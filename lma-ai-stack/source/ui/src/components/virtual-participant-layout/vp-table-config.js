@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useEffect, useState } from 'react';
@@ -25,7 +25,9 @@ import { Link as RouterLink } from 'react-router-dom';
 
 import { TableHeader } from '../common/table';
 import { exportToExcel } from '../common/download-func';
+import { sharedWithEntries } from '../common/shared-with';
 import { deleteVirtualParticipants } from '../../graphql/queries/virtualParticipantQueries';
+import { canManageAll } from './vp-access';
 
 const client = generateClient();
 
@@ -77,13 +79,9 @@ const renderMeetingNameCell = (item) => (
 
 // Render function for shared with cell with smart truncation
 const renderSharedWithCell = (item) => {
-  const sharedWith = item.SharedWith || '';
-  if (!sharedWith) return '-';
-
-  const emails = sharedWith
-    .split(',')
-    .map((email) => email.trim())
-    .filter((email) => email);
+  // A row read from the list carries "a,b"; one updated by a subscription
+  // message carries "[a, b]". Both read as the same entries.
+  const emails = sharedWithEntries(item.SharedWith);
 
   if (emails.length === 0) return '-';
   if (emails.length === 1) return emails[0];
@@ -326,7 +324,9 @@ const ACTIVE_VP_STATUSES = ['SCHEDULED', 'INITIALIZING', 'CONNECTING', 'JOINING'
 // meetings list page: requires the user to type "confirm" before the delete
 // mutation is issued. Supports multi-select bulk delete.
 export const VpDeleteModal = (props) => {
-  const { selectedItems = [], loading, onRefresh, onNotify } = props;
+  const { selectedItems = [], loading, onRefresh, onNotify, viewer = {} } = props;
+  // Deleting is for each Virtual Participant's owner and Admins.
+  const mayDelete = canManageAll(selectedItems, viewer);
 
   const [visible, setVisible] = useState(false);
   const [deleteDisabled, setDeleteDisabled] = useState(false);
@@ -398,7 +398,11 @@ export const VpDeleteModal = (props) => {
         iconName="remove"
         variant="normal"
         loading={loading}
-        disabled={selectedItems.length === 0}
+        disabled={!mayDelete}
+        disabledReason={
+          selectedItems.length > 0 ? 'Only the owner or an Admin can delete a Virtual Participant' : undefined
+        }
+        ariaLabel="Delete selected Virtual Participants"
         onClick={openDeleteSettings}
       />
       <Modal
@@ -506,6 +510,7 @@ export const VPCommonHeader = ({ resourceName = 'Virtual Participants', ...props
             loading={props.loading}
             onRefresh={props.onRefresh}
             onNotify={props.onNotify}
+            viewer={props.viewer}
           />
           <Button variant="normal" onClick={() => props.onPasteInvite()}>
             Paste Meeting Invite

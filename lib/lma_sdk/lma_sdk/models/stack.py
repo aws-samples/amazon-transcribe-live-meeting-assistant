@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Stack-related data models."""
 
 from __future__ import annotations
@@ -61,6 +61,13 @@ class StackDeployResult(BaseModel):
     console_url: str = ""
     outputs: list[StackOutput] = Field(default_factory=list)
     operation: str = ""
+    # False when CloudFormation accepted the request but found nothing to do.
+    # A caller that deploys in order to test what it just built needs to tell
+    # that apart from a real update: the stack keeps running the code it had,
+    # and every test afterwards describes that older code instead. Reported
+    # separately from `success` because for an interactive deploy of an
+    # unchanged working copy, no change IS the successful outcome.
+    changed: bool = True
 
 
 class StackDeleteResult(BaseModel):

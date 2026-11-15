@@ -1,11 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Page, ConsoleMessage } from 'playwright-core';
 import jwt from 'jsonwebtoken';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { ChatAudience, noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
+import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { applyZoomPersonalLink } from './zoom-join-link.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom-sdk');
 
 const STATUS_CONNECTED = 2;
 const STATUS_DISCONNECTED = 3;
@@ -28,6 +41,33 @@ function buildSignature(clientId: string, clientSecret: string, meetingNumber: s
     return jwt.sign(payload, clientSecret, { algorithm: 'HS256', header: { alg: 'HS256', typ: 'JWT' } });
 }
 
+/** One chat message as the in-page listener queues it (zoom-sdk-server.ts). */
+export interface ZoomSdkChat {
+    senderName: string;
+    text: string;
+    id?: string | number | null;
+    time?: string | number | null;
+    receiverId?: string | number | null;
+    receiverName?: string | null;
+}
+
+/**
+ * Who a Meeting SDK chat message went to. The SDK addresses everyone as
+ * receiver 0 (the id its own sendChat takes for everyone), named "Everyone";
+ * any other receiver is a private message. Unknown when the payload names no
+ * receiver, and the meeting chat capture does not add such a message. Not confirmed against a live payload: the capture's debug line
+ * reports whether a recipient was read.
+ */
+export function zoomSdkChatAudience(
+    receiverId: string | number | null | undefined,
+    receiverName: string | null | undefined,
+): ChatAudience | undefined {
+    const name = (receiverName ?? '').trim();
+    if (name) return /^everyone\b/i.test(name) && !/privately|direct message/i.test(name) ? 'everyone' : 'direct';
+    if (receiverId === null || receiverId === undefined || String(receiverId).trim() === '') return undefined;
+    return String(receiverId).trim() === '0' ? 'everyone' : 'direct';
+}
+
 export default class ZoomSdk {
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
@@ -44,16 +84,29 @@ export default class ZoomSdk {
         });
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    /**
+     * Posts chat messages through the SDK page; true when the page took every
+     * one (its __lmaSendChat answers false when the SDK refused one). Never throws.
+     */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
+        let all = true;
         for (const message of messages) {
             if (!message) continue;
             try {
-                await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
+                const taken = await page.evaluate((m: string) => (window as any).__lmaSendChat(m), message);
+                if (taken === false) {
+                    all = false;
+                    log.warn('[zoom-sdk] the SDK did not take a chat message (non-fatal)');
+                }
                 await new Promise((r) => setTimeout(r, 200));
             } catch (err) {
-                console.warn('[zoom-sdk] sendChat failed (non-fatal):', err);
+                all = false;
+                log.warn('[zoom-sdk] sendChat failed (non-fatal):', err);
             }
         }
+        return all;
     }
 
     private async clickBySvg(page: Page, svgSelectors: string[], labelRe: string): Promise<boolean> {
@@ -81,10 +134,10 @@ export default class ZoomSdk {
             return false;
         }
         try {
-            await el.click({ force: true });
+            await el.click({ force: true, timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             return true;
         } catch (err) {
-            console.warn('[zoom-sdk] click failed:', err);
+            log.warn('[zoom-sdk] click failed:', err);
             return false;
         } finally {
             await handle.dispose();
@@ -116,7 +169,7 @@ export default class ZoomSdk {
 
             if (!audioDone && state.needJoinAudio && !state.audioJoined) {
                 if (await this.clickBySvg(page, [], 'join audio|connect audio|computer audio')) {
-                    console.log('[zoom-sdk] joined computer audio');
+                    log.info('[zoom-sdk] joined computer audio');
                 }
                 await new Promise((r) => setTimeout(r, 1500));
                 continue;
@@ -126,11 +179,11 @@ export default class ZoomSdk {
             if (!micDone && audioDone) {
                 if (wantMic && state.muted) {
                     if (await this.clickBySvg(page, ['svg.SvgAudioUnmute'], 'unmute')) {
-                        console.log('[zoom-sdk] unmuted microphone (voice assistant / avatar audio)');
+                        log.info('[zoom-sdk] unmuted microphone (voice assistant / avatar audio)');
                     }
                 } else if (!wantMic && !state.muted) {
                     if (await this.clickBySvg(page, ['svg.SvgAudioMute'], 'mute my|^mute$')) {
-                        console.log('[zoom-sdk] muted microphone (no voice assistant)');
+                        log.info('[zoom-sdk] muted microphone (no voice assistant)');
                     }
                 }
                 micDone = true;
@@ -139,7 +192,7 @@ export default class ZoomSdk {
             if (!videoDone && state.videoOff) {
                 videoClicks += 1;
                 if (await this.clickBySvg(page, ['svg.SvgVideoOff', 'svg.SvgVideoOffDisallowed'], 'start video|start my video')) {
-                    console.log(`[zoom-sdk] started video (avatar camera) attempt ${videoClicks}`);
+                    log.info(`[zoom-sdk] started video (avatar camera) attempt ${videoClicks}`);
                 }
                 await new Promise((r) => setTimeout(r, 2000));
                 if (videoClicks >= 3) videoDone = true;
@@ -147,13 +200,25 @@ export default class ZoomSdk {
             }
             if (!state.videoOff) videoDone = true;
 
+            // Without the avatar the camera must stay off. The SDK used to land
+            // video-off because the browser had no camera; with the blank camera
+            // (blank-camera.ts) listed it could start video, so stop it here.
+            if (!wantVideo && state.videoOn && videoClicks < 3) {
+                videoClicks += 1;
+                if (await this.clickBySvg(page, ['svg.SvgVideoOn'], 'stop video|stop my video')) {
+                    log.info(`[zoom-sdk] stopped video (no avatar) attempt ${videoClicks}`);
+                }
+                await new Promise((r) => setTimeout(r, 2000));
+                continue;
+            }
+
             if (audioDone && micDone && videoDone) {
-                console.log(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
+                log.info(`[zoom-sdk] media setup complete (audio=${audioDone} mic=${micDone} video=${!wantVideo ? 'n/a' : 'on'})`);
                 return;
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
-        console.log(`[zoom-sdk] media setup finished (audio=${audioDone} mic=${micDone} videoDone=${videoDone})`);
+        log.info(`[zoom-sdk] media setup finished (audio=${audioDone} mic=${micDone} videoDone=${videoDone})`);
     }
 
     // Zoom can flip the camera off mid-meeting; re-start it when the avatar is
@@ -171,7 +236,7 @@ export default class ZoomSdk {
             if (state && state.videoOff) {
                 consecutiveOff += 1;
                 if (consecutiveOff >= 2) {
-                    console.warn('[zoom-sdk] camera OFF (x2) with avatar connected — re-starting video');
+                    log.warn('[zoom-sdk] camera OFF (x2) with avatar connected — re-starting video');
                     await this.clickBySvg(page, ['svg.SvgVideoOff', 'svg.SvgVideoOffDisallowed'], 'start video|start my video');
                     consecutiveOff = 0;
                 }
@@ -186,11 +251,11 @@ export default class ZoomSdk {
 
         page.on('console', (message: ConsoleMessage) => {
             const text = message.text();
-            if (text.includes('[LMA-ZoomSDK]')) console.log(`ZoomSDK page: ${text}`);
+            if (text.includes('[LMA-ZoomSDK]')) log.info(`ZoomSDK page: ${text}`);
         });
-        page.on('pageerror', (error: unknown) => console.warn('[zoom-sdk] page error:', error));
+        page.on('pageerror', (error: unknown) => log.warn('[zoom-sdk] page error:', error));
         page.on('crash', () => {
-            console.error('[zoom-sdk] page crashed (renderer crash) — ending meeting');
+            log.error('[zoom-sdk] page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
@@ -206,6 +271,14 @@ export default class ZoomSdk {
         const clientSecret = (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim();
         if (!clientId || !clientSecret) {
             throw new Error('Zoom SDK method selected but ZOOM_MEETING_SDK_CLIENT_ID / ZOOM_MEETING_SDK_CLIENT_SECRET are not set');
+        }
+        // A personal meeting link (/my/<name>) is resolved to its meeting
+        // number first, as the web-client join does (zoom.ts).
+        if (details.invite.zoomPersonalLink) {
+            await substep('Looking up the personal meeting link…');
+            if (!(await applyZoomPersonalLink(details.invite))) {
+                return { reason: 'never-joined', trigger: 'pre-join:zoom-link-unresolved' };
+            }
         }
         const meetingNumber = (details.invite.meetingId || '').replace(/\D/g, '');
         if (!meetingNumber) {
@@ -224,6 +297,11 @@ export default class ZoomSdk {
             {
                 meetingNumber,
                 signature,
+                // Passed as given, including a password that is the pwd value
+                // of a Zoom join link (meeting-password.ts zoomPasswordKind).
+                // The web-client join puts such a value on the join URL; for
+                // the Meeting SDK it has not been tested whether `passWord`
+                // takes it in place of the passcode.
                 passWord: details.invite.meetingPassword || '',
                 userName: details.scribeIdentity,
                 leaveUrl: `${this.server.origin}/left.html`,
@@ -236,7 +314,7 @@ export default class ZoomSdk {
 
         const isolated = await page.evaluate(() => (window as any).crossOriginIsolated === true).catch(() => false);
         if (!isolated) {
-            console.warn('[zoom-sdk] crossOriginIsolated=false — gallery/SAB view may be degraded');
+            log.warn('[zoom-sdk] crossOriginIsolated=false — gallery/SAB view may be degraded');
         }
 
         await substep('Joining the meeting…');
@@ -252,11 +330,11 @@ export default class ZoomSdk {
                 const btn = await page.$('button.preview-join-button');
                 if (btn) {
                     try {
-                        await btn.click();
+                        await btn.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
                         previewClicked = true;
-                        console.log('[zoom-sdk] clicked preview Join');
+                        log.info('[zoom-sdk] clicked preview Join');
                     } catch (err) {
-                        console.warn('[zoom-sdk] preview Join click failed (will retry):', err);
+                        log.warn('[zoom-sdk] preview Join click failed (will retry):', err);
                     }
                 }
             }
@@ -282,10 +360,10 @@ export default class ZoomSdk {
         }
 
         if (!joined) {
-            console.log('[zoom-sdk] never admitted before waitingTimeout');
+            log.info('[zoom-sdk] never admitted before waitingTimeout');
             return { reason: 'never-joined', trigger: 'sdk-not-admitted' };
         }
-        console.log('[zoom-sdk] joined meeting');
+        log.info('[zoom-sdk] joined meeting');
 
         await page.evaluate(() => (window as any).__lmaStartPopupDismiss()).catch(() => {});
 
@@ -295,8 +373,17 @@ export default class ZoomSdk {
 
         await substep('In the meeting — posting introduction…');
         await this.sendMessages(page, details.introMessages);
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The page is LMA's own embed of the Meeting SDK, so one screenshot of it.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
@@ -307,7 +394,7 @@ export default class ZoomSdk {
         let pollsSinceLonelyCheck = 0;
         const monitorTimer = setInterval(async () => {
             if (this.ended || page.isClosed()) return;
-            let snap: { speaker: string; chats: Array<{ senderName: string; text: string }>; count: number; domCount: number; status: number; selfLeave: number | null } | null;
+            let snap: { speaker: string; chats: ZoomSdkChat[]; count: number; domCount: number; status: number; selfLeave: number | null } | null;
             try {
                 snap = await page.evaluate(() => {
                     const w = window as any;
@@ -343,30 +430,95 @@ export default class ZoomSdk {
                 }
             }
 
+            // The same count the alone-in-meeting check below prefers.
+            const consentCount = snap.domCount >= 0 ? snap.domCount : snap.count;
+            if (consentCount >= 1) meetingConsent.noteAttendeeCount(consentCount);
+
             for (const chat of snap.chats) {
                 const sender = chat.senderName || null;
-                const body = chat.text || '';
+                const rawBody = chat.text || '';
+                const chatId = chat.id == null ? null : String(chat.id);
+                const audience = zoomSdkChatAudience(chat.receiverId, chat.receiverName);
+                // Which LMA VP the message is for, when there are several
+                // (chat-addressing.ts). One for another VP, or the bare "LMA"
+                // with several here, is meeting chat only.
+                const route = chatAddressing.route(rawBody, sender);
+                if (!route.act) {
+                    meetingChat.offer({
+                        platform: 'zoom-sdk',
+                        text: rawBody,
+                        commandText: route.text,
+                        sender,
+                        id: chatId,
+                        platformTime: chat.time ?? null,
+                        audience,
+                    });
+                    continue;
+                }
+                // Read with its address reduced to "LMA".
+                const body = route.text;
+                // A consent reply, or "LMA start" while consent is withheld.
+                if (await meetingConsent.handleChat(sender, body)) continue;
                 if (matchesEndCommand(body)) {
-                    console.log(`[zoom-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                    log.info(`[zoom-sdk] asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                     await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
                     this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
                     return;
                 }
-                if (details.start && body.includes(details.pauseCommand)) {
+                // Checked ahead of pause/resume so an assistant-mode toggle lands
+                // whether or not transcription is paused; the two vocabularies
+                // are disjoint.
+                const assistantToggle = parseAssistantChatCommand(body);
+                // Answered in the background, so the next poll is not held up.
+                const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion) {
+                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', async (messages, answered) => {
+                        await this.sendMessages(page, messages);
+                        // The meeting assistant's answer, not a notice, is added to the
+                        // transcript when the question was (meeting-chat.ts).
+                        if (answered) {
+                            meetingChat.offerAnswer(
+                                { platform: 'zoom-sdk', text: rawBody, sender, id: chatId },
+                                messages,
+                            );
+                        }
+                    });
+                }
+                if (assistantToggle) {
+                    await this.sendMessages(
+                        page,
+                        await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
+                    );
+                } else if (matchesChatCommand(body, details.helpCommand)) {
+                    // Answered whether or not transcription is paused: the list is how
+                    // someone finds out how to resume it.
+                    log.info('[chat-help] posting the chat command list');
+                    await this.sendMessages(page, chatHelpMessages(voiceAssistant));
+                } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                     details.start = false;
-                    console.log(details.pauseMessages[0]);
+                    void recordTranscriptionPause(true, sender);
+                    log.info(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
-                } else if (!details.start && body.includes(details.startCommand)) {
+                } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                     details.start = true;
-                    console.log(details.startMessages[0]);
+                    void recordTranscriptionPause(false, null);
+                    log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     transcriptionService.startTranscription();
-                } else if (details.start) {
-                    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                    const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
-                    details.messages.push(formatted);
-                    console.log('New message:', formatted);
+                } else {
+                    // Meeting chat, for the transcript (meeting-chat.ts decides).
+                    meetingChat.offer({
+                        platform: 'zoom-sdk',
+                        text: rawBody,
+                        commandText: body,
+                        sender,
+                        id: chatId,
+                        platformTime: chat.time ?? null,
+                        audience,
+                    });
                 }
             }
 
@@ -381,7 +533,7 @@ export default class ZoomSdk {
                 if (effectiveCount <= 1) {
                     consecutiveLonely += 1;
                     if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
-                        console.log(`[zoom-sdk] alone in meeting (count=${effectiveCount}) — leaving`);
+                        log.info(`[zoom-sdk] alone in meeting (count=${effectiveCount}) — leaving`);
                         details.start = false;
                         this.requestEnd({ reason: 'alone-in-meeting', trigger: 'sdk-participants' });
                     }
@@ -391,7 +543,7 @@ export default class ZoomSdk {
             }
         }, 3000);
 
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         const timeoutPromise = new Promise<ExitInfo>((resolve) =>
             setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
         );
@@ -406,7 +558,7 @@ export default class ZoomSdk {
             await this.server?.close();
         } catch { /* noop */ }
 
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

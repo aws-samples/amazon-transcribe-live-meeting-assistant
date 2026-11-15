@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 ---
@@ -21,29 +21,6 @@ Parameters:
       STRANDS_BEDROCK_WITH_KB (Create) automatically creates a Bedrock Knowledge Base for document search.
       STRANDS_BEDROCK_WITH_KB (Use Existing) uses an existing Bedrock Knowledge Base you provide.
 
-  MeetingAssistServiceBedrockModelID:
-    Type: String
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    AllowedValues:
-      - "amazon.nova-micro-v1:0"
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-opus-4-20250514-v1:0"
-      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-    Description: >-
-      Select a Bedrock LLM model for the meeting assistant. Includes Nova models (cost-effective)
-      and Claude 4+ models (cutting-edge). Some models require inference profiles.
-
   TavilyApiKey:
     Type: String
     NoEcho: true
@@ -54,6 +31,24 @@ Parameters:
       for current information during meetings. Leave blank to disable web search capability.
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+
+  # Second form of the same setting, for a deployment that already keeps the key
+  # in Secrets Manager (provisioned by its own tooling, rotated on its own
+  # schedule). Either form supplies the stack with one thing: a secret ARN. The
+  # TavilyApiKeyCredentialForm rule below rejects both at once.
+  TavilyApiKeySecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Tavily API key. Use this instead of TavilyApiKey when the key is already
+      provisioned in Secrets Manager. Supply one form or the other, not both.
+      A secret encrypted with your own KMS key must grant kms:Decrypt to the
+      meeting-assist function's role in that key's policy.
 
   ElevenLabsApiKey:
     Type: String
@@ -66,15 +61,23 @@ Parameters:
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid ElevenLabs API key (20+ characters)"
 
-  ElevenLabsAgentId:
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  ElevenLabsApiKeySecretArn:
     Type: String
     Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
     Description: >-
-      (Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior.
-      Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here.
-      Leave blank to use default conversational AI without custom personality.
-    AllowedPattern: "^(|[a-zA-Z0-9_-]{10,})$"
-    ConstraintDescription: "Must be empty or a valid ElevenLabs Agent ID"
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      ElevenLabs API key. Use this instead of ElevenLabsApiKey when the key is
+      already provisioned in Secrets Manager. Supply one form or the other, not
+      both. A secret encrypted with your own KMS key must grant kms:Decrypt in
+      that key's policy to whichever role reads it: the MicroVM launcher
+      function's role under VPLaunchType MICROVM (the default), or the Virtual
+      Participant task execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   SimliApiKey:
     Type: String
@@ -82,32 +85,30 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) API key for Simli avatar. The avatar feature requires BOTH
-      SimliApiKey and SimliFaceId — leave both blank to disable the avatar,
+      this key and the Simli face ID on the Configuration page (Virtual
+      Participant section) — leave both blank to disable the avatar,
       or set both to enable an animated lip-synced avatar as the Virtual
       Participant's camera feed.
       Get your API key from https://simli.com. Leave blank to disable avatar.
 
-  SimliFaceId:
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  SimliApiKeySecretArn:
     Type: String
     Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
     Description: >-
-      (Optional) Simli Face ID for the avatar appearance. Required when
-      SimliApiKey is set — the avatar is enabled only when BOTH parameters
-      are non-empty. Get this from your Simli dashboard at https://simli.com.
-
-  VoiceAssistantProvider:
-    Type: String
-    Default: "none"
-    AllowedValues:
-      - "none"
-      - "elevenlabs"
-      - "amazon_nova_sonic"
-    Description: >-
-      Voice AI assistant provider for Virtual Participant. Choose 'none' to
-      disable voice responses (default), 'elevenlabs' for ElevenLabs
-      Conversational AI (requires API key above), or 'amazon_nova_sonic' for
-      Amazon Nova Sonic, which needs no API key and is configured on the Nova
-      Sonic page in the LMA UI.
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Simli API key. Use this instead of SimliApiKey when the key is already
+      provisioned in Secrets Manager. Supply one form or the other, not both.
+      The Simli face ID on the Configuration page (Virtual Participant
+      section) is still required alongside it. A secret encrypted with your
+      own KMS key must grant kms:Decrypt in that key's policy to whichever role
+      reads it: the MicroVM launcher function's role under VPLaunchType MICROVM
+      (the default), or the Virtual Participant task execution role on FARGATE
+      and EC2. See docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   AmazonNovaSonicRegion:
     Type: String
@@ -121,34 +122,8 @@ Parameters:
       Nova Sonic is available in fewer regions than LMA itself, so a
       deployment constrained to a particular region for compliance can keep
       everything else local and reach the voice assistant elsewhere. Only
-      used when VoiceAssistantProvider is amazon_nova_sonic.
-
-  VoiceAssistantActivationMode:
-    Type: String
-    Default: "wake_phrase"
-    AllowedValues:
-      - "always_active"
-      - "wake_phrase"
-      - "strands_tool (coming soon)"
-    Description: >-
-      How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
-      'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
-
-  VoiceAssistantWakePhrases:
-    Type: String
-    Default: "hey alex,ok alex,hi alex,hello alex"
-    Description: >-
-      Comma-separated list of wake phrases for voice assistant activation (case-insensitive).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
-
-  VoiceAssistantActivationDuration:
-    Type: Number
-    Default: 30
-    MinValue: 5
-    MaxValue: 300
-    Description: >-
-      How long the voice assistant stays active after wake phrase detection (in seconds).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
+      used when the voice assistant on the Configuration page (Virtual
+      Participant section) is Amazon Nova Sonic.
 
   BedrockGuardrailId:
     Type: String
@@ -187,13 +162,6 @@ Parameters:
       If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
-  AssistantWakePhraseRegEx:
-    Type: String
-    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
-    Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant.
-      Default is 'OK Assistant'
-
   TranscriptKnowledgeBase:
     Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
     Type: String
@@ -230,146 +198,69 @@ Parameters:
       - "true"
       - "false"
 
-  IsContentRedactionEnabled:
-    Type: String
-    Default: "false"
-    Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is
-      only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
-    AllowedValues:
-      - "true"
-      - "false"
-
   TranscribeContentRedactionType:
     Type: String
     Default: PII
     Description: >-
-      Type of content redaction from Amazon Transcribe transcription output
+      Type of content redaction from Amazon Transcribe transcription output.
     AllowedValues:
       - PII
 
-  TranscribeLanguageCode:
-    Type: String
-    Description: >-
-      Language code or language identification setting for Amazon Transcribe. NOTE:
-      Language identification can't  be combined with custom language models or redaction.
-
-    Default: en-US
-    AllowedValues:
-      - identify-language
-      - identify-multiple-languages
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
-
-  TranscribeLanguageOptions:
-    Type: String
-    Default: "en-US, es-US"
-    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
-    ConstraintDescription: >-
-      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US,
-      en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN,
-      th-TH
-    Description: >-
-      When using language identification, specify two or more language codes, e.g.
-      "en-US, es-US" that represent the languages that may be  used in your meeting.
-      Including more than five is not recommended.  Enter only one language dialect
-      per language - e.g. 'en-US, en-AU' is not allowed.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
-      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
-      NOTE: The identify-language feature has not yet been applied to the virtual participant. 
-      If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
-
-  TranscribePreferredLanguage:
-    Type: String
-    Description: >-
-      Optionally select a preferred language when using language identification -
-      must be one of the languages entered for TranscribeLanguageOptions.
-    Default: None
-    AllowedValues:
-      - None
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
-
-  ShowSpeakerLabel:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Default for Amazon Transcribe speaker partitioning (diarization) on
-      WebSocket streaming sessions - the desktop capture app and the Stream Audio
-      browser tab. When enabled, Transcribe tells apart individual voices within
-      an audio channel and each distinct voice is appended to the channel's
-      speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or
-      fewer voices per channel. This is only the DEFAULT: clients that offer
-      per-channel speaker identification settings (the desktop capture app and
-      the Stream Audio tab) send their own choice per meeting, which takes
-      precedence. Leave "false" unless you want it on for clients that do not.
-
-  TranscribePiiEntityTypes:
-    Type: String
-    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
-    Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values
-      that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
-
-  CustomVocabularyName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the vocabulary to use when processing the transcription job. Leave
-      blank if no custom vocabulary to be used. If yes, the custom
-      vocabulary must pre-exist in your account.
-
-  CustomLanguageModelName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the custom language model to use when processing the transcription
-      job. Leave blank if no
-      custom language model is to be used. If specified, the custom language model
-      must pre-exist in your account,  match the Language Code selected above, and
-      use the 'Narrow Band' base model.
-
   EnableMicrovmAsr:
     Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda
+      MicroVMs in this account), an alternative to Amazon Transcribe for Stream
+      Audio, Chrome extension, Desktop Capture and Virtual Participant meetings;
+      it also provides the speaker embeddings voice enrollment needs. Amazon
+      Transcribe is the default engine for every meeting source: an admin moves
+      a source onto the ASR MicroVM engine in the Transcription Engine section
+      of the Configuration page. Deployed only in Regions with AWS Lambda
+      MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 --
+      not GovCloud); elsewhere this setting has no effect and every meeting uses
+      Amazon Transcribe. Set false to leave the engine undeployed. See
+      docs/microvm-asr.md.
+
+  EnableVoiceEnrollment:
+    Type: String
     Default: "false"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
-      Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS
-      Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes
-      until an admin moves Stream Audio, Chrome extension and Desktop Capture
-      meetings, or Virtual Participants, onto it on the Transcription Engine page.
-      English only; requires a region with AWS Lambda MicroVMs. See
-      docs/microvm-asr.md.
+      Let people enroll their voice so they are labelled by name in meetings from
+      their first word. A voiceprint is biometric data about a person: while this
+      is false the enrollment table, the consent log and the consent portal do
+      not exist in the deployment at all. Turning it on creates obligations that
+      are yours -- biometric data is separately regulated in many jurisdictions
+      and typically requires informed consent before collection, a published
+      retention schedule and deletion on request. See docs/voice-enrollment.md.
+      Matching also needs the ASR MicroVM engine (EnableMicrovmAsr, deployed in
+      Regions with AWS Lambda MicroVMs), since Amazon Transcribe exposes no
+      speaker embedding.
+
+  VoiceEnrollmentRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    MaxValue: 3650
+    Description: >-
+      How long a voice-enrollment consent stands before it must be renewed. When
+      it lapses the voiceprint is deleted and the person is asked to consent
+      again. Consent that never expires is not meaningfully informed.
+
+  VoiceEnrollmentTermsVersion:
+    Type: String
+    Default: "1"
+    AllowedPattern: "^[A-Za-z0-9._-]{1,32}$"
+    Description: >-
+      Bump this to require everybody to re-consent. An enrollment whose consent
+      is to a superseded version stops being used for matching until its owner
+      agrees to the current terms.
 
   ModelValidation:
     Type: String
@@ -378,7 +269,9 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Specifies if Amazon Bedrock model access is validated during deployment.
+      Specifies if access to the shipped default Amazon Bedrock models (summaries, meeting
+      assistant and its knowledge bases) and the knowledge base embedding model is validated
+      during deployment.
       Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop
       Studio) where Amazon Bedrock model access permissions may not be set up yet.
 
@@ -394,17 +287,6 @@ Parameters:
       redaction logic, profanity filtering, or custom rules to highlight patterns
       in the transcript.
 
-  TranscriptLambdaHookFunctionNonPartialOnly:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >
-      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
-      transcript segments only (true), or for
-      both Partial and Non-Partial transcript segments (false).
-
   EndOfCallTranscriptSummary:
     Default: "BEDROCK"
     Type: String
@@ -415,33 +297,9 @@ Parameters:
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK
       and LAMBDA are supported.
-      BEDROCK option requires you to choose one of the supported model IDs from the  provided
-      list (BedrockModelId). The LAMBDA option requires you to provide a function
+      BEDROCK option uses the model chosen on the Configuration page (Amazon Bedrock
+      Models section). The LAMBDA option requires you to provide a function
       ARN below.
-
-  BedrockModelId:
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    Type: String
-    AllowedValues:
-      - "amazon.nova-micro-v1:0"
-      - "amazon.nova-lite-v1:0"
-      - "amazon.nova-pro-v1:0"
-      - "us.amazon.nova-premier-v1:0"
-      - "global.amazon.nova-2-lite-v1:0"
-      - "us.amazon.nova-2-lite-v1:0"
-      - "us.anthropic.claude-opus-4-20250514-v1:0"
-      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
-      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "us.anthropic.claude-sonnet-4-6"
-      - "us.anthropic.claude-opus-4-6-v1"
-      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      - "global.anthropic.claude-sonnet-4-6"
-      - "global.anthropic.claude-opus-4-6-v1"
-    Description: >
-      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge).
-      Some models require inference profiles. Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -522,17 +380,6 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
-  EnableAudioRecording:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Enable or disable recording of audio during a meeting. If set to false, the
-      meeting will not be recorded.
-      If set to true, the meeting will be recorded.
-
   ZoomMeetingSdkClientId:
     Type: String
     Default: ""
@@ -552,6 +399,26 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  ZoomMeetingSdkClientSecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Zoom Meeting SDK app client secret. Use this instead of
+      ZoomMeetingSdkClientSecret when the secret is already provisioned in
+      Secrets Manager. Supply one form or the other, not both.
+      ZoomMeetingSdkClientId is still required alongside it. A secret encrypted
+      with your own KMS key must grant kms:Decrypt in that key's policy to
+      whichever role reads it: the MicroVM launcher function's role under
+      VPLaunchType MICROVM (the default), or the Virtual Participant task
+      execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
+
   AcsConnectionString:
     Type: String
     NoEcho: true
@@ -568,6 +435,25 @@ Parameters:
       Participant joins Microsoft Teams meetings via the ACS calling SDK
       (Teams interoperability) instead of automating the Teams web client.
       Leave blank to use the default web-client join.
+
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  AcsConnectionStringSecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      full Azure Communication Services connection string. Use this instead of
+      AcsConnectionString when the connection string is already provisioned in
+      Secrets Manager. Supply one form or the other, not both. A secret
+      encrypted with your own KMS key must grant kms:Decrypt in that key's
+      policy to whichever role reads it: the MicroVM launcher function's role
+      under VPLaunchType MICROVM (the default), or the Virtual Participant task
+      execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   EnableVideoRecording:
     Type: String
@@ -606,6 +492,45 @@ Parameters:
       Number of days to retain meeting records. Meetings will be automatically deleted
       from LMA after this time.
       Specify partial days like 0.5 to retain meeting records for half a day.
+      This is the default and the upper limit; an Admin can set a shorter period at run time on
+      the Configuration page (Retention section), never a longer one.
+
+  ConfigurationPreset:
+    Type: String
+    Default: standard
+    AllowedValues:
+      - standard
+      - internal-meetings-notify
+      - regulated-consent-required
+      - regulated-notify
+      - none
+    Description: >-
+      The configuration preset the deployment's default configuration is built
+      from, which sets consent, retention and privacy together: standard (the
+      shipped defaults), internal-meetings-notify (participants are notified and
+      may object; audio and the meeting chat are captured),
+      regulated-consent-required (participants must consent first, the transcript
+      is deleted 15 minutes after the summary, no audio is recorded, personal
+      information is redacted, and Amazon Bedrock runs within this Region's
+      geography; LogLevel and the retention-day parameters are set here, not by
+      the preset) or regulated-notify (as regulated-consent-required, except that
+      participants are notified, capture runs from the start and stops when one
+      objects). Each preset is also offered on the Configuration page as a
+      read-only Managed profile. none is accepted as standard, for stacks deployed
+      with it. CustomConfigPath is applied over this when provided.
+
+  CustomConfigPath:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|s3://[^/]+/.+)$"
+    Description: >-
+      Optional s3://bucket/key of a configuration file, JSON or YAML, laid over
+      ConfigurationPreset to make the deployment's default configuration: an
+      object of configuration section name to settings, or a file exported from
+      the Configuration page. It is checked against the configuration schemas,
+      and the deployment fails if it does not match. It is read again on every
+      stack update, so it must stay readable for the life of the stack, and an
+      edit to it applies on the next update. Leave blank to use the preset alone.
 
   TranscriptionExpirationInDays:
     Type: Number
@@ -614,30 +539,10 @@ Parameters:
       Number of days to retain turn by turn meeting transcriptions.  Transcriptions
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
-
-  MeetingInactivityTimeoutInMinutes:
-    Type: Number
-    Default: 240
-    MinValue: 0
-    MaxValue: 10080
-    Description: >-
-      Number of minutes a meeting may go without producing a finalized transcript
-      segment before LMA ends it on the meeting's behalf. A meeting whose client
-      disconnects without sending its end-of-meeting event stays "In Progress"
-      until this timeout elapses. A meeting that is still connected but silent for
-      longer than the timeout is also ended, so keep it comfortably longer than the
-      longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
-
-  MeetingInactivityLookbackInDays:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      How far back to look for meetings to close. A meeting that started longer
-      ago than this is never closed automatically, so raise it temporarily if you
-      are updating a deployment that has accumulated older meetings stuck in
-      progress. Higher values read more meeting records on every run.
+      Also sets the lifecycle rules for transcript files and key-frame images in the recordings
+      bucket, which the Configuration page does not change.
+      This is the default and the upper limit; an Admin can set a shorter period at run time on
+      the Configuration page (Retention section), never a longer one.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -670,6 +575,41 @@ Parameters:
     Description: >-
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
+
+  VPSchedulerStateMachineLogsExpirationInDays:
+    Type: Number
+    Default: 7
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
+    Description: >-
+      Number of days to retain the scheduled Virtual Participant state machine's
+      execution history logs. Shorter than CloudWatchLogsExpirationInDays by
+      default because the state machine logs every state transition of every
+      scheduled Virtual Participant. Raise it while investigating a scheduled
+      Virtual Participant that did not start.
 
   EnableAppSyncApiCache:
     Type: String
@@ -806,40 +746,6 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
-  VPAttendeePollMs:
-    Type: Number
-    Default: 20000
-    MinValue: 1000
-    MaxValue: 120000
-    Description: >-
-      How often a Teams Virtual Participant samples the meeting UI to
-      decide whether the meeting is still running, in milliseconds.
-      Leave at the default unless advised otherwise.
-
-  VPPollsBeforeEnd:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      Consecutive polls on which a Teams meeting must show one or fewer
-      attendees before the Virtual Participant leaves. 3 polls at the default
-      cadence is about 60 seconds.
-
-  VPPollsBeforeEndMissing:
-    Type: Number
-    Default: 15
-    MinValue: 1
-    MaxValue: 90
-    Description: >-
-      Consecutive polls on which a Teams meeting must show neither a readable
-      attendee count nor any in-meeting controls before the Virtual Participant
-      leaves. 15 polls at the default cadence is about 5 minutes. Raise
-      this if participants report the Virtual Participant leaving meetings
-      that are still in progress. A value producing a tolerance outside 4 to
-      30 minutes at the chosen cadence is adjusted into that range, so at the
-      default cadence anything below 12 is raised.
-
   TranscriberDesiredTaskCount:
     Type: Number
     Default: 1
@@ -915,8 +821,53 @@ Parameters:
       - WARN
       - ERROR
     Description: >-
-      Default logging level for all Lambda functions. Set to DEBUG for
-      troubleshooting, INFO for normal operation.
+      Logging level for the Lambda functions and containers. At INFO (the
+      default) and above, log lines record identifiers, sizes and outcomes rather
+      than meeting content. DEBUG also logs meeting content: the summary prompt
+      with its transcript, meeting assistant requests and answers, and the voice
+      assistants' heard and spoken text; use it only while diagnosing a problem.
+
+  AppSyncFieldLogLevel:
+    Type: String
+    Default: ERROR
+    AllowedValues:
+      - NONE
+      - ERROR
+      - INFO
+      - DEBUG
+      - ALL
+    Description: >-
+      What the GraphQL API writes to its CloudWatch log group, /aws/appsync/apis/<api id>.
+      ERROR logs requests that fail, without their content. DEBUG and ALL also log each
+      request's content, which includes transcript text; use them only while diagnosing a
+      problem. The log group keeps entries for CloudWatchLogsExpirationInDays.
+
+  EnableOperationalAlarms:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Create the CloudWatch alarms that watch the transcription pipeline and
+      notify the operational alerts SNS topic. Set to 'false' if you forward
+      these signals from somewhere else, or if your organisation manages alarms
+      outside the application stack. The operational dashboard and the alerts
+      topic are created either way, so turning this off removes the
+      notifications rather than the visibility. See docs/monitoring.md.
+
+  TranscribeConcurrentStreamAlarmThreshold:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: >-
+      Number of concurrent Amazon Transcribe streaming sessions at which the
+      'transcribe-concurrent-streams-near-quota' alarm notifies. The default of
+      20 is 80% of the default account quota of 25 concurrent streams, which
+      leaves headroom to request an increase before meetings start being
+      refused. If you raise the quota, raise this with it — the alarm has no way
+      to read your account's current quota, so left at 20 it keeps notifying at
+      a level that is no longer close to the limit.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -934,33 +885,24 @@ Metadata:
           - VPMinInstances
           - VPMaxInstances
       - Label:
-          default: Virtual Participant Meeting-End Detection (Teams)
-        Parameters:
-          - VPAttendeePollMs
-          - VPPollsBeforeEnd
-          - VPPollsBeforeEndMissing
-      - Label:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
-          - MeetingAssistServiceBedrockModelID
           - TavilyApiKey
-          - AssistantWakePhraseRegEx
+          - TavilyApiKeySecretArn
       - Label:
           default: Meeting Assist Voice Assistant
         Parameters:
           - ElevenLabsApiKey
-          - ElevenLabsAgentId
+          - ElevenLabsApiKeySecretArn
           - SimliApiKey
-          - SimliFaceId
-          - VoiceAssistantProvider
+          - SimliApiKeySecretArn
           - AmazonNovaSonicRegion
-          - VoiceAssistantActivationMode
-          - VoiceAssistantWakePhrases
-          - VoiceAssistantActivationDuration
           - ZoomMeetingSdkClientId
           - ZoomMeetingSdkClientSecret
+          - ZoomMeetingSdkClientSecretArn
           - AcsConnectionString
+          - AcsConnectionStringSecretArn
       - Label:
           default: Meeting Assist Bedrock Guardrails
         Parameters:
@@ -985,19 +927,17 @@ Metadata:
           default: Amazon Transcribe Configuration
         Parameters:
           - IsPartialTranscriptEnabled
-          - IsContentRedactionEnabled
-          - TranscribeLanguageCode
-          - TranscribeLanguageOptions
-          - TranscribePreferredLanguage
           - TranscribeContentRedactionType
-          - ShowSpeakerLabel
-          - TranscribePiiEntityTypes
-          - CustomVocabularyName
-          - CustomLanguageModelName
       - Label:
-          default: On-demand speech engine (EXPERIMENTAL)
+          default: ASR MicroVM speech engine (alternative transcription engine)
         Parameters:
           - EnableMicrovmAsr
+      - Label:
+          default: Voice enrollment (Beta; biometric; off by default)
+        Parameters:
+          - EnableVoiceEnrollment
+          - VoiceEnrollmentRetentionDays
+          - VoiceEnrollmentTermsVersion
       - Label:
           default: WebSocket Transcriber Service Scaling
         Parameters:
@@ -1010,9 +950,7 @@ Metadata:
           default: Transcript Event Processing Configuration
         Parameters:
           - TranscriptLambdaHookFunctionArn
-          - TranscriptLambdaHookFunctionNonPartialOnly
           - EndOfCallTranscriptSummary
-          - BedrockModelId
           - EndOfCallLambdaHookFunctionArn
           - StartOfCallLambdaHookFunctionArn
           - PostCallSummaryLambdaHookFunctionArn
@@ -1022,16 +960,19 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
+          default: Configuration
+        Parameters:
+          - ConfigurationPreset
+          - CustomConfigPath
+      - Label:
           default: Retention Settings
         Parameters:
-          - EnableAudioRecording
           - EnableVideoRecording
           - MeetingRecordExpirationInDays
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
-          - MeetingInactivityTimeoutInMinutes
-          - MeetingInactivityLookbackInDays
+          - VPSchedulerStateMachineLogsExpirationInDays
           - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
@@ -1048,6 +989,13 @@ Metadata:
           - PrivateSubnet1
           - PrivateSubnet2
       - Label:
+          default: Operational Monitoring
+        Parameters:
+          - EnableOperationalAlarms
+          - TranscribeConcurrentStreamAlarmThreshold
+          - LogLevel
+          - AppSyncFieldLogLevel
+      - Label:
           default: Security Configuration
         Parameters:
           - PermissionsBoundaryArn
@@ -1056,48 +1004,42 @@ Metadata:
         Parameters:
           - ModelValidation
     ParameterLabels:
-      CallAudioProcessor:
-        default: Call Audio Processor
-      ChimeVoiceToneAnalysis:
-        default: Chime Voice Tone Analysis
-      CustomVoiceConnectorId:
-        default: Amazon Chime SDK Voice Connector ID (existing)
+      EnableVideoRecording:
+        default: Record Meeting Video
+      LogLevel:
+        default: Log Level
+      AppSyncFieldLogLevel:
+        default: GraphQL API Log Level
       AdminEmail:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
-      MeetingAssistServiceBedrockModelID:
-        default: Meeting Assist Service Bedrock Model ID
       TavilyApiKey:
         default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
+      TavilyApiKeySecretArn:
+        default: Existing Secret ARN Holding the Tavily API Key (Optional)
       ElevenLabsApiKey:
         default: ElevenLabs API Key for Virtual Participant Voice (Optional)
-      ElevenLabsAgentId:
-        default: ElevenLabs Agent ID for Custom Personality (Optional)
+      ElevenLabsApiKeySecretArn:
+        default: Existing Secret ARN Holding the ElevenLabs API Key (Optional)
       SimliApiKey:
         default: Simli API Key for Avatar (Optional)
-      SimliFaceId:
-        default: Simli Face ID for Avatar Appearance (Optional)
+      SimliApiKeySecretArn:
+        default: Existing Secret ARN Holding the Simli API Key (Optional)
       ZoomMeetingSdkClientId:
         default: Zoom Meeting SDK Client ID (Optional)
       ZoomMeetingSdkClientSecret:
         default: Zoom Meeting SDK Client Secret (Optional)
+      ZoomMeetingSdkClientSecretArn:
+        default: Existing Secret ARN Holding the Zoom Meeting SDK Client Secret (Optional)
       AcsConnectionString:
         default: Azure Communication Services Connection String for Teams SDK Join (Optional)
-      VoiceAssistantProvider:
-        default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
+      AcsConnectionStringSecretArn:
+        default: Existing Secret ARN Holding the ACS Connection String (Optional)
       AmazonNovaSonicRegion:
         default: Amazon Nova Sonic Region (blank = this stack's region)
-      VoiceAssistantActivationMode:
-        default: Voice Assistant Activation Mode
-      VoiceAssistantWakePhrases:
-        default: Voice Assistant Wake Phrases (comma-separated)
-      VoiceAssistantActivationDuration:
-        default: Voice Assistant Activation Duration (seconds)
-      AssistantWakePhraseRegEx:
-        default: Meeting Assist Wake Phrase Regular Expression
       BedrockGuardrailId:
         default: Bedrock Guardrail Id (optional)
       BedrockGuardrailVersion:
@@ -1116,34 +1058,22 @@ Metadata:
         default: MCP Server OAuth Callback URLs
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
-      IsContentRedactionEnabled:
-        default: Enable Content Redaction for Transcripts
-      TranscribeLanguageCode:
-        default: Language for Transcription
-      TranscribeLanguageOptions:
-        default: Transcribe Language Options
-      TranscribePreferredLanguage:
-        default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
-      ShowSpeakerLabel:
-        default: Default for Speaker Identification on Streaming Sessions
-      TranscribePiiEntityTypes:
-        default: Transcription PII Redaction Entity Types
-      CustomVocabularyName:
-        default: Transcription Custom Vocabulary Name
-      CustomLanguageModelName:
-        default: Transcription Custom Language Model Name
       EnableMicrovmAsr:
-        default: Deploy the on-demand speech engine (EXPERIMENTAL)
+        default: Deploy the ASR MicroVM speech engine
+      EnableVoiceEnrollment:
+        default: Enable voice enrollment (stores biometric data)
+      VoiceEnrollmentRetentionDays:
+        default: Voice Enrollment Consent Validity In Days
+      VoiceEnrollmentTermsVersion:
+        default: Voice Enrollment Terms Version
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
         default:
           Lambda Hook Function ARN for Custom Transcript Segment Processing
           (existing)
-      TranscriptLambdaHookFunctionNonPartialOnly:
-        default: Lambda Hook Function Mode Non-Partial only
       EndOfCallTranscriptSummary:
         default: End of Call Transcript Summary
       EndOfCallLambdaHookFunctionArn:
@@ -1162,14 +1092,16 @@ Metadata:
         default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
         default: Transcription Expiration In Days
+      ConfigurationPreset:
+        default: Configuration Preset
+      CustomConfigPath:
+        default: Custom Configuration Path
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
         default: CloudWatch Logs Expiration In Days
-      MeetingInactivityTimeoutInMinutes:
-        default: Meeting Inactivity Timeout In Minutes
-      MeetingInactivityLookbackInDays:
-        default: Meeting Inactivity Lookback In Days
+      VPSchedulerStateMachineLogsExpirationInDays:
+        default: Virtual Participant Scheduler State Machine Logs Expiration In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
@@ -1194,12 +1126,6 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
-      VPAttendeePollMs:
-        default: VP Teams Meeting-End Poll Interval (ms)
-      VPPollsBeforeEnd:
-        default: VP Teams Polls Before Leaving An Empty Meeting
-      VPPollsBeforeEndMissing:
-        default: VP Teams Polls Before Leaving An Unreadable Meeting
       TranscriberDesiredTaskCount:
         default: WebSocket Transcriber Task Count
       TranscriberAutoScalingEnabled:
@@ -1214,6 +1140,10 @@ Metadata:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
         default: Enable Data Retention On Stack Deletion
+      EnableOperationalAlarms:
+        default: Create Operational CloudWatch Alarms
+      TranscribeConcurrentStreamAlarmThreshold:
+        default: Transcribe Concurrent Stream Alarm Threshold
 
 Rules:
   # check required parameters
@@ -1251,8 +1181,52 @@ Rules:
           EnableVideoRecording is 'true' — scaling out would place meeting video
           connections on tasks that do not hold the matching audio session.
 
+  # Each third-party credential is supplied in exactly one of two forms: the
+  # value itself (this stack stores it in a secret of its own) or the ARN of a
+  # secret that already holds it. Supplying both leaves no single answer to
+  # which one the consumers should read, so it is rejected on the parameters
+  # page rather than resolved by precedence.
+  TavilyApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref TavilyApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref TavilyApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either TavilyApiKey or TavilyApiKeySecretArn, not both. Clear
+          TavilyApiKey to point the stack at your own secret, or clear
+          TavilyApiKeySecretArn to have the stack store the key for you.
+
+  ElevenLabsApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref ElevenLabsApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref ElevenLabsApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either ElevenLabsApiKey or ElevenLabsApiKeySecretArn, not both.
+
+  SimliApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref SimliApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref SimliApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either SimliApiKey or SimliApiKeySecretArn, not both.
+
+  ZoomMeetingSdkClientSecretCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]
+        AssertDescription:
+          Supply either ZoomMeetingSdkClientSecret or
+          ZoomMeetingSdkClientSecretArn, not both.
+
+  AcsConnectionStringCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref AcsConnectionString, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref AcsConnectionStringSecretArn, ""]
+        AssertDescription:
+          Supply either AcsConnectionString or AcsConnectionStringSecretArn,
+          not both.
+
 Mappings:
-  # Deploy-time values for the on-demand ASR engine that are deliberately not
+  # Deploy-time values for the ASR MicroVM engine that are deliberately not
   # CloudFormation parameters: EnableMicrovmAsr is the only deploy-time question,
   # and the bundle carries its own calibrated operating point.
   #
@@ -1262,8 +1236,21 @@ Mappings:
   # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: parakeet-tdt-v3-titanet-small
+      ModelBundle: parakeet-tdt-v3-live-nemotron35-sortformer
       MaxMeetingSeconds: "14400"
+
+  # Console hostname per partition, for the console links in Outputs.
+  # AWS::URLSuffix does not help here: the console is not reached at
+  # <service>.<urlsuffix>, and its hostname differs per partition in a way that
+  # no pseudo parameter exposes. Keyed on AWS::Partition so a GovCloud or China
+  # deployment emits links that resolve there.
+  ConsoleDomain:
+    aws:
+      Domain: console.aws.amazon.com
+    aws-us-gov:
+      Domain: console.amazonaws-us-gov.com
+    aws-cn:
+      Domain: console.amazonaws.cn
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
@@ -1292,10 +1279,58 @@ Conditions:
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+  # Operator-supplied third-party credentials. "...Value" means the credential
+  # itself was typed into the parameter, so this stack creates the secret that
+  # holds it; "...SecretArn" means an existing secret was named instead. The
+  # Rules above allow at most one of the two per credential, and the consuming
+  # stacks only ever receive the resulting ARN.
+  HasTavilyApiKeyValue: !Not [!Equals [!Ref TavilyApiKey, ""]]
+  HasTavilyApiKeySecretArn: !Not [!Equals [!Ref TavilyApiKeySecretArn, ""]]
+  HasElevenLabsApiKeyValue: !Not [!Equals [!Ref ElevenLabsApiKey, ""]]
+  HasElevenLabsApiKeySecretArn: !Not [!Equals [!Ref ElevenLabsApiKeySecretArn, ""]]
+  HasSimliApiKeyValue: !Not [!Equals [!Ref SimliApiKey, ""]]
+  HasSimliApiKeySecretArn: !Not [!Equals [!Ref SimliApiKeySecretArn, ""]]
+  HasZoomMeetingSdkClientSecretValue:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+  HasZoomMeetingSdkClientSecretArn:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]]
+  HasAcsConnectionStringValue: !Not [!Equals [!Ref AcsConnectionString, ""]]
+  HasAcsConnectionStringSecretArn:
+    !Not [!Equals [!Ref AcsConnectionStringSecretArn, ""]]
+
+  # Either form of the Zoom SDK client secret enables the SDK join path, which
+  # is what the UI's ZoomSdkEnabled setting reports.
   ZoomSdkEnabled: !And
     - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
-    - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
-  ShouldDeployMicrovmAsr: !Equals [!Ref EnableMicrovmAsr, "true"]
+    - !Or
+      - !Condition HasZoomMeetingSdkClientSecretValue
+      - !Condition HasZoomMeetingSdkClientSecretArn
+  # The Regions where AWS Lambda MicroVMs, which the ASR MicroVM engine runs on,
+  # are available: the same list VPLaunchType's description gives. Outside them
+  # AWS::Lambda::MicrovmImage is not a recognised resource type, so the ASR
+  # nested stack is not created whatever EnableMicrovmAsr says, and every meeting
+  # uses Amazon Transcribe. Extend this list when MicroVMs reach another Region.
+  IsMicrovmRegion: !Or
+    - !Equals [!Ref AWS::Region, us-east-1]
+    - !Equals [!Ref AWS::Region, us-east-2]
+    - !Equals [!Ref AWS::Region, us-west-2]
+    - !Equals [!Ref AWS::Region, ap-northeast-1]
+    - !Equals [!Ref AWS::Region, eu-west-1]
+  ShouldDeployMicrovmAsr: !And
+    - !Equals [!Ref EnableMicrovmAsr, "true"]
+    - !Condition IsMicrovmRegion
+  ShouldCreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, "true"]
+  # AdminEmail is a required parameter with an AllowedPattern that an empty
+  # string does not match, so in practice this is always true. It is asserted
+  # anyway so that the subscription resource states the contract it depends on:
+  # SNS rejects a subscription with an empty endpoint, which would fail the
+  # whole stack rather than just the subscription.
+  ShouldSubscribeAdminEmailToAlerts: !Not [!Equals [!Ref AdminEmail, ""]]
+  # The stale-meeting reaper is always scheduled; a timeout of 0 on the
+  # Configuration page makes each run end nothing, so the "no
+  # invocations" alarm still applies.
+  ShouldAlarmOnStaleMeetingReaper: !Condition ShouldCreateOperationalAlarms
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
     - !Not
@@ -1423,6 +1458,38 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
+          # CloudWatch is the publisher when an alarm notifies the operational
+          # alerts topic, and SNS requires the publisher itself to hold
+          # kms:GenerateDataKey* and kms:Decrypt on the topic's key. Granted
+          # unconditionally and with no condition keys: EnableOperationalAlarms
+          # can be switched on by a stack update at any time, and without this
+          # grant an alarm shows ALARM in the console while the notification is
+          # silently dropped, which is the one failure an alerting stack cannot
+          # afford. kms:Decrypt is needed because SNS re-reads the data key it
+          # was given, and the grant covers no other action.
+          - Sid: Allow CloudWatch Alarms To Publish To Encrypted Topics
+            Effect: Allow
+            Principal:
+              Service: !Sub "cloudwatch.${AWS::URLSuffix}"
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: "*"
+          # The recordings bucket policy lets Amazon Transcribe read uploaded
+          # media and write batch transcripts, and the bucket's objects are
+          # encrypted with this key.
+          - Sid: Allow Transcribe To Use Recordings Bucket Objects
+            Effect: Allow
+            Principal:
+              Service: !Sub "transcribe.${AWS::URLSuffix}"
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow S3 Vectors indexing service
             Effect: Allow
             Principal:
@@ -1442,6 +1509,96 @@ Resources:
     Properties:
       AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
       TargetKeyId: !Ref CustomerManagedEncryptionKey
+
+  ##########################################################################
+  # Third-party integration credentials
+  #
+  # One secret per operator-supplied credential, created only when that
+  # credential was typed into its parameter. The parameters themselves are
+  # unchanged: an operator still enters the key in the same box, and this stack
+  # is what decides where it is kept. What travels on to the consuming stacks is
+  # the secret's ARN — the ECS task definition names the ARN and the ECS agent
+  # injects the value at task start, and the meeting-assist function reads the
+  # ARN and fetches the value on first use.
+  #
+  # Each is named under ${AWS::StackName}/integrations/ so an operator rotating
+  # one can address it by a name they can predict, next to the per-user
+  # credentials this deployment already keeps there
+  # (${AWS::StackName}/zoom-credentials/<cognito sub>). That is a deliberate
+  # difference from the four secrets the AI stack and the WebSocket transcriber
+  # stack create, which set no Name and so get a generated one: nothing
+  # addresses those by name, and the rotation procedures for these do.
+  #
+  # DeletionPolicy is Delete, not the EnableDataRetentionOnDelete conditional
+  # used for DynamoDB tables and S3 buckets. The value here is an operator
+  # input that also exists at the provider and in the stack parameter, so a
+  # retained copy preserves nothing that is not already recoverable, and with a
+  # fixed name a retained copy would hold that name indefinitely. Delete
+  # releases it once Secrets Manager's recovery window elapses; the window
+  # itself cannot be shortened from CloudFormation (the resource exposes no
+  # RecoveryWindowInDays), so the two cases where a held name fails a stack
+  # update are documented in
+  # docs/infrastructure-and-security.md#the-30-day-recovery-window.
+  ##########################################################################
+  TavilyApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasTavilyApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/tavily-api-key"
+      Description: !Sub "Tavily API key for the ${AWS::StackName} web search tool"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref TavilyApiKey
+
+  ElevenLabsApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasElevenLabsApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/elevenlabs-api-key"
+      Description: !Sub "ElevenLabs API key for the ${AWS::StackName} voice assistant"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref ElevenLabsApiKey
+
+  SimliApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasSimliApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/simli-api-key"
+      Description: !Sub "Simli API key used by the ${AWS::StackName} Virtual Participant avatar"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref SimliApiKey
+
+  ZoomMeetingSdkClientSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasZoomMeetingSdkClientSecretValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/zoom-meeting-sdk-client-secret"
+      Description: !Sub "Zoom Meeting SDK client secret for ${AWS::StackName} join signatures"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref ZoomMeetingSdkClientSecret
+
+  AcsConnectionStringSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasAcsConnectionStringValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/acs-connection-string"
+      Description: !Sub "ACS connection string for ${AWS::StackName} Teams interop tokens"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref AcsConnectionString
 
   # EventBridge rule for KMS key monitoring
   KMSKeyMonitoringEventRule:
@@ -1722,38 +1879,7 @@ Resources:
             status = cfnresponse.SUCCESS
             reason = f"Parameters Validated"
             if event['RequestType'] != "Delete":
-              # Validate Transcribe Language options
-              transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
-              transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
-              transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
-              customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
-              customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
               modelValidation = event['ResourceProperties'].get('ModelValidation', '')
-              if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
-                if customVocabularyName:
-                  status = cfnresponse.FAILED
-                  reason = f"CustomVocabularyName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
-                elif customLanguageModelName:
-                  status = cfnresponse.FAILED
-                  reason = f"CustomLanguageModelName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
-                if transcribeLanguageOptions == '':
-                  status = cfnresponse.FAILED
-                  reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
-                else:
-                  # only one language dialect per language
-                  languages = set()
-                  lang_codes = [l.strip() for l in transcribeLanguageOptions.split(',')]
-                  for lang_code in lang_codes:
-                    lang = lang_code.split('-')[0]
-                    if lang in languages:
-                      status = cfnresponse.FAILED
-                      reason = f"TranscribeLanguageOptions has a duplicate entry for '{lang}' - only one language dialect per language is allowed."
-                    languages.add(lang)
-                  # transcribePreferredLanguage must be in transcribeLanguageOptions
-                  if not transcribePreferredLanguage == 'None':
-                    if not transcribePreferredLanguage in lang_codes:
-                      status = cfnresponse.FAILED
-                      reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
               # Validate Bedrock model access
               failedModels = []
               requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
@@ -1784,16 +1910,17 @@ Resources:
     Type: Custom::ValidateParameters
     Properties:
       ServiceToken: !GetAtt ValidateParametersFunction.Arn
-      TranscribeLanguageCode: !Ref TranscribeLanguageCode
-      TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-      TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-      CustomVocabularyName: !Ref CustomVocabularyName
-      CustomLanguageModelName: !Ref CustomLanguageModelName
       ModelValidation: !Ref ModelValidation
+      # The shipped defaults of the Amazon Bedrock Models section that every
+      # deployment calls (setting_defaults.json, held equal to these by
+      # test_model_validation.py), and the knowledge base embedding model. The
+      # key frame text model is left out: it is called only for meeting video.
+      # A model chosen later on the Configuration page is not checked here.
       BedrockModelIds:
-        - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - "global.anthropic.claude-sonnet-5-5" # Summaries and meeting insights
+        - "global.anthropic.claude-haiku-5-5" # Meeting assistant
+        - "global.anthropic.claude-haiku-4-5-20251001-v1:0" # Meeting assistant knowledge bases
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
-        - !Ref BedrockModelId # Meeting summarization
 
   ##########################################################################
   # Resources shared by multiple nested stacks
@@ -1804,9 +1931,12 @@ Resources:
       RetentionPeriodHours: 24
       StreamModeDetails:
         StreamMode: ON_DEMAND
+      # Encrypted with the stack's customer-managed key. Changing the key is an
+      # in-place update: records written before it stay encrypted with the
+      # previous key until they age out of the 24-hour retention period.
       StreamEncryption:
         EncryptionType: KMS
-        KeyId: alias/aws/kinesis
+        KeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   # Initialise LMASettingsParameter as empty (so it never gets replaced)
   # and use CR UpdateLMASettingsFunction to add/update values
@@ -1925,7 +2055,6 @@ Resources:
       ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
       LCASettingsName: !Ref LMASettingsParameter
       LCASettingsKeyValuePairs:
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         ShouldUseTranscriptKnowledgeBase: !If
         - ShouldUseTranscriptKnowledgeBase
         - True
@@ -1997,9 +2126,23 @@ Resources:
                     - !Sub "${RecordingsBucket.Arn}/*"
                     - !Ref AWS::NoValue
 
+  # Named independently of the function on purpose: !Sub-ing the function's
+  # generated physical name would make this group depend on the function, so
+  # CloudFormation would create the function first and the first invocation
+  # would let Lambda create the group itself.
+  S3BucketCleanupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldDeleteDataOnDelete
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/S3BucketCleanupFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
     Condition: ShouldDeleteDataOnDelete
+    DependsOn:
+      - S3BucketCleanupFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -2022,6 +2165,8 @@ Resources:
       Role: !GetAtt S3BucketCleanupRole.Arn
       Timeout: 900
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref S3BucketCleanupFunctionLogGroup
       TracingConfig:
         Mode: Active
       Environment:
@@ -2275,10 +2420,16 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # Objects are written with the stack's customer-managed key. An S3 Bucket
+      # Key keeps the number of KMS requests (and their cost) low. Objects
+      # written before this setting keep the encryption they were written with
+      # until they are rewritten or expire.
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt CustomerManagedEncryptionKey.Arn
+            BucketKeyEnabled: true
       LoggingConfiguration:
         DestinationBucketName: !Ref LoggingBucket
         LogFilePrefix: "recordings-bucket-logs/"
@@ -2303,10 +2454,39 @@ Resources:
             Status: Enabled
             Prefix: "lma-transcripts/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
+          # Key frames of the shared screen (docs/meeting-video.md). Their items
+          # carry the transcript's DynamoDB TTL, and the images are kept for the
+          # same number of days as the transcript.
+          - Id: VideoKeyframeRetention
+            Status: Enabled
+            Prefix: "lma-video-keyframes/"
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
+          # Consent evidence images (docs/meeting-consent.md), kept for as many
+          # days as the key frames. The transcript's retention rather than the
+          # meeting record's because a lifecycle rule takes whole days, which the
+          # key-frame rule above already requires of this parameter.
+          - Id: ConsentEvidenceRetention
+            Status: Enabled
+            Prefix: "lma-consent-evidence/"
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
           - Id: PendingUploadCleanup
             Status: Enabled
             Prefix: "lma-uploads-pending/"
             ExpirationInDays: 7
+          # The bucket is versioned, so an expiry above or a deletion by LMA
+          # turns the current version into a noncurrent one (or adds a delete
+          # marker). Noncurrent versions of every object are removed one day
+          # after they stop being current, and a delete marker with no version
+          # left behind it is removed too, so the retention periods above are
+          # how long content is kept, plus at most about a day. One day, not
+          # the configuration bucket's 35: nothing in LMA restores an earlier
+          # version of a recording or transcript file, and these files are
+          # meeting content whose retention is the point of the rules above.
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            ExpiredObjectDeleteMarker: true
       CorsConfiguration:
         CorsRules:
           - Id: LmaUploadsPendingPutFromBrowser
@@ -2574,6 +2754,9 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
       Parameters:
+        # Keep in step with the Domain passed to AISTACK: this stack still seeds
+        # the table a rollback reads, and the two disagreeing would leave one
+        # holding the general summary prompts and the other the healthcare ones.
         Domain: "Default"
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
@@ -2643,10 +2826,7 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
-        EnableVoiceToneAnalysis: "false"
-        CallAudioSource: "Genesys Cloud Audiohook Web Socket"
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -2658,23 +2838,39 @@ Resources:
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLambdaAgentAssistEnabled: "true"
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
+        # Named rather than read from MEETINGASSISTSETUP's output, because that
+        # stack takes its inputs from this one and the reference would be
+        # circular. The name is the FunctionName the meeting assistant setup
+        # template gives the agent.
+        TroubleshootingAgentFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-Troubleshooting"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
-        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
-        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
+        ConfigurationPreset: !Ref ConfigurationPreset
+        CustomConfigPath: !Ref CustomConfigPath
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
-        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
-        BedrockModelId: !Ref BedrockModelId
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        # Keep in step with the Domain passed to LLMTEMPLATESTACK above; see the
+        # comment there.
+        Domain: "Default"
+        # Substituted by the publish step with a digest of the shipped
+        # configuration content and of the code that processes it. It is what
+        # makes CloudFormation re-run the configuration seeder when either
+        # changes; a property that never changes is a custom resource that is
+        # never invoked again after the first deployment.
+        ConfigurationSeedHash: "<CONFIGURATION_SEED_HASH_TOKEN>"
         ChatButtonConfigTableName: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.ChatButtonConfigTableName
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
+          - ""
+        AsrLauncherFunctionArn: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
         AsrConfigTableArn: !If
           - ShouldDeployMicrovmAsr
@@ -2718,8 +2914,11 @@ Resources:
         EnableMCPServer: !Ref EnableMCP
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
-        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        EnableVoiceEnrollment: !Ref EnableVoiceEnrollment
+        VoiceEnrollmentRetentionDays: !Ref VoiceEnrollmentRetentionDays
+        VoiceEnrollmentTermsVersion: !Ref VoiceEnrollmentTermsVersion
         LogLevel: !Ref LogLevel
+        AppSyncFieldLogLevel: !Ref AppSyncFieldLogLevel
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2735,6 +2934,8 @@ Resources:
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   TRANSCRIPTBEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2749,6 +2950,8 @@ Resources:
         pInputDocumentUploadFolderPrefix: "lma-transcripts/"
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
 
   MEETINGASSISTSETUP:
@@ -2770,8 +2973,13 @@ Resources:
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
-        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        TavilyApiKey: !Ref TavilyApiKey
+        # The ARN of the secret holding the key, never the key: whichever form
+        # the operator used, the meeting-assist function fetches the value for
+        # itself. Empty when web search is not configured.
+        TavilyApiKeySecretArn: !If
+          - HasTavilyApiKeySecretArn
+          - !Ref TavilyApiKeySecretArn
+          - !If [HasTavilyApiKeyValue, !Ref TavilyApiKeySecret, ""]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         TranscriptBedrockKnowledgeBaseId: !If
@@ -2779,11 +2987,10 @@ Resources:
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        LogLevel: !Ref LogLevel
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         # Changes to Params below force MeetingAssist Setup to update.
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
-        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
@@ -2796,6 +3003,22 @@ Resources:
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        # Inputs for the troubleshooting agent: the records it reads, the table
+        # holding its system prompt, and the API id that scopes its read of
+        # AppSync's service-managed log group.
+        VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
+        LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+        # Where the meeting assistant records each answer's token usage for the
+        # meeting cost estimate.
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        # Where the meeting assistant and the troubleshooting agent read their
+        # Amazon Bedrock models, and the layer that reads it.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
+        ConfigurationLayerArn: !GetAtt AISTACK.Outputs.ConfigurationPythonLayerArn
+        # Threaded through so this nested stack's IAM roles carry the
+        # deployment's permissions boundary, as the other nested stacks' do.
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         Version: v0.8.8
 
   VPCSTACK:
@@ -2810,9 +3033,13 @@ Resources:
       Parameters:
         LMAStackName: !Ref "AWS::StackName"
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   # On-demand streaming ASR + speaker diarization on AWS Lambda MicroVMs, used by
-  # the WebSocket transcriber as an alternative to Amazon Transcribe streaming.
+  # the WebSocket transcriber and the Virtual Participant for each meeting source
+  # an admin moves onto it; Amazon Transcribe streaming is the default engine and
+  # the fallback. Created only
+  # in Regions with Lambda MicroVMs (see the IsMicrovmRegion condition).
   # One MicroVM per meeting, launched at meeting start and terminated at the end.
   ASRMICROVMSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2849,6 +3076,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
+        LMAStackName: !Ref AWS::StackName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -2858,16 +3086,7 @@ Resources:
         CallDataStreamName: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
-        TranscribeApiMode: "standard"
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
-        ShowSpeakerLabel: !Ref ShowSpeakerLabel
-        CustomVocabularyName: !Ref CustomVocabularyName
-        CustomLanguageModelName: !Ref CustomLanguageModelName
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
@@ -2883,19 +3102,32 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleName
           - ""
+        # The languages that bundle transcribes; a meeting in another stays on
+        # Amazon Transcribe.
+        AsrModelLanguages: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelLanguages
+          - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
-        PcaS3BucketName: ""
-        PcaTranscriptsPrefix: ""
-        PcaPlaybackAudioFilePrefix: ""
-        PcaWebAppURL: ""
-        PcaWebAppCallPathPrefix: ""
+        # The shared configuration table, which the switches above are read
+        # from; the ASR table stays as the fallback read.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
+        # Where a streaming client's consent step is recorded on its meeting.
+        AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
+        AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+        # Empty when voice enrollment is off, which is how the transcriber knows
+        # not to ask. The AI stack decides that, since the enrollments live there.
+        VoiceEnrollmentSeedsFunctionArn: !GetAtt AISTACK.Outputs.VoiceEnrollmentSeedsFunctionArn
+        # Where the transcriber records each meeting's Transcribe seconds and ASR
+        # MicroVM time for the meeting cost estimate, kept as long as the meeting.
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
-        EnableAudioRecording: !Ref EnableAudioRecording
         EnableVideoRecording: !Ref EnableVideoRecording
         VideoRecordingsPrefix: "lma-video-recordings/"
         TranscriberDesiredTaskCount: !Ref TranscriberDesiredTaskCount
@@ -2943,41 +3175,57 @@ Resources:
           - ShouldUseAnyStrandsBedrock
           - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
           - ""
-        EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
-        ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
-        AcsConnectionString: !Ref AcsConnectionString
+        # ARNs of the secrets holding these credentials, never the credentials:
+        # the Virtual Participant task definition names the ARN and the ECS
+        # agent injects the value into the container at task start. Empty when
+        # the corresponding feature is not configured.
+        ZoomMeetingSdkClientSecretArn: !If
+          - HasZoomMeetingSdkClientSecretArn
+          - !Ref ZoomMeetingSdkClientSecretArn
+          - !If
+            - HasZoomMeetingSdkClientSecretValue
+            - !Ref ZoomMeetingSdkClientSecretSecret
+            - ""
+        AcsConnectionStringSecretArn: !If
+          - HasAcsConnectionStringSecretArn
+          - !Ref AcsConnectionStringSecretArn
+          - !If
+            - HasAcsConnectionStringValue
+            - !Ref AcsConnectionStringSecret
+            - ""
         EnableVideoRecording: !Ref EnableVideoRecording
-        VPAttendeePollMs: !Ref VPAttendeePollMs
-        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
-        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
-        ElevenLabsApiKey: !Ref ElevenLabsApiKey
-        ElevenLabsAgentId: !Ref ElevenLabsAgentId
-        SimliApiKey: !Ref SimliApiKey
-        SimliFaceId: !Ref SimliFaceId
-        VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        ElevenLabsApiKeySecretArn: !If
+          - HasElevenLabsApiKeySecretArn
+          - !Ref ElevenLabsApiKeySecretArn
+          - !If [HasElevenLabsApiKeyValue, !Ref ElevenLabsApiKeySecret, ""]
+        SimliApiKeySecretArn: !If
+          - HasSimliApiKeySecretArn
+          - !Ref SimliApiKeySecretArn
+          - !If [HasSimliApiKeyValue, !Ref SimliApiKeySecret, ""]
         AmazonNovaSonicRegion: !Ref AmazonNovaSonicRegion
-        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
-        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
-        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
+        # The shared configuration table, which the voice assistant's settings
+        # are read from. The Nova Sonic table above is still passed, as the
+        # fallback read when this one holds no shipped Nova Sonic settings or
+        # cannot be read.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
           - ""
         AudioFilePrefix: "lma-audio-recordings/"
         CallDataStreamName: !Ref CallDataStream
-        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
-        TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
-        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        CustomVocabularyName: !Ref CustomVocabularyName
         # The on-demand ASR engine, when deployed. Whether a Virtual Participant
-        # uses it is the Transcription Engine page's runtime switch, read at meeting start.
+        # uses it is the Transcription Engine runtime switch, read at meeting start.
         AsrLauncherFunctionArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
+          - ""
+        AsrModelLanguages: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelLanguages
           - ""
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         # Same source, packaged with the Dockerfile at the zip ROOT, which is
@@ -2998,6 +3246,7 @@ Resources:
         DomSelectorCacheTableName: !GetAtt AISTACK.Outputs.DomSelectorCacheTableName
         VPProfilesBucketName: !GetAtt AISTACK.Outputs.VPProfilesBucketName
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
         VncOriginVerifyHeaderValueSecretArn: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderValueSecretArn
@@ -3030,6 +3279,8 @@ Resources:
         VPMinInstances: !Ref VPMinInstances
         VPMaxInstances: !Ref VPMaxInstances
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        SchedulerStateMachineLogsExpirationInDays: !Ref VPSchedulerStateMachineLogsExpirationInDays
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel
 
@@ -3070,6 +3321,951 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  ##########################################################################
+  # Operational alerting
+  #
+  # One SNS topic that every alarm below notifies, and an email subscription
+  # for AdminEmail. An email subscription is created in PendingConfirmation
+  # state and delivers nothing until the recipient clicks the link in the
+  # confirmation message, so a deployment is not alerting until somebody has
+  # done that. See docs/monitoring.md.
+  ##########################################################################
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: LMA Operational Alerts
+      KmsMasterKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  AlertsTopicAdminEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: ShouldSubscribeAdminEmailToAlerts
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AdminEmail
+
+  ##########################################################################
+  # Operational alarms
+  #
+  # Every alarm here reads a metric an AWS service publishes on its own, so
+  # none of them depend on application code emitting anything. Each one
+  # notifies AlertsTopic, sets TreatMissingData explicitly, and carries an
+  # AlarmDescription written as the first few steps of a runbook, because the
+  # description is the only context that travels with the notification email.
+  ##########################################################################
+  DiscardedRecordsQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-discarded-records-queue-depth"
+      AlarmDescription: >-
+        A batch of Kinesis records reached the Call Event Processor's on-failure
+        destination, so transcript segments or meeting events were dropped
+        rather than delayed. Check the Call Event Processor log group for the
+        error that ended the batch, then read a message from this queue — it
+        carries the shard and sequence-number range of the failed batch, not the
+        records themselves — to see what was lost. Messages stay for 14 days and
+        nothing drains the queue automatically, so the depth holds until someone
+        purges it. OK notifications are enabled for that reason: the queue
+        returning to empty means a person acted, and that is worth knowing.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  TranscriptDeletionDeadLetterQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcript-deletion-dead-letter-queue-depth"
+      AlarmDescription: >-
+        A transcript deletion did not complete after its retries, so a meeting's
+        transcript is still stored although the Retention settings say it should
+        have been deleted. Check the TranscriptDeletionFunction log group for
+        the error, then read a message from this queue: each one carries the
+        CallId. Once the cause is fixed, invoke the function with
+        {"CallId": "<id>", "Trigger": "scheduled"} for each meeting, which
+        deletes it, and purge the queue. Messages stay for 14 days. OK
+        notifications are enabled, since the queue returning to empty means a
+        person acted.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AISTACK.Outputs.TranscriptDeletionDeadLetterQueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  CallEventProcessorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-call-event-processor-errors"
+      AlarmDescription: >-
+        The Call Event Processor failed at least one invocation in a five-minute
+        window. It is the single consumer between Kinesis and both DynamoDB and
+        AppSync, so while it is failing the web UI stops receiving transcript
+        updates even though audio is still being transcribed. Check its log
+        group for the exception first. A Bedrock throttle, a DynamoDB capacity
+        error or a malformed event from a Lambda hook function are the usual
+        causes. The event source retries a failed batch, so a short burst can
+        clear itself; errors that persist across several windows will eventually
+        surface on the discarded-records queue instead.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  CallEventProcessorThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-call-event-processor-throttles"
+      AlarmDescription: >-
+        Lambda refused to start an invocation of the Call Event Processor because
+        the account's concurrent execution limit was already in use. Transcript
+        updates fall behind for as long as this continues, and the backlog shows
+        up on the consumer-lag alarm shortly afterwards. Check the account's
+        Lambda concurrency usage in Service Quotas and what else in the account
+        is consuming it; a reserved concurrency allocation on this function, or a
+        quota increase, is the fix. The event source retries throttled batches,
+        so no data is lost unless the records age out of the stream's 24-hour
+        retention first.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  KinesisConsumerIteratorAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-kinesis-consumer-iterator-age"
+      AlarmDescription: >-
+        The Call Event Processor is more than five minutes behind the call data
+        stream, so the web UI is showing a transcript that lags the meeting by
+        at least that much. Check this function's Duration and Throttles first,
+        then its log group for retried batches. The stream keeps 24 hours of
+        records, so a lag that keeps growing eventually loses data. Two metrics
+        are combined, both reporting the same lag by different routes: the
+        stream's enhanced fan-out consumer reports how far behind the latest
+        record each delivered event was, and Lambda reports the age of the
+        batch its event source handed over. Whichever has data drives the
+        alarm, a period with neither reads as zero, and two of the last three
+        periods must breach before it notifies.
+      Metrics:
+        # The stream is read through an enhanced fan-out consumer, so the lag
+        # signal is SubscribeToShardEvent.MillisBehindLatest rather than
+        # GetRecords.IteratorAgeMilliseconds. Measured over 14 days on a live
+        # stream, the GetRecords age had data in 29 of 336 hours — whatever
+        # occasionally polls the stream, not this consumer — while this metric
+        # had data in all 336.
+        - Id: efolag
+          Label: Enhanced fan-out consumer lag
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Kinesis
+              MetricName: SubscribeToShardEvent.MillisBehindLatest
+              Dimensions:
+                - Name: StreamName
+                  Value: !Ref CallDataStream
+                - Name: ConsumerName
+                  Value: !GetAtt AISTACK.Outputs.DataStreamConsumerName
+            Period: 300
+            Stat: Maximum
+        - Id: consumerage
+          Label: Call Event Processor event-source iterator age
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: IteratorAge
+              Dimensions:
+                - Name: FunctionName
+                  Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+            Period: 300
+            Stat: Maximum
+        - Id: worstlag
+          Label: Worst observed consumer lag (ms)
+          Expression: "MAX([FILL(efolag, 0), FILL(consumerage, 0)])"
+          ReturnData: true
+      # Two of three rather than two of two. FILL makes the expression dense,
+      # so TreatMissingData is never consulted and the newest period always
+      # carries a value — which for a metric published with any delay is the
+      # fill value. AWS documents that this can leave a FILL-based alarm stuck
+      # in one state, and names an M-of-N alarm with M < N as the workaround.
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 300000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  KinesisWriteThroughputExceededAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-kinesis-write-throughput-exceeded"
+      AlarmDescription: >-
+        A write to the call data stream was rejected for exceeding the shard's
+        throughput. The stream is in on-demand mode, which grows its capacity
+        automatically but only after a sustained rise, so this is what a sharp
+        increase in concurrent meetings looks like before the stream has caught
+        up. The producer retries, so brief rejections cost latency rather than
+        data. If it persists, check how many meetings are live and whether the
+        number is rising faster than roughly double every fifteen minutes, which
+        is the rate on-demand scaling keeps up with.
+      Namespace: AWS/Kinesis
+      MetricName: WriteProvisionedThroughputExceeded
+      Dimensions:
+        - Name: StreamName
+          Value: !Ref CallDataStream
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  TranscriberNoHealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcriber-no-healthy-targets"
+      AlarmDescription: >-
+        The transcriber load balancer has no target passing its health check, so
+        every new Stream Audio, browser-extension, desktop-app and Virtual
+        Participant connection is being refused. Meetings already streaming
+        drop as well. Check the transcriber service's running task count and
+        its Fargate log group for a task that is failing to start, then the
+        target group's health-check reason in the EC2 console. Missing data
+        reads as healthy here, because the target group publishes nothing at all
+        when it has no registered targets; the transcriber-service-no-tasks
+        alarm is what covers that case. OK notifications are enabled so that
+        recovery is visible without checking the console.
+      Namespace: AWS/ApplicationELB
+      MetricName: HealthyHostCount
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberTargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberLoadBalancerFullName
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  TranscriberServiceNoTasksAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcriber-service-no-tasks"
+      AlarmDescription: >-
+        The transcriber ECS service is running no tasks, so no meeting can
+        stream audio in by any route. Check the service's Events tab in the ECS
+        console for a task that cannot be placed — an exhausted Fargate quota, a
+        subnet with no address space left, or an image the task execution role
+        cannot pull are the usual reasons — and the Fargate log group for a
+        container exiting during startup. A deployment does not lower this count
+        — the service registers a replacement before draining the task it
+        replaces — so two consecutive five-minute windows are required only so
+        that a single absent or transiently zero datapoint does not notify. OK
+        notifications are enabled so recovery is visible.
+      Namespace: ECS/ContainerInsights
+      MetricName: RunningTaskCount
+      Dimensions:
+        - Name: ClusterName
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscribingClusterName
+        - Name: ServiceName
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberServiceName
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  AppSync5xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-appsync-5xx-errors"
+      AlarmDescription: >-
+        The GraphQL API returned five or more server errors in a five-minute
+        window. The web UI reads every meeting, transcript and summary through
+        this API and subscribes to live updates over it, so users see empty
+        pages or a transcript that stops advancing. Check the AppSync console's
+        Monitoring tab to see which resolver is failing, then that resolver's
+        data source: a DynamoDB table being throttled and a Lambda data source
+        timing out both surface here as 5XX. Client-side errors appear as 4XX
+        instead and are not covered by this alarm — look at the dashboard's
+        AppSync widget if users report problems and this is quiet.
+      Namespace: AWS/AppSync
+      MetricName: 5XXError
+      Dimensions:
+        - Name: GraphQLAPIId
+          Value: !GetAtt AISTACK.Outputs.AppSyncApiId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  TranscribeConcurrentStreamsNearQuotaAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcribe-concurrent-streams-near-quota"
+      AlarmDescription: !Sub >-
+        Concurrent Amazon Transcribe StartStreamTranscription sessions in this
+        region reached ${TranscribeConcurrentStreamAlarmThreshold}, the level
+        set by the TranscribeConcurrentStreamAlarmThreshold parameter. Nothing
+        has failed yet: past the account quota, Transcribe refuses a new session
+        with LimitExceededException and the meeting that asked for it gets no
+        transcript. Request an increase to "Concurrent HTTP/2 streams for
+        transcription" in Service Quotas, and raise this parameter with it — the
+        alarm cannot read the quota. The count is account-wide and region-wide,
+        so another workload in this account calling StartStreamTranscription
+        consumes the same quota and is counted here; one calling
+        StartCallAnalyticsStreamTranscription or
+        StartMedicalStreamTranscription also consumes it but is published as a
+        separate series and is not counted. This deployment opens one session
+        per audio channel, so a stereo meeting counts as two.
+      # Amazon Transcribe publishes ConcurrentStreamsCount under exactly one
+      # dimension set, confirmed against a live account with list-metrics:
+      # Domain, ServiceType and Operation together, with ServiceType
+      # capitalised. Querying any subset returns no datapoints at all, which
+      # would leave this alarm in OK for ever. The published dimensions table
+      # disagrees with this — it lists "batch" as ServiceType's only value and
+      # omits Operation entirely — so trust the measurement, not the table.
+      # A SEARCH expression would cover every streaming operation at once, but
+      # CloudWatch does not accept SEARCH in an alarm.
+      Namespace: AWS/Transcribe
+      MetricName: ConcurrentStreamsCount
+      Dimensions:
+        - Name: Domain
+          Value: Transcribe
+        - Name: ServiceType
+          Value: Streaming
+        - Name: Operation
+          Value: StartStreamTranscription
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref TranscribeConcurrentStreamAlarmThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  StaleMeetingReaperNotInvokedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldAlarmOnStaleMeetingReaper
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-stale-meeting-reaper-not-invoked"
+      AlarmDescription: >-
+        The stale-meeting reaper has not run for two hours. It is scheduled
+        every fifteen minutes and is what ends a meeting whose client
+        disconnected without sending an end-of-meeting event, so while it is
+        quiet those meetings stay "In Progress" and never get a summary. Check
+        that the EventBridge rule whose name ends in -StaleMeetingReaper (it is
+        prefixed with the nested AI stack's name, not this stack's) is enabled
+        and its target still resolves. Missing data is treated as breaching,
+        since the
+        signal being watched for is the absence of invocations; CloudWatch
+        treats an evaluation range with no data at all as breaching regardless
+        of EvaluationPeriods, so a fresh install notifies once and then clears,
+        which is expected. This alarm is created whenever
+        EnableOperationalAlarms is true.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.StaleMeetingReaperFunctionName
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  BedrockThrottlingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-bedrock-throttling"
+      AlarmDescription: >-
+        Amazon Bedrock throttled five or more invocations in a five-minute
+        window. Meeting summaries, the Meeting Assistant's replies, speaker
+        naming and meeting-invitation parsing all go through Bedrock, so users
+        see an assistant that does not answer or a summary that does not appear.
+        Check which model is being throttled on the dashboard's Bedrock widget,
+        then that model's requests-per-minute and tokens-per-minute quotas in
+        Service Quotas. The metric is read without a model dimension on purpose,
+        because Bedrock publishes it both ways and a request throttled before
+        the model is resolved carries no model id.
+      Namespace: AWS/Bedrock
+      MetricName: InvocationThrottles
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  VirtualParticipantLaunchFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-vp-launch-failures"
+      AlarmDescription: >-
+        The state machine that launches Virtual Participants failed or timed out
+        an execution, so somebody asked for a bot to join a meeting and it did
+        not. Open the execution in the Step Functions console and read the
+        failing state, then the launch state machine's log group. A compute
+        quota that is exhausted, an image that cannot be pulled and a meeting
+        URL the platform rejected all land here. The meeting record is written
+        with a FAILED status, so the web UI shows the failure to the person who
+        asked for it; this alarm exists so nobody has to be watching the UI to
+        find out. Failures and timeouts are summed, since the state machine
+        reports a launch that never completed as a timeout, and one breaching
+        period out of the last three notifies.
+      Metrics:
+        - Id: launchfailed
+          Label: Launch executions failed
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/States
+              MetricName: ExecutionsFailed
+              Dimensions:
+                - Name: StateMachineArn
+                  Value: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.StepFunctions
+            Period: 300
+            Stat: Sum
+        - Id: launchtimedout
+          Label: Launch executions timed out
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/States
+              MetricName: ExecutionsTimedOut
+              Dimensions:
+                - Name: StateMachineArn
+                  Value: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.StepFunctions
+            Period: 300
+            Stat: Sum
+        # No FILL here. CloudWatch treats a missing value as 0 on either side of
+        # an arithmetic operator, so the sum already behaves as intended, and
+        # leaving the terms unfilled keeps the expression sparse — which is what
+        # lets TreatMissingData apply and avoids the stuck-state hazard FILL
+        # carries for a metric published with any delay.
+        - Id: launchnotcompleted
+          Label: Launches that did not complete
+          Expression: "launchfailed + launchtimedout"
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  ##########################################################################
+  # Alarms on metrics LMA publishes itself
+  #
+  # Unlike every alarm above, these read metrics the application emits, in the
+  # namespace ${AWS::StackName}. Both watch a condition the code otherwise
+  # swallows -- a failure that is caught, recorded and not raised -- which is
+  # why each is an alarm and not only a dashboard widget: the metric is the
+  # only notice anybody gets, and a number nobody is paged on is not one.
+  #
+  # Both use one breaching period out of three rather than one out of one.
+  # These metrics arrive by way of CloudWatch Logs rather than PutMetricData,
+  # and AWS recommends an M-of-N alarm where the log flush interval is not
+  # under the application's control -- which on Lambda and on the ECS awslogs
+  # driver it is not. One of three absorbs a datapoint that lands in the next
+  # period without missing the event.
+  #
+  # Both alarms are named for meetings, which is what an operator is looking
+  # for, but the no-transcript one counts audio sessions: a client that
+  # reconnects for the same meeting opens a second session. The description and
+  # the docs say so; the name is left readable.
+  #
+  # Neither uses metric math. Alarming on the *absence* of a first transcript
+  # segment while meetings were starting would need two metrics and FILL;
+  # StreamingSessionsWithoutTranscript counts that condition directly in the one
+  # component that can observe it, so a plain threshold says the same thing and
+  # avoids FILL, which makes an expression dense and so stops TreatMissingData
+  # from ever being consulted.
+  ##########################################################################
+  TranscriptSegmentWriteFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcript-segment-write-failures"
+      AlarmDescription: >-
+        A transcript segment did not reach the meeting page and nothing else
+        reports it. The Call Event Processor gathers these writes with
+        return_exceptions set, so a failed one is collected into the
+        invocation's result rather than raised, and is therefore not redelivered
+        on its own account: a raised failure would be attributed to its Kinesis
+        record, retried, and finally described to the on-failure destination
+        another alarm watches, while this one reaches neither. The transcript
+        simply has a gap. Read the Call Event Processor's log group for 'max
+        retries on query' over the same period; that line carries the exception
+        type and the GraphQL errorType, and is the one these failures produce.
+        An expired caller token, a rejected AppSync write and a DynamoDB
+        capacity error all land here. Lines already lost cannot be replayed once
+        their records age out of the stream's 24-hour retention, so treat a
+        sustained rate as urgent.
+      Namespace: !Ref AWS::StackName
+      MetricName: TranscriptSegmentWriteFailed
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  MeetingsWithoutTranscriptAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-meetings-without-transcript"
+      AlarmDescription: >-
+        Three or more audio sessions streamed for at least thirty seconds and
+        produced no transcript at all. Sessions, not meetings: a client
+        reconnecting for the same meeting opens a second one, and only meetings
+        streamed through the transcriber are counted -- a Virtual Participant
+        transcribes in its own container and never appears here. Nothing else
+        reports this: the session closes normally, the meeting reaches ENDED,
+        and the meeting page shows an empty transcript with no error on it. Read
+        the transcriber's container log group for '[TRANSCRIBING]' lines over
+        the same period. The usual causes are an exhausted Amazon Transcribe
+        streaming quota, which the near-quota alarm should have notified first;
+        a language code or custom vocabulary the account does not have; and,
+        where the MicroVM ASR engine is selected, an engine that could not start
+        with fallback switched off.
+      Namespace: !Ref AWS::StackName
+      MetricName: StreamingSessionsWithoutTranscript
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  ##########################################################################
+  # Operational dashboard
+  #
+  # One template-level dashboard rather than a Lambda that merges fragments
+  # from each nested stack: every identifier the widgets need is already a
+  # nested stack Output, so the variable map of the list form of Fn::Sub is
+  # enough. The widgets above the "Application metrics" band read metrics AWS
+  # services publish; the five metric widgets in that band read metrics LMA
+  # publishes itself, in the namespace ${AWS::StackName} -- which needs no
+  # variable in the map below, since Fn::Sub resolves the pseudo-parameter
+  # directly. The log tables after the band are Logs Insights queries, not
+  # metrics.
+  ##########################################################################
+  OperationalDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
+      # yamllint disable rule:line-length
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {
+                "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+                "properties": {
+                  "markdown": "# ${AWS::StackName} — operational dashboard\n\nEvery widget here reads a metric an AWS service publishes on its own. Alarms on the same metrics notify the SNS topic **${AlertsTopicName}**; see `docs/monitoring.md` for what each one means and how to subscribe to it."
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 2, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcribe concurrent StartStreamTranscription sessions — account-wide, not just this stack",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "Streaming", "Operation", "StartStreamTranscription", {"label": "StartStreamTranscription"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-transcribe-concurrent-streams-near-quota notifies at or above this",
+                        "value": ${TranscribeQuotaThreshold}
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 2, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Kinesis call data stream — rejected writes matter more than record volume",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Kinesis", "IncomingRecords", "StreamName", "${CallDataStreamName}", {"label": "Records in"}],
+                    ["AWS/Kinesis", "WriteProvisionedThroughputExceeded", "StreamName", "${CallDataStreamName}", {"label": "Writes rejected", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 8, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Consumer lag — how far behind the live meeting the transcript is (ms)",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Kinesis", "SubscribeToShardEvent.MillisBehindLatest", "StreamName", "${CallDataStreamName}", "ConsumerName", "${DataStreamConsumerName}", {"label": "Enhanced fan-out consumer lag"}],
+                    ["AWS/Lambda", "IteratorAge", "FunctionName", "${CallEventProcessorFunctionName}", {"label": "Call Event Processor event-source age"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-kinesis-consumer-iterator-age notifies above this",
+                        "value": 300000
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 8, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Discarded records queue — depth never falls on its own, so any value above zero is open work",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${DiscardedRecordsQueueName}", {"label": "Messages waiting"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-discarded-records-queue-depth notifies above this",
+                        "value": 0
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 14, "width": 24, "height": 6,
+                "properties": {
+                  "title": "Call Event Processor — the one consumer between Kinesis and the web UI",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Lambda", "Invocations", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Invocations"}],
+                    ["AWS/Lambda", "Errors", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Errors"}],
+                    ["AWS/Lambda", "Throttles", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Throttles"}],
+                    ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Maximum", "label": "Concurrent executions"}],
+                    ["AWS/Lambda", "Duration", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "p99", "label": "Duration p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 20, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Amazon Bedrock — read without a model dimension, so pre-resolution failures are counted",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Bedrock", "Invocations", {"stat": "Sum", "label": "Invocations"}],
+                    ["AWS/Bedrock", "InvocationThrottles", {"stat": "Sum", "label": "Throttles"}],
+                    ["AWS/Bedrock", "InvocationClientErrors", {"stat": "Sum", "label": "Client errors"}],
+                    ["AWS/Bedrock", "InvocationLatency", {"stat": "p99", "label": "Latency p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 20, "width": 12, "height": 6,
+                "properties": {
+                  "title": "ECS tasks — RunningTaskCount is per service, TaskCount is per cluster; the VP series counts tasks started per meeting",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${TranscribingClusterName}", "ServiceName", "${TranscriberServiceName}", {"stat": "Minimum", "label": "Transcriber service (running)"}],
+                    ["ECS/ContainerInsights", "TaskCount", "ClusterName", "${VirtualParticipantClusterName}", {"label": "Virtual Participant cluster (all tasks)"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 26, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Virtual Participant memory used (MiB) — a VP stuck in INITIALIZING is usually a starved host",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "${VirtualParticipantClusterName}", "TaskDefinitionFamily", "${VirtualParticipantTaskFamily}", {"stat": "Maximum", "label": "Peak per task"}],
+                    ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "${VirtualParticipantClusterName}", "TaskDefinitionFamily", "${VirtualParticipantTaskFamily}", {"stat": "Average", "label": "Average per task"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 26, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcriber target health — zero healthy targets refuses every new meeting",
+                  "region": "${AWS::Region}",
+                  "stat": "Minimum",
+                  "period": 60,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", "${TranscriberTargetGroupFullName}", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"label": "Healthy"}],
+                    ["AWS/ApplicationELB", "UnHealthyHostCount", "TargetGroup", "${TranscriberTargetGroupFullName}", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "Maximum", "label": "Unhealthy"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 32, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcriber load balancer — a WebSocket is long-lived, so response time reads the upgrade, not the meeting",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "p99", "label": "Target response time p99 (s)"}],
+                    ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "Sum", "label": "Target 5XX", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 32, "width": 12, "height": 6,
+                "properties": {
+                  "title": "GraphQL API — 4XX is usually an expired client token, 5XX is a failing resolver",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/AppSync", "4XXError", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "Sum", "label": "4XX"}],
+                    ["AWS/AppSync", "5XXError", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "Sum", "label": "5XX"}],
+                    ["AWS/AppSync", "Latency", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "p99", "label": "Latency p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
+                "properties": {
+                  "markdown": "## Application metrics\n\nThe five widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. The Virtual Participant publishes only its Nova Sonic quota refusals so far; MicroVM ASR and Meeting Assistant metrics are not published yet."
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Meetings — started and ended are counted once each; a live meeting is legitimately started and not ended",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "MeetingsStarted", {"label": "Meetings started"}],
+                    ["${AWS::StackName}", "MeetingsEnded", {"label": "Meetings ended"}],
+                    ["${AWS::StackName}", "StreamingSessionsStarted", {"label": "Live audio sessions opened"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Time to first transcript segment (ms) — mostly measures when somebody first spoke, so read the shape and not a value",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "Minimum", "label": "Fastest"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "Average", "label": "Average"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "p90", "label": "p90"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "p99", "label": "p99"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcript segment writes — a failure here is a gap in a transcript that nothing else reports",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "TranscriptSegmentsWritten", {"label": "Written"}],
+                    ["${AWS::StackName}", "TranscriptSegmentWriteFailed", {"label": "Failed", "yAxis": "right"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-transcript-segment-write-failures notifies at or above this",
+                        "value": 1,
+                        "yAxis": "right"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Audio sessions that produced no transcript — under thirty seconds is not counted, so a value here is a session long enough that silence is usually a fault",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "StreamingSessionsWithoutTranscript", {"label": "Sessions with no transcript"}],
+                    ["${AWS::StackName}", "StreamingSessionsStarted", {"label": "Sessions opened", "yAxis": "right"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-meetings-without-transcript notifies at or above this",
+                        "value": 3
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 52, "width": 24, "height": 6,
+                "properties": {
+                  "title": "Nova Sonic streams refused for the account's concurrency quota (20 per region, shared by every voice assistant in the account) — each refusal degrades a voice assistant rather than failing it",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "NovaSonicStreamsThrottled", {"label": "Refused stream opens"}]
+                  ]
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 58, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Call Event Processor",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${CallEventProcessorLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 12, "y": 58, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Virtual Participant launch state machine",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${VirtualParticipantStateMachineLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 64, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Virtual Participant container",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${VirtualParticipantContainerLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 12, "y": 64, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — WebSocket transcriber container",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${TranscriberFargateLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              }
+            ]
+          }
+        - AlertsTopicName: !GetAtt AlertsTopic.TopicName
+          TranscribeQuotaThreshold: !Ref TranscribeConcurrentStreamAlarmThreshold
+          CallDataStreamName: !Ref CallDataStream
+          DataStreamConsumerName: !GetAtt AISTACK.Outputs.DataStreamConsumerName
+          CallEventProcessorFunctionName: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+          CallEventProcessorLogGroup: !GetAtt AISTACK.Outputs.CallEventProcessorLogGroupName
+          DiscardedRecordsQueueName: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName
+          AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+          TranscribingClusterName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscribingClusterName
+          TranscriberServiceName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberServiceName
+          TranscriberTargetGroupFullName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberTargetGroupFullName
+          TranscriberLoadBalancerFullName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberLoadBalancerFullName
+          TranscriberFargateLogGroup: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberFargateLogGroupName
+          VirtualParticipantClusterName: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.ClusterName
+          VirtualParticipantTaskFamily: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.TaskDefinitionFamily
+          VirtualParticipantStateMachineLogGroup: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.SchedulerStateMachineLogGroupName
+          VirtualParticipantContainerLogGroup: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.ContainerLogGroupName
+
+# yamllint enable rule:line-length
 Outputs:
   QuickSightManifestUrl:
     Description: S3 URL for QuickSight manifest file to import recordings bucket data
@@ -3098,43 +4294,131 @@ Outputs:
       - !Ref RecordingsBucket
       - ""
 
-  SNSCategoryTopicName:
-    Description: The name of the SNS Topic for matched category and alert notifications
-    Value: !GetAtt AISTACK.Outputs.SNSTopic
-
   FetchTranscriptLambdaArn:
     Description:
       The ARN of a Lambda function that will process and export a call
       transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
+  ConfigurationProfileOrigin:
+    Description: >-
+      How this stack's configuration profile came to exist. Stamped when the
+      profile is created and unchanged by later deployments or saves.
+      'created-previous-table-unreadable' is the value to act on: summary prompt
+      templates customized before the upgrade were not carried across and have
+      to be applied again from the Transcript Summary section of the Configuration page. The table they used
+      to live in is retained, so the old values can be read from it.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationProfileOrigin
+
+  ConfigurationSectionAdoption:
+    Description: >-
+      For each configuration store moved into the configuration table after the
+      profile existed, what the latest deployment that ran the seeder found, as
+      section=outcome pairs. 'previous-table-unreadable' is the value to act on:
+      those settings were not carried across from the table they used to live
+      in. The next deployment that runs the seeder tries again; saving the
+      settings from their page in the web UI makes that unnecessary.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationSectionAdoption
+
+  ConfigurationRevisionHistory:
+    Description: >-
+      What the latest deployment that ran the configuration seeder found of the
+      configuration profile's revision history, as profile=outcome. 'present'
+      is what a new deployment, an upgrade and every later deployment report:
+      the profile's current state is a recorded revision. 'not-started' means
+      the history could not be written at deploy time; nothing is lost, as the
+      first save from a configuration page records the profile before replacing
+      it, but the configuration seeder's log says why.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationRevisionHistory
+
+  # Both links below point at the shared configuration table. The record's body
+  # is a compressed attribute there, so these are for inspecting provenance --
+  # who saved a record and when -- rather than for editing: prompts are edited
+  # in the Transcript Summary section of the Configuration page in the web UI, which is also the only path
+  # that refuses a save another administrator has superseded.
   LLMDefaultPromptSummaryTemplate:
     Description:
-      View the *default* summary prompts. Do not edit. To override default
-      prompts, add or edit attributes in the custom summary prompts item.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+      View the *default* summary prompts record. Rewritten whenever a release
+      changes the prompts it ships, so edit the custom profile instead -- from
+      the Transcript Summary section of the Configuration page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   LLMCustomPromptSummaryTemplate:
     Description:
-      Edit the *custom* summary prompts. Attribute values here override
-      the default summary prompts, and are preserved during stack updates.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+      View the *custom* summary prompts record, which overrides the default one
+      and is preserved during stack updates. Edit it from the Transcript
+      Summary page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
+  TroubleshootingAgentCustomPrompt:
+    Description:
+      Edit the *custom* troubleshooting agent system prompt. A systemPrompt
+      attribute here replaces the default on the next diagnosis, with no
+      redeployment, and is preserved during stack updates.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomTroubleshootingAgentPrompt&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  TroubleshootingAgentFunctionArn:
+    Description:
+      ARN of the troubleshooting agent Lambda function. The web UI's
+      Troubleshooting page and Diagnose buttons reach it through AppSync; it can
+      also be invoked with the AWS CLI or SDK.
+    Value: !GetAtt MEETINGASSISTSETUP.Outputs.TroubleshootingAgentFunctionArn
+
+  # The chat buttons live in the shared configuration table too, as a
+  # compressed attribute, so these links are for inspecting who saved a record
+  # and when. Buttons are edited from the Edit Chat Buttons dialog on a meeting
+  # page, which is open to members of the Admin group.
   DefaultChatButtonConfig:
-    Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.
-    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.DefaultChatButtonConfig
+    Description:
+      View the *default* configuration record, which holds the shipped STRANDS
+      agent chat buttons. Rewritten whenever a release changes what it ships,
+      so edit the custom buttons instead -- from the Edit Chat Buttons dialog.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CustomChatButtonConfig:
-    Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
-    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.CustomChatButtonConfig
+    Description:
+      View the *custom* configuration profile, which holds the chat buttons
+      that replace the shipped ones when any are set and is preserved during
+      stack updates. Edit them from the Edit Chat Buttons dialog.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
+  # Like the summary prompt links above, these point at the shared
+  # configuration table, where the settings are a compressed attribute: they
+  # are for inspecting who saved a record and when. The settings are edited on
+  # the Nova Sonic Voice Assistant section of the Configuration page in the web UI.
   DefaultNovaSonicConfig:
-    Description: View the *default* Nova Sonic voice assistant configuration. Do not edit - changes will be overwritten on stack updates. To customize, edit the custom config item.
-    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.DefaultNovaSonicConfig
+    Description:
+      View the *default* configuration record, which holds the shipped Nova
+      Sonic voice assistant settings. Rewritten whenever a release changes what
+      it ships, so edit the custom profile instead -- from the Nova Sonic
+      Configuration page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CustomNovaSonicConfig:
-    Description: Edit the *custom* Nova Sonic voice assistant configuration. Attribute values here override the default config and are preserved during stack updates.
-    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.CustomNovaSonicConfig
+    Description:
+      View the *custom* configuration profile, which holds the Nova Sonic voice
+      assistant settings that override the shipped ones and is preserved during
+      stack updates. Edit them from the Nova Sonic Voice Assistant section of the Configuration page in the
+      web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CallDataStreamName:
     Description: >-
@@ -3212,4 +4496,32 @@ Outputs:
       REST API Gateway endpoint for API key-authenticated MCP access.
       Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
     Value: !GetAtt AISTACK.Outputs.MCPServerApiKeyEndpoint
+
+  SNSAlertsTopicARN:
+    Description: >-
+      SNS topic every operational alarm notifies. The AdminEmail address is
+      subscribed at deploy time but receives nothing until that subscription is
+      confirmed from the email SNS sends. Subscribe a team alias or a chat
+      webhook here instead of relying on one person — see docs/monitoring.md.
+    Value: !Ref AlertsTopic
+
+  SNSAlertsTopicConsoleUrl:
+    Description: >-
+      Console link to the operational alerts topic, where subscriptions can be
+      added and their confirmation status checked.
+    Value: !Sub
+      - "https://${Domain}/sns/v3/home?region=${AWS::Region}#/topic/${TopicArn}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TopicArn: !Ref AlertsTopic
+
+  OperationalDashboardName:
+    Description: Name of the CloudWatch dashboard for this deployment
+    Value: !Ref OperationalDashboard
+
+  OperationalDashboardConsoleUrl:
+    Description: Console link to the operational dashboard
+    Value: !Sub
+      - "https://${Domain}/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${DashboardName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        DashboardName: !Ref OperationalDashboard
 

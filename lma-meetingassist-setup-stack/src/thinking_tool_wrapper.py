@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -54,7 +54,8 @@ def wrap_tool_with_thinking(tool_func: Callable, tool_name: str, call_id: str, m
                 },
                 'timestamp': datetime.utcnow().isoformat()
             }
-            logger.info(f"🔧 Tool invoked: {tool_name} with args={args}, kwargs={kwargs}")
+            logger.info(f"🔧 Tool invoked: {tool_name} with {len(args)} positional and {len(kwargs)} keyword argument(s)")
+            logger.debug(f"🔧 Tool arguments: args={args}, kwargs={kwargs}")
             send_thinking_fn(call_id, message_id, thinking_step, sequence)
             
             # Execute the actual tool

@@ -27,6 +27,11 @@ else
 fi
 
 # Push BOOTING status before Node starts so the UI shows progress during cold-start.
+# Conditional on the row not having reached a terminal status: a VP cancelled or
+# ended while its task was still being placed has an outcome already, and this
+# write would otherwise put it back to booting. Same guard the state machine and
+# the task reaper use. A conditional-check failure is a normal outcome here, and
+# is swallowed along with every other failure of this best-effort write.
 push_booting_status() {
     if [ -z "$VIRTUAL_PARTICIPANT_ID" ] || [ -z "$VP_TABLE_NAME" ]; then
         return 0
@@ -35,8 +40,9 @@ push_booting_status() {
         --table-name "$VP_TABLE_NAME" \
         --key "{\"id\":{\"S\":\"$VIRTUAL_PARTICIPANT_ID\"}}" \
         --update-expression "SET #s = :s, updatedAt = :u" \
+        --condition-expression "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))" \
         --expression-attribute-names '{"#s":"status"}' \
-        --expression-attribute-values "{\":s\":{\"S\":\"BOOTING\"},\":u\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"}}" \
+        --expression-attribute-values "{\":s\":{\"S\":\"BOOTING\"},\":u\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"},\":failed\":{\"S\":\"FAILED\"},\":completed\":{\"S\":\"COMPLETED\"},\":ended\":{\"S\":\"ENDED\"},\":cancelled\":{\"S\":\"CANCELLED\"}}" \
         --region "${AWS_REGION:-us-west-2}" \
         > /dev/null 2>&1 || true
 }

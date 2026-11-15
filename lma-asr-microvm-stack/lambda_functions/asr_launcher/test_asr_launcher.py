@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the ASR MicroVM session launcher (no AWS calls).
 
@@ -65,6 +65,20 @@ def test_acquire_returns_the_endpoint_and_a_port_scoped_token() -> None:
     assert result["port"] == 8080
     client.create_microvm_auth_token.assert_called_once()
     assert client.create_microvm_auth_token.call_args.kwargs["allowed_ports"] == [{"port": 8080}]
+
+
+def test_acquire_reports_the_size_the_caller_meters_the_microvm_at() -> None:
+    """The transcriber multiplies this by the MicroVM's lifetime for the cost estimate."""
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client), mock.patch.object(
+        index, "MICROVM_MEMORY_MIB", 8192
+    ):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+    assert result["memoryMiB"] == 8192
+    with mock.patch.object(index, "microvms", fake_microvms()), mock.patch.object(
+        index, "MICROVM_MEMORY_MIB", 0
+    ):
+        assert "memoryMiB" not in index.lambda_handler({"action": "acquire", "callId": "c"}, None)
 
 
 def test_acquire_never_lets_a_microvm_suspend_mid_meeting() -> None:
@@ -325,3 +339,37 @@ def test_acquire_does_not_retry_without_a_minute_left_before_the_deadline() -> N
     assert result["ok"] is False
     assert "Internal service error" in result["reason"]
     assert client.run_microvm.call_count == 1
+
+
+ASR_LOG_GROUP = "/aws/lambda-microvms/LMA-Test-asr-logs"
+
+
+def test_every_acquire_attempt_names_the_stacks_log_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The image's Logging setting covers only its build. A running MicroVM logs
+    to the group its RunMicrovm call names, or to a service-created one if the
+    call names none -- so the retry has to name it too."""
+    monkeypatch.setenv("MICROVM_LOG_GROUP_NAME", ASR_LOG_GROUP)
+    client = fake_microvms()
+    client.run_microvm.side_effect = [
+        {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"},
+        {"microvmId": "mvm-2", "endpoint": "e2", "state": "RUNNING"},
+    ]
+    client.get_microvm.side_effect = [{"state": "TERMINATED"}]
+    with mock.patch.object(index, "microvms", client):
+        assert index.lambda_handler({"action": "acquire", "callId": "c"}, None)["ok"] is True
+
+    assert client.run_microvm.call_count == 2
+    for call in client.run_microvm.call_args_list:
+        assert call.kwargs["logging"] == {"cloudWatch": {"logGroup": ASR_LOG_GROUP}}
+
+
+def test_an_unset_log_group_still_acquires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing variable costs log placement, not the meeting: the member is
+    omitted (the client drops None values) and the service default applies."""
+    monkeypatch.delenv("MICROVM_LOG_GROUP_NAME", raising=False)
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is True
+    assert client.run_microvm.call_args.kwargs["logging"] is None

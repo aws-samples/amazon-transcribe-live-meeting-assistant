@@ -13,6 +13,8 @@ input AddTranscriptSegmentInput {
 	Sentiment: Sentiment
 	SentimentScore: SentimentScoreInput
 	SentimentWeighted: Float
+	# See TranscriptSegment.LanguageCode.
+	LanguageCode: String
 	Owner: String
 	SharedWith: String
 }
@@ -46,13 +48,94 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Status: CallStatus
 	RecordingUrl: String
 	VideoRecordingUrl: String
-	PcaUrl: String
 	TotalConversationDurationMillis: Float
 	AgentId: String
 	Metadatajson: String
-	CallCategories: [String]
-	IssuesDetected: String
 	CallSummaryText: String
+	# Small JSON object describing where the summary text came from and whether a
+	# run is in flight: {"source","status","trigger","startedAt","updatedAt",
+	# "message"}. `source` is "generated" or "manual"; `status` is "running",
+	# "failed", "idle" or absent; `trigger` is "meeting-end" for the summary the
+	# pipeline produces when a meeting ends, and absent for a regeneration.
+	# Absent altogether on a meeting summarised before this field existed, and
+	# on a meeting in a deployment with summaries switched off, which readers
+	# treat as a summary with nothing running. See
+	# ui/src/components/common/summary-state.js for the shape.
+	CallSummaryState: String
+	# JSON map from a transcript segment's STORED speaker (its channel plus the
+	# voice id the engine assigned, e.g. 'Other Participant (spk_0)') to a real
+	# name, plus any merges of two voice ids onto one person, single-segment
+	# overrides and the optional pasted attendee list. Applied wherever a speaker
+	# is read rather than written back onto the segments, so naming a voice is one
+	# small write and applies retroactively to the whole transcript. See
+	# ui/src/components/common/speaker-identities.js for the shape and the
+	# resolution order.
+	SpeakerIdentities: String
+	# The meeting's agenda: plain text, one item per line. Written through
+	# updateCallAgenda and, for a meeting a Virtual Participant started with an
+	# agenda, at creation through createCall. Absent on a meeting nobody gave an
+	# agenda. See docs/meeting-agenda.md.
+	Agenda: String
+	# Where the stored agenda came from: "scheduled" (the Virtual Participant
+	# form), "mcp" (an MCP client starting or scheduling a Virtual Participant),
+	# "ui" (typed on the meeting page) or "derived" (read from the transcript).
+	AgendaSource: String
+	# Who last set the agenda -- a username for a person, a fixed label for the
+	# backend -- and when.
+	AgendaUpdatedBy: String
+	AgendaUpdatedAt: AWSDateTime
+	# The meeting's consent record: the mode and rule it runs in, its status,
+	# whether it may be recorded and transcribed now, and the notices, replies,
+	# attestation and evidence behind that. Absent on a meeting whose consent was
+	# never started. Written only through the meeting consent mutations, and
+	# read with signed evidence links through getMeetingConsent. See
+	# docs/meeting-consent.md.
+	Consent: MeetingConsent
+	# Set by the transcript deletion function while the Retention section deletes
+	# transcripts after the summary: when this meeting's transcript is due to be
+	# deleted, when it was (the first time; a later sweep keeps it), and how many
+	# transcript segments and files were removed in all. See
+	# docs/transcript-deletion.md.
+	TranscriptDeletionScheduledFor: AWSDateTime
+	TranscriptDeletedAt: AWSDateTime
+	TranscriptSegmentsDeleted: Int
+	TranscriptFilesDeleted: Int
+	# How the meeting was captured and transcribed, written when it starts (and
+	# again if the engine changes, see updateCaptureContext). Absent on a meeting
+	# started before these fields existed. See
+	# docs/websocket-streaming-api.md#capture-context.
+	# CaptureSource: VIRTUAL_PARTICIPANT, STREAM_AUDIO (the Stream Audio page and
+	# its embeddable component), BROWSER_EXTENSION, DESKTOP_APP, UPLOAD, or API
+	# (any other client of the streaming API, or one that did not say).
+	CaptureSource: String
+	# TRANSCRIBE (Amazon Transcribe) or MICROVM_ASR (the on-demand ASR MicroVM).
+	# A meeting that fell back from the MicroVM to Amazon Transcribe reads
+	# TRANSCRIBE.
+	TranscriptionEngine: String
+	# The Amazon Transcribe language setting the meeting used: a language code
+	# such as en-US, or identify-language / identify-multiple-languages when
+	# Transcribe identified the language. Not set for MICROVM_ASR, whose model
+	# sets the language; a meeting moved to the MicroVM after START can keep the
+	# value START recorded, so read it only when TranscriptionEngine is TRANSCRIBE.
+	TranscriptionLanguage: String
+	# Which channels speaker separation (diarization) was asked for: BOTH,
+	# REMOTE (the meeting audio), LOCAL (the microphone) or NONE.
+	SpeakerSeparation: String
+	# The languages the speech engine identified in the meeting, as language
+	# codes (e.g. en-US, es-US), in the order each was first heard. Added to by
+	# addCallDetectedLanguage when a segment arrives in a language the meeting
+	# does not list yet. Absent when no segment named a language: a fixed
+	# language setting, or the ASR MicroVM engine.
+	DetectedLanguages: [String]
+	# Whether transcription is paused because someone typed the pause command
+	# (LMA pause) to the meeting's Virtual Participant in the meeting chat, as a
+	# JSON string: {"Paused": true, "At": <when>, "By": <chat sender, when the
+	# chat showed one>}, or {"Paused": false, "At": <when>} once LMA start
+	# resumed it. Written through updateTranscriptionPause. Absent on a meeting
+	# never paused that way. The meeting page shows a banner while it reads
+	# paused and the meeting is live. Consent withholding capture is not
+	# recorded here; see Consent.
+	TranscriptionPause: String
 	Owner: String
 	SharedWith: String
 }
@@ -79,14 +162,27 @@ enum CallStatus {
 	ENDED
 }
 
+# The two speech channels: REMOTE is everyone else in the meeting (the meeting
+# audio), LOCAL the local side (the user's microphone, or a Virtual Participant's
+# voice assistant). See lma_channels in the configuration layer. CALLER and AGENT
+# are the names LMA before 0.4.0 wrote for REMOTE and LOCAL, kept (and marked
+# @deprecated) so that segments stored by those versions still serialize;
+# addTranscriptSegment stores them under the new names, and every reader treats
+# them as REMOTE and LOCAL. MEETING_CHAT holds the messages participants typed
+# in the meeting chat, which a Virtual Participant adds to the transcript, one
+# segment per message; it is not speech, and the readers of what was said leave
+# it out. CATEGORY_MATCH, AGENT_VOICETONE and CALLER_VOICETONE are retired: the
+# two transcript queries leave out any stored item that still carries one (see
+# getTranscriptSegments.request.vtl). (AppSync's schema parser refuses a comment
+# between enum values, so this one sits above the enum.)
 enum Channel {
-	CALLER
-	AGENT
-	AGENT_VOICETONE
-	CALLER_VOICETONE
+	REMOTE
+	LOCAL
+	MEETING_CHAT
+	CALLER @deprecated(reason: "Stored by LMA before 0.4.0; read as REMOTE.")
+	AGENT @deprecated(reason: "Stored by LMA before 0.4.0; read as LOCAL.")
 	AGENT_ASSISTANT
 	CHAT_ASSISTANT
-	CATEGORY_MATCH
 }
 
 input CreateCallInput {
@@ -99,6 +195,19 @@ input CreateCallInput {
 	ExpiresAfter: AWSTimestamp
 	Owner: String
 	SharedWith: String
+	# A meeting started by a Virtual Participant carries the agenda given when
+	# it was started or scheduled, so the meeting has it from its first event
+	# rather than from a second write racing the creation. See the Agenda
+	# fields on Call.
+	Agenda: String
+	AgendaSource: String
+	AgendaUpdatedBy: String
+	AgendaUpdatedAt: AWSDateTime
+	# How the meeting is captured and transcribed; see these fields on Call.
+	CaptureSource: String
+	TranscriptionEngine: String
+	TranscriptionLanguage: String
+	SpeakerSeparation: String
 }
 
 type CreateCallOutput @aws_iam {
@@ -142,7 +251,15 @@ type DeleteMeetingsOutput {
 input CreateUploadMeetingInput {
 	callId: String
 	meetingTopic: String!
-	agentId: String!
+	# The name the transcript shows for the uploading user's side. Required,
+	# here or as agentId.
+	localSpeakerName: String
+	# The name for the other participants; "Other Participant" when not given.
+	remoteSpeakerName: String
+	# Older names of localSpeakerName and remoteSpeakerName, still accepted. A
+	# documented name wins when both are sent. toNumber is accepted and stored
+	# as before; nothing shows it.
+	agentId: String
 	fromNumber: String
 	toNumber: String
 	filename: String!
@@ -150,6 +267,9 @@ input CreateUploadMeetingInput {
 	fileSize: Float
 	enableDiarization: Boolean
 	maxSpeakers: Int
+	# The language to transcribe in, such as en-US. Left out, the upload follows
+	# the Configuration page's Amazon Transcribe language (or its language
+	# identification); set, it wins and the settings are not checked.
 	languageCode: String
 	meetingDateTime: AWSDateTime
 }
@@ -161,6 +281,10 @@ type CreateUploadMeetingOutput {
 	uploadKey: String!
 	contentType: String!
 	expiresInSeconds: Int!
+	# The language the recording is transcribed in: a language code, or
+	# identify-language / identify-multiple-languages when Amazon Transcribe
+	# identifies it from the Configuration page's language options.
+	transcriptionLanguage: String
 }
 
 interface DynamoDbBase {
@@ -177,12 +301,47 @@ type Mutation @aws_iam {
 	updateCallAggregation(input: UpdateCallAggregationInput!): Call
 	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call
 	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call
-	updatePcaUrl(input: UpdatePcaUrlInput!): Call
+	# Sets the capture context fields of Call after the meeting started: written
+	# when the engine that transcribes it is not the one its START named, as
+	# when the MicroVM could not start and Amazon Transcribe took over.
+	updateCaptureContext(input: UpdateCaptureContextInput!): Call
+	# Sets Call.TranscriptionPause: written by the call event processor for an
+	# UPDATE_TRANSCRIPTION_PAUSE event from a Virtual Participant.
+	updateTranscriptionPause(input: UpdateTranscriptionPauseInput!): Call
+	# Appends one language to Call.DetectedLanguages when the meeting does not
+	# list it yet; written by the call event processor for the first segment it
+	# sees in that language. A language already listed fails the write's
+	# condition, which the processor treats as done.
+	addCallDetectedLanguage(input: AddCallDetectedLanguageInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
-	addCallCategory(input: AddCallCategoryInput!): Call
-	addIssuesDetected(input: AddIssuesDetectedInput!): Call
+	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
+	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
+	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
+	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools @aws_iam
+	# The meeting consent record (Call.Consent). One Lambda resolver applies the
+	# access rule of each; see the Meeting consent section below and
+	# docs/meeting-consent.md.
+	startMeetingConsent(input: StartMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	recordMeetingConsentNotice(input: RecordMeetingConsentNoticeInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	setMeetingConsentParticipants(input: SetMeetingConsentParticipantsInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	recordMeetingConsentEvent(input: RecordMeetingConsentEventInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	attestMeetingConsent(input: AttestMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
+	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
+	# Starts a diagnosis by the troubleshooting agent and returns at once; the
+	# answer is read with getTroubleshootingJob. For the Admin group, and
+	# re-checked in the resolver Lambda. See docs/troubleshooting-agent.md.
+	startTroubleshooting(input: StartTroubleshootingInput!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
+	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
+	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
+	# like addTranscriptSegment. See docs/meeting-video.md.
+	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
 	deleteCall(input: DeleteCallInput!): DeleteCallOutput
 	shareCall(input: ShareCallInput!): ShareCallOutput
 	unshareCall(input: UnshareCallInput!): UnshareCallOutput
@@ -193,16 +352,40 @@ type Mutation @aws_iam {
 	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	# Change the launch settings of a Virtual Participant that is scheduled and
+	# has not started, while the meeting is at least 5 minutes away. Its owner,
+	# Admins and backend roles may; the launch schedule follows the change.
+	updateScheduledVirtualParticipant(input: UpdateScheduledVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
-	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
-	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
+	# The four configuration records below are account-wide: one stored item drives
+	# every meeting in the deployment. Writing them is an administrator operation,
+	# pinned to the "Admin" Cognito group here and re-checked in each resolver
+	# Lambda so the directive is not the only place the constraint exists.
+	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
+	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The price table the per-meeting cost estimate is computed with.
+	updateCallPricing(input: UpdateCallPricingInput!): UpdateCallPricingOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The schema-driven configuration editor's save: every section it changed,
+	# checked against each section's schema and saved as one revision.
+	updateConfiguration(input: UpdateConfigurationInput!): UpdateConfigurationOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The configuration history: every save above records a revision. Restoring
+	# saves an earlier revision's body as a new one, so it is forward-only.
+	restoreConfigurationRevision(input: RestoreConfigurationRevisionInput!): RestoreConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	labelConfigurationRevision(input: LabelConfigurationRevisionInput!): LabelConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Named configuration profiles. A new profile is a Custom full copy of
+	# another (the baseline by default) or of an imported configuration. The
+	# baseline and Managed profiles are refused every write. See
+	# docs/configuration-store.md.
+	createConfigurationProfile(input: CreateConfigurationProfileInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	deleteConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	activateConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -223,34 +406,85 @@ type Mutation @aws_iam {
 
 type OverallSentiment @aws_cognito_user_pools
 @aws_iam {
-	AGENT: Float
-	CALLER: Float
-	AGENT_VOICETONE: Float
-	CALLER_VOICETONE: Float
+	REMOTE: Float
+	LOCAL: Float
+	AGENT: Float @deprecated(reason: "Older meetings' value for LOCAL.")
+	CALLER: Float @deprecated(reason: "Older meetings' value for REMOTE.")
 }
 
 input OverallSentimentInput {
+	REMOTE: Float
+	LOCAL: Float
+	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
 	AGENT: Float
 	CALLER: Float
-	AGENT_VOICETONE: Float
-	CALLER_VOICETONE: Float
 }
 
 type Query @aws_cognito_user_pools
 @aws_iam {
 	getCall(CallId: ID!): Call
-	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
-	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
+	# What the enrollment portal shows its visitor about their own enrollment,
+	# including the terms text whose hash is stored with a consent.
+	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
+	# A meeting's segments a page at a time: pass each page's nextToken back
+	# until it is null. A page can hold no segments and still carry a nextToken.
+	getTranscriptSegments(callId: ID!, isPartial: Boolean, nextToken: String): TranscriptSegmentList
+	getTranscriptSegmentsWithSentiment(callId: ID!, nextToken: String): TranscriptSegmentsWithSentimentList
+	# The meeting's key frames in time order, a page at a time, with short-lived
+	# signed links to their images. Answered to the callers getCall answers: the
+	# meeting's owner, the people it is shared with, admins and backend roles.
+	# afterFrameId returns only the frames after that one, for a page that
+	# already has the earlier ones; frameId returns just that frame, and with
+	# it limit, nextToken and afterFrameId are not used. frameIds returns up to
+	# 100 frames, in the order named, each once, leaving out any that do not
+	# exist, likewise without the paging arguments.
+	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID, frameIds: [ID]): VideoKeyframeList
+	# The meeting's consent record with hour-long signed links to its evidence
+	# images, whether it may be recorded and transcribed now, and the
+	# deployment's consent settings. Answered to the callers getCall answers.
+	getMeetingConsent(CallId: ID!): MeetingConsentState
+	# The deployment's consent mode and rule, and whether a meeting may choose a
+	# less strict one, for the Create Virtual Participant form to show which
+	# choices apply. Read by every signed-in user, before any meeting exists.
+	getMeetingConsentDefaults: MeetingConsentDefaults @aws_cognito_user_pools
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	# Read by the Meeting Assist chat panel for whoever is viewing the meeting, to
+	# render the quick-action buttons, so every signed-in user reads it.
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
-	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools @aws_iam
+	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	# Read by the Stream Audio and Upload Audio forms for whoever is starting a
+	# meeting -- the capture sample rate and the speaker-count field depend on which
+	# engine is selected -- so every signed-in user reads it. The Virtual Participant
+	# task role reads it with SigV4, which is what @aws_iam is here for.
 	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools @aws_iam
-	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools @aws_iam
+	# Cognito user pools only, unlike its siblings above: the resolver behind
+	# this field decides from the caller's group membership, which a request
+	# signed with IAM credentials does not carry, so the declaration here
+	# names the one mode that can be answered.
+	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The itemised cost estimate of one meeting, computed when read. Answered to
+	# the callers getCall answers -- an Admin, the owner, anyone the meeting is
+	# shared with, or a backend role with IAM -- and checked in the resolver.
+	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
+	# One diagnosis started with startTroubleshooting, for the Admin who started it.
+	getTroubleshootingJob(JobId: ID!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The price table behind those estimates, for the Admin who edits it.
+	getCallPricing: CallPricing @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# What the configuration editor renders: every section's schema, the shipped
+	# baseline and a profile's changes over it. Profile defaults to "custom".
+	getConfiguration(Profile: String): ConfigurationDocument @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The configuration history, for the Admin group, per profile. Profile
+	# defaults to "custom", which a deployment may no longer have.
+	listConfigurationRevisions(Profile: String): ConfigurationRevisionList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	getConfigurationRevision(Profile: String, Revision: Int!): ConfigurationRevisionDetail @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Every profile and the baseline, without their bodies.
+	listConfigurationProfiles: ConfigurationProfileList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
@@ -281,7 +515,9 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	meetingName: String
 	meetingPlatform: String
 	meetingId: String
-	meetingPassword: String
+	# Always null: the meeting password is stored for the launch paths, which
+	# read it from the row or their input, and no read returns it.
+	meetingPassword: String @deprecated(reason: "Always null; the meeting password is not returned by reads.")
 	meetingTime: AWSTimestamp
 	scheduledFor: AWSDateTime
 	isScheduled: Boolean
@@ -302,6 +538,31 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# to audio. Defaults to true; persisted on the row so the VPScheduler Lambda
 	# can plumb ENABLE_VIDEO_RECORDING to scheduled launches.
 	enableVideoRecording: Boolean
+	# The agenda given when the VP was started or scheduled, and where it came
+	# from ("scheduled" from the LMA form, "mcp" from an MCP client). Read by the
+	# VP container when it starts, which puts it on the meeting record it creates;
+	# neither launch path has to carry it.
+	agenda: String
+	agendaSource: String
+	# The meeting consent mode and opt-in rule chosen for this meeting when the
+	# VP was started or scheduled; absent means the deployment's (see
+	# docs/meeting-consent.md). Read by the VP container when it starts, like
+	# the agenda.
+	consentMode: String
+	consentRule: String
+	# The IANA time zone of the browser that scheduled the meeting (for example
+	# "America/New_York"), so the time can be shown as it was entered. Absent for
+	# immediate launches and for rows written before it was recorded.
+	scheduledTimeZone: String
+	# Whether the launching user chose to join a Zoom meeting with their stored
+	# Zoom account rather than as a guest. Absent when the form did not offer the
+	# choice (other platforms, the Zoom Meeting SDK, older rows).
+	# getVirtualParticipant also answers it for scheduled rows written before it
+	# was recorded, from whether userZoomSub is set.
+	useStoredZoomAccount: Boolean
+	# Whether a meeting password was given. Answered by getVirtualParticipant
+	# from the row, so a reader can show that one was set without reading it.
+	hasMeetingPassword: Boolean
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -314,7 +575,31 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	# The status MANUAL_ACTION_REQUIRED interrupted. A prompt can arrive at any
+	# point from sign-in to mid-meeting, so this is what the VP goes back to
+	# once the user has dealt with it -- there is no single status that is right
+	# to return to. Removed with the rest of the prompt when it is cleared.
+	statusBeforeManualAction: String
 	errorMessage: String
+	# Structured identifier of the branch the VP exited through, taken from
+	# `ExitInfo.trigger` in the container (e.g. "pre-join:not-admitted",
+	# "acs-not-admitted", "attendees-left", "meetingTimeout"). `errorMessage`
+	# carries the prose shown to the user; this carries the machine-readable
+	# code, so join outcomes can be aggregated by query rather than by
+	# grepping container logs.
+	endTrigger: String
+	# How the VP joined the meeting, written by the container once it is
+	# admitted. Teams only, for now: "acs" (Azure Communication Services),
+	# "browser", or "browser:acs-refused:<subCode>" when the browser join took
+	# over after Teams refused the ACS join (docs/teams-acs-sdk.md). Absent for
+	# other platforms and for rows written before it was recorded.
+	joinMethod: String
+	# Why the VP was ended from outside: written by endVirtualParticipant,
+	# which has carried it on the row all along without it being declared
+	# here, so it could not be read back through the API. Prose, supplied by
+	# the caller ("User requested termination"); endTrigger above is the
+	# machine-readable field.
+	endReason: String
 	# Set to true by acknowledgeVPFailure when the user clicks "Got it" on
 	# the failure banner. The VP container polls this on the FAILED path
 	# and proceeds with ALB/VNC tear-down as soon as it flips (or after a
@@ -349,11 +634,33 @@ input CreateVirtualParticipantInput {
 	# scheduled launches can read it; immediate launches also pass it via the
 	# Step Functions input.
 	enableVideoRecording: Boolean
+	# Optional meeting agenda, one item per line (at most 10,000 characters).
+	# Persisted on the row for both immediate and scheduled meetings; the
+	# resolver records its source as "mcp" for an IAM caller and "scheduled"
+	# for a signed-in user.
+	agenda: String
+	# Optional meeting consent choice for this meeting: "off", "notify" or
+	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,
+	# the deployment's. The deployment's rule on a per-meeting choice is
+	# applied by the VP before it joins, and again by the meeting consent
+	# resolver when the VP starts the meeting's consent.
+	consentMode: String
+	consentRule: String
+	# Optional: the IANA time zone the scheduled time was entered in, and
+	# whether a Zoom meeting is joined with the user's stored Zoom account.
+	# Stored on the row for the Virtual Participant page; neither launch path
+	# reads them.
+	scheduledTimeZone: String
+	useStoredZoomAccount: Boolean
 }
 
 input UpdateVirtualParticipantInput {
 	id: ID!
-	status: String!
+	# Optional: the resolver writes `status` only when it is supplied, so a
+	# caller that owns one unrelated field (linking a CallId, clearing a
+	# manual-action prompt) updates that field alone and the row keeps
+	# whatever status its own lifecycle last wrote.
+	status: String
 	CallId: ID
 	vncEndpoint: String
 	vncPort: Int
@@ -364,8 +671,42 @@ input UpdateVirtualParticipantInput {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	statusBeforeManualAction: String
 	errorMessage: String
+	endTrigger: String
+	joinMethod: String
 	userAcknowledgedFailure: Boolean
+	# Clear flags. An omitted field means "leave this attribute as it is", so
+	# clearing an attribute needs a signal of its own. Setting one of these to
+	# true removes the corresponding attribute(s) from the row; the flag wins
+	# over a value supplied for the same attribute in the same call.
+	clearErrorMessage: Boolean
+	clearManualAction: Boolean
+}
+
+# The launch settings of a scheduled Virtual Participant, as the Create
+# Virtual Participant form asks for them. An omitted field is left as it is.
+input UpdateScheduledVirtualParticipantInput {
+	id: ID!
+	meetingName: String
+	meetingPlatform: String
+	meetingId: String
+	# A new meeting password; empty or omitted keeps the current one.
+	meetingPassword: String
+	# Remove the meeting password (a join link or a Google Meet code takes none).
+	clearMeetingPassword: Boolean
+	# At least 5 minutes from now.
+	meetingTime: AWSTimestamp
+	scheduledTimeZone: String
+	# Sent empty, removes the agenda.
+	agenda: String
+	# Sent empty, removes the meeting consent choice, so the deployment's applies.
+	consentMode: String
+	consentRule: String
+	enableVideoRecording: Boolean
+	# Join a Zoom meeting with the stored Zoom account of the user who
+	# scheduled it, or as a guest.
+	useStoredZoomAccount: Boolean
 }
 
 input EndVirtualParticipantInput {
@@ -424,10 +765,10 @@ input SentimentAggregationInput {
 
 type SentimentByChannel @aws_cognito_user_pools
 @aws_iam {
-	AGENT: [SentimentByChannelEntry]
-	CALLER: [SentimentByChannelEntry]
-	AGENT_VOICETONE: [SentimentByChannelEntry]
-	CALLER_VOICETONE: [SentimentByChannelEntry]
+	REMOTE: [SentimentByChannelEntry]
+	LOCAL: [SentimentByChannelEntry]
+	AGENT: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for LOCAL.")
+	CALLER: [SentimentByChannelEntry] @deprecated(reason: "Older meetings' value for REMOTE.")
 }
 
 type SentimentByChannelEntry @aws_cognito_user_pools
@@ -444,10 +785,11 @@ input SentimentByChannelEntryInput {
 }
 
 input SentimentByChannelInput {
+	REMOTE: [SentimentByChannelEntryInput]
+	LOCAL: [SentimentByChannelEntryInput]
+	# CALLER and AGENT are deprecated: older meetings' values for REMOTE and LOCAL.
 	AGENT: [SentimentByChannelEntryInput]
 	CALLER: [SentimentByChannelEntryInput]
-	AGENT_VOICETONE: [SentimentByChannelEntryInput]
-	CALLER_VOICETONE: [SentimentByChannelEntryInput]
 }
 
 type SentimentByPeriod @aws_cognito_user_pools
@@ -478,9 +820,15 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText", "addCallDetectedLanguage"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onAddVideoKeyframe(CallId: ID): VideoKeyframe
+		@aws_subscribe(mutations: ["addVideoKeyframe"])
+	# Every change to a meeting's consent record. A subscriber that needs the
+	# evidence links reads getMeetingConsent again on each message.
+	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
+		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence", "verifyMeetingConsentEvidence"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
@@ -517,6 +865,10 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	Sentiment: Sentiment
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
+	# The language the speech engine identified for the segment, as a language
+	# code (e.g. es-US). Set by Amazon Transcribe with language identification on;
+	# absent with a fixed language and on the ASR MicroVM engine.
+	LanguageCode: String
 	Owner: String
 	SharedWith: String
 }
@@ -550,6 +902,82 @@ type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
 	TranscriptSegmentsWithSentiment: [TranscriptSegmentWithSentiment]
 	nextToken: String
 }
+
+# One picture of the shared screen, kept when it changed and then held still.
+# Stored under the meeting (PK "kf#<CallId>") with the transcript's retention and
+# the meeting's Owner and SharedWith. See docs/meeting-video.md.
+type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	# Zero-padded milliseconds on the transcript timeline plus a suffix, so the
+	# sort key orders frames in time.
+	FrameId: ID!
+	# Seconds on the transcript timeline: the clock of a segment's StartTime.
+	Timestamp: Float!
+	# Seconds into the meeting's video recording, when there is one.
+	VideoOffset: Float
+	# HTTPS S3 URLs of the large image and the thumbnail.
+	ImageUrl: String!
+	ThumbnailUrl: String!
+	Width: Int
+	Height: Int
+	# What took the frame: VIRTUAL_PARTICIPANT, or DESKTOP_CAPTURE for the
+	# desktop capture app's video.
+	Source: String
+	# Whether the meeting platform showed a screen share when the frame was
+	# taken; absent where the platform gives no such signal.
+	ShareDetected: Boolean
+	# Fraction of the picture that differed from the previous key frame.
+	ChangeScore: Float
+	# The text on the frame, read once by a vision model after it is stored;
+	# empty when it holds none, absent until it has been read.
+	SlideText: String
+	# What the frame shows, read with its text: SCREEN (shared content),
+	# CAMERA (the meeting's camera video) or MIXED (both). Absent until the
+	# text has been read, and on frames read before it was. A CAMERA frame is
+	# left out of the summary, the assistant's view and the Screen share strip.
+	ContentKind: String
+	# A few words naming the frame's shared content, when the model gave them.
+	Title: String
+	# The FrameId of an earlier frame showing the same screen, set when the
+	# text is read; the meeting page hides such frames unless asked to show all.
+	DuplicateOf: ID
+	Owner: String
+	SharedWith: String
+	# Signed links to the two images, valid for an hour, filled in only by
+	# getVideoKeyframes.
+	ImageSignedUrl: String
+	ThumbnailSignedUrl: String
+}
+
+type VideoKeyframeList @aws_cognito_user_pools
+@aws_iam {
+	VideoKeyframes: [VideoKeyframe]
+	nextToken: String
+}
+
+input AddVideoKeyframeInput {
+	CallId: ID!
+	FrameId: ID!
+	Timestamp: Float!
+	VideoOffset: Float
+	ImageUrl: String!
+	ThumbnailUrl: String!
+	Width: Int
+	Height: Int
+	Source: String
+	ShareDetected: Boolean
+	ChangeScore: Float
+	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Owner: String
+	SharedWith: String
+}
 input UpdateAgentInput {
 	CallId: ID!
 	AgentId: String!
@@ -558,28 +986,18 @@ input UpdateAgentInput {
 	SharedWith: String
 }
 
-input AddCallCategoryInput {
-	CallId: ID!
-	CallCategories: [String]
-	UpdatedAt: AWSDateTime
-	Owner: String
-	SharedWith: String
-}
-
-input AddIssuesDetectedInput {
-	CallId: ID!
-	IssuesDetected: String!
-	UpdatedAt: AWSDateTime
-	Owner: String
-	SharedWith: String
-}
-
 input AddCallSummaryTextInput {
 	CallId: ID!
+	# A blank value is not written (updateCall.request.vtl skips blank values),
+	# which is how a failed end-of-meeting run records its state without
+	# replacing whatever text the meeting already has.
 	CallSummaryText: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The end-of-meeting run's outcome, written with its text. Same shape as
+	# Call.CallSummaryState.
+	CallSummaryState: String
 }
 
 input UpdateCallAggregationInput {
@@ -597,6 +1015,10 @@ input UpdateCallStatusInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# Written with the ENDED status when an end-of-meeting summary has been
+	# queued, so the meeting reads as "summary in progress" from the same write
+	# that ends it. Same shape as Call.CallSummaryState.
+	CallSummaryState: String
 }
 
 input UpdateRecordingUrlInput {
@@ -615,12 +1037,445 @@ input UpdateVideoRecordingUrlInput {
 	SharedWith: String
 }
 
-input UpdatePcaUrlInput {
+input AddCallDetectedLanguageInput {
 	CallId: ID!
-	PcaUrl: String!
+	LanguageCode: String!
+}
+
+input UpdateTranscriptionPauseInput {
+	CallId: ID!
+	# The whole value, as Call.TranscriptionPause describes it.
+	TranscriptionPause: String!
 	UpdatedAt: AWSDateTime
+}
+
+# A field left out (or null) keeps its stored value.
+input UpdateCaptureContextInput {
+	CallId: ID!
+	CaptureSource: String
+	TranscriptionEngine: String
+	TranscriptionLanguage: String
+	SpeakerSeparation: String
+	UpdatedAt: AWSDateTime
+}
+
+# ----------------------------------------------------------------------------
+# Voice enrollment
+#
+# A voiceprint is biometric data, so consent is first-party: the enrollee
+# authenticates as themselves and performs the consent in their own session. An
+# admin can revoke; only the enrollee can grant, and no field here lets
+# anyone enroll somebody else. These fields are served only in a deployment with
+# EnableVoiceEnrollment=true -- the schema advertises them regardless, so a
+# deployment without it resolves them to null.
+# ----------------------------------------------------------------------------
+
+type VoiceEnrollmentState @aws_cognito_user_pools {
+	Success: Boolean
+	Message: String
+	# none | pending | active | revoked
+	Status: String
+	DisplayName: String
+	ConsentExpiresAt: String
+	# True when the terms have changed since this person agreed, so what they
+	# agreed to is no longer what the deployment does.
+	NeedsReconsent: Boolean
+	TermsVersion: String
+	# The exact text the enrollee is shown and whose hash is stored with their
+	# consent, so a stored consent proves what it was given to.
+	Terms: String
+}
+
+type VoiceEnrollmentResult @aws_cognito_user_pools {
+	Success: Boolean
+	Message: String
+	Status: String
+}
+
+input EnrolMyVoiceInput {
+	# The name to label transcripts with, as the enrollee types it.
+	DisplayName: String!
+	# Base64 PCM recordings. Used to compute the voiceprint and then discarded --
+	# they are never written to S3 or to a table.
+	Samples: [String!]!
+	TotalSeconds: Float!
+}
+
+input RevokeVoiceConsentInput {
+	# Omitted when withdrawing your own. An admin may name somebody else, for a
+	# person who has left; the log records which of them acted.
+	SubjectId: ID
+}
+
+input UpdateSpeakerIdentitiesInput {
+	CallId: ID!
+	SpeakerIdentities: String!
+}
+
+# ----------------------------------------------------------------------------
+# Meeting summary: hand edits and regeneration
+#
+# The end-of-meeting summary is written by the Kinesis pipeline through
+# addCallSummaryText, which is reachable by IAM callers only. These two fields
+# are the browser-reachable surface, so each is held to the same access rule the
+# read path applies -- Admin, the meeting's owner, or a user it has been shared
+# with -- and each enforces it rather than relying on the client.
+# ----------------------------------------------------------------------------
+
+input UpdateCallSummaryTextInput {
+	CallId: ID!
+	# The summary text to store. Optional so the same mutation can record a state
+	# change (a run starting, a run failing) without touching the text -- which is
+	# what keeps the previous summary intact when a regeneration fails. At least
+	# one of CallSummaryText and CallSummaryState must be supplied.
+	CallSummaryText: String
+	CallSummaryState: String
+}
+
+# ----------------------------------------------------------------------------
+# Meeting agenda
+#
+# Browser-reachable, so held to the same access rule as the summary and speaker
+# writes above -- Admin, the meeting's owner, or a user it has been shared with --
+# as a DynamoDB condition in updateCallAgenda.request.vtl.
+# ----------------------------------------------------------------------------
+
+input UpdateCallAgendaInput {
+	CallId: ID!
+	# Plain text, one item per line. An empty string clears the agenda.
+	Agenda: String!
+	# One of "scheduled", "mcp", "ui", "derived". Honoured for a backend role
+	# with IAM credentials, which must supply it; a signed-in user's write is
+	# always recorded as "ui", whatever is sent here.
+	AgendaSource: String
+	# Backend roles only: the label the change is attributed to. A signed-in
+	# user's write is attributed to their username, whatever is sent here.
+	AgendaUpdatedBy: String
+	# When true the write applies only while the meeting has no agenda, so a
+	# writer filling in a missing agenda never replaces one somebody set. Checked in the same
+	# DynamoDB condition as access, so the check and the write are atomic.
+	OnlyIfUnset: Boolean
+}
+
+input DeriveCallAgendaInput {
+	CallId: ID!
+}
+
+# ----------------------------------------------------------------------------
+# Meeting consent
+#
+# Whether a meeting's participants were told it is recorded and transcribed,
+# and whether they agreed. Stored on the meeting row as Call.Consent and
+# written only by the meeting consent resolver Lambda, which applies the access
+# rule of each mutation (see meeting_consent_resolver/index.py) and decides the
+# status with the rules in the configuration layer's lma_consent. Names are the
+# meeting platform's display names, not verified identities. See
+# docs/meeting-consent.md.
+# ----------------------------------------------------------------------------
+
+type MeetingConsent @aws_cognito_user_pools
+@aws_iam {
+	# "off", "notify" or "opt_in".
+	Mode: String
+	# For opt_in: "each_participant" or "owner_attests". Null otherwise.
+	Rule: String
+	# "pending", "granted", "objected" or "not_required".
+	Status: String
+	# Whether the meeting may be recorded and transcribed now: opt_in only while
+	# granted, notify unless objected, off always.
+	CaptureAllowed: Boolean
+	# The notice or consent request for this meeting, its placeholders filled.
+	NoticeText: String
+	# When the notice was first posted.
+	NoticePostedAt: AWSDateTime
+	Notices: [MeetingConsentNotice]
+	# The participants present, as last listed by the capture client.
+	Participants: [String]
+	# Everyone ever listed as present (the first 500).
+	ParticipantsSeen: [String]
+	# Every reply and attestation, in the order recorded.
+	Events: [MeetingConsentEvent]
+	Attestation: MeetingConsentAttestation
+	Evidence: [MeetingConsentEvidence]
+	# Each change of Status or CaptureAllowed, with when and why.
+	StatusHistory: [MeetingConsentStatusChange]
+	StartedAt: AWSDateTime
+	StartedBy: String
+	UpdatedAt: AWSDateTime
+	# Increases by one with every write.
+	Version: Int
+}
+
+type MeetingConsentNotice @aws_cognito_user_pools
+@aws_iam {
+	# "chat", "voice", "banner" or "invite".
+	Channel: String
+	Text: String
+	PostedAt: AWSDateTime
+	PostedBy: String
+}
+
+type MeetingConsentEvent @aws_cognito_user_pools
+@aws_iam {
+	EventId: ID
+	# The display name the reply came from (or, for an attestation, who attested).
+	ParticipantName: String
+	# "consent" or "objection".
+	Decision: String
+	# "chat", "voice", "ui" (entered by a signed-in user) or "attestation".
+	Source: String
+	# What was said or typed, when the capture client sent it.
+	Text: String
+	OccurredAt: AWSDateTime
+	RecordedAt: AWSDateTime
+	# The signed-in user who entered it, or "LMA" for a backend role.
+	RecordedBy: String
+}
+
+type MeetingConsentAttestation @aws_cognito_user_pools
+@aws_iam {
+	AttestedBy: String
+	# "verbal", "chat" or "invite_terms".
+	Method: String
+	Statement: String
+	AttestedAt: AWSDateTime
+	RecordedBy: String
+}
+
+type MeetingConsentEvidence @aws_cognito_user_pools
+@aws_iam {
+	EvidenceId: ID
+	# "screenshot" or "invitation".
+	Kind: String
+	# Under lma-consent-evidence/<meeting>/ in the recordings bucket.
+	S3Key: String
+	CapturedAt: AWSDateTime
+	AddedAt: AWSDateTime
+	Note: String
+	# An hour-long link to the image, filled in by getMeetingConsent only, and
+	# not once the image has been deleted.
+	SignedUrl: String
+	# The vision model's check of the image, when one was run.
+	Verification: MeetingConsentVerification
+	# When the image was deleted after its check, in a deployment that does not
+	# keep evidence screenshots. The entry and its check are kept.
+	ImageDeletedAt: AWSDateTime
+}
+
+# A vision model's reading of one evidence image: supporting evidence, which
+# never changes the record's Status.
+type MeetingConsentVerification @aws_cognito_user_pools
+@aws_iam {
+	# "supports_consent", "objection_found" or "inconclusive".
+	Verdict: String
+	# The participants listed as present with no visible reply reading as consent.
+	MissingParticipants: [String]
+	# The participants listed as present whose consent was said aloud or entered
+	# in LMA, so it is not expected in a chat image.
+	ConsentedOutsideChat: [String]
+	# Whether the model's answer could be read at all.
+	Readable: Boolean
+	NoticeVisible: Boolean
+	NoticeMatches: Boolean
+	Replies: [MeetingConsentVerifiedReply]
+	AnyObjection: Boolean
+	# From 0 to 1, as the model reported it.
+	Confidence: Float
+	Summary: String
+	ModelId: String
+	VerifiedAt: AWSDateTime
+	VerifiedBy: String
+	InputTokens: Int
+	OutputTokens: Int
+}
+
+type MeetingConsentVerifiedReply @aws_cognito_user_pools
+@aws_iam {
+	# The sender's name as shown in the image.
+	Name: String
+	Text: String
+	# "consent", "objection" or "unclear".
+	Decision: String
+}
+
+type MeetingConsentStatusChange @aws_cognito_user_pools
+@aws_iam {
+	Status: String
+	CaptureAllowed: Boolean
+	At: AWSDateTime
+	Reason: String
+}
+
+# What every consent mutation answers with, and what onUpdateMeetingConsent
+# carries. A subscriber receives the Consent fields the writer selected, so
+# writers select the whole record (see docs/meeting-consent.md).
+type MeetingConsentUpdate @aws_cognito_user_pools
+@aws_iam {
+	CallId: ID!
+	Consent: MeetingConsent
 	Owner: String
 	SharedWith: String
+}
+
+# The deployment's consent settings (the Meeting Consent section of the
+# Configuration page), as a capture client needs them.
+type MeetingConsentSettings @aws_cognito_user_pools
+@aws_iam {
+	Mode: String
+	Rule: String
+	NotifyNoticeText: String
+	OptInNoticeText: String
+	ConsentPhrases: [String]
+	ObjectionPhrases: [String]
+	AllowPerMeetingOverride: Boolean
+	KeepEvidenceScreenshots: Boolean
+	VerifierModelId: String
+}
+
+# The part of those settings that decides which per-meeting choices apply
+# (getMeetingConsentDefaults).
+type MeetingConsentDefaults @aws_cognito_user_pools {
+	Mode: String
+	Rule: String
+	AllowPerMeetingOverride: Boolean
+}
+
+type MeetingConsentState @aws_cognito_user_pools
+@aws_iam {
+	CallId: ID!
+	# Null when the meeting's consent was never started.
+	Consent: MeetingConsent
+	# The capture gate for this meeting now. With no record, false only when the
+	# deployment's mode is opt_in.
+	CaptureAllowed: Boolean!
+	Settings: MeetingConsentSettings
+}
+
+# Starting again with the mode and rule already in force (or with neither
+# named, once consent has started) returns the record as it is: a restarting
+# capture client keeps the meeting's choice, and its notice, even if the
+# deployment's settings changed. NoticeText, LmaUser and MeetingName are read
+# only when consent starts or its mode changes.
+input StartMeetingConsentInput {
+	CallId: ID!
+	# "off", "notify" or "opt_in"; omitted, the meeting's mode once started, or
+	# else the deployment's. A mode or rule less strict than the deployment's is
+	# refused when the deployment does not allow a per-meeting choice.
+	Mode: String
+	# For opt_in: "each_participant" or "owner_attests"; omitted, the meeting's
+	# rule once started in opt_in, or else the deployment's.
+	Rule: String
+	# Fill the notice's {LMA_USER} and {meeting} placeholders.
+	LmaUser: String
+	MeetingName: String
+	# This meeting's own notice instead of the deployment's, placeholders
+	# filled the same way. Refused when the deployment does not allow a
+	# per-meeting choice.
+	NoticeText: String
+}
+
+input RecordMeetingConsentNoticeInput {
+	CallId: ID!
+	# "chat", "voice", "banner" or "invite".
+	Channel: String!
+	# What was posted; omitted, the meeting's NoticeText.
+	Text: String
+	# Omitted, now.
+	PostedAt: AWSDateTime
+}
+
+input SetMeetingConsentParticipantsInput {
+	CallId: ID!
+	# Everyone present now, by display name, leaving out LMA's own participant.
+	# Replaces the previous list.
+	Participants: [String!]!
+}
+
+input RecordMeetingConsentEventInput {
+	CallId: ID!
+	ParticipantName: String!
+	# "consent" or "objection".
+	Decision: String!
+	# Backend roles: "chat" or "voice". A signed-in user's entry is always
+	# recorded as "ui", whatever is sent here.
+	Source: String
+	Text: String
+	OccurredAt: AWSDateTime
+}
+
+input AttestMeetingConsentInput {
+	CallId: ID!
+	# "verbal", "chat" or "invite_terms".
+	Method: String!
+	Statement: String
+	# Backend roles only: the meeting's owner, whose attestation is relayed;
+	# anybody else is refused, and omitted it is the owner. A signed-in user's
+	# attestation is their own, and only the meeting's owner may make one.
+	AttestedBy: String
+}
+
+input AddMeetingConsentEvidenceInput {
+	CallId: ID!
+	# An image the backend stored under lma-consent-evidence/<meeting>/ in the
+	# recordings bucket, where <meeting> is the CallId with every character
+	# other than letters, digits, "_" and "." replaced by "_" and leading and
+	# trailing "_" removed.
+	S3Key: String!
+	# "screenshot" (the default) or "invitation".
+	Kind: String
+	CapturedAt: AWSDateTime
+	Note: String
+}
+
+# The owner, an Admin or a backend role. Where evidence screenshots are not
+# kept, the check deletes the image once its result is stored.
+input VerifyMeetingConsentEvidenceInput {
+	CallId: ID!
+	# An EvidenceId from the meeting's consent record.
+	EvidenceId: ID!
+}
+
+# The outcome of reading a meeting's transcript for a stated agenda. A found
+# agenda is not in this response: it is stored through updateCallAgenda and
+# arrives through onUpdateCall like any other agenda change.
+type DeriveCallAgendaOutput @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean
+	Message: String
+	# True when an agenda was found and stored.
+	Derived: Boolean
+}
+
+input RegenerateCallSummaryInput {
+	CallId: ID!
+}
+
+type RegenerateCallSummaryOutput @aws_cognito_user_pools
+@aws_iam {
+	# True when a run was accepted. The summary itself is not in this response:
+	# summarisation outlives a GraphQL request, so the run continues in the
+	# background and the new text arrives through onUpdateCall.
+	Success: Boolean
+	Message: String
+}
+
+input ResolveSpeakerNamesInput {
+	CallId: ID!
+	# True when a user asked for this pass explicitly. An automatic pass skips the
+	# model when no new speech could name anybody; pressing the button answers the
+	# user regardless. Ignored for a caller without a Cognito identity.
+	Force: Boolean
+}
+
+type ResolveSpeakerNamesOutput @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean
+	Message: String
+	NamesApplied: Int
+	# Why the pass ended as it did, for a caller to act on: NAMED, NO_EVIDENCE,
+	# ALREADY_NAMED, COOLDOWN, NO_GROWTH, MEETING_ENDED, NOT_PERMITTED,
+	# NO_SUCH_MEETING or FAILED. Absent from a resolver older than this field.
+	Reason: String
 }
 
 input ShareCallInput {
@@ -721,6 +1576,13 @@ type ThinkingStepData @aws_cognito_user_pools @aws_iam {
 	Success: Boolean
 }
 
+# Meeting Assist chat buttons
+#
+# The read returns a JSON string in ChatButtonConfigId, which is how this field
+# has always answered: one record's "N#Label" buttons, plus its Version -- the
+# only key that is not a button, and the one the Edit Chat Buttons dialog sends
+# back as ExpectedVersion when it saves. Nothing recording who saved the record
+# is in it, because every signed-in user reads this field.
 type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
 }
@@ -728,14 +1590,30 @@ type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
 input UpdateChatButtonConfigInput {
 	ChatButtonConfigId: ID!
 	ButtonConfig: String!
+	# The version the dialog loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# dialog was actually looking at.
+	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the dialog can save again without reloading.
+	Version: Int
 }
 
 # Nova Sonic Voice Assistant Configuration
+#
+# The read returns a JSON string in NovaSonicConfigId, which is how this field
+# has always answered. What is in that string is the record's settings plus its
+# Version, UpdatedBy and UpdatedAt -- not the whole DynamoDB item, which also
+# carried the partition key, the seeded guidance text and a description.
+# Version is what the page sends back as ExpectedVersion when it saves.
 type NovaSonicConfig @aws_cognito_user_pools @aws_iam {
 	NovaSonicConfigId: ID!
 }
@@ -743,11 +1621,21 @@ type NovaSonicConfig @aws_cognito_user_pools @aws_iam {
 input UpdateNovaSonicConfigInput {
 	NovaSonicConfigId: ID!
 	ConfigData: String!
+	# The version the page loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# page was actually looking at.
+	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 	NovaSonicConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the page can save again without reloading.
+	Version: Int
 }
 
 # Runtime switches for the on-demand ASR engine, edited from the Transcription Engine
@@ -755,25 +1643,47 @@ type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 # so a change needs no stack update: which engine streaming meetings use, which
 # engine Virtual Participants use, and whether VPs ask for per-voice labels.
 # Deliberately no tuning fields: the diarization operating point is measured per
-# model bundle and baked into the ASR image.
+# model bundle and baked into the ASR image. The read answers with the effective
+# switches -- the shipped ones, all off, with the saved ones over them.
 type AsrConfig @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
 	streamingEngineMicrovm: Boolean
 	virtualParticipantEngineMicrovm: Boolean
 	diarizeVirtualParticipant: Boolean
+	# The version of the stored profile, which a client sends back as
+	# ExpectedVersion when it saves.
+	Version: Int
 }
 
 input UpdateAsrConfigInput {
 	AsrConfigId: ID!
 	ConfigData: String!
+	# The version the page loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# page was actually looking at.
+	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateAsrConfigOutput @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the page can save again without reloading.
+	Version: Int
 }
 
 # LLM Prompt Summary Templates
+#
+# The read returns a JSON string in LLMPromptTemplateId, which is how this field
+# has always answered. What is in that string is the record's prompts plus its
+# Version, UpdatedBy and UpdatedAt -- no longer the whole DynamoDB item, which
+# also carried the partition key and the seeded guidance text. Version is what
+# the editor sends back as ExpectedVersion when it saves, so a save made against
+# a record another administrator has since changed is refused rather than
+# replacing their edit.
 type LLMPromptTemplate @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 }
@@ -781,11 +1691,341 @@ type LLMPromptTemplate @aws_cognito_user_pools @aws_iam {
 input UpdateLLMPromptTemplateInput {
 	LLMPromptTemplateId: ID!
 	TemplateConfig: String!
+	# The version the editor loaded. Optional, so a client that does not send
+	# it keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# editor was actually looking at.
+	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 	Success: Boolean!
+	# The version now stored, so the editor can save again without reloading.
+	Version: Int
+}
+
+# The configuration editor
+#
+# Each section of the configuration has a JSON Schema document with layout
+# annotations; the editor renders a form from it, and every save is checked
+# against it. See docs/configuration-store.md.
+type ConfigurationDocument @aws_cognito_user_pools {
+	Profile: String!
+	# Whether the profile is stored. The editor saves only into one that is.
+	Exists: Boolean
+	# What a save sends back as ExpectedVersion.
+	Version: Int
+	UpdatedBy: String
+	UpdatedAt: String
+	# The revision the profile's current state is.
+	PublishedRevision: Int
+	# The baseline ("default") and Managed profiles are read-only.
+	Managed: Boolean
+	Description: String
+	# Whether this is the profile in force.
+	Active: Boolean
+	# Whether the profile is stored as a full copy rather than a delta.
+	FullCopy: Boolean
+	# A JSON list of {"Name", "CacheTier", "Schema"}, one per section, where
+	# CacheTier is immediate, short or standard and decides how soon a saved
+	# change is read.
+	Sections: String
+	# JSON objects of section name -> values: the shipped baseline, and the
+	# profile's changes over it as stored.
+	Default: String
+	Custom: String
+	# A JSON list of the presets an editor can apply, in their order: {"Id",
+	# "Title", "Description", "Order", "Sections"}, where Sections maps a
+	# section name to {"mode": "merge", "values"}. Applying one saves nothing.
+	Presets: String
+}
+
+input UpdateConfigurationInput {
+	Profile: String
+	# A JSON object of section name -> that section's complete stored values,
+	# for every section being saved. Sections not named keep what is stored.
+	Sections: String!
+	# The Version getConfiguration returned. Required: a save made from a stale
+	# read would replace whatever was saved since.
+	ExpectedVersion: Int!
+	# Recorded on the revision this save creates. At most 500 characters are kept.
+	Comment: String
+}
+
+type UpdateConfigurationOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	# The revision the save recorded; null when nothing changed.
+	Revision: Int
+	Unchanged: Boolean
+}
+
+# Configuration history
+#
+# Every save into the configuration store records a revision of the profile it
+# saves into. See docs/configuration-store.md.
+type ConfigurationRevision @aws_cognito_user_pools {
+	Revision: Int!
+	CreatedAt: String
+	# The saver's email address, or their username where the token carries none:
+	# the same identity the configuration records hold as UpdatedBy.
+	CreatedBy: String
+	# The sections this revision changed relative to the one before it; for the
+	# first revision of a profile, every section it holds. Null when not known.
+	Sections: [String]
+	Comment: String
+	# save, restore, deploy, backfill (the profile as it stood when history
+	# began) or recovered (recorded from the profile after its own save could
+	# not store it).
+	Source: String
+	RestoredFrom: Int
+	Label: String
+	# The profile version the revision was saved as.
+	Version: Int
+	SizeBytes: Int
+	# Whether this revision is the profile's current state.
+	Published: Boolean
+}
+
+type ConfigurationRevisionList @aws_cognito_user_pools {
+	Profile: String!
+	# The profile's current version: what a restore sends as ExpectedVersion.
+	Version: Int
+	LatestRevision: Int
+	PublishedRevision: Int
+	# Newest first.
+	Revisions: [ConfigurationRevision]
+}
+
+type ConfigurationRevisionDetail @aws_cognito_user_pools {
+	Profile: String!
+	Revision: Int!
+	CreatedAt: String
+	CreatedBy: String
+	Sections: [String]
+	Comment: String
+	Source: String
+	RestoredFrom: Int
+	Label: String
+	Version: Int
+	SizeBytes: Int
+	Published: Boolean
+	# The whole profile body this revision holds, as a JSON string.
+	Body: String
+}
+
+type ConfigurationRevisionDiff @aws_cognito_user_pools {
+	Profile: String!
+	FromRevision: Int!
+	ToRevision: Int!
+	# A JSON list of {"Path": [keys...], "Change": "added" | "removed" | "changed",
+	# "Before", "After"}, one per value that differs.
+	Changes: String
+}
+
+input RestoreConfigurationRevisionInput {
+	Profile: String
+	Revision: Int!
+	# The Version listConfigurationRevisions returned. Required: a restore
+	# replaces every section of the profile.
+	ExpectedVersion: Int!
+	Comment: String
+}
+
+type RestoreConfigurationRevisionOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	# The new revision the restore recorded; null when the profile already held
+	# the restored body, so nothing changed.
+	Revision: Int
+	Unchanged: Boolean
+}
+
+input LabelConfigurationRevisionInput {
+	Profile: String
+	Revision: Int!
+	# At most 100 characters. Empty or absent clears the label. A labelled
+	# revision is kept however many revisions follow it.
+	Label: String
+}
+
+type LabelConfigurationRevisionOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Revision: Int
+}
+
+input CreateConfigurationProfileInput {
+	# Letters, digits, ".", "_" and "-", at most 64 characters.
+	Name: String!
+	# The profile to copy; the baseline ("default") when absent.
+	CopyFrom: String
+	# Or an imported configuration: a JSON object of section name -> values,
+	# laid over the baseline. Not with CopyFrom.
+	Body: String
+	Description: String
+	# Recorded on the profile's first revision.
+	Comment: String
+}
+
+input ConfigurationProfileNameInput {
+	Name: String!
+}
+
+type ConfigurationProfileOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	Revision: Int
+}
+
+type ConfigurationProfileSummary @aws_cognito_user_pools {
+	Name: String!
+	# The baseline and the profiles the deployment writes from the shipped
+	# presets: read-only, rewritten by every stack update.
+	Managed: Boolean
+	Active: Boolean
+	Description: String
+	Version: Int
+	UpdatedAt: String
+	UpdatedBy: String
+	# How the profile came to exist, e.g. "copied-from-default" or "imported".
+	Origin: String
+	PublishedRevision: Int
+	FullCopy: Boolean
+}
+
+type ConfigurationProfileList @aws_cognito_user_pools {
+	Profiles: [ConfigurationProfileSummary]
+}
+
+# An estimate of what one meeting cost, built from metering records written
+# where the usage happened and a configurable price table. It is an estimate:
+# list prices, first usage tier, and only the usage that is metered -- NotIncluded
+# names what is left out. See docs/meeting-cost-estimate.md.
+# ── Troubleshooting agent ──────────────────────────────────────────────────
+#
+# A diagnosis takes minutes, longer than an AppSync request may, so it runs as a
+# job: startTroubleshooting records it and returns, and the page reads it with
+# getTroubleshootingJob until Status is COMPLETED or FAILED.
+
+input StartTroubleshootingInput {
+	# The question. When empty, a diagnosis of the meeting or Virtual
+	# Participant named below asks a fixed question about it.
+	Question: String
+	CallId: ID
+	VirtualParticipantId: ID
+}
+
+type TroubleshootingJob @aws_cognito_user_pools {
+	JobId: ID!
+	# PENDING, RUNNING, COMPLETED or FAILED.
+	Status: String!
+	Question: String
+	CallId: ID
+	VirtualParticipantId: ID
+	# Markdown, in the agent's three sections: Root Cause, Recommendations, Evidence.
+	Answer: String
+	Error: String
+	# True when the agent reached one of its limits before it finished searching.
+	Truncated: Boolean
+	CreatedAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+}
+
+type CallCost @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	Currency: String
+	# Sum of every priced line. Lines with no price are excluded, and counted in
+	# UnpricedCount, so a non-zero count means this total is incomplete.
+	TotalCost: Float
+	ContextTotals: [CallCostContextTotal]
+	Items: [CallCostLineItem]
+	UnpricedCount: Int
+	# Lines priced at a price the active configuration profile sets, and the
+	# name of that profile.
+	CustomPriceCount: Int
+	PriceProfile: String
+	# Metering records read for this meeting.
+	RecordCount: Int
+	# The date the default prices were taken, and from where.
+	PricesAsOf: String
+	PriceSource: String
+	# The deployment's region, and the region whose prices stand in for any
+	# region the price table does not list (named in RegionsWithoutListedPrices).
+	Region: String
+	BaseRegion: String
+	RegionsWithoutListedPrices: [String]
+	NotIncluded: [String]
+	ComputedAt: AWSDateTime
+}
+
+type CallCostContextTotal @aws_cognito_user_pools @aws_iam {
+	# What the usage was for: Transcription, VirtualParticipant, VoiceAssistant,
+	# MeetingAssistant, Summary, SpeakerNaming, AgendaDerivation, Sentiment,
+	# PageAutomation.
+	Context: String
+	Cost: Float
+}
+
+type CallCostLineItem @aws_cognito_user_pools @aws_iam {
+	Context: String
+	# "<service>/<api-or-model>", the key the price table is looked up by.
+	Service: String
+	Region: String
+	Unit: String
+	Quantity: Float
+	# USD per unit; null when the price table has no price for this unit.
+	UnitPrice: Float
+	Cost: Float
+	# False for a unit that is shown for reference but not billed on its own
+	# (requests, sessions, runtime seconds).
+	Chargeable: Boolean
+	Priced: Boolean
+	# Why a figure is approximate or deliberately unpriced, from the price table.
+	Note: String
+	# How the usage was measured: launch type, sizes, session counts.
+	Details: String
+	# Where UnitPrice came from: "shipped" (the price table LMA ships), "custom"
+	# (set in the active configuration profile), or "none" (no price).
+	PriceOrigin: String
+	# One sentence naming that source, and a pricing page for a shipped price.
+	PriceSource: String
+	PriceSourceUrl: String
+	# The shipped price of the same unit, shown beside a custom one.
+	ShippedUnitPrice: Float
+}
+
+# A JSON string: {"Default", "Custom", "Effective", "Version", "Profile",
+# "UpdatedBy", "UpdatedAt", "Region"}. Default is the table this release ships,
+# Custom what the active profile stores for the section (empty while the
+# default is active), Effective the merge every estimate uses, Profile the name
+# of the profile in force ("default" when none is).
+type CallPricing @aws_cognito_user_pools {
+	Pricing: String
+}
+
+input UpdateCallPricingInput {
+	# A JSON object in the shape of the shipped table, stored as the active
+	# profile's call_pricing section; whatever it leaves out takes the shipped
+	# value, so "{}" returns every price to the shipped value.
+	Pricing: String!
+	# The Version getCallPricing returned; a save against a newer record is refused.
+	ExpectedVersion: Int!
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
+}
+
+type UpdateCallPricingOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Version: Int
 }
 
 # Short-lived auth token for reaching a Virtual Participant's noVNC port when

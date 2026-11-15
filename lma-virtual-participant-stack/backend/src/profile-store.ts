@@ -18,6 +18,9 @@ import {
     HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
+import { createLogger } from './logger.js';
+
+const log = createLogger('profile-store');
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const PROFILES_BUCKET = (process.env.VP_PROFILES_BUCKET || '').trim();
@@ -71,7 +74,7 @@ function promoteSessionAuthCookies(localDir: string): void {
     ];
     const cookiesPath = candidates.find((p) => existsSync(p));
     if (!cookiesPath) {
-        console.log('[profile-store] No Cookies DB found — skipping session-auth promotion.');
+        log.info('[profile-store] No Cookies DB found — skipping session-auth promotion.');
         return;
     }
 
@@ -89,16 +92,16 @@ function promoteSessionAuthCookies(localDir: string): void {
         );
         const before = sel.get(...params) as { n: number };
         if (!before || before.n === 0) {
-            console.log('[profile-store] No session auth cookies to promote.');
+            log.info('[profile-store] No session auth cookies to promote.');
             return;
         }
         const upd = db.prepare(
             `UPDATE cookies SET is_persistent = 1, expires_utc = ? WHERE is_persistent = 0 AND (${hostClause})`,
         );
         const res = upd.run(expiresUtc, ...params);
-        console.log(`[profile-store] Promoted ${res.changes} session auth cookie(s) to persistent (meeting-platform login survival).`);
+        log.info(`[profile-store] Promoted ${res.changes} session auth cookie(s) to persistent (meeting-platform login survival).`);
     } catch (err) {
-        console.warn('[profile-store] Session-auth cookie promotion failed (non-fatal):', err);
+        log.warn('[profile-store] Session-auth cookie promotion failed (non-fatal):', err);
     } finally {
         try { db?.close(); } catch { /* ignore */ }
     }
@@ -119,7 +122,7 @@ export interface ProfileHandle {
 }
 
 // Normalize a meeting platform label to a stable S3 path segment. Mirrors the
-// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX', with
+// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET', with
 // older mixed-case variants) so the key matches between writer and reader.
 // Falls back to 'unknown' so a missing/garbage platform still gets an isolated
 // (never shared) profile rather than colliding with a real one.
@@ -137,7 +140,7 @@ export async function acquireProfile(opts: { cognitoSub: string; platform?: stri
     const handle: ProfileHandle = { enabled: false, localDir: '', s3Key: '' };
     const sub = (opts.cognitoSub || '').trim();
     if (!PROFILES_BUCKET || !sub) {
-        console.log(
+        log.info(
             `[profile-store] DISABLED (bucket=${PROFILES_BUCKET ? 'set' : 'EMPTY'}, ` +
                 `sub=${sub ? 'set' : 'EMPTY'}); using fresh ephemeral profile.`,
         );
@@ -145,16 +148,25 @@ export async function acquireProfile(opts: { cognitoSub: string; platform?: stri
     }
 
     const platform = normalizePlatform(opts.platform);
+    // Google Meet joins as a guest, so a saved profile has no sign-in to carry,
+    // and measured on a live meeting it did harm: every join that reused the
+    // saved profile was refused by Meet's guest check ("You can't join this
+    // video call"), and the first join after the profile was deleted got in.
+    // So a Meet join always starts from a fresh profile and saves nothing.
+    if (platform === 'googlemeet') {
+        log.info('[profile-store] Google Meet joins as a guest: using a fresh profile, not saving it.');
+        return handle;
+    }
     const userHash = createHash('sha256').update(sub.toLowerCase()).digest('hex');
     handle.enabled = true;
     handle.s3Key = `${S3_PREFIX}${userHash}/${platform}/${TAR_NAME}`;
     handle.localDir = join(PROFILE_ROOT, `${userHash.slice(0, 16)}-${platform}`);
     await fs.mkdir(handle.localDir, { recursive: true });
 
-    console.log(`[profile-store] user hash (sha256) : ${userHash.slice(0, 16)}...`);
-    console.log(`[profile-store] platform           : ${platform}`);
-    console.log(`[profile-store] localDir           : ${handle.localDir}`);
-    console.log(`[profile-store] s3Key              : s3://${PROFILES_BUCKET}/${handle.s3Key}`);
+    log.info(`[profile-store] user hash (sha256) : ${userHash.slice(0, 16)}...`);
+    log.info(`[profile-store] platform           : ${platform}`);
+    log.info(`[profile-store] localDir           : ${handle.localDir}`);
+    log.info(`[profile-store] s3Key              : s3://${PROFILES_BUCKET}/${handle.s3Key}`);
 
     try {
         await downloadAndExtract(handle.s3Key, handle.localDir);
@@ -162,7 +174,7 @@ export async function acquireProfile(opts: { cognitoSub: string; platform?: stri
         // restored login is actually loaded by Chromium on this launch.
         promoteSessionAuthCookies(handle.localDir);
     } catch (err) {
-        console.warn('[profile-store] Restore failed (continuing with fresh profile):', err);
+        log.warn('[profile-store] Restore failed (continuing with fresh profile):', err);
     }
 
     return handle;
@@ -174,7 +186,7 @@ export async function persistProfile(handle: ProfileHandle): Promise<void> {
     try {
         await fs.access(handle.localDir);
     } catch {
-        console.warn(`[profile-store] Skipping upload — local dir missing (${handle.localDir})`);
+        log.warn(`[profile-store] Skipping upload — local dir missing (${handle.localDir})`);
         return;
     }
 
@@ -183,7 +195,7 @@ export async function persistProfile(handle: ProfileHandle): Promise<void> {
         const tarStart = Date.now();
         await runShell('tar', ['-czf', tmpTar, '-C', handle.localDir, '.']);
         const stat = await fs.stat(tmpTar);
-        console.log(
+        log.info(
             `[profile-store] Tarred profile: ${(stat.size / (1024 * 1024)).toFixed(1)} MB in ${Date.now() - tarStart}ms`,
         );
 
@@ -197,11 +209,11 @@ export async function persistProfile(handle: ProfileHandle): Promise<void> {
                 ServerSideEncryption: 'aws:kms',
             }),
         );
-        console.log(
+        log.info(
             `[profile-store] Uploaded profile to s3://${PROFILES_BUCKET}/${handle.s3Key} in ${Date.now() - uploadStart}ms`,
         );
     } catch (err) {
-        console.warn('[profile-store] persistProfile failed (non-fatal):', err);
+        log.warn('[profile-store] persistProfile failed (non-fatal):', err);
     } finally {
         await fs.unlink(tmpTar).catch(() => undefined);
     }
@@ -220,7 +232,7 @@ async function downloadAndExtract(s3Key: string, localDir: string): Promise<void
             err?.name === 'NoSuchKey' ||
             err?.$metadata?.httpStatusCode === 404
         ) {
-            console.log('[profile-store] No tar in S3 yet — fresh profile.');
+            log.info('[profile-store] No tar in S3 yet — fresh profile.');
             await wipeDirContents(localDir);
             return;
         }
@@ -242,13 +254,13 @@ async function downloadAndExtract(s3Key: string, localDir: string): Promise<void
                 .on('error', reject);
         });
         const stat = await fs.stat(tmpTar);
-        console.log(
+        log.info(
             `[profile-store] Downloaded profile: ${(stat.size / (1024 * 1024)).toFixed(1)} MB in ${Date.now() - downloadStart}ms`,
         );
 
         const extractStart = Date.now();
         await runShell('tar', ['-xzf', tmpTar, '-C', localDir]);
-        console.log(`[profile-store] Extracted profile in ${Date.now() - extractStart}ms`);
+        log.info(`[profile-store] Extracted profile in ${Date.now() - extractStart}ms`);
     } finally {
         await fs.unlink(tmpTar).catch(() => undefined);
     }

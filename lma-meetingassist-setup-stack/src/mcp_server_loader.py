@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -18,6 +18,7 @@ Caching Strategy:
 - MCPClient health is checked before reuse; unhealthy clients are recreated
 """
 
+import contextlib
 import os
 import boto3
 import hashlib
@@ -392,6 +393,36 @@ def get_valid_oauth_token(server_id: str, account_id: str, oauth_config: dict) -
         raise
 
 
+def streamable_http_transport(server_url: str, headers: Optional[Dict[str, str]] = None):
+    """A zero-argument factory opening the streamable HTTP transport to ``server_url``.
+
+    mcp 2.x renamed ``streamablehttp_client`` to ``streamable_http_client`` and
+    moved request headers onto the HTTP client it is given
+    (``create_mcp_http_client(headers=...)``); earlier releases take ``headers``
+    directly. Both are supported, so the agent's layer works whichever mcp
+    release strands-agents resolves to.
+    """
+    headers = headers or {}
+    try:
+        # create_mcp_http_client is defined elsewhere in mcp and re-exported by this
+        # module; the installed-mcp test fails if a release drops the re-export.
+        from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+    except ImportError:
+        from mcp.client.streamable_http import streamablehttp_client
+
+        return lambda: streamablehttp_client(url=server_url, headers=headers)
+
+    @contextlib.asynccontextmanager
+    async def transport():
+        # The transport leaves a client it is given open, so the client is
+        # opened and closed here, with the transport's lifetime.
+        async with create_mcp_http_client(headers=headers) as http_client:
+            async with streamable_http_client(server_url, http_client=http_client) as streams:
+                yield streams
+
+    return transport
+
+
 def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None):
     """
     Load an HTTP-based MCP server (streamable-http transport)
@@ -409,8 +440,7 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
     """
     try:
         from strands.tools.mcp import MCPClient
-        from mcp.client.streamable_http import streamablehttp_client
-        
+
         logger.info(f"Loading HTTP MCP server: {server_id} at {server_url}")
         
         # Extract headers from auth config
@@ -420,12 +450,8 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
             logger.info(f"Using auth headers: {list(headers.keys())}")
         
         # Create MCP client with HTTP transport
-        # Note: streamablehttp_client only supports url and headers, not params
         mcp_client = MCPClient(
-            lambda: streamablehttp_client(
-                url=server_url,
-                headers=headers
-            ),
+            streamable_http_transport(server_url, headers),
             prefix=server_id.replace('/', '_').replace('.', '_')
         )
         

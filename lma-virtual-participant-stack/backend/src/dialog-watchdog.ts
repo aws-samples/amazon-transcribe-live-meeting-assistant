@@ -8,14 +8,19 @@
  * handlers haven't dealt with it), it asks Claude (via vision + DOM
  * snapshot) to classify the dialog. The action depends on the type:
  *
- *   - CONSENT / RECORDING_NOTICE  → click the primary action (auto-dismiss)
+ *   - CONSENT / RECORDING_NOTICE  → click the primary action (auto-dismiss),
+ *                                  whatever the model said about needsHuman,
+ *                                  but never one that joins without meeting
+ *                                  audio. A camera/microphone dialog that cannot
+ *                                  be answered safely is escalated. The rules
+ *                                  are in dialog-decision.ts.
  *   - CAPTCHA / LOGIN_REQUIRED / SSO_REDIRECT / BLOCKED → escalate via
  *                                  setManualActionRequired so the React UI
  *                                  shows the VNC takeover banner.
  *   - OTHER                       → leave alone (we don't auto-click
  *                                  anything we can't classify).
  *
- * Used by every platform handler (Zoom, Teams, Webex, Chime). The
+ * Used by every platform handler (Zoom, Teams, Webex, Chime, Google Meet). The
  * platform-specific dialog selectors are passed in so we cover platform-
  * specific modal containers (`.zm-modal` for Zoom, `[data-tid="modal"]`
  * for Teams, etc.).
@@ -24,9 +29,14 @@ import { Page } from 'playwright-core';
 import {
     analyzeUnknownDialog,
     isResolverEnabled,
+    readActionText,
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
 import { details } from './details.js';
+import { decideAfterClickFailure, decideDialogAction } from './dialog-decision.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('dialog-watchdog');
 
 const COMMON_DIALOG_SELECTORS = [
     '[role="dialog"]',
@@ -38,12 +48,11 @@ const PLATFORM_DIALOG_SELECTORS: Record<string, string[]> = {
     TEAMS: ['[data-tid="modal"]', '.fui-Dialog__surface'],
     WEBEX: ['.md-modal', '[role="dialog"][aria-modal="true"]'],
     CHIME: ['[data-test-id*="modal"]'],
+    GOOGLE_MEET: ['[aria-modal="true"]'],
 };
 
-const AUTOCLICK_TYPES = new Set(['CONSENT', 'RECORDING_NOTICE']);
-
 interface WatchdogOpts {
-    platform: 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
+    platform: 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME' | 'GOOGLE_MEET';
     checkIntervalMs?: number;
     /** Slow cadence used once the page has been quiet (no new dialogs) for a
      *  while. Defaults to 4× the fast interval. The watchdog snaps back to the
@@ -125,27 +134,42 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         lastHandledHtml = fingerprint;
         consecutive = 0;
         if (!analysis) return true;
-        console.log(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
+        log.info(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
 
-        if (
-            !analysis.needsHuman &&
-            analysis.primaryActionSelector &&
-            AUTOCLICK_TYPES.has(analysis.type)
-        ) {
-            const ok = await scrollIntoViewAndClick(page, analysis.primaryActionSelector);
-            if (ok) {
-                console.log(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
-            } else {
-                console.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
-            }
-        } else if (analysis.needsHuman && details.invite.virtualParticipantId) {
+        const escalate = async (message: string): Promise<void> => {
+            log.info(`[dialog-watchdog ${opts.platform}] escalating ${analysis.type}: ${message}`);
+            if (!details.invite.virtualParticipantId) return;
             const { createStatusManager } = await import('./status-manager.js');
             await createStatusManager(details.invite.virtualParticipantId).setManualActionRequired(
                 analysis.type,
-                analysis.message || `Manual action required in the ${opts.platform} web client.`,
+                message,
                 manualActionTimeoutSec,
             );
             escalated = true;
+        };
+
+        const actionText = analysis.primaryActionSelector
+            ? await readActionText(page, analysis.primaryActionSelector)
+            : null;
+        const decision = decideDialogAction(analysis, opts.platform, actionText);
+        if (decision.kind === 'click') {
+            const ok = await scrollIntoViewAndClick(page, decision.selector);
+            if (ok) {
+                log.info(
+                    `[dialog-watchdog ${opts.platform}] auto-dismissed via ${decision.selector} ("${actionText}")`,
+                );
+            } else {
+                log.warn(`[dialog-watchdog ${opts.platform}] click failed on ${decision.selector}`);
+                const after = decideAfterClickFailure(analysis, opts.platform, actionText);
+                if (after.kind === 'escalate') await escalate(after.message);
+            }
+        } else if (decision.kind === 'escalate') {
+            if (actionText) {
+                log.info(
+                    `[dialog-watchdog ${opts.platform}] not clicking ${analysis.primaryActionSelector} ("${actionText}")`,
+                );
+            }
+            await escalate(decision.message);
         }
         return true;
     };
@@ -156,7 +180,7 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         try {
             hadDialog = await tick();
         } catch (err) {
-            console.warn(`[dialog-watchdog ${opts.platform}] error:`, err);
+            log.warn(`[dialog-watchdog ${opts.platform}] error:`, err);
         }
         // Adaptive cadence: any dialog this tick resets to fast; otherwise
         // count quiet ticks and back off to the idle interval once we've been

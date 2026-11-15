@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Acquire, re-token and release ASR MicroVMs for the WebSocket transcriber.
 
@@ -50,6 +50,12 @@ ACQUIRE_TIMEOUT_SECONDS = int(os.environ.get("ACQUIRE_TIMEOUT_SECONDS", "240"))
 ACQUIRE_ATTEMPTS = 2
 RETRY_MIN_REMAINING_SECONDS = 60
 POLL_INTERVAL_SECONDS = 2
+# The image's MinimumMemoryInMiB, reported back on acquire. Zero (unset) leaves
+# it out of the response.
+try:
+    MICROVM_MEMORY_MIB = int(os.environ.get("MICROVM_MEMORY_MIB", "0"))
+except ValueError:
+    MICROVM_MEMORY_MIB = 0
 
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
 _CONNECTOR = "arn:aws:lambda:{}:aws:network-connector:aws-network-connector:{}"
@@ -57,6 +63,24 @@ INGRESS_CONNECTOR = _CONNECTOR.format(_REGION, "ALL_INGRESS")
 EGRESS_CONNECTOR = os.environ.get("EGRESS_CONNECTOR_ARN") or _CONNECTOR.format(
     _REGION, "INTERNET_EGRESS"
 )
+
+
+def _logging_config() -> dict | None:
+    """The RunMicrovm `logging` member naming the stack's MicroVM log group.
+
+    The image's Logging setting governs only its build, snapshot and validate
+    output. A running MicroVM's own output goes wherever RunMicrovm says, and
+    when RunMicrovm says nothing the service writes it to a group it creates
+    itself, named after the image, with no expiry and no customer-managed key.
+
+    None (the member omitted, the service default) only when the variable is
+    unset, so a mis-set environment loses log placement rather than the meeting.
+    """
+    log_group = os.environ.get("MICROVM_LOG_GROUP_NAME")
+    if not log_group:
+        logger.warning("MICROVM_LOG_GROUP_NAME is not set; the service will pick the log group")
+        return None
+    return {"cloudWatch": {"logGroup": log_group}}
 
 
 def _client_token(call_id: str) -> str:
@@ -112,6 +136,7 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
                 "suspendedDurationSeconds": 0,
             },
             maximumDurationInSeconds=MAX_MEETING_SECONDS,
+            logging=_logging_config(),
             clientToken=_client_token(token_seed),
         )
     except MicrovmError as exc:
@@ -164,7 +189,7 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
         _release(microvm_id)
         return {"ok": False, "reason": f"CreateMicrovmAuthToken failed: {exc}"}
 
-    return {
+    result = {
         "ok": True,
         "reason": "",
         "microvmId": microvm_id,
@@ -172,6 +197,11 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
         "port": ASR_PORT,
         **token,
     }
+    # The size the image was built at, so the caller can meter the MicroVM's
+    # lifetime for the meeting cost estimate without knowing the bundle.
+    if MICROVM_MEMORY_MIB > 0:
+        result["memoryMiB"] = MICROVM_MEMORY_MIB
+    return result
 
 
 def _release(microvm_id: str) -> dict:

@@ -1,10 +1,20 @@
 import { Page } from 'playwright-core';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { chatAddressing } from './chat-addressing.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { clickWithDomFallback, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('chime');
 
 export default class Chime {
     private prevSender: string = '';
@@ -17,25 +27,32 @@ export default class Chime {
         });
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        const found = await findElementWithFallback(
-            page,
-            ['textarea[placeholder="Message all attendees"]'],
-            {
-                intent: 'Chime in-meeting chat panel message compose textarea',
-                platform: 'CHIME',
-                step: 'chime.chat.input',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!found) {
-            console.log('Could not locate Chime chat input — aborting sendMessages');
-            return;
-        }
-        for (const message of messages) {
-            await found.element.type(message);
-            await found.element.press('Enter');
-            await new Promise(resolve => setTimeout(resolve, 100));
+    /** Posts chat messages; true when every one was typed and sent. Never throws. */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        try {
+            const found = await findElementWithFallback(
+                page,
+                ['textarea[placeholder="Message all attendees"]'],
+                {
+                    intent: 'Chime in-meeting chat panel message compose textarea',
+                    platform: 'CHIME',
+                    step: 'chime.chat.input',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (!found) {
+                log.warn('Could not locate Chime chat input — aborting sendMessages');
+                return false;
+            }
+            for (const message of messages) {
+                await found.element.type(message);
+                await found.element.press('Enter');
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return true;
+        } catch (e) {
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
         }
     }
 
@@ -50,7 +67,7 @@ export default class Chime {
         // so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'CHIME' });
 
-        console.log('Getting Chime meeting link.');
+        log.info('Getting Chime meeting link.');
         await gotoMeetingPage(
             page,
             `https://app.chime.aws/meetings/${details.invite.meetingId}`,
@@ -58,7 +75,7 @@ export default class Chime {
             'chime-join',
         );
 
-        console.log('Entering name.');
+        log.info('Entering name.');
         const nameRes = await findElementWithFallback(
             page,
             ['#name'],
@@ -70,7 +87,7 @@ export default class Chime {
             { maxRetries: 10, delayMs: 500 },
         );
         if (!nameRes) {
-            console.log('LMA Virtual Participant was unable to join the meeting.');
+            log.warn('LMA Virtual Participant was unable to join the meeting.');
             throw new Error('Meeting not found or invalid meeting ID');
         }
         await nameRes.element.type(details.scribeIdentity, { delay: 100 });
@@ -79,7 +96,7 @@ export default class Chime {
 
         // Only click mute button if voice assistant is NOT enabled
         if (!voiceAssistant.isEnabled()) {
-            console.log('Clicking mute button.');
+            log.info('Clicking mute button.');
             const muteRes = await findElementWithFallback(
                 page,
                 ['text/Join muted'],
@@ -90,12 +107,18 @@ export default class Chime {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            await muteRes?.element.click();
+            // A toggle, so no DOM-click fallback: a fallback after a click that
+            // did land would flip it back. A miss is logged and the join goes on.
+            if (muteRes) {
+                await muteRes.element.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS }).catch((err: Error) => {
+                    log.warn(`[chime] "Join muted" click failed (non-fatal): ${err?.message?.split('\n')[0]}`);
+                });
+            }
         } else {
-            console.log('Voice assistant enabled - skipping mute button for agent audio');
+            log.info('Voice assistant enabled - skipping mute button for agent audio');
         }
 
-        console.log('Clicking join button.');
+        log.info('Clicking join button.');
         const joinRes = await findElementWithFallback(
             page,
             ['button[data-testid="button"][aria-label="Join"]'],
@@ -107,46 +130,56 @@ export default class Chime {
             { maxRetries: 10, delayMs: 500 },
         );
         if (!joinRes) {
-            console.log('Could not locate Chime Join button — aborting');
-            return { reason: 'unknown', trigger: 'pre-join:no-join-button' };
+            log.warn('Could not locate Chime Join button — aborting');
+            // Still on the pre-join screen with no way off it, so the VP never
+            // entered the meeting: 'never-joined', matching the Teams handler's
+            // equivalent branch. Anything milder would be scored as a normal
+            // completion.
+            return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
-        await joinRes.element.click();
+        await clickWithDomFallback(joinRes.element, 'Join');
 
-        console.log('Opening chat panel.');
+        log.info('Opening chat panel.');
         try {
             const chatPanelElement = await page.waitForSelector(
                 'button[data-testid="button"][aria-label^="Open chat panel"]',
                 { timeout: details.waitingTimeout }
             );
-            await chatPanelElement?.click();
+            if (chatPanelElement) await clickWithDomFallback(chatPanelElement, 'Open chat panel');
         } catch (error) {
-            console.log('LMA Virtual Participant was not admitted into the meeting.');
-            throw new Error('Wrong meeting password or permission denied');
+            log.info('LMA Virtual Participant was not admitted into the meeting.');
+            // Returned rather than thrown, so the reason travels as a code the
+            // orchestrator can act on. Throwing put the outcome through the
+            // message-matching classifier in index.ts, which could only guess
+            // at a cause ("Wrong meeting password or permission denied") from
+            // a branch that knows only that the in-meeting UI never appeared.
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        console.log('Successfully joined Chime meeting');
+        log.info('Successfully joined Chime meeting');
 
-        console.log('Sending introduction messages.');
+        log.info('Sending introduction messages.');
         await this.sendMessages(page, details.introMessages);
 
-        console.log('Opening attendees panel.');
+        log.info('Opening attendees panel.');
         const attendeesPanelElement = await page.waitForSelector(
             'button[data-testid="button"][aria-label^="Open attendees panel"]'
         );
-        await attendeesPanelElement?.click();
+        if (attendeesPanelElement) await clickWithDomFallback(attendeesPanelElement, 'Open attendees panel');
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
+            meetingConsent.noteAttendeeCount(number);
             if (number <= 1) {
-                console.log('LMA Virtual Participant got lonely and left.');
+                log.info('LMA Virtual Participant got lonely and left.');
                 details.start = false;
                 this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
         });
 
-        console.log('Listening for attendee changes.');
+        log.info('Listening for attendee changes.');
         await page.evaluate(() => {
             const targetNode = document.querySelector(
                 'button[data-testid="collapse-container"][aria-label^="Present"]'
@@ -169,7 +202,7 @@ export default class Chime {
             await transcriptionService.speakerChange(speaker);
         });
 
-        console.log('Listening for speaker changes.');
+        log.info('Listening for speaker changes.');
         await page.evaluate(() => {
             const targetNode = document.querySelector(
                 '.activeSpeakerCell ._3yg3rB2Xb_sfSzRXkm8QT-'
@@ -211,9 +244,39 @@ export default class Chime {
                 }
                 this.prevSender = sender;
 
-                // Handle LMA commands
+                // Which LMA VP the message is for, when there are several
+                // (chat-addressing.ts); read from here on with its address
+                // reduced to "LMA". One for another VP, or the bare "LMA" with
+                // several here, is not read for the commands.
+                if (text) {
+                    const route = chatAddressing.route(text, sender === 'Amazon Chime' ? null : sender);
+                    if (!route.act) return;
+                    text = route.text;
+                }
+
+                // A consent reply, or "LMA start" while consent is withheld. Chime's
+                // own system messages go through too, without a sender, so a
+                // start command never gets past a withheld meeting unread.
+                if (text && (await meetingConsent.handleChat(sender === 'Amazon Chime' ? null : sender, text))) {
+                    return;
+                }
+
+                // Handle LMA commands. The assistant-mode toggles are checked
+                // ahead of pause/resume so that they land whether or not
+                // transcription is paused — what the assistant is doing is
+                // independent of whether the transcript is running. The two
+                // vocabularies are disjoint, so the order is not otherwise
+                // load-bearing.
+                const assistantToggle = text ? parseAssistantChatCommand(text) : null;
+                // Answered in the background, so the next message is not held up.
+                const chatQuestion = text && !assistantToggle ? parseChatQuestion(text) : null;
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion && sender !== 'Amazon Chime' && !sender?.includes(details.scribeName)) {
+                    void startChatAnswer(chatQuestion, sender, 'chime', (messages) => this.sendMessages(page, messages));
+                }
                 if (text && matchesEndCommand(text)) {
-                    console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
+                    log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(text ?? '').length} characters)`);
                     await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
                     this.requestEnd({
@@ -222,44 +285,36 @@ export default class Chime {
                         requestedBy: sender,
                         matchedMessage: text,
                     });
-                } else if (details.start && text === details.pauseCommand) {
+                } else if (assistantToggle) {
+                    await this.sendMessages(
+                        page,
+                        await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
+                    );
+                } else if (text && matchesChatCommand(text, details.helpCommand)) {
+                    // Answered whether or not transcription is paused: the list is how
+                    // someone finds out how to resume it.
+                    log.info('[chat-help] posting the chat command list');
+                    await this.sendMessages(page, chatHelpMessages(voiceAssistant));
+                } else if (details.start && text && matchesChatCommand(text, details.pauseCommand)) {
                     details.start = false;
-                    console.log(details.pauseMessages[0]);
+                    void recordTranscriptionPause(true, sender === 'Amazon Chime' ? null : sender);
+                    log.info(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
-                } else if (!details.start && text === details.startCommand) {
+                } else if (!details.start && text && matchesChatCommand(text, details.startCommand)) {
                     details.start = true;
-                    console.log(details.startMessages[0]);
+                    void recordTranscriptionPause(false, null);
+                    log.info(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     // Restart transcription if needed
                     transcriptionService.startTranscription();
-                } else if (
-                    details.start &&
-                    sender !== 'Amazon Chime' &&
-                    !sender?.includes(details.scribeName)
-                ) {
-                    const timestamp = new Date().toLocaleTimeString('en-US', {
-                        hour12: false,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                    });
-                    let message = `[${timestamp}] ${sender}: `;
-
-                    if (attachmentTitle && attachmentHref) {
-                        details.attachments[attachmentTitle] = attachmentHref;
-                        message += text
-                            ? `${text} | ${attachmentTitle}`
-                            : attachmentTitle;
-                    } else if (text) {
-                        message += text;
-                    }
-
-                    details.messages.push(message);
-                    console.log('New message:', message);
                 }
+                // Other Amazon Chime chat is read for the commands above only,
+                // and is not added to the transcript: the meeting chat capture
+                // (meeting-chat.ts) does not cover Amazon Chime.
             }
         );
 
-        console.log('Listening for message changes.');
+        log.info('Listening for message changes.');
         await page.evaluate(() => {
             const targetNode = document.querySelector('._2B9DdDvc2PdUbvEGXfOU20');
             const config = { childList: true, subtree: true };
@@ -291,14 +346,26 @@ export default class Chime {
             if (targetNode) observer.observe(targetNode, config);
         });
 
+        // The meeting consent flow, when the meeting runs one: the notice, the
+        // replies and the gate on capture (meeting-consent.ts). Chime shows the
+        // chat and the attendee list side by side, so one screenshot has both.
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            panels: { bothVisible: true },
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
+
         // Start transcription if enabled (LMA behavior)
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
 
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         let exitInfo: ExitInfo = { reason: 'unknown' };
         // Detect Chime's own meeting-end UI by polling for the host-ended text
         // or for navigation away from the meeting page. The poll resolves with
@@ -335,7 +402,7 @@ export default class Chime {
         } finally {
             details.start = false;
         }
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

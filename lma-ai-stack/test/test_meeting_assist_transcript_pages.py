@@ -1,0 +1,368 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT-0 License.
+# See the LICENSE file in the project root for full license information.
+"""The Meeting Assistant's read of the current meeting's transcript (no AWS).
+
+`fetch_meeting_transcript` is what the `current_meeting_transcript` tool returns
+and what the direct-Bedrock fallback prompts with. It reads the meeting's
+segments from DynamoDB with a Query, and a Query returns at most 1 MB of items
+*read* per page, applying the FilterExpression only after that cap. The partial
+segments this read excludes are numerous, so they spend the page budget without
+appearing in the result: a long meeting is spread over several pages. Reading one
+page hands the agent the opening stretch of the meeting with nothing to indicate
+the rest exists, so every page is read, bounded by a page limit and by a check
+that the continuation key is advancing.
+
+The same correction was made to the equivalent read in
+`lma-ai-stack/source/lambda_functions/fetch_transcript/index.py`; these tests
+assert the Strands function's own copy behaves the same way.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+import strands_stand_in  # scripts/testing, put on the path by lma-ai-stack/conftest.py
+
+REPO = Path(__file__).resolve().parents[2]
+FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
+# The AI stack's configuration layer, which the function is deployed with and
+# imports lma_config from.
+CONFIGURATION_LAYER = REPO / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
+
+TABLE = "lma-call-events"
+CALL_ID = "call-1"
+
+
+@pytest.fixture(scope="module")
+def strands_stub():
+    """The stand-in for `strands` (scripts/testing/strands_stand_in.py), for this module."""
+    with strands_stand_in.installed() as stub:
+        yield stub
+
+
+@pytest.fixture(scope="module")
+def strands_module(strands_stub):
+    """The meeting-assist Lambda's module, imported by path under its own name."""
+    os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+    os.environ.setdefault("AWS_REGION", "us-east-1")
+
+    if str(FUNCTION_SRC) not in sys.path:
+        sys.path.append(str(FUNCTION_SRC))
+    if str(CONFIGURATION_LAYER) not in sys.path:
+        sys.path.append(str(CONFIGURATION_LAYER))
+    spec = importlib.util.spec_from_file_location(
+        "lma_strands_meeting_assist_pages",
+        FUNCTION_SRC / "strands_meeting_assist_function.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _segment(speaker: str, text: str, end_time: float, channel: str = "REMOTE") -> dict:
+    return {
+        "Speaker": speaker,
+        "Transcript": text,
+        "Channel": channel,
+        "EndTime": end_time,
+        "IsPartial": False,
+    }
+
+
+def _table_returning(strands_module, monkeypatch, pages: list[dict]) -> MagicMock:
+    """Stand in for the DynamoDB table resource, handing back `pages` in order."""
+    table = MagicMock()
+    table.query.side_effect = pages
+    resource = MagicMock()
+    resource.Table.return_value = table
+    monkeypatch.setattr(strands_module, "dynamodb", resource)
+    return table
+
+
+def test_a_transcript_spanning_several_pages_is_read_to_the_end(strands_module, monkeypatch):
+    """The segments on the later pages are the end of the meeting, where decisions land."""
+    table = _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {
+                "Items": [_segment("Alice", "first", 1.0)],
+                "LastEvaluatedKey": {"PK": "trs#call-1", "SK": "page-1"},
+            },
+            {
+                "Items": [_segment("Bob", "second", 2.0)],
+                "LastEvaluatedKey": {"PK": "trs#call-1", "SK": "page-2"},
+            },
+            {"Items": [_segment("Alice", "third", 3.0)]},
+        ],
+    )
+
+    transcript = strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+
+    assert transcript == "Alice: first\nBob: second\nAlice: third"
+    assert table.query.call_count == 3
+
+
+def test_each_page_resumes_from_the_key_the_previous_page_ended_on(strands_module, monkeypatch):
+    table = _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {
+                "Items": [_segment("Alice", "first", 1.0)],
+                "LastEvaluatedKey": {"PK": "trs#call-1", "SK": "page-1"},
+            },
+            {"Items": [_segment("Bob", "second", 2.0)]},
+        ],
+    )
+
+    strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+
+    first, second = table.query.call_args_list
+    assert "ExclusiveStartKey" not in first.kwargs
+    assert second.kwargs["ExclusiveStartKey"] == {"PK": "trs#call-1", "SK": "page-1"}
+
+
+def test_a_single_page_transcript_is_read_with_one_query(strands_module, monkeypatch):
+    """Short meetings, which are most of them, cost exactly what they did before."""
+    table = _table_returning(
+        strands_module, monkeypatch, [{"Items": [_segment("Alice", "all of it", 1.0)]}]
+    )
+
+    assert strands_module.fetch_meeting_transcript(CALL_ID, TABLE) == "Alice: all of it"
+    assert table.query.call_count == 1
+
+
+def test_the_assistants_own_turns_are_still_labelled_as_the_assistant(
+    strands_module,
+    monkeypatch,
+):
+    """Formatting is unchanged by the paging; the AGENT_ASSISTANT channel is relabelled."""
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {
+                "Items": [
+                    _segment("Alice", "what did we decide", 1.0),
+                    _segment("ignored", "you decided to ship", 2.0, channel="AGENT_ASSISTANT"),
+                ]
+            }
+        ],
+    )
+
+    transcript = strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+    assert transcript == "Alice: what did we decide\nMeetingAssistant: you decided to ship"
+
+
+def test_a_continuation_key_that_stops_advancing_ends_the_read(strands_module, monkeypatch):
+    """Asking for the same page again would otherwise spin until the timeout."""
+    repeated = {"PK": "trs#call-1", "SK": "page-1"}
+    table = _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {"Items": [_segment("Alice", "first", 1.0)], "LastEvaluatedKey": repeated},
+            {"Items": [_segment("Bob", "second", 2.0)], "LastEvaluatedKey": repeated},
+        ],
+    )
+
+    transcript = strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+
+    assert table.query.call_count == 2
+    assert transcript == "Alice: first\nBob: second"
+
+
+def test_the_read_stops_at_the_page_limit_and_says_so(strands_module, monkeypatch, caplog):
+    """A table that never stops paging must not consume the whole function timeout."""
+    table = MagicMock()
+    counter = iter(range(10_000))
+    table.query.side_effect = lambda **_kwargs: {
+        "Items": [_segment("Alice", "again", 1.0)],
+        "LastEvaluatedKey": {"PK": "trs#call-1", "SK": f"page-{next(counter)}"},
+    }
+    resource = MagicMock()
+    resource.Table.return_value = table
+    monkeypatch.setattr(strands_module, "dynamodb", resource)
+
+    with caplog.at_level("WARNING"):
+        strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+
+    assert table.query.call_count == strands_module.MAX_TRANSCRIPT_PAGES
+    assert "page limit" in caplog.text
+    assert CALL_ID in caplog.text
+
+
+def test_a_failed_read_returns_no_transcript_rather_than_raising(strands_module, monkeypatch):
+    """Unchanged: the tool reports no transcript and the agent answers without one."""
+    table = MagicMock()
+    table.query.side_effect = RuntimeError("ProvisionedThroughputExceededException")
+    resource = MagicMock()
+    resource.Table.return_value = table
+    monkeypatch.setattr(strands_module, "dynamodb", resource)
+
+    assert strands_module.fetch_meeting_transcript(CALL_ID, TABLE) == ""
+
+
+def test_the_read_selects_both_speech_channels_under_either_name_and_the_assistant(
+    strands_module, monkeypatch
+):
+    """A meeting recorded before 0.4.0 stores its speech as CALLER and AGENT."""
+    from boto3.dynamodb.conditions import Attr
+
+    table = _table_returning(strands_module, monkeypatch, [{"Items": []}])
+    strands_module.query_transcript_items(CALL_ID, TABLE)
+    assert table.query.call_args.kwargs["FilterExpression"] == (
+        Attr("Channel").is_in(["REMOTE", "LOCAL", "CALLER", "AGENT", "AGENT_ASSISTANT"])
+        & Attr("IsPartial").eq(False)
+    )
+
+
+def test_the_standalone_fallback_channel_names_match_the_layer():
+    """Without the configuration layer the function uses its own copy of the names."""
+    import ast
+
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+    from lma_channels import STORED_SPEECH_CHANNELS
+
+    tree = ast.parse((FUNCTION_SRC / "strands_meeting_assist_function.py").read_text())
+    fallbacks = [
+        ast.literal_eval(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "STORED_SPEECH_CHANNELS" for t in node.targets)
+    ]
+    assert fallbacks == [STORED_SPEECH_CHANNELS]
+
+
+# ── the meeting chat and the shared screen ─────────────────────────────────
+
+
+def _chat(sender: str, text: str, at: float) -> dict:
+    return {
+        "Speaker": sender,
+        "Transcript": text,
+        "Channel": "MEETING_CHAT",
+        "StartTime": at,
+        "EndTime": at,
+        "IsPartial": False,
+    }
+
+
+def test_the_current_meeting_tool_includes_chat_messages(strands_module, monkeypatch):
+    """A chat message is a line of its own, marked, under its sender, in time order."""
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [
+            {
+                "Items": [
+                    {**_segment("Alice", "Shall we look at the budget?", 10.0), "StartTime": 8.0},
+                    _chat("Bob", "Here it is: https://example.com/budget", 12.0),
+                    {**_segment("Alice", "Thanks.", 20.0), "StartTime": 18.0},
+                ]
+            }
+        ],
+    )
+    assert strands_module.fetch_meeting_transcript(CALL_ID, TABLE).split("\n") == [
+        "Alice: Shall we look at the budget?",
+        "[chat] Bob: Here it is: https://example.com/budget",
+        "Alice: Thanks.",
+    ]
+
+
+def test_a_chat_message_carries_its_time_when_the_transcript_is_timed(strands_module, monkeypatch):
+    _table_returning(strands_module, monkeypatch, [{"Items": [_chat("Bob", "Agreed.", 75.0)]}])
+    assert (
+        strands_module.fetch_meeting_transcript(CALL_ID, TABLE, with_timestamps=True)
+        == "[01:15] [chat] Bob: Agreed."
+    )
+
+
+def test_a_chat_message_is_one_line_however_it_was_typed(strands_module, monkeypatch):
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [{"Items": [_chat("", "Agenda:\n- budget\r\n- hiring\n", 5.0), _chat("Eve", "x" * 3000, 6.0)]}],
+    )
+    first, second = strands_module.fetch_meeting_transcript(CALL_ID, TABLE).split("\n")
+    assert first == "[chat] Unknown sender: Agenda: / - budget / - hiring"
+    assert second.endswith(" [...]")
+    assert len(second) < 2100
+
+
+def test_the_current_meeting_read_selects_the_meeting_chat(strands_module, monkeypatch):
+    """The transcript tool reads the chat; the frames tool's transcript stays speech only."""
+    from boto3.dynamodb.conditions import Attr
+
+    table = _table_returning(strands_module, monkeypatch, [{"Items": []}, {"Items": []}])
+    strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+    assert table.query.call_args.kwargs["FilterExpression"] == (
+        Attr("Channel").is_in(
+            ["REMOTE", "LOCAL", "CALLER", "AGENT", "AGENT_ASSISTANT", "MEETING_CHAT"]
+        )
+        & Attr("IsPartial").eq(False)
+    )
+    strands_module.query_transcript_items(CALL_ID, TABLE)
+    assert "MEETING_CHAT" not in str(table.query.call_args.kwargs["FilterExpression"].get_expression())
+
+
+def test_chat_senders_do_not_change_how_voices_are_named(strands_module, monkeypatch):
+    """Voices are named from the speech alone, so a chat sender is never folded into one."""
+    seen = []
+
+    def namer(_call_id, _table, items):
+        seen.extend(item["Channel"] for item in items)
+        return lambda item: item["Speaker"]
+
+    monkeypatch.setattr(strands_module, "meeting_speaker_namer", namer)
+    _table_returning(
+        strands_module,
+        monkeypatch,
+        [{"Items": [_segment("Alice", "Hi.", 1.0), _chat("Alice", "Hi from the chat.", 2.0)]}],
+    )
+    strands_module.fetch_meeting_transcript(CALL_ID, TABLE)
+    assert seen == ["REMOTE"]
+
+
+def test_the_standalone_fallback_chat_channel_name_matches_the_layer(strands_module):
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+    from lma_channels import MEETING_CHAT
+
+    assert strands_module.MEETING_CHAT_CHANNEL == MEETING_CHAT
+    import ast
+
+    tree = ast.parse((FUNCTION_SRC / "strands_meeting_assist_function.py").read_text())
+    fallbacks = [
+        ast.literal_eval(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "MEETING_CHAT_CHANNEL" for t in node.targets)
+    ]
+    assert fallbacks == [MEETING_CHAT]
+
+
+def test_the_current_meeting_tool_includes_screen_share_text(strands_module):
+    """The shared-screen tool, offered with the transcript, gives each frame's title and text."""
+    import meeting_frames
+
+    frame = {
+        "FrameId": "f1",
+        "Timestamp": 30.0,
+        "Title": "Q3 budget",
+        "SlideText": "Revenue 12M\nCosts 9M",
+        "ContentKind": "SCREEN",
+    }
+    result = meeting_frames.build_tool_result(
+        [(frame, 90.0)], [], {}, total_frames=1, send_images=False, show_inline=False
+    )
+    text = "\n".join(block["text"] for block in result["content"])
+    assert "Shows: Q3 budget" in text
+    assert "Revenue 12M\nCosts 9M" in text
+    assert "on screen from 00:30 to 01:30" in text

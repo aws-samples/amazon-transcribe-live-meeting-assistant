@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Computation from call_event_processor that touches nothing outside itself.
 
@@ -22,11 +22,13 @@ session belongs in call_event_processor.py, not in this module.
 
 from __future__ import annotations
 
+import json
 from statistics import fmean
-from typing import Any, Dict, List, Literal, Optional, Pattern, TypedDict
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Pattern, TypedDict
 
 SentimentLabelType = Literal["NEGATIVE", "MIXED", "NEUTRAL", "POSITIVE"]
-ChannelType = Literal["AGENT", "CALLER"]
+# The speech channels sentiment is aggregated for (lma_channels.SPEECH_CHANNELS).
+ChannelType = Literal["REMOTE", "LOCAL"]
 SentimentPeriodType = Literal["QUARTER"]
 
 # The meeting timeline is divided into this many equal periods.
@@ -145,6 +147,43 @@ def matches_wake_phrase(pattern: Optional[Pattern[str]], transcript: str) -> boo
     return pattern.search(transcript) is not None
 
 
+class SegmentAnalyses(NamedTuple):
+    """Which per-segment analyses a stored transcript segment is given."""
+
+    sentiment: bool
+    agent_assist: bool
+
+
+def segment_analyses(
+    *,
+    is_speech: bool,
+    is_partial: bool,
+    sentiment_enabled: bool,
+    agent_assist_enabled: bool,
+    wake_pattern: Callable[[], Optional[Pattern[str]]],
+    transcript: str,
+) -> SegmentAnalyses:
+    """Whether a segment gets Amazon Comprehend sentiment, and wakes the Meeting Assistant.
+
+    Both read what was said, so both are for a final segment on a speech
+    channel only. A message typed in the meeting chat (the MEETING_CHAT
+    channel) is stored like a segment but gets neither: its sentiment would be
+    counted with the speakers', and a wake phrase typed in the chat is not
+    somebody asking the assistant aloud. ``is_speech`` is the caller's
+    ``lma_channels.is_speech_channel(channel)``; it is passed in so this module
+    keeps no imports outside the standard library. ``wake_pattern`` is called
+    only for a segment that could wake the assistant, because reading it reads
+    the configuration.
+    """
+    final_speech = is_speech and not is_partial
+    return SegmentAnalyses(
+        sentiment=final_speech and sentiment_enabled,
+        agent_assist=final_speech
+        and agent_assist_enabled
+        and matches_wake_phrase(wake_pattern(), transcript),
+    )
+
+
 def convert_keys_to_uppercamelcase(d: Dict[str, Any]) -> Dict[str, Any]:
     """Upper-case the first letter of every key, recursively through nested dicts.
 
@@ -171,3 +210,146 @@ def merge_dicts(d1: Dict[Any, Any], d2: Dict[Any, Any]) -> Dict[Any, Any]:
     new_dict = d1.copy()
     new_dict.update(d2)
     return new_dict
+
+
+def agenda_derivation_due(
+    call_id: Optional[str],
+    end_time: Any,
+    after_seconds: float,
+    already_queued: "set[str]",
+) -> bool:
+    """Whether a final segment should queue the automatic agenda pass.
+
+    True once the meeting's transcript reaches ``after_seconds`` from its start,
+    the first time this execution environment sees that for the meeting. The
+    environment-local set only keeps a busy meeting from queueing a pass per
+    segment; it is not what makes the pass run once. Other environments queue it
+    too, and the deriver's own conditional claim on the meeting record is what
+    lets only one of them reach the model. ``after_seconds`` of 0 or less turns
+    the automatic pass off.
+    """
+    if not call_id or after_seconds <= 0 or call_id in already_queued:
+        return False
+    try:
+        return float(end_time) >= after_seconds
+    except (TypeError, ValueError):
+        return False
+
+
+def apply_meeting_access(segment: Dict[str, Any], meeting: Dict[str, Any]) -> None:
+    """Gives a transcript segment its meeting's Owner and SharedWith, in place.
+
+    ``meeting`` is what ``get_call_details`` read from the meeting record, so the
+    access fields come from the record rather than from the event. SharedWith is
+    the meeting's, None included, as it has always been for a segment. Owner is
+    set when the meeting has one; a meeting without one leaves the segment's
+    Owner as normalization made it (from a verified access token, or None).
+
+    Every write of a segment to ``addTranscriptSegment`` replaces the whole
+    item, so each write of the same segment -- the transcript, then its
+    sentiment -- has to carry these fields.
+    """
+    segment["SharedWith"] = meeting.get("SharedWith")
+    owner = meeting.get("Owner")
+    if owner is not None:
+        segment["Owner"] = owner
+
+
+# The meeting record's capture context fields (Call.CaptureSource and the three
+# beside it in schema.graphql), which START carries and UPDATE_CAPTURE_CONTEXT
+# changes. See docs/websocket-streaming-api.md#capture-context.
+CAPTURE_CONTEXT_FIELDS = (
+    "CaptureSource",
+    "TranscriptionEngine",
+    "TranscriptionLanguage",
+    "SpeakerSeparation",
+)
+
+
+def capture_context_fields(message: Dict[str, Any]) -> Dict[str, str]:
+    """The capture context fields an event sets: each one it carries as a
+    non-blank string. A field it leaves out keeps the value already stored."""
+    return {
+        field: message[field].strip()
+        for field in CAPTURE_CONTEXT_FIELDS
+        if isinstance(message.get(field), str) and message[field].strip()
+    }
+
+
+#: Longest chat sender name stored in Call.TranscriptionPause.
+MAX_PAUSED_BY_LENGTH = 200
+
+
+def transcription_pause_state(message: Dict[str, Any], now_iso: str) -> Optional[str]:
+    """Call.TranscriptionPause for an UPDATE_TRANSCRIPTION_PAUSE event, or None
+    when the event does not say whether transcription is paused.
+
+    A JSON string, always written whole, so a resume replaces the pause (and its
+    sender) rather than leaving fields of it behind: the Call update resolver
+    skips blank values, so a field cannot be cleared by writing it empty.
+    ``{"Paused": true, "At": ..., "By": ...}`` for a pause, ``By`` only when
+    the chat showed a sender; ``{"Paused": false, "At": ...}`` for a resume.
+    ``At`` is when the Virtual Participant saw the command, or ``now_iso`` when
+    the event does not carry it.
+    """
+    paused = message.get("Paused")
+    if not isinstance(paused, bool):
+        return None
+    changed_at = message.get("ChangedAt")
+    at = changed_at.strip() if isinstance(changed_at, str) and changed_at.strip() else now_iso
+    state: Dict[str, Any] = {"Paused": paused, "At": at}
+    paused_by = message.get("PausedBy")
+    if paused and isinstance(paused_by, str) and paused_by.strip():
+        state["By"] = paused_by.strip()[:MAX_PAUSED_BY_LENGTH]
+    return json.dumps(state, separators=(",", ":"))
+
+
+#: How many meetings an execution environment remembers the languages of before
+#: forgetting them all; forgetting costs at most one conditional write per
+#: language of a meeting it sees again.
+DETECTED_LANGUAGES_MEMORY = 5000
+
+
+def language_to_record(
+    call_id: Optional[str],
+    language_code: Optional[str],
+    stored_languages: Any,
+    noted: "Dict[str, set[str]]",
+) -> Optional[str]:
+    """The language a segment adds to its meeting's DetectedLanguages, or None.
+
+    ``stored_languages`` is the list ``getCall`` returned for the meeting, which
+    the processor reads for every segment anyway, and ``noted`` the languages
+    this execution environment has already written per meeting. Both are
+    needed: the record read for a segment can predate the write made for an
+    earlier segment of the same batch, and without ``noted`` every segment of a
+    batch in a new language would write it again. Neither is what keeps the
+    list free of repeats -- other environments write too, and the write's own
+    condition does that -- so this only decides whether a write is worth making.
+
+    A language returned here is noted at once, so a second segment in the same
+    batch does not ask again; ``forget_language`` takes it back when the write
+    did not succeed.
+    """
+    if not call_id or not isinstance(language_code, str) or not language_code.strip():
+        return None
+    code = language_code.strip()
+    stored = stored_languages if isinstance(stored_languages, list) else []
+    if code in stored:
+        return None
+    seen = noted.get(call_id)
+    if seen is not None and code in seen:
+        return None
+    if seen is None:
+        if len(noted) >= DETECTED_LANGUAGES_MEMORY:
+            noted.clear()
+        seen = noted.setdefault(call_id, set())
+    seen.add(code)
+    return code
+
+
+def forget_language(call_id: str, language_code: str, noted: "Dict[str, set[str]]") -> None:
+    """Undo ``language_to_record`` for a write that failed, so a later segment retries it."""
+    seen = noted.get(call_id)
+    if seen is not None:
+        seen.discard(language_code)

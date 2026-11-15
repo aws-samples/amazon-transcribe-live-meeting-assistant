@@ -1,4 +1,61 @@
 #if ( $ctx.error )
   $util.error($ctx.error.message, $ctx.error.type)
 #end
-$util.toJson({"TranscriptSegmentsWithSentiment": $ctx.result.items, "nextToken": $ctx.result.nextToken})
+
+## This resolver can be invoked by either a Lambda function with IAM authentication
+## or a User authenticated using Cognito. The Lambda function gets unrestricted access
+## to all the call records stored in the DynamoDB to perform the backend operations in the
+## Call Event Processor function; a signed-in caller is answered the segments of
+## meetings they own or that are shared with them, and an Admin all of them, as
+## getTranscriptSegments answers.
+
+#set($isCognitoUser = true)
+#if($context.identity.userArn && $context.identity.userArn.contains(":assumed-role/"))
+  #set($isCognitoUser = false)
+#end
+
+#if(!$context.identity.groups.contains("Admin") && $isCognitoUser)
+  #set($myResults = [])
+  #foreach($item in $context.result.items)
+    #set( $sharedWithRaw = $util.defaultIfNull($item.SharedWith, "") )
+## BEGIN SharedWith entries -- one text in every template that reads SharedWith;
+## test_shared_with_access.py holds the copies to it.
+## Reads $sharedWithRaw into $sharedWithEntries, a list of trimmed, non-empty
+## entries, from every shape SharedWith is stored in: a List (shareCall and
+## shareTranscriptSegment write one), a string set, and a comma-separated or
+## "[a, b]" String (older meeting rows; transcript segments and key frames, which
+## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
+## "[", "]" and "," only ever separate entries: a String is split at each of
+## them, and a List element that contains one is not an entry, so no entry holds
+## a separator and the "[a, b]" form subscription.js matches is unambiguous.
+## Membership is then a comparison of whole entries, as in the Lambda resolvers.
+## Every template sets $sharedWithRaw through $util.defaultIfNull(..., ""): a
+## #set whose value is null leaves the variable as it was, which in a loop
+## would carry one item's SharedWith over to the next.
+#set( $sharedWithEntries = [] )
+#if( $util.isList($sharedWithRaw) )
+  #foreach( $sharedWithEntry in $sharedWithRaw )
+    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty()
+        && !$sharedWithEntry.contains("[") && !$sharedWithEntry.contains("]")
+        && !$sharedWithEntry.contains(",") )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#elseif( $util.isString($sharedWithRaw) )
+  #set( $sharedWithText = $sharedWithRaw.replace("[", ",").replace("]", ",") )
+  #foreach( $sharedWithEntry in $sharedWithText.split(",") )
+    #if( !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#end
+## END SharedWith entries
+    #if($item.Owner == $context.identity.username || $sharedWithEntries.contains($context.identity.username))
+      #set($added = $myResults.add($item))
+    #end
+  #end
+  $util.toJson({"TranscriptSegmentsWithSentiment": $myResults, "nextToken": $ctx.result.nextToken})
+#else
+  $util.toJson({"TranscriptSegmentsWithSentiment": $ctx.result.items, "nextToken": $ctx.result.nextToken})
+#end
+

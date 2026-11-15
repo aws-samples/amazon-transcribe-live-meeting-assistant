@@ -9,7 +9,9 @@ title: "Stream Audio"
 - [Overview](#overview)
 - [Use Cases](#use-cases)
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
+- [Meeting Consent](#meeting-consent)
 - [Speaker Identification](#speaker-identification)
+- [If the Connection Drops](#if-the-connection-drops)
 - [Browser Compatibility](#browser-compatibility)
 - [Technical Details](#technical-details)
 - [Important Notice](#important-notice)
@@ -71,6 +73,19 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 
 ![Open Recorded Meeting](../images/readme-stream-audio-open-recorded.png)
 
+## Meeting Consent
+
+When the deployment's [meeting consent](meeting-consent.md) mode is Notify or
+Opt-in, a **Meeting consent** panel appears above the Start button. It shows
+the notice to read out or paste into the meeting chat (**Copy notice**), asks
+you to confirm that you shared it or, in Opt-in, that everyone agreed, and how;
+offers **Capture evidence** to keep a screenshot of the meeting on its consent
+record; and, while streaming, **Participant objected**, which stops the stream
+and records the objection. In Opt-in, Start is refused until you confirm, and
+nothing is recorded or transcribed until the transcriber has recorded your
+confirmation on the meeting. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+
 ## Speaker Identification
 
 The names you enter above give one speaker name per channel: everything from the
@@ -103,8 +118,35 @@ Notes:
 - Labels are numbers, not names -- Transcribe distinguishes voices but does not
   identify who they belong to. If you need real names for meeting participants,
   use the [Chrome Extension](browser-extension.md) or a
-  [Virtual Participant](virtual-participant.md), which read them from the meeting.
+  [Virtual Participant](virtual-participant.md), which read them from the meeting
+  and, with speaker identification on, use the voices to correct the meeting
+  page's speaker names (see
+  [How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named)).
+  Stream Audio has no meeting page to read, so its labels are unchanged.
 - There is no additional Amazon Transcribe charge for speaker identification.
+
+## If the Connection Drops
+
+If the page's connection to LMA drops while you are streaming (for example on a
+change of network), the page keeps capturing and reconnects on its own, after 1, 2 and 4 seconds and then
+every 5 seconds. Each time it connects it signs in with your current session and
+continues the same meeting: the transcript and the recording carry on in the same
+meeting, with one recording. The page keeps the last 3 seconds of audio captured
+while it was disconnected and sends them once it has reconnected; anything said
+earlier in the outage is missing from both the transcript and the recording.
+
+LMA holds a meeting whose connection dropped for 60 seconds. If the page cannot
+reconnect within 55 seconds, it stops streaming and shows **Connection lost:
+meeting ended**. The meeting keeps everything captured before the drop and has
+its summary as usual, and **Open recorded meeting** opens it. Click **Start
+Streaming** to continue in a new meeting. The 55 seconds count from when the
+browser notices the connection is gone, which for a network that fails silently
+can be some time after it failed. If LMA has already ended the meeting by the
+time the page reconnects, the page's audio goes to a second session of the same
+meeting, as described under
+[Reconnection](websocket-streaming-api.md#reconnection). The same happens
+when the reconnection reaches a different transcription server task than the
+one holding the meeting, on deployments that run more than one.
 
 ## Browser Compatibility
 
@@ -118,9 +160,9 @@ Because attribution is per channel, several people sharing one microphone appear
 as a single speaker unless you tick the **Speaker identification** boxes above.
 Your speaker-identification choices are sent once, in the session's opening
 message, and the server enables speaker partitioning for the channels you chose.
-Which engine does the partitioning depends on the deployment: Amazon Transcribe
-by default, or the [on-demand ASR & diarization engine](microvm-asr.md) when that
-is deployed. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
+Which engine does the partitioning depends on the deployment: Amazon Transcribe by
+default, or the [ASR MicroVM engine](microvm-asr.md) where it is deployed and an admin
+has moved these meetings onto it. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
 for the protocol details.
 
 ## Important Notice

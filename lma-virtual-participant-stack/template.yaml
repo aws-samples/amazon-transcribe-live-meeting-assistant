@@ -1,11 +1,17 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
 Parameters:
+  # Since 0.4.0 the voice assistant, avatar face, Teams meeting-end polling,
+  # Amazon Transcribe and audio-recording parameters below are Configuration
+  # page settings. lma-main.yaml no longer passes these parameters, so each
+  # stays at its default, which is the setting's shipped default, and is the
+  # task's fallback when the configuration cannot be read. The task reads the
+  # configuration first (backend/src/stack-settings.ts).
   LMAStackName:
     Type: String
     Description: LMA Stack Name
@@ -17,18 +23,26 @@ Parameters:
       (Optional) ARN of the Strands agent Lambda function (ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN).
       When provided, enables Nova voice agent to delegate complex queries to the Strands agent.
 
-  # {LMA_USER} token is replaced by user's name at runtime.
+  # {LMA_USER} token is replaced by user's name at runtime, and {LMA_HANDLE}
+  # by the name to add after "LMA" to address this VP (the owner's first name
+  # or email local part).
 
+  # The VP's display name is the Configuration page setting Virtual Participant
+  # > Display name (virtual_participant.displayName), applied over LMA_IDENTITY
+  # when the VP starts (backend/src/stack-settings.ts). lma-main.yaml does not
+  # pass this parameter; it stays at the setting's shipped default as the
+  # fallback for a VP that cannot read the configuration.
   LMAIdentity:
     Type: String
-    Default: LMA ({LMA_USER})
+    Default: 'LMA - {LMA_USER}'
 
   IntroMessage:
     Type: String
     Default: >-
       Hello. I am an AI Live Meeting Assistant (LMA).
       I was invited by {LMA_USER} to join this call.
-      Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat.
+      Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands.
+      If there is more than one LMA here, add my name: "LMA {LMA_HANDLE} leave".
       To learn more please visit: https://amazon.com/live-meeting-assistant.
 
   StartRecordingMessage:
@@ -102,6 +116,14 @@ Parameters:
   EventSourcingTableName:
     Type: String
     Description: Name of the EventSourcingTable (CallEventTable) DynamoDB table from AI stack
+
+  MeetingRecordExpirationInDays:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Days a meeting record is kept. The Virtual Participant's
+      metering records for the meeting cost estimate expire with the meeting
+      they belong to. Empty leaves them without a TTL.
 
   VNCTargetGroupArn:
     Type: String
@@ -192,26 +214,34 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) Zoom Meeting SDK app Client ID. When both ZoomMeetingSdkClientId
-      and ZoomMeetingSdkClientSecret are provided, the Virtual Participant joins
+      and ZoomMeetingSdkClientSecretArn are provided, the Virtual Participant joins
       Zoom meetings via the Zoom Meeting Web SDK instead of automating the public
       web client. Requires Zoom approval/allowlist of the SDK app for meetings
       outside the app owner's own account. Leave both blank to use the default
       web-client join.
 
-  ZoomMeetingSdkClientSecret:
+  # Third-party credentials reach this stack as the ARN of the Secrets Manager
+  # secret that holds them, never as the value. The container reads each one
+  # from the environment variable of the same name it always has:
+  # ZOOM_MEETING_SDK_CLIENT_SECRET, ACS_CONNECTION_STRING, ELEVENLABS_API_KEY
+  # and SIMLI_API_KEY. Under the ECS launch types the ECS agent resolves the ARN
+  # and sets the variable at task start; under MICROVM the launcher Lambda does
+  # the same before the container's /run hook fires. Each parameter is empty
+  # when its feature is unconfigured.
+  ZoomMeetingSdkClientSecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) Zoom Meeting SDK app Client Secret. Paired with
-      ZoomMeetingSdkClientId. Used to sign the SDK join signature.
+      (Optional) ARN of the Secrets Manager secret holding the Zoom Meeting SDK
+      app client secret. Paired with ZoomMeetingSdkClientId. Used to sign the
+      SDK join signature.
 
-  AcsConnectionString:
+  AcsConnectionStringSecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) Azure Communication Services connection string
+      (Optional) ARN of the Secrets Manager secret holding the Azure
+      Communication Services connection string
       (endpoint=https://...;accesskey=...). When provided, the Virtual
       Participant joins Microsoft Teams meetings via the ACS calling SDK
       (Teams interoperability) instead of automating the Teams web client.
@@ -261,18 +291,19 @@ Parameters:
       Consecutive polls on which a Teams meeting must show neither a readable
       attendee count nor any in-meeting controls before the Virtual Participant
       leaves. 15 polls at the default cadence is about 5 minutes. Raise
-      this if participants report the Virtual Participant leaving meetings
-      that are still in progress. A value producing a tolerance outside 4 to
+      it on the Configuration page (Virtual Participant section) if
+      participants report the Virtual Participant leaving meetings that are
+      still in progress. A value producing a tolerance outside 4 to
       30 minutes at the chosen cadence is adjusted into that range, so at the
       default cadence anything below 12 is raised.
 
-  ElevenLabsApiKey:
+  ElevenLabsApiKeySecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for ElevenLabs text-to-speech and conversational AI.
-      When provided, enables voice interaction capabilities in Virtual Participant.
+      (Optional) ARN of the Secrets Manager secret holding the ElevenLabs API
+      key for text-to-speech and conversational AI. When provided, enables
+      voice interaction capabilities in Virtual Participant.
 
   ElevenLabsAgentId:
     Type: String
@@ -281,23 +312,24 @@ Parameters:
       (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
       Leave blank to use default conversational agent.
 
-  SimliApiKey:
+  SimliApiKeySecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for Simli avatar. The avatar feature requires BOTH
-      SimliApiKey and SimliFaceId — leave both blank to disable, or set both
-      to enable animated avatar video for the Virtual Participant's camera
-      feed. The avatar lip-syncs with the voice assistant's audio output.
+      (Optional) ARN of the Secrets Manager secret holding the Simli API key.
+      The avatar feature requires BOTH this and SimliFaceId — leave both blank
+      to disable, or set both to enable animated avatar video for the Virtual
+      Participant's camera feed. The avatar lip-syncs with the voice
+      assistant's audio output.
 
   SimliFaceId:
     Type: String
     Default: ""
     Description: >-
       (Optional) Simli Face ID for the avatar appearance. Required when
-      SimliApiKey is set — the avatar is enabled only when BOTH parameters
-      are non-empty. Get this from your Simli dashboard at simli.com.
+      SimliApiKeySecretArn is set — the avatar is enabled only when BOTH
+      parameters are non-empty. Get this from your Simli dashboard at
+      simli.com.
 
   SimliTransportMode:
     Type: String
@@ -357,8 +389,18 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) DynamoDB table name for Nova Sonic configuration.
-      When provided, enables customizable prompts for Nova voice assistant.
+      (Optional) DynamoDB table the Nova Sonic voice assistant settings were
+      stored in before they moved into the shared configuration table. Read
+      only as a fallback, when ConfigurationTableName holds no shipped Nova
+      Sonic settings or cannot be read.
+
+  ConfigurationTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The shared configuration table created by the AI stack. The
+      voice assistant reads its settings -- prompt, model, voice, meeting mode
+      and translator languages -- from it when it starts.
 
   NovaModelId:
     Type: String
@@ -501,14 +543,43 @@ Parameters:
       Transcribe. When set, a VP still uses Amazon Transcribe unless the Transcription Engine
       page's deployment default says otherwise; it reads that switch at meeting start.
 
+  AsrModelLanguages:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") the deployed ASR
+      bundle transcribes. A Virtual Participant whose language is another stays on
+      Amazon Transcribe; empty means English only.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  SchedulerStateMachineLogsExpirationInDays:
+    Type: Number
+    Default: 7
+    Description: >-
+      Retention for the scheduled-launch state machine's execution-history log
+      group. Kept shorter than CloudWatchLogsExpirationInDays by default because
+      the state machine logs every state transition of every scheduled Virtual
+      Participant. Raise it while investigating a scheduled launch that did not
+      start.
+
   CustomerManagedEncryptionKeyArn:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
+
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      When true, this stack's MicroVM log group is retained on a stack delete and
+      on a change of VPLaunchType, so a meeting's MicroVM output survives both.
+      When false, it is deleted with the resource that produced it.
 
   PermissionsBoundaryArn:
     Type: String
@@ -596,11 +667,27 @@ Conditions:
   # model ARN in that region too, or the client is pointed somewhere IAM denies.
   HasCustomNovaSonicRegion: !Not [!Equals [!Ref AmazonNovaSonicRegion, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
+  HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, ""]]
   # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
   # no origin-verify secret for one.
   HasVncOriginVerifySecret: !Not [!Equals [!Ref VncOriginVerifyHeaderValueSecretArn, ""]]
+  # One per third-party credential, each true only when that feature is
+  # configured, so an unconfigured feature contributes neither a Secrets entry
+  # on the task definition nor an IAM grant.
+  HasZoomMeetingSdkClientSecretArn:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]]
+  HasAcsConnectionStringSecretArn:
+    !Not [!Equals [!Ref AcsConnectionStringSecretArn, ""]]
+  HasElevenLabsApiKeySecretArn: !Not [!Equals [!Ref ElevenLabsApiKeySecretArn, ""]]
+  HasSimliApiKeySecretArn: !Not [!Equals [!Ref SimliApiKeySecretArn, ""]]
+  HasAnyIntegrationSecret: !Or
+    - !Condition HasZoomMeetingSdkClientSecretArn
+    - !Condition HasAcsConnectionStringSecretArn
+    - !Condition HasElevenLabsApiKeySecretArn
+    - !Condition HasSimliApiKeySecretArn
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -730,6 +817,18 @@ Resources:
                   - "ec2:TerminateInstances"
                 Resource:
                   - "*"
+
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  VirtualParticipantBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/VirtualParticipantBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
@@ -906,6 +1005,10 @@ Resources:
           - Name: VP_LAUNCH_TYPE
             Value: !Ref VPLaunchType
       ServiceRole: !GetAtt BuildRole.Arn
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref VirtualParticipantBuildProjectLogGroup
       Artifacts:
         Type: NO_ARTIFACTS
 
@@ -952,8 +1055,21 @@ Resources:
                 Resource:
                   - "*"
 
+  # Named independently of the function on purpose: !Sub-ing the function's
+  # generated physical name would make this group depend on the function, so
+  # CloudFormation would create the function first and the first invocation
+  # would let Lambda create the group itself.
+  BuildCustomResourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BuildCustomResourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   BuildCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    DependsOn:
+      - BuildCustomResourceFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -973,6 +1089,8 @@ Resources:
       Role: !GetAtt BuildCustomResourceRole.Arn
       Timeout: 900
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref BuildCustomResourceFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -1059,8 +1177,17 @@ Resources:
                 Resource:
                   - "*"
 
+  ECSRoleCustomResourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ECSRoleCustomResourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   ECSRoleCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    DependsOn:
+      - ECSRoleCustomResourceFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1080,6 +1207,8 @@ Resources:
       Role: !GetAtt ECSRoleCustomResourceRole.Arn
       Timeout: 300
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref ECSRoleCustomResourceFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -1175,10 +1304,27 @@ Resources:
               - Effect: Allow
                 Action:
                   - kinesis:PutRecord
-                  - kinesis:PutRecords
-                  - kinesis:DescribeStream
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              # The recordings bucket and the call data stream are encrypted
+              # with the stack's customer-managed key. This role is used by the
+              # ECS tasks and by the running MicroVM alike.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -1192,7 +1338,6 @@ Resources:
                   - transcribe:ListVocabularies
                   - transcribe:StartStreamTranscription
                   - transcribe:StartTranscriptionJob
-                  - transcribe:StartCallAnalyticsStreamTranscription
                 Resource: "*"
         # Acquire, re-token and release ASR MicroVMs through the launcher, exactly
         # as the WebSocket transcriber does; the VP never calls lambda-microvms itself.
@@ -1253,6 +1398,23 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+        # Metering records for the meeting cost estimate: the VP's compute,
+        # Transcribe, Nova Sonic and page-automation usage. PutItem only, and
+        # only under the mtr# partitions of the meeting table; the KMS grant
+        # its encryption needs is on VPTaskRegistryPolicy above.
+        - PolicyName: MeteringPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTableName}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
         - PolicyName: DomSelectorCachePolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -1382,6 +1544,27 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*claude-haiku-4-5*"
+        # GetItem only: the voice assistant's read is three of them -- the
+        # active-profile pointer, the baseline and the profile it names.
+        - !If
+          - HasConfigurationTable
+          - PolicyName: ConfigurationTableRead
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:GetItem"
+                  Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+                - Effect: Allow
+                  Action:
+                    - "kms:Decrypt"
+                    - "kms:DescribeKey"
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+          - !Ref AWS::NoValue
         - PolicyName: NovaSonicConfigAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -1436,6 +1619,55 @@ Resources:
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      # The ECS agent resolves a container definition's Secrets with the task
+      # EXECUTION role, so the read lives here and not on TaskRole: on the ECS
+      # launch types the container's own credentials grant no access to these
+      # secrets. Under MICROVM the launcher Lambda resolves them instead and
+      # stages the values in the VP task registry, which the container does
+      # read with TaskRole -- see VPMicrovmLauncherRole below and
+      # docs/infrastructure-and-security.md#integration-credentials.
+      #
+      # Scoped to the specific secret ARNs this deployment was given, and the
+      # whole policy is absent when no integration is configured.
+      #
+      # AmazonECSTaskExecutionRolePolicy above does not cover this: it grants
+      # ECR pull and CloudWatch Logs only.
+      Policies: !If
+        - HasAnyIntegrationSecret
+        - - PolicyName: ReadIntegrationCredentialSecrets
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - HasZoomMeetingSdkClientSecretArn
+                      - !Ref ZoomMeetingSdkClientSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasAcsConnectionStringSecretArn
+                      - !Ref AcsConnectionStringSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasElevenLabsApiKeySecretArn
+                      - !Ref ElevenLabsApiKeySecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasSimliApiKeySecretArn
+                      - !Ref SimliApiKeySecretArn
+                      - !Ref AWS::NoValue
+                # The secrets this stack creates are encrypted with the
+                # customer-managed key, so GetSecretValue alone is not enough
+                # to read them. A secret supplied by the operator under its own
+                # key needs a matching grant in that key's policy instead.
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
         - !Ref AWS::NoValue
 
   Cluster:
@@ -1580,9 +1812,19 @@ Resources:
                   - ec2:DescribeInstances
                 Resource: "*"
 
+  ASGDeletionHandlerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseEC2LaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ASGDeletionHandlerFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   ASGDeletionHandlerFunction:
     Type: AWS::Lambda::Function
     Condition: UseEC2LaunchType
+    DependsOn:
+      - ASGDeletionHandlerFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -1605,6 +1847,8 @@ Resources:
       Role: !GetAtt ASGDeletionHandlerRole.Arn
       Timeout: 300
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref ASGDeletionHandlerFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -1620,7 +1864,12 @@ Resources:
           autoscaling = boto3.client('autoscaling')
           
           def handler(event, context):
-              logger.info(f"Event: {event}")
+              # The request type and resource only: the event's ResponseURL is a
+              # presigned URL and stays out of the logs.
+              logger.info(
+                  f"{event.get('RequestType')} request for "
+                  f"{event.get('LogicalResourceId')} ({event.get('RequestId')})"
+              )
               request_type = event['RequestType']
               asg_name = event['ResourceProperties'].get('AutoScalingGroupName')
               
@@ -2011,6 +2260,57 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
 
+  # Destination for the image build and for every MicroVM's stdout -- the
+  # highest-volume stream in the VP stack, so it is declared here to carry the
+  # stack's retention setting and the customer-managed key rather than being
+  # created by the service with no expiry and the AWS-owned key.
+  #
+  # Two settings route output here, and both are needed. The image's
+  # Logging.CloudWatch.LogGroup covers only the build, snapshot and /validate
+  # output. Each running MicroVM's output goes to the group named in that
+  # RunMicrovm call's own `logging` member, which VPMicrovmLauncherFunction
+  # passes from MICROVM_LOG_GROUP_NAME; a RunMicrovm that names no group logs
+  # to a service-created `/aws/lambda-microvms/<image name>` group instead.
+  # The MicroVM execution role (TaskRole) writes the runtime streams, through
+  # LogsPolicy; the customer-managed key's policy already admits CloudWatch
+  # Logs for this account.
+  #
+  # The name deliberately differs from the group earlier releases logged to
+  # (`/aws/lambda-microvms/${LMAStackName}-vp`). That group is already present
+  # in any stack that has built the image, and CloudFormation cannot adopt an
+  # existing log group: declaring it under the same name fails the update with
+  # "already exists". The previous group is left in place with the logs it
+  # already holds.
+  #
+  # Kept under the /aws/lambda-microvms/ prefix so VPMicrovmBuildRole's and the
+  # task role's existing log-group scoping still covers it.
+  VPMicrovmLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    # Treated as stateful, like VirtualParticipantTaskDefContainerLogGroup: this
+    # is where a meeting's MicroVM output lands, so neither a stack delete nor a
+    # change of VPLaunchType should take it with them -- and because the group
+    # is conditional, a launch-type change alone would otherwise delete every
+    # MicroVM meeting log as a side effect.
+    #
+    # RetainExceptOnCreate rather than Retain, because the update that first
+    # creates this group is the same one that rebuilds the image. If that build
+    # fails the update rolls back -- and a plain Retain is honoured even when
+    # rolling back the operation that created the resource, which would leave the
+    # group behind and make the retry fail with "already exists". The retry has
+    # to be able to create this group again.
+    #
+    # Retaining it on a real delete has the consequence every retained resource
+    # in LMA has: the name is derived from the parent stack's name, so moving off
+    # MICROVM and back with retention enabled leaves the retained group in the
+    # way of the new one. Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, RetainExceptOnCreate, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-vp-logs"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # The MicroVM image: a versioned Firecracker snapshot built from the same
   # Dockerfile the ECS launch types use.
   #
@@ -2021,6 +2321,11 @@ Resources:
   VPMicrovmImage:
     Type: AWS::Lambda::MicrovmImage
     Condition: UseMicrovmLaunchType
+    # Logging.CloudWatch.LogGroup is a destination name, not a group the
+    # resource owns, so the group has to exist before the first build writes to
+    # it -- and has to outlive the image on a stack delete.
+    DependsOn:
+      - VPMicrovmLogGroup
     # cfn-lint 1.51 ships no schema for this resource type yet (service launched
     # 2026-06), so E3006 would otherwise fail `make lint-cfn` in CI. Scoped to
     # this resource rather than disabling the rule globally.
@@ -2048,7 +2353,7 @@ Resources:
         - Architecture: ARM_64
       Logging:
         CloudWatch:
-          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-vp"
+          LogGroup: !Ref VPMicrovmLogGroup
       # Egress via the VPC connector (see VPMicrovmEgressConnector) rather than
       # the Lambda-managed INTERNET_EGRESS pool, so the VP reaches
       # Zoom/Teams/Webex/Chime and the AWS public APIs from the VPC's NAT
@@ -2110,6 +2415,104 @@ Resources:
           ResumeTimeoutInSeconds: 30
           Terminate: ENABLED
           TerminateTimeoutInSeconds: 30
+
+  # Keeps the image below its 50-version cap. Each rebuild adds a version, so a
+  # stack deployed often would otherwise reach the cap and the next image build
+  # would fail -- stopping the update at the first resource it touches.
+  VPMicrovmImagePrunerRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: MicrovmImageVersions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:GetMicrovmImage
+                  - lambda:ListMicrovmImageVersions
+                  - lambda:DeleteMicrovmImageVersion
+                Resource: !GetAtt VPMicrovmImage.ImageArn
+
+  VPMicrovmImagePrunerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPMicrovmImagePruner"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VPMicrovmImagePrunerFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseMicrovmLaunchType
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it runs once per stack operation
+    # checkov:skip=CKV_AWS_115: "Function runs once per stack operation; reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a Cfn custom resource that reports its own outcome"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VPMicrovmImagePruner"
+      LoggingConfig:
+        LogGroup: !Ref VPMicrovmImagePrunerLogGroup
+      Handler: image_version_pruner.lambda_handler
+      Runtime: python3.12
+      # Deletes are serialised and a blocked one is retried over several passes.
+      # The handler stops and reports while 30s remain, so it does not rely on
+      # this being generous enough for the worst case.
+      Timeout: 600
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt VPMicrovmImagePrunerRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        # The same deployment package as the launcher: the handler imports
+        # microvm_client.py, which ships alongside it.
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref MicrovmLauncherS3Key
+
+  VPMicrovmImagePruner:
+    Type: Custom::MicrovmImageVersionPruner
+    Condition: UseMicrovmLaunchType
+    Properties:
+      ServiceToken: !GetAtt VPMicrovmImagePrunerFunction.Arn
+      # The GetAtt is what orders this after the image, so no DependsOn.
+      ImageArn: !GetAtt VPMicrovmImage.ImageArn
+      # How many versions to leave behind beyond the active one.
+      KeepVersions: 5
+      # Carried only to trigger the prune. A custom resource is only invoked
+      # when one of its properties changes, and this one changes on every
+      # successful rebuild -- including rebuilds caused by a property change
+      # rather than new source, which the source location would miss. A rebuild
+      # whose version FAILS consumes a version number without changing this,
+      # so a long run of consecutive failures would not be pruned until the
+      # next success.
+      LatestActiveImageVersion: !GetAtt VPMicrovmImage.LatestActiveImageVersion
 
   # EventBridge Scheduler assumes this to invoke the launcher for meetings booked
   # in advance (the MICROVM equivalent of TargetECSRole, which Scheduler uses to
@@ -2203,6 +2606,42 @@ Resources:
               - Effect: Allow
                 Action: ecs:DescribeTaskDefinition
                 Resource: "*"
+              # A MicroVM has no ECS agent, so the launcher does what the agent
+              # does on the ECS launch types: resolve the task definition's
+              # Secrets entries and hand the container the same environment
+              # variables. Scoped to the same specific ARNs the task execution
+              # role is granted.
+              - !If
+                - HasAnyIntegrationSecret
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - HasZoomMeetingSdkClientSecretArn
+                      - !Ref ZoomMeetingSdkClientSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasAcsConnectionStringSecretArn
+                      - !Ref AcsConnectionStringSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasElevenLabsApiKeySecretArn
+                      - !Ref ElevenLabsApiKeySecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasSimliApiKeySecretArn
+                      - !Ref SimliApiKeySecretArn
+                      - !Ref AWS::NoValue
+                - !Ref AWS::NoValue
+              - !If
+                - HasAnyIntegrationSecret
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -2225,11 +2664,21 @@ Resources:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
+  VPMicrovmLauncherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPMicrovmLauncherFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # Launches one MicroVM per meeting. Called by the scheduler state machine
   # (MICROVM dispatch path) and by EventBridge Scheduler for scheduled meetings,
   # since neither has a native lambda-microvms integration.
   VPMicrovmLauncherFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VPMicrovmLauncherFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -2248,6 +2697,8 @@ Resources:
       # throttling backoff and a cold image.
       Timeout: 300
       MemorySize: 256
+      LoggingConfig:
+        LogGroup: !Ref VPMicrovmLauncherFunctionLogGroup
       TracingConfig:
         Mode: Active
       Role: !GetAtt VPMicrovmLauncherRole.Arn
@@ -2259,6 +2710,10 @@ Resources:
           # is one source of truth (see _static_config in the launcher).
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           EXECUTION_ROLE_ARN: !GetAtt TaskRole.Arn
+          # Passed as RunMicrovm's `logging` member. The image's Logging setting
+          # covers only its build output; without this, each meeting's MicroVM
+          # output goes to a service-created group with no expiry.
+          MICROVM_LOG_GROUP_NAME: !Ref VPMicrovmLogGroup
           # The ARN embeds a service-generated id, so it cannot be constructed
           # from the connector's Name.
           EGRESS_CONNECTOR_ARN: !GetAtt VPMicrovmEgressConnector.Arn
@@ -2328,6 +2783,15 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            - Name: ASR_MODEL_LANGUAGES
+              Value: !Ref AsrModelLanguages
+            # The container's own diagnostics, including the per-result
+            # separation log, were gated on a DEBUG variable nothing set -- so
+            # the one tool for working out why a room separated badly could not
+            # be switched on in a deployment at all. Driven by the stack's
+            # LogLevel parameter, like every Lambda here.
+            - Name: LOG_LEVEL
+              Value: !Ref LogLevel
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
@@ -2340,6 +2804,15 @@ Resources:
               Value: !Ref ExitMessage
             - Name: GRAPHQL_ENDPOINT
               Value: !Ref GraphQLEndpoint
+            # The CloudWatch namespace for the application metrics the VP
+            # publishes: the parent stack's name, which LMAStackName is, so the
+            # dashboard in lma-main.yaml reads them. The MicroVM launch type
+            # gets it from here too (the launcher copies this environment).
+            # No cloudwatch:PutMetricData grant accompanies this: the records
+            # are Embedded Metric Format on stdout, which CloudWatch Logs turns
+            # into metrics with only the log-writing permission already held.
+            - Name: METRIC_NAMESPACE
+              Value: !Ref LMAStackName
             - Name: APPSYNC_EVENTS_URL
               Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
@@ -2377,14 +2850,20 @@ Resources:
               Value: ""
             - Name: ZOOM_MEETING_SDK_CLIENT_ID
               Value: !Ref ZoomMeetingSdkClientId
-            - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
-              Value: !Ref ZoomMeetingSdkClientSecret
-            - Name: ACS_CONNECTION_STRING
-              Value: !Ref AcsConnectionString
             - Name: LMA_USER_SUB
               Value: ""
             - Name: DYNAMODB_TABLE_NAME
               Value: !Ref EventSourcingTableName
+            # The meeting cost estimate's metering records (see metering.ts),
+            # kept as long as the meeting they belong to.
+            - Name: METERING_TABLE_NAME
+              Value: !Ref EventSourcingTableName
+            - Name: METERING_EXPIRATION_DAYS
+              Value: !Ref MeetingRecordExpirationInDays
+            # The MicroVM image's MinimumMemoryInMiB, which the VP meters its
+            # own compute at under the MICROVM launch type. Kept equal to it.
+            - Name: VP_MICROVM_MEMORY_MIB
+              Value: "4096"
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
             # Deployment default for video recording; overridden per-VP at task
@@ -2407,12 +2886,8 @@ Resources:
               Value: !Ref VncOriginVerifyHeaderValueSecretArn
             - Name: VNC_ORIGIN_VERIFY_HEADER_NAME
               Value: !Ref VncOriginVerifyHeaderName
-            - Name: ELEVENLABS_API_KEY
-              Value: !Ref ElevenLabsApiKey
             - Name: ELEVENLABS_AGENT_ID
               Value: !Ref ElevenLabsAgentId
-            - Name: SIMLI_API_KEY
-              Value: !Ref SimliApiKey
             - Name: SIMLI_FACE_ID
               Value: !Ref SimliFaceId
             - Name: SIMLI_TRANSPORT_MODE
@@ -2436,8 +2911,42 @@ Resources:
               Value: !Ref NovaSystemPrompt
             - Name: NOVA_SONIC_CONFIG_TABLE_NAME
               Value: !Ref NovaSonicConfigTableName
+            - Name: CONFIGURATION_TABLE_NAME
+              Value: !Ref ConfigurationTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
+          # Third-party credentials, named by secret ARN. The ECS agent reads
+          # each secret with the TASK EXECUTION role (not the task role) and
+          # sets the variable in the container at task start, so the value is
+          # absent from this task definition, from DescribeTaskDefinition and
+          # from the console's task view, while the container keeps reading the
+          # same process.env name it always did.
+          #
+          # The whole list is omitted when no integration is configured, rather
+          # than rendered as an empty list.
+          Secrets: !If
+            - HasAnyIntegrationSecret
+            - - !If
+                - HasZoomMeetingSdkClientSecretArn
+                - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
+                  ValueFrom: !Ref ZoomMeetingSdkClientSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasAcsConnectionStringSecretArn
+                - Name: ACS_CONNECTION_STRING
+                  ValueFrom: !Ref AcsConnectionStringSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasElevenLabsApiKeySecretArn
+                - Name: ELEVENLABS_API_KEY
+                  ValueFrom: !Ref ElevenLabsApiKeySecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasSimliApiKeySecretArn
+                - Name: SIMLI_API_KEY
+                  ValueFrom: !Ref SimliApiKeySecretArn
+                - !Ref AWS::NoValue
+            - !Ref AWS::NoValue
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -2597,7 +3106,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      RetentionInDays: 7
+      RetentionInDays: !Ref SchedulerStateMachineLogsExpirationInDays
       LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}"
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
@@ -2826,7 +3335,7 @@ Resources:
               },
               "MarkVPFailed": {
                 "Type": "Task",
-                "Comment": "RunTask failed (e.g. ECS capacity, IAM, image pull). Surface a FAILED status + error message on the VP DynamoDB row so the UI / MCP poller stops showing INITIALIZING forever.",
+                "Comment": "RunTask failed (e.g. ECS capacity, IAM, image pull). Surface a FAILED status + error message on the VP DynamoDB row so the UI / MCP poller stops showing INITIALIZING forever. The ConditionExpression keeps the write to rows that have not reached a terminal status yet, which is the same guard VPTaskReaperFunction uses: this state can run while a task that did start is already reporting its own outcome, and the row's own lifecycle is the authority on that. A conditional-check failure is caught below and ends the execution, exactly as any other failure of this update does.",
                 "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
                 "Parameters": {
                   "TableName": "${VirtualParticipantTableName}",
@@ -2834,6 +3343,7 @@ Resources:
                     "id": { "S.$": "$.data.virtualParticipantId" }
                   },
                   "UpdateExpression": "SET #s = :failed, #e = :err, #ea = :now",
+                  "ConditionExpression": "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))",
                   "ExpressionAttributeNames": {
                     "#s": "status",
                     "#e": "errorMessage",
@@ -2841,6 +3351,9 @@ Resources:
                   },
                   "ExpressionAttributeValues": {
                     ":failed": { "S": "FAILED" },
+                    ":completed": { "S": "COMPLETED" },
+                    ":ended": { "S": "ENDED" },
+                    ":cancelled": { "S": "CANCELLED" },
                     ":err": { "S.$": "States.Format('VP launch failed: {}', $.runTaskError.Cause)" },
                     ":now": { "S.$": "$$.State.EnteredTime" }
                   }
@@ -3130,7 +3643,7 @@ Resources:
               },
               "MarkWaitingForCapacity": {
               "Type": "Task",
-              "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
+              "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this. The ConditionExpression keeps the write to rows that have not reached a terminal status yet, the same guard MarkVPFailed and VPTaskReaperFunction use, so a VP cancelled or ended while its task was still queued keeps that outcome. It does nothing about the ordering between this write and the container's own status writes -- a VP already reporting BOOTING or further can still be set back to WAITING_FOR_CAPACITY by this state, and the container's next write corrects it. A conditional-check failure is caught below and ends the execution, as any other failure of this update does.",
               "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
               "Parameters": {
               "TableName": "${VirtualParticipantTableName}",
@@ -3138,12 +3651,17 @@ Resources:
               "id": { "S.$": "$.data.virtualParticipantId" }
               },
               "UpdateExpression": "SET #s = :status, #ea = :now",
+              "ConditionExpression": "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))",
               "ExpressionAttributeNames": {
               "#s": "status",
               "#ea": "updatedAt"
               },
               "ExpressionAttributeValues": {
               ":status": { "S": "WAITING_FOR_CAPACITY" },
+              ":failed": { "S": "FAILED" },
+              ":completed": { "S": "COMPLETED" },
+              ":ended": { "S": "ENDED" },
+              ":cancelled": { "S": "CANCELLED" },
               ":now": { "S.$": "$$.State.EnteredTime" }
               }
               },
@@ -3301,6 +3819,8 @@ Resources:
                   - scheduler:CreateSchedule
                   - scheduler:DeleteSchedule
                   - scheduler:GetSchedule
+                  # Moves the schedule when a scheduled VP's launch settings change.
+                  - scheduler:UpdateSchedule
                 Resource: 
                   - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroup}/*"
                   - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${VPScheduleGroup}"
@@ -3328,15 +3848,26 @@ Resources:
                   - dynamodb:GetShardIterator
                   - dynamodb:ListStreams
                 Resource: !Ref VirtualParticipantTableStreamArn
+              # Records on a scheduled VP's row that a change to its launch
+              # settings could not be applied to its schedule.
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
               - Effect: Allow
                 Action:
                   - "kms:Decrypt"
                   - "kms:DescribeKey"
+                  # The table is encrypted with this key, and the row update
+                  # writes to it.
+                  - "kms:GenerateDataKey"
                 Resource: !Ref CustomerManagedEncryptionKeyArn
 
   # Virtual Participant Scheduler Lambda Function
   VirtualParticipantSchedulerFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VirtualParticipantSchedulerLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -3350,6 +3881,8 @@ Resources:
       FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref VirtualParticipantSchedulerLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -3364,6 +3897,25 @@ Resources:
           logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           scheduler_client = boto3.client('scheduler')
+          dynamodb_client = boto3.client('dynamodb')
+
+
+          def _record_summary(record):
+              """What is logged of a stream record: its event name, the VP id and,
+              for a MODIFY, the names of the attributes that changed. Never the
+              attribute values, which include the meeting ID or link, the meeting
+              password and the agenda."""
+              data = record.get('dynamodb', {}) or {}
+              vp_id = (data.get('Keys', {}) or {}).get('id', {}).get('S')
+              summary = {'eventName': record.get('eventName'), 'vpId': vp_id}
+              if record.get('eventName') == 'MODIFY':
+                  old_image = data.get('OldImage', {}) or {}
+                  new_image = data.get('NewImage', {}) or {}
+                  summary['changed'] = sorted(
+                      key for key in set(old_image) | set(new_image)
+                      if old_image.get(key) != new_image.get(key)
+                  )
+              return summary
 
 
           def _ecs_params(vp_id, new_image, launch_type, meeting_time_int,
@@ -3406,114 +3958,246 @@ Resources:
               }
 
 
+          def _schedule_params(vp_id, new_image):
+              """The EventBridge Scheduler schedule for a scheduled VP row.
+
+              One definition for creating the schedule when the row is written and for
+              moving it when the row's launch settings are changed, so a moved schedule
+              launches exactly as a new one would.
+              """
+              meeting_time_int = int(new_image['meetingTime']['N'])
+
+              # Schedule for future execution
+              delay_seconds = 120  # 2 minutes before meeting
+              scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
+
+              # User identity for persistent profile + stored Zoom creds.
+              # Absent on older rows / guest-only flows.
+              user_sub = new_image.get('userSub', {}).get('S', '')
+              user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
+              # Per-VP video toggle. Default ON when absent (older rows).
+              # ECS env values must be strings, so coerce the bool.
+              enable_video_recording = new_image.get('enableVideoRecording', {}).get('BOOL', True)
+              enable_video_recording_str = 'true' if enable_video_recording else 'false'
+              stack_name = os.environ.get('LMA_STACK_NAME', '')
+              zoom_secret_name = (
+                  f"{stack_name}/zoom-credentials/{user_zoom_sub}"
+                  if user_zoom_sub and stack_name else ''
+              )
+
+              launch_type = os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')
+
+              if launch_type == 'MICROVM':
+                  # EventBridge Scheduler has a native ECS runTask target but
+                  # none for lambda-microvms, so a MICROVM schedule invokes the
+                  # launcher Lambda instead -- the same target the "start now"
+                  # state machine uses (see ScheduledMeetingTarget). Forwarding
+                  # VP_LAUNCH_TYPE into an ecs:runTask LaunchType instead makes
+                  # ECS reject the fire with "launch type should be one of
+                  # [EC2,FARGATE,EXTERNAL]", and because the schedule is
+                  # ActionAfterCompletion=DELETE it then vanishes, leaving the
+                  # VP stuck at SCHEDULED with no visible error (issue #613).
+                  #
+                  # The launcher accepts this flat payload as well as the state
+                  # machine's {"data": {...}} shape; the key names below are the
+                  # ones its FIELD_MAP looks for. Cognito tokens are absent by
+                  # design -- they are minted per session and would have expired
+                  # by the meeting time -- which matches what the ECS scheduled
+                  # path passes today.
+                  target = {
+                      'Arn': os.environ['MICROVM_LAUNCHER_ARN'],
+                      'RoleArn': os.environ['SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN'],
+                      'Input': json.dumps({
+                          'virtualParticipantId': vp_id,
+                          'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
+                          'meetingId': new_image.get('meetingId', {}).get('S', ''),
+                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
+                          'meetingName': new_image.get('meetingName', {}).get('S', ''),
+                          'meetingTime': str(meeting_time_int),
+                          'owner': new_image.get('owner', {}).get('S', ''),
+                          'userSub': user_sub,
+                          'zoomCredentialsSecretName': zoom_secret_name,
+                          'enableVideoRecording': enable_video_recording_str,
+                      })
+                  }
+              else:
+                  target = {
+                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
+                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
+                      'Input': json.dumps(_ecs_params(
+                          vp_id, new_image, launch_type, meeting_time_int,
+                          user_sub, zoom_secret_name, enable_video_recording_str,
+                      ))
+                  }
+
+              return {
+                  'ActionAfterCompletion': 'DELETE',
+                  'FlexibleTimeWindow': {'Mode': 'OFF'},
+                  'GroupName': os.environ['SCHEDULE_GROUP_NAME'],
+                  'Name': vp_id,
+                  'ScheduleExpression': f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})",
+                  'ScheduleExpressionTimezone': 'UTC',
+                  'State': 'ENABLED',
+                  'Target': target,
+              }, scheduled_time
+
+
+          # What the schedule's target carries from the row. A change to any of them on a
+          # row still waiting for its launch means the schedule has to be rewritten; the
+          # agenda and the meeting consent choice are read from the row by the VP when it
+          # starts, so they need nothing here.
+          LAUNCH_FIELDS = (
+              'meetingTime', 'meetingId', 'meetingPassword', 'meetingName', 'meetingPlatform',
+              'owner', 'userSub', 'userZoomSub', 'enableVideoRecording',
+          )
+
+          # A schedule is moved only if it would still fire this far in the future. The
+          # updateScheduledVirtualParticipant resolver accepts a change only while the
+          # meeting, and so the fire time, is minutes away; this is the backstop.
+          MIN_SECONDS_BEFORE_FIRE = 30
+
+
+          def _waiting_for_launch(image):
+              return (
+                  image.get('status', {}).get('S') == 'SCHEDULED'
+                  and image.get('isScheduled', {}).get('BOOL', False)
+                  and bool(image.get('meetingTime', {}).get('N'))
+              )
+
+
+          def _launch_settings_changed(old_image, new_image):
+              return any(old_image.get(field) != new_image.get(field) for field in LAUNCH_FIELDS)
+
+
+          def _note_schedule_not_moved(vp_id, why):
+              """Say on the row, while it is still waiting, that its launch is unchanged.
+
+              The page shows errorMessage as the status detail, so the owner sees that
+              the saved settings will not be the ones used.
+              """
+              message = (
+                  "The changed launch settings were saved, but the launch schedule could "
+                  f"not be moved ({why}), so the Virtual Participant launches as it was "
+                  "scheduled before. Cancel it and schedule a new one to use the new settings."
+              )
+              try:
+                  dynamodb_client.update_item(
+                      TableName=os.environ['VP_TABLE_NAME'],
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression='SET #e = :e, #u = :u',
+                      ConditionExpression='#s = :scheduled',
+                      ExpressionAttributeNames={'#e': 'errorMessage', '#u': 'updatedAt', '#s': 'status'},
+                      ExpressionAttributeValues={
+                          ':e': {'S': message},
+                          ':u': {'S': datetime.now(timezone.utc).isoformat()},
+                          ':scheduled': {'S': 'SCHEDULED'},
+                      },
+                  )
+              except Exception as e:
+                  logger.error(f"Could not record on VP {vp_id} that its schedule was not moved: {e}")
+
+
+          def _clear_schedule_note(vp_id):
+              """Remove an earlier note that the schedule was not moved, once it has been.
+
+              Only a successful move clears it: an edit that changes no launch field
+              moves nothing, so a note from an earlier failed move still applies.
+              """
+              try:
+                  dynamodb_client.update_item(
+                      TableName=os.environ['VP_TABLE_NAME'],
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression='REMOVE #e',
+                      ConditionExpression='#s = :scheduled AND attribute_exists(#e)',
+                      ExpressionAttributeNames={'#e': 'errorMessage', '#s': 'status'},
+                      ExpressionAttributeValues={':scheduled': {'S': 'SCHEDULED'}},
+                  )
+              except dynamodb_client.exceptions.ConditionalCheckFailedException:
+                  pass
+              except Exception as e:
+                  logger.error(f"Could not clear the schedule note on VP {vp_id}: {e}")
+
+
+          def _move_schedule(vp_id, new_image):
+              """Rewrite the existing schedule for a changed row; never create one.
+
+              UpdateSchedule replaces the schedule named for the VP in place, so there is
+              never a second schedule for it and the old time stops applying as the new
+              one starts. If there is no such schedule (it has fired and deleted itself,
+              or was cancelled) nothing is created: the launch, if any, already happened.
+              """
+              params, scheduled_time = _schedule_params(vp_id, new_image)
+              seconds_left = (scheduled_time - datetime.now(timezone.utc)).total_seconds()
+              if seconds_left < MIN_SECONDS_BEFORE_FIRE:
+                  logger.warning(f"VP {vp_id}: new fire time is {seconds_left:.0f}s away; schedule not moved")
+                  _note_schedule_not_moved(vp_id, 'the new launch time is too close')
+                  return False
+              try:
+                  scheduler_client.update_schedule(**params)
+              except scheduler_client.exceptions.ResourceNotFoundException:
+                  logger.warning(f"VP {vp_id}: no schedule to move (already fired or removed)")
+                  _note_schedule_not_moved(vp_id, 'no launch schedule was found for it')
+                  return False
+              except Exception as e:
+                  logger.error(f"VP {vp_id}: could not move schedule: {e}")
+                  _note_schedule_not_moved(vp_id, 'the schedule update failed')
+                  return False
+              logger.info(f"Moved schedule for VP {vp_id} to {params['ScheduleExpression']}")
+              _clear_schedule_note(vp_id)
+              return True
+
+
           def lambda_handler(event, context):
-              logger.info("Processing VP scheduler request")
-              logger.info(f"Event: {json.dumps(event, default=str)}")
+              records = event.get('Records', [])
+              logger.info(
+                  f"Processing VP scheduler request: "
+                  f"{json.dumps([_record_summary(r) for r in records])}"
+              )
               
               try:
                   for record in event.get('Records', []):
                       event_name = record.get('eventName')
                       dynamodb_data = record.get('dynamodb', {})
-                      
+
                       keys = dynamodb_data.get('Keys', {})
                       vp_id = keys.get('id', {}).get('S')
-                      
+
                       if not vp_id:
                           logger.warning("No VP ID found in record, skipping")
                           continue
-                          
+
                       logger.info(f"Processing {event_name} event for VP {vp_id}")
-                      
+
                       if event_name == 'INSERT':
                           new_image = dynamodb_data.get('NewImage', {})
                           is_scheduled = new_image.get('isScheduled', {}).get('BOOL', False)
                           meeting_time = new_image.get('meetingTime', {}).get('N')
-                          
+
                           if is_scheduled and meeting_time:
-                              meeting_time_int = int(meeting_time)
-
-                              # Schedule for future execution
-                              delay_seconds = 120  # 2 minutes before meeting
-                              scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
-
-                              # User identity for persistent profile + stored Zoom creds.
-                              # Absent on older rows / guest-only flows.
-                              user_sub = new_image.get('userSub', {}).get('S', '')
-                              user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
-                              # Per-VP video toggle. Default ON when absent (older rows).
-                              # ECS env values must be strings, so coerce the bool.
-                              enable_video_recording = new_image.get('enableVideoRecording', {}).get('BOOL', True)
-                              enable_video_recording_str = 'true' if enable_video_recording else 'false'
-                              stack_name = os.environ.get('LMA_STACK_NAME', '')
-                              zoom_secret_name = (
-                                  f"{stack_name}/zoom-credentials/{user_zoom_sub}"
-                                  if user_zoom_sub and stack_name else ''
-                              )
-
-                              launch_type = os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')
-
-                              if launch_type == 'MICROVM':
-                                  # EventBridge Scheduler has a native ECS runTask target but
-                                  # none for lambda-microvms, so a MICROVM schedule invokes the
-                                  # launcher Lambda instead -- the same target the "start now"
-                                  # state machine uses (see ScheduledMeetingTarget). Forwarding
-                                  # VP_LAUNCH_TYPE into an ecs:runTask LaunchType instead makes
-                                  # ECS reject the fire with "launch type should be one of
-                                  # [EC2,FARGATE,EXTERNAL]", and because the schedule is
-                                  # ActionAfterCompletion=DELETE it then vanishes, leaving the
-                                  # VP stuck at SCHEDULED with no visible error (issue #613).
-                                  #
-                                  # The launcher accepts this flat payload as well as the state
-                                  # machine's {"data": {...}} shape; the key names below are the
-                                  # ones its FIELD_MAP looks for. Cognito tokens are absent by
-                                  # design -- they are minted per session and would have expired
-                                  # by the meeting time -- which matches what the ECS scheduled
-                                  # path passes today.
-                                  target = {
-                                      'Arn': os.environ['MICROVM_LAUNCHER_ARN'],
-                                      'RoleArn': os.environ['SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN'],
-                                      'Input': json.dumps({
-                                          'virtualParticipantId': vp_id,
-                                          'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
-                                          'meetingId': new_image.get('meetingId', {}).get('S', ''),
-                                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
-                                          'meetingName': new_image.get('meetingName', {}).get('S', ''),
-                                          'meetingTime': str(meeting_time_int),
-                                          'owner': new_image.get('owner', {}).get('S', ''),
-                                          'userSub': user_sub,
-                                          'zoomCredentialsSecretName': zoom_secret_name,
-                                          'enableVideoRecording': enable_video_recording_str,
-                                      })
-                                  }
-                              else:
-                                  target = {
-                                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
-                                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
-                                      'Input': json.dumps(_ecs_params(
-                                          vp_id, new_image, launch_type, meeting_time_int,
-                                          user_sub, zoom_secret_name, enable_video_recording_str,
-                                      ))
-                                  }
-
-                              schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
-
-                              response = scheduler_client.create_schedule(
-                                  ActionAfterCompletion='DELETE',
-                                  FlexibleTimeWindow={'Mode': 'OFF'},
-                                  GroupName=os.environ['SCHEDULE_GROUP_NAME'],
-                                  Name=vp_id,
-                                  ScheduleExpression=schedule_expression,
-                                  ScheduleExpressionTimezone='UTC',
-                                  State='ENABLED',
-                                  Target=target
-                              )
+                              params, _ = _schedule_params(vp_id, new_image)
+                              response = scheduler_client.create_schedule(**params)
 
                               logger.info(
-                                  f"Successfully scheduled VP {vp_id} ({launch_type}) "
+                                  f"Successfully scheduled VP {vp_id} "
+                                  f"({os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')}) "
                                   f"with schedule ARN: {response.get('ScheduleArn')}"
                               )
                           else:
                               logger.info(f"VP {vp_id} is not scheduled, skipping")
+
+                      elif event_name == 'MODIFY':
+                          # updateScheduledVirtualParticipant changed the launch settings
+                          # of a row still waiting for its launch: move its schedule. Every
+                          # other write (status, sharing, the VP's own progress) leaves
+                          # the launch fields alone or the row no longer waiting.
+                          old_image = dynamodb_data.get('OldImage', {})
+                          new_image = dynamodb_data.get('NewImage', {})
+                          if (
+                              _waiting_for_launch(old_image)
+                              and _waiting_for_launch(new_image)
+                              and _launch_settings_changed(old_image, new_image)
+                          ):
+                              _move_schedule(vp_id, new_image)
 
                       elif event_name == 'REMOVE':
                           try:
@@ -3563,6 +4247,7 @@ Resources:
             - !GetAtt VPScheduleInvokeLauncherRole.Arn
             - !Ref AWS::NoValue
           LMA_STACK_NAME: !Ref LMAStackName
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
           LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
   VirtualParticipantSchedulerEventSourceMapping:
@@ -3667,6 +4352,8 @@ Resources:
 
   VPTaskReaperFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VPTaskReaperLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -3682,6 +4369,8 @@ Resources:
       Runtime: python3.12
       MemorySize: 256
       Timeout: 60
+      LoggingConfig:
+        LogGroup: !Ref VPTaskReaperLogGroup
       Role: !GetAtt VPTaskReaperRole.Arn
       Environment:
         Variables:
@@ -3881,8 +4570,13 @@ Resources:
               )
 
           def lambda_handler(event, context):
-              logger.debug(f'Event: {json.dumps(event, default=str)[:2000]}')
               detail = event.get('detail', {}) or {}
+              # The task and its state only: the event's overrides carry the
+              # task's environment, meeting password included.
+              logger.debug(
+                  f"Task state change: taskArn={detail.get('taskArn')} "
+                  f"lastStatus={detail.get('lastStatus')} stopCode={detail.get('stopCode')}"
+              )
 
               # Only act on STOPPED transitions for our cluster. The
               # EventBridge rule already filters on these but defense-
@@ -4003,3 +4697,50 @@ Outputs:
     Value: !GetAtt VirtualParticipantSchedulerFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-VPSchedulerFunctionArn"
+
+  # ── Identifiers the top-level stack's CloudWatch dashboard needs ──
+  # ClusterArn and TaskDefinitionArn are already exported above, but a
+  # CloudWatch metric dimension takes the bare cluster name and the task
+  # definition family rather than an ARN, and the log group names are built from
+  # this nested stack's generated name, which the parent does not know.
+  #
+  # Unlike the outputs above, these four carry no Export. lma-main.yaml reads
+  # them with Fn::GetAtt on the nested stack, never Fn::ImportValue, so an
+  # export would buy nothing and would create a constraint that is hard to undo:
+  # CloudFormation refuses to remove or rename an exported output once anything
+  # imports it, and these are observability plumbing that should stay free to
+  # change. The equivalent outputs added to the AI and transcriber stacks for
+  # the same purpose likewise have none.
+  ClusterName:
+    Description: >-
+      Name of the Virtual Participant ECS cluster, for the ClusterName
+      dimension of ECS/ContainerInsights metrics
+    Value: !Ref Cluster
+
+  TaskDefinitionFamily:
+    Description: >-
+      Family of the Virtual Participant task definition, for the
+      TaskDefinitionFamily dimension of ECS/ContainerInsights metrics
+    # Derived from the task definition ARN rather than repeating the Family
+    # expression used on the resource, which the two could otherwise drift
+    # apart on silently. Ref on a task definition returns
+    # arn:<partition>:ecs:<region>:<account>:task-definition/<family>:<revision>,
+    # so taking the part after the slash and then the part before the colon
+    # yields the family.
+    Value: !Select
+      - 0
+      - !Split
+        - ":"
+        - !Select [1, !Split ["/", !Ref TaskDefinition]]
+
+  SchedulerStateMachineLogGroupName:
+    Description: >-
+      Log group the Virtual Participant launch state machine writes to, for
+      Logs Insights dashboard widgets
+    Value: !Ref SchedulerStateMachineLogGroup
+
+  ContainerLogGroupName:
+    Description: >-
+      Log group the Virtual Participant container writes to, for Logs Insights
+      dashboard widgets
+    Value: !Ref VirtualParticipantTaskDefContainerLogGroup

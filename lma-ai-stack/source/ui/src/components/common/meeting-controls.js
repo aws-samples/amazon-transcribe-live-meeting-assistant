@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { generateClient } from 'aws-amplify/api';
@@ -22,6 +22,7 @@ import {
 } from '@cloudscape-design/components';
 import shareMeetings from '../../graphql/queries/shareMeetings';
 import deleteMeetings from '../../graphql/queries/deleteMeetings';
+import { sharedWithEntries } from './shared-with';
 
 const client = generateClient();
 const getListKeys = (callId, createdAt) => {
@@ -109,14 +110,6 @@ export const shareModal = (props) => {
 
   const { getCallDetailsFromCallIds } = props;
 
-  const parseSharedWith = (sharedWithString) => {
-    return (sharedWithString || '')
-      .replace(/[[\]]/g, '')
-      .split(',')
-      .map((email) => email.trim())
-      .filter((email) => email);
-  };
-
   const openShareSettings = async () => {
     setShare(true);
     setIsLoading(true);
@@ -124,7 +117,7 @@ export const shareModal = (props) => {
 
     const recipients = new Set();
     callDetails.forEach((call) => {
-      const sharedWithArray = parseSharedWith(call.SharedWith);
+      const sharedWithArray = sharedWithEntries(call.SharedWith);
       sharedWithArray.forEach((email) => recipients.add(email));
     });
 
@@ -210,13 +203,17 @@ export const shareModal = (props) => {
 
   return (
     <SpaceBetween size="xxs" direction="horizontal">
+      {/* The meeting page's header labels the button; the meeting list keeps the icon. */}
       <Button
         iconName="share"
         variant="normal"
         loading={props.loading}
         disabled={props.selectedItems.length === 0}
         onClick={openShareSettings}
-      />
+        ariaLabel={props.triggerText ? undefined : 'Share'}
+      >
+        {props.triggerText}
+      </Button>
       <Modal
         onDismiss={closeShareSettings}
         visible={share}
@@ -310,6 +307,13 @@ export const deleteModal = (props) => {
     setDeletedCallIds([]);
   };
 
+  // Opened from somewhere other than its own button -- the meeting page's
+  // actions menu, which hides the button (`hideTrigger`) and changes
+  // `openRequest` each time Delete is chosen.
+  useEffect(() => {
+    if (props.openRequest) openDeleteSettings();
+  }, [props.openRequest]);
+
   const closeDeleteSettings = () => {
     setDeleteDisabled(false);
     setVisible(false);
@@ -363,13 +367,16 @@ export const deleteModal = (props) => {
 
   return (
     <SpaceBetween size="xxs" direction="horizontal">
-      <Button
-        iconName="remove"
-        variant="normal"
-        loading={props.loading}
-        disabled={props.selectedItems.length === 0}
-        onClick={openDeleteSettings}
-      />
+      {!props.hideTrigger && (
+        <Button
+          iconName="remove"
+          variant="normal"
+          loading={props.loading}
+          disabled={props.selectedItems.length === 0}
+          onClick={openDeleteSettings}
+          ariaLabel="Delete"
+        />
+      )}
       {props.selectedItems.length > 0 ? (
         <Modal
           visible={visible}

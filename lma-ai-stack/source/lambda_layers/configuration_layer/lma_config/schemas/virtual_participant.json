@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/virtual_participant",
+  "title": "Virtual Participant",
+  "description": "The name the Virtual Participant joins meetings under, its voice assistant, how it is activated, its avatar, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript. The defaults are the shipped values, or the default profile's; a value set here is used instead until it is reset. The API keys these features need are stack parameters: a provider or avatar chosen here without its key configured does not start.",
+  "sectionLabel": "Virtual Participant",
+  "appliesText": "A saved change applies to the next Virtual Participant to start; one already in a meeting keeps the settings it started with.",
+  "order": 11,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "displayName": {
+      "order": 0,
+      "type": "string",
+      "title": "Display name",
+      "description": "The name the Virtual Participant joins a meeting under and posts to the meeting chat as. {LMA_USER} is replaced by the name of the LMA user who started it, so the default gives each user's Virtual Participant its own name, such as LMA - Jane Doe. Use only letters A-Z and a-z, digits, spaces and the characters - ' . _ @, and start with a letter or digit: Microsoft Teams accepts only these characters in a guest's name, so a name made of them is shown the same on every platform. {LMA_USER} may appear anywhere after the first character; on Teams only, a character of the user's name that Teams does not accept loses its accent or is left out. Keep the first word LMA: participants address a Virtual Participant by its name (LMA Jane leave), and Virtual Participants in the same meeting recognise each other by a name that starts with LMA. Without {LMA_USER}, every user's Virtual Participant has the same name, and two of them in one meeting cannot be addressed separately.",
+      "examples": ["LMA - {LMA_USER}", "LMA Notetaker - {LMA_USER}"],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9 '._@-]|\\{LMA_USER\\})*$"
+    },
+    "voiceAssistantProvider": {
+      "order": 1,
+      "type": "string",
+      "title": "Voice assistant",
+      "description": "none for no spoken answers; elevenlabs for ElevenLabs Conversational AI, which needs the ElevenLabs API key configured on the stack; amazon_nova_sonic for Amazon Nova Sonic, set up in the Nova Sonic Voice Assistant section.",
+      "enum": ["none", "elevenlabs", "amazon_nova_sonic"],
+      "enumLabels": {
+        "none": "None",
+        "elevenlabs": "ElevenLabs",
+        "amazon_nova_sonic": "Amazon Nova Sonic"
+      }
+    },
+    "voiceAssistantActivationMode": {
+      "order": 2,
+      "type": "string",
+      "title": "Voice assistant activation mode",
+      "description": "wake_phrase activates the voice assistant when a participant says a wake phrase, for the number of seconds set below; always_active keeps it listening for the whole meeting, which the Group meeting and Translator meeting modes of the Nova Sonic Voice Assistant section need. Always listening streams meeting audio to the voice assistant's model for the whole meeting, so it costs more. Participants can still switch a running meeting with a chat command. strands_tool (coming soon) is not implemented yet: choose wake_phrase or always_active.",
+      "enum": ["always_active", "wake_phrase", "strands_tool (coming soon)"],
+      "enumLabels": {
+        "always_active": "Always listening",
+        "wake_phrase": "Wake phrase",
+        "strands_tool (coming soon)": "Strands tool (coming soon)"
+      }
+    },
+    "voiceAssistantWakePhrases": {
+      "order": 3,
+      "type": "string",
+      "title": "Wake phrases",
+      "description": "Comma-separated phrases that activate the voice assistant, case-insensitive. Used when the activation mode is wake_phrase.",
+      "examples": ["hey alex,ok alex,hi alex,hello alex"],
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "voiceAssistantActivationDuration": {
+      "order": 4,
+      "type": "integer",
+      "title": "Seconds the voice assistant stays active",
+      "description": "How long the voice assistant stays active after a wake phrase, when the activation mode is wake_phrase.",
+      "minimum": 5,
+      "maximum": 300
+    },
+    "elevenLabsAgentId": {
+      "order": 5,
+      "type": "string",
+      "title": "ElevenLabs agent ID",
+      "description": "An ElevenLabs Conversational AI agent, for a customised voice assistant; empty for the default one.",
+      "maxLength": 128,
+      "pattern": "^([A-Za-z0-9_-]{10,})?$"
+    },
+    "simliFaceId": {
+      "order": 6,
+      "type": "string",
+      "title": "Simli face ID",
+      "description": "The face of the Simli avatar; the avatar is on only when this and the Simli API key are both set.",
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_-]*$"
+    },
+    "attendeePollMs": {
+      "order": 7,
+      "type": "integer",
+      "title": "Teams: milliseconds between meeting checks",
+      "description": "How often a Teams Virtual Participant checks whether its meeting is still running.",
+      "minimum": 1000,
+      "maximum": 120000
+    },
+    "pollsBeforeEnd": {
+      "order": 8,
+      "type": "integer",
+      "title": "Teams: checks alone before leaving",
+      "description": "Consecutive checks on which the meeting shows one attendee or none before the Virtual Participant leaves.",
+      "minimum": 1,
+      "maximum": 90
+    },
+    "pollsBeforeEndMissing": {
+      "order": 9,
+      "type": "integer",
+      "title": "Teams: checks without a meeting before leaving",
+      "description": "Consecutive checks on which the meeting shows neither an attendee count nor its controls before the Virtual Participant leaves. Raise it if Virtual Participants leave meetings that are still running.",
+      "minimum": 1,
+      "maximum": 90
+    },
+    "captureMeetingChat": {
+      "order": 10,
+      "type": "boolean",
+      "title": "Add the meeting chat to the transcript",
+      "description": "On: the messages participants send to everyone in the meeting chat are added to the meeting's transcript, each under its sender's name, at the time the Virtual Participant read it. Not added: LMA chat commands (an \"LMA ask\" question is added), consent replies, the Virtual Participant's own messages, private messages, and anything sent while the transcript is paused or consent is withheld. Nothing is added while Redact personal information in the Amazon Transcribe section is on, in any language, whatever this says. Zoom, Microsoft Teams and Google Meet meetings are covered; Webex and Amazon Chime meetings are not. Chat messages expire with the transcript and are deleted with it."
+    }
+  },
+  "additionalProperties": false
+}

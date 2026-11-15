@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
@@ -18,8 +18,8 @@ const content = (
     <h3>Roles</h3>
     <ul>
       <li>
-        <strong>Admin</strong> &mdash; full access, including this User Management page and all Configuration pages (MCP
-        Servers, Nova Sonic, Transcript Summary).
+        <strong>Admin</strong> &mdash; full access, including this User Management page and every Configuration page
+        (View / Edit Configuration and MCP Servers).
       </li>
       <li>
         <strong>User</strong> &mdash; standard LMA access (Meetings, Streaming, Virtual Participant). Cannot access

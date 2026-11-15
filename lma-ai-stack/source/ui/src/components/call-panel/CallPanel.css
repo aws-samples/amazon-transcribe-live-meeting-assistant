@@ -19,55 +19,328 @@
 .sentiment-image-popover {
     cursor: pointer;
 }
-.issue-detected {
-    text-decoration: underline;
-    text-decoration-color: red;
-    text-decoration-thickness: 3px;
-}
-span.issue-span {
-    text-decoration: underline;
-    text-decoration-color: red;
-    text-decoration-thickness: 2px;
-}
-
-span.issue-pill {
-    background-color: red;
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    line-height: 2.5em;
-    color: white;
-    padding-bottom: 0.1em;
-}
-
-.transcript-segment-category-match  {
-    background-color: lavender;
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    padding-bottom: 0.1em;
-    line-height: 2.5em !important;
-}
-
-.transcript-segment-category-match p {
-    height:1.5em;
-    padding: 0px !important;
-}
-
-.transcript-segment-category-match-alert  {
-    background-color: rgb(255, 147, 147);
-    border-radius: 2em;
-    padding-left: 1em;
-    padding-right: 1em;
-    padding-bottom: 0.1em;
-    line-height: 2.5em !important;
-}
-.transcript-segment-category-match-alert p {
-    height:1.5em;
-    padding: 0px !important;
-    color:white;
-}
-
 .hide-transcript {
     display:none;
+}
+/*
+ * A speaker name that was inferred from the transcript and that nobody has
+ * confirmed. Marked rather than hidden: the name is useful, but presenting a
+ * guess exactly like a name a person typed is what would make automatic
+ * naming actively harmful. Confirm or reject it in the Speakers panel.
+ */
+.transcript-speaker-proposed {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
+/* A transcript segment moved to from the key frame strip. */
+.transcript-segment-highlight {
+  animation: transcript-segment-flash 2.5s ease-out;
+}
+
+@keyframes transcript-segment-flash {
+  0% {
+    background-color: #f2f8fd;
+    box-shadow: inset 3px 0 0 #0972d3;
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+
+/* The transcript column: the player above the transcript (meeting-player/). */
+.transcript-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Search and the speaker filter, above the transcript's lines. */
+.transcript-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.transcript-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 280px;
+}
+
+.transcript-search-count {
+  font-size: 12px;
+  color: #5f6b7a;
+  white-space: nowrap;
+  min-width: 5em;
+}
+
+.transcript-speaker-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The Chat chip, set apart from the speakers': it shows or hides the meeting
+   chat whichever speakers are chosen. */
+.transcript-chat-filter {
+  display: inline-flex;
+}
+
+.transcript-speaker-filter > * + .transcript-chat-filter {
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid #c6c6cd;
+}
+
+.awsui-dark-mode .transcript-speaker-filter > * + .transcript-chat-filter {
+  border-left-color: #414d5c;
+}
+
+/* Shown when the transcript has stopped following the live end or the recording. */
+.transcript-scroll-frame {
+  position: relative;
+}
+
+.transcript-follow-paused {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #ffeaa7;
+  padding: 5px 10px;
+  text-align: center;
+  font-size: 12px;
+  z-index: 1000;
+  border-radius: 4px;
+  border: 1px solid #fdcb6e;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* The line being heard while the recording plays. */
+.transcript-row-current {
+  background-color: #f2f8fd;
+  box-shadow: inset 3px 0 0 #0972d3;
+}
+
+/* A line holding the search, and the one moved to. */
+.transcript-row-match {
+  box-shadow: inset 3px 0 0 #f2cd54;
+}
+
+.transcript-row-match-active {
+  background-color: #fffbeb;
+  box-shadow: inset 3px 0 0 #b78c00;
+}
+
+.transcript-row-current.transcript-row-match {
+  box-shadow: inset 3px 0 0 #0972d3;
+}
+
+mark.transcript-search-match {
+  background-color: #fff3b0;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.transcript-row-match-active mark.transcript-search-match {
+  background-color: #ffd75e;
+}
+
+/*
+ * The tabs and the meeting assistant's panel (MeetingAssistantPanel): a column
+ * beside the tabs while it is open, and nothing when it is closed, so the tabs
+ * have the full width. Where the page is narrow (CallPanel measures it and adds
+ * meeting-body-assistant-overlay) the panel lies over the right of the tabs
+ * instead. Both ways it is sticky below the application's top navigation, so
+ * it stays in view while a long tab scrolls.
+ */
+.meeting-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.meeting-main {
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
+}
+
+.meeting-body-assistant-open:not(.meeting-body-assistant-overlay) {
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 440px);
+}
+
+.meeting-assistant {
+  grid-row: 1;
+  grid-column: 2;
+  position: sticky;
+  top: calc(var(--meeting-assistant-top, 0px) + 12px);
+  /* Set by CallPanel from where the panel starts; the fallback is for before it has measured. */
+  height: var(--meeting-assistant-height, max(420px, calc(100vh - 300px)));
+  min-width: 0;
+}
+
+.meeting-assistant[hidden] {
+  display: none;
+}
+
+.meeting-body-assistant-overlay .meeting-assistant {
+  grid-column: 1;
+  justify-self: end;
+  width: min(420px, 100%);
+  z-index: 850;
+  border-radius: 16px;
+  box-shadow: -4px 0 16px rgba(0, 7, 22, 0.18);
+}
+
+.meeting-assistant-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #c6c6cd;
+  border-radius: 16px;
+}
+
+.meeting-assistant-header {
+  padding: 8px 12px 6px 20px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.meeting-assistant-chat {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+}
+
+/* On the header's Assistant button: an answer arrived while the panel was closed. */
+.meeting-assistant-unread {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #0972d3;
+  vertical-align: middle;
+}
+
+.meeting-assistant-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The Summary tab: the line of links to its sections, and a rule between sections. */
+.summary-toc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e9ebed;
+}
+
+.summary-toc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-section + .summary-section {
+  padding-top: 4px;
+  border-top: 1px solid #e9ebed;
+}
+
+.awsui-dark-mode .summary-toc,
+.awsui-dark-mode .summary-section + .summary-section {
+  border-color: #414d5c;
+}
+
+/* A speaker's chip on the Transcript tab, with its edit button beside it. */
+.transcript-speaker-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The chips of one platform name's voices, with its one-person / several-people
+   toggle, kept together and set apart from the other speakers. */
+.transcript-speaker-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid #c6c6cd;
+  border-radius: 8px;
+}
+
+.awsui-dark-mode .transcript-speaker-group {
+  border-color: #414d5c;
+}
+
+/* A voice being named in place: room for the name. */
+.transcript-speaker-chip-editing {
+  gap: 4px;
+  min-width: 12rem;
+}
+
+/* A speaker named in the meeting header: a badge that opens the speaker in the Speakers panel. */
+.meeting-speaker-chip {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.meeting-speaker-chip:hover {
+  text-decoration: underline;
+}
+
+.meeting-speaker-chip:focus-visible {
+  outline: 2px solid #0972d3;
+  outline-offset: 2px;
+}
+
+/* A voice's row in the Speakers panel, for a moment after the header opened it. */
+.speaker-row-focused {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px #0972d3;
+}
+
+/* A platform name's voices in the Speakers panel, under the name and its one-person / several-people toggle. */
+.speaker-group-rows {
+  padding-left: 12px;
+  border-left: 2px solid #e9ebed;
+}
+
+.awsui-dark-mode .speaker-group-rows {
+  border-color: #414d5c;
+}
+
+/* How far the meeting got with an agenda item, beside it in the Transcript tab's agenda. */
+.agenda-item-status {
+  margin-left: 8px;
+  white-space: nowrap;
 }

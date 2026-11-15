@@ -5,14 +5,44 @@
  */
 
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
+import {
+  AssistantReconfigureOutcome,
+  AssistantReconfigureRequest,
+  formatAssistantToggleLog,
+} from './assistant-toggles.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('noop-agent');
 
 export class NoOpAgent implements VoiceAssistantProvider {
   async start(): Promise<void> {
-    console.log('Voice assistant disabled (provider=none)');
+    log.info('Voice assistant disabled (provider=none)');
   }
 
   async stop(): Promise<void> {
     // No-op
+  }
+
+  /**
+   * There is no assistant to reconfigure. Still logged, so a toggle issued
+   * against a meeting with the voice assistant switched off leaves the same
+   * single record as one that landed.
+   */
+  async reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome> {
+    const outcome: AssistantReconfigureOutcome = {
+      result: 'declined',
+      changed: [],
+      sessionRebuilt: false,
+      // Nominal values: this provider has no modes of its own, and the shape
+      // needs something to report.
+      meetingModeBefore: 'normal',
+      meetingModeAfter: 'normal',
+      activationModeBefore: 'wake_phrase',
+      activationModeAfter: 'wake_phrase',
+      detail: 'the voice assistant is not enabled for this meeting',
+    };
+    log.info(formatAssistantToggleLog(request, outcome));
+    return outcome;
   }
 
   sendAudioChunk(chunk: Buffer): void {
@@ -33,6 +63,11 @@ export class NoOpAgent implements VoiceAssistantProvider {
 
   deactivate(): void {
     // No-op
+  }
+
+  /** There is no assistant to reconfigure. */
+  supportsModeChanges(): boolean {
+    return false;
   }
 
   isEnabled(): boolean {
@@ -60,6 +95,11 @@ export class NoOpAgent implements VoiceAssistantProvider {
   }
 
   isMuted(): boolean {
+    return false;
+  }
+
+  requestStopTalking(_reason?: string): boolean {
+    // No-op - there is nothing speaking to silence
     return false;
   }
 }

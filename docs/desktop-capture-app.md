@@ -30,9 +30,9 @@ https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e
 ## How it works
 
 - Your **microphone** is transcribed as the meeting owner — the **"My Mic"**
-  channel (the AGENT channel downstream).
+  channel (the LOCAL channel downstream).
 - Your computer's **system audio** — the remote participants — is the
-  **"Meeting Audio"** channel (the CALLER channel downstream).
+  **"Meeting Audio"** channel (the REMOTE channel downstream).
 - Audio streams to the **same** secure WebSocket transcriber endpoint the
   browser options use; the server is unchanged. From there it flows through the
   identical pipeline (real-time transcription, Meeting Assistant, summaries,
@@ -78,17 +78,19 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 ### Choosing the transcription engine
 
 Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
-on **Configuration ▸ Transcription Engine**, the same setting that covers Stream Audio and the
-Chrome extension. When the deployment runs the
-[on-demand ASR & diarization engine](microvm-asr.md), `--asr-engine microvm` or
+in the **Transcription Engine** section of **Configuration ▸ Configuration**, the same setting that covers Stream Audio and the
+Chrome extension; it ships on Amazon Transcribe, and an admin can move it onto the
+[ASR MicroVM engine](microvm-asr.md) wherever that engine is deployed. When the deployment runs that engine, `--asr-engine microvm` or
 `--asr-engine transcribe` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`)
 overrides that setting for one run in either direction; omit it and the deployment
 setting applies.
 
 Both engines produce speaker labels, so the two flags above do **not** pick an engine.
 The on-demand engine separates voices sharing a single microphone more reliably, but it
-is English only and does not support content redaction, custom vocabularies, custom
-language models or language identification. A meeting whose MicroVM cannot start falls
+transcribes only the languages its deployed model bundle supports (see [Languages](microvm-asr.md#languages)) and does not support content redaction, custom vocabularies, custom
+language models or language identification. While the deployment's Amazon Transcribe
+settings set a language that bundle does not support or use any of those, meetings stay on Amazon Transcribe, and
+`--asr-engine microvm` does not change that. A meeting whose MicroVM cannot start falls
 back to Amazon Transcribe on its own.
 
 ## Optional: record screen video
@@ -110,6 +112,13 @@ audio into a single **MP4** at the end of the call, saved to the LMA recordings
 bucket, and shown in the call detail page's **Recording Video** player — the
 same place Virtual Participant recordings appear. Capture runs at ~5 fps and up
 to 1080p, which keeps CPU and bandwidth modest while staying legible for slides.
+While the video arrives, the transcriber also keeps a **key frame** each time
+the picture changes to something new and holds still — each slide, each page —
+and stores it on the meeting; see
+[Meeting Video and Key Frames](meeting-video.md#desktop-video). The app captures
+the whole display, so a meeting window showing camera video also yields frames;
+those are recognised when their text is read and left out of the summary and
+the Screen share tab ([Camera frames](meeting-video.md#camera-frames)).
 
 When screen video is enabled, the one-time consent gate and the live recording
 view both show a **"Screen video is ON"** notice, since screen contents are more
@@ -146,6 +155,49 @@ The text is configurable per deployment via the `RecordingDisclaimer`
 CloudFormation parameter, so organizations can substitute their own legal
 wording; the app picks it up from the `lma-config.json` baked into the
 download.
+
+### Meeting consent (Notify and Opt-in deployments)
+
+When your administrator sets the deployment's [meeting consent](meeting-consent.md)
+mode to Notify or Opt-in, the panel shows a **Meeting consent** block above
+**Start Recording**, and asks it afresh for every meeting. The app reads the
+mode from the transcriber when you sign in and when the panel opens; with the
+mode Off, or a transcriber from before this feature, no block is shown.
+
+- **The notice** to share, filled with your microphone label and the meeting
+  name: read it out, or press **Copy notice** and paste it into the meeting chat.
+- **The confirmation**: in Opt-in, *Everyone in the meeting agreed to it being
+  recorded and transcribed*, with **how** (out loud, in the meeting chat, or in
+  the invitation's terms) and an optional note. In Notify, *I have told everyone
+  in the meeting*, which may be left unticked.
+- **Capture evidence** (optional): keeps one frame of the screen or window
+  selected as the screen-video source in Settings — the meeting window, for
+  example the chat after everyone replied — on the meeting's consent record,
+  where it is checked with a vision model. It works whether or not screen video
+  is being recorded. On macOS it needs macOS 14 or later and the Screen Recording
+  permission.
+- **While recording**: the consent status as the meeting's record answers it,
+  **Capture evidence** again, and **Participant objected** with an optional
+  name, which stops recording and transcription at once and records the
+  objection on the meeting.
+
+In **Opt-in**, Start is refused until you confirm, and nothing is recorded or
+transcribed until the transcriber has recorded your confirmation on the
+meeting, usually a second or two after Start; screen video starts at that
+point too. If the confirmation cannot be recorded, the recording stops and the
+panel says why. A recording that the transcriber stops for consent — an
+objection, or a confirmation it could not record — is not reconnected.
+
+For headless/CLI use, the app prints the notice and needs
+`--consent-method verbal|chat|invite_terms` (`LMA_CONSENT_METHOD`) to confirm
+how everyone agreed, with an optional `--consent-note` (`LMA_CONSENT_NOTE`); an
+Opt-in meeting started without it exits with code 2, and a meeting the
+transcriber stops for consent exits with code 3.
+
+Builds of the app from before this feature show no consent block. How the
+transcriber treats their recordings — capture with a warning, or refuse — is the
+**Streaming clients without a consent step** setting; see
+[Clients without a consent step](meeting-consent.md#clients-without-a-consent-step).
 
 ## Download and install (macOS)
 
@@ -297,7 +349,8 @@ Menu-bar item:
   your browser).
 - While recording, the icon turns **red** so it's obvious at a glance.
 - **Right-click** the item for **Quit** (kept out of the popover so it isn't
-  confused with *Stop*).
+  confused with *Stop*). Quitting while recording — from here, the Dock or
+  **⌘Q** — stops the recording first, as *Stop* does.
 
 Dock icon:
 
@@ -315,6 +368,11 @@ Dock icon:
 > a way to see recording state and stop the recording. If your menu bar is
 > crowded, you can also **⌘-drag** the LMA menu-bar icon further right so it's
 > among the last to be hidden.
+
+While the app is in front, the standard macOS shortcuts work: **⌘C**, **⌘V**,
+**⌘X**, **⌘A** and **⌘Z** in any field — including pasting into the sign-in form
+from a password manager — **⌘,** for Settings, **⌘W** to close a window and
+**⌘Q** to quit.
 
 Popover options:
 
@@ -611,7 +669,7 @@ of all capture options.
 | Dimension                   | Desktop Capture App                                        | [Virtual Participant](virtual-participant.md)          |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
 | How it captures             | Runs on your computer; captures OS system audio + mic locally | Headless bot joins the meeting in the cloud       |
-| Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex) |
+| Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex, Google Meet) |
 | Speaker identification      | ❌ No per-speaker names (one "Meeting Audio" channel)    | ✅ Active-speaker names from the meeting platform      |
 | In-meeting voice assistant  | ❌ Web-UI chat assistant only                            | ✅ Optional Nova Sonic voice assistant in the meeting  |
 | Visible to others           | ✅ No bot / extra attendee                               | ❌ Visible bot joins the meeting                       |

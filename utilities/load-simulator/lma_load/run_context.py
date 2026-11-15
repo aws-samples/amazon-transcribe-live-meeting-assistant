@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Run-context: per-invocation state shared across scenarios.
 
 Encapsulates the ``runId`` tag that every synthetic object carries, the

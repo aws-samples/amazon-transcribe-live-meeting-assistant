@@ -1,6 +1,21 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Shared pytest fixtures for LMA SDK tests."""
+
+import sys
+from pathlib import Path
+
+# No test here sends a request to AWS; see scripts/testing/no_real_aws.py. First,
+# so that a client built while the SDK is imported gets the fake credentials.
+_GUARD_DIR = Path(__file__).resolve().parents[3] / "scripts" / "testing"
+if str(_GUARD_DIR) not in sys.path:
+    sys.path.append(str(_GUARD_DIR))
+
+# The guard's pytest_configure hook and its autouse fixture.
+from no_real_aws import *
+from no_real_aws import activate
+
+activate()
 
 import pytest
 import boto3

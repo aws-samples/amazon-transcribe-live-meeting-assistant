@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -11,9 +11,13 @@ export default /* GraphQL */ `
       SK
       CallId
       AgentId
-      CallCategories
-      IssuesDetected
       CallSummaryText
+      CallSummaryState
+      SpeakerIdentities
+      Agenda
+      AgendaSource
+      AgendaUpdatedBy
+      AgendaUpdatedAt
       Status
       UpdatedAt
       CreatedAt
@@ -21,17 +25,30 @@ export default /* GraphQL */ `
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
-      PcaUrl
       Owner
       SharedWith
       TotalConversationDurationMillis
+      DetectedLanguages
+      TranscriptionPause
       Sentiment {
         OverallSentiment {
+          REMOTE
+          LOCAL
           AGENT
           CALLER
         }
         SentimentByPeriod {
           QUARTER {
+            REMOTE {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
+            LOCAL {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
             AGENT {
               BeginOffsetMillis
               EndOffsetMillis

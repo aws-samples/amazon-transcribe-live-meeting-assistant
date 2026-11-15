@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the VAD-segmented offline recognizer.
 
@@ -372,6 +372,13 @@ def test_build_offline_config_num_threads_default(monkeypatch: pytest.MonkeyPatc
     assert build_offline_model_config(model_dir="/opt/models").num_threads == 1
     monkeypatch.setenv("ASR_NUM_THREADS", "4")
     assert build_offline_model_config(model_dir="/opt/models").num_threads == 4
+
+
+def test_build_offline_config_keeps_short_utterances(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_model_env(monkeypatch)
+    vad = build_offline_model_config(model_dir="/opt/models").vad
+    assert vad.threshold == 0.35
+    assert vad.min_speech_ms == 100
 
 
 def test_build_offline_config_endpointing_maps_to_vad_silence(

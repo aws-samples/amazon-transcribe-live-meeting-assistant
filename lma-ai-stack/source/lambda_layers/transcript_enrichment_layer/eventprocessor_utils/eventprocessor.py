@@ -1,30 +1,52 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional
+import asyncio
+import logging
+import uuid
 from datetime import datetime, timedelta
 from os import getenv
-import uuid
-import asyncio
-from sentiment import ComprehendWeightedSentiment
+from typing import TYPE_CHECKING, Dict, List, Optional
+
 import jwt
 from jwt import PyJWKClient
 
+# The configuration layer, which every function attaching this layer also attaches.
+# pylint: disable-next=import-error
+from lma_channels import LOCAL, REMOTE, canonical_channel
+from sentiment import ComprehendWeightedSentiment
+
 if TYPE_CHECKING:
-    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
     from mypy_boto3_comprehend.client import ComprehendClient
+    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
 else:
     ComprehendClient = object
     DetectSentimentResponseTypeDef = object
 
-MEETING_RECORD_EXPIRATION_IN_DAYS = getenv(
-    "MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
-TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv(
-    "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+try:
+    # The configuration layer, on the functions that attach it beside this one.
+    # pylint: disable-next=import-error
+    from lma_config import read_setting as _read_setting
+except ImportError:  # pragma: no cover - every function that writes records attaches it
+    _read_setting = None
+
+try:
+    # pylint: disable-next=import-error
+    from lma_config import SEGMENT_EXPIRY_LIMIT_DAYS, deletion_delay_minutes
+except ImportError:  # pragma: no cover - a configuration layer from before the setting
+    deletion_delay_minutes = None
+    SEGMENT_EXPIRY_LIMIT_DAYS = 2.0
+
+# The stack parameters' values: MeetingRecordExpirationInDays and
+# TranscriptionExpirationInDays. Each is the default of a Retention setting on
+# the Configuration page and also its upper limit, so a record is given the
+# shorter of the two (see _retention_days).
+MEETING_RECORD_EXPIRATION_IN_DAYS = getenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
+TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
 
 region = getenv("VITE_AWS_REGION", "us-east-1")
-user_pool_id = getenv("VITE_USER_POOL_ID", '')
+user_pool_id = getenv("VITE_USER_POOL_ID", "")
 
 jwks_url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
 jwks_client = PyJWKClient(jwks_url)
@@ -38,11 +60,6 @@ SENTIMENT_SCORE = dict(
     Mixed=0,
 )
 
-# XXX workaround - this should be moved to the Tumbling Window state
-# Contact Lens sends individual Utterances (partials)
-# This map is used to concatenate the invididual Utterances
-UTTERANCES_MAP: Dict[str, str] = {}
-
 # Get value for DynamboDB TTL field
 
 
@@ -50,42 +67,99 @@ def get_ttl(expire_in_days):
     return int((datetime.utcnow() + timedelta(days=float(expire_in_days))).timestamp())
 
 
+def _retention_days(setting: str, env_var: str, parameter_value: str) -> float:
+    """Days a record written now is kept: the Retention section's value, at most the parameter's.
+
+    The section is read through the configuration layer, on its standard tier, so
+    a saved change reaches records written about five minutes later. Without the
+    layer, or with no table named, the parameter's value is the answer, as before.
+    """
+    if _read_setting is None:
+        return float(parameter_value)
+    try:
+        days = _read_setting("retention", setting, env_var=env_var, default=float(parameter_value))
+    except Exception:  # pylint: disable=broad-except -- a record is never lost over its expiry
+        logging.getLogger(__name__).warning(
+            "could not read the retention; using %s", env_var, exc_info=True
+        )
+        return float(parameter_value)
+    return float(days) if days else float(parameter_value)
+
+
 def get_meeting_ttl():
-    return get_ttl(MEETING_RECORD_EXPIRATION_IN_DAYS)
+    return get_ttl(
+        _retention_days(
+            "meetingRecordExpirationInDays",
+            "MEETING_RECORD_EXPIRATION_IN_DAYS",
+            MEETING_RECORD_EXPIRATION_IN_DAYS,
+        )
+    )
 
 
-def get_transcription_ttl():
-    return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
+def _deletes_transcripts_after_summary() -> bool:
+    """Whether the Retention section deletes each transcript once it is summarized."""
+    if deletion_delay_minutes is None:
+        return False
+    try:
+        return deletion_delay_minutes() is not None
+    except Exception:  # pylint: disable=broad-except -- a record is never lost over its expiry
+        logging.getLogger(__name__).warning(
+            "could not read the transcript deletion setting; giving the segment its usual expiry",
+            exc_info=True,
+        )
+        return False
+
+
+def get_transcription_ttl(limited_by_deletion: bool = True):
+    """The expiry of a record that follows the transcript retention.
+
+    ``limited_by_deletion`` is for records that hold transcript text, which
+    the transcript deletion removes; a record that only shares the retention
+    period, such as a key frame, passes False and keeps the full period.
+    """
+    days = _retention_days(
+        "transcriptionExpirationInDays",
+        "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS",
+        TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS,
+    )
+    # While transcripts are deleted after the summary, the transcript deletion
+    # function removes each segment; the short expiry is what removes it if
+    # that deletion never ran.
+    if limited_by_deletion and _deletes_transcripts_after_summary():
+        days = min(days, SEGMENT_EXPIRY_LIMIT_DAYS)
+    return get_ttl(days)
+
 
 def get_owner_from_jwt(jwt_token):
     """
     Extract owner from JWT token with proper signature verification.
-    
+
     Args:
         jwt_token: JWT access token from Cognito
-        
+
     Returns:
         username from token if valid, None if token is empty/invalid
-        
+
     Note:
         Always verifies JWT signature for security. Empty tokens return None
         so caller can fall back to AgentId (for Virtual Participant service calls).
     """
     # Handle empty tokens by using AgentId as fallback (for VP service calls)
-    if not jwt_token or jwt_token == '':
+    if not jwt_token or jwt_token == "":
         print("Empty JWT token, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
-    
+
     try:
         # ALWAYS verify the token signature for security
         decoded_jwt = verify_cognito_token(jwt_token)
-        
+
         if decoded_jwt:
-            return decoded_jwt['username']
+            return decoded_jwt["username"]
         return None
     except Exception as e:
         print(f"JWT decode failed: {e}, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
+
 
 def verify_cognito_token(token):
     try:
@@ -111,167 +185,18 @@ def verify_cognito_token(token):
         print("Token verification failed:", e)
         return None
 
-def transform_segment_to_categories_agent_assist(
-    category: str,
-    category_details: Dict[str, Any],
-    call_id: str,
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Categories segment payload to Agent Assist"""
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
 
-    transcript = f"{category}"
-    # get the min and maximum offsets to put a time range
-    segment_item = {}
-    segment_item["BeginOffsetMillis"] = min(
-        (
-            point_of_interest["BeginOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-    segment_item["EndOffsetMillis"] = max(
-        (
-            point_of_interest["EndOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
+def segment_language_code(message: Dict) -> Optional[str]:
+    """The ``LanguageCode`` a producer sent on a segment, or None.
 
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-    )
-
-
-def transform_segment_to_issues_agent_assist(
-    segment: Dict[str, Any],
-    issue: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Transcript Issues payload to Agent Assist"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["CallId"]
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-    segment_item = segment["Transcript"]
-    transcript = segment_item["Content"]
-
-    issues_detected = segment.get("Transcript", {}).get("IssuesDetected", [])
-    if not issues_detected:
-        raise ValueError("Invalid issue segment")
-
-    begin_offset = issue["CharacterOffsets"]["BeginOffsetChar"]
-    end_offset = issue["CharacterOffsets"]["EndOffsetChar"]
-    issue_transcript = transcript[begin_offset:end_offset]
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-    end_time = end_time + 0.001  # UI sort order
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=issue_transcript,
-    )
-
-
-def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
-    """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
-    call_id: str = segment["CallId"]
-    contact_id: str = segment["CallId"]
-    is_partial: bool
-    segment_item: Dict[str, Any]
-    segment_id: str
-    transcript: str
-    utterance: Dict[str, Any] = segment.get("Utterance", None)
-    categories: Dict[str, Any] = segment.get("Categories", None)
-    contact_lens_transcript: Dict[str, Any] = segment.get("Transcript", None)
-    sentiment_args = {}
-
-    # partial transcript
-    if "Utterance" in segment:
-        is_partial = True
-        segment_item = segment["Utterance"]
-        segment_id = segment_item["TranscriptId"]
-        content = segment_item["PartialContent"]
-        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(
-            segment_id, "") + " " + content
-        transcript = UTTERANCES_MAP[segment_id]
-    # final transcript
-    elif "Transcript" in segment:
-        is_partial = False
-        segment_item = segment["Transcript"]
-        segment_id = segment_item["Id"]
-        transcript = segment_item["Content"]
-        # delete utterance concatenatin from global map
-        if segment_id in UTTERANCES_MAP:
-            del UTTERANCES_MAP[segment_id]
-        if "Sentiment" in segment_item:
-            sentiment = segment_item.get("Sentiment", "NEUTRAL")
-            sentiment_args = dict(
-                Sentiment=sentiment,
-                SentimentScore=SENTIMENT_SCORE,
-                SentimentWeighted=SENTIMENT_WEIGHT.get(sentiment, 0),
-            )
-    else:
-        raise ValueError("Invalid segment type")
-
-    channel = segment_item.get("ParticipantRole", "AGENT")
-    # contact lens uses "CUSTOMER" and LCA expects "CALLER"
-    if channel == "CUSTOMER":
-        channel = "CALLER"
-    created_at = datetime.utcnow().astimezone().isoformat()
-    # Contact Lens times are in Milliseconds
-    # Changing to seconds to normalize units used by the transcript state manager which uses
-    # seconds per the Transcribe streaming API
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    transcript_segment = dict(
-        CallId=call_id,
-        ContactId=contact_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-        OriginalTranscript=transcript,
-        **sentiment_args,
-    )
-
-    if (utterance):
-        transcript_segment["Utterance"] = utterance
-
-    if (categories):
-        transcript_segment["Categories"] = categories
-
-    if (contact_lens_transcript):
-        transcript_segment["ContactLensTranscript"] = contact_lens_transcript
-
-    return transcript_segment
+    Amazon Transcribe names a language per result only with language
+    identification on; the producers pass it on as ``LanguageCode``. Anything
+    that is not a non-empty string is treated as no language.
+    """
+    value = message.get("LanguageCode")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 # Transform Transcript segment fields
@@ -287,72 +212,26 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     transcript: str = None
     is_partial: bool = None
     sentiment: str = None
-    issuesdetected = None
-    sentimentWeighted = None
-    sentimentScore = None
     status: str = "TRANSCRIBING"
     expires_afer = get_transcription_ttl()
     created_at = datetime.utcnow().astimezone().isoformat()
     owner: str = None
     segments = []
 
-    utteranceEvent = message.get("UtteranceEvent", None)
     transcriptEvent = message.get("TranscriptEvent", None)
-    contactLensEvent = message.get("ContactId", None)
 
-    if (utteranceEvent):  # TCA streaming event in KDS
+    if transcriptEvent:  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
-        channel = utteranceEvent["ParticipantRole"]
-        if channel == "CUSTOMER":
-            channel = "CALLER"
-        segment_id = utteranceEvent["UtteranceId"]
-        start_time = utteranceEvent["BeginOffsetMillis"]/1000
-        end_time = utteranceEvent["EndOffsetMillis"]/1000
-        transcript = utteranceEvent["Transcript"]
-        is_partial = utteranceEvent["IsPartial"]
-        if not is_partial and utteranceEvent.get("Sentiment", None):
-            sentiment: str = utteranceEvent.get("Sentiment", None)
-        if not is_partial and utteranceEvent.get("SentimentWeighted", None):
-            sentimentWeighted = utteranceEvent.get("SentimentWeighted", None)
-        if not is_partial and utteranceEvent.get("SentimentScore", None):
-            sentimentScore = utteranceEvent.get("SentimentScore", None)
-
-        if not is_partial and utteranceEvent.get("IssuesDetected", []):
-            issuesdetected = utteranceEvent.get("IssuesDetected")
-        segments.append(
-            dict(
-                CallId=call_id,
-                Channel=channel,
-                SegmentId=segment_id,
-                StartTime=start_time,
-                EndTime=end_time,
-                Transcript=transcript,
-                OriginalTranscript=transcript,
-                IsPartial=is_partial,
-                Sentiment=sentiment,
-                SentimentWeighted=sentimentWeighted,
-                SentimentScore=sentimentScore,
-                IssuesDetected=issuesdetected,
-                Status=status,
-                ExpiresAfter=expires_afer,
-                CreatedAt=created_at,
-            )
-        )
-    elif (transcriptEvent):  # Standard Transcribe streaming event in KDS
-        call_id = message["CallId"]
-        channel = transcriptEvent["Channel"]
-        if channel == "CUSTOMER":
-            channel = "CALLER"
+        channel = canonical_channel(transcriptEvent["Channel"])
         segment_id = transcriptEvent["ResultId"]
         start_time = transcriptEvent["StartTime"]
         end_time = transcriptEvent["EndTime"]
         speaker = transcriptEvent.get("Speaker", None)
-        if (not speaker):
+        if not speaker:
             speaker = "Other Participant"
         transcript = transcriptEvent["Transcript"]
         is_partial = transcriptEvent["IsPartial"]
         sentiment = None
-        issuesdetected = None
         segments.append(
             dict(
                 CallId=call_id,
@@ -365,34 +244,19 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 OriginalTranscript=transcript,
                 IsPartial=is_partial,
                 Sentiment=sentiment,
-                IssuesDetected=issuesdetected,
                 Status=status,
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,
             )
         )
-    elif (contactLensEvent):  # Contact Lens event
-        call_id = message["ContactId"]
-        for segment in message.get("Segments", []):
-            # only handle utterances and transcripts - delegate categories to agent assist
-            if "Utterance" not in segment and "Transcript" not in segment:
-                continue
-            transcript_segment = {
-                **transform_contact_lens_segment({**segment, "CallId": call_id}),
-            }
-            segments.append(transcript_segment)
-
-    else:    # custom event message in KDS
+    else:  # custom event message in KDS
         call_id = message["CallId"]
-        channel = "CALLER"
+        # A producer from before 0.4.0, or one outside LMA, may still send the
+        # older channel names, or only IsCaller; either is written as REMOTE/LOCAL.
         if message.get("Channel", None):
-            channel = message["Channel"]
+            channel = canonical_channel(message["Channel"])
         else:
-            iscaller: bool = message.get("IsCaller", True)
-            if iscaller:
-                channel = "CALLER"
-            else:
-                channel = "AGENT"
+            channel = REMOTE if message.get("IsCaller", True) else LOCAL
 
         if message.get("SegmentId", None):
             segment_id = message["SegmentId"]
@@ -415,7 +279,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             end_time = message["EndTime"]
 
         speaker = message.get("Speaker", None)
-        if (not speaker):
+        if not speaker:
             speaker = "Other Participant"
 
         transcript = message["Transcript"]
@@ -423,10 +287,10 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
 
         if message.get("Sentiment", None):
             sentiment = message["Sentiment"]
-        
+
         if message.get("AccessToken", None):
             owner = get_owner_from_jwt(message.get("AccessToken"))
-            
+
         segments.append(
             dict(
                 CallId=call_id,
@@ -439,21 +303,30 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 OriginalTranscript=transcript,
                 IsPartial=is_partial,
                 Sentiment=sentiment,
-                IssuesDetected=issuesdetected,
                 Status=status,
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,
                 Owner=owner,
                 IdToken=message.get("IdToken", None),
                 AccessToken=message.get("AccessToken", None),
-                RefreshToken=message.get("RefreshToken", None)
+                RefreshToken=message.get("RefreshToken", None),
             )
         )
+
+    # The language the speech engine identified for the segment, when it named
+    # one. Left out otherwise, so a segment with no language is written exactly
+    # as before.
+    language_code = segment_language_code(transcriptEvent or message)
+    if language_code:
+        for segment in segments:
+            segment["LanguageCode"] = language_code
 
     return segments
 
 
-async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE) -> DetectSentimentResponseTypeDef:
+async def detect_sentiment(
+    text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE
+) -> DetectSentimentResponseTypeDef:
     loop = asyncio.get_running_loop()
     sentiment_future = loop.run_in_executor(
         None,
@@ -467,13 +340,15 @@ async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPR
     return result
 
 
-async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_args: Dict) -> Dict[str, object]:
+async def transform_segment_to_add_sentiment(
+    message: Dict, sentiment_analysis_args: Dict
+) -> Dict[str, object]:
 
     sentiment_label_in_message = message.get("Sentiment", None)
 
     sentiment = {}
     # we received sentiment label in transcript, use it.
-    if (sentiment_label_in_message):
+    if sentiment_label_in_message:
         sentiment_weighted_in_message = message.get("SentimentWeighted", None)
         sentiment_score_in_message = message.get("SentimentScore", None)
 
@@ -489,23 +364,31 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
             SentimentWeighted=None,
         )
 
-        if (sentiment_weighted_in_message):
+        if sentiment_weighted_in_message:
             sentiment["SentimentWeighted"] = sentiment_weighted_in_message
         elif sentimentlabel in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
-            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(
-                sentimentlabel, 0)
-        if (sentiment_score_in_message):
+            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(sentimentlabel, 0)
+        if sentiment_score_in_message:
             sentiment["SentimentScore"] = sentiment_score_in_message
 
     else:  # did not receive sentiment label, so call Comprehend to figure out sentiment
-
         text = message.get("OriginalTranscript", message.get("Transcript", ""))
-        comprehend_client: ComprehendClient = sentiment_analysis_args.get(
-            "comprehend_client")
-        comprehend_language_code = sentiment_analysis_args.get(
-            "comprehend_language_code", "en")
+        comprehend_client: ComprehendClient = sentiment_analysis_args.get("comprehend_client")
+        comprehend_language_code = sentiment_analysis_args.get("comprehend_language_code", "en")
 
-        sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(text, comprehend_client, comprehend_language_code)
+        sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(
+            text, comprehend_client, comprehend_language_code
+        )
+        # Counted for the meeting's cost estimate. A metering failure must never
+        # cost the segment its sentiment, so it is contained here.
+        on_request = sentiment_analysis_args.get("on_comprehend_request")
+        if on_request:
+            try:
+                on_request(message.get("CallId"), text)
+            except Exception:  # pylint: disable=broad-except
+                logging.getLogger(__name__).warning(
+                    "could not meter a sentiment request", exc_info=True
+                )
         comprehend_weighted_sentiment = ComprehendWeightedSentiment()
 
         sentiment = {
@@ -514,11 +397,10 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
 
         if sentiment:
             if sentiment.get("Sentiment") in ["POSITIVE", "NEGATIVE"]:
-                sentiment["SentimentWeighted"] = comprehend_weighted_sentiment.get_weighted_sentiment_score(
-                    sentiment_response=sentiment_response
+                sentiment["SentimentWeighted"] = (
+                    comprehend_weighted_sentiment.get_weighted_sentiment_score(
+                        sentiment_response=sentiment_response
+                    )
                 )
-    transcript_segment_with_sentiment = {
-        **message,
-        **sentiment
-    }
+    transcript_segment_with_sentiment = {**message, **sentiment}
     return transcript_segment_with_sentiment

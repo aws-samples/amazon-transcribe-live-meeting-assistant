@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -49,7 +49,7 @@ test('the recording is written from the combined-audio stream', () => {
     // agent, which is what a meeting recording has to contain.
     const body = methodBody('private async *audioStream');
     assert.match(body, /combined_audio\.monitor/);
-    assert.match(body, /recordingStream\.write\(chunk\)/);
+    assert.match(body, /recordingStream\.write\(recordedAudio\(chunk, details\.start\)\)/);
 });
 
 test('the recording is NOT written from the meeting-only stream', () => {
@@ -79,16 +79,17 @@ test('writeAudio no longer takes a recording stream at all', () => {
     // Leaving the parameter in place would invite the bug straight back; removing
     // it makes reintroducing the write a compile error rather than a silent
     // regression that only shows up in a recording nobody plays back.
-    assert.match(src, /private async writeAudio\(transcribeResponse: any\): Promise<void>/);
+    assert.match(src, /private async writeAudio\(transcribeResponse: any, stereo = false\): Promise<void>/);
     assert.doesNotMatch(src, /this\.writeAudio\(response, recordingStream\)/);
 });
 
-test('the recording only captures audio once the meeting has started', () => {
-    // audioStream runs before details.start to keep the Transcribe stream alive
-    // with silence; recording that would prepend the pre-join period to every file.
+test('the recording gets silence, not audio and not nothing, while capture is off', () => {
+    // audioStream feeds the engines silence while details.start is off, so the
+    // transcript's clock runs on; the recording must run on with it (as
+    // silence) or every later line plays ahead of its audio.
     const body = methodBody('private async *audioStream');
-    const guard = body.slice(0, body.indexOf('recordingStream.write(chunk)'));
-    assert.match(guard.split('\n').slice(-4).join('\n'), /details\.start && recordingStream/);
+    assert.match(body, /recordingStream\.write\(recordedAudio\(chunk, details\.start\)\)/);
+    assert.doesNotMatch(body, /details\.start && recordingStream/);
 });
 
 test('the recording tees the pre-framing chunk, not each frame', () => {
@@ -96,16 +97,21 @@ test('the recording tees the pre-framing chunk, not each frame', () => {
     // would produce an identical file with more syscalls — and if the split ever
     // changed, a subtly different one.
     const body = methodBody('private async *audioStream');
-    const writeIdx = body.indexOf('recordingStream.write(chunk)');
+    const writeIdx = body.indexOf('recordingStream.write(recordedAudio(chunk');
     const frameIdx = body.indexOf('frameAudioChunk(chunk)');
     assert.ok(writeIdx > 0 && frameIdx > 0);
     assert.ok(writeIdx < frameIdx, 'the recording write should precede framing');
 });
 
 test('the audio recording and the transcript come from the same samples', () => {
-    // The user-visible promise of a recording: it is what was transcribed. Both
-    // now derive from the single ffmpeg on combined_audio.monitor in audioStream.
+    // The user-visible promise of a recording: it is what was transcribed. On
+    // the mono stream both derive from the single ffmpeg on
+    // combined_audio.monitor in audioStream. On the two-channel stream (with a
+    // voice assistant) Transcribe hears the participants and the assistant on
+    // separate channels and the recording is the same capture's mix of both.
     const body = methodBody('private async *audioStream');
     assert.match(body, /yield \{ AudioEvent: \{ AudioChunk: frame \} \}/);
     assert.equal((src.match(/recordingStream\.write/g) || []).length, 1, 'exactly one writer');
+    assert.match(body, /if \(!stereo\) \{\s*record\(chunk\);/);
+    assert.match(body, /this\.process\.stdout\?\.on\('data', record\)/);
 });

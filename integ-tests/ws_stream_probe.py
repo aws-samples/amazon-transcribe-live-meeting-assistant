@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """End-to-end WebSocket audio streaming probe (the transcriber front door).
 
 Connects to the live transcriber WebSocket exactly like the browser Stream Audio
@@ -61,15 +61,28 @@ def _outputs(cfn, stack_name: str) -> dict:
     return {o["OutputKey"]: o["OutputValue"] for o in outs}
 
 
+
+def _stack_resources(cfn, stack_name):
+    """Every resource summary of a stack.
+
+    ListStackResources returns at most 100 resources per page, and the AI
+    nested stack has more than that, so a single call can miss the table.
+    """
+    return [
+        r
+        for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name)
+        for r in page["StackResourceSummaries"]
+    ]
+
 def _event_sourcing_table(cfn, stack_name: str) -> str:
-    resources = cfn.list_stack_resources(StackName=stack_name)["StackResourceSummaries"]
+    resources = _stack_resources(cfn, stack_name)
     ai_stack = next(
         (r["PhysicalResourceId"] for r in resources if r["LogicalResourceId"] == "AISTACK"),
         None,
     )
     if not ai_stack:
         raise RuntimeError("AISTACK nested stack not found")
-    ai_resources = cfn.list_stack_resources(StackName=ai_stack)["StackResourceSummaries"]
+    ai_resources = _stack_resources(cfn, ai_stack)
     for r in ai_resources:
         if r["LogicalResourceId"] == "EventSourcingTable":
             return r["PhysicalResourceId"]
@@ -113,9 +126,8 @@ async def _stream_wav(ws_url: str, tokens: dict, call_id: str, wav_path: Path,
         await ws.send(json.dumps({
             "callEvent": "START",
             "callId": call_id,
-            "fromNumber": "WS Probe",
-            "toNumber": "LMA System",
-            "agentId": agent_id,
+            "remoteSpeakerName": "WS Probe",
+            "localSpeakerName": agent_id,
             "samplingRate": rate,
         }))
 

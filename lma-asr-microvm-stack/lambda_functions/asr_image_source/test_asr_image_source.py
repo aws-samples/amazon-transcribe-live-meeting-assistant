@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the ASR image-source packager (no AWS calls).
 
@@ -518,8 +518,8 @@ def test_the_shipped_catalog_resolves_with_the_stack_defaults() -> None:
 
     rendered = index.render_model_env(default)
     for key in (
-        "ASR_MODEL_URL",
-        "ASR_MODEL_SHA256",
+        # An archive pins one URL and checksum; a model pinned file by file, one per file.
+        *_model_source_keys(default["model"]),
         "ASR_MODEL_ENCODER_FILE",
         "ASR_MODEL_DECODER_FILE",
         "ASR_MODEL_JOINER_FILE",
@@ -970,3 +970,224 @@ def test_a_two_pass_bundle_reports_the_two_pass_engine() -> None:
 
     assert two_pass["AsrEngine"] == "two_pass"
     assert offline["AsrEngine"] == "accurate"
+
+
+def _model_source_keys(model: dict) -> tuple[str, ...]:
+    """The model.env keys that must be non-empty for ``model``'s weights to be pinned."""
+    if model.get("archive") == index.FILES_ARCHIVE:
+        return tuple(
+            f"ASR_MODEL_{part}_{field}"
+            for part in ("ENCODER", "DECODER", "JOINER", "TOKENS")
+            for field in ("URL", "SHA256")
+        )
+    return ("ASR_MODEL_URL", "ASR_MODEL_SHA256")
+
+
+def _files_pinned(name: str, digit: str) -> dict:
+    return {"path": name, "url": f"https://x.invalid/rev/{name}", "sha256": digit * 64}
+
+
+def _catalog_with_files_model(preview_files: bool = False) -> dict:
+    """The offline model pinned file by file, as a host serving fixed revisions allows."""
+    catalog = _catalog_with_preview()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    for key in ("url", "sha256"):
+        main.pop(key)
+    main["archive"] = "files"
+    main["files"] = {
+        "encoder": _files_pinned("e.onnx", "1"),
+        "decoder": _files_pinned("d.onnx", "2"),
+        "joiner": _files_pinned("j.onnx", "3"),
+        "tokens": _files_pinned("t.txt", "4"),
+    }
+    main["warmWav"] = {"url": "https://x.invalid/rev/0.wav", "sha256": "5" * 64}
+    if preview_files:
+        preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+        for key in ("url", "sha256"):
+            preview.pop(key)
+        preview["archive"] = "files"
+        preview["files"] = {
+            key: _files_pinned(name, "6") for key, name in preview["files"].items()
+        }
+    return catalog
+
+
+def test_a_model_pinned_file_by_file_renders_one_url_and_checksum_per_file() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, _catalog_with_files_model()))
+
+    assert values["ASR_MODEL_ARCHIVE"] == "files"
+    assert values["ASR_MODEL_URL"] == ""
+    # The in-archive names still reach the image, so the runtime layout is unchanged.
+    assert values["ASR_MODEL_ENCODER_FILE"] == "e.onnx"
+    assert values["ASR_MODEL_TOKENS_FILE"] == "t.txt"
+    assert values["ASR_MODEL_ENCODER_URL"] == "https://x.invalid/rev/e.onnx"
+    assert values["ASR_MODEL_JOINER_SHA256"] == "3" * 64
+    assert values["ASR_MODEL_WARM_WAV_SHA256"] == "5" * 64
+
+
+def test_an_archive_model_renders_no_per_file_entries() -> None:
+    """Archive bundles keep their exact model.env, and so their image fingerprint."""
+    values = _env_values(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+
+    assert values["ASR_MODEL_URL"] == "https://example.invalid/model-a.tar.bz2"
+    assert "ASR_MODEL_ENCODER_URL" not in values
+    assert "ASR_MODEL_WARM_WAV_URL" not in values
+
+
+def test_a_preview_model_can_be_pinned_file_by_file() -> None:
+    catalog = _catalog_with_files_model(preview_files=True)
+    values = _env_values(index.resolve({"BundleId": "bundle-two-pass"}, catalog))
+
+    assert values["ASR_PREVIEW_MODEL_ARCHIVE"] == "files"
+    assert values["ASR_PREVIEW_MODEL_ENCODER_FILE"] == "encoder.int8.onnx"
+    assert values["ASR_PREVIEW_MODEL_TOKENS_URL"] == "https://x.invalid/rev/tokens.txt"
+
+
+def test_a_file_pinned_model_requires_a_checksum_for_every_file() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    del main["files"]["joiner"]["sha256"]
+    with pytest.raises(index.ResolutionError, match="joiner file is missing"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_model_rejects_a_bare_file_name() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["tokens"] = "t.txt"
+    with pytest.raises(index.ResolutionError, match="path, url and sha256"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_warm_wav_requires_a_checksum() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["warmWav"] = {"url": "https://x.invalid/rev/0.wav"}
+    with pytest.raises(index.ResolutionError, match="warmWav"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_a_file_pinned_preview_requires_a_checksum_for_every_file() -> None:
+    catalog = _catalog_with_files_model(preview_files=True)
+    preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview["files"]["decoder"]["sha256"] = ""
+    with pytest.raises(index.ResolutionError, match="decoder file is missing"):
+        index.resolve({"BundleId": "bundle-two-pass"}, catalog)
+
+
+def test_a_qwen3_asr_model_must_come_from_an_archive() -> None:
+    catalog = _catalog_with_qwen()
+    qwen = next(m for m in catalog["models"] if m["id"] == "qwen")
+    for key in ("url", "sha256"):
+        qwen.pop(key, None)
+    qwen["archive"] = "files"
+    qwen["files"] = {key: _files_pinned(name, "7") for key, name in qwen["files"].items()}
+    with pytest.raises(index.ResolutionError, match="tokenizer directory"):
+        index.resolve({"BundleId": "bundle-qwen"}, catalog)
+
+
+def test_every_shipped_file_pinned_model_names_a_fixed_revision() -> None:
+    """A per-file pin is only stable if the URL names a commit, not a branch."""
+    catalog = json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+    pinned = [m for m in catalog["models"] if m.get("archive") == index.FILES_ARCHIVE]
+    assert pinned, "expected at least one model pinned file by file"
+    for model in pinned:
+        sources = [*model["files"].values(), *([model["warmWav"]] if "warmWav" in model else [])]
+        for source in sources:
+            assert re.search(r"/resolve/[0-9a-f]{40}/", source["url"]), source["url"]
+            assert re.fullmatch(r"[0-9a-f]{64}", source["sha256"]), source
+
+
+def _shipped_catalog() -> dict:
+    return json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ({"languages": ["en", "es-ES", "FR"]}, ["en", "es", "fr"]),
+        # One baked language is the only one decoded, whatever else the model covers.
+        ({"languages": ["en", "fr", "de"], "decodeLanguage": "fr"}, ["fr"]),
+        ({"languages": ["multilingual"]}, None),
+        ({}, None),
+    ],
+)
+def test_a_models_languages_are_its_listed_base_languages(model: dict, expected) -> None:
+    assert index.model_languages(model) == expected
+
+
+def test_a_two_pass_bundles_languages_are_those_both_models_transcribe() -> None:
+    final = {"languages": ["en", "es", "el", "mt"]}
+    preview = {"languages": ["en", "es", "ja"]}
+    assert index.bundle_languages({"model": final, "preview": preview}) == ["en", "es"]
+    assert index.bundle_languages({"model": final, "preview": None}) == ["el", "en", "es", "mt"]
+
+
+def test_a_model_without_a_language_list_makes_the_bundle_english_only() -> None:
+    final = {"languages": ["en", "es"]}
+    multilingual = {"languages": ["multilingual"]}
+    assert index.bundle_languages({"model": final, "preview": multilingual}) == ["en"]
+    assert index.bundle_languages({"model": multilingual}) == ["en"]
+
+
+def test_build_reports_the_bundles_languages() -> None:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"][0]["languages"] = ["fr", "en"]
+    zipped = make_source_zip(catalog)
+    with mock.patch.object(
+        index.s3, "get_object", return_value={"Body": io.BytesIO(zipped)}
+    ), mock.patch.object(index.s3, "put_object"):
+        _, data = index.build({"SourceLocation": "bucket/key.zip", "DestBucket": "dest"})
+    assert data["Languages"] == "en,fr"
+
+
+def test_the_default_bundle_reports_the_languages_both_its_models_list() -> None:
+    selection = index.resolve({}, _shipped_catalog())
+    languages = index.bundle_languages(selection)
+    assert languages == sorted(
+        set(selection["model"]["languages"]) & set(selection["preview"]["languages"])
+    )
+    for code in ("en", "es", "fr", "de", "it", "pt", "nl"):
+        assert code in languages
+    # Parakeet v3 lists Greek; the Nemotron 3.5 preview does not, so the bundle does not.
+    assert "el" not in languages
+    assert "ja" not in languages
+
+
+def test_the_image_is_given_the_same_language_list_the_stack_reports() -> None:
+    """The ASR server names a row's language only from this list (asr_server/language.py)."""
+    selection = index.resolve({}, _shipped_catalog())
+    rendered = index.render_model_env(selection)
+    lines = [line for line in rendered.splitlines() if line.startswith("ASR_BUNDLE_LANGUAGES=")]
+    assert lines == [f"ASR_BUNDLE_LANGUAGES={','.join(index.bundle_languages(selection))}"]
+
+
+def test_a_one_language_bundle_bakes_a_one_language_list() -> None:
+    rendered = index.render_model_env(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+    assert "ASR_BUNDLE_LANGUAGES=en" in rendered.splitlines()
+
+
+def test_a_file_pinned_transducer_may_carry_an_encoder_weights_file() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["encoder_data"] = _files_pinned("encoder.weights", "8")
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, catalog))
+
+    assert values["ASR_MODEL_ENCODER_DATA_FILE"] == "encoder.weights"
+    assert values["ASR_MODEL_ENCODER_DATA_URL"] == "https://x.invalid/rev/encoder.weights"
+    assert values["ASR_MODEL_ENCODER_DATA_SHA256"] == "8" * 64
+
+
+def test_a_file_pinned_transducer_encoder_weights_file_requires_a_checksum() -> None:
+    catalog = _catalog_with_files_model()
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["files"]["encoder_data"] = {"path": "encoder.weights", "url": "https://x.invalid/w"}
+    with pytest.raises(index.ResolutionError, match="encoder_data file is missing"):
+        index.resolve({"BundleId": "bundle-offline"}, catalog)
+
+
+def test_the_parakeet_v3_bundles_use_the_full_precision_export() -> None:
+    catalog = json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
+    v3 = [b for b in catalog["bundles"] if b["id"].startswith("parakeet-tdt-v3")]
+    assert v3
+    assert {b["modelId"] for b in v3} == {"parakeet-tdt-0.6b-v3"}

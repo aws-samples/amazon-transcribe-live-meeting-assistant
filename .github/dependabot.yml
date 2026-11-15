@@ -50,7 +50,6 @@ updates:
   - package-ecosystem: npm
     directories:
       - /lma-websocket-transcriber-stack/source/app
-      - /lma-websocket-transcriber-stack/source/lambda_functions/pca_integration
     schedule:
       interval: weekly
     target-branch: develop
@@ -89,7 +88,8 @@ updates:
       # (dist/index.js does require("./Client") but the file is dist/client.js),
       # which builds on case-insensitive macOS but FAILS the Docker image build
       # on case-sensitive Linux (CodeBuild): "Cannot read file: .../dist/Client.js".
-      # Pinned to 3.0.1; unignore once upstream fixes the casing (>3.0.2).
+      # Only 3.0.2 is skipped: 3.1.0 bundles cleanly in the Linux image build
+      # (the Dockerfile's esbuild step was run against it).
       - dependency-name: simli-client
         versions: ["3.0.2"]
       # @types/uuid >=10 are deprecated empty stubs (uuid ships its own types
@@ -100,7 +100,7 @@ updates:
       # react/react-dom track whatever @zoom/meetingsdk peers exactly, because
       # the Zoom participant uses it and the SDK declares *exact* react and
       # react-dom peers rather than a range (verified in its package.json).
-      # @zoom/meetingsdk 6.5.0 peers `react: "18.3.1"` and `react-dom: "18.3.1"`,
+      # @zoom/meetingsdk 6.10.0 peers `react: "18.3.1"` and `react-dom: "18.3.1"`,
       # so both are pinned to exactly 18.3.1 here; any independent move makes
       # `npm ci` fail with ERESOLVE ("Conflicting peer dependency"), which would
       # break CI and the Dockerfile's `npm ci && npm run build`, and with it the
@@ -119,6 +119,13 @@ updates:
         versions: [">=19"]
       - dependency-name: "@types/react-dom"
         versions: [">=19"]
+      # playwright-core follows cloakbrowser, which drives every meeting join:
+      # cloakbrowser 0.7.2 declares `playwright-core >=1.53.0 <1.65.0` (npm) and
+      # `playwright<1.65` (pip). Held below 1.65 until cloakbrowser's range
+      # includes it; then move it together with the Dockerfile's
+      # PLAYWRIGHT_PIP_VERSION and CLOAKBROWSER_PIP_VERSION pins.
+      - dependency-name: playwright-core
+        versions: [">=1.65"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm

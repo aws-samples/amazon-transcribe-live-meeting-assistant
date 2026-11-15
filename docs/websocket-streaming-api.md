@@ -39,7 +39,7 @@ This document specifies everything a client application needs to connect, authen
 The LMA WebSocket transcriber service accepts real-time audio streams over a WebSocket connection and produces live transcriptions using Amazon Transcribe. Clients connect via a secure WebSocket (`wss://`), authenticate with Amazon Cognito JWT tokens, send JSON control messages to start/end a session, and stream raw PCM audio as binary frames.
 
 **Key capabilities:**
-- Real-time speech-to-text transcription via Amazon Transcribe (standard or Call Analytics)
+- Real-time speech-to-text transcription via Amazon Transcribe
 - Stereo audio support with per-channel speaker attribution
 - Active speaker tracking for multi-participant meetings
 - Optional server-side audio recording to Amazon S3
@@ -228,9 +228,9 @@ Client                                          Server
 3. **Stream Audio** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
 4. **Speaker Changes** *(optional)* — Send `SPEAKER_CHANGE` text messages when the active speaker changes in a multi-participant meeting.
 5. **Send END** — When the session is complete, send a JSON text message with `callEvent: "END"` to signal the server to finalize the transcription, upload recordings, and clean up.
-6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server will automatically trigger end-of-call processing.
+6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server holds the meeting for 60 seconds for the client to reconnect, and then triggers end-of-call processing (see [Reconnection](#reconnection)).
 
-> **Important:** If the WebSocket connection is closed unexpectedly (network error, client crash), the server automatically triggers end-of-call cleanup including writing the call end event. However, explicitly sending the END message is strongly recommended for clean shutdown.
+> **Important:** If the WebSocket connection is closed unexpectedly (network error, client crash), the server ends the meeting, including writing the call end event, 60 seconds later unless the client reconnects and sends START for it again. Explicitly sending the END message is strongly recommended for clean shutdown.
 
 ---
 
@@ -252,13 +252,13 @@ Sent once at the beginning of a session to initialize the transcription.
 {
   "callEvent": "START",
   "callId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentId": "agent@example.com",
-  "fromNumber": "Customer Name",
-  "toNumber": "Meeting Name",
+  "localSpeakerName": "ana@example.com",
+  "remoteSpeakerName": "Other Participant",
   "samplingRate": 16000,
-  "activeSpeaker": "Customer Name",
+  "activeSpeaker": "Other Participant",
   "diarizeSystemChannel": true,
-  "diarizeMicChannel": false
+  "diarizeMicChannel": false,
+  "clientType": "DESKTOP_APP"
 }
 ```
 
@@ -266,18 +266,34 @@ Sent once at the beginning of a session to initialize the transcription.
 |-------|------|----------|---------|-------------|
 | `callEvent` | `string` | **Yes** | — | Must be `"START"` |
 | `callId` | `string` (UUID) | No | Auto-generated UUID | Unique identifier for this session. Use UUID v4 format. If omitted, the server generates one. |
-| `agentId` | `string` | No | Auto-generated UUID | Identifier for the agent/user (e.g., email address or username). Used as the speaker name for the microphone channel (channel 1) in stereo mode. |
-| `fromNumber` | `string` | No | `"Customer Phone"` | Label for the caller / remote participant. Used as speaker name for channel 0. Despite the name, this is a free-form string — not necessarily a phone number. |
-| `toNumber` | `string` | No | `"System Phone"` | Label for the system / meeting. Free-form string. |
+| `localSpeakerName` | `string` | No | Auto-generated UUID | The speaker name for the microphone channel (channel 1), usually the user's email address or name. It is also stored as the meeting's `AgentId`, which the meeting list shows as **Owner Name**. Older name: `agentId`. |
+| `remoteSpeakerName` | `string` | No | `"Other Participant"` | The speaker name for the meeting-audio channel (channel 0) when the START has no `activeSpeaker`, until a `SPEAKER_CHANGE` names someone else. It is stored as the meeting's `CustomerPhoneNumber` attribute and stands in for the placeholder speaker name in the transcript. Free-form text. Older name: `fromNumber`. |
 | `samplingRate` | `number` | **Yes** | — | Audio sample rate in Hz. Must match the actual audio being sent. Supported values: `8000` or `16000`. |
-| `activeSpeaker` | `string` | No | Value of `fromNumber` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
-| `diarizeSystemChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
-| `diarizeMicChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Same, for the microphone channel (channel 1). |
+| `activeSpeaker` | `string` | No | Value of `remoteSpeakerName` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
+| `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
+| `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
+| `clientType` | `string` | No | `API` | Which client is capturing the meeting: `STREAM_AUDIO` (the Stream Audio page and its embeddable components), `BROWSER_EXTENSION` or `DESKTOP_APP`. Stored on the meeting as its capture source; any other value, or none, is stored as `API`. See [Capture Context](#capture-context). |
+
+> **Older field names.** Clients written for LMA before 0.4.0 send the two
+> speaker names as `agentId` (for `localSpeakerName`) and `fromNumber` (for
+> `remoteSpeakerName`), names LMA inherited from a telephony solution. The
+> server still accepts them, in every message type, and a client need not change.
+> If a message carries both spellings of one name, the documented one is used.
+> Those clients may also send `toNumber`, a free-form label the server stores as
+> the meeting's `SystemPhoneNumber` attribute (default `"System"`) and does not
+> otherwise use; it has no newer name, and a new client need not send it.
+> The in-repository clients that are built and deployed with the stack (the
+> Stream Audio page, the embeddable components, the browser extension, the
+> sample CLI client) send the documented names. The Desktop Capture Apps for
+> macOS and Windows still send `agentId`, `fromNumber` and `toNumber`, which
+> keeps them working against deployments of earlier versions.
 
 > **Precedence:** if the client sends **either** diarization field, its values are
 > used verbatim (a field left out counts as `false`). Only when **neither** field
-> is present does the server fall back to the deployment-wide `ShowSpeakerLabel`
-> CloudFormation parameter, applied to both channels. Anything other than a JSON
+> is present does the server fall back to the deployment-wide default, applied to
+> both channels: **Amazon Transcribe › Identify speakers within a channel by
+> default** on the deployment's Configuration page (off unless an Admin changes
+> it). Anything other than a JSON
 > `true` — including the string `"true"` — is treated as `false`.
 
 #### 6.1.2 SPEAKER_CHANGE Message
@@ -288,7 +304,7 @@ Sent during a session to update who is currently speaking on the meeting channel
 {
   "callEvent": "SPEAKER_CHANGE",
   "callId": "550e8400-e29b-41d4-a716-446655440000",
-  "agentId": "agent@example.com",
+  "localSpeakerName": "ana@example.com",
   "activeSpeaker": "New Speaker Name"
 }
 ```
@@ -297,10 +313,33 @@ Sent during a session to update who is currently speaking on the meeting channel
 |-------|------|----------|-------------|
 | `callEvent` | `string` | **Yes** | Must be `"SPEAKER_CHANGE"` |
 | `callId` | `string` (UUID) | **Yes** | Must match the `callId` from the START message |
-| `agentId` | `string` | **Yes** | Same agent ID from START. Used to determine if the speaker change applies to the meeting channel. |
-| `activeSpeaker` | `string` | **Yes** | Name of the new active speaker on the meeting channel. If the name matches `agentId`, the change is ignored (the agent's channel is already known). |
+| `localSpeakerName` | `string` | **Yes** | The same `localSpeakerName` as in START (older name: `agentId`). Used to determine if the speaker change applies to the meeting channel. |
+| `activeSpeaker` | `string` | **Yes** | Name of the new active speaker on the meeting channel. If the name matches `localSpeakerName`, the change is ignored (the microphone channel's speaker is already known). |
 
-> **Behavior:** The server only updates the meeting channel (channel 0) speaker. If `activeSpeaker` equals `agentId`, the event is ignored because the agent is already attributed to channel 1.
+> **Behavior:** The server only updates the meeting channel (channel 0) speaker. If `activeSpeaker` equals `localSpeakerName`, the event is ignored because that speaker is already attributed to channel 1.
+
+**Where the change is placed.** The server places each change on the meeting's
+audio clock at the point it arrives, which is the amount of audio received on the
+session so far. It then names each meeting-channel segment after whoever was
+active for most of the segment's audio, with every change moved back by 0.75 s
+(the `SPEAKER_CHANGE_LAG_SECONDS` environment variable on the transcriber task
+overrides this). For that to be right, send a change as soon as it happens, on the
+same connection as the audio, and keep sending audio as it is captured rather than
+in large batches. This applies on the ASR MicroVM engine, and on Amazon Transcribe
+when the meeting channel is diarized. Otherwise, a segment takes the speaker active
+when Amazon Transcribe returns it. An `activeSpeaker` of `none` or `n/a` means
+nobody is speaking: the previous speaker carries on.
+
+**With the meeting channel diarized**, the speaker changes are also counted
+against each voice label. Once a voice has at least 20 s of speech and one name
+holds at least 70% of it, that voice's segments are named after that name even
+where the reported changes lag or flicker. The voice id is written only under the
+name the voice is attributed to, so `Ana (spk_1)` and `Sam (spk_1)` do not both
+appear. See
+[Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well),
+which describes the same rule for the Virtual Participant. A client that never
+sends `SPEAKER_CHANGE` gets the meeting channel's own name plus the voice id, as
+before.
 
 #### 6.1.3 END Message
 
@@ -319,6 +358,150 @@ Sent to signal the end of the audio streaming session.
 | `callId` | `string` (UUID) | **Yes** | Must match the `callId` from the START message |
 | `shouldRecordCall` | `boolean` | No | Override whether the server saves the audio recording to S3. If omitted, uses the server's default configuration. |
 
+#### 6.1.4 Frames the Server Sends
+
+The server sends JSON text frames to the client only for meeting consent
+(below). Each has an `event` field, not `callEvent`. A client that does not
+use meeting consent never asks for one, and may ignore any text frame it
+receives.
+
+#### 6.1.5 Meeting Consent Frames
+
+When the deployment's [meeting consent](meeting-consent.md) mode is Notify or
+Opt-in, a client shows its user a consent step before streaming and sends what
+the user confirmed with `START`. The server records it on the meeting once the
+meeting exists, and transcribes and records audio only while the meeting's
+consent allows it. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app)
+for the behaviour; this section is the protocol.
+
+**Ask for the settings** (any time on an open connection, usually once on
+connecting):
+
+```json
+{ "callEvent": "CONSENT_SETTINGS" }
+```
+
+The server answers:
+
+```json
+{
+  "event": "CONSENT_SETTINGS",
+  "available": true,
+  "mode": "opt_in",
+  "rule": "owner_attests",
+  "supported": true,
+  "noticeTemplate": "{LMA_USER} would like to record and transcribe this meeting ({meeting}) ...",
+  "consentPhrase": "I consent",
+  "objectionPhrase": "I object",
+  "clientsWithoutConsent": "accept_with_warning"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `available` | `false` when the settings could not be read, with a `message`; the other fields are then absent |
+| `mode` | `off`, `notify` or `opt_in`. With `off` no consent step is needed |
+| `rule` | For `opt_in`, `owner_attests`: the rule a streaming client's meeting runs under, met by the user's confirmation. `null` otherwise |
+| `supported` | `false` when the deployment's opt-in rule cannot be met by a streaming client, with the `reason`; the server refuses such a meeting |
+| `noticeTemplate` | The notice (notify) or consent request (opt-in) to show. Fill `{LMA_USER}` (the user, or "The meeting organizer"), `{meeting}` (the meeting's name, or "this meeting"), `{consent_phrase}` and `{objection_phrase}` (the two phrases below); leave other text in braces as written |
+| `clientsWithoutConsent` | What the server does with a `START` that has no `consent` field: `accept_with_warning` or `reject` |
+
+**Send the step with START**, in a `consent` field:
+
+```json
+{
+  "callEvent": "START",
+  "callId": "Weekly sync - 2026-11-02-10:00:00.000",
+  "localSpeakerName": "ana@example.com",
+  "samplingRate": 16000,
+  "consent": {
+    "mode": "opt_in",
+    "confirmed": true,
+    "method": "verbal",
+    "noticeText": "ana@example.com would like to record and transcribe this meeting (Weekly sync) ...",
+    "lmaUser": "ana@example.com",
+    "meetingName": "Weekly sync",
+    "statement": "Everyone agreed at the start of the call.",
+    "client": "Stream Audio"
+  }
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `mode` | Yes | The mode the step was shown for. An opt-in meeting whose step was shown for another mode is refused (the settings changed) |
+| `confirmed` | For opt-in | `true` when the user confirmed: in opt-in, that everyone agreed; in notify, that the notice was given. An opt-in meeting without it is refused |
+| `method` | For opt-in | `verbal`, `chat` or `invite_terms`: how everyone was told or agreed |
+| `noticeText` | No | The notice as shown, placeholders filled (at most 2,000 characters); recorded as the notice posted |
+| `lmaUser`, `meetingName` | No | Fill the placeholders of the notice stored on the meeting (at most 100 characters each) |
+| `statement` | No | The user's own words about how everyone agreed (at most 500 characters) |
+| `client` | No | The client's name, used in the attestation's statement when there is none |
+
+A client that implements the consent step should send the `consent` field
+with every `START`, with `mode: "off"` when it has not read the settings. In an
+opt-in deployment such a `START` is refused with `CONSENT_NOT_CONFIRMED`, which
+tells the client to read the settings again, instead of being treated by
+`clientsWithoutConsent` as a client without a consent step.
+
+In opt-in, audio sent after `START` is discarded until the meeting's consent
+allows capture, usually a second or two later; there is no need to wait before
+sending it.
+
+**Report an objection** while streaming:
+
+```json
+{ "callEvent": "CONSENT_OBJECTION", "participantName": "Bo Chen", "source": "voice", "text": "I object" }
+```
+
+`participantName` (default *A participant*), `source` (`voice`, the default,
+or `chat`) and `text` are optional. The server stops transcribing and
+recording at once, ends the meeting as if `END` had been sent, records the
+objection, and closes the connection. Do not send `END` afterwards.
+
+**Send an evidence image** after `START`:
+
+```json
+{
+  "callEvent": "CONSENT_EVIDENCE",
+  "image": "data:image/jpeg;base64,/9j/4AAQ...",
+  "capturedAt": "2026-11-02T10:01:30.000Z",
+  "note": "The meeting window after the request"
+}
+```
+
+`image` is a JPEG or PNG, as base64 with or without the `data:` prefix, of at
+most 3.75 MB; at most five are accepted per meeting. The server stores it under
+the meeting's evidence folder, adds it to the consent record, and asks for it
+to be checked. `CONSENT_OBJECTION` and `CONSENT_EVIDENCE` apply to the meeting
+started on the same connection; their `callId`, if sent, is not used. They may
+be sent straight after `START`: the server holds them until it has registered
+the meeting (up to eight per connection). A consent step is recorded only on a
+meeting owned by the signed-in user who sent `START`.
+
+**What the server sends back**, after each step and on refusal:
+
+```json
+{
+  "event": "CONSENT_STATE",
+  "callId": "Weekly sync - 2026-11-02-10:00:00.000",
+  "mode": "opt_in",
+  "status": "granted",
+  "captureAllowed": true,
+  "reason": "the meeting owner attested that everyone agreed"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `status` | The record's status: `pending`, `granted`, `objected` or `not_required` |
+| `captureAllowed` | `false` only when the server has stopped, or will not start, capturing the meeting; the meeting is then ended and the connection closed. Stop capturing and do not reconnect for the same meeting |
+| `code`, `message` | When something was refused or not recorded: `CONSENT_REQUIRED` (no consent step, and the deployment refuses such clients), `CONSENT_NOT_CONFIRMED`, `CONSENT_RULE_UNSUPPORTED`, `CONSENT_NOT_RECORDED` (the record could not be written; in notify capture goes on), `NOTICE_NOT_RECORDED` (the notice was not recorded as posted; capture goes on), `MEETING_NOT_OWNED` (the meeting named belongs to another user; start again with another name), `OBJECTION_RECEIVED`, `EVIDENCE_REFUSED`, `EVIDENCE_NOT_STORED`, `NO_MEETING` |
+| `evidence` | After an evidence image: `evidenceId`, `stored`, and once checked the `verdict` (`supports_consent`, `objection_found` or `inconclusive`) |
+
+A refused `START` is answered with a `CONSENT_STATE` frame and the connection is
+closed with code `1008`; no meeting is created.
+
 #### Full CallMetaData Schema
 
 For reference, here is the complete TypeScript type used by the server:
@@ -327,14 +510,16 @@ For reference, here is the complete TypeScript type used by the server:
 type CallMetaData = {
   callId: string;           // UUID v4
   callEvent: string;        // "START" | "SPEAKER_CHANGE" | "END"
-  agentId?: string;         // Speaker name for microphone channel (ch_1)
-  fromNumber?: string;      // Speaker label for meeting channel (ch_0)
-  toNumber?: string;        // Meeting/system label
+  localSpeakerName?: string;  // Speaker name for microphone channel (ch_1); older name agentId
+  remoteSpeakerName?: string; // Speaker name for meeting channel (ch_0); older name fromNumber
+  toNumber?: string;        // Older clients only: stored as SystemPhoneNumber, otherwise unused
   samplingRate: number;     // 8000 or 16000
   activeSpeaker: string;    // Current speaker on meeting channel (ch_0)
   shouldRecordCall?: boolean;
   diarizeSystemChannel?: boolean;  // START only: diarize ch_0 (system/meeting)
   diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
+  consent?: object;         // START only: the client's consent step (6.1.5)
+  clientType?: string;      // START only: STREAM_AUDIO | BROWSER_EXTENSION | DESKTOP_APP (Capture Context)
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -345,9 +530,33 @@ type CallMetaData = {
 };
 ```
 
+#### Capture Context
+
+Each meeting's record says how it was captured and transcribed, in four fields
+of the `Call` type that `getCall` returns. The server writes them from the
+`START` message and the settings the meeting starts with; a client sets only
+the first, through `clientType`.
+
+| Field | Values |
+|-------|--------|
+| `CaptureSource` | `STREAM_AUDIO`, `BROWSER_EXTENSION` or `DESKTOP_APP` from the START's `clientType`, and `API` for any other client of this API. Meetings that do not come through this API are `VIRTUAL_PARTICIPANT` (a [Virtual Participant](virtual-participant.md) joined the meeting) and `UPLOAD` (an uploaded recording). |
+| `TranscriptionEngine` | `TRANSCRIBE` (Amazon Transcribe) or `MICROVM_ASR` (the [MicroVM ASR engine](microvm-asr.md)). A meeting the MicroVM could not take, and that Amazon Transcribe transcribed instead, reads `TRANSCRIBE`. |
+| `TranscriptionLanguage` | The Amazon Transcribe language setting the meeting used: a language code such as `en-US`, or `identify-language` / `identify-multiple-languages` when Transcribe identified the language from the deployment's language options. An uploaded recording identified this way keeps the identify mode, as a streaming meeting does; the languages identified are listed in the meeting's `DetectedLanguages`. Not set for `MICROVM_ASR`, whose model sets the language; a meeting that moved to the MicroVM after START can still hold the language START recorded, so read it only when `TranscriptionEngine` is `TRANSCRIBE`. |
+| `SpeakerSeparation` | The channels speaker separation (diarization) was asked for, after the [precedence](#611-start-message) above: `BOTH`, `REMOTE` (the meeting audio, channel 0), `LOCAL` (the microphone, channel 1) or `NONE`. |
+
+The engine is the one the meeting is expected to start with when its record is
+created. If another one transcribes it — Amazon Transcribe taking over because
+no MicroVM could be started, or an opt-in meeting that waited for consent while
+the engine setting changed — the server writes the transcription fields again
+when transcription starts. The `clientType` is the client's own statement: it is
+informational, and does not change how the meeting is processed. All four fields are absent on meetings recorded before LMA stored
+them, and a client that does not send `clientType` keeps working unchanged.
+
 ### 6.2 Binary Messages (Audio Data)
 
 After sending the START message, stream audio data as **binary WebSocket frames**. Each frame contains raw PCM audio samples with no headers or metadata.
+
+The server sends no reply to START, and a client does not need to wait before sending audio. Audio that arrives while the server is still handling the START (reading settings, checking consent, opening or resuming the meeting's session) is held and then delivered in the order it arrived, ahead of any audio sent later. The hold keeps up to 8 seconds of audio per connection at the START's `samplingRate` (two channels of 16-bit PCM, with the rate taken as between 8 and 48 kHz); beyond that the oldest audio is dropped and the server logs a warning. If the START is refused, or the connection closes before it has been handled, the held audio is discarded.
 
 **Requirements:**
 - Each binary frame contains raw PCM audio bytes — **no WAV headers, no container format**
@@ -373,7 +582,7 @@ After sending the START message, stream audio data as **binary WebSocket frames*
 | Mode | Channels | Description |
 |------|----------|-------------|
 | **Mono** | 1 | Single audio source. All audio is attributed to the active speaker. |
-| **Stereo** | 2 | Two interleaved channels. Channel 0 (left) = meeting/remote audio ("CALLER"). Channel 1 (right) = microphone/local audio ("AGENT"). |
+| **Stereo** | 2 | Two interleaved channels. Channel 0 (left) = meeting/remote audio (transcript channel `REMOTE`). Channel 1 (right) = microphone/local audio (transcript channel `LOCAL`). |
 
 **Stereo interleaving format:**
 
@@ -427,7 +636,20 @@ The server supports three mechanisms for speaker attribution:
 
 When streaming stereo audio:
 - **Channel 0** (left) → Attributed to the meeting/remote participant(s). Speaker name is the `activeSpeaker` value.
-- **Channel 1** (right) → Attributed to the local agent/user. Speaker name is the `agentId` value.
+- **Channel 1** (right) → Attributed to the local user. Speaker name is the `localSpeakerName` value.
+
+Each transcript segment records which of the two it came from in its `Channel`
+field: `REMOTE` for channel 0 and `LOCAL` for channel 1. A client never sends
+these names; they appear in what LMA stores and returns, such as the GraphQL
+`TranscriptSegment.Channel` field, the transcript Lambda hook's input and the
+transcript-segment records on the meeting's Kinesis data stream.
+
+LMA versions before 0.4.0 used the names `CALLER` (for `REMOTE`) and `AGENT`
+(for `LOCAL`). Meetings recorded by those versions keep the older names until
+they expire, and LMA reads them as the new ones. A producer that writes
+transcript segments to the Kinesis data stream directly, or calls the
+`addTranscriptSegment` mutation, may still send `CALLER` or `AGENT`; LMA stores
+them as `REMOTE` and `LOCAL`.
 
 ### Active Speaker Updates
 
@@ -435,7 +657,7 @@ For scenarios where multiple participants share the meeting channel (channel 0),
 
 **Rules:**
 - `SPEAKER_CHANGE` only affects channel 0 (the meeting channel)
-- If `activeSpeaker` matches `agentId`, the change is ignored (channel 1 always belongs to the agent)
+- If `activeSpeaker` matches `localSpeakerName`, the change is ignored (channel 1 always belongs to the local speaker)
 - Speaker names are free-form strings
 
 ### Speaker Identification (Diarization)
@@ -526,20 +748,90 @@ speaking on both channels therefore gets a different number on each.
 
 | Scenario | Behavior |
 |----------|----------|
-| Binary data received before START | Server logs an error; audio is dropped. Always send START first. |
+| Binary data received before START | Server logs an error; audio is dropped. Always send START first. Audio sent after a START the server is still handling is held, not dropped (see [Binary Messages](#62-binary-messages-audio-data)). |
 | END received without START | Server logs an error and ignores the message. |
 | Duplicate END messages | Server logs a warning; second END is ignored. |
 | WebSocket error (network) | Server logs the error and forces a close, triggering automatic end-of-call cleanup. |
-| Client disconnects unexpectedly | Server detects the close event and automatically writes a call end event and cleans up resources. |
+| Client disconnects unexpectedly | Server holds the meeting for 60 seconds for the client to reconnect (see [Reconnection](#reconnection)); if it does not, the server writes the call end event and cleans up resources. |
+| Meeting consent refuses the meeting, or stops it | Server sends a `CONSENT_STATE` frame with `captureAllowed: false` and closes the connection with code `1008`. See [Meeting Consent Frames](#615-meeting-consent-frames). |
 
 ### Reconnection
 
-The server does not support session resumption. If a connection drops, the client must:
+If a connection drops without an END, the server holds the meeting for 60
+seconds. The window is the `AUDIO_RECONNECT_GRACE_MS` environment variable of
+the transcriber's container, in milliseconds: `0` turns holding off, and a value
+that is not a number keeps the default. The stack does not set this variable
+and has no parameter for it, so it is changed only by editing the transcriber's
+ECS task definition (registering a new revision with the variable added and
+updating the service to it). A stack update that replaces the task definition
+does not carry that edit over. To continue the meeting, the client must:
 1. Open a new WebSocket connection
-2. Send a new START message (optionally with a new `callId`)
+2. Send START again with the **same `callId`**, authenticated as the same user
 3. Begin streaming audio again
 
-The previous session will be finalized automatically by the server.
+The server then continues the same meeting on the new connection: the audio
+recording carries on in the same file, and the transcript carries on from where
+the audio recording is, so the two stay in step for the meeting page's player.
+Audio the client could not send while it was disconnected is missing from both.
+The meeting gets one END, when the client sends it or the connection closes
+for good. A START for the same meeting from the same user while its old
+connection is still open (the client noticed the drop first) moves the meeting
+to the new connection and closes the old one.
+
+A video stream of the meeting (`START_VIDEO` on its own connection) keeps the
+times its client gives it. A stream resumed with `videoResume: true` continues
+its own timestamps, so if the client went on recording video while the audio
+connection was down, the video and its key frames are ahead of the transcript
+from then on by the audio that was lost. A stream restarted without
+`videoResume` has its key frames placed at the duration of the audio received
+so far, which leaves out the time the audio connection was down, as the
+transcript does; how closely depends on the client sending audio as it is
+captured.
+
+A meeting nobody reconnects to within the 60 seconds is ended as if its
+connection had closed for good. A START with a new `callId` starts a new
+meeting.
+
+A client that reconnects should therefore:
+
+- Send the meeting's START again on **every** connection it opens for the
+  meeting, as that connection's first frame, before any audio. Audio on a
+  connection that has had no START is dropped. Send the same START as the first
+  time, including its `consent` field: the server checks the meeting's consent
+  again on each START.
+- Authenticate each connection with current tokens. The tokens are checked when
+  the connection opens, so a reconnect made with tokens that have expired since
+  the first connection is refused with `401`.
+- Hold a bounded amount of the audio captured while disconnected (LMA's clients
+  hold about 3 seconds), and send it after the START; it can follow the START
+  at once, since the server holds audio that arrives while it handles the
+  START. The recording and the transcript carry on from where they were, so whatever was not sent is missing
+  from both and they stay in step with each other.
+- Stop reconnecting for a meeting the server ended for its consent
+  (`CONSENT_STATE` with `captureAllowed: false`), and send no further START for
+  it.
+- Treat a meeting whose connection could not be restored within the 60 seconds
+  as ended, rather than send START for it again, which would start a second
+  session (below).
+
+LMA's own clients do this. The Stream Audio page and its embeddable variants
+reconnect after 1, 2 and 4 seconds and then every 5 seconds, fetch tokens for
+each connection, send the START again, and then send up to the last 3 seconds of
+audio captured while disconnected (older audio is dropped). If no connection
+opens within 55 seconds of the drop, they stop streaming and say that the
+meeting was ended; the meeting keeps what was captured before the drop. The 55
+seconds are counted from when the browser reports the connection closed, which
+can be later than the server notices. The Desktop Capture App also holds about
+3 seconds of audio and sends START on every connection. The browser extension
+does not reconnect: a dropped connection stops its capture.
+
+The held meeting lives on the transcriber task that served it. With more than
+one task (`TranscriberDesiredTaskCount` above 1), a reconnection can reach a
+different task, which starts a second session for the same `callId`: its
+transcript starts again from zero, and its audio recording is stored beside the
+meeting's first one (`<callId>_<timestamp>.wav` under the recordings prefix)
+rather than replacing it, while the meeting keeps its first recording. The same
+happens to a reconnection after the 60 seconds.
 
 ---
 
@@ -582,9 +874,8 @@ ws.on('open', () => {
   const startMessage = JSON.stringify({
     callEvent: 'START',
     callId: callId,
-    agentId: 'my-agent@example.com',
-    fromNumber: 'Remote Participant',
-    toNumber: 'My Meeting',
+    localSpeakerName: 'me@example.com',
+    remoteSpeakerName: 'Remote Participant',
     samplingRate: SAMPLE_RATE,
     activeSpeaker: 'Remote Participant',
   });
@@ -650,9 +941,8 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     callEvent: 'START',
     callId: callId,
-    agentId: 'user@example.com',
-    fromNumber: 'Meeting Audio',
-    toNumber: 'My Meeting',
+    localSpeakerName: 'user@example.com',
+    remoteSpeakerName: 'Meeting Audio',
     samplingRate: SAMPLE_RATE,
     activeSpeaker: 'Meeting Audio',
   }));
@@ -755,9 +1045,8 @@ async def stream_audio(pcm_file_path: str):
         start_msg = json.dumps({
             "callEvent": "START",
             "callId": call_id,
-            "agentId": "agent@example.com",
-            "fromNumber": "Remote Speaker",
-            "toNumber": "My Meeting",
+            "localSpeakerName": "me@example.com",
+            "remoteSpeakerName": "Remote Speaker",
             "samplingRate": SAMPLE_RATE,
             "activeSpeaker": "Remote Speaker",
         })
@@ -814,6 +1103,8 @@ npx ts-node src/index.ts wss://<endpoint>/api/v1/ws --wavfile sample.wav
 - `SAMPLE_RATE` — Audio sample rate (default: `8000`)
 - `BYTES_PER_SAMPLE` — Bytes per sample (default: `2`)
 - `CHUNK_SIZE_IN_MS` — Chunk duration in ms (default: `200`)
+- `LOCAL_SPEAKER_NAME` — Speaker name for the microphone channel (older name `AGENT_ID`)
+- `REMOTE_SPEAKER_NAME` — Speaker name for the meeting-audio channel (older name `CALL_FROM_NUMBER`)
 
 ### Browser Extension
 
@@ -841,14 +1132,16 @@ These environment variables configure the server and are provided here for refer
 | `USERPOOL_ID` | — | Cognito User Pool ID for JWT verification |
 | `RECORDINGS_BUCKET_NAME` | — | S3 bucket for audio recordings |
 | `RECORDING_FILE_PREFIX` | `lma-audio-recordings/` | S3 key prefix for recordings |
-| `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3 |
-| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
+| `CONFIGURATION_TABLE_NAME` | — | The configuration table. The Amazon Transcribe options and the recording default are read from it as each meeting starts; the variables below are their fallbacks |
+| `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3, when the Meeting Recording section (**Meeting Recording › Record meeting audio** on the Configuration page) cannot be read. Set from the transcriber nested stack's own `EnableAudioRecording` parameter, which the main stack does not pass |
+| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels, when the Amazon Transcribe section does not say. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. The deployment's value is **Amazon Transcribe › Identify speakers within a channel by default** on the Configuration page; this variable, set from the transcriber nested stack's own `ShowSpeakerLabel` parameter, which the main stack does not pass, is its fallback. |
 | `DIARIZATION_MIN_RUN_WORDS` | `3` | Minimum same-speaker words for a run to become its own transcript segment. Shorter runs are absorbed into the neighbouring turn. Not set by the CloudFormation template — override on the task definition to re-tune. |
 | `DIARIZATION_MIN_RUN_SECONDS` | `0.5` | Minimum duration, in seconds, for the same. A run must clear **both** thresholds. |
 | `DIARIZATION_MAX_SEGMENT_SECONDS` | `20` | Longest stretch of audio allowed in one in-progress segment. Bounds how long the live transcript can hold an unlabelled block, since Transcribe caps results near 30s and never labels a partial. `0` disables chunking. |
 | `CPU_HEALTH_THRESHOLD` | `50` | CPU usage % threshold for health check |
 | `LOCAL_TEMP_DIR` | `/tmp/` | Temporary directory for recording files |
-| `WS_LOG_LEVEL` | `debug` | Server log level |
+| `WS_LOG_LEVEL` | `info` | Server log level. Set from the stack's `LogLevel` parameter |
+| `LOG_FORMAT` | `json` | `json` writes one JSON record per line (see [Log Format](troubleshooting.md#log-format)); `text` writes readable `pino-pretty` lines, for a local run |
 | `WS_LOG_INTERVAL` | `120` | Seconds between periodic health check log entries |
 
 ---

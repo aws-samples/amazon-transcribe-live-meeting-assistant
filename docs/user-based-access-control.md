@@ -40,6 +40,17 @@ Non-admin users:
 - Can share and delete only their own meetings
 - Cannot access admin configuration pages
 
+Each transcript line a meeting stores, whether speech, a meeting-chat line or a
+meeting-assistant answer, carries the meeting's owner and its sharing list, as
+each video key frame does. Both are read from the meeting record when the line
+is written, not taken from the event that carried it. A non-admin user is
+answered the lines whose owner is them or whose sharing list names them, in the
+transcript query and in the live subscription. Lines stored by earlier versions
+are left as they are: speech and chat lines carry the sharing list, and an owner
+only where the producer sent an access token; meeting-assistant answers carry no
+sharing list. All of them are returned to Admins, and speech and chat lines also
+to the users the meeting is shared with.
+
 ## Authorized Account Email Domain
 
 The Authorized Account Email Domain setting controls who can self-register for an LMA account.
@@ -143,7 +154,19 @@ Meeting owners can permanently delete their meetings.
 
 - Deleted meetings are **automatically removed** from shared users' meeting lists
 - Shared users do **not** receive a notification when a meeting they can access is deleted
-- Deletion is **permanent** and cannot be undone
+- Deletion cannot be undone from LMA. It deletes the meeting record, its
+  transcript, summary, consent record, key frames and usage records, every
+  version of its recordings and files in the recordings bucket, and every
+  Virtual Participant record that names it. The full list is in
+  [Deleting a meeting](privacy-and-data-handling.md#deleting-a-meeting)
+- The deleted items remain restorable for 35 days from the DynamoDB tables'
+  point-in-time recovery, by someone with access to the AWS account; the
+  recordings and files are not, because every version is deleted. Records that
+  already passed through the Kinesis and DynamoDB streams (24 hours), CloudWatch
+  logs, and anything already downloaded are not affected; see
+  [Copies that follow their own lifetime](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime)
+- If any step fails, the meeting is not deleted and stays in the list; deleting
+  it again repeats every step
 
 ## Upgrading from v0.1.9 or Earlier
 

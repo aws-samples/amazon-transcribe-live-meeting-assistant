@@ -1,0 +1,21 @@
+/* The meeting's chapters (see MeetingChapters.jsx). */
+.meeting-chapters {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.meeting-chapters li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.meeting-chapters-time {
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5em;
+  display: inline-block;
+}

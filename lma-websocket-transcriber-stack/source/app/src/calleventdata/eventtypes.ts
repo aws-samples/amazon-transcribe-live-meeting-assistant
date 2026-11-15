@@ -1,16 +1,15 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import { 
-    TranscriptEvent,
-    UtteranceEvent,
-    CategoryEvent,
-} from '@aws-sdk/client-transcribe-streaming';
+import { TranscriptEvent } from '@aws-sdk/client-transcribe-streaming';
 import stream from 'stream';
 import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
+import type { SessionSettings } from './session-settings';
+import type { ConsentSession } from '../consent/session';
+import type { CaptureContext, TranscriptionContext, TranscriptionEngineName } from './capture-context';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -20,7 +19,8 @@ export type EventType =
     | 'UPDATE_AGENT' // optional
     | 'ADD_S3_RECORDING_URL'  // optional
     | 'ADD_S3_VIDEO_RECORDING_URL' // optional
-    | 'ADD_CALL_CATEGORY' // optional
+    | 'ADD_VIDEO_KEYFRAME' // optional
+    | 'UPDATE_CAPTURE_CONTEXT' // optional
     | 'END'; // required
 
 export type CallEventBase<Type extends EventType = EventType> = {
@@ -30,10 +30,18 @@ export type CallEventBase<Type extends EventType = EventType> = {
     UpdatedAt?: string,
 };
 
-export type CallStartEvent = CallEventBase<'START'> & {
+export type CallStartEvent = CallEventBase<'START'> & Partial<CaptureContext> & {
     CustomerPhoneNumber: string,
     SystemPhoneNumber: string,
     AgentId: string | undefined,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
+};
+
+// The transcription fields of the meeting record again, when the engine that
+// transcribes the meeting is not the one its START named (see capture-context.ts).
+export type CallCaptureContextEvent = CallEventBase<'UPDATE_CAPTURE_CONTEXT'> & TranscriptionContext & {
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -63,6 +71,24 @@ export type CallVideoRecordingEvent = CallEventBase<'ADD_S3_VIDEO_RECORDING_URL'
     RefreshToken?: string,
 };
 
+// One key frame of the desktop capture app's video (see videokeyframes.ts). The
+// Virtual Participant sends the same fields; see docs/meeting-video.md.
+export type CallVideoKeyframeEvent = CallEventBase<'ADD_VIDEO_KEYFRAME'> & {
+    FrameId: string,
+    Timestamp: number,
+    VideoOffset: number | null,
+    ImageUrl: string,
+    ThumbnailUrl: string,
+    Width: number,
+    Height: number,
+    Source: 'DESKTOP_CAPTURE',
+    ShareDetected: null,
+    ChangeScore: number,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
+};
+
 export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> & {
     Channel?: string,
     ParticipantName?: string,
@@ -73,15 +99,15 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     IsPartial?: boolean,
     Sentiment?: string,
     TranscriptEvent?: TranscriptEvent,
-    UtteranceEvent?: UtteranceEvent,
     Speaker: string,
-    AccessToken?: string,
-    IdToken?: string,
-    RefreshToken?: string,
-};
-
-export type AddCallCategoryEvent = CallEventBase<'ADD_CALL_CATEGORY'> & {
-    CategoryEvent: CategoryEvent,
+    /**
+     * The language Amazon Transcribe identified for the result the segment came
+     * from (e.g. `es-US`), when language identification is on, or the language
+     * the ASR MicroVM engine identified from a final's text (see
+     * microvmRowLanguageCode). Absent when neither engine names one: Amazon
+     * Transcribe with a fixed language, and MicroVM partials and short rows.
+     */
+    LanguageCode?: string,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -118,10 +144,24 @@ export const CHANNEL_MIC = 'ch_1';
 
 export type CallMetaData = {
     callId: Uuid,
+    /**
+     * The meeting-audio (ch_0) speaker label. A client sends it as
+     * `remoteSpeakerName`, or as `fromNumber` if written for LMA before 0.4.0;
+     * see speaker-fields.ts.
+     */
     fromNumber?: string,
+    /** Stored as the meeting's SystemPhoneNumber; nothing else reads it. */
     toNumber?: string,
     shouldRecordCall?: boolean,
+    /**
+     * The microphone (ch_1) speaker label. A client sends it as
+     * `localSpeakerName`, or as `agentId` if written for LMA before 0.4.0.
+     */
     agentId?: string,
+    /** The documented spelling of `agentId`; copied onto it when the frame is read. */
+    localSpeakerName?: string,
+    /** The documented spelling of `fromNumber`; copied onto it when the frame is read. */
+    remoteSpeakerName?: string,
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,
@@ -174,6 +214,17 @@ export type CallMetaData = {
             };
         };
     };
+    /**
+     * START only: which client this is -- STREAM_AUDIO, BROWSER_EXTENSION or
+     * DESKTOP_APP -- stored on the meeting record as its capture source. Absent
+     * or unknown is stored as API. See capture-context.ts.
+     */
+    clientType?: string,
+    /**
+     * START only: the client's consent step (see consent/rules.ts and
+     * docs/meeting-consent.md). Absent from clients without one.
+     */
+    consent?: unknown,
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,
@@ -190,6 +241,11 @@ export type SocketCallData = {
      * when the meeting is transcribed by Amazon Transcribe.
      */
     asr?: AsrSessionSet,
+    /**
+     * When the session was created. Not a position on the meeting's timeline:
+     * that is the audio received (session-lifecycle.ts recordedAudioSeconds),
+     * which leaves out time the audio connection was down.
+     */
     startStreamTime: Date,
     speakerEvents: [],
     ended: boolean,
@@ -201,4 +257,46 @@ export type SocketCallData = {
      * that predate the check (defensive; the handler treats that as a denial).
      */
     ownerSub?: string
+    /**
+     * The meeting's Amazon Transcribe options and recording default, read once
+     * from the configuration when it started and kept for its whole life, so
+     * every engine path and every reconnect uses the same values.
+     */
+    sessionSettings?: SessionSettings
+    /**
+     * The meeting's consent, when its client sent a consent step and the
+     * deployment requires one. While its gate is closed no audio is transcribed
+     * or recorded.
+     */
+    consent?: ConsentSession
+    /** Whether transcription was started, which an opt-in meeting defers until its consent allows it. */
+    transcriptionStarted?: boolean,
+    /**
+     * This session's local recording files: the raw PCM it writes as audio
+     * arrives, and the WAV built from it when the meeting ends. Named per
+     * session, so a later session of the same meeting on this task cannot
+     * write into a file an earlier one is still uploading.
+     */
+    recordingTempPath?: string,
+    recordingWavPath?: string,
+    /**
+     * The transcription engine the meeting record names: the one its START event
+     * named, or the last UPDATE_CAPTURE_CONTEXT written for it.
+     */
+    recordedTranscriptionEngine?: TranscriptionEngineName
+    /**
+     * Settles once the meeting's transcription engine has started, or has
+     * finished with the audio held for it when the meeting ended first
+     * (engine-start.ts). Ending the meeting waits for it, so audio received
+     * while an ASR MicroVM was being acquired is transcribed.
+     */
+    engineStarting?: Promise<void>
+    /**
+     * Bytes of the meeting's audio stream dropped, oldest first, while an ASR
+     * MicroVM was being acquired, to bound what the task holds. They are in the
+     * recording, so an Amazon Transcribe fallback's clock starts after them.
+     */
+    heldAudioDroppedBytes?: number
+    /** This connection's capture was discarded for consent: none of it is transcribed. */
+    discarded?: boolean
 };

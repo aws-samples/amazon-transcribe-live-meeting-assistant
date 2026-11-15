@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 /* eslint-disable @typescript-eslint/no-empty-function */
@@ -11,11 +11,14 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 
+// A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
+// The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
+// frame names only the local one.
 type Call = {
   callEvent: string,
-  agentId: string,
-  fromNumber: string,
-  toNumber: string,
+  // Which client captured the meeting, stored on its record as its capture source.
+  clientType: string,
+  localSpeakerName: string,
   callId: string,
   samplingRate: number,
   activeSpeaker: string,
@@ -182,9 +185,8 @@ function IntegrationProvider({ children }: any) {
     setShouldConnect(true);
     const callMetadata = {
       callEvent: 'START',
-      agentId: userName,
-      fromNumber: '+9165551234',
-      toNumber: '+8001112222',
+      clientType: 'BROWSER_EXTENSION',
+      localSpeakerName: userName,
       callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
       activeSpeaker: 'n/a'

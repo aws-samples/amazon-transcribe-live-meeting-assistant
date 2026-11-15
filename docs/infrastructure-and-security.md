@@ -12,12 +12,14 @@ title: "Infrastructure & Security"
 - [Nested Stack Structure](#nested-stack-structure)
 - [Authentication](#authentication)
 - [Encryption](#encryption)
+- [Integration Credentials](#integration-credentials)
 - [Networking](#networking)
 - [WAF (Web Application Firewall)](#waf-web-application-firewall)
 - [CloudFront CDN](#cloudfront-cdn)
 - [IAM](#iam)
 - [Observability](#observability)
 - [Data Retention](#data-retention)
+- [Where meeting content is processed](#where-meeting-content-is-processed)
 - [Related Documentation](#related-documentation)
 
 ## Overview
@@ -70,10 +72,276 @@ LMA uses **Amazon Cognito User Pool** for authentication with the following feat
 - **Customer-managed KMS key** encrypts DynamoDB tables, S3 buckets, and CloudWatch Log groups
 - All sensitive data is encrypted using AES-256 via KMS
 
+#### Recordings bucket and call data stream
+
+The recordings bucket (audio and video recordings, batch transcripts, key
+frames, consent evidence and pending uploads) uses SSE-KMS with the stack's
+customer-managed key, with an S3 Bucket Key to keep the number of KMS requests
+low. Amazon Transcribe batch jobs for uploaded meetings name the same key as
+their output encryption key. The Kinesis call data stream is encrypted with the
+same key.
+
+Each role that reads or writes the bucket or the stream is granted the key only
+through that service (`kms:ViaService` for Amazon S3 or Kinesis). The web UI's
+Cognito identity-pool role, which signs playback URLs for recordings, is granted
+`kms:Decrypt` only, through Amazon S3, and only for objects of the recordings
+bucket. The transcript knowledge base's service role is granted `kms:Decrypt`
+through Amazon S3.
+
+When you update an existing stack:
+
+- **Existing objects keep the encryption they were written with** (SSE-S3)
+  until they are rewritten or expire under the bucket's lifecycle rules. New
+  objects are written with the customer-managed key. To re-encrypt existing
+  objects, copy them onto themselves (for example with S3 Batch Operations or
+  `aws s3 cp --recursive` with `--sse aws:kms --sse-kms-key-id <key-arn>`).
+- **The stream's key is changed in place.** The stream is not replaced and keeps
+  its shards and consumers; records written before the change stay encrypted
+  with the previous key until they age out of the 24-hour retention period.
+- If you read the recordings bucket from outside the stack (for example the
+  Amazon QuickSight manifest in the stack outputs, Amazon Athena, or your own
+  tooling), the reading principal needs `kms:Decrypt` on the stack's key, whose
+  alias is `alias/<stack-name>-encryption-key`.
+
 ### In Transit
 
 - **HTTPS/TLS** for all connections including WebSocket, AppSync, and CloudFront
 - All API communications are encrypted end-to-end
+
+## Integration Credentials
+
+LMA talks to five optional third-party services, and the credential for each is
+supplied by you as a CloudFormation parameter. Every one of those values is
+held in **AWS Secrets Manager**, in a secret created by the stack and encrypted
+with the deployment's customer-managed KMS key. The parameter is still where
+you type the key; the stack decides where it is kept.
+
+Each secret is named under the prefix `<stack-name>/integrations/`, alongside
+the per-user Zoom sign-in credentials the deployment already keeps at
+`<stack-name>/zoom-credentials/<cognito-sub>`:
+
+| Credential | CloudFormation parameter | Secret name | Read by |
+|---|---|---|---|
+| Tavily API key (web search tool) | `TavilyApiKey` | `<stack-name>/integrations/tavily-api-key` | The meeting assist Lambda, on the first web search of each execution environment |
+| ElevenLabs API key (voice assistant) | `ElevenLabsApiKey` | `<stack-name>/integrations/elevenlabs-api-key` | The Virtual Participant container, at task start |
+| Simli API key (avatar) | `SimliApiKey` | `<stack-name>/integrations/simli-api-key` | The Virtual Participant container, at task start |
+| Zoom Meeting SDK client secret | `ZoomMeetingSdkClientSecret` | `<stack-name>/integrations/zoom-meeting-sdk-client-secret` | The Virtual Participant container, at task start |
+| Azure Communication Services connection string | `AcsConnectionString` | `<stack-name>/integrations/acs-connection-string` | The Virtual Participant container, at task start |
+
+A secret is created only when its parameter has a value, so a deployment that
+uses none of these features creates none of them.
+
+These secrets are deleted with the stack, regardless of
+`EnableDataRetentionOnDelete` — that parameter protects the meeting data a
+deployment produced, and these values also exist at the provider and in the
+stack parameter.
+
+**How each consumer reads its credential.** The Virtual Participant's ECS task
+definition lists the secret's ARN under `Secrets` rather than a value under
+`Environment`. The ECS agent resolves it with the **task execution role** and
+sets the environment variable in the container when the task starts, so the
+value is not part of the task definition and does not appear in
+`DescribeTaskDefinition` or the ECS console. The meeting assist Lambda is given
+the secret's ARN in `TAVILY_API_KEY_SECRET_ARN` and fetches the value itself,
+caching it for the life of the execution environment.
+
+Under `VPLaunchType=MICROVM`, the default, there is no ECS agent, so the MicroVM
+launcher Lambda performs the same resolution — on every launch, so that a
+rotated credential reaches the next meeting. The delivery route differs from the
+ECS one and is worth knowing: a MicroVM takes its configuration from the
+Virtual Participant task registry (the `…-VPTaskRegistry` DynamoDB table the AI
+stack creates) rather than from an injected environment, so the launcher writes
+the resolved values into the `vpConfig` attribute of that participant's item and
+the container reads them from there and applies them to its environment before
+starting. That table is encrypted with the deployment's customer-managed key and
+has point-in-time recovery enabled, each item expires by TTL on `expiresAt`
+roughly nine hours after the launch, and the Virtual Participant's own task role
+can read items in it.
+
+Every grant is scoped to the specific secret ARNs a deployment was given — no
+wildcards — together with `kms:Decrypt` restricted to requests made through
+Secrets Manager.
+
+The Virtual Participant redacts these four from its own log output. Its logs go
+to `/aws/lambda-microvms/<stack-name>-vp-logs` under `VPLaunchType=MICROVM` and
+to the Virtual Participant stack's `.../fargate/VirtualParticipant` group on the
+ECS launch types. Both groups are declared by the stack, encrypted with the
+customer-managed key, and kept for `CloudWatchLogsExpirationInDays` — so that
+one parameter is where to set how long Virtual Participant logs live.
+
+### The 30-day recovery window
+
+Each secret carries a fixed name, which is what makes the rotation procedures
+below usable: you address the secret by a name you can predict. The cost is
+that Secrets Manager does not remove a deleted secret immediately. It schedules
+it for deletion and holds the name for a 30-day recovery window, and creating a
+secret of a held name fails. `AWS::SecretsManager::Secret` exposes no way to
+shorten that window, so there are two cases to know about.
+
+**Clearing a credential and setting it again inside 30 days.** Blanking
+`SimliApiKey` (say) deletes `<stack-name>/integrations/simli-api-key`; putting a
+value back within the window fails the stack update on `CreateSecret`, because
+the name is still held. This is the likelier of the two cases — no stack
+deletion is involved, only two ordinary parameter changes — so if you are
+turning a feature off and expect to turn it back on soon, clear the name as
+below rather than waiting.
+
+**Deleting a stack and recreating it under the same name inside 30 days.** The
+same thing, for every configured credential at once, on the first one
+CloudFormation reaches.
+
+Either way, recover by removing the held name outright and retrying:
+
+```bash
+aws secretsmanager delete-secret \
+  --secret-id <stack-name>/integrations/simli-api-key \
+  --force-delete-without-recovery
+```
+
+### Bringing your own secret
+
+Each of the five also accepts the ARN of a secret you have already provisioned,
+via a companion parameter (`TavilyApiKeySecretArn`,
+`ElevenLabsApiKeySecretArn`, `SimliApiKeySecretArn`,
+`ZoomMeetingSdkClientSecretArn`, `AcsConnectionStringSecretArn`). Supply the
+value or the ARN, not both — the stack refuses a deployment that sets both
+forms of the same credential.
+
+A secret you provide must:
+
+- **Live in the same account and the same region as the stack.** The parameters
+  accept any well-formed Secrets Manager ARN, because a CloudFormation
+  `AllowedPattern` cannot interpolate the stack's own region or account to check
+  it, but only a same-account, same-region secret works. The `kms:Decrypt`
+  grants are conditioned on `kms:ViaService = secretsmanager.<stack
+  region>.<url suffix>`, so a secret in another region is not decryptable;
+  and a secret in another account additionally needs a resource policy on the
+  secret itself granting the reader, which this stack neither creates nor
+  checks for. Either mistake shows up when the credential is first used — a VP
+  task that cannot start, or a web search that reports itself unavailable — not
+  at deploy time.
+- **Hold the credential as its entire `SecretString`**, not as a field of a JSON
+  document.
+- **Grant `kms:Decrypt` to the reader in its key policy**, if it is encrypted
+  with your own KMS key rather than the AWS managed `aws/secretsmanager` key.
+  Which role is the reader depends on the credential and, for the four
+  container ones, on the launch type — see below.
+
+#### Which role reads which secret
+
+Getting this wrong is not caught at deploy time: the key policy is yours, the
+stack cannot inspect it, and the first sign of a missing grant is the feature
+failing when it is next used.
+
+| Secret | Reader |
+|---|---|
+| Tavily API key | The meeting assist function's role |
+| The four Virtual Participant credentials, under `VPLaunchType=MICROVM` (the **default**) | The MicroVM launcher function's role |
+| The four Virtual Participant credentials, under `FARGATE` or `EC2` | The Virtual Participant **task execution** role (not the task role) |
+
+Neither Virtual Participant role has a fixed name, so look the ARN up rather
+than constructing it. Under the default launch type:
+
+```bash
+aws lambda get-function-configuration \
+  --function-name <stack-name>-VPMicrovmLauncher \
+  --query Role --output text
+```
+
+Under `FARGATE` or `EC2`, read it off the task definition the stack created:
+
+```bash
+VP_STACK=$(aws cloudformation describe-stack-resources \
+  --stack-name <stack-name> --logical-resource-id VIRTUALPARTICIPANTSTACK \
+  --query 'StackResources[0].PhysicalResourceId' --output text)
+aws ecs describe-task-definition \
+  --task-definition "$(aws cloudformation describe-stacks --stack-name "$VP_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='TaskDefinitionArn'].OutputValue" \
+    --output text)" \
+  --query 'taskDefinition.executionRoleArn' --output text
+```
+
+The meeting assist function's role, for the Tavily key:
+
+```bash
+aws lambda get-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --query Role --output text
+```
+
+Then add a statement of this shape to your key's policy. The `kms:ViaService`
+condition is the same whichever reader applies, because both of the stack's own
+grants carry it — only the principal differs:
+
+```json
+{
+  "Sid": "AllowLMAToDecryptThisSecret",
+  "Effect": "Allow",
+  "Principal": { "AWS": "<the role ARN from above>" },
+  "Action": "kms:Decrypt",
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": { "kms:ViaService": "secretsmanager.<region>.amazonaws.com" }
+  }
+}
+```
+
+`Resource: "*"` in a key policy means "this key", not every key. If you change
+`VPLaunchType` later, the reader changes with it, so revisit the key policy at
+the same time.
+
+### Rotating a credential
+
+Rotating a third-party credential from time to time is ordinary practice, and
+each of these providers issues replacements from its own console. Doing it once
+for each credential you have configured also means every value the deployment
+uses is one held as described above — the mechanics are the same either way.
+
+**Storing the new value.** Either update the CloudFormation parameter and apply
+the stack update, which stores a new version of the secret for you, or store
+the new version yourself in the Secrets Manager console or with
+`aws secretsmanager put-secret-value --secret-id <stack-name>/integrations/<name>`.
+
+> If you store it yourself, also set the CloudFormation parameter to the new
+> value (or move to the matching `...SecretArn` parameter and manage the secret
+> entirely yourself). Otherwise the next stack update writes the parameter's
+> older value back over the rotated one.
+
+**When it takes effect** differs between the four Virtual Participant
+credentials and the Tavily key, because they are read at different times. It is
+worth knowing which is which before you rotate.
+
+*The four Virtual Participant credentials* — ElevenLabs, Simli, the Zoom
+Meeting SDK client secret and the ACS connection string — are read at the start
+of each meeting's task, and a Virtual Participant task runs one meeting. So the
+**next meeting to start uses the new value**, with no new task definition
+revision and no forced ECS deployment. That holds on every launch type: under
+`VPLaunchType=MICROVM` the launcher resolves the secrets per launch for exactly
+this reason. A meeting already in progress finishes on the value it started
+with.
+
+*The Tavily key* is read by the meeting assist Lambda on the first web search
+each execution environment performs and cached there for that environment's
+life, so it **takes effect as execution environments recycle**. How long that
+takes is up to Lambda and depends on the deployment's traffic — under steady
+use an environment can stay warm for hours.
+
+A stack update does not hasten it. The function is configured with the secret's
+ARN, which does not change when the value does, so updating `TavilyApiKey`
+leaves the function's configuration identical and Lambda has no reason to
+replace anything. If you need the new key in use immediately, change the
+function's configuration directly, which is what makes Lambda start new
+execution environments:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --description "Tavily key rotated $(date -u +%FT%TZ)"
+```
+
+That edits a stack-managed resource out of band, so CloudFormation will report
+drift on the description until a later stack update resets it. Nothing else
+about the function changes.
 
 ## Networking
 
@@ -144,14 +412,141 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 
 ## Data Retention
 
-| Data Type | Retention | Configuration |
-|-----------|-----------|---------------|
-| Meeting records | Configurable, default 90 days | DynamoDB TTL via `MeetingRecordExpirationInDays` parameter |
-| Audio recordings | Configurable | S3 lifecycle policy |
-| Transcript KB data | Configurable | S3 lifecycle policy |
-| CloudWatch logs | Configurable | `CloudWatchLogsExpirationInDays` parameter |
+[What LMA stores, and for how long](privacy-and-data-handling.md#what-lma-stores-and-for-how-long)
+on the Privacy and Data Handling Controls page is the inventory of meeting data:
+each kind of data, where it is stored, how long it is kept by default, what
+controls that, and what deleting a meeting or the stack does to it. These stack
+parameters set the retention periods; each is described in the
+[CloudFormation Parameters Reference](cloudformation-parameters.md):
 
-The stack parameter **EnableDataRetentionOnDelete** controls whether DynamoDB tables, S3 buckets, and KMS keys are retained when the stack is deleted. When enabled, these resources persist after stack deletion to prevent data loss.
+| Parameter | Default | What it sets |
+|-----------|---------|--------------|
+| `MeetingRecordExpirationInDays` | 90 | The DynamoDB time to live of meeting records (with their summaries and consent records), usage records and Virtual Participant records. An Admin can shorten it, and not lengthen it, for meeting and usage records on the Configuration page ([Retention](configuration-guide.md#retention-settings-the-stack-limits)) |
+| `TranscriptionExpirationInDays` | 90 | The DynamoDB time to live of transcript segments and key-frame items, shortened the same way, and the S3 lifecycle rules on transcript and summary files, key-frame images and consent evidence images |
+| `AudioRecordingExpirationInDays` | 90 | The S3 lifecycle rules on audio and video recordings |
+| `CloudWatchLogsExpirationInDays` | 90 | The retention of the stack's CloudWatch log groups |
+| `VPSchedulerStateMachineLogsExpirationInDays` | 7 | The retention of the scheduled Virtual Participant state machine's log group |
+| `EnableDataRetentionOnDelete` | `true` | Whether the DynamoDB tables, S3 buckets and KMS key are kept when the stack is deleted; see [Cleanup](cleanup.md#retained-resources) |
+
+The recordings bucket is versioned, and removes noncurrent object versions one
+day after they stop being current; see
+[Earlier versions in the recordings bucket](privacy-and-data-handling.md#earlier-versions-in-the-recordings-bucket).
+
+## Where meeting content is processed
+
+Meeting content here means a meeting's audio, its transcript, the text and images
+of its shared screen, its chat, and anything derived from them, such as summaries
+and assistant answers. This section lists every place LMA sends it, so that a
+deployment with a data-residency requirement can check each one.
+
+### The AWS Region of the stack
+
+LMA's own resources all run in the AWS Region the stack is deployed to: the
+WebSocket transcriber, the Virtual Participant tasks, the Lambda functions, the
+ASR MicroVM speech engine where it is deployed (see [MicroVM ASR](microvm-asr.md)), and the
+DynamoDB tables, S3 buckets, Kinesis stream and AppSync API that store and carry
+meeting content. The web UI is served through CloudFront, whose edge locations
+cache the UI's static files only; meeting content reaches the browser from the
+Region's AppSync API.
+
+### Amazon Transcribe
+
+Streaming transcription, from the WebSocket transcriber and from the Virtual
+Participant, and the transcription of uploaded recordings, call Amazon Transcribe
+in the stack's Region. Live translation on the meeting page calls Amazon Translate
+in the same Region from the browser.
+
+### Amazon Bedrock
+
+Every Amazon Bedrock model LMA calls runs where the **Model inference geography**
+setting allows. The setting is in the **Amazon Bedrock Models** section of
+**Configuration ▸ Configuration** and applies to the summaries and meeting insights
+(summaries, invitation parsing, speaker naming, the agenda, and the transcript
+search tools), the meeting assistant and the troubleshooting agent, the meeting
+assistant's knowledge bases, key frame text, the Meeting Consent section's
+evidence check model, and the Virtual Participant's page-automation model.
+
+| Value | Where inference runs |
+|-------|----------------------|
+| **Global** (default) | Each model id is used as chosen. The shipped defaults are `global.` cross-Region inference profiles, which Amazon Bedrock may serve from any commercial AWS Region. |
+| **Same geography as this deployment** | Within the geography of the stack's Region. A model whose id routes outside it (a `global.` profile, or another geography's) is run as the same model through the geography's inference profile, or as the in-Region model. |
+| **In-region only** | In the stack's Region only, using the plain model id. Amazon Bedrock offers most Claude models in a Region only through inference profiles, so this value usually needs an Amazon Nova model. |
+
+The geography of each Region, narrowest first:
+
+| Stack Region | Inference profiles used under **Same geography** |
+|--------------|-------------------------------------------------|
+| `us-*` | `us.` (Regions in the United States) |
+| `us-gov-*` | `us-gov.` (AWS GovCloud (US) Regions) |
+| `ca-*` | `ca.` (Regions in Canada) |
+| `eu-*` | `eu.` (Regions in Europe) |
+| `ap-northeast-1`, `ap-northeast-3` | `jp.` (Japan), then `apac.` |
+| `ap-southeast-2`, `ap-southeast-4` | `au.` (Australia), then `apac.` |
+| `ap-south-1`, `ap-south-2` | `in.` (India), then `apac.` |
+| other `ap-*` | `apac.` (Regions in Asia Pacific) |
+| any other Region | none: the in-Region model id |
+
+A model id that is already within the geography, such as a `us.` profile in a
+`us-east-1` deployment, is used as chosen. The setting decides where a model runs
+and never which model: a model chosen on the page is only ever addressed through a
+different profile of the same model.
+
+**When the geography has no id for a model, the feature reports an error instead
+of calling Amazon Bedrock outside it.** Which profiles exist depends on the model
+and on the Region. For example, at the time of writing there is no Japan or APAC
+profile for Claude Sonnet 5.5, so a Tokyo deployment under **Same geography** needs
+another summary model. The section shows, before a change is saved, the id each
+feature will run as and which features have no id in the selected geography. It
+also marks an id that the shipped catalogue does not list for the Region, such as
+a plain model id the Region does not offer on demand, because a call with that id
+may fail.
+
+A feature that cannot read the setting from the configuration table (for example
+because the table read is throttled or denied) also reports an error rather than
+running as **Global**, and the call is not made. This includes deployments that
+have never changed the setting: the read fails before the feature knows what the
+setting holds. A deployment with no configuration table, or one whose table is
+read successfully and has never had the setting saved, runs as **Global**.
+
+Which ids exist is read from a catalogue shipped with LMA
+(`lma_config/bedrock_inference_catalog.json`), built from the Amazon Bedrock
+`ListInferenceProfiles` and `ListFoundationModels` APIs by
+`scripts/bedrock_inference_catalog.py`. For a Region the catalogue does not list,
+the geography's profile id is built by rule and used unchecked, with a warning in
+the function's log.
+
+The setting does not apply to the following, which have their own controls:
+
+- **Amazon Nova Sonic**, the voice assistant, runs in the Region the
+  `AmazonNovaSonicRegion` stack parameter names (this stack's Region when blank).
+- **Amazon Titan Text Embeddings**, which indexes knowledge-base documents and
+  meeting transcripts, runs in the knowledge base's Region.
+- A Bedrock Knowledge Base or Guardrail you supply runs where that resource is.
+
+Deploy-time model validation (the `ModelValidation` parameter) calls the shipped
+`global.` defaults once, with a fixed question and no meeting content.
+
+The meeting cost estimate prices an id the setting produces that the price table
+does not list at the same model's listed price; see
+[Meeting Cost Estimate](meeting-cost-estimate.md#how-a-line-is-priced).
+
+### Optional integrations outside AWS
+
+Each of these receives meeting content only when it is configured, and from then on
+for every meeting that uses it:
+
+| Integration | Enabled by | What it receives |
+|-------------|-----------|------------------|
+| Tavily web search | The `TavilyApiKey` stack parameter | The search queries the meeting assistant writes, which can quote the meeting. See [Meeting Assistant](meeting-assistant.md#tavily-web-search). |
+| ElevenLabs voice assistant | **Voice assistant** set to ElevenLabs in the Virtual Participant section, with the `ElevenLabsApiKey` (or `ElevenLabsApiKeySecretArn`) stack parameter | The meeting audio the voice assistant listens to, and its conversation. See [ElevenLabs Setup](elevenlabs-setup.md). |
+| Simli avatar | The `SimliApiKey` (or `SimliApiKeySecretArn`) stack parameter and a Simli face ID | The voice assistant's spoken replies, which it renders as the avatar's video. See [Simli Avatar Setup](simli-avatar-setup.md). |
+| Azure Communication Services | An ACS connection string (`AcsConnectionString` or `AcsConnectionStringSecretArn`) | The Teams meeting's audio, video and chat, which a Virtual Participant joins through ACS instead of the Teams web client. See [Teams ACS SDK](teams-acs-sdk.md). |
+| MCP servers | An MCP server added on the MCP Servers page | The tool calls the meeting assistant makes to it, which can quote the meeting. See [MCP Servers](mcp-servers.md). |
+| Lambda hook functions | The `TranscriptLambdaHookFunctionArn`, `StartOfCallLambdaHookFunctionArn`, `EndOfCallLambdaHookFunctionArn` and `PostCallSummaryLambdaHookFunctionArn` stack parameters | Transcript segments, meeting events or the summary, in your own Lambda functions, which may send them on. See [Lambda Hook Functions](lambda-hook-functions.md). |
+
+The meeting platform itself (Zoom, Microsoft Teams, Google Meet, Amazon Chime or
+Webex) hosts the meeting a Virtual Participant joins, under that platform's own
+terms.
 
 ## Related Documentation
 

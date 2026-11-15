@@ -1,11 +1,12 @@
-Websocket Client utility makes it easier to test LCA/Agent Assist using a call recording. Websocket client utility 
-reads call recording in WAV file format (stereo) and streams the audio data to the websocket server. 
+The WebSocket client utility makes it easier to test LMA with a meeting recording. It reads a stereo WAV
+file and streams its audio to the LMA WebSocket server, as described in
+[the WebSocket streaming API](../../docs/websocket-streaming-api.md).
 
 ## How to use
 The websocket client can be run from a local command line (such MacOs terminal) or from Cloud9/Cloud Shell command line. 
 This command line environmentshould have access to AWS resources. 
 
-To get started, cd to `utilities/websocket-client` directory in LCA repo.
+To get started, cd to the `utilities/websocket-client` directory of the LMA repository.
 
 1. Setup the package dependencies (first time you run the utility)
 
@@ -23,11 +24,11 @@ To get started, cd to `utilities/websocket-client` directory in LCA repo.
 
     `CHUNK_SIZE_IN_MS=200`
 
-    `CALL_FROM_NUMBER='LCA-Client'`
+    `REMOTE_SPEAKER_NAME='Other Participant'` (speaker name for the meeting audio, the WAV file's left channel)
 
-    `CALL_TO_NUMBER='+8001112222'`
+    `LOCAL_SPEAKER_NAME='me@example.com'` (speaker name for the microphone, the right channel)
 
-    `AGENT_ID='BabuS'`
+    `CALL_FROM_NUMBER` and `AGENT_ID`, the older names of these two variables, are still read.
 
     `LMA_ACCESS_JWT_TOKEN=`
     
@@ -43,4 +44,4 @@ To get started, cd to `utilities/websocket-client` directory in LCA repo.
 
     `npm run start -- --uri <<Websocket Server Endpoint>>  --wavfile <<wav file name>>`
 
-        `Websocket Server Endpoint` - obtain this from the "Outputs" section of LCA cloudformation console.
+        `Websocket Server Endpoint` - obtain this from the "Outputs" section of the LMA stack in the CloudFormation console.

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Download, verify and normalise the ASR model weights during the image build.
 
@@ -27,8 +27,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+KEEP_SOURCE_NAME = None
 CANONICAL_NAMES = {
     "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
     "ASR_MODEL_DECODER_FILE": "decoder.onnx",
     "ASR_MODEL_JOINER_FILE": "joiner.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
@@ -42,13 +44,13 @@ QWEN3_CANONICAL_NAMES = {
 }
 # Cohere Transcribe stores its encoder weights in an external-data file whose name is
 # recorded inside the ONNX graph, so that file keeps its archive name.
-KEEP_SOURCE_NAME = None
 COHERE_CANONICAL_NAMES = {
     "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
     "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
     "ASR_MODEL_DECODER_FILE": "decoder.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
 }
+OPTIONAL_FILES = {"transducer": frozenset({"ASR_MODEL_ENCODER_DATA_FILE"})}
 KIND_FILES = {
     "transducer": CANONICAL_NAMES,
     "qwen3_asr": QWEN3_CANONICAL_NAMES,
@@ -73,7 +75,12 @@ def model_files_for(env: dict[str, str]) -> dict[str, str]:
         raise ModelFetchError(
             f"unknown ASR_MODEL_KIND {kind!r}; expected one of {sorted(KIND_FILES)}"
         )
-    return KIND_FILES[kind]
+    optional = OPTIONAL_FILES.get(kind, frozenset())
+    return {
+        key: canonical
+        for key, canonical in KIND_FILES[kind].items()
+        if key not in optional or env.get(key)
+    }
 
 PREVIEW_PREFIX = "ASR_PREVIEW_MODEL_"
 PREVIEW_SUBDIR = "preview"
@@ -220,6 +227,46 @@ def place_model(extracted: Path, env: dict[str, str], dest: Path) -> None:
             log("kept one test WAV for the /ready and /validate warm decode")
 
 
+# ASR_MODEL_ARCHIVE value for a model given as individually pinned files rather than
+# one archive. Each ASR_MODEL_<PART>_FILE then has a matching ASR_MODEL_<PART>_URL and
+# ASR_MODEL_<PART>_SHA256, the way the diarizer's MODEL and DATA files are expressed,
+# so a model can be fetched from a host that serves files at a fixed revision.
+FILES_ARCHIVE = "files"
+WARM_WAV_PREFIX = "ASR_MODEL_WARM_WAV"
+
+
+def is_files_model(env: dict[str, str]) -> bool:
+    return env.get("ASR_MODEL_ARCHIVE", "") == FILES_ARCHIVE
+
+
+def fetch_model_files(env: dict[str, str], dest: Path, tmpdir: Path, label: str) -> None:
+    """Fetch, verify and place each file of a model pinned file by file.
+
+    Lays down exactly the names ``place_model`` produces from an archive, so the
+    runtime cannot tell which form the catalog used.
+    """
+    for env_key, canonical in model_files_for(env).items():
+        name = env[env_key]
+        stem = env_key[: -len("_FILE")]
+        target = tmpdir / f"{stem.lower()}.part"
+        fetch_verified(
+            env.get(f"{stem}_URL", ""), env.get(f"{stem}_SHA256", ""), target, f"{label} {name}"
+        )
+        target_name = Path(name).name if canonical is None else canonical
+        shutil.move(str(target), str(dest / target_name))
+        log(f"placed {name} -> {target_name}")
+
+    warm_url = env.get(f"{WARM_WAV_PREFIX}_URL", "")
+    if warm_url:
+        target = tmpdir / "warm.wav.part"
+        fetch_verified(
+            warm_url, env.get(f"{WARM_WAV_PREFIX}_SHA256", ""), target, f"{label} warm WAV"
+        )
+        (dest / "test_wavs").mkdir(exist_ok=True)
+        shutil.move(str(target), str(dest / "test_wavs" / "warm.wav"))
+        log("kept one test WAV for the /ready and /validate warm decode")
+
+
 def run(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="fetch_model.py")
     parser.add_argument("--env-file", default="/build/model.env")
@@ -250,43 +297,51 @@ def run(argv: list[str]) -> int:
         tmpdir = Path(tmp)
         try:
             archive_kind = env.get("ASR_MODEL_ARCHIVE", "tar.bz2")
-            archive = tmpdir / f"model.{archive_kind}"
-            fetch_verified(
-                env.get("ASR_MODEL_URL", ""),
-                env.get("ASR_MODEL_SHA256", ""),
-                archive,
-                f"asr model {env.get('ASR_MODEL_ID', '?')}",
-            )
-            extracted = extract(
-                archive,
-                archive_kind,
-                int(env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
-                dest,
-            )
-            place_model(extracted, env, dest)
+            model_label = f"asr model {env.get('ASR_MODEL_ID', '?')}"
+            if is_files_model(env):
+                fetch_model_files(env, dest, tmpdir, model_label)
+            else:
+                archive = tmpdir / f"model.{archive_kind}"
+                fetch_verified(
+                    env.get("ASR_MODEL_URL", ""),
+                    env.get("ASR_MODEL_SHA256", ""),
+                    archive,
+                    model_label,
+                )
+                extracted = extract(
+                    archive,
+                    archive_kind,
+                    int(env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
+                    dest,
+                )
+                place_model(extracted, env, dest)
             preview_env = preview_env_for(env)
-            if preview_env.get("ASR_MODEL_URL"):
+            if preview_env.get("ASR_MODEL_URL") or is_files_model(preview_env):
                 preview_dest = dest / PREVIEW_SUBDIR
                 preview_dest.mkdir(parents=True, exist_ok=True)
                 missing = [key for key in model_files_for(preview_env) if key not in preview_env]
                 if missing:
                     raise ModelFetchError(f"{env_path} preview entries are missing {missing}")
-                preview_kind = preview_env.get("ASR_MODEL_ARCHIVE", "tar.bz2")
-                preview_archive = tmpdir / f"preview.{preview_kind}"
-                fetch_verified(
-                    preview_env.get("ASR_MODEL_URL", ""),
-                    preview_env.get("ASR_MODEL_SHA256", ""),
-                    preview_archive,
-                    f"preview model {preview_env.get('ASR_MODEL_ID', '?')}",
-                )
-                preview_extracted = extract(
-                    preview_archive,
-                    preview_kind,
-                    int(preview_env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
-                    preview_dest,
-                )
-                place_model(preview_extracted, preview_env, preview_dest)
-                shutil.rmtree(preview_dest / "_staging", ignore_errors=True)
+                preview_label = f"preview model {preview_env.get('ASR_MODEL_ID', '?')}"
+                if is_files_model(preview_env):
+                    fetch_model_files(preview_env, preview_dest, tmpdir, preview_label)
+                else:
+                    preview_kind = preview_env.get("ASR_MODEL_ARCHIVE", "tar.bz2")
+                    preview_archive = tmpdir / f"preview.{preview_kind}"
+                    fetch_verified(
+                        preview_env.get("ASR_MODEL_URL", ""),
+                        preview_env.get("ASR_MODEL_SHA256", ""),
+                        preview_archive,
+                        preview_label,
+                    )
+                    preview_extracted = extract(
+                        preview_archive,
+                        preview_kind,
+                        int(preview_env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
+                        preview_dest,
+                    )
+                    place_model(preview_extracted, preview_env, preview_dest)
+                    shutil.rmtree(preview_dest / "_staging", ignore_errors=True)
 
             speaker_url = env.get("ASR_SPEAKER_MODEL_URL", "")
             if speaker_url:

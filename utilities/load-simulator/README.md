@@ -12,6 +12,7 @@ CLI (or as a standalone `lma-load` binary):
 | `backfill`   | Fabricate X historical meetings spread over Y days, with **backdated timestamps** | Meeting-list paginator, `listCallsDateRange` GSI, date-range picker scalability |
 | `rbac`       | Provision N synthetic Cognito users + latency-sweep `listCalls`/`getCallCount` under RBAC | Per-user ownership filter, subscription fanout, role-gated queries |
 | `cleanup`    | Delete every synthetic resource tagged with a given run-id | Deterministic teardown of meetings, VPs, users, S3 orphans |
+| `asr-benchmark` | Play one recording through each ASR model bundle (and Amazon Transcribe) and compare | Cost and transcript quality of model configurations |
 
 Every synthetic resource is stamped with a `LoadTestRunId` / Owner-prefix
 so cleanup is deterministic. Running against stacks whose name contains
@@ -26,6 +27,7 @@ so cleanup is deterministic. Running against stacks whose name contains
     - [Backfill](#2-backfill--fabricate-historical-meetings)
     - [RBAC](#3-rbac--synthetic-user--latency-sweep)
     - [Cleanup](#4-cleanup--deterministic-teardown)
+    - [ASR benchmark](#5-asr-benchmark--compare-model-configurations)
 4. [Synthetic Cognito users](#synthetic-cognito-users)
 5. [Cost and quota awareness](#cost-and-quota-awareness)
 6. [CloudWatch observability](#cloudwatch-observability)
@@ -288,6 +290,46 @@ Deletes, in order:
 3. Meeting rows in the EventSourcing table whose `Owner` starts with `loadtest-<runId>-`
 4. S3 orphans under `lma-uploads-pending/loadtest-<runId>-*`
 
+### 5. `asr-benchmark` — compare model configurations
+
+```bash
+lma load asr-benchmark -s LMA-dev-stack-2 --dataset ami/IS1009c \
+    --bundles parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small --transcribe --dry-run
+```
+
+`--dataset` takes a packaged ground-truth meeting (`ami/IS1009c` and `ami/IS1009d`, clean
+headset audio; `ami/ES2004a`, low-level headsets, for noise robustness): a meeting
+from the [AMI Meeting Corpus](lma_load/asr_benchmark/datasets/ami/README.md) (CC BY 4.0)
+whose reference transcript ships in the package. Its headset audio is downloaded from the
+AMI mirror on first use, checked against pinned SHA-256s, and mixed into a stereo recording
+(needs numpy: `pip install -e 'utilities/load-simulator[benchmark]'`). `--wav` takes your
+own recording instead, with an optional `--reference` STM file.
+
+A lab test of [MicroVM ASR](../../docs/microvm-asr.md) bundles on a dev stack. The
+recording (stereo 16-bit WAV: channel 0 meeting audio, channel 1 microphone) is
+streamed once, at real time, through each configuration: Amazon Transcribe first if
+`--transcribe` is given, then each bundle. Before a bundle's run the stack is updated
+with its own template and only the `AsrDefaults` `ModelBundle` line changed, every
+parameter kept; the ASR image rebuilds in about 20-25 minutes. The switch refuses to
+run if any nested stack's published template (at its `TemplateURL`) differs from the one
+deployed, which happens when `publish.sh` has been re-run since the last deploy. The
+original bundle is restored at the end unless `--keep-bundle` is given;
+`--switch-only <bundle>` switches the stack and exits, which puts it back after an
+interrupted run.
+
+Each run is measured from the transcriber's log (the MicroVM and its lifetime, or the
+Transcribe requests) and the engine's log (CPU per minute, peak memory, the bundle it
+ran), priced at AWS Price List rates (`--prices-file` takes a `CallPricing.json`
+instead), and also priced at only the cores it used. Its final transcript is read back
+and, with a reference, scored for word error rate per channel (swapped / missing / extra
+words). Without a reference the table has no WER column; agreement with the Transcribe run
+is kept in the JSON.
+
+Results go to `results/<run-id>/`: `asr-benchmark.md` (the comparison table),
+`asr-benchmark.json`, and `transcript-<config>.txt` for each run. The benchmark
+meetings (`asr-bench-<run-id>-<config>`) are kept so they can be opened in the UI; the
+temporary Cognito user is deleted. `make asr-benchmark` wraps the same command.
+
 ## Synthetic Cognito users
 
 Users are created using **+N subaddressing**:
@@ -345,16 +387,49 @@ Example:
 
 ## CloudWatch observability
 
-A template dashboard JSON is shipped at
-`lma_load/observability/cloudwatch_dashboard.json`. Deploy it per-run with:
+Every LMA stack deploys its own dashboard, named `<stack-name>-<region>`, which
+needs no substitution and is wider than the one here — see
+[Monitoring & Alerting](../../docs/monitoring.md). Use that one unless you
+specifically want a separate, disposable dashboard per load run.
+
+For the per-run case, a template dashboard JSON is shipped at
+`lma_load/observability/cloudwatch_dashboard.json`. It contains five placeholders,
+and **all five must be substituted**: an unsubstituted one leaves a widget
+querying a metric that does not exist, which renders as an empty graph rather
+than an error, so the dashboard looks fine and shows nothing. Three of the five
+name resources that CloudFormation and SAM generate names for, so they are read
+from the nested stacks' outputs rather than built from the stack name:
 
 ```bash
+# Resolve the generated resource names from the nested stacks.
+AI_STACK=$(aws cloudformation describe-stack-resource \
+    --stack-name "$LMA_STACK_NAME" --logical-resource-id AISTACK \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text)
+CEP_FUNCTION=$(aws cloudformation describe-stacks --stack-name "$AI_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='CallEventProcessorFunctionName'].OutputValue" \
+    --output text)
+APPSYNC_API_ID=$(aws cloudformation describe-stacks --stack-name "$AI_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='AppSyncApiId'].OutputValue" --output text)
+
+VP_STACK=$(aws cloudformation describe-stack-resource \
+    --stack-name "$LMA_STACK_NAME" --logical-resource-id VIRTUALPARTICIPANTSTACK \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text)
+VP_CLUSTER=$(aws cloudformation describe-stacks --stack-name "$VP_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" --output text)
+
+CALL_DATA_STREAM=$(lma load stack-info | awk '/call_data_stream/{print $2}')
+
 # Fill in template vars then put-dashboard
 sed "s/\${region}/$AWS_DEFAULT_REGION/g; \
-     s/\${stack}/$LMA_STACK_NAME/g; \
-     s/\${call_data_stream}/$(lma load stack-info | awk '/call_data_stream/{print $2}')/g" \
+     s/\${call_data_stream}/$CALL_DATA_STREAM/g; \
+     s/\${cep_function}/$CEP_FUNCTION/g; \
+     s/\${appsync_api_id}/$APPSYNC_API_ID/g; \
+     s/\${vp_cluster}/$VP_CLUSTER/g" \
      utilities/load-simulator/lma_load/observability/cloudwatch_dashboard.json \
     > /tmp/dash.json
+
+# Nothing should be left; prints the placeholders that were missed.
+grep -o '\${[a-z_]*}' /tmp/dash.json || echo "all placeholders substituted"
 
 aws cloudwatch put-dashboard \
     --dashboard-name "LMA-LoadSim-$LMA_STACK_NAME" \
@@ -363,11 +438,11 @@ aws cloudwatch put-dashboard \
 
 The dashboard covers:
 
-* Transcribe active streaming sessions (Maximum)
+* Transcribe concurrent streaming sessions (`ConcurrentStreamsCount`, Maximum) — account-wide, so another workload in the account calling `StartStreamTranscription` is included; one calling `StartCallAnalyticsStreamTranscription` or `StartMedicalStreamTranscription` consumes the same quota but is published as a separate series and is not shown
 * Kinesis CallDataStream throughput + throttles
-* `CallEventProcessor` Lambda concurrency / errors / throttles
+* Call Event Processor Lambda concurrency / duration / errors / throttles
 * Bedrock invocations / throttles / client errors
-* ECS VP cluster `RunningTaskCount`
+* ECS VP cluster `TaskCount` — the cluster-wide metric, because `RunningTaskCount` is published per service and Virtual Participant tasks are started per meeting by `RunTask` rather than by a service
 * AppSync 4xx/5xx + Latency
 
 Each scenario also saves per-run artifacts to `./results/<runId>/`:

@@ -1,51 +1,120 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Alert,
   Badge,
   Box,
   Button,
-  ButtonDropdown,
   ColumnLayout,
   Container,
   FormField,
   Grid,
   Header,
-  Icon,
   Input,
   Link,
   Modal,
   Popover,
+  Select,
   SpaceBetween,
   StatusIndicator,
   Tabs,
   TextContent,
   Textarea,
   Toggle,
+  ToggleButton,
 } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
-import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
+import { TranslateClient } from '@aws-sdk/client-translate';
 import markdownRehypePlugins from '../common/markdown-plugins';
-import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
-import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
-import { splitDiarizationLabel } from '../common/utilities';
+import { getMarkdownSummary, getSummarySection, summarySections } from '../common/summary';
+import {
+  SOURCE_MANUAL,
+  STATUS_IDLE,
+  SUMMARY_IN_PROGRESS_TEXT,
+  SUMMARY_OVERDUE_TEXT,
+  isHandEdited,
+  isRegenerating,
+  isSummaryInProgress,
+  isSummaryOverdue,
+  msUntilSummaryOverdue,
+  parseSummaryState,
+  regenerationFailure,
+} from '../common/summary-state';
+import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
+import {
+  buildSpeakerRoster,
+  headerSpeakers,
+  identityKeyFor,
+  parseSpeakerIdentities,
+  resolveSpeaker,
+  serializeSpeakerIdentities,
+  speakerDisplayRows,
+  speakerGroups,
+  withSpeakerName,
+} from '../common/speaker-identities';
+import { speakerChipLayout, withSpeakerMode } from '../common/speaker-modes';
+import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
+import SpeakerAssignmentModal from './SpeakerAssignmentModal';
+import TranscriptSpeakerChips from './TranscriptSpeakerChips';
+import AgendaPanel from './AgendaPanel';
+import ConsentPanel from './ConsentPanel';
+import ConsentPauseAlert from './ConsentPauseAlert';
+import TranscriptionPauseAlert from './TranscriptionPauseAlert';
+import CaptureContextPanel, { CONSENT_SETTING_ID } from './CaptureContextPanel';
+import { consentEnforced } from '../common/meeting-context';
+import TranscriptDeletionNotice from './TranscriptDeletionNotice';
+import useMeetingConsent from '../../hooks/use-meeting-consent';
+import CallCostPanel from './CallCostPanel';
+import MeetingHeader from './MeetingHeader';
+import MeetingAttributes from './MeetingAttributes';
+import MeetingAssistantPanel from './MeetingAssistantPanel';
+import useAssistantPanel from '../../hooks/use-assistant-panel';
+import { NodeSlot, useDetachedNode } from './NodeSlot';
+import { TAB_DETAILS, TAB_SCREEN_SHARE, TAB_SUMMARY, TAB_TRANSCRIPT } from './meeting-tabs';
+import SummarySections from './SummarySections';
+import useMeetingTab from '../../hooks/use-meeting-tab';
+import useTranscriptTranslation from '../../hooks/use-transcript-translation';
+import useCallCost from '../../hooks/use-call-cost';
 
-import RecordingPlayer from '../recording-player';
-import VideoPlayer from '../video-player';
+import VideoTimeline from '../video-timeline';
+import MeetingChapters from '../meeting-chapters/MeetingChapters';
+import { chaptersFromSummary } from '../common/chapters';
+import { parseAgendaItems } from '../common/agenda';
+import { formatDurationClock, meetingDurationMillis, platformLabel } from '../common/meeting-header';
+import { frameIdSeconds, scrollTranscriptToTime } from '../common/video-keyframes';
+import {
+  SEEK_STEP_SECONDS,
+  chooseMeetingMedia,
+  clockFor,
+  defaultMediaPreference,
+  currentSegmentId,
+  playerShortcut,
+  recordingSecondsForFrame,
+  sameAnchors,
+  toRecordingSeconds,
+} from '../meeting-player/playback-sync';
+import { usePlaybackSelector, usePlaybackStore } from '../meeting-player/playback-store';
+import MeetingPlayer from '../meeting-player';
+import {
+  passesTranscriptFilter,
+  rehypeMarkMatches,
+  speakerFilterOptions,
+  stepMatch,
+  textMatches,
+} from '../common/transcript-search';
 import useSettingsContext from '../../contexts/settings';
 
-import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
+import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { InfoLink } from '../common/info-link';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
-import { VoiceToneFluctuationChart, SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
+import { SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
 
 import './CallPanel.css';
 import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
@@ -53,18 +122,15 @@ import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
 import awsExports from '../../aws-exports';
-import {
-  downloadTranscriptAsExcel,
-  downloadTranscriptAsText,
-  exportToTextFile,
-  downloadTranscriptAsDocx,
-  exportToDocxFile,
-} from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
-import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
-import MCPServersModal from '../mcp-servers';
+import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import { isSharedWith } from '../common/shared-with';
+import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
+import { isChatChannel, isSpeechChannel } from '../common/channels';
+import { meetingLanguages, segmentLanguageMark } from '../common/detected-languages';
+import ChatSegment from '../chat-segment/ChatSegment';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -72,189 +138,277 @@ const logger = new ConsoleLogger('CallPanel');
 // comprehend PII types
 const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
 
-const MAXIMUM_ATTEMPTS = 100;
-const MAXIMUM_RETRY_DELAY = 1000;
-
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 
+/**
+ * The height of the transcript and of the assistant beside it: the viewport
+ * less the page chrome above them (navigation, breadcrumbs, the meeting header,
+ * the tabs and the transcript's own header), and never less than a readable
+ * box. The transcript keeps its own scroll, rather than using the page's,
+ * because following a live meeting means holding the newest line in view while
+ * the reader can still scroll back, and that is a property of one scrolling
+ * box; the assistant's frame needs a fixed height beside it in any case.
+ */
+const TRANSCRIPT_HEIGHT = 'max(360px, calc(100vh - 420px))';
+
+/** Below this width of the page, the assistant panel lies over the tabs instead of beside them. */
+export const ASSISTANT_OVERLAY_BELOW_PX = 900;
+/** The assistant panel's least height, and its distance from the top navigation and the window's foot. */
+const ASSISTANT_MIN_HEIGHT_PX = 420;
+const ASSISTANT_GAP_PX = 12;
+
 /* eslint-disable react/prop-types, react/destructuring-assignment */
-const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
-  const { calls } = useCallsContext();
-  const props = {
-    calls,
-    selectedItems: [item],
-    loading: false,
-    getCallDetailsFromCallIds,
-  };
+/**
+ * How long the local "starting" state bridges the gap to the backend's own mark.
+ *
+ * Pressing Regenerate returns before the run finishes -- summarising calls a
+ * model once per prompt template and outlives a GraphQL request -- so progress
+ * after that point is read from the meeting's stored summary state, which
+ * arrives through onUpdateCall. This covers only the second or two before that
+ * mark lands, and is a safety net for the case where it never does.
+ */
+const REGENERATE_HANDOVER_MS = 30000;
 
+// Where the consent record is on the Details tab, for the links that open it.
+const CONSENT_RECORD_ID = 'meeting-consent-record';
+
+const EDIT_AFTER_MEETING_REASON =
+  'Available once the meeting has ended, so the end-of-meeting summary cannot replace your text.';
+
+const GENERATING_REASON = 'Available once the summary being generated for this meeting has arrived.';
+
+/**
+ * The summary's text, or -- when it has none to show yet -- what is happening
+ * instead: the end-of-meeting summary on its way, a run that failed or is
+ * overdue (with the way out, when the viewer can take it), or "Not available".
+ */
+const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating, overdue, failed, canRegenerate }) => {
+  if (!sections.length && generating) {
+    return (
+      <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+        <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
+        <Box color="text-body-secondary" padding={{ top: 'xs' }}>
+          The meeting has ended and its summary is being written. It appears here when it is ready.
+        </Box>
+      </Box>
+    );
+  }
+  if (!sections.length && (failed || overdue)) {
+    return (
+      <Box color="text-body-secondary">
+        {failed ? 'No summary is available for this meeting.' : SUMMARY_OVERDUE_TEXT}
+        {canRegenerate && ' Use Regenerate to try again.'}
+      </Box>
+    );
+  }
   return (
-    <Container
-      header={
-        <Header
-          variant="h4"
-          info={<InfoLink onFollow={() => setToolsOpen(true)} />}
-          actions={
-            <SpaceBetween size="xxxs" direction="horizontal">
-              {shareModal(props)} {deleteModal(props)}
-            </SpaceBetween>
-          }
-        >
-          Meeting Attributes
-        </Header>
-      }
-    >
-      <ColumnLayout columns={6} variant="text-grid">
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Meeting ID</strong>
-            </Box>
-            <div>{item.callId}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Initiation Timestamp</strong>
-            </Box>
-            <div>{item.initiationTimeStamp}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Last Update Timestamp</strong>
-            </Box>
-            <div>{item.updatedAt}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Duration</strong>
-            </Box>
-            <div>{item.conversationDurationTimeStamp}</div>
-          </div>
-        </SpaceBetween>
-
-        <SpaceBetween size="xs">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Status</strong>
-            </Box>
-            <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
-          </div>
-        </SpaceBetween>
-        {item?.pcaUrl?.length && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Post Meeting Analytics</strong>
-              </Box>
-              <Button variant="normal" href={item.pcaUrl} target="_blank" iconAlign="right" iconName="external">
-                Open in Post Call Analytics
-              </Button>
-            </div>
-          </SpaceBetween>
-        )}
-        {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Recording Audio</strong>
-              </Box>
-              <RecordingPlayer recordingUrl={item.recordingUrl} />
-            </div>
-          </SpaceBetween>
-        )}
-        {item?.videoRecordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
-          <SpaceBetween size="xs">
-            <div>
-              <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Recording Video</strong>
-              </Box>
-              <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} />
-            </div>
-          </SpaceBetween>
-        )}
-      </ColumnLayout>
-    </Container>
+    <SummarySections callId={callId} sections={sections} keyframes={keyframes} onKeyframeSelect={onKeyframeSelect} />
   );
 };
 
+// Exported for its own tests: regenerating is an asynchronous run whose
+// progress and failure are read back from the meeting rather than from the
+// mutation's answer, and that handover is worth driving directly.
 // eslint-disable-next-line arrow-body-style
-const CallSummary = ({ item }) => {
-  const [setCopySuccess] = useState(false);
+export const CallSummary = ({
+  item,
+  onSave,
+  onRegenerate,
+  readOnly,
+  omitSections = [],
+  keyframes = 'image',
+  onKeyframeSelect = undefined,
+}) => {
+  const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
+  // Local, and deliberately not the only source of progress: a second browser
+  // tab, or another user, learns that a run is going from the stored state.
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
 
-  const copyToClipboard = async () => {
+  // Re-rendered once when an end-of-meeting summary in progress becomes
+  // overdue, so the fallback below appears without anything else having to
+  // change on the meeting.
+  const [, setOverdueTick] = useState(0);
+  useEffect(() => {
+    const wait = msUntilSummaryOverdue(summaryState);
+    if (wait === null) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setOverdueTick((n) => n + 1), wait + 100);
+    return () => clearTimeout(timer);
+  }, [summaryState]);
+
+  const regenerating = starting || isRegenerating(summaryState);
+  // The end-of-meeting summary, queued when the meeting ended and not yet
+  // written. A press of Regenerate in this tab takes over from it.
+  const generating = !starting && isSummaryInProgress(summaryState);
+  const overdue = !starting && isSummaryOverdue(summaryState);
+  const failure = startError || regenerationFailure(summaryState);
+  const handEdited = isHandEdited(summaryState);
+  // Editing waits until the meeting has ended, and then until its
+  // end-of-meeting summary has been written. That write replaces the text
+  // without asking -- so an edit made before it lands would be discarded with
+  // none of the confirmation an edit is promised. The pipeline marks the
+  // summary as in progress in the same write that sets `ENDED`, and marks it
+  // generated when the summary lands, so both waits are read from the state.
+  //
+  // Regenerate stays available during a meeting, which is one of the documented
+  // reasons to press it: a meeting summarised while it was still going has
+  // since continued. A run that is still going when the meeting ends is
+  // discarded by the regenerator rather than written, because the pipeline's
+  // summary covers more of the transcript than that run saw.
+  const meetingInProgress = item.recordingStatusLabel === IN_PROGRESS_STATUS;
+
+  // Hand over from the local flag to the stored state as soon as anything about
+  // the summary changes -- which the backend's "running" mark is. Keyed on the
+  // raw strings so a re-render with an identical summary does not reset it.
+  const fingerprint = `${item.callSummaryText ?? ''}|${item.callSummaryState ?? ''}`;
+  const fingerprintAtStart = useRef(null);
+  useEffect(() => {
+    if (!starting) {
+      return undefined;
+    }
+    if (fingerprintAtStart.current !== null && fingerprint !== fingerprintAtStart.current) {
+      setStarting(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setStarting(false), REGENERATE_HANDOVER_MS);
+    return () => clearTimeout(timer);
+  }, [starting, fingerprint]);
+
+  // A refusal belongs to the press that produced it and does not outlive the
+  // summary it was refused for. The common refusal is "a run is already going",
+  // raised against a run in another tab; it is hidden while that run is in
+  // flight and would otherwise come back beside the result when the run landed
+  // and the spinner stopped covering it.
+  useEffect(() => {
+    setStartError(null);
+  }, [fingerprint]);
+
+  const startRegeneration = async () => {
+    setConfirmReplace(false);
+    setStartError(null);
+    fingerprintAtStart.current = fingerprint;
+    setStarting(true);
+    const result = await onRegenerate();
+    if (!result?.Success) {
+      // Said out loud rather than left as a stopped spinner: the commonest
+      // refusals are "a run is already going" and "not permitted", and neither
+      // is something the user can work out from the button going quiet.
+      setStartError(result?.Message || 'could not regenerate the summary');
+      setStarting(false);
+    }
+  };
+
+  const handleRegenerateClick = () => {
+    // A hand-written summary is somebody's own work, and regenerating discards
+    // it, so that case asks first. A generated one has nothing to lose.
+    if (handEdited) {
+      setConfirmReplace(true);
+      return;
+    }
+    startRegeneration();
+  };
+
+  const beginEditing = () => {
+    // Seeded with the text as rendered, not the raw stored value: a summary
+    // produced from several prompt templates is stored as a JSON object, and
+    // asking somebody to edit JSON to fix a sentence would be absurd. Saving
+    // therefore turns a structured summary into the plain markdown document it
+    // was being read as, which is what a hand-written summary is.
+    setDraft(getMarkdownSummary(item.callSummaryText));
+    setStartError(null);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
     try {
-      const summaryText = getTextFileFormattedMeetingDetails(item);
-      await navigator.clipboard.writeText(summaryText);
-      setCopySuccess(true);
-      // Reset the success state after 2 seconds
-      setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      logger.error('Failed to copy to clipboard:', err);
-      // Fallback for older browsers
-      try {
-        const textArea = document.createElement('textarea');
-        textArea.value = getTextFileFormattedMeetingDetails(item);
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setCopySuccess(true);
-        setTimeout(() => setCopySuccess(false), 2000);
-      } catch (fallbackErr) {
-        logger.error('Fallback copy failed:', fallbackErr);
+      const saved = await onSave(draft);
+      if (saved) {
+        setEditing(false);
       }
+    } finally {
+      setSaving(false);
     }
   };
 
-  const downloadCallSummary = async (option) => {
-    if (option.detail.id === 'download') {
-      await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
-    } else if (option.detail.id === 'email') {
-      window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
-    } else if (option.detail.id === 'docx') {
-      await exportToDocxFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
-    } else if (option.detail.id === 'copy') {
-      await copyToClipboard();
-    }
-  };
+  // The meeting page shows some sections in their own place -- the chapters as
+  // a list, the agenda coverage under the agenda -- and leaves them out here.
+  // The downloads are in the page header's Download menu.
+  const omitKey = omitSections.join('|');
+  const sections = useMemo(() => summarySections(item.callSummaryText, omitSections), [item.callSummaryText, omitKey]);
 
   return (
     <Container
       header={
         <Header
           variant="h4"
-          info={
-            <Link
-              variant="info"
-              target="_blank"
-              href="https://docs.aws.amazon.com/transcribe/latest/dg/call-analytics-insights.html#call-analytics-insights-summarization"
-            >
-              Info
-            </Link>
-          }
           actions={
-            <SpaceBetween size="xxs" direction="horizontal">
-              {item.callSummaryText && (
-                <ButtonDropdown
-                  items={[
-                    { text: 'Copy to clipboard', id: 'copy', disabled: false, iconName: 'copy' },
-                    { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
-                    { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
-                    { text: 'Download as Word', id: 'docx', disabled: false, iconName: 'file' },
-                  ]}
-                  variant="normal"
-                  onItemClick={(option) => downloadCallSummary(option)}
-                >
-                  <Icon name="download" variant="primary" />
-                </ButtonDropdown>
+            <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
+              {regenerating && <StatusIndicator type="loading">Regenerating</StatusIndicator>}
+              {/* In the header only beside text already shown (a summary made
+                  while the meeting ran); otherwise the body says it. */}
+              {generating && sections.length > 0 && (
+                <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
+              )}
+              {!regenerating && overdue && !failure && (
+                <StatusIndicator type="warning">{SUMMARY_OVERDUE_TEXT}</StatusIndicator>
+              )}
+              {!regenerating && failure && (
+                // Announced, because the outcome of pressing Regenerate -- and
+                // especially a refusal -- is the whole feedback for that action.
+                // Through nativeAttributes: Cloudscape's Box accepts neither
+                // `role` nor `ariaLive` as a prop.
+                <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+                  <StatusIndicator type="error">{failure}</StatusIndicator>
+                </Box>
+              )}
+              {/* Shown beside a failure, not instead of it: whose words the
+                  stored summary is does not depend on how the last run went,
+                  and a failed regeneration is exactly when it matters that the
+                  text on screen is somebody's own. */}
+              {!regenerating && handEdited && !editing && <Badge color="blue">Edited</Badge>}
+              {editing ? (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  <Button onClick={() => setEditing(false)} disabled={saving}>
+                    Cancel
+                  </Button>
+                  {/* A blank summary would store as an empty string, which
+                      leaves nothing to read and disables Edit, so the only way
+                      back would be Regenerate. */}
+                  <Button variant="primary" onClick={saveEdit} loading={saving} disabled={!draft.trim()}>
+                    Save summary
+                  </Button>
+                </SpaceBetween>
+              ) : (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  {onRegenerate && (
+                    <Button
+                      iconName="refresh"
+                      loading={regenerating}
+                      disabled={readOnly || saving || generating}
+                      disabledReason={generating && !readOnly ? GENERATING_REASON : undefined}
+                      onClick={handleRegenerateClick}
+                    >
+                      Regenerate
+                    </Button>
+                  )}
+                  {onSave && (
+                    <Button
+                      iconName="edit"
+                      disabled={readOnly || regenerating || generating || meetingInProgress || !item.callSummaryText}
+                      disabledReason={meetingInProgress && !readOnly ? EDIT_AFTER_MEETING_REASON : undefined}
+                      onClick={beginEditing}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </SpaceBetween>
               )}
             </SpaceBetween>
           }
@@ -263,28 +417,55 @@ const CallSummary = ({ item }) => {
         </Header>
       }
     >
-      <Grid gridDefinition={[{ colspan: { default: 12 } }]}>
-        <Tabs
-          tabs={[
-            {
-              label: 'Transcript Summary',
-              id: 'summary',
-              content: (
-                <div>
-                  <div>
-                    {/* eslint-disable-next-line react/no-array-index-key */}
-                    <TextContent color="gray">
-                      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>
-                        {getMarkdownSummary(item.callSummaryText)}
-                      </ReactMarkdown>
-                    </TextContent>
-                  </div>
-                </div>
-              ),
-            },
-          ]}
+      {/* Mounted only while it is wanted: Cloudscape renders a Modal's footer
+          even when it is not visible, so a permanently mounted one leaves a
+          second "Regenerate" button in the page for a click to land on. */}
+      {confirmReplace && (
+        <Modal
+          visible
+          onDismiss={() => setConfirmReplace(false)}
+          header="Replace the edited summary?"
+          footer={
+            <Box float="right">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => setConfirmReplace(false)}>Cancel</Button>
+                <Button variant="primary" onClick={startRegeneration}>
+                  Regenerate
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          This summary was edited by hand. Regenerating replaces it with a newly generated one, and the edited text
+          cannot be recovered.
+        </Modal>
+      )}
+      {editing ? (
+        <FormField
+          label="Meeting summary"
+          description="Markdown. Saving replaces the summary everywhere it is read, the download included."
+          stretch
+        >
+          <Textarea
+            value={draft}
+            onChange={({ detail }) => setDraft(detail.value)}
+            rows={16}
+            disabled={saving}
+            ariaLabel="Meeting summary text"
+          />
+        </FormField>
+      ) : (
+        <SummaryBody
+          callId={item.callId}
+          sections={sections}
+          keyframes={keyframes}
+          onKeyframeSelect={onKeyframeSelect}
+          generating={generating}
+          overdue={overdue && !regenerating}
+          failed={Boolean(failure) && !regenerating}
+          canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
-      </Grid>
+      )}
     </Container>
   );
 };
@@ -348,23 +529,21 @@ const getTimestampFromSeconds = (secs) => {
   return iso.substr(14, 7); // MM:SS.s
 };
 
-const TranscriptContent = ({ segment, translateCache }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
+// The translation of a segment's text, once it has one; '' until then.
+const translationOf = ({ segmentId, targetLanguage, translateOn }, translateCache) => {
+  if (!translateOn || !targetLanguage) return '';
+  return translateCache?.[segmentId.concat('-', targetLanguage)]?.translated ?? '';
+};
 
-  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
+const TranscriptContent = ({ segment, translation = '', query = '' }) => {
+  const { transcript, segmentId, channel } = segment;
+  // The search's words marked in the segment's own text (not its translation).
+  const transcriptPlugins = useMemo(
+    () => (query ? [...markdownRehypePlugins, rehypeMarkMatches(query)] : markdownRehypePlugins),
+    [query],
+  );
 
-  const k = segmentId.concat('-', targetLanguage);
-
-  // prettier-ignore
-  const currTranslated = translateOn
-    && targetLanguage !== ''
-    && translateCache[k] !== undefined
-    && translateCache[k].translated !== undefined
-    ? translateCache[k].translated
-    : '';
-
-  const result = currTranslated !== undefined ? currTranslated : '';
+  const result = translation;
 
   const transcriptPiiSplit = transcript.split(piiTypesSplitRegEx);
 
@@ -375,7 +554,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
     }
 
     let className = '';
-    let text = t;
+    const text = t;
     const translatedText = result;
 
     switch (channel) {
@@ -383,17 +562,8 @@ const TranscriptContent = ({ segment, translateCache }) => {
       case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
-      case 'AGENT':
-      case 'CALLER':
-        break;
-      case 'CATEGORY_MATCH':
-        if (text.match(regex)) {
-          className = 'transcript-segment-category-match-alert';
-          text = `Alert: ${text}`;
-        } else {
-          className = 'transcript-segment-category-match';
-          text = `Category: ${text}`;
-        }
+      case 'LOCAL':
+      case 'REMOTE':
         break;
       default:
         break;
@@ -403,10 +573,11 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // prettier-ignore
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
-          {translatedText.trim()}
-        </ReactMarkdown>
+        <ReactMarkdown rehypePlugins={transcriptPlugins}>{text.trim()}</ReactMarkdown>
+        {/* react-markdown 9 and later take no className: wrapped, so the translation keeps its colour. */}
+        <div className="translated-text">
+          <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{translatedText.trim()}</ReactMarkdown>
+        </div>
       </TextContent>
     );
   });
@@ -418,28 +589,142 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
+/**
+ * Rename the voice behind one segment, from the segment itself.
+ *
+ * Correcting a name where you are reading it is the natural gesture; making
+ * someone leave the transcript and find the Speakers panel is not. The wording
+ * spells out how many segments move, because the instinct is to assume you are
+ * editing the one line in front of you -- naming is per voice, and the
+ * single-segment option is the escape hatch for the case where separation put
+ * one turn on the wrong voice.
+ */
+const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
+  const [draft, setDraft] = useState('');
+  const [onlyThisSegment, setOnlyThisSegment] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Clearing the draft is what signals the save landed: the field's placeholder
+  // is the segment's current speaker, which re-renders to the new name. The
+  // result is awaited so a rejected write does not read as a successful one.
+  const save = async () => {
+    if (!draft.trim()) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const ok = await onRenameSpeaker(segment, draft.trim(), onlyThisSegment);
+      if (ok !== false) {
+        setDraft('');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Popover
+      triggerType="custom"
+      position="bottom"
+      size="medium"
+      dismissButton={false}
+      content={
+        <SpaceBetween direction="vertical" size="xs">
+          {locked && (
+            <Box variant="small" color="text-status-info">
+              This name is locked. Unlock it in the Speakers panel to change it.
+            </Box>
+          )}
+          <FormField
+            label="Speaker name"
+            description={
+              onlyThisSegment
+                ? 'Applies to this segment only.'
+                : 'Applies to every segment from this voice, including earlier ones.'
+            }
+          >
+            <Input
+              value={draft}
+              onChange={({ detail }) => setDraft(detail.value)}
+              onKeyDown={({ detail }) => {
+                if (detail.key === 'Enter') {
+                  save();
+                }
+              }}
+              placeholder={`${segment.speaker}`.trim()}
+              disabled={saving || locked}
+              autoFocus
+            />
+          </FormField>
+          <Toggle checked={onlyThisSegment} onChange={({ detail }) => setOnlyThisSegment(detail.checked)}>
+            Only this segment
+          </Toggle>
+          <Button variant="primary" disabled={!draft.trim() || saving || locked} loading={saving} onClick={save}>
+            Save
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <Button variant="inline-link">
+        <strong
+          className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}
+          title={
+            segment.speakerProposed
+              ? 'Suggested from the transcript. Confirm or reject it in the Speakers panel.'
+              : undefined
+          }
+        >
+          {segment.speaker}
+        </strong>
+      </Button>
+    </Popover>
+  );
+};
+
+/**
+ * The language a line was identified in, beside its time: a short code in a
+ * badge ("ES"), with the language's name as its tooltip and accessible label.
+ * Shown only in a meeting with more than one language (detected-languages.js).
+ */
+export const LanguageMark = ({ mark }) => (
+  <span className="transcript-language-mark" role="img" aria-label={`Language: ${mark.name}`} title={mark.name}>
+    <Badge color="grey">{mark.text}</Badge>
+  </span>
+);
+
+const TranscriptSegment = ({
+  segment,
+  translation = '',
+  enableSentimentAnalysis,
+  onRenameSpeaker,
+  readOnly,
+  onSeek = null,
+  query = '',
+}) => {
   const { channel } = segment;
 
-  if (channel === 'CATEGORY_MATCH') {
-    const categoryText = `${segment.transcript}`;
-    const newSegment = segment;
-    newSegment.transcript = categoryText;
-    // We will return a special version of the grid that's specifically only for category.
+  // A message typed in the meeting chat: at one moment, the one it was read.
+  if (isChatChannel(channel)) {
     return (
       <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
-        {getSentimentImage(segment, enableSentimentAnalysis)}
-        <SpaceBetween direction="vertical" size="xxs">
-          <TranscriptContent segment={newSegment} translateCache={translateCache} />
-        </SpaceBetween>
+        <div className="sentiment-image" />
+        <ChatSegment
+          segment={segment}
+          time={getTimestampFromSeconds(segment.startTime)}
+          onSeek={onSeek}
+          query={query}
+          translation={translation}
+        />
       </Grid>
     );
   }
 
+  const times = `${getTimestampFromSeconds(segment.startTime)} - ${getTimestampFromSeconds(segment.endTime)}`;
+
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
-  if (channel === 'AGENT' || channel === 'CALLER') {
+  if (channel === 'LOCAL' || channel === 'REMOTE') {
     displayChannel = `${segment.speaker}`.trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
@@ -451,15 +736,37 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
-          <TextContent>
-            <strong>{displayChannel}</strong>
-          </TextContent>
-          <TextContent>
-            {`${getTimestampFromSeconds(segment.startTime)} -
-              ${getTimestampFromSeconds(segment.endTime)}`}
-          </TextContent>
+          {onRenameSpeaker && !readOnly && (channel === 'LOCAL' || channel === 'REMOTE') ? (
+            <SpeakerRenamePopover segment={segment} onRenameSpeaker={onRenameSpeaker} locked={segment.speakerLocked} />
+          ) : (
+            <TextContent>
+              <strong
+                className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}
+                title={
+                  segment.speakerProposed
+                    ? 'Suggested from the transcript. Confirm or reject it in the Speakers panel.'
+                    : undefined
+                }
+              >
+                {displayChannel}
+              </strong>
+            </TextContent>
+          )}
+          {onSeek ? (
+            // With a recording to play, the time plays it from this line.
+            <Button
+              variant="inline-link"
+              ariaLabel={`Play from ${getTimestampFromSeconds(segment.startTime)}`}
+              onClick={() => onSeek(segment.startTime)}
+            >
+              {times}
+            </Button>
+          ) : (
+            <TextContent>{times}</TextContent>
+          )}
+          {segment.languageMark && <LanguageMark mark={segment.languageMark} />}
         </SpaceBetween>
-        <TranscriptContent segment={segment} translateCache={translateCache} />
+        <TranscriptContent segment={segment} translation={translation} query={query} />
       </SpaceBetween>
     </Grid>
   );
@@ -471,8 +778,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
  * - Same speaker
  * - Same channel
  * - The gap between two segments is less than PAUSE_TO_MERGE_IN_SECONDS second
- * - Add language code check if available
- * TODO: Check language code once it is returned
+ * - Not in two different identified languages, so each block has one language
  * @param previous previous segment
  * @param current current segment
  * @returns {boolean} indicates whether to merge or not
@@ -482,6 +788,9 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   // eslint-disable-next-line implicit-arrow-linebreak
   previous.speaker === current.speaker
   && previous.channel === current.channel
+  // Each chat message is its own row.
+  && !isChatChannel(current.channel)
+  && (!previous.languageCode || !current.languageCode || previous.languageCode === current.languageCode)
   && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
 
 /**
@@ -494,34 +803,288 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.transcript += ` ${current.transcript}`;
   previous.endTime = current.endTime;
   previous.isPartial = current.isPartial;
+  previous.languageCode = previous.languageCode || current.languageCode;
+  // Keep every id that went into this block. A merged block renders under the
+  // first segment's id, so a "only this segment" rename recorded against that id
+  // alone would cover only part of the text the user was looking at -- visibly so
+  // in the transcript download, which does not merge.
+  previous.mergedSegmentIds = [...(previous.mergedSegmentIds || [previous.segmentId]), current.segmentId];
+};
+
+// Whether a segment is somebody speaking: not the assistants' answers, and not
+// a message typed in the meeting chat.
+const isSpeechSegment = (segment) => isSpeechChannel(segment?.channel);
+
+// The segments the transcript shows, of those it holds: not the chat
+// assistant's (it has its own panel), and only complete ones.
+const isDisplayedSegment = (s) =>
+  // prettier-ignore
+  s?.segmentId
+  && s?.createdAt
+  && (s.agentTranscript === undefined || s.agentTranscript || s.channel !== 'LOCAL')
+  && s.channel !== 'CHAT_ASSISTANT';
+
+const rowIdFor = (s) => `${s.segmentId}-${s.createdAt}`;
+
+// How often, at most, the lines on screen are read while the reader scrolls,
+// for the translation to do those first.
+const VISIBLE_ROWS_THROTTLE_MS = 200;
+
+/**
+ * How far translating the transcript has got, and what to do about the lines
+ * that could not be translated. Says nothing once every line is done; during a
+ * live meeting, says nothing about the line or two that are always just
+ * arriving. Exported for its own tests.
+ */
+export const TranslationProgress = ({ status, live, onRetry }) => {
+  const { total, done, failed, reason, translating } = status;
+  const remaining = total - done - failed;
+  if (translating && (!live || remaining > 2)) {
+    return (
+      <Box padding={{ horizontal: 's', bottom: 'xxs' }}>
+        <StatusIndicator type="loading">{`Translating ${done} of ${total} lines`}</StatusIndicator>
+      </Box>
+    );
+  }
+  if (!translating && failed > 0) {
+    return (
+      <Box padding={{ horizontal: 's', bottom: 'xxs' }} nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+        <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+          <StatusIndicator type="error">
+            {`Could not translate ${failed} of ${total} lines${reason ? `: ${reason}` : ''}`}
+          </StatusIndicator>
+          <Button variant="inline-link" onClick={onRetry}>
+            Try again
+          </Button>
+        </SpaceBetween>
+      </Box>
+    );
+  }
+  return null;
+};
+
+// How long after the page scrolls the transcript itself a scroll event is
+// taken to be that scroll rather than the reader's. A smooth scroll over a long
+// transcript takes most of a second.
+const PROGRAMMATIC_SCROLL_MS = 1000;
+
+/**
+ * One line of the transcript. Memoised: while a recording plays, the
+ * transcript re-renders each time the segment being heard changes, and only
+ * the two rows whose highlight moved need to.
+ */
+const TranscriptRow = React.memo(
+  ({
+    segment,
+    current,
+    match,
+    query,
+    translation,
+    enableSentimentAnalysis,
+    participantName,
+    onRenameSpeaker,
+    readOnly,
+    onSeek,
+  }) => {
+    const classes = ['transcript-row'];
+    if (current) classes.push('transcript-row-current');
+    if (match) classes.push('transcript-row-match');
+    if (match === 'active') classes.push('transcript-row-match-active');
+    return (
+      <div
+        className={classes.join(' ')}
+        data-start-time={segment.startTime}
+        data-row-id={rowIdFor(segment)}
+        data-segment-id={segment.segmentId}
+        aria-current={current ? 'true' : undefined}
+      >
+        <TranscriptSegment
+          segment={segment}
+          translation={translation}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          participantName={participantName}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
+          onSeek={onSeek}
+          query={match ? query : ''}
+        />
+      </div>
+    );
+  },
+);
+TranscriptRow.displayName = 'TranscriptRow';
+
+/**
+ * The part of the transcript's box that can be seen: all of it, less the top
+ * when the page has been scrolled and the player, which stays at the top of
+ * the window, lies over it.
+ */
+const visibleBounds = (container) => {
+  const box = container.getBoundingClientRect();
+  const player = container.closest('.transcript-column')?.querySelector('.meeting-player');
+  const cover = player ? player.getBoundingClientRect().bottom : -Infinity;
+  return { top: Math.max(box.top, Math.min(cover, box.bottom)), bottom: box.bottom };
+};
+
+/** Whether a row is wholly inside the visible part of its scrolling container. */
+const rowInView = (container, row) => {
+  const { top, bottom } = visibleBounds(container);
+  const r = row.getBoundingClientRect();
+  return r.top >= top && r.bottom <= bottom;
+};
+
+const findRow = (container, rowId) =>
+  [...(container?.querySelectorAll('[data-row-id]') || [])].find((row) => row.getAttribute('data-row-id') === rowId);
+
+/**
+ * Search and speaker filter for the transcript, above its lines. The search
+ * marks the segments holding every word typed and steps through them; the
+ * speaker chips limit the transcript to some speakers.
+ */
+const TranscriptToolbar = ({
+  query,
+  onQueryChange,
+  matchCount,
+  activeMatch,
+  onStep,
+  speakerNames,
+  selectedSpeakers,
+  onSpeakersChange,
+  hasChat = false,
+  showChat = true,
+  onShowChatChange = () => {},
+  editableSpeakers = null,
+  onEditSpeaker = undefined,
+  chipEntries = null,
+  onSetSpeakerMode = undefined,
+  onRenameVoices = undefined,
+}) => {
+  let countText = '';
+  if (query.trim()) {
+    countText = matchCount ? `${activeMatch + 1 > 0 ? activeMatch + 1 : 0} of ${matchCount}` : 'No matches';
+  }
+  const toggleSpeaker = (name, pressed) =>
+    onSpeakersChange(pressed ? [...selectedSpeakers, name] : selectedSpeakers.filter((n) => n !== name));
+  const canEdit = Boolean(onEditSpeaker && editableSpeakers?.size);
+  // The chips, grouped by platform name; one plain chip per name when the
+  // caller has not grouped them.
+  const entries = chipEntries ?? speakerNames.map((name) => ({ type: 'name', name, keys: [] }));
+  const hasGroups = entries.some((entry) => entry.type === 'group');
+  return (
+    <div className="transcript-toolbar" data-testid="transcript-toolbar">
+      <div className="transcript-search">
+        <Input
+          type="search"
+          value={query}
+          placeholder="Search the transcript"
+          ariaLabel="Search the transcript"
+          onChange={({ detail }) => onQueryChange(detail.value)}
+          onKeyDown={({ detail }) => {
+            if (detail.key === 'Enter') onStep(detail.shiftKey ? -1 : 1);
+          }}
+        />
+        <Button
+          variant="icon"
+          iconName="angle-up"
+          ariaLabel="Previous match"
+          disabled={!matchCount}
+          onClick={() => onStep(-1)}
+        />
+        <Button
+          variant="icon"
+          iconName="angle-down"
+          ariaLabel="Next match"
+          disabled={!matchCount}
+          onClick={() => onStep(1)}
+        />
+        <span className="transcript-search-count" aria-live="polite" data-testid="transcript-search-count">
+          {countText}
+        </span>
+      </div>
+      {(speakerNames.length > 1 || hasChat || hasGroups || (canEdit && speakerNames.length > 0)) && (
+        <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
+          {(speakerNames.length > 1 || canEdit || hasGroups) && (
+            <>
+              {speakerNames.length > 1 && (
+                <ToggleButton
+                  pressed={!selectedSpeakers.length}
+                  onChange={() => onSpeakersChange([])}
+                  ariaLabel="All speakers"
+                >
+                  All
+                </ToggleButton>
+              )}
+              <TranscriptSpeakerChips
+                entries={entries}
+                filterable={speakerNames.length > 1}
+                selectedSpeakers={selectedSpeakers}
+                onToggleSpeaker={toggleSpeaker}
+                editableSpeakers={canEdit ? editableSpeakers : null}
+                onEditSpeaker={canEdit ? onEditSpeaker : undefined}
+                onSetMode={onSetSpeakerMode}
+                onRenameVoices={onRenameVoices}
+              />
+            </>
+          )}
+          {/* The meeting chat is shown or hidden on its own, whichever speakers are chosen. */}
+          {hasChat && (
+            <span className="transcript-chat-filter">
+              <ToggleButton
+                iconName="contact"
+                pressed={showChat}
+                onChange={({ detail }) => onShowChatChange(detail.pressed)}
+                ariaLabel="Chat messages"
+              >
+                Chat
+              </ToggleButton>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
   autoScroll,
+  scrollRequest,
   translateClient,
   targetLanguage,
   agentTranscript,
   translateOn,
-  collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onRenameSpeaker,
+  readOnly,
+  active = true,
+  playback = null,
+  onSeek = null,
+  onSaveSpeakerIdentities = undefined,
 }) => {
-  const bottomRef = useRef();
   const containerRef = useRef();
+  // The speaker whose chip opened the speaker modal, or null.
+  const [editingSpeaker, setEditingSpeaker] = useState(null);
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
-  const [translateCache, setTranslateCache] = useState({});
-  const [cacheSeen, setCacheSeen] = useState({});
-  const [lastUpdated, setLastUpdated] = useState(Date.now());
-  const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeMatch, setActiveMatch] = useState(-1);
+  const [selectedSpeakers, setSelectedSpeakers] = useState([]);
+  const [showChat, setShowChat] = useState(true);
+  // Until when a scroll event is the page's own scrolling, not the reader's.
+  const programmaticUntilRef = useRef(0);
 
-  // channels: AGENT, AGENT_ASSIST, CALLER, CATEGORY_MATCH,
-  // AGENT_VOICETONE, CALLER_VOICETONE
-  const maxChannels = 6;
+  const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
+  // After the meeting, with a recording to play, Auto-scroll keeps the line
+  // being heard in view; during it, the newest line.
+  const followPlayback = Boolean(playback && onSeek && autoScroll && !isLive);
+
+  // Every channel the meeting has: REMOTE, LOCAL, the assistants, the voice-tone
+  // readings and MEETING_CHAT. Which of them are shown is isDisplayedSegment's call.
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId);
 
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
@@ -539,121 +1102,23 @@ const CallInProgressTranscript = ({
     return currentTurnByTurnSegments;
   };
 
-  const updateTranslateCache = (seg) => {
-    const promises = [];
-    // prettier-ignore
-    for (let i = 0; i < seg.length; i += 1) {
-      const k = seg[i].segmentId.concat('-', targetLanguage);
+  // Whether each platform name's voices are one person or several, decided over
+  // the whole transcript (speaker-modes.js). Recomputed as segments arrive, so
+  // a name's new voices are numbered as they are first heard, and whenever the
+  // map changes.
+  const groups = useMemo(
+    () => speakerGroups(getSegments(), speakerIdentities),
+    [callTranscriptPerCallId, callId, speakerIdentities],
+  );
+  // The meeting's languages, from its record and its segments: each line is
+  // marked with its language only when there is more than one.
+  const languages = useMemo(
+    () => meetingLanguages(item.detectedLanguages, getSegments()),
+    [callTranscriptPerCallId, callId, item.detectedLanguages],
+  );
 
-      // prettier-ignore
-      if (translateCache[k] === undefined) {
-        // Now call translate API
-        const params = {
-          Text: seg[i].transcript,
-          SourceLanguageCode: 'auto',
-          TargetLanguageCode: targetLanguage,
-        };
-        const command = new TranslateTextCommand(params);
-
-        logger.debug('Translate API being invoked for:', seg[i].transcript, targetLanguage);
-
-        promises.push(
-          translateClient.send(command).then(
-            (data) => {
-              const n = {};
-              logger.debug('Translate API response:', seg[i].transcript, targetLanguage, data.TranslatedText);
-              n[k] = { cacheId: k, transcript: seg[i].transcript, translated: data.TranslatedText };
-              return n;
-            },
-            (error) => {
-              logger.debug('Error from translate:', error);
-            },
-          ),
-        );
-      }
-    }
-    return promises;
-  };
-
-  // Translate all segments when the call is completed.
-  useEffect(() => {
-    if (translateOn && targetLanguage !== '' && item.recordingStatusLabel !== IN_PROGRESS_STATUS) {
-      const promises = updateTranslateCache(getSegments());
-      Promise.all(promises).then((results) => {
-        // prettier-ignore
-        if (results.length > 0) {
-          setTranslateCache((state) => ({
-            ...state,
-            ...results.reduce((a, b) => ({ ...a, ...b })),
-          }));
-          setUpdateFlag((state) => !state);
-        }
-      });
-    }
-  }, [targetLanguage, agentTranscript, translateOn, item.recordingStatusLabel]);
-
-  // Translate real-time segments when the call is in progress.
-  useEffect(() => {
-    const runTranslation = async () => {
-      const c = getSegments();
-      // prettier-ignore
-      if (
-        translateOn
-        && targetLanguage !== ''
-        && c.length > 0
-        && item.recordingStatusLabel === IN_PROGRESS_STATUS
-      ) {
-        const k = c[c.length - 1].segmentId.concat('-', targetLanguage);
-        const n = {};
-        if (c[c.length - 1].isPartial === false && cacheSeen[k] === undefined) {
-          n[k] = { seen: true };
-          setCacheSeen((state) => ({
-            ...state,
-            ...n,
-          }));
-
-          // prettier-ignore
-          if (translateCache[k] === undefined) {
-            // Now call translate API
-            const params = {
-              Text: c[c.length - 1].transcript,
-              SourceLanguageCode: 'auto',
-              TargetLanguageCode: targetLanguage,
-            };
-            const command = new TranslateTextCommand(params);
-
-            logger.debug('Translate API being invoked for:', c[c.length - 1].transcript, targetLanguage);
-
-            try {
-              const data = await translateClient.send(command);
-              const o = {};
-              logger.debug('Translate API response:', c[c.length - 1].transcript, data.TranslatedText);
-              o[k] = {
-                cacheId: k,
-                transcript: c[c.length - 1].transcript,
-                translated: data.TranslatedText,
-              };
-              setTranslateCache((state) => ({
-                ...state,
-                ...o,
-              }));
-            } catch (error) {
-              logger.debug('Error from translate:', error);
-            }
-          }
-        }
-        if (Date.now() - lastUpdated > 500) {
-          setUpdateFlag((state) => !state);
-          logger.debug('Updating turn by turn with latest cache');
-        }
-      }
-      setLastUpdated(Date.now());
-    };
-    runTranslation();
-  }, [callTranscriptPerCallId, translateOn, targetLanguage]);
-
-  const getTurnByTurnSegments = () => {
-    const currentTurnByTurnSegments = transcriptChannels
+  const getTurnByTurnSegments = () =>
+    transcriptChannels
       .map((c) => {
         const { segments } = transcriptsForThisCallId[c];
         return segments;
@@ -682,53 +1147,218 @@ const CallInProgressTranscript = ({
         t.agentTranscript = agentTranscript;
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
-        // In streaming audio the speaker will just be "Other participant", override this with the
-        // name the user chose if needed.
-        // Compare the BASE name: with per-channel speaker identification on the
-        // speaker arrives as 'Other Participant (spk_0)', which an exact match
-        // would miss. The label is re-attached so the substitution keeps it.
-        const { base: speakerBase, suffix: speakerLabel } = splitDiarizationLabel(t.speaker);
-        if (speakerBase === DEFAULT_OTHER_SPEAKER_NAME || speakerBase === '') {
-          t.speaker = `${item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME}${speakerLabel}`;
-        }
+        t.languageMark = segmentLanguageMark(t, languages);
+        // Resolve the stored speaker to a display name. This covers both the
+        // meeting's speaker identity map (a voice a user has named) and the older
+        // behaviour of substituting the participant name typed on the Stream Audio
+        // form for the 'Other Participant' placeholder. Resolution happens on
+        // read, which is what makes naming a voice apply to segments that were
+        // written before the name was known.
+        // Capture the stored speaker before overwriting it: it is what the
+        // identity map is keyed on, so the popover on this segment needs it to
+        // rename the voice.
+        // The key a name is stored under, resolved THROUGH any merge -- writing
+        // to the segment's own key once it has been merged would store an entry
+        // nothing reads.
+        // A chat message stays under the sender the meeting's chat gave: it is
+        // not a voice, so the names given to voices do not apply to it.
+        if (isChatChannel(t.channel)) return t;
+        t.speakerKey = identityKeyFor(t, speakerIdentities);
+        // remoteParticipantName is the remote side's name, so it substitutes for the
+        // placeholder on the REMOTE channel only. The download path has always
+        // scoped it this way; the other readers now match.
+        const resolved = resolveSpeaker(
+          t,
+          speakerIdentities,
+          t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
+          groups,
+        );
+        t.speaker = resolved.name;
+        // The platform name this line was shown under as one person or
+        // several, for the grouped speaker chips.
+        t.speakerGroup = resolved.group;
+        t.speakerLocked = resolved.locked;
+        // A name given to this segment alone, not to its voice.
+        t.speakerOverridden = resolved.overridden;
+        // An inferred name that nobody has confirmed. Rendered differently
+        // below, because showing a guess as indistinguishable from a name a
+        // person typed is the one thing that would make this actively harmful.
+        t.speakerProposed = resolved.status === 'proposed';
+        // A placeholder nobody gave ('ConfRm_1 · Voice 2'), which a voice's
+        // chip opens empty to rename rather than prefilled.
+        t.speakerUnnamed = resolved.status === 'unnamed';
 
         return t;
       })
-      .map(
-        // prettier-ignore
-        (s) => (
-          s?.segmentId
-          && s?.createdAt
-          && (s.agentTranscript === undefined
-            || s.agentTranscript || s.channel !== 'AGENT')
-          && (s.channel !== 'AGENT_VOICETONE')
-          && (s.channel !== 'CALLER_VOICETONE')
-          && (s.channel !== 'CHAT_ASSISTANT')
-          && <TranscriptSegment
-            key={`${s.segmentId}-${s.createdAt}`}
-            segment={s}
-            translateCache={translateCache}
-            enableSentimentAnalysis={enableSentimentAnalysis}
-            participantName={item.callerPhoneNumber}
-          />
-        ),
-      );
+      .filter(isDisplayedSegment);
 
-    // this element is used for scrolling to bottom and to provide padding
-    currentTurnByTurnSegments.push(<div key="bottom" ref={bottomRef} />);
-    return currentTurnByTurnSegments;
-  };
+  // What is shown: the speakers chosen, then the segments holding the search.
+  const speakerNames = useMemo(() => speakerFilterOptions(turnByTurnSegments, isSpeechSegment), [turnByTurnSegments]);
+  // A chosen speaker who is no longer in the transcript (renamed) stops filtering.
+  const activeSpeakers = useMemo(
+    () => selectedSpeakers.filter((name) => speakerNames.includes(name)),
+    [selectedSpeakers, speakerNames],
+  );
+  const hasChat = useMemo(() => turnByTurnSegments.some((s) => isChatChannel(s.channel)), [turnByTurnSegments]);
+  // The voices each speaker's chip stands for: usually one, and several when
+  // voices that were never merged were given the same name. A name given to a
+  // single segment stands for no voice, so it is not edited from its chip.
+  const voiceKeysByName = useMemo(() => {
+    const byName = new Map();
+    turnByTurnSegments.forEach((s) => {
+      if (!isSpeechSegment(s) || s.speakerOverridden || !s.speakerKey) return;
+      const name = `${s.speaker ?? ''}`.trim();
+      if (!byName.has(name)) byName.set(name, new Set());
+      byName.get(name).add(s.speakerKey);
+    });
+    return byName;
+  }, [turnByTurnSegments]);
+  const editableSpeakers = useMemo(
+    () => (onSaveSpeakerIdentities && !readOnly ? new Set(voiceKeysByName.keys()) : null),
+    [voiceKeysByName, onSaveSpeakerIdentities, readOnly],
+  );
+  // The chips, grouped by platform name, with each group's one-person /
+  // several-people toggle.
+  const chipEntries = useMemo(
+    () => speakerChipLayout(turnByTurnSegments.filter(isSpeechSegment), groups),
+    [turnByTurnSegments, groups],
+  );
+  const canWriteSpeakers = Boolean(onSaveSpeakerIdentities && !readOnly);
+  // One write each: the chosen mode, or the name for every voice behind a chip
+  // (an empty name returns them to "Voice N").
+  const setSpeakerMode = (key, mode) =>
+    onSaveSpeakerIdentities(serializeSpeakerIdentities(withSpeakerMode(speakerIdentities, key, mode)));
+  const renameVoices = (keys, name) =>
+    onSaveSpeakerIdentities(
+      serializeSpeakerIdentities(keys.reduce((map, key) => withSpeakerName(map, key, name), speakerIdentities)),
+    );
+  // The meeting's voices as the Speakers panel lists them, each with the name
+  // its lines carry, read when the modal opens.
+  const roster = useMemo(
+    () =>
+      editingSpeaker === null
+        ? []
+        : speakerDisplayRows(
+            buildSpeakerRoster(getSegments(), speakerIdentities, item.remoteParticipantName, {
+              captureSource: item.captureSource,
+            }),
+            speakerIdentities,
+            groups,
+            item.remoteParticipantName,
+          ),
+    [
+      editingSpeaker,
+      callTranscriptPerCallId,
+      speakerIdentities,
+      groups,
+      item.remoteParticipantName,
+      item.captureSource,
+    ],
+  );
+  const editingKeys = editingSpeaker === null ? null : voiceKeysByName.get(editingSpeaker);
+  const editingRows = editingKeys ? roster.filter((row) => editingKeys.has(row.key)) : [];
+  const visibleSegments = useMemo(
+    () =>
+      turnByTurnSegments.filter((s) =>
+        passesTranscriptFilter(s, { speakers: activeSpeakers, showChat }, isSpeechSegment),
+      ),
+    [turnByTurnSegments, activeSpeakers, showChat],
+  );
+  // Translated a bounded number of lines at a time, newest first while the
+  // meeting runs and the lines on screen first after it (see
+  // use-transcript-translation.js), each line shown as soon as it arrives.
+  const {
+    translateCache,
+    status: translation,
+    prioritize: prioritizeTranslation,
+    retry: retryTranslation,
+  } = useTranscriptTranslation({
+    segments: visibleSegments,
+    enabled: translateOn,
+    targetLanguage,
+    translateClient,
+    newestFirst: isLive,
+  });
+  const matchIds = useMemo(
+    () => (query.trim() ? visibleSegments.filter((s) => textMatches(s.transcript, query)).map(rowIdFor) : []),
+    [visibleSegments, query],
+  );
+  const matchSet = useMemo(() => new Set(matchIds), [matchIds]);
+  const activeMatchId = activeMatch >= 0 ? matchIds[activeMatch] : null;
+
+  // The line being heard, from the player's position. Re-renders the
+  // transcript only when that line changes. A chat message is never what is
+  // being heard: it was typed, not said, so the highlight and the scrolling
+  // that follow the recording pass over it.
+  const playbackRows = useMemo(
+    () =>
+      visibleSegments
+        .filter((s) => !isChatChannel(s.channel))
+        .map((s) => ({ id: rowIdFor(s), startTime: s.startTime, endTime: s.endTime })),
+    [visibleSegments],
+  );
+  const selectCurrent = useCallback(
+    (state) => (state.engaged ? currentSegmentId(playbackRows, state.seconds) : null),
+    [playbackRows],
+  );
+  const currentRowId = usePlaybackSelector(onSeek ? playback : null, selectCurrent);
+  const selectSeekCount = useCallback((state) => state.seekCount || 0, []);
+  const seekCount = usePlaybackSelector(onSeek ? playback : null, selectSeekCount);
+
+  const scrollToRow = useCallback((row) => {
+    const container = containerRef.current;
+    if (!container || !row) return;
+    programmaticUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS;
+    const box = container.getBoundingClientRect();
+    const visible = visibleBounds(container);
+    const top = row.getBoundingClientRect().top - box.top + container.scrollTop;
+    // A third of the way down what can be seen, so what comes next is in view too.
+    const target = top - (visible.top - box.top) - (visible.bottom - visible.top) / 3;
+    if (container.scrollTo) container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }, []);
+
+  // The lines on screen, for the translation to do first. Read at most every
+  // VISIBLE_ROWS_THROTTLE_MS while the reader scrolls.
+  const visibleRowsTimer = useRef(null);
+  const reportVisibleRows = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !translateOn || !targetLanguage) return;
+    const { top, bottom } = visibleBounds(container);
+    const ids = [];
+    container.querySelectorAll('[data-segment-id]').forEach((row) => {
+      const r = row.getBoundingClientRect();
+      if (r.bottom >= top && r.top <= bottom) ids.push(row.getAttribute('data-segment-id'));
+    });
+    prioritizeTranslation(ids);
+  }, [translateOn, targetLanguage, prioritizeTranslation]);
+  useEffect(() => {
+    reportVisibleRows();
+  }, [reportVisibleRows, visibleSegments.length, active]);
+  useEffect(() => () => clearTimeout(visibleRowsTimer.current), []);
 
   // Detect when user manually scrolls
   const handleScroll = (e) => {
     const container = e.target;
-    const threshold = 50; // pixels from bottom
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-    if (!isAtBottom && autoScroll) {
-      setUserHasScrolled(true);
-    } else if (isAtBottom) {
-      setUserHasScrolled(false);
+    if (translateOn && visibleRowsTimer.current === null) {
+      visibleRowsTimer.current = setTimeout(() => {
+        visibleRowsTimer.current = null;
+        reportVisibleRows();
+      }, VISIBLE_ROWS_THROTTLE_MS);
     }
+    if (isLive) {
+      const threshold = 50; // pixels from bottom
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+      if (!isAtBottom && autoScroll) {
+        setUserHasScrolled(true);
+      } else if (isAtBottom) {
+        setUserHasScrolled(false);
+      }
+      return;
+    }
+    // While a recording plays, scrolling away stops the transcript following
+    // it, until Resume or the next move of the recording.
+    if (Date.now() < programmaticUntilRef.current) return;
+    if (followPlayback && playback?.get().playing) setUserHasScrolled(true);
   };
 
   const scrollTranscriptToBottom = useCallback(() => {
@@ -742,12 +1372,41 @@ const CallInProgressTranscript = ({
 
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
-  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
+    // speakerIdentities belongs here: naming a voice has to re-label the
+    // segments already on screen, which is the whole point of resolving the
+    // speaker on read. Without it a rename would only affect later segments.
+  }, [
+    callTranscriptPerCallId,
+    item.recordingStatusLabel,
+    targetLanguage,
+    agentTranscript,
+    translateOn,
+    speakerIdentities,
+    languages,
+  ]);
+
+  // Move to the segment at a requested time (a key frame or a chapter was
+  // selected). During a live meeting this pauses following the live end, so
+  // the transcript stays there; after it, the recording has been moved to the
+  // same time, so following it carries on from there.
+  // The transcript is on its own tab, and a hidden element has no layout to
+  // scroll by, so a request made while another tab is shown is kept and
+  // carried out when the Transcript tab is opened.
+  const appliedScrollRef = useRef(null);
+  useEffect(() => {
+    if (!scrollRequest || !active || appliedScrollRef.current === scrollRequest.at) return;
+    appliedScrollRef.current = scrollRequest.at;
+    programmaticUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS;
+    const row = scrollTranscriptToTime(containerRef.current, scrollRequest.seconds);
+    if (row && isLive) setUserHasScrolled(true);
+    if (!isLive) setUserHasScrolled(false);
+  }, [scrollRequest, active]);
 
   useEffect(() => {
     // prettier-ignore
     if (
-      item.recordingStatusLabel === IN_PROGRESS_STATUS
+      active
+      && isLive
       && autoScroll
       && !userHasScrolled
       && containerRef.current
@@ -755,6 +1414,7 @@ const CallInProgressTranscript = ({
       scrollTranscriptToBottom();
     }
   }, [
+    active,
     turnByTurnSegments,
     autoScroll,
     userHasScrolled,
@@ -765,592 +1425,196 @@ const CallInProgressTranscript = ({
     scrollTranscriptToBottom,
   ]);
 
+  // An explicit move of the recording (a click on a line, a chapter, the seek
+  // bar, the arrow keys) is where the reader wants to be: follow it again.
+  useEffect(() => {
+    if (seekCount) setUserHasScrolled(false);
+  }, [seekCount]);
+
+  // Keep the line being heard in view, unless the reader has scrolled away.
+  useEffect(() => {
+    if (!followPlayback || userHasScrolled || !active || !currentRowId) return;
+    const container = containerRef.current;
+    const row = findRow(container, currentRowId);
+    if (row && !rowInView(container, row)) scrollToRow(row);
+  }, [currentRowId, followPlayback, userHasScrolled, active, scrollToRow]);
+
+  // A new search starts at its first match.
+  useEffect(() => {
+    setActiveMatch(query.trim() && matchIds.length ? 0 : -1);
+  }, [query]);
+  useEffect(() => {
+    if (activeMatch >= matchIds.length) setActiveMatch(matchIds.length ? 0 : -1);
+  }, [matchIds.length]);
+  useEffect(() => {
+    if (!activeMatchId || !active) return;
+    scrollToRow(findRow(containerRef.current, activeMatchId));
+  }, [activeMatchId, active, scrollToRow]);
+
+  const stepSearch = (step) => {
+    if (!matchIds.length) return;
+    // Reading the matches is a move away from the line being heard.
+    if (followPlayback && playback?.get().playing) setUserHasScrolled(true);
+    setActiveMatch((index) => stepMatch(matchIds.length, index, step));
+  };
+
+  const resumeFollowing = () => {
+    setUserHasScrolled(false);
+    if (isLive) scrollTranscriptToBottom();
+  };
+
+  let pausedNotice = null;
+  if (userHasScrolled && autoScroll && isLive) pausedNotice = 'Auto-scroll paused - scroll to bottom to resume';
+  if (userHasScrolled && followPlayback) pausedNotice = 'Following the recording is paused';
+
   return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      style={{
-        overflowY: 'auto',
-        height: collapseSentiment ? '34vh' : '68vh',
-        maxHeight: collapseSentiment ? '34vh' : '68vh',
-        paddingLeft: '10px',
-        paddingTop: '5px',
-        paddingRight: '10px',
-      }}
-    >
-      {/* Visual indicator when auto-scroll is paused */}
-      {userHasScrolled && autoScroll && (
+    <>
+      <TranscriptToolbar
+        query={query}
+        onQueryChange={setQuery}
+        matchCount={matchIds.length}
+        activeMatch={activeMatch}
+        onStep={stepSearch}
+        speakerNames={speakerNames}
+        selectedSpeakers={activeSpeakers}
+        onSpeakersChange={setSelectedSpeakers}
+        hasChat={hasChat}
+        showChat={showChat}
+        onShowChatChange={setShowChat}
+        editableSpeakers={editableSpeakers}
+        onEditSpeaker={editableSpeakers ? setEditingSpeaker : undefined}
+        chipEntries={chipEntries}
+        onSetSpeakerMode={canWriteSpeakers ? setSpeakerMode : undefined}
+        onRenameVoices={canWriteSpeakers ? renameVoices : undefined}
+      />
+      {editingRows.length > 0 && (
+        <SpeakerAssignmentModal
+          speaker={editingSpeaker}
+          rows={editingRows}
+          roster={roster}
+          identities={speakerIdentities}
+          groups={groups}
+          onSave={onSaveSpeakerIdentities}
+          onDismiss={() => setEditingSpeaker(null)}
+          readOnly={readOnly}
+        />
+      )}
+      {/* The notice lies over the lines rather than among them: shown and
+          hidden among them, it would move them, and the browser's scroll
+          anchoring would then scroll the box -- which reads as the reader
+          scrolling, and shows the notice again. */}
+      {translateOn && targetLanguage && (
+        <TranslationProgress status={translation} live={isLive} onRetry={retryTranslation} />
+      )}
+      <div className="transcript-scroll-frame">
+        {pausedNotice && (
+          <div className="transcript-follow-paused" role="status">
+            {`⚠️ ${pausedNotice}`}
+            <Button
+              onClick={resumeFollowing}
+              variant="inline-link"
+              iconName="angle-down"
+              style={{ marginLeft: '10px', fontSize: '12px' }}
+            >
+              Resume
+            </Button>
+          </div>
+        )}
         <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          data-testid="transcript-scroll"
           style={{
-            position: 'sticky',
-            top: 0,
-            background: '#ffeaa7',
-            padding: '5px 10px',
-            textAlign: 'center',
-            fontSize: '12px',
-            zIndex: 1000,
-            borderRadius: '4px',
-            margin: '0 0 10px 0',
-            border: '1px solid #fdcb6e',
+            overflowY: 'auto',
+            height: TRANSCRIPT_HEIGHT,
+            maxHeight: TRANSCRIPT_HEIGHT,
+            paddingLeft: '10px',
+            paddingTop: '5px',
+            paddingRight: '10px',
           }}
         >
-          ⚠️ Auto-scroll paused - scroll to bottom to resume
-          <Button
-            onClick={() => {
-              setUserHasScrolled(false);
-              scrollTranscriptToBottom();
-            }}
-            variant="inline-link"
-            iconName="angle-down"
-            style={{ marginLeft: '10px', fontSize: '12px' }}
-          >
-            Resume
-          </Button>
+          {visibleSegments.length === 0 && turnByTurnSegments.length > 0 && (
+            <Box color="text-body-secondary" padding="s">
+              {!showChat && !activeSpeakers.length
+                ? 'No lines to show with the chat hidden.'
+                : 'No lines from the speakers chosen.'}
+            </Box>
+          )}
+          <ColumnLayout borders="horizontal" columns={1}>
+            {visibleSegments.map((s) => {
+              const rowId = rowIdFor(s);
+              let match = null;
+              if (matchSet.has(rowId)) match = rowId === activeMatchId ? 'active' : 'match';
+              return (
+                <TranscriptRow
+                  key={rowId}
+                  segment={s}
+                  current={rowId === currentRowId}
+                  match={match}
+                  query={query}
+                  // The row's own translation rather than the whole cache, so
+                  // a translation arriving re-renders its row and no other.
+                  translation={translationOf(s, translateCache)}
+                  enableSentimentAnalysis={enableSentimentAnalysis}
+                  participantName={item.remoteParticipantName}
+                  onRenameSpeaker={onRenameSpeaker}
+                  readOnly={readOnly}
+                  onSeek={onSeek}
+                />
+              );
+            })}
+          </ColumnLayout>
         </div>
-      )}
-      <ColumnLayout borders="horizontal" columns={1}>
-        {turnByTurnSegments}
-      </ColumnLayout>
-    </div>
+      </div>
+    </>
   );
 };
 
-const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showMCPModal, setShowMCPModal] = useState(false);
-  const [buttonConfig, setButtonConfig] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [alertMessage, setAlertMessage] = useState(null);
-  const [alertType, setAlertType] = useState('success');
-
-  // Check if user is admin (Amplify v6 pattern)
-  const { isAdmin } = useUserGroups();
-
-  const loadButtonConfiguration = async () => {
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const query = `
-        query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
-          default: getChatButtonConfig(ChatButtonConfigId: $defaultId) {
-            ChatButtonConfigId
-          }
-          custom: getChatButtonConfig(ChatButtonConfigId: $customId) {
-            ChatButtonConfigId
-          }
-        }
-      `;
-
-      const variables = {
-        defaultId: 'DefaultChatButtonConfig',
-        customId: 'CustomChatButtonConfig',
-      };
-
-      const result = await client.graphql({ query, variables });
-
-      // Parse the JSON strings returned from the resolver
-      const defaultData = result?.data?.default?.ChatButtonConfigId
-        ? JSON.parse(result.data.default.ChatButtonConfigId)
-        : {};
-      const customData = result?.data?.custom?.ChatButtonConfigId
-        ? JSON.parse(result.data.custom.ChatButtonConfigId)
-        : {};
-
-      // Filter to only include button fields (format: N#LABEL)
-      const buttonPattern = /^\d+#/;
-      const filterButtons = (config) => {
-        const filtered = {};
-        Object.keys(config).forEach((key) => {
-          if (buttonPattern.test(key)) {
-            filtered[key] = config[key];
-          }
-        });
-        return filtered;
-      };
-
-      const defaultButtons = filterButtons(defaultData);
-      const customButtons = filterButtons(customData);
-
-      // If custom buttons exist, use those; otherwise use defaults
-      const hasCustomButtons = Object.keys(customButtons).length > 0;
-      setButtonConfig(hasCustomButtons ? customButtons : defaultButtons);
-    } catch (error) {
-      console.error('Failed to load button configuration:', error);
-      setAlertType('error');
-      setAlertMessage('Failed to load button configuration');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Load button configuration when modal opens
-  useEffect(() => {
-    if (showEditModal && isAdmin) {
-      loadButtonConfiguration();
-    }
-  }, [showEditModal, isAdmin]);
-
-  const handleSave = async () => {
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const mutation = `
-        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
-          updateChatButtonConfig(input: $input) {
-            ChatButtonConfigId
-            Success
-          }
-        }
-      `;
-
-      const variables = {
-        input: {
-          ChatButtonConfigId: 'CustomChatButtonConfig',
-          ButtonConfig: JSON.stringify(buttonConfig),
-        },
-      };
-
-      await client.graphql({ query: mutation, variables });
-
-      setAlertType('success');
-      setAlertMessage('Button configuration saved successfully!');
-
-      // Notify iframe to reload button configuration
-      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-      if (iframe && iframe.contentWindow) {
-        const iframeOrigin = new URL(iframe.src).origin;
-        iframe.contentWindow.postMessage(
-          {
-            type: 'STRANDS_RELOAD_BUTTONS',
-          },
-          iframeOrigin,
-        );
-      }
-
-      // Close modal after short delay
-      setTimeout(() => {
-        setShowEditModal(false);
-      }, 1500);
-    } catch (error) {
-      console.error('Failed to save button configuration:', error);
-      setAlertType('error');
-      setAlertMessage('Failed to save button configuration');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleReset = async () => {
-    if (
-      !window.confirm('Are you sure you want to reset to default buttons? This will delete all custom configurations.')
-    ) {
-      return;
-    }
-
-    setIsLoading(true);
-    setAlertMessage(null);
-
-    try {
-      const mutation = `
-        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
-          updateChatButtonConfig(input: $input) {
-            ChatButtonConfigId
-            Success
-          }
-        }
-      `;
-
-      const variables = {
-        input: {
-          ChatButtonConfigId: 'CustomChatButtonConfig',
-          ButtonConfig: JSON.stringify({}),
-        },
-      };
-
-      await client.graphql({ query: mutation, variables });
-
-      setAlertType('success');
-      setAlertMessage('Reset to defaults successfully!');
-
-      // Notify iframe to reload button configuration
-      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-      if (iframe && iframe.contentWindow) {
-        const iframeOrigin = new URL(iframe.src).origin;
-        iframe.contentWindow.postMessage(
-          {
-            type: 'STRANDS_RELOAD_BUTTONS',
-          },
-          iframeOrigin,
-        );
-      }
-
-      // Reload to show default config
-      setTimeout(() => {
-        loadButtonConfiguration();
-      }, 1500);
-    } catch (error) {
-      console.error('Failed to reset button configuration:', error);
-      setAlertType('error');
-      setAlertMessage('Failed to reset to defaults');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleButtonChange = (key, field, value) => {
-    if (field === 'label') {
-      // Update the key when label changes
-      const match = key.match(/^(\d+)#/);
-      if (match) {
-        const sequence = parseInt(match[1], 10);
-        const newKey = `${sequence}#${value}`;
-        const newConfig = { ...buttonConfig };
-        const oldPrompt = newConfig[key];
-        delete newConfig[key];
-        newConfig[newKey] = oldPrompt;
-        setButtonConfig(newConfig);
-      }
-    } else {
-      // Update prompt
-      setButtonConfig({
-        ...buttonConfig,
-        [key]: value,
-      });
-    }
-  };
-
-  const handleDeleteButton = (key) => {
-    const newConfig = { ...buttonConfig };
-    delete newConfig[key];
-
-    // Re-sequence remaining buttons to keep numbering contiguous
-    const sortedEntries = Object.entries(newConfig).sort((a, b) => {
-      const getSeq = (k) => {
-        const m = k.match(/^(\d+)#/);
-        return m ? parseInt(m[1], 10) : 999;
-      };
-      return getSeq(a[0]) - getSeq(b[0]);
-    });
-
-    const resequenced = {};
-    sortedEntries.forEach(([k, v], idx) => {
-      const label = k.replace(/^\d+#/, '');
-      resequenced[`${idx + 1}#${label}`] = v;
-    });
-
-    setButtonConfig(resequenced);
-  };
-
-  const handleAddButton = () => {
-    // Find the next sequence number
-    const existingSequences = Object.keys(buttonConfig || {}).map((k) => {
-      const m = k.match(/^(\d+)#/);
-      return m ? parseInt(m[1], 10) : 0;
-    });
-    const nextSequence = existingSequences.length > 0 ? Math.max(...existingSequences) + 1 : 1;
-    const newKey = `${nextSequence}#NEW BUTTON`;
-    setButtonConfig({
-      ...buttonConfig,
-      [newKey]: 'Enter prompt here',
-    });
-  };
-
-  const renderButtonEditors = () => {
-    if (!buttonConfig) return null;
-
-    // Sort by sequence number
-    const sortedEntries = Object.entries(buttonConfig).sort((a, b) => {
-      const getSequence = (key) => {
-        const match = key.match(/^(\d+)#/);
-        return match ? parseInt(match[1], 10) : 999;
-      };
-      return getSequence(a[0]) - getSequence(b[0]);
-    });
-
-    return sortedEntries.map(([key, prompt]) => {
-      const match = key.match(/^(\d+)#(.*)$/);
-      if (!match) return null;
-
-      const [, sequence, label] = match;
-
-      return (
-        <Box key={`button-${sequence}`} padding={{ vertical: 's' }}>
-          <SpaceBetween size="s">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Box variant="h4">Button {sequence}</Box>
-              <Button
-                variant="icon"
-                iconName="remove"
-                onClick={() => handleDeleteButton(key)}
-                ariaLabel={`Delete button ${sequence}`}
-              />
-            </SpaceBetween>
-            <FormField label="Label">
-              <Input value={label} onChange={(e) => handleButtonChange(key, 'label', e.detail.value)} />
-            </FormField>
-            <FormField label='Prompt (set to "NONE" to hide button)'>
-              <Textarea value={prompt} onChange={(e) => handleButtonChange(key, 'prompt', e.detail.value)} rows={3} />
-            </FormField>
-          </SpaceBetween>
-        </Box>
-      );
-    });
-  };
-
-  if (import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true') {
-    // Use STRANDS chat UI
-    // Note: encodeURIComponent is required because callId may contain characters like '+'
-    // which URLSearchParams.get() would otherwise decode as a space.
-    const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;
-
-    console.log(`DEBUG: Agent Assist Mode: ${import.meta.env.VITE_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
-
-    return (
-      <>
-        <Container
-          disableContentPaddings
-          header={
-            <Header
-              variant="h4"
-              info={
-                <Link variant="info" target="_blank" href="https://amazon.com/live-meeting-assistant">
-                  Info
-                </Link>
-              }
-              actions={
-                isAdmin && import.meta.env.VITE_AGENT_ASSIST_MODE === 'LAMBDA' ? (
-                  <ButtonDropdown
-                    items={[
-                      { text: 'Edit Chat Buttons', id: 'edit-buttons' },
-                      {
-                        text: showVNCPreview ? 'Close VP Live View' : 'Open VP Live View',
-                        id: 'live-view',
-                        disabled: !vpData || !vpData.vncReady || loadingVP,
-                      },
-                      { text: 'MCP Servers', id: 'mcp-servers', disabled: false },
-                    ]}
-                    variant="normal"
-                    onItemClick={(e) => {
-                      if (e.detail.id === 'edit-buttons') {
-                        setShowEditModal(true);
-                      } else if (e.detail.id === 'live-view') {
-                        setShowVNCPreview((prev) => !prev);
-                      } else if (e.detail.id === 'mcp-servers') {
-                        setShowMCPModal(true);
-                      }
-                    }}
-                    ariaLabel="Settings"
-                  >
-                    <Icon name="settings" />
-                  </ButtonDropdown>
-                ) : null
-              }
-            >
-              Meeting Assist Bot
-            </Header>
-          }
-        >
-          <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
-            {/*
-              The `sandbox` list is deliberately exactly these two tokens.
-
-              What it buys: the frame renders agent output. The omitted tokens
-              mean nothing in that output can submit a form, open a popup, raise
-              a modal, or navigate the top-level page. Those are capabilities of
-              the inert markup that reaches the DOM, not of script, so removing
-              them is worth having on its own. This is the outer of three layers
-              for the form case in particular -- renderMarkdownSafe in
-              strands-chat.html strips form controls before they are rendered,
-              and `form-action 'self'` in the distribution's CSP bounds where a
-              submission could go -- and it is the layer that does not depend on
-              the sanitizer having run.
-
-              What it does not buy: `allow-scripts` plus `allow-same-origin` lets
-              a script already running in the frame remove the sandbox attribute
-              from its own frame element, so this is not a boundary against code
-              executing inside the frame. It is a restriction on inert content.
-
-              Why `allow-same-origin` stays: the parent/frame postMessage channel
-              is pinned in both directions -- the parent only acts on messages
-              whose `event.origin` equals its own, and addresses the frame with
-              an explicit targetOrigin rather than '*'. Dropping the token would
-              move the frame to an opaque origin and force both ends back to
-              '*'/"null", trading a precise channel for a vaguer one.
-
-              Cost: none. strands-chat.html has no form, no target="_blank", no
-              window.open and no downloads of its own.
-            */}
-            <iframe
-              style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
-              title="Meeting Assist"
-              src={iframeSrc}
-              sandbox="allow-scripts allow-same-origin"
-              width="100%"
-            />
-          </Box>
-        </Container>
-
-        {/* Edit Buttons Modal */}
-        <Modal
-          visible={showEditModal}
-          onDismiss={() => setShowEditModal(false)}
-          size="large"
-          header="Edit Chat Buttons"
-          footer={
-            <Box float="right">
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button variant="normal" onClick={handleReset} disabled={isLoading}>
-                  Reset to Defaults
-                </Button>
-                <Button variant="link" onClick={() => setShowEditModal(false)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={handleSave} disabled={isLoading}>
-                  Save Changes
-                </Button>
-              </SpaceBetween>
-            </Box>
-          }
-        >
-          <SpaceBetween size="m">
-            <Alert type={alertType} visible={!!alertMessage}>
-              {alertMessage}
-            </Alert>
-
-            <Box>
-              Customize the suggestion buttons that appear in the chat. Changes will apply to all users. Set prompt to
-              &quot;NONE&quot; to hide a button.
-            </Box>
-
-            {isLoading ? (
-              <Box textAlign="center">Loading...</Box>
-            ) : (
-              <SpaceBetween size="m">
-                {renderButtonEditors()}
-                <Button variant="normal" iconName="add-plus" onClick={handleAddButton}>
-                  Add Button
-                </Button>
-              </SpaceBetween>
-            )}
-          </SpaceBetween>
-        </Modal>
-
-        {/* MCP Servers Modal */}
-        <MCPServersModal visible={showMCPModal} onDismiss={() => setShowMCPModal(false)} vpData={vpData} />
-      </>
-    );
-  }
-  return null;
-};
-const getTranscriptContent = ({
-  item,
-  callTranscriptPerCallId,
-  autoScroll,
-  translateClient,
-  targetLanguage,
-  agentTranscript,
-  translateOn,
-  collapseSentiment,
-  enableSentimentAnalysis,
-}) => {
-  switch (item.recordingStatusLabel) {
-    case DONE_STATUS:
-    case IN_PROGRESS_STATUS:
-    default:
-      return (
-        <CallInProgressTranscript
-          item={item}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          autoScroll={autoScroll}
-          translateClient={translateClient}
-          targetLanguage={targetLanguage}
-          agentTranscript={agentTranscript}
-          translateOn={translateOn}
-          collapseSentiment={collapseSentiment}
-          enableSentimentAnalysis={enableSentimentAnalysis}
-        />
-      );
-  }
-};
+const LANGUAGE_OPTIONS = LANGUAGE_CODES.filter(({ value }) => value).map(({ value, label }) => ({ value, label }));
 
 const CallTranscriptContainer = ({
   setToolsOpen,
   item,
   callTranscriptPerCallId,
   translateClient,
-  collapseSentiment,
   enableSentimentAnalysis,
-  user,
-  showVNCPreview,
-  setShowVNCPreview,
-  vpData,
-  loadingVP,
+  speakerIdentities,
+  onRenameSpeaker,
+  readOnly,
+  scrollRequest,
+  active = true,
+  player = null,
+  playback = null,
+  onSeek = null,
+  onSaveSpeakerIdentities = undefined,
 }) => {
-  // defaults to auto scroll when call is in progress
-  const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-  const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
-  const [showDownloadTranscript, setShowDownloadTranscripts] = useState(item.recordingStatusLabel === DONE_STATUS);
+  // Auto-scroll follows the newest line while the meeting runs, and the line
+  // being heard once it has ended and there is a recording to play; it is on
+  // by default in both. With neither there is nothing for it to follow.
+  const canFollow = item.recordingStatusLabel === IN_PROGRESS_STATUS || Boolean(onSeek);
+  const [autoScroll, setAutoScroll] = useState(canFollow);
+  const [autoScrollDisabled, setAutoScrollDisabled] = useState(!canFollow);
 
   const [translateOn, setTranslateOn] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState(localStorage.getItem('targetLanguage') || '');
   const [agentTranscript] = useState(true);
 
-  const handleLanguageSelect = (event) => {
-    setTargetLanguage(event.target.value);
-    localStorage.setItem('targetLanguage', event.target.value);
+  const handleLanguageSelect = ({ detail }) => {
+    const value = detail.selectedOption?.value || '';
+    setTargetLanguage(value);
+    localStorage.setItem('targetLanguage', value);
   };
 
   useEffect(() => {
-    setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
-    setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-    setShowDownloadTranscripts(item.recordingStatusLabel === DONE_STATUS);
-  }, [item.recordingStatusLabel]);
+    setAutoScrollDisabled(!canFollow);
+    setAutoScroll(canFollow);
+  }, [canFollow]);
 
-  const languageChoices = () => {
-    if (translateOn) {
-      return (
-        // prettier-ignore
-        // eslint-disable-jsx-a11y/control-has-associated-label
-        <div>
-          <select value={targetLanguage} onChange={handleLanguageSelect}>
-            {LANGUAGE_CODES.map(({ value, label }) => <option value={value}>{label}</option>)}
-          </select>
-        </div>
-      );
-    }
-    return translateOn;
-  };
-
-  const downloadTranscript = (option) => {
-    console.log('option', option);
-    if (option.detail.id === 'text') {
-      downloadTranscriptAsText(callTranscriptPerCallId, item);
-    } else if (option.detail.id === 'excel') {
-      downloadTranscriptAsExcel(callTranscriptPerCallId, item);
-    } else if (option.detail.id === 'docx') {
-      downloadTranscriptAsDocx(callTranscriptPerCallId, item);
-    }
-  };
+  const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage) || null;
 
   return (
-    <Grid
-      gridDefinition={[
-        {
-          colspan: {
-            default: 12,
-            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
-          },
-        },
-        {
-          colspan: {
-            default: 12,
-            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
-          },
-        },
-      ]}
-    >
+    <div className="transcript-column">
+      {player}
       <Container
         fitHeight="true"
         disableContentPaddings
@@ -1359,98 +1623,62 @@ const CallTranscriptContainer = ({
             variant="h4"
             info={<InfoLink onFollow={() => setToolsOpen(true)} />}
             actions={
-              <SpaceBetween direction="vertical" size="xs">
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Toggle
-                    onChange={({ detail }) => setAutoScroll(detail.checked)}
-                    checked={autoScroll}
-                    disabled={autoScrollDisabled}
+              // The transcript's downloads are in the page header's Download menu.
+              <SpaceBetween direction="horizontal" size="m" alignItems="center">
+                <Toggle
+                  onChange={({ detail }) => setAutoScroll(detail.checked)}
+                  checked={autoScroll}
+                  disabled={autoScrollDisabled}
+                >
+                  Auto-scroll
+                </Toggle>
+                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                  Translate
+                </Toggle>
+                {translateOn && (
+                  <Select
+                    selectedOption={selectedLanguage}
+                    onChange={handleLanguageSelect}
+                    options={LANGUAGE_OPTIONS}
+                    placeholder="Choose a language"
+                    filteringType="auto"
+                    ariaLabel="Translation language"
+                    expandToViewport
                   />
-                  <span>Auto Scroll</span>
-                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
-                  <span>Enable Translation</span>
-                  {languageChoices()}
-                  {showDownloadTranscript && (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <ButtonDropdown
-                        items={[
-                          {
-                            text: 'Download as',
-                            iconName: 'download',
-                            items: [
-                              { text: 'Excel', id: 'excel', disabled: false },
-                              { text: 'Text', id: 'text' },
-                              { text: 'Word', id: 'docx' },
-                            ],
-                          },
-                        ]}
-                        variant="normal"
-                        onItemClick={(option) => downloadTranscript(option)}
-                      >
-                        <Icon name="download" variant="primary" />
-                      </ButtonDropdown>
-                    </SpaceBetween>
-                  )}
-                </SpaceBetween>
+                )}
               </SpaceBetween>
             }
           >
-            Meeting Transcript
+            Transcript
           </Header>
         }
       >
-        {getTranscriptContent({
-          item,
-          callTranscriptPerCallId,
-          autoScroll,
-          translateClient,
-          targetLanguage,
-          agentTranscript,
-          translateOn,
-          collapseSentiment,
-          enableSentimentAnalysis,
-        })}
+        <TranscriptDeletionNotice
+          deletedAt={item.transcriptDeletedAt}
+          scheduledFor={item.transcriptDeletionScheduledFor}
+        />
+        <CallInProgressTranscript
+          item={item}
+          callTranscriptPerCallId={callTranscriptPerCallId}
+          autoScroll={autoScroll}
+          scrollRequest={scrollRequest}
+          translateClient={translateClient}
+          targetLanguage={targetLanguage}
+          agentTranscript={agentTranscript}
+          translateOn={translateOn}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
+          active={active}
+          playback={playback}
+          onSeek={onSeek}
+          onSaveSpeakerIdentities={onSaveSpeakerIdentities}
+        />
       </Container>
-      {getAgentAssistPanel(item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
-    </Grid>
+    </div>
   );
 };
-
-const VoiceToneContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
-  <Container
-    fitHeight="true"
-    disableContentPaddings={collapseSentiment ? '' : 'true'}
-    header={
-      <Header
-        variant="h4"
-        info={
-          <Link
-            variant="info"
-            target="_blank"
-            href="https://docs.aws.amazon.com/chime-sdk/latest/dg/call-analytics.html"
-          >
-            Info
-          </Link>
-        }
-        actions={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="inline-icon"
-              iconName={collapseSentiment ? 'angle-up' : 'angle-down'}
-              onClick={() => setCollapseSentiment(!collapseSentiment)}
-            />
-          </SpaceBetween>
-        }
-      >
-        Voice Tone Analysis (30sec rolling window)
-      </Header>
-    }
-  >
-    {collapseSentiment ? (
-      <VoiceToneFluctuationChart item={item} callTranscriptPerCallId={callTranscriptPerCallId} />
-    ) : null}
-  </Container>
-);
 
 const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
   <>
@@ -1495,7 +1723,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Caller Avg Sentiment:</strong>
+                <strong>Remote Avg Sentiment:</strong>
               </Box>
               <div>
                 <SentimentIcon sentiment={item.callerSentimentLabel} />
@@ -1509,7 +1737,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Caller Sentiment Trend:</strong>
+                <strong>Remote Sentiment Trend:</strong>
               </Box>
               <div>
                 <SentimentTrendIcon trend={item.callerSentimentTrendLabel} />
@@ -1519,7 +1747,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Agent Avg Sentiment:</strong>
+                <strong>Local Avg Sentiment:</strong>
               </Box>
               <div>
                 <SentimentIcon sentiment={item.agentSentimentLabel} />
@@ -1533,7 +1761,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
           <SpaceBetween size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
-                <strong>Agent Sentiment Trend:</strong>
+                <strong>Local Sentiment Trend:</strong>
               </Box>
               <div>
                 <SentimentTrendIcon trend={item.agentSentimentTrendLabel} />
@@ -1546,358 +1774,440 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
   </>
 );
 
-export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
+export const CallPanel = ({
+  item,
+  callTranscriptPerCallId,
+  setToolsOpen,
+  getCallDetailsFromCallIds,
+  tabInUrl = false,
+  assistantDefaultOpen = undefined,
+  onRefreshMeeting = undefined,
+}) => {
   const { currentCredentials, user } = useAppContext();
-  const { userGroups, isAdmin: isAdminUser } = useUserGroups();
+  const { isAdmin: isAdminUser } = useUserGroups();
 
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
 
-  const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
-  // prettier-ignore
-  const customRetryStrategy = new StandardRetryStrategy(
-    async () => MAXIMUM_ATTEMPTS,
-    {
-      delayDecider:
-        (_, attempts) => Math.floor(
-          Math.min(MAXIMUM_RETRY_DELAY, 2 ** attempts * 10),
-        ),
-    },
+  const {
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
+  } = useCallsContext();
+  // Memoised on the raw string: created in the component body it would be a new
+  // object identity every render, and it is a dependency of the effect that
+  // rebuilds the entire transcript element list.
+  const speakerIdentities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
+
+  const saveSpeakerIdentities = (serialized) => sendUpdateSpeakerIdentities(item.callId, serialized);
+
+  /**
+   * Store a summary somebody wrote by hand.
+   *
+   * Recorded as source 'manual', which is what puts the Edited badge on the
+   * panel and what makes a later regeneration ask before replacing it.
+   */
+  const saveCallSummary = (text) =>
+    sendUpdateCallSummary(item.callId, text, {
+      source: SOURCE_MANUAL,
+      status: STATUS_IDLE,
+      updatedAt: new Date().toISOString(),
+    });
+
+  const regenerateCallSummaryForItem = useCallback(
+    () => sendRegenerateCallSummary(item.callId),
+    [item.callId, sendRegenerateCallSummary],
   );
 
-  let translateClient = new TranslateClient({
-    region: awsExports.aws_project_region,
-    credentials: currentCredentials,
-    maxAttempts: MAXIMUM_ATTEMPTS,
-    retryStrategy: customRetryStrategy,
-  });
+  // Presentation only -- it greys out controls the write would reject anyway.
+  // The rule itself is enforced as a condition on the mutation (and, for the
+  // regeneration, in the Lambda behind it). Shared by the Speakers panel, the
+  // transcript's inline rename, the summary controls and the Agenda panel so
+  // all four agree.
+  const speakerNamesReadOnly =
+    !isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username);
 
-  /* Get a client with refreshed credentials. Credentials can go stale when user is logged in
-     for an extended period.
+  // The consent record, for the Consent panel and the summary downloads. Read
+  // with its own query, which signs the evidence links, and kept current by
+  // its own subscription.
+  const meetingConsent = useMeetingConsent(item.callId);
+
+  /**
+   * Apply a rename made from a transcript segment.
+   *
+   * Two different writes behind one gesture: by default the name is attached to
+   * the VOICE, which relabels every segment that voice produced; with "only this
+   * segment" it is recorded against the segment id instead, for the case where
+   * speaker separation attributed a single turn to the wrong voice and no
+   * voice-level rename can fix it.
    */
-  useEffect(() => {
-    logger.debug('Translate client with refreshed credentials');
-    translateClient = new TranslateClient({
-      region: awsExports.aws_project_region,
-      credentials: currentCredentials,
-      maxAttempts: MAXIMUM_ATTEMPTS,
-      retryStrategy: customRetryStrategy,
-    });
-  }, [currentCredentials]);
-
-  // Send user context to iframe when it loads
-  useEffect(() => {
-    const sendUserContextToIframe = () => {
-      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-      if (iframe && iframe.contentWindow && user) {
-        const iframeOrigin = new URL(iframe.src).origin;
-        iframe.contentWindow.postMessage(
-          {
-            type: 'STRANDS_USER_CONTEXT',
-            userGroups,
-            isAdmin: isAdminUser,
-            email: user?.attributes?.email || user?.username || '',
+  // Memoised because it is a dependency of the effect that rebuilds the entire
+  // transcript element list. A fresh identity each render would rebuild it on
+  // every unrelated re-render of this page -- the calls context is reconstructed
+  // on each render of the layout above, so those are frequent.
+  const handleRenameSpeaker = useCallback(
+    (segment, name, onlyThisSegment) => {
+      if (onlyThisSegment) {
+        const overrides = { ...speakerIdentities.segmentOverrides };
+        (segment.mergedSegmentIds || [segment.segmentId]).forEach((id) => {
+          overrides[id] = name;
+        });
+        return saveSpeakerIdentities(serializeSpeakerIdentities({ ...speakerIdentities, segmentOverrides: overrides }));
+      }
+      return saveSpeakerIdentities(
+        serializeSpeakerIdentities({
+          ...speakerIdentities,
+          identities: {
+            ...speakerIdentities.identities,
+            [segment.speakerKey]: {
+              ...(speakerIdentities.identities[segment.speakerKey] || {}),
+              name,
+              status: 'confirmed',
+              source: 'manual',
+              updatedAt: new Date().toISOString(),
+            },
           },
-          iframeOrigin,
-        );
-      }
-    };
+        }),
+      );
+    },
+    [speakerIdentities, item.callId, sendUpdateSpeakerIdentities],
+  );
 
-    // Send user context after a short delay to ensure iframe is loaded
-    const timer = setTimeout(sendUserContextToIframe, 500);
+  const identifySpeakers = useCallback(
+    ({ force }) => sendResolveSpeakerNames(item.callId, { force }),
+    [item.callId, sendResolveSpeakerNames],
+  );
 
-    return () => clearTimeout(timer);
-  }, [user, userGroups, isAdminUser, item.callId]);
+  // Flattened final segments, for the Speakers panel's one-row-per-voice list.
+  const transcriptSegmentsForCall = Object.values(callTranscriptPerCallId[item.callId] || {}).flatMap(
+    (channel) => channel.segments || [],
+  );
 
-  // Add message handler for STRANDS iframe requests
+  // One client per set of credentials, which go stale and are refreshed when
+  // a user stays signed in for a long time. One attempt per request: the
+  // transcript's translation queue does its own retrying, with backoff, so
+  // that a throttled request is visible to it and counted against a bounded
+  // number of requests in flight -- an SDK retrying each of hundreds of lines
+  // on its own is what kept a long meeting from showing any translation.
+  const translateClient = useMemo(
+    () =>
+      new TranslateClient({
+        region: awsExports.aws_project_region,
+        credentials: currentCredentials,
+        maxAttempts: 1,
+      }),
+    [currentCredentials],
+  );
+
+  const isLive = item.recordingStatusLabel === IN_PROGRESS_STATUS;
+
+  // The meeting assistant, in a panel beside the tabs on every tab
+  // (MeetingAssistantPanel). Whether it is open is remembered per user, and a
+  // live meeting opens with it open the first time (use-assistant-panel.js).
+  // Read here rather than once at load, so a test can set the flag.
+  const assistantEnabled = import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true';
+  // Whether the panel lies over the tabs (a narrow page) rather than beside
+  // them; null until the page has been measured (see the layout effect below).
+  const [assistantOverlays, setAssistantOverlays] = useState(null);
+  const assistant = useAssistantPanel({
+    enabled: assistantEnabled,
+    callId: item.callId,
+    isLive,
+    username: user?.username,
+    defaultOpen: assistantDefaultOpen,
+    besideTabs: assistantOverlays === null ? null : !assistantOverlays,
+  });
+  const setAssistantOpen = assistant.setOpen;
+  // A new value each time the viewer opens the panel: the focus goes into the composer.
+  const [assistantFocusRequest, setAssistantFocusRequest] = useState(0);
+  // An answer finished while the panel was closed; shown on the header button.
+  const [assistantUnread, setAssistantUnread] = useState(false);
+  const assistantOpenRef = useRef(assistant.open);
+  assistantOpenRef.current = assistant.open;
+  const assistantButtonRef = useRef(null);
   useEffect(() => {
-    const handleMessage = async (event) => {
-      // Validate message origin for security
-      if (event.origin !== window.location.origin) return;
+    if (assistant.open) setAssistantUnread(false);
+  }, [assistant.open]);
+  useEffect(() => {
+    setAssistantUnread(false);
+  }, [item.callId]);
+  const toggleAssistant = useCallback(
+    (open) => {
+      setAssistantOpen(open);
+      if (open) setAssistantFocusRequest((previous) => previous + 1);
+    },
+    [setAssistantOpen],
+  );
+  const closeAssistant = useCallback(
+    ({ returnFocus = false } = {}) => {
+      setAssistantOpen(false);
+      if (returnFocus) assistantButtonRef.current?.focus();
+    },
+    [setAssistantOpen],
+  );
+  const onAnswerComplete = useCallback(() => {
+    if (!assistantOpenRef.current) setAssistantUnread(true);
+  }, []);
 
-      // Handle user context request from iframe
-      if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
-        const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-        if (iframe && iframe.contentWindow) {
-          const iframeOrigin = new URL(iframe.src).origin;
-          iframe.contentWindow.postMessage(
-            {
-              type: 'STRANDS_USER_CONTEXT',
-              userGroups,
-              isAdmin: isAdminUser,
-              email: user?.attributes?.email || user?.username || '',
-            },
-            iframeOrigin,
-          );
-        }
-      }
+  // Answers the meeting assistant chat frame, and its requests for frames of
+  // the shared screen; the embeddable chat panel uses the same two hooks.
+  useStrandsChatBridge(item.callId, { onAnswerComplete });
+  useChatKeyframeLinks(item.callId);
 
-      // Handle button configuration requests
-      else if (event.data && event.data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
-        try {
-          const query = `
-            query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
-              default: getChatButtonConfig(ChatButtonConfigId: $defaultId) {
-                ChatButtonConfigId
-              }
-              custom: getChatButtonConfig(ChatButtonConfigId: $customId) {
-                ChatButtonConfigId
-              }
-            }
-          `;
-
-          const variables = {
-            defaultId: 'DefaultChatButtonConfig',
-            customId: 'CustomChatButtonConfig',
-          };
-
-          const result = await client.graphql({ query, variables });
-
-          // Parse the JSON strings returned from the resolver
-          const defaultData = result?.data?.default?.ChatButtonConfigId
-            ? JSON.parse(result.data.default.ChatButtonConfigId)
-            : {};
-          const customData = result?.data?.custom?.ChatButtonConfigId
-            ? JSON.parse(result.data.custom.ChatButtonConfigId)
-            : {};
-
-          // Filter to only include button fields (format: N#LABEL)
-          const buttonPattern = /^\d+#/;
-          const filterButtons = (config) => {
-            const filtered = {};
-            Object.keys(config).forEach((key) => {
-              if (buttonPattern.test(key)) {
-                filtered[key] = config[key];
-              }
-            });
-            return filtered;
-          };
-
-          const defaultButtons = filterButtons(defaultData);
-          const customButtons = filterButtons(customData);
-
-          // If custom buttons exist, use only those; otherwise use defaults
-          const hasCustomButtons = Object.keys(customButtons).length > 0;
-          const mergedConfig = hasCustomButtons ? { ...customButtons } : { ...defaultButtons };
-
-          // Send success response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
-                requestId: event.data.requestId,
-                success: true,
-                config: mergedConfig,
-              },
-              iframeOrigin,
-            );
-          }
-        } catch (error) {
-          console.error('[CallPanel] getChatButtonConfig call failed:', error);
-          logger.error('getChatButtonConfig call failed', error);
-
-          // Send error response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
-                requestId: event.data.requestId,
-                success: false,
-                error: error.message || error.errors?.[0]?.message || 'getChatButtonConfig call failed',
-              },
-              iframeOrigin,
-            );
-          }
-        }
-      }
-
-      // Handle update button configuration requests (admin only)
-      else if (event.data && event.data.type === 'STRANDS_UPDATE_BUTTON_CONFIG_REQUEST') {
-        try {
-          const mutation = `
-            mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
-              updateChatButtonConfig(input: $input) {
-                ChatButtonConfigId
-                Success
-              }
-            }
-          `;
-
-          const variables = {
-            input: {
-              ChatButtonConfigId: 'CustomChatButtonConfig',
-              ButtonConfig: event.data.buttonConfig,
-            },
-          };
-
-          const result = await client.graphql({ query: mutation, variables });
-
-          // Send success response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
-                requestId: event.data.requestId,
-                success: true,
-                result,
-              },
-              iframeOrigin,
-            );
-          }
-        } catch (error) {
-          logger.error('updateChatButtonConfig call failed', error);
-
-          // Send error response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
-                requestId: event.data.requestId,
-                success: false,
-                error: error.message || error.errors?.[0]?.message || 'updateChatButtonConfig call failed',
-              },
-              iframeOrigin,
-            );
-          }
-        }
-      }
-
-      // Handle chat message requests
-      else if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
-        try {
-          const mutation = `
-            mutation SendChatMessage($input: SendChatMessageInput!) {
-              sendChatMessage(input: $input) {
-                MessageId
-                Status
-                CallId
-                Response
-              }
-            }
-          `;
-
-          const variables = {
-            input: {
-              CallId: event.data.callId,
-              Message: event.data.message,
-              ConversationHistory: event.data.conversationHistory || [],
-            },
-          };
-
-          const result = await client.graphql({ query: mutation, variables });
-
-          // Send success response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_CHAT_RESPONSE',
-                messageId: event.data.messageId,
-                success: true,
-                result,
-              },
-              iframeOrigin,
-            );
-          }
-        } catch (error) {
-          logger.error('sendChatMessage call failed', error);
-
-          // Send error response back to iframe
-          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
-          if (iframe && iframe.contentWindow) {
-            const iframeOrigin = new URL(iframe.src).origin;
-            iframe.contentWindow.postMessage(
-              {
-                type: 'STRANDS_CHAT_RESPONSE',
-                messageId: event.data.messageId,
-                success: false,
-                error: error.message || error.errors?.[0]?.message || 'sendChatMessage call failed',
-              },
-              iframeOrigin,
-            );
-          }
-        }
-      }
-
-      // Handle token stream subscription setup
-      else if (event.data && event.data.type === 'STRANDS_SETUP_TOKEN_SUBSCRIPTION') {
-        try {
-          const subscription = `
-            subscription OnAddChatToken($callId: ID!, $messageId: ID!) {
-              onAddChatToken(CallId: $callId, MessageId: $messageId) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                  Type
-                  Content
-                  ToolName
-                  ToolInput
-                  ToolResult
-                  Success
-                }
-              }
-            }
-          `;
-
-          // Set up token subscription
-          client
-            .graphql({
-              query: subscription,
-              variables: {
-                callId: event.data.callId,
-                messageId: event.data.messageId,
-              },
-            })
-            .subscribe({
-              next: (message) => {
-                const token = message?.data?.onAddChatToken;
-                if (token) {
-                  // Send token to the chat iframe
-                  event.source.postMessage(
-                    {
-                      type: 'STRANDS_TOKEN_MESSAGE',
-                      token,
-                    },
-                    event.origin,
-                  );
-                }
-              },
-              error: (error) => {
-                logger.error('Token subscription error', error);
-              },
-            });
-        } catch (error) {
-          logger.error('Failed to set up token subscription', error);
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-    };
-  }, [user]);
-
-  // VNC Preview state at CallPanel level
+  // Whether the Virtual Participant's live view is shown, at the top of the
+  // Transcript tab. Opened and closed from the assistant's settings menu and
+  // by the assistant itself (the VNC preview subscription below).
   const [showVNCPreview, setShowVNCPreview] = useState(false);
-  const [vpData, setVpData] = useState(null);
+
+  // How many key frames the strip has loaded. It decides whether the meeting
+  // has a Screen share tab, and the tab's label.
+  const [keyframes, setKeyframes] = useState({ count: 0, more: false, loaded: false });
+  useEffect(() => {
+    setKeyframes({ count: 0, more: false, loaded: false });
+  }, [item.callId]);
+  const hasKeyframes = keyframes.count > 0;
+  const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
+  // Opening the live view also opens the tab it is on, wherever it was asked for.
+  const setVncPreview = useCallback(
+    (show) => {
+      setShowVNCPreview(show);
+      if (show) setActiveTab(TAB_TRANSCRIPT);
+    },
+    [setActiveTab],
+  );
+  const setVncPreviewRef = useRef(setVncPreview);
+  setVncPreviewRef.current = setVncPreview;
+  const timelineNode = useDetachedNode();
+
+  // The Virtual Participant that joined this meeting, if one did: for the
+  // platform in the header and, once its browser can be watched, the live view.
+  const [meetingVp, setMeetingVp] = useState(null);
   const [loadingVP, setLoadingVP] = useState(false);
+  const vpData = meetingVp?.vncReady ? meetingVp : null;
+
+  // The meeting's one player, above the transcript (meeting-player/). It plays
+  // the video recording when there is one and the audio recording otherwise,
+  // and nothing while the meeting is live; the viewer can switch between them
+  // when there are both. The video recording's clock against the
+  // transcript's comes from the key frames (each carries both); empty until
+  // the strip has loaded frames that do.
+  const [clockAnchors, setClockAnchors] = useState([]);
+  // The viewer's own choice of recording; null until they make one.
+  const [chosenMedia, setChosenMedia] = useState(null);
+  useEffect(() => {
+    setClockAnchors([]);
+    setChosenMedia(null);
+  }, [item.callId]);
+  // Without a choice, a Virtual Participant's video with no key frames to
+  // line it up gives way to the audio recording (defaultMediaPreference).
+  const mediaDefault = defaultMediaPreference({
+    hasBoth: Boolean(item.recordingUrl && item.videoRecordingUrl),
+    isVirtualParticipant: Boolean(meetingVp),
+    framesLoaded: keyframes.loaded,
+    hasAnchors: clockAnchors.length > 0,
+  });
+  const media = chooseMeetingMedia({
+    recordingUrl: item.recordingUrl,
+    videoRecordingUrl: item.videoRecordingUrl,
+    isLive,
+    prefer: chosenMedia || mediaDefault.prefer,
+  });
+  const audioDefaultReason = !chosenMedia && media?.kind === 'audio' ? mediaDefault.reason : null;
+  const mediaKind = media?.kind || null;
+  const canPlayRecording = Boolean(media);
+  const playerRef = useRef(null);
+  const playback = usePlaybackStore();
+
+  const onClockAnchors = useCallback((anchors) => {
+    setClockAnchors((previous) => (sameAnchors(previous, anchors) ? previous : anchors));
+  }, []);
+  const clock = useMemo(() => clockFor(mediaKind, clockAnchors), [mediaKind, clockAnchors]);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
+
+  /**
+   * Move the player to a time on the transcript's clock (or to a key frame's
+   * own place in the video recording), and play from there when `play`.
+   */
+  const seekPlayer = useCallback(
+    ({ transcriptSeconds = null, frame = null, play = false }) => {
+      const player = playerRef.current;
+      if (!player || !mediaKind) return;
+      const seconds = frame
+        ? recordingSecondsForFrame(frame, { kind: mediaKind, clock: clockRef.current })
+        : toRecordingSeconds(clockRef.current, transcriptSeconds);
+      player.seek(seconds, { play });
+    },
+    [mediaKind],
+  );
+
+  // Requests from the key frame strip, the chapters and the summary's slides:
+  // move the transcript to a time, and the player with it. `at` makes a
+  // repeated request distinct. `reveal` is an explicit "show me": it opens the
+  // Transcript tab, where the player is. Without it the transcript and the
+  // player are only moved, ready for when the tab is next opened, and nothing
+  // plays out of sight.
+  const [transcriptScrollRequest, setTranscriptScrollRequest] = useState(null);
+  const [frameSelectRequest, setFrameSelectRequest] = useState(null);
+  const showInTranscript = useCallback(
+    (seconds, { reveal = false } = {}) => {
+      setTranscriptScrollRequest({ seconds, at: Date.now() });
+      seekPlayer({ transcriptSeconds: seconds, play: false });
+      if (reveal) setActiveTab(TAB_TRANSCRIPT);
+    },
+    [setActiveTab, seekPlayer],
+  );
+  // "Play recording from here" on a key frame (reveal), or a frame selected in
+  // the strip (no reveal: positioned, not played).
+  const playRecordingFrom = useCallback(
+    (frame, { reveal = false } = {}) => {
+      if (reveal) {
+        setTranscriptScrollRequest({ seconds: Number(frame?.Timestamp) || 0, at: Date.now() });
+        setActiveTab(TAB_TRANSCRIPT);
+      }
+      seekPlayer({ frame, play: reveal });
+    },
+    [setActiveTab, seekPlayer],
+  );
+  // A slide named in the summary: open the Screen share tab at its frame, and
+  // move the player to it for when the recording is played from there.
+  const showKeyframe = useCallback(
+    (frameId) => {
+      setFrameSelectRequest({ frameId, at: Date.now() });
+      setActiveTab(TAB_SCREEN_SHARE);
+      const seconds = frameIdSeconds(frameId);
+      if (seconds !== null) {
+        setTranscriptScrollRequest({ seconds, at: Date.now() });
+        seekPlayer({ transcriptSeconds: seconds, play: false });
+      }
+    },
+    [setActiveTab, seekPlayer],
+  );
+  // "Show in transcript" under a frame the assistant showed: as the same
+  // action on the Screen share tab, from the time in the frame's id. Where the
+  // panel lies over the page, it is closed so the transcript can be seen; the
+  // remembered choice is left as it was.
+  const assistantOverlaysRef = useRef(assistantOverlays);
+  assistantOverlaysRef.current = assistantOverlays;
+  const showChatFrameInTranscript = useCallback(
+    (frameId) => {
+      const seconds = frameIdSeconds(frameId);
+      if (seconds === null) return;
+      showInTranscript(seconds, { reveal: true });
+      if (assistantOverlaysRef.current) setAssistantOpen(false, { remember: false });
+    },
+    [showInTranscript, setAssistantOpen],
+  );
+  const onFramesChange = useCallback(({ count, more, loaded }) => {
+    setKeyframes((previous) =>
+      previous.count === count && previous.more === more && previous.loaded === Boolean(loaded)
+        ? previous
+        : { count, more, loaded: Boolean(loaded) },
+    );
+  }, []);
+  // The key frames the Screen share tab counts, which the player marks on its
+  // seek bar as screen shares beside the chapters.
+  const [screenShares, setScreenShares] = useState([]);
+  useEffect(() => {
+    setScreenShares([]);
+  }, [item.callId]);
+  const onScreenShares = useCallback((frames) => {
+    setScreenShares((previous) =>
+      previous.length === frames.length &&
+      previous.every(
+        (f, i) =>
+          f.FrameId === frames[i].FrameId && f.Title === frames[i].Title && f.VideoOffset === frames[i].VideoOffset,
+      )
+        ? previous
+        : frames,
+    );
+  }, []);
+
+  // Chapters from the summary, on the transcript's clock.
+  const chapters = useMemo(() => chaptersFromSummary(item.callSummaryText), [item.callSummaryText]);
+  // A chapter selected on the Summary tab: the Transcript tab at that time, the
+  // recording playing from it.
+  const selectChapter = useCallback(
+    (chapter) => {
+      showInTranscript(chapter.seconds, { reveal: true });
+      seekPlayer({ transcriptSeconds: chapter.seconds, play: true });
+    },
+    [showInTranscript, seekPlayer],
+  );
+  // A line of the transcript: play from its start.
+  const playFromTranscript = useCallback(
+    (seconds) => seekPlayer({ transcriptSeconds: seconds, play: true }),
+    [seekPlayer],
+  );
+  // The Details tab's "Play" on a recording: the Transcript tab, playing that
+  // recording from where the player is.
+  // A change of recording -- chosen, or the default settling -- keeps the
+  // place. Read here, while rendering: the player resets the position when
+  // its recording changes, and its effects run before this component's.
+  const pendingSwitchRef = useRef(null);
+  const playOnTranscriptTab = useCallback(
+    (kind) => {
+      setActiveTab(TAB_TRANSCRIPT);
+      const state = playback.get();
+      const seconds = state.engaged ? state.seconds : 0;
+      if (kind && kind !== mediaKind) {
+        // Played once the other recording has loaded, from the same place.
+        pendingSwitchRef.current = { seconds, playing: true };
+        setChosenMedia(kind);
+        return;
+      }
+      playerRef.current?.seek(toRecordingSeconds(clockRef.current, seconds), { play: true });
+    },
+    [setActiveTab, playback, mediaKind],
+  );
+  const shownMediaRef = useRef({ callId: item.callId, url: media?.url });
+  if (shownMediaRef.current.url !== media?.url) {
+    const { seconds, playing, engaged } = playback.get();
+    const sameMeeting = shownMediaRef.current.callId === item.callId;
+    if (!sameMeeting) {
+      pendingSwitchRef.current = null;
+    } else if (!pendingSwitchRef.current && engaged && shownMediaRef.current.url) {
+      pendingSwitchRef.current = { seconds, playing };
+    }
+    shownMediaRef.current = { callId: item.callId, url: media?.url };
+  }
+  useEffect(() => {
+    const pending = pendingSwitchRef.current;
+    pendingSwitchRef.current = null;
+    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, play: pending.playing });
+  }, [media?.url]);
+
+  // Nothing plays out of sight: leaving the Transcript tab pauses the player.
+  useEffect(() => {
+    if (activeTab !== TAB_TRANSCRIPT) playerRef.current?.pause();
+  }, [activeTab]);
+
+  // Space plays or pauses, Left and Right move 5 seconds: on the Transcript
+  // tab, with a recording, while focus is on nothing in particular or within
+  // this panel and not in a field (playerShortcut). Within this panel, so the
+  // meeting list's split panel does not take the keys of the list beside it.
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (activeTab !== TAB_TRANSCRIPT || !mediaKind) return undefined;
+    const onKeyDown = (event) => {
+      const { target } = event;
+      const inPanel = target === document.body || panelRef.current?.contains(target);
+      const action = inPanel ? playerShortcut(event) : null;
+      const player = playerRef.current;
+      if (!action || !player) return;
+      event.preventDefault();
+      if (action === 'toggle') player.toggle();
+      if (action === 'back') player.nudge(-SEEK_STEP_SECONDS);
+      if (action === 'forward') player.nudge(SEEK_STEP_SECONDS);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [activeTab, mediaKind]);
 
   // Fetch Virtual Participant data for this call
   useEffect(() => {
@@ -1910,16 +2220,11 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
         const vps = result.data.listVirtualParticipants || [];
         const matchingVP = vps.find((vp) => vp.CallId === item.callId);
-
-        if (matchingVP && matchingVP.vncReady) {
-          setVpData(matchingVP);
-          logger.info('Found VP for call:', matchingVP);
-        } else {
-          setVpData(null);
-        }
+        setMeetingVp(matchingVP || null);
+        if (matchingVP) logger.info('Found VP for call:', matchingVP);
       } catch (error) {
         logger.error('Error fetching VP data:', error);
-        setVpData(null);
+        setMeetingVp(null);
       } finally {
         setLoadingVP(false);
       }
@@ -1930,13 +2235,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   // Subscribe to VP updates
   useEffect(() => {
-    if (!vpData?.id) return undefined;
+    if (!meetingVp?.id) return undefined;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
       next: (message) => {
         const updated = message?.data?.onUpdateVirtualParticipant;
-        if (updated && updated.id === vpData.id) {
-          setVpData((prev) => ({
+        if (updated && updated.id === meetingVp.id) {
+          setMeetingVp((prev) => ({
             ...prev,
             ...updated,
           }));
@@ -1947,7 +2252,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     });
 
     return () => subscription.unsubscribe();
-  }, [vpData?.id]);
+  }, [meetingVp?.id]);
 
   // Subscribe to VNC preview control from agent
   useEffect(() => {
@@ -1973,7 +2278,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           if (control) {
             if (control.Success) {
               const shouldShow = control.Action === 'open';
-              setShowVNCPreview(shouldShow);
+              setVncPreviewRef.current(shouldShow);
               logger.info(`VNC preview ${control.Action} by ${control.RequestedBy || 'agent'}`);
             }
           }
@@ -1988,16 +2293,153 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     };
   }, [item.callId]);
 
-  return (
-    <SpaceBetween size="s">
-      <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
+  // The header's figures. The length is read from the transcript as well as
+  // from the stored value (see meetingDurationMillis), and the downloads carry
+  // the same figure the page shows.
+  const durationMillis = meetingDurationMillis(item, transcriptSegmentsForCall);
+  const displayItem = useMemo(
+    () => ({ ...item, conversationDurationTimeStamp: formatDurationClock(durationMillis) }),
+    [item, durationMillis],
+  );
+  const platform = platformLabel(meetingVp?.meetingPlatform);
+  const roster = buildSpeakerRoster(transcriptSegmentsForCall, speakerIdentities, item.remoteParticipantName, {
+    captureSource: item.captureSource,
+  });
+  // The header names the speakers the transcript's lines carry: through the
+  // meeting's speaker modes, so a name shown as one person is one speaker
+  // however many voices it has, and a name shown as several people is one per
+  // voice. Recomputed on every render, so a mode or a name arriving through
+  // the meeting's subscription reaches the header with the transcript.
+  const speakers = headerSpeakers(
+    speakerDisplayRows(
+      roster,
+      speakerIdentities,
+      speakerGroups(transcriptSegmentsForCall, speakerIdentities),
+      item.remoteParticipantName,
+    ),
+  );
+  // A speaker chosen in the header, opened in the Speakers panel on the
+  // Details tab. Kept as a request until the panel has carried it out, like
+  // the consent record's.
+  const [speakerFocusRequest, setSpeakerFocusRequest] = useState(null);
+  const showSpeaker = useCallback(
+    (key) => {
+      setActiveTab(TAB_DETAILS);
+      setSpeakerFocusRequest({ key, at: Date.now() });
+    },
+    [setActiveTab],
+  );
 
-      {/* Show VNC Preview in place of Summary during active meeting if VP is available */}
-      {showVNCPreview && vpData && vpData.vncReady && item.recordingStatusLabel === IN_PROGRESS_STATUS ? (
+  // The consent record is shown on the Details tab when consent was enforced
+  // for the meeting (or could not be read); the header's indicator and the
+  // paused-transcription alert open it, or the consent setting when it was off.
+  const showConsentRecordPanel = Boolean(meetingConsent.error) || consentEnforced(meetingConsent.consent?.Mode);
+  const [consentScrollRequest, setConsentScrollRequest] = useState(null);
+  const showConsent = useCallback(() => {
+    setActiveTab(TAB_DETAILS);
+    setConsentScrollRequest({ at: Date.now() });
+  }, [setActiveTab]);
+  useEffect(() => {
+    if (!consentScrollRequest || activeTab !== TAB_DETAILS) return;
+    const target =
+      document.getElementById(showConsentRecordPanel ? CONSENT_RECORD_ID : CONSENT_SETTING_ID) ||
+      document.getElementById(CONSENT_SETTING_ID);
+    target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    setConsentScrollRequest(null);
+  }, [consentScrollRequest, activeTab, showConsentRecordPanel]);
+  const cost = useCallCost(
+    item.callId,
+    `${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${item.callSummaryState || ''}`,
+  );
+
+  // The summary's sections that the Summary tab shows in their own place: the
+  // chapters as the clickable list, and the agenda coverage under the agenda.
+  // Each is left in the summary when there is nothing to show it in instead.
+  const agendaItems = parseAgendaItems(item.agenda);
+  const agendaCoverage = getSummarySection(item.callSummaryText, 'AGENDA COVERAGE');
+  const coverageSaysNoAgenda = /^\s*no agenda was set/i.test(agendaCoverage || '');
+  const omitSections = [
+    ...(chapters.length ? ['CHAPTERS'] : []),
+    ...(agendaCoverage !== null && (agendaItems.length || coverageSaysNoAgenda) ? ['AGENDA COVERAGE'] : []),
+  ];
+
+  const showVnc = showVNCPreview && vpData && vpData.vncReady && isLive;
+  const sideColumn = chapters.length > 0 || agendaItems.length > 0;
+
+  const agendaProps = {
+    item,
+    onSave: sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined,
+    onDerive: sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined,
+    readOnly: speakerNamesReadOnly,
+    compactWhenEmpty: true,
+    coverage: agendaItems.length && !coverageSaysNoAgenda ? agendaCoverage : null,
+  };
+  // eslint-disable-next-line react/jsx-props-no-spreading
+  const agendaPanel = <AgendaPanel {...agendaProps} />;
+
+  // The agenda again at the top of the Transcript tab, where a live meeting is
+  // followed: a section that opens and closes, open while the meeting is live
+  // and closed after it. A meeting without an agenda shows the one line with
+  // Add agenda while it is live and the viewer can change it, and nothing
+  // otherwise (the Summary tab keeps that line).
+  const canChangeAgenda = !speakerNamesReadOnly && Boolean(sendUpdateCallAgenda || sendDeriveCallAgenda);
+  const transcriptAgenda =
+    agendaItems.length > 0 || (isLive && canChangeAgenda) ? (
+      // eslint-disable-next-line react/jsx-props-no-spreading
+      <AgendaPanel {...agendaProps} collapsible defaultExpanded={isLive} />
+    ) : null;
+
+  const summaryTab = (
+    <SpaceBetween size="l">
+      {!agendaItems.length && agendaPanel}
+      <Grid
+        gridDefinition={
+          sideColumn ? [{ colspan: { default: 12, m: 8 } }, { colspan: { default: 12, m: 4 } }] : [{ colspan: 12 }]
+        }
+      >
+        <CallSummary
+          item={displayItem}
+          // Conditional on the context actually supplying the writer. Three
+          // separate components build the calls context by enumerating its
+          // fields, and a control wired to a missing one would render and then
+          // throw on the click rather than not being offered.
+          onSave={sendUpdateCallSummary ? saveCallSummary : undefined}
+          onRegenerate={sendRegenerateCallSummary ? regenerateCallSummaryForItem : undefined}
+          readOnly={speakerNamesReadOnly}
+          omitSections={omitSections}
+          // The slides the summary names are shown as their thumbnails, read
+          // once their section is opened; a click shows one on the Screen
+          // share tab when the meeting has one, and otherwise opens it full size.
+          keyframes="image"
+          onKeyframeSelect={hasKeyframes ? showKeyframe : undefined}
+        />
+        {sideColumn && (
+          <SpaceBetween size="l">
+            <MeetingChapters chapters={chapters} onSelect={selectChapter} canPlayRecording={canPlayRecording} />
+            {agendaItems.length > 0 && agendaPanel}
+          </SpaceBetween>
+        )}
+      </Grid>
+      {enableSentimentAnalysis && (
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <CallStatsContainer
+            item={item}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            collapseSentiment={collapseSentiment}
+            setCollapseSentiment={setCollapseSentiment}
+          />
+        </Grid>
+      )}
+    </SpaceBetween>
+  );
+
+  const transcript = (
+    <SpaceBetween size="l">
+      {/* The Virtual Participant's live view, while the meeting runs and it has been opened. */}
+      {showVnc && (
         <VNCViewer
           vpId={vpData.id}
           vncEndpoint={vpData.vncEndpoint}
-          websocketUrl={vpData.vncEndpoint}
           status={vpData.status}
           manualActionType={vpData.manualActionType}
           manualActionMessage={vpData.manualActionMessage}
@@ -2007,49 +2449,233 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           onOpenNewTab={() => window.open(`#/virtual-participant/${vpData.id}`, '_blank')}
           showHeader
         />
-      ) : (
-        <CallSummary item={item} />
       )}
-
-      {(enableSentimentAnalysis || enableVoiceTone) && (
-        <Grid
-          gridDefinition={[
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
-          ]}
-        >
-          {enableSentimentAnalysis && (
-            <CallStatsContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
-          {enableVoiceTone && (
-            <VoiceToneContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
-        </Grid>
-      )}
+      {transcriptAgenda}
       <CallTranscriptContainer
         item={item}
+        player={
+          media ? (
+            <MeetingPlayer
+              controllerRef={playerRef}
+              kind={media.kind}
+              url={media.url}
+              clock={clock}
+              chapters={chapters}
+              screenShares={screenShares}
+              store={playback}
+              alternative={media.alternative}
+              onSwitch={setChosenMedia}
+              hint={audioDefaultReason}
+            />
+          ) : null
+        }
+        playback={media ? playback : null}
+        onSeek={media ? playFromTranscript : null}
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
-        collapseSentiment={collapseSentiment}
         enableSentimentAnalysis={enableSentimentAnalysis}
-        user={user}
-        showVNCPreview={showVNCPreview}
-        setShowVNCPreview={setShowVNCPreview}
-        vpData={vpData}
-        loadingVP={loadingVP}
+        speakerIdentities={speakerIdentities}
+        onRenameSpeaker={handleRenameSpeaker}
+        onSaveSpeakerIdentities={sendUpdateSpeakerIdentities ? saveSpeakerIdentities : undefined}
+        readOnly={speakerNamesReadOnly}
+        scrollRequest={transcriptScrollRequest}
+        active={activeTab === TAB_TRANSCRIPT}
       />
     </SpaceBetween>
+  );
+
+  const details = (
+    <SpaceBetween size="l">
+      <MeetingAttributes
+        item={item}
+        durationMillis={durationMillis}
+        platform={platform}
+        onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
+        audioDefaultReason={audioDefaultReason}
+      />
+      <CaptureContextPanel
+        item={item}
+        vp={meetingVp}
+        platform={platform}
+        roster={roster}
+        languages={meetingLanguages(item.detectedLanguages, transcriptSegmentsForCall)}
+        consentState={meetingConsent}
+        onShowConsentRecord={showConsentRecordPanel ? showConsent : undefined}
+      />
+      <SpeakerIdentitiesPanel
+        item={item}
+        segments={transcriptSegmentsForCall}
+        setToolsOpen={setToolsOpen}
+        onSave={saveSpeakerIdentities}
+        onIdentify={identifySpeakers}
+        readOnly={speakerNamesReadOnly}
+        isLive={isLive}
+        onMeetingEnded={onRefreshMeeting}
+        focusRequest={speakerFocusRequest}
+        active={activeTab === TAB_DETAILS}
+      />
+      {showConsentRecordPanel && (
+        <div id={CONSENT_RECORD_ID}>
+          <ConsentPanel
+            state={meetingConsent}
+            canEdit={!speakerNamesReadOnly}
+            isOwner={!!user?.username && item.owner === user.username}
+            isAdmin={!!isAdminUser}
+          />
+        </div>
+      )}
+      <CallCostPanel callId={item.callId} state={cost} />
+    </SpaceBetween>
+  );
+
+  // Every tab stays mounted while another is shown ('eager'): switching tabs
+  // keeps the transcript's translations and scroll position, a summary or
+  // agenda being edited, and the assistant's conversation.
+  const tabs = [
+    { id: TAB_SUMMARY, label: 'Summary', content: summaryTab, contentRenderStrategy: 'eager' },
+    { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
+    ...(hasKeyframes
+      ? [
+          {
+            id: TAB_SCREEN_SHARE,
+            label: `Screen share (${keyframes.count}${keyframes.more ? '+' : ''})`,
+            content: <NodeSlot node={timelineNode} />,
+            contentRenderStrategy: 'eager',
+          },
+        ]
+      : []),
+    { id: TAB_DETAILS, label: 'Details', content: details, contentRenderStrategy: 'eager' },
+  ];
+
+  // The assistant panel's place: a column beside the tabs, or, where the page
+  // is narrower than ASSISTANT_OVERLAY_BELOW_PX (a phone, the meeting list's
+  // split panel at the side, a narrow embed), over the right of the tabs.
+  // Measured on the page's own width rather than the window's, because the
+  // same page is shown full width, in the split panel and in embeds. Sticky
+  // below the application's top navigation, as the player is, and as tall as
+  // the window leaves below where it starts on the page, so the composer at
+  // its foot is in view without scrolling. Measured again when the page, the
+  // header above it (speaker names arriving) or the window change size.
+  // Measured before the first paint, because with no choice made the width
+  // decides whether the panel starts open.
+  const bodyRef = useRef(null);
+  const headerRef = useRef(null);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !assistantEnabled) return undefined;
+    const nav = document.getElementById('top-navigation');
+    const measure = () => {
+      const navHeight = nav ? nav.offsetHeight : 0;
+      const pageTop = body.getBoundingClientRect().top + window.scrollY;
+      const top = Math.max(pageTop, navHeight + ASSISTANT_GAP_PX);
+      setAssistantOverlays(body.clientWidth > 0 && body.clientWidth < ASSISTANT_OVERLAY_BELOW_PX);
+      body.style.setProperty('--meeting-assistant-top', `${navHeight}px`);
+      body.style.setProperty(
+        '--meeting-assistant-height',
+        `${Math.max(ASSISTANT_MIN_HEIGHT_PX, window.innerHeight - top - ASSISTANT_GAP_PX)}px`,
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(body);
+    if (headerRef.current) observer?.observe(headerRef.current);
+    if (nav) observer?.observe(nav);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [assistantEnabled]);
+
+  const bodyClass = [
+    'meeting-body',
+    assistant.open ? 'meeting-body-assistant-open' : '',
+    assistantOverlays ? 'meeting-body-assistant-overlay' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div ref={panelRef}>
+      <SpaceBetween size="m">
+        <div ref={headerRef}>
+          <MeetingHeader
+            item={displayItem}
+            durationMillis={durationMillis}
+            platform={platform}
+            speakers={speakers}
+            cost={cost}
+            consentState={meetingConsent}
+            onShowConsent={showConsent}
+            callTranscriptPerCallId={callTranscriptPerCallId}
+            getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+            setToolsOpen={setToolsOpen}
+            onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
+            onSelectSpeaker={showSpeaker}
+            assistant={
+              assistantEnabled
+                ? {
+                    open: assistant.open,
+                    unread: assistantUnread,
+                    onToggle: toggleAssistant,
+                    buttonRef: assistantButtonRef,
+                  }
+                : undefined
+            }
+          />
+        </div>
+        <ConsentPauseAlert
+          isLive={isLive}
+          consentState={meetingConsent}
+          startedAt={item.initiationTimeStamp}
+          onShowRecord={showConsentRecordPanel ? showConsent : undefined}
+        />
+        <TranscriptionPauseAlert isLive={isLive} transcriptionPause={item.transcriptionPause} />
+        <div ref={bodyRef} className={bodyClass}>
+          <div className="meeting-main">
+            <Tabs
+              tabs={tabs}
+              activeTabId={activeTab}
+              onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+              ariaLabel="Meeting"
+            />
+          </div>
+          {/* Created on first opening, then hidden rather than removed, so the chat keeps its conversation. */}
+          {assistant.mounted && (
+            <MeetingAssistantPanel
+              callId={item.callId}
+              open={assistant.open}
+              onClose={closeAssistant}
+              focusRequest={assistantFocusRequest}
+              onShowInTranscript={showChatFrameInTranscript}
+              showVNCPreview={showVNCPreview}
+              setShowVNCPreview={setVncPreview}
+              vpData={vpData}
+              loadingVP={loadingVP}
+            />
+          )}
+        </div>
+        {timelineNode &&
+          createPortal(
+            <VideoTimeline
+              key={item.callId}
+              callId={item.callId}
+              title={item.callId}
+              isLive={isLive}
+              canPlayRecording={canPlayRecording}
+              onShowInTranscript={showInTranscript}
+              onPlayFrom={playRecordingFrom}
+              chapters={chapters}
+              onClockAnchors={onClockAnchors}
+              onFramesChange={onFramesChange}
+              onScreenShares={onScreenShares}
+              selectRequest={frameSelectRequest}
+            />,
+            timelineNode,
+          )}
+      </SpaceBetween>
+    </div>
   );
 };
 

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -11,9 +11,18 @@ export default /* GraphQL */ `
       AgentId
       Owner
       SharedWith
-      CallCategories
-      IssuesDetected
       CallSummaryText
+      CallSummaryState
+      SpeakerIdentities
+      Agenda
+      AgendaSource
+      AgendaUpdatedBy
+      AgendaUpdatedAt
+      TranscriptDeletionScheduledFor
+      TranscriptDeletedAt
+      TranscriptSegmentsDeleted
+      TranscriptFilesDeleted
+      ExpiresAfter
       CreatedAt
       CustomerPhoneNumber
       Status
@@ -21,15 +30,32 @@ export default /* GraphQL */ `
       UpdatedAt
       RecordingUrl
       VideoRecordingUrl
-      PcaUrl
+      CaptureSource
+      TranscriptionEngine
+      TranscriptionLanguage
+      SpeakerSeparation
+      DetectedLanguages
+      TranscriptionPause
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {
+          REMOTE
+          LOCAL
           AGENT
           CALLER
         }
         SentimentByPeriod {
           QUARTER {
+            REMOTE {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
+            LOCAL {
+              BeginOffsetMillis
+              EndOffsetMillis
+              Score
+            }
             AGENT {
               BeginOffsetMillis
               EndOffsetMillis

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """WebSocket server on port 8080 for the streaming ASR pipeline.
 
@@ -24,6 +24,12 @@ Runs **inside the MicroVM**. Speaks the wire protocol in ``design.md`` §5:
   ``max_wait_ms`` (stops reading the socket → TCP backpressure); if the consumer
   is still wedged, the frame is *dropped* rather than buffered without bound, so
   a fast sender against a fixed-memory MicroVM can never OOM the process.
+* **Timeline after a drop:** the engines time everything by the samples they were
+  fed, so a dropped frame would pull every later row earlier than the audio the
+  client sent. :class:`ReceivedAudioTimeline` records where each drop fell and
+  how long it was, and every outgoing ``partial``/``final`` is moved back onto the
+  received-audio timeline, so row times equal the position in the audio received
+  since the session started.
 
 Testability
 -----------
@@ -41,15 +47,18 @@ real loopback socket.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import contextlib
 import json
 import logging
 import os
 import resource
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple, Protocol
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -74,6 +83,7 @@ from asr_server.diarization import (
     diarization_enabled,
     pcm16_to_float32,
 )
+from asr_server.language import default_language_identifier
 from asr_server.model_env import load_model_env
 from asr_server.offline_recognizer import (
     build_offline_model_config,
@@ -81,6 +91,8 @@ from asr_server.offline_recognizer import (
 )
 from asr_server.protocol_adapter import ProtocolAdapter, WireMessage
 from asr_server.recognizer import (
+    DEFAULT_MODEL_DIR,
+    EnrolledVoiceSeed,
     Recognizer,
     RecognizerEngine,
     SessionConfig,
@@ -90,6 +102,7 @@ from asr_server.recognizer import (
 )
 from asr_server.sortformer import SortformerEngine, create_sortformer_engine, sortformer_enabled
 from asr_server.two_pass import create_two_pass_engine, preview_model_dir
+from asr_server.warmup import WARM_DECODE_SECONDS, warm_decode_pcm
 
 __all__ = [
     "DEFAULT_PORT",
@@ -97,6 +110,7 @@ __all__ = [
     "WebSocketConnection",
     "EngineFactory",
     "AsrSession",
+    "ReceivedAudioTimeline",
     "serve_asr",
     "main",
 ]
@@ -318,6 +332,96 @@ def _build_config(query: dict[str, str], frame: dict[str, object] | None) -> Con
         raise _ConfigError(_CODE_BAD_CONFIG, f"invalid config: {exc}") from exc
 
 
+# --- Received-audio timeline ------------------------------------------------
+
+# Engine times are float sums of per-chunk durations while drop points are computed
+# from byte counts, so the two can differ by rounding at a drop boundary.
+_TIMELINE_EPSILON_S = 1e-6
+
+
+class ReceivedAudioTimeline:
+    """Maps engine time onto the timeline of audio the session received.
+
+    Every engine clocks itself by the samples it was fed, and the engines layered
+    over one another (recogniser, preview, embedding diarizer, Sortformer) slice
+    audio back out of their buffers by those same times. Dropping a frame therefore
+    leaves the engine internally consistent but behind the sender: every later
+    time is early by the dropped duration, and the client places rows (and looks up
+    who was speaking) on its own clock of audio sent.
+
+    The correction is applied here, at the wire, rather than inside the engines:
+
+    * Advancing the engines' clocks would have to be done in step across every
+      layer, or the diarizer's sample slices would no longer match the text.
+    * Feeding silence in place of the dropped audio would keep every clock aligned
+      without touching them, but it hands more work to a consumer that is already
+      behind (the reason the frame was dropped), and a stretch of silence can
+      close an utterance or move the voice-activity detector mid-sentence.
+
+    A drop at engine time ``p`` lasting ``d`` seconds moves every time after ``p``
+    later by ``d``, and drops accumulate. At the boundary itself, a *start* at ``p``
+    belongs to the audio after the gap (shifted) and an *end* at ``p`` to the audio
+    before it (not shifted), so a row that ends where the drop fell does not grow
+    by the dropped duration.
+    """
+
+    def __init__(self) -> None:
+        # Parallel, non-decreasing lists: engine time of each drop point, and the
+        # cumulative dropped seconds in effect after it. Consecutive drops at the
+        # same point (a burst while the consumer is stalled) share one entry.
+        self._points: list[float] = []
+        self._totals: list[float] = []
+
+    @property
+    def dropped_seconds(self) -> float:
+        """Total audio dropped so far, in seconds."""
+        return self._totals[-1] if self._totals else 0.0
+
+    def record_drop(self, at_engine_s: float, seconds: float) -> float:
+        """Record ``seconds`` of audio dropped at engine time ``at_engine_s``.
+
+        Returns the cumulative dropped seconds. Drop points arrive in order (the
+        queue is FIFO), so the lists stay sorted.
+        """
+        if seconds <= 0:
+            return self.dropped_seconds
+        total = self.dropped_seconds + seconds
+        if self._points and abs(self._points[-1] - at_engine_s) <= _TIMELINE_EPSILON_S:
+            self._totals[-1] = total
+        else:
+            self._points.append(at_engine_s)
+            self._totals.append(total)
+        return total
+
+    def start(self, engine_s: float) -> float:
+        """Received-audio time of a start (or word start) at ``engine_s``."""
+        index = bisect.bisect_right(self._points, engine_s + _TIMELINE_EPSILON_S)
+        return engine_s + (self._totals[index - 1] if index else 0.0)
+
+    def end(self, engine_s: float) -> float:
+        """Received-audio time of an end (or word end) at ``engine_s``."""
+        index = bisect.bisect_left(self._points, engine_s - _TIMELINE_EPSILON_S)
+        return engine_s + (self._totals[index - 1] if index else 0.0)
+
+    def apply(self, message: WireMessage) -> WireMessage:
+        """Return ``message`` with its times on the received-audio timeline."""
+        if not self._points:
+            return message
+        start = self.start(message.start)
+        if isinstance(message, Partial):
+            end = None if message.end is None else max(self.end(message.end), start)
+            return message.model_copy(update={"start": start, "end": end})
+        words = []
+        for word in message.words:
+            word_start = self.start(word.s)
+            words.append(
+                word.model_copy(update={"s": word_start, "e": max(self.end(word.e), word_start)})
+            )
+        return message.model_copy(
+            update={"start": start, "end": max(self.end(message.end), start), "words": words}
+        )
+
+
 # --- Session ----------------------------------------------------------------
 
 
@@ -338,9 +442,13 @@ class AsrSession:
         engine: RecognizerEngine,
         server_config: ServerConfig | None = None,
         session_id: str | None = None,
+        language_identifier: Callable[[str], str | None] | None = None,
     ) -> None:
         self._conn = conn
         self._path = path
+        # Names the language of each final's text (asr_server.language); shared by
+        # every session, like the engine. None leaves finals without a language.
+        self._language_identifier = language_identifier
         # The heavy model, built ONCE at startup and shared across all sessions.
         # This session only acquires a lightweight per-connection stream from it
         # (``engine.new_session()``) — no per-connection model allocation.
@@ -371,6 +479,11 @@ class AsrSession:
         self._audio_bytes = 0
         self.backpressure_events = 0
         self.frames_dropped = 0
+        # Bytes handed to the queue (not dropped). The queue is FIFO and drained by
+        # one consumer, so this is exactly where on the engine's clock a frame
+        # dropped next would have landed.
+        self._bytes_queued = 0
+        self._timeline = ReceivedAudioTimeline()
 
         # Diagnostic counters (logging only — no behaviour change). These localise a
         # "connects but no transcription" failure across the four suspect stages:
@@ -406,6 +519,11 @@ class AsrSession:
         return self._audio_bytes / _BYTES_PER_SAMPLE / self._sample_rate
 
     @property
+    def dropped_seconds(self) -> float:
+        """Audio seconds received but dropped, and so never fed to the engine."""
+        return self._timeline.dropped_seconds
+
+    @property
     def segments(self) -> int:
         """Real segments finalized this session (feeds ``termination.segments``)."""
         return self._adapter.segments
@@ -439,7 +557,10 @@ class AsrSession:
 
             self._sample_rate = config.sample_rate
             self._interim_results = config.interim_results
-            self._adapter = ProtocolAdapter(word_timestamps=config.word_timestamps)
+            self._adapter = ProtocolAdapter(
+                word_timestamps=config.word_timestamps,
+                identify_language=self._language_identifier,
+            )
 
             if config.mode == "embed":
                 ending = await self._run_embed_session(first_pcm, ended)
@@ -448,12 +569,13 @@ class AsrSession:
             # read against. ``$ASR_ENGINE`` selects which engine's model is baked per image
             # (streaming default / accurate) — logging it disambiguates recognizer behaviour.
             _LOG.info(
-                "session %s start: sample_rate=%d interim_results=%s engine=%s "
+                "session %s start: sample_rate=%d interim_results=%s engine=%s bundle=%s "
                 "word_timestamps=%s endpointing_ms=%s diarize=%s max_speakers=%s",
                 self._session_id,
                 config.sample_rate,
                 config.interim_results,
                 os.environ.get("ASR_ENGINE", "streaming"),
+                os.environ.get("ASR_BUNDLE_ID", "unknown"),
                 config.word_timestamps,
                 config.endpointing_ms,
                 config.diarize,
@@ -490,6 +612,18 @@ class AsrSession:
                     live_turn_cut=config.live_turn_cut,
                     turn_cut_interval_ms=config.turn_cut_interval_ms,
                     max_open_segment_ms=config.max_open_segment_ms,
+                    partial_speakers=config.partial_speakers,
+                    # Voices a person consented to enroll, so their speech is
+                    # labelled with their name from the first word rather than
+                    # spk_0 until something names it.
+                    enrolled_voices=tuple(
+                        EnrolledVoiceSeed(
+                            label=voice.label,
+                            vector=tuple(voice.vector),
+                            weight=voice.weight,
+                        )
+                        for voice in config.enrolled_voices
+                    ),
                 )
                 self._recognizer = await asyncio.to_thread(
                     self._engine.new_session, session_config
@@ -701,6 +835,7 @@ class AsrSession:
                     continue
                 frame_config, ended = _classify_first_text(frame)
                 if ended:
+                    self._log_end_of_stream()
                     return True
                 # A second ``config`` mid-stream is ignored (config is negotiated
                 # once at open, R2.1); genuinely bad text raised above already.
@@ -715,13 +850,33 @@ class AsrSession:
             self._fatal = True
             return False
 
+    def _log_end_of_stream(self) -> None:
+        """Log, at INFO, how much audio is still to decode when the client ends the stream.
+
+        Everything queued is decoded, and the utterance still open is closed as a
+        ``final``, before ``termination`` is sent; the client waits for that. This
+        line, with the session summary that follows ``termination``, shows how long
+        the end of a stream took and how much work it found waiting.
+        """
+        bytes_per_second = _BYTES_PER_SAMPLE * self._sample_rate
+        _LOG.info(
+            "session %s eos: %.1fs of audio received, %.1fs decoded, %d frame(s) queued; "
+            "decoding the rest and closing the open utterance",
+            self._session_id,
+            self._bytes_queued / bytes_per_second,
+            self._audio_bytes / bytes_per_second,
+            self._queue.qsize(),
+        )
+
     async def _enqueue(self, pcm: bytes) -> None:
         """Hand one PCM frame to the bounded queue, applying backpressure (R7).
 
         Fast path is a non-blocking put. On a full queue we block up to
         ``max_wait_ms`` (stops reading the socket, so TCP backpressure slows the
         sender); if the consumer is still behind after that, the frame is dropped
-        rather than buffered without bound — memory stays fixed, no OOM.
+        rather than buffered without bound — memory stays fixed, no OOM. A dropped
+        frame is recorded on the session's :class:`ReceivedAudioTimeline` so later
+        rows still carry the time the client sent their audio.
         """
         # Diagnostic (logging only): count every binary frame that ARRIVES here, so a
         # run can distinguish "mic sent no audio" (b) from "audio never reached the
@@ -748,7 +903,28 @@ class AsrSession:
                 )
             except TimeoutError:
                 self.frames_dropped += 1
+                self._record_drop(pcm)
+                self._log_diagnostic_tick()
+                return
+        self._bytes_queued += len(pcm)
         self._log_diagnostic_tick()
+
+    def _record_drop(self, pcm: bytes) -> None:
+        """Put a dropped frame on the timeline and log it at INFO."""
+        bytes_per_second = _BYTES_PER_SAMPLE * self._sample_rate
+        at_engine_s = self._bytes_queued / bytes_per_second
+        seconds = (len(pcm) // _BYTES_PER_SAMPLE) / self._sample_rate
+        total = self._timeline.record_drop(at_engine_s, seconds)
+        _LOG.info(
+            "session %s: engine behind, dropped %.3fs of audio at %.3fs received "
+            "(%.3fs engine); cumulative dropped %.3fs, later row times shifted by %.3fs",
+            self._session_id,
+            seconds,
+            at_engine_s + total - seconds,
+            at_engine_s,
+            total,
+            total,
+        )
 
     def _log_diagnostic_tick(self) -> None:
         """Emit a DEBUG heartbeat at most every ``_DIAGNOSTIC_LOG_INTERVAL_S``.
@@ -788,8 +964,8 @@ class AsrSession:
         _LOG.info(
             "session %s end (%s): frames_in=%d bytes_in=%d (~%.1fs audio) "
             "recognizer_events=%d messages_emitted=%d segments=%d "
-            "backpressure=%d dropped=%d interim_results=%s peer_gone=%s "
-            "rss_current=%.1fMB rss_peak=%.1fMB",
+            "backpressure=%d dropped=%d dropped_seconds=%.3f interim_results=%s "
+            "peer_gone=%s rss_current=%.1fMB rss_peak=%.1fMB",
             self._session_id,
             ending,
             self._bin_frames_in,
@@ -800,6 +976,7 @@ class AsrSession:
             self.segments,
             self.backpressure_events,
             self.frames_dropped,
+            self.dropped_seconds,
             self._interim_results,
             self._peer_gone,
             rss.current_mb,
@@ -854,7 +1031,11 @@ class AsrSession:
         """Flush the recogniser, emit finals, send ``termination``, then close (R6.3)."""
         await self._finalize_stream()
         await self._send(
-            Termination(audio_seconds=self.audio_seconds, segments=self.segments)
+            Termination(
+                audio_seconds=self.audio_seconds,
+                segments=self.segments,
+                dropped_seconds=self.dropped_seconds,
+            )
         )
         await self._safe_close()
 
@@ -899,6 +1080,9 @@ class AsrSession:
         full event stream; this seam merely drops interim ``partial`` frames from
         the wire when the client negotiated ``interim_results=false`` (``final``s,
         which carry the committed transcript, always go out).
+
+        Times are moved onto the received-audio timeline here, the last step before
+        the wire, so every engine variant gets the same correction after a drop.
         """
         for message in messages:
             if not self._interim_results and isinstance(message, Partial):
@@ -908,7 +1092,7 @@ class AsrSession:
             # this still localises emit-vs-transport issues without synchronous
             # per-message writes on the event loop hot path.
             self._messages_emitted += 1
-            await self._send(message)
+            await self._send(self._timeline.apply(message))
         if messages:
             self._log_diagnostic_tick()
 
@@ -1068,6 +1252,84 @@ async def _report_load(reporter: LoadReporter, interval_s: float) -> None:
             _LOG.info(line)
 
 
+# The hook server (asr_microvm/hook_server.py) asks for the warm-up decode over a
+# pair of pipes it creates when it starts this process: "<read fd>,<write fd>". Not
+# a socket, so nothing outside the MicroVM can ask for one.
+WARM_CONTROL_ENV = "ASR_WARM_CONTROL_FDS"
+
+
+def run_warm_up(engine: RecognizerEngine) -> dict[str, object]:
+    """Decode the warm-up audio once on every model the engine holds.
+
+    Run before the snapshot (from ``/ready``) and again from ``/validate``, so the
+    offline model's weights are resident and its buffers sized for the longest
+    utterance, and so Lambda records those pages to prefetch on later launches.
+    """
+    seconds = float(os.environ.get("ASR_WARM_DECODE_S", str(WARM_DECODE_SECONDS)))
+    model_dir = Path(os.environ.get("ASR_MODEL_DIR", DEFAULT_MODEL_DIR))
+    pcm, origin = warm_decode_pcm(seconds, wav=model_dir / "test_wavs" / "warm.wav")
+    started = time.perf_counter()
+    decodes = engine.warm_up(pcm)
+    elapsed = time.perf_counter() - started
+    _LOG.info(
+        "warm-up decode: %d decode(s) of %s in %.2fs, rss=%.0fMB",
+        decodes,
+        origin,
+        elapsed,
+        _read_rss_mb().current_mb,
+    )
+    return {"ok": True, "decodes": decodes, "seconds": round(elapsed, 3), "audio": origin}
+
+
+def serve_warm_requests(
+    engine: RecognizerEngine,
+    request_fd: int,
+    reply_fd: int,
+    warm: Callable[[RecognizerEngine], dict[str, object]] = run_warm_up,
+) -> None:
+    """Answer ``warm <id>`` lines on ``request_fd`` with one JSON line each on ``reply_fd``.
+
+    Returns when the request pipe closes. A failed warm-up is reported, not raised,
+    so the hook can retry it.
+    """
+    with os.fdopen(request_fd, "r", encoding="utf-8") as requests, os.fdopen(
+        reply_fd, "w", encoding="utf-8"
+    ) as replies:
+        for line in requests:
+            parts = line.split()
+            request_id = parts[1] if len(parts) == 2 else ""
+            if not parts or parts[0] != "warm":
+                reply: dict[str, object] = {"ok": False, "error": "unknown request"}
+            else:
+                try:
+                    reply = warm(engine)
+                except Exception as exc:  # noqa: BLE001 - reported to the hook, which retries
+                    _LOG.exception("warm-up decode failed")
+                    reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            replies.write(json.dumps({"id": request_id, **reply}) + "\n")
+            replies.flush()
+
+
+def start_warm_control(engine: RecognizerEngine) -> threading.Thread | None:
+    """Serve warm-up requests from the hook server, when it passed its pipes."""
+    value = os.environ.get(WARM_CONTROL_ENV, "")
+    if not value:
+        return None
+    try:
+        request_fd, reply_fd = (int(part) for part in value.split(","))
+    except ValueError:
+        _LOG.warning("ignoring %s=%r: expected '<read fd>,<write fd>'", WARM_CONTROL_ENV, value)
+        return None
+    thread = threading.Thread(
+        target=serve_warm_requests,
+        args=(engine, request_fd, reply_fd),
+        name="asr-warm-control",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 async def serve_asr(
     server_config: ServerConfig | None = None,
     engine_factory: EngineFactory = _default_engine_factory,
@@ -1105,6 +1367,13 @@ async def serve_asr(
     _LOG.info(
         "recognizer ready in %.2fs", asyncio.get_running_loop().time() - build_start
     )
+    # Loaded now, like the engine, so it is resident in the snapshot rather than
+    # loaded by the first final after a resume.
+    language_identifier = default_language_identifier()
+    _LOG.info(
+        "row language identification: %s",
+        "on" if language_identifier.preload() else "off",
+    )
 
     # Startup memory FLOOR: the baked-warm model is now resident and no session has
     # connected yet, so this is the idle resident baseline the 8GB→4GB sizing call is
@@ -1118,6 +1387,7 @@ async def serve_asr(
         floor.peak_mb,
     )
 
+    start_warm_control(engine)
     reporter = LoadReporter()
     interval_s = float(os.environ.get("ASR_LOAD_LOG_INTERVAL_S", "60"))
 
@@ -1129,6 +1399,7 @@ async def serve_asr(
             path=path,
             engine=engine,
             server_config=cfg,
+            language_identifier=language_identifier,
         )
         reporter.active_sessions += 1
         try:

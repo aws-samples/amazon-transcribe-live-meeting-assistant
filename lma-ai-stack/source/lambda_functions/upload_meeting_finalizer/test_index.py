@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for Stage 3 of the meeting-upload pipeline (Transcribe state change).
 
@@ -34,6 +34,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -54,6 +55,8 @@ os.environ["S3_BUCKET_NAME"] = BUCKET
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer, which carries lma_metering, as the Lambda has it.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
 PROCESSOR_DIR = HERE.parent / "upload_meeting_processor"
 INITIATOR_DIR = HERE.parent / "upload_meeting_initiator"
 
@@ -214,9 +217,16 @@ class FakeS3:
 class FakeTranscribe:
     """Answers GetTranscriptionJob with a chosen tag set."""
 
-    def __init__(self, tags: list | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        tags: list | None = None,
+        error: Exception | None = None,
+        job: dict | None = None,
+    ) -> None:
         self.tags = OUR_TAGS if tags is None else tags
         self.error = error
+        # Further TranscriptionJob fields, such as the identified language.
+        self.job = job or {}
         self.calls: list[str] = []
 
     def get_transcription_job(self, TranscriptionJobName):  # noqa: N803
@@ -227,6 +237,7 @@ class FakeTranscribe:
             "TranscriptionJob": {
                 "TranscriptionJobName": TranscriptionJobName,
                 "Tags": self.tags,
+                **self.job,
             }
         }
 
@@ -246,7 +257,7 @@ def job_row(**overrides) -> dict:
         "Status": "TRANSCRIBING",
         "Owner": "bob@example.com",
         "AgentId": "bob@example.com",
-        "FromNumber": "Customer",
+        "FromNumber": "Other Participant",
         "ToNumber": "System",
         "EnableDiarization": False,
         "MaxSpeakers": 4,
@@ -426,7 +437,7 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
     assert first == {
         "EventType": "ADD_TRANSCRIPT_SEGMENT",
         "CallId": CALL_ID,
-        "Channel": "CALLER",
+        "Channel": "REMOTE",
         "SegmentId": "seg-00000",
         "StartTime": 0.0,
         "EndTime": 1.5,
@@ -436,6 +447,71 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
         "CreatedAt": created_at,
         "UpdatedAt": created_at,
     }
+
+
+def test_a_segment_from_a_fixed_language_job_carries_no_language(h) -> None:
+    """A job run in one fixed language names no language per word, so no segment
+    claims one was identified."""
+    h.run()
+    assert all("LanguageCode" not in seg for seg in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT"))
+
+
+def test_a_segment_takes_the_language_most_of_its_words_were_identified_in(h) -> None:
+    """With multiple-language identification Transcribe names a language per word;
+    an utterance lists its words' ids and takes their majority language."""
+    h.s3.transcript = {
+        "results": {
+            "items": [
+                {"id": 0, "language_code": "en-US"},
+                {"id": 1, "language_code": "en-US"},
+                {"id": 2, "language_code": "es-US"},
+                {"id": 3, "language_code": "es-US"},
+                {"id": 4, "language_code": "es-US"},
+                {"id": 5},
+            ],
+            "audio_segments": [
+                {"transcript": "good morning", "start_time": 0, "end_time": 1, "items": [0, 1]},
+                {"transcript": "buenos dias", "start_time": 1, "end_time": 2, "items": [2, 3, 4]},
+                {"transcript": "ok", "start_time": 2, "end_time": 3, "items": [5]},
+                {
+                    "transcript": "hola",
+                    "start_time": 3,
+                    "end_time": 4,
+                    "language_code": "es-MX",
+                    "items": [0],
+                },
+            ],
+        }
+    }
+    h.run()
+    segments = h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
+    assert [seg.get("LanguageCode") for seg in segments] == ["en-US", "es-US", None, "es-MX"]
+
+
+def test_the_batch_job_is_metered_to_the_last_transcribed_word(h, monkeypatch) -> None:
+    stored = []
+
+    class Table:
+        def put_item(self, TableName, Item):  # noqa: N803
+            stored.append(Item)
+
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="t", client=Table())
+    )
+    h.run()
+    assert len(stored) == 1
+    assert stored[0]["Service"] == {"S": "transcribe/batch"}
+    assert stored[0]["Context"] == {"S": "Transcription"}
+    # The fixture's transcript is shorter than the per-job minimum.
+    assert stored[0]["Usage"]["M"]["seconds"] == {"N": "15"}
+
+
+@pytest.mark.parametrize(
+    "items,seconds",
+    [([], 0.0), ([{"end_time": "1.5"}, {"end_time": "62.25"}, {"end_time": None}], 62.25)],
+)
+def test_the_transcribed_duration_is_the_latest_end_time(items, seconds) -> None:
+    assert index.transcribed_seconds({"results": {"items": items}}) == seconds
 
 
 def test_segments_are_final_not_partial(h) -> None:
@@ -580,39 +656,29 @@ def test_every_utterance_is_one_channel_when_diarization_was_not_requested(h) ->
     }
     h.run()
     assert [s["Channel"] for s in h.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")] == [
-        "CALLER",
-        "CALLER",
+        "REMOTE",
+        "REMOTE",
     ]
 
 
-def test_the_first_diarized_speaker_is_the_caller_and_the_rest_are_the_agent(monkeypatch) -> None:
-    """LMA's transcript view has exactly two channels, so more than two speakers
-    have to collapse onto them; the original label survives separately so the UI
-    can still distinguish the speakers."""
+def test_every_diarized_speaker_is_on_the_remote_channel(monkeypatch) -> None:
+    """An uploaded recording has no local microphone, so no speaker is LOCAL; the
+    original label survives separately so the UI can still distinguish them."""
     transcript = {
         "results": {
             "audio_segments": [
                 {"transcript": "a", "start_time": 0, "end_time": 1, "speaker_label": "spk_0"},
                 {"transcript": "b", "start_time": 1, "end_time": 2, "speaker_label": "spk_1"},
-                {"transcript": "c", "start_time": 2, "end_time": 3, "speaker_label": "spk_3"},
+                {"transcript": "c", "start_time": 2, "end_time": 3, "speaker_label": "spk_10"},
+                {"transcript": "d", "start_time": 3, "end_time": 4, "speaker_label": "ch_1"},
             ]
         }
     }
     harness = Harness(monkeypatch, job_row(EnableDiarization=True), transcript)
     harness.run()
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT", "AGENT"]
-    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_1", "spk_3"]
-
-
-@pytest.mark.parametrize(
-    ("label", "channel"),
-    [("spk_0", "CALLER"), ("ch_0", "CALLER"), ("spk_1", "AGENT"), ("spk_10", "AGENT")],
-)
-def test_the_channel_mapping_is_by_exact_label(label, channel) -> None:
-    """``spk_10`` starts with the same characters as ``spk_1`` and must not be
-    matched by a prefix test."""
-    assert index._channel_for_speaker(label, True) == channel
+    assert [s["Channel"] for s in segments] == ["REMOTE"] * 4
+    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_1", "spk_10", "ch_1"]
 
 
 def test_an_unlabelled_diarized_segment_is_attributed_to_the_first_speaker(monkeypatch) -> None:
@@ -625,7 +691,7 @@ def test_an_unlabelled_diarized_segment_is_attributed_to_the_first_speaker(monke
     harness.run()
     segment = harness.kinesis.only("ADD_TRANSCRIPT_SEGMENT")
     assert segment["Speaker"] == "spk_0"
-    assert segment["Channel"] == "CALLER"
+    assert segment["Channel"] == "REMOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +795,19 @@ def test_the_recording_url_event_points_at_the_promoted_object(h) -> None:
     payload = h.kinesis.only("ADD_S3_RECORDING_URL")
     assert payload["RecordingUrl"] == f"s3://{BUCKET}/lma-audio-recordings/{CALL_ID}.mp3"
     assert payload["CallId"] == CALL_ID
-    assert payload["CreatedAt"] and payload["UpdatedAt"]
+    assert payload["CreatedAt"]
+
+
+def test_the_recording_url_event_carries_no_updated_at(h) -> None:
+    """updateCall.request.vtl applies an update only when its UpdatedAt is newer
+    than the stored one, and the call event processor runs a batch's records
+    concurrently, so the END sent right after can be applied first. A stamp here
+    would then be refused on every redelivery and the meeting would show no
+    recording; without one the resolver stamps the update when it runs."""
+    h.run()
+    payload = h.kinesis.only("ADD_S3_RECORDING_URL")
+    assert "UpdatedAt" not in payload
+    assert h.kinesis.event_types[-2:] == ["ADD_S3_RECORDING_URL", "END"]
 
 
 def test_a_pending_delete_that_fails_does_not_cost_the_recording(h) -> None:
@@ -805,7 +883,7 @@ def test_the_end_event_repeats_the_meeting_identity(h) -> None:
     assert h.kinesis.only("END") == {
         "EventType": "END",
         "CallId": CALL_ID,
-        "CustomerPhoneNumber": "Customer",
+        "CustomerPhoneNumber": "Other Participant",
         "SystemPhoneNumber": "System",
         "AgentId": "bob@example.com",
         "CreatedAt": h.kinesis.only("END")["CreatedAt"],
@@ -913,6 +991,10 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
 
     monkeypatch.setattr(initiator, "job_table", CapturingTable())
     monkeypatch.setattr(initiator, "s3_client", StubS3())
+    # Nothing saved in the Transcription section: the shipped en-US applies.
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values={}))
+    )
     created = initiator.lambda_handler(
         {
             "info": {"fieldName": "createUploadMeeting"},
@@ -961,11 +1043,257 @@ def test_a_row_written_by_stage_one_finalizes_end_to_end(monkeypatch) -> None:
         {"Bucket": BUCKET, "Key": f"lma-transcripts/{call_id}.transcribe.json"}
     ]
     segments = harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")
-    # EnableDiarization survived from Stage 1, so the second speaker is the agent.
-    assert [s["Channel"] for s in segments] == ["CALLER", "AGENT"]
+    assert [s["Channel"] for s in segments] == ["REMOTE", "REMOTE"]
+    assert [s["Speaker"] for s in segments] == ["spk_0", "spk_2"]
     assert harness.s3.copies[0]["CopySource"] == {"Bucket": BUCKET, "Key": created["uploadKey"]}
     assert harness.s3.copies[0]["Key"] == f"lma-audio-recordings/{call_id}.mp4"
     # Owner, not the client-supplied agentId, attributes the finished meeting.
     assert harness.kinesis.only("END")["AgentId"] == "carol@example.com"
     assert harness.table.final["Status"] == "COMPLETED"
     assert harness.table.final["SegmentCount"] == 2
+
+
+# ---------------------------------------------------------------------------
+# The identified language, for an upload that asked Transcribe to identify it
+# ---------------------------------------------------------------------------
+
+
+def identifying(monkeypatch, mode: str, job: dict, transcript: dict | None = None) -> Harness:
+    """A finalizer for an upload Stage 1 set to identify its language."""
+    harness = Harness(
+        monkeypatch,
+        job_row(
+            LanguageIdentification=mode,
+            LanguageOptions=["de-DE", "ja-JP", "es-US"],
+            LanguageSource="CONFIGURATION",
+        ),
+        transcript,
+    )
+    harness.transcribe.job = job
+    return harness
+
+
+def segment_languages(harness: Harness) -> list:
+    return [seg.get("LanguageCode") for seg in harness.kinesis.of_type("ADD_TRANSCRIPT_SEGMENT")]
+
+
+#: A multiple-language identification output: a language per word.
+MULTI_LANGUAGE_TRANSCRIPT = {
+    "results": {
+        "items": [
+            {"id": 0, "language_code": "de-DE"},
+            {"id": 1, "language_code": "de-DE"},
+            {"id": 2, "language_code": "es-US"},
+        ],
+        "audio_segments": [
+            {"transcript": "guten Morgen", "start_time": 0, "end_time": 1, "items": [0, 1]},
+            {"transcript": "hola", "start_time": 1, "end_time": 2, "items": [2]},
+        ],
+    }
+}
+
+
+def test_single_language_identification_gives_every_segment_the_identified_language(
+    monkeypatch,
+) -> None:
+    """Its output names no language per word, so each segment takes the job's;
+    that is how the language reaches the meeting's DetectedLanguages."""
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"})
+    h.run()
+    assert segment_languages(h) == ["ja-JP", "ja-JP"]
+
+
+def test_the_glued_segment_takes_the_identified_language_too(monkeypatch) -> None:
+    transcript = {"results": {"transcripts": [{"transcript": "Konnichiwa."}]}}
+    h = identifying(monkeypatch, "identify-language", {"LanguageCode": "ja-JP"}, transcript)
+    h.run()
+    assert segment_languages(h) == ["ja-JP"]
+
+
+def test_multiple_language_identification_takes_each_segments_language_from_its_words(
+    monkeypatch,
+) -> None:
+    h = identifying(
+        monkeypatch,
+        "identify-multiple-languages",
+        {
+            "LanguageCodes": [
+                {"LanguageCode": "es-US", "DurationInSeconds": 1.0},
+                {"LanguageCode": "de-DE", "DurationInSeconds": 2.0},
+            ]
+        },
+        MULTI_LANGUAGE_TRANSCRIPT,
+    )
+    h.run()
+    assert segment_languages(h) == ["de-DE", "es-US"]
+
+
+@pytest.mark.parametrize("mode", ["identify-language", "identify-multiple-languages"])
+def test_the_meetings_transcription_language_stays_the_identify_mode(monkeypatch, mode) -> None:
+    """TranscriptionLanguage says how the meeting was transcribed, as START
+    recorded it; the languages heard are its DetectedLanguages, kept apart."""
+    h = identifying(monkeypatch, mode, {"LanguageCode": "ja-JP"}, MULTI_LANGUAGE_TRANSCRIPT)
+    h.run()
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"LanguageCode": "it-IT", "LanguageSource": "CONFIGURATION"},
+        {"LanguageCode": "it-IT", "LanguageSource": "REQUEST"},
+        {},
+    ],
+    ids=["configured", "requested", "legacy-row"],
+)
+def test_an_upload_that_named_its_language_detects_none(monkeypatch, row) -> None:
+    """As for a streaming meeting in a fixed language, the language setting
+    already names it."""
+    h = Harness(monkeypatch, job_row(**row))
+    h.transcribe.job = {"LanguageCode": "it-IT"}
+    h.run()
+    assert segment_languages(h) == [None, None]
+    assert "UPDATE_CAPTURE_CONTEXT" not in h.kinesis.event_types
+
+
+def test_a_job_that_reports_no_language_gives_segments_none(monkeypatch) -> None:
+    h = identifying(monkeypatch, "identify-language", {})
+    h.run()
+    assert segment_languages(h) == [None, None]
+
+
+@pytest.mark.parametrize(
+    ("mode", "job", "expected"),
+    [
+        ("identify-language", {"LanguageCode": " pt-BR "}, "pt-BR"),
+        ("identify-language", {"LanguageCode": ""}, None),
+        ("identify-language", {}, None),
+        (
+            "identify-multiple-languages",
+            {"LanguageCodes": [{"LanguageCode": "hi-IN"}], "LanguageCode": "hi-IN"},
+            None,
+        ),
+        ("", {"LanguageCode": "fr-FR"}, None),
+    ],
+    ids=["single", "blank", "missing", "multiple", "fixed-language"],
+)
+def test_only_single_language_identification_names_a_language_for_the_whole_job(
+    mode, job, expected
+) -> None:
+    assert index.identified_language({"LanguageIdentification": mode}, job) == expected
+
+
+def test_the_single_language_mode_is_one_stage_one_records() -> None:
+    assert index.SINGLE_LANGUAGE_IDENTIFICATION in initiator.IDENTIFY_MODES
+
+
+class _StartedJobs:
+    """Stage 2's Transcribe client: keeps the StartTranscriptionJob parameters."""
+
+    def __init__(self) -> None:
+        self.params: dict = {}
+
+    def start_transcription_job(self, **params):
+        self.params = params
+        return {}
+
+
+@pytest.mark.parametrize(
+    ("settings", "parameter", "identified", "transcript", "languages"),
+    [
+        (
+            {"languageCode": "identify-language", "languageOptions": "pt-BR, it-IT"},
+            "IdentifyLanguage",
+            {"LanguageCode": "it-IT", "IdentifiedLanguageScore": 0.98},
+            None,
+            ["it-IT", "it-IT"],
+        ),
+        (
+            {"languageCode": "identify-multiple-languages", "languageOptions": "de-DE,es-US,hi-IN"},
+            "IdentifyMultipleLanguages",
+            {
+                "LanguageCodes": [
+                    {"LanguageCode": "es-US", "DurationInSeconds": 12.0},
+                    {"LanguageCode": "de-DE", "DurationInSeconds": 40.5},
+                ]
+            },
+            MULTI_LANGUAGE_TRANSCRIPT,
+            ["de-DE", "es-US"],
+        ),
+    ],
+    ids=["identify", "identify-multiple"],
+)
+def test_language_identification_carries_from_the_settings_to_the_segments(
+    monkeypatch, settings, parameter, identified, transcript, languages
+) -> None:
+    """All three stages, with only the AWS clients faked: the identify mode Stage 1
+    reads from the Configuration page is the job Stage 2 starts and the meeting's
+    TranscriptionLanguage, and the languages that job identifies are given to the
+    segments this stage emits."""
+    # Stage 1: the Configuration page's settings, read when the upload starts.
+    written: list[dict] = []
+    monkeypatch.setattr(
+        initiator,
+        "job_table",
+        SimpleNamespace(put_item=lambda Item, ConditionExpression=None: written.append(Item)),  # noqa: N803
+    )
+    monkeypatch.setattr(
+        initiator,
+        "s3_client",
+        SimpleNamespace(generate_presigned_url=lambda *a, **k: "https://example.invalid/presigned"),
+    )
+    monkeypatch.setattr(
+        initiator, "_STORE", SimpleNamespace(get_section=lambda _: SimpleNamespace(values=settings))
+    )
+    created = initiator.lambda_handler(
+        {
+            "info": {"fieldName": "createUploadMeeting"},
+            "identity": {"username": "dana@example.com", "groups": []},
+            "arguments": {
+                "input": {
+                    "meetingTopic": "Roadmap",
+                    "localSpeakerName": "dana@example.com",
+                    "filename": "roadmap.mp3",
+                    "contentType": "audio/mpeg",
+                    "enableDiarization": True,
+                    "maxSpeakers": 3,
+                }
+            },
+        },
+        None,
+    )
+    row = written[0]
+    call_id = created["callId"]
+    assert created["transcriptionLanguage"] == settings["languageCode"]
+
+    # Stage 2: the file lands and the job starts.
+    stage_two_stream = FakeKinesis()
+    started = _StartedJobs()
+    monkeypatch.setattr(processor, "job_table", FakeTable(row))
+    monkeypatch.setattr(processor, "kinesis_client", stage_two_stream)
+    monkeypatch.setattr(processor, "transcribe_client", started)
+    processor.lambda_handler(
+        {
+            "Records": [
+                {
+                    "s3": {
+                        "bucket": {"name": BUCKET},
+                        "object": {"key": created["uploadKey"], "size": 1024},
+                    }
+                }
+            ]
+        },
+        None,
+    )
+    assert started.params[parameter] is True
+    assert started.params["LanguageOptions"] == row["LanguageOptions"]
+    assert "LanguageCode" not in started.params
+    assert started.params["Settings"]["ShowSpeakerLabels"] is True
+    assert stage_two_stream.only("START")["TranscriptionLanguage"] == settings["languageCode"]
+
+    # Stage 3: the job completes, reporting what it identified.
+    harness = Harness(monkeypatch, row, transcript)
+    harness.transcribe.job = {**started.params, **identified}
+    harness.run(eventbridge_event(name=call_id))
+    assert segment_languages(harness) == languages
+    assert "UPDATE_CAPTURE_CONTEXT" not in harness.kinesis.event_types

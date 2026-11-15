@@ -43,9 +43,12 @@ RUN set -eux; \
     mkdir -p /src && cd /src; \
     apt-get source ffmpeg; \
     cd "$(find /src -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"; \
-    # --disable-everything, then enable ONLY what the mux uses: read fragmented
-    # MP4 + WAV, write MP4, copy H.264, encode AAC. No network protocols and no
-    # external libs, so the binary links none of the purged gnutls/gcrypt stack.
+    # --disable-everything, then enable ONLY what the mux and the key frames
+    # use. The mux: read fragmented MP4 + WAV, write MP4, copy H.264, encode
+    # AAC. The key frames (src/videokeyframes.ts): decode H.264, scale, write
+    # raw grayscale samples to a pipe and JPEGs to files. No network protocols
+    # and no external libs, so the binary links none of the purged
+    # gnutls/gcrypt stack.
     ./configure \
         --disable-everything \
         --disable-shared --enable-static \
@@ -53,12 +56,12 @@ RUN set -eux; \
         --disable-network --disable-autodetect \
         --enable-protocol=file,pipe \
         --enable-demuxer=mov,mp4,m4v,wav,concat \
-        --enable-muxer=mp4 \
+        --enable-muxer=mp4,rawvideo,image2 \
         --enable-decoder=h264,aac,pcm_s16le \
-        --enable-encoder=aac \
+        --enable-encoder=aac,mjpeg,rawvideo \
         --enable-parser=h264,aac \
         --enable-bsf=h264_mp4toannexb,extract_extradata \
-        --enable-filter=aresample,anull,null \
+        --enable-filter=aresample,anull,null,scale,format,split,showinfo \
         --disable-ffplay --disable-ffprobe; \
     make -j"$(nproc)"; \
     strip ffmpeg; \

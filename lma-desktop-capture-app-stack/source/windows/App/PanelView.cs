@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace LMA;
 
@@ -175,6 +176,368 @@ public sealed class PanelView : Border
     private readonly StackPanel _liveRow = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
 
     public Action? RequestClosePopup;
+
+    // MARK: - Meeting consent (see Consent.cs and docs/meeting-consent.md)
+    //
+    // The step shown before Start when the deployment's mode is Notify or
+    // Opt-in: the notice with Copy, the confirmation and how it was given, an
+    // optional note and evidence screenshot; while recording, the consent
+    // status, more evidence, and Participant objected. Asked afresh for every
+    // meeting. The block is rebuilt on every Refresh from these fields, so no
+    // control has to be re-parented.
+    private Consent.Settings? _consentSettings;
+    private Consent.Step _consentStep = new();
+    private byte[]? _consentEvidenceJpeg;
+    private BitmapSource? _consentEvidencePreview;
+    private string _consentStatus = "";
+    private string _consentEvidenceStatus = "";
+    private string? _consentBlockedReason;
+    private string _objectorName = "";
+    private bool _consentFetchInFlight;
+    private bool _capturingEvidence;
+    /// <summary>The one start waiting for the settings, however often Start was pressed.</summary>
+    private Action? _startAfterFetch;
+
+    /// <summary>
+    /// Read the consent settings from the transcriber. `thenStart`, when given,
+    /// runs on the UI thread once they are read (or could not be); only the
+    /// latest is kept, so pressing Start again while waiting starts once.
+    /// </summary>
+    public void RefreshConsentSettings(Action? thenStart = null)
+    {
+        if (thenStart != null) _startAfterFetch = thenStart;
+        if (_consentFetchInFlight) return;
+        if (!_c.IsAuthenticated || _c.CurrentState.Kind == CaptureController.StateKind.Streaming)
+        {
+            RunPendingStart();
+            return;
+        }
+        _consentFetchInFlight = true;
+        Refresh();
+        _ = _c.FetchConsentSettingsAsync().ContinueWith(t => Dispatcher.Invoke(() =>
+        {
+            _consentFetchInFlight = false;
+            var settings = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
+            // No answer, or one saying the settings are unavailable, leaves an
+            // earlier answer in place; with none, an unavailable answer is kept so
+            // the panel can say why there is no step.
+            if (settings != null && (settings.Available || _consentSettings == null)) _consentSettings = settings;
+            Refresh();
+            RunPendingStart();
+        }));
+    }
+
+    private void RunPendingStart()
+    {
+        var start = _startAfterFetch;
+        _startAfterFetch = null;
+        start?.Invoke();
+    }
+
+    /// <summary>A CONSENT_STATE frame for the active meeting (UI thread).</summary>
+    public void OnConsentState(Consent.State state)
+    {
+        if (state.IsEvidence) _consentEvidenceStatus = Consent.Describe(state);
+        else _consentStatus = Consent.Describe(state);
+        // Refused or not recorded (rather than objected to): the settings shown
+        // may not be the ones in force, so the next Start reads them again.
+        if (state.StopsCapture && state.Status != "objected" && state.Code != "OBJECTION_RECEIVED")
+            _consentSettings = null;
+        Refresh();
+    }
+
+    /// <summary>The notice for the meeting about to start, as the panel shows it.</summary>
+    private string ConsentNoticeText =>
+        _consentSettings is { Required: true } s
+            ? Consent.RenderNotice(s.NoticeTemplate, EffectiveMicLabel(), _meetingName.Text,
+                s.ConsentPhrase, s.ObjectionPhrase)
+            : "";
+
+    /// <summary>
+    /// Whether Start may go ahead under the consent step; when not, the reason is
+    /// shown on the panel.
+    /// </summary>
+    private bool ConsentAllowsStart()
+    {
+        _consentBlockedReason = Consent.StartBlockedReason(_consentSettings, _consentStep);
+        if (_consentBlockedReason == null) return true;
+        Refresh();
+        return false;
+    }
+
+    /// <summary>
+    /// A start from outside the panel (JumpList, thumbnail toolbar, forwarded
+    /// launch): the same checks as the Start button; `showPanel` brings the panel
+    /// up when the consent step or the disclaimer needs the user.
+    /// </summary>
+    public void StartFromCommand(Action showPanel)
+    {
+        void Check()
+        {
+            if (!ConsentAllowsStart()) { showPanel(); return; }
+            if (NeedsDisclaimer) { ShowDisclaimerGate(); showPanel(); return; }
+            ReallyStart();
+        }
+        if (_consentSettings == null) RefreshConsentSettings(Check);
+        else Check();
+    }
+
+    private void ResetConsentStep()
+    {
+        _consentStep = new Consent.Step();
+        _consentEvidenceJpeg = null;
+        _consentEvidencePreview = null;
+        _consentEvidenceStatus = "";
+        _consentBlockedReason = null;
+        _objectorName = "";
+    }
+
+    /// <summary>
+    /// One frame of the selected screen-video source (the meeting window, or the
+    /// main display), kept as evidence. Before Start it is sent once recording
+    /// begins; while recording it is sent at once.
+    /// </summary>
+    private void CaptureConsentEvidence()
+    {
+        if (_capturingEvidence) return;
+        _capturingEvidence = true;
+        var sourceId = AppSettings.VideoSourceId;
+        var sourceName = SelectedVideoSourceName();
+        _ = Task.Run(() => VideoCapture.Thumbnail(sourceId, 1920)).ContinueWith(t => Dispatcher.Invoke(() =>
+        {
+            _capturingEvidence = false;
+            var shot = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
+            BitmapSource? preview = null;
+            var jpeg = shot is { } img ? EncodeEvidenceJpeg(img, out preview) : null;
+            // A failed capture leaves an earlier screenshot, and its preview, as they were.
+            if (jpeg != null) _consentEvidencePreview = preview;
+            if (jpeg == null)
+            {
+                _consentEvidenceStatus = $"No screenshot was taken of {sourceName}. Check that it is open and not minimized.";
+            }
+            else if (_c.CurrentState.Kind == CaptureController.StateKind.Streaming)
+            {
+                _c.SendConsentEvidence(jpeg, $"Captured from {sourceName} while recording");
+                _consentEvidenceStatus = $"Screenshot of {sourceName} sent to the meeting.";
+            }
+            else
+            {
+                _consentEvidenceJpeg = jpeg;
+                _consentEvidenceStatus = $"Screenshot of {sourceName} will be kept on the meeting when recording starts.";
+            }
+            Refresh();
+        }));
+    }
+
+    /// <summary>
+    /// A captured frame as a JPEG within the evidence checker's limit, lowering
+    /// the quality until it fits; also the preview shown on the panel.
+    /// </summary>
+    private static byte[]? EncodeEvidenceJpeg(VideoCapture.ThumbnailImage img, out BitmapSource? preview)
+    {
+        preview = null;
+        if (img.Width <= 0 || img.Height <= 0) return null;
+        var bitmap = BitmapSource.Create(img.Width, img.Height, 96, 96, PixelFormats.Bgr32, null,
+            img.PixelsBgra, img.Width * 4);
+        bitmap.Freeze();
+        foreach (var quality in new[] { 85, 70, 55, 40 })
+        {
+            var encoder = new JpegBitmapEncoder { QualityLevel = quality };
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var stream = new System.IO.MemoryStream();
+            encoder.Save(stream);
+            if (stream.Length <= Consent.MaxEvidenceBytes)
+            {
+                preview = bitmap;
+                return stream.ToArray();
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The consent block for the panel, or null when no step is needed.</summary>
+    private UIElement? BuildConsentBlock(bool streaming)
+    {
+        if (!streaming && _consentSettings is { Available: false } unavailable)
+        {
+            // The transcriber answered but could not read the settings: say so
+            // rather than show nothing. It applies the settings in force at Start.
+            return new TextBlock
+            {
+                Text = "Meeting consent settings unavailable: "
+                    + (string.IsNullOrEmpty(unavailable.Message) ? "try again" : unavailable.Message),
+                Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0x6A, 0x00)),
+                FontSize = 10, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4),
+            };
+        }
+        if (!streaming && _consentSettings == null && _consentFetchInFlight)
+        {
+            return new TextBlock
+            {
+                Text = "Checking meeting consent settings…", Foreground = Secondary, FontSize = 10,
+                Margin = new Thickness(0, 0, 0, 4),
+            };
+        }
+        if (_consentSettings is not { Required: true } settings) return null;
+        bool optIn = settings.Mode == Consent.Mode.OptIn;
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Meeting consent",
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        if (!settings.Supported)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = settings.Reason, Foreground = Brushes.Red, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+        panel.Children.Add(new TextBlock
+        {
+            Text = optIn
+                ? "Nothing is recorded or transcribed until everyone has agreed. Read this out or paste it into the meeting chat:"
+                : "Tell everyone in the meeting that it is recorded — read this out or paste it into the chat:",
+            Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        var notice = ConsentNoticeText;
+        // Read-only TextBox rather than a TextBlock so the notice can be selected.
+        panel.Children.Add(new TextBox
+        {
+            Text = notice, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, FontSize = 11,
+            Background = new SolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0)),
+            BorderThickness = new Thickness(0), Padding = new Thickness(4),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        var copy = new Button { Content = "Copy notice", FontSize = 11, HorizontalAlignment = HorizontalAlignment.Left };
+        copy.Click += (_, _) =>
+        {
+            try { Clipboard.SetText(notice); _consentStatus = "Notice copied — paste it into the meeting chat."; }
+            catch (Exception ex) { _consentStatus = $"The notice could not be copied: {ex.Message}"; }
+            Refresh();
+        };
+        panel.Children.Add(copy);
+
+        if (!streaming)
+        {
+            var confirm = new CheckBox
+            {
+                Content = new TextBlock
+                {
+                    Text = optIn
+                        ? "Everyone in the meeting agreed to it being recorded and transcribed"
+                        : "I have told everyone in the meeting, with the notice above",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                IsChecked = _consentStep.Confirmed, FontSize = 11, Margin = new Thickness(0, 6, 0, 4),
+            };
+            confirm.Click += (_, _) =>
+            {
+                _consentStep = _consentStep with { Confirmed = confirm.IsChecked ?? false };
+                _consentBlockedReason = null;
+            };
+            panel.Children.Add(confirm);
+            panel.Children.Add(Label(optIn ? "How everyone agreed" : "How they were told"));
+            var method = new ComboBox { FontSize = 11, Margin = new Thickness(0, 0, 0, 4) };
+            method.Items.Add(new ComboBoxItem { Content = "Choose…", Tag = null });
+            foreach (var m in new[] { Consent.Method.Verbal, Consent.Method.Chat, Consent.Method.InviteTerms })
+                method.Items.Add(new ComboBoxItem { Content = Consent.Label(m), Tag = m });
+            method.SelectedIndex = _consentStep.Method is { } chosen ? 1 + (int)chosen : 0;
+            method.PreviewMouseWheel += SwallowWheel;
+            method.SelectionChanged += (_, _) =>
+            {
+                var picked = (method.SelectedItem as ComboBoxItem)?.Tag as Consent.Method?;
+                _consentStep = _consentStep with { Method = picked };
+                _consentBlockedReason = null;
+            };
+            panel.Children.Add(method);
+            panel.Children.Add(Label("Note (optional)"));
+            var note = new TextBox { Text = _consentStep.Statement, FontSize = 11 };
+            StyleBox(note);
+            note.TextChanged += (_, _) => _consentStep = _consentStep with { Statement = note.Text };
+            panel.Children.Add(note);
+        }
+
+        var evidence = new Button
+        {
+            Content = _capturingEvidence ? "Capturing…" : "📷 Capture evidence",
+            IsEnabled = !_capturingEvidence, FontSize = 11,
+            ToolTip = $"Keeps one frame of {SelectedVideoSourceName()} on the meeting as consent evidence",
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 2),
+        };
+        evidence.Click += (_, _) => CaptureConsentEvidence();
+        panel.Children.Add(evidence);
+        if (_consentEvidencePreview != null)
+        {
+            panel.Children.Add(new Image
+            {
+                Source = _consentEvidencePreview, MaxHeight = 90, HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 2, 0, 2),
+            });
+            if (!streaming && _consentEvidenceJpeg != null)
+            {
+                var remove = new Button { Content = "Remove screenshot", FontSize = 10, HorizontalAlignment = HorizontalAlignment.Left };
+                remove.Click += (_, _) =>
+                {
+                    _consentEvidenceJpeg = null; _consentEvidencePreview = null; _consentEvidenceStatus = "";
+                    Refresh();
+                };
+                panel.Children.Add(remove);
+            }
+        }
+        foreach (var line in new[] { _consentEvidenceStatus, _consentStatus })
+        {
+            if (string.IsNullOrEmpty(line)) continue;
+            panel.Children.Add(new TextBlock
+            {
+                Text = line, Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 0),
+            });
+        }
+        if (_consentBlockedReason != null && !streaming)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = _consentBlockedReason, Foreground = Brushes.Red, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        }
+        if (streaming)
+        {
+            panel.Children.Add(Label("If a participant objects"));
+            var name = new TextBox { Text = _objectorName, FontSize = 11, ToolTip = "Their name (optional)" };
+            StyleBox(name);
+            name.TextChanged += (_, _) => _objectorName = name.Text;
+            panel.Children.Add(name);
+            var objected = new Button
+            {
+                Content = "✋ Participant objected", FontSize = 11, HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = "Stops recording and transcription now, and records the objection on the meeting",
+            };
+            objected.Click += (_, _) =>
+            {
+                _c.ReportObjection(_objectorName);
+                _objectorName = "";
+                _consentStatus = "Objection reported. Recording and transcription stopped.";
+                Refresh();
+            };
+            panel.Children.Add(objected);
+        }
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x10, 0x00, 0x66, 0xCC)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xB0, 0xC8, 0xE8)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8),
+            Margin = new Thickness(0, 4, 0, 6),
+            Child = panel,
+        };
+    }
+
 
     public PanelView(CaptureController controller)
     {
@@ -366,10 +729,7 @@ public sealed class PanelView : Border
     /// </summary>
     public void PushSettingsToController()
     {
-        var mic = AppSettings.MicLabel;
-        if (string.IsNullOrEmpty(mic)) mic = CurrentEmail();
-        if (string.IsNullOrEmpty(mic)) mic = _c.Config.AgentId;
-        _c.MicLabel = mic;
+        _c.MicLabel = EffectiveMicLabel();
         var sys = AppSettings.SystemLabel;
         _c.SystemLabel = string.IsNullOrEmpty(sys) ? AppSettings.DefaultSystemLabel : sys;
         _c.MicDeviceId = AppSettings.MicDeviceId;
@@ -377,6 +737,15 @@ public sealed class PanelView : Border
         _c.DiarizeMicChannel = AppSettings.DiarizeMicChannel;
         _c.VideoEnabled = AppSettings.VideoEnabled;
         _c.VideoSourceId = AppSettings.VideoSourceId;
+    }
+
+    /// <summary>The mic label a meeting started now would send (see PushSettingsToController).</summary>
+    private string EffectiveMicLabel()
+    {
+        var mic = AppSettings.MicLabel;
+        if (string.IsNullOrEmpty(mic)) mic = CurrentEmail();
+        if (string.IsNullOrEmpty(mic)) mic = _c.Config.AgentId;
+        return mic;
     }
 
     /// <summary>
@@ -628,8 +997,12 @@ public sealed class PanelView : Border
                     "Your meeting is being processed. Open it in LMA when ready.",
                     _c.LmaUrl());
             }
+            // Consent is per meeting: the next one is confirmed afresh.
+            ResetConsentStep();
         }
         Refresh();
+        // Signed in, or back from a recording: read the settings in force.
+        if (s.Kind == CaptureController.StateKind.Authenticated) RefreshConsentSettings();
     }
 
     public void OnLevels(float meeting, float mic, bool connected, bool paused)
@@ -685,6 +1058,8 @@ public sealed class PanelView : Border
                 _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
                     ? Visibility.Visible : Visibility.Collapsed;
                 _body.Children.Add(_meetingNameRow);
+                // Meeting consent step (Notify / Opt-in deployments only).
+                if (BuildConsentBlock(streaming: false) is { } consentIdle) _body.Children.Add(consentIdle);
                 // What will actually be captured, BEFORE pressing Start. Both
                 // selections live in the Settings window, so without this you had
                 // to open Settings to answer "which mic?" and "which screen am I
@@ -735,6 +1110,7 @@ public sealed class PanelView : Border
                 _muteMic.IsChecked = _c.IsMicMuted;
                 _muteSys.IsChecked = _c.IsMeetingMuted;
                 _body.Children.Add(Row(_muteMic, _muteSys));
+                if (BuildConsentBlock(streaming: true) is { } consentLive) _body.Children.Add(consentLive);
             }
 
             _body.Children.Add(Sep());
@@ -1046,6 +1422,19 @@ public sealed class PanelView : Border
 
     private void DoStart()
     {
+        // The meeting consent step comes first: read the settings if they are not
+        // known yet, and hold an opt-in meeting until it is confirmed.
+        if (_consentSettings == null)
+        {
+            RefreshConsentSettings(StartAfterConsentCheck);
+            return;
+        }
+        StartAfterConsentCheck();
+    }
+
+    private void StartAfterConsentCheck()
+    {
+        if (!ConsentAllowsStart()) return;
         // One-time recording-consent gate (mirrors the browser extension): the
         // first Start on this machine shows the disclaimer; Agree persists and
         // proceeds, Cancel does nothing.
@@ -1070,6 +1459,20 @@ public sealed class PanelView : Border
         var name = string.IsNullOrEmpty(_meetingName.Text)
             ? null
             : $"{_meetingName.Text} - {DateTime.Now:yyyy-MM-dd HH:mm}";
+        if (_consentSettings is { Required: true } consent)
+        {
+            _c.ConsentPayload = Consent.Payload(consent, _consentStep, _c.MicLabel, _meetingName.Text,
+                ConsentNoticeText);
+            _c.ConsentEvidenceJpeg = _consentEvidenceJpeg;
+        }
+        else
+        {
+            // The step rides START even when none was shown (see Consent.Settings.NotShown).
+            _c.ConsentPayload = Consent.Payload(Consent.Settings.NotShown, new Consent.Step(), _c.MicLabel,
+                _meetingName.Text, "");
+            _c.ConsentEvidenceJpeg = null;
+        }
+        _consentStatus = "";
         _c.Start(name);
     }
 

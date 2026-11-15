@@ -29,7 +29,7 @@ lma-ai-stack/source/ui/src/
 ├── App.jsx                # Root: ThemeProvider > Authenticator > AppContent
 ├── index.jsx              # Entry point
 ├── aws-exports.js         # Amplify config (rewritten at deploy time)
-├── components/            # 22 feature directories + common/
+├── components/            # feature directories + common/
 │   ├── common/
 │   ├── call-list/
 │   ├── call-details/
@@ -40,8 +40,7 @@ lma-ai-stack/source/ui/src/
 │   ├── meetings-query-layout/
 │   ├── virtual-participant-layout/
 │   ├── mcp-servers-page/
-│   ├── nova-sonic-config/
-│   ├── transcript-summary-config/
+│   ├── configuration/          (the schema-driven Configuration page)
 │   └── ...
 ├── contexts/              # React Context providers
 │   ├── app.js             # AppContext (auth, awsConfig, navigation)
@@ -211,7 +210,7 @@ Hand-maintained source files (`.js`, `.jsx`) start with:
 ```js
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 ```

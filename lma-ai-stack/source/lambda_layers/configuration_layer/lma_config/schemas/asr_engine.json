@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/asr_engine",
+  "title": "Transcription engine",
+  "description": "Whether a Virtual Participant separates the voices behind one attendee and, where the ASR MicroVM speech engine is deployed, which engine transcribes each kind of meeting: Amazon Transcribe by default, or the ASR MicroVM engine.",
+  "sectionLabel": "Transcription Engine",
+  "appliesText": "A saved change applies to meetings that start at least 30 seconds after the save; a meeting already running keeps its settings.",
+  "order": 4,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "streamingEngineMicrovm": {
+      "order": 0,
+      "availableWhen": { "setting": "AsrEngineAvailable", "value": "true" },
+      "type": "boolean",
+      "title": "Stream Audio, Chrome extension and Desktop Capture",
+      "description": "Speaker identification per channel is chosen per meeting, on the Stream Audio form or in the desktop app's settings. While the Amazon Transcribe section uses content redaction, a custom vocabulary or language model, language identification, or a language the deployed speech model does not support, these meetings stay on Amazon Transcribe whichever engine is selected.",
+      "widget": "radio",
+      "booleanLabels": {
+        "false": "Amazon Transcribe",
+        "true": "ASR MicroVM speech engine"
+      }
+    },
+    "virtualParticipantEngineMicrovm": {
+      "order": 1,
+      "availableWhen": { "setting": "AsrEngineAvailable", "value": "true" },
+      "type": "boolean",
+      "title": "Virtual Participants",
+      "description": "Speaker names come from the meeting roster with either engine. While the Amazon Transcribe section uses content redaction, a custom vocabulary, language identification, or a language the deployed speech model does not support, Virtual Participants stay on Amazon Transcribe whichever engine is selected.",
+      "widget": "radio",
+      "booleanLabels": {
+        "false": "Amazon Transcribe",
+        "true": "ASR MicroVM speech engine"
+      }
+    },
+    "diarizeVirtualParticipant": {
+      "order": 2,
+      "type": "boolean",
+      "title": "Virtual Participant voice separation",
+      "description": "On by default. Tells apart the voices behind each attendee, so a conference room's people can be shown and named separately, and uses each voice to correct the attendee name where the meeting platform's speaker indicator lags. A name shows as one person unless it reads as a room or its voices are given different names; either can be changed per meeting. Works with either engine: on Amazon Transcribe from its own speaker labels, and on the on-demand engine where its model bundle has speaker identification; with a bundle that has none, the on-demand engine labels by roster name only. Turn it off to name rows from the meeting roster alone."
+    }
+  },
+  "additionalProperties": false
+}

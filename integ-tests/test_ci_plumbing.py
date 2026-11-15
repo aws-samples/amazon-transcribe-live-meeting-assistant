@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the scheduled pipeline's own machinery. No AWS, no stack.
 
@@ -18,25 +18,39 @@ whether a scheduled run can report success without having tested anything:
     has to do is produce a payload in every one of those cases rather than a
     traceback where the notification should have been.
 
-``ci_assume_role`` is covered for the file it writes; the STS exchange itself
-needs a real OIDC token and is exercised only by the pipeline.
+The job's AWS credentials are not covered here: they are vended by the runner
+rather than acquired by code in this repository, so the thing that can go wrong
+is the role's trust policy, and the pipeline is what exercises it.
 """
 
 from __future__ import annotations
 
 import json
-import stat
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts" / "testing"))
 
-import ci_assume_role  # noqa: E402
 import cognito_test_user  # noqa: E402
+import failure_cause  # noqa: E402
 import junit_summary  # noqa: E402
+import live_meeting  # noqa: E402
+import resume_rollback  # noqa: E402
+
+# No test in this module sends a request to AWS (scripts/testing/no_real_aws.py).
+# Only this module: the rest of integ-tests/ calls a deployed stack on purpose and
+# may share the session, so the guard is installed without being made strict, and
+# the fake credentials (so a request reaches the guard rather than failing for
+# want of credentials) are set per test.
+from no_real_aws import _no_real_aws, fake_aws_credentials, install_guard  # noqa: F401
+
+install_guard()
+pytestmark = pytest.mark.usefixtures("fake_aws_credentials")
 
 
 @pytest.fixture(autouse=True)
@@ -142,58 +156,6 @@ def test_available_reports_false_for_a_broken_source_without_raising(monkeypatch
     """`available()` is the skip guard, so it must not raise out of a test body."""
     _stub_secret(monkeypatch, {"username": "ci@example.com"})
     assert cognito_test_user.available() is False
-
-
-# ── the credentials file the pipeline writes ────────────────────────────────
-
-_FAKE_CREDENTIALS = {
-    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "aws_secret_access_key": "wJalrXUtnFEMI-EXAMPLE-KEY",  # pragma: allowlist secret
-    "aws_session_token": "FwoGZXIvYXdzEXAMPLE",
-}
-
-
-def test_credentials_file_is_written_owner_only(tmp_path: Path):
-    path = tmp_path / "credentials"
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_an_existing_credentials_file_is_tightened_not_left_as_found(tmp_path: Path):
-    """O_CREAT's mode applies only on creation, so an existing file needs a chmod."""
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    path.chmod(0o644)
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_writing_a_profile_preserves_other_profiles(tmp_path: Path):
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    body = path.read_text(encoding="utf-8")
-    assert "[other]" in body and "KEEP" in body
-    assert "[lma-ci]" in body
-    assert _FAKE_CREDENTIALS["aws_session_token"] in body
-
-
-def test_credentials_path_honours_the_aws_environment_variable(monkeypatch, tmp_path: Path):
-    """The pipeline points this outside the checkout so it cannot become an artifact."""
-    target = tmp_path / "elsewhere" / "credentials"
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(target))
-    assert ci_assume_role._credentials_path() == target
-
-
-def test_an_empty_oidc_token_is_refused_before_calling_sts(monkeypatch):
-    """An absent `id_tokens:` block yields an empty variable, not an error."""
-    called = mock.Mock()
-    monkeypatch.setattr(ci_assume_role, "_assume", called)
-    exit_code = ci_assume_role.main(
-        ["--role-arn", "arn:aws:iam::123456789012:role/example", "--token", "   "]
-    )
-    assert exit_code == 2
-    called.assert_not_called()
 
 
 # ── the notification payload built from the JUnit report ────────────────────
@@ -393,3 +355,1239 @@ def test_the_cli_succeeds_when_there_is_no_report(tmp_path: Path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "❌ FAILED"
     assert "No JUnit report" in payload["summary"]
+
+
+def test_a_failed_publish_stage_names_the_stage_rather_than_the_missing_report(
+    tmp_path: Path, capsys
+):
+    """The publish job has no report to write, and that is not the news."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "publish",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "❌ FAILED"
+    assert "publish stage failed" in payload["summary"]
+    assert "no tests ran" in payload["summary"]
+    # Says the stack is untouched, which is the thing worth knowing at 8pm.
+    assert "unchanged" in payload["summary"]
+    assert "No JUnit report" not in payload["summary"]
+
+
+def test_a_failed_deploy_stage_says_what_the_next_night_will_do(tmp_path: Path, capsys):
+    """A stuck rollback is resumed by the next deploy, and the post says so."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "deploy stage failed" in payload["summary"]
+    assert "is resumed by the next nightly deploy" in payload["summary"]
+
+
+def test_the_tests_stage_is_the_default_and_still_summarises_the_report(tmp_path: Path, capsys):
+    """Passing no --stage must not change what the tests job has always posted."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    exit_code = junit_summary.main(
+        ["--report", str(report), "--status", "success", "--stack", "lma-integtest1"]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "✅ PASSED"
+    assert "3 passed" in payload["summary"]
+    assert "stage failed" not in payload["summary"]
+
+
+def test_an_unknown_stage_is_refused_rather_than_silently_mislabelled(tmp_path: Path):
+    """A typo in the job definition must fail loudly, not post a wrong label."""
+    with pytest.raises(SystemExit):
+        junit_summary.main(
+            ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "deployy"]
+        )
+
+
+def test_a_failed_stage_quotes_its_cause_ahead_of_the_general_guidance(
+    tmp_path: Path, capsys
+):
+    """The reason is the news; the stage's standing advice is the same every night."""
+    cause = tmp_path / "failure-cause.txt"
+    cause.write_text("Stack is UPDATE_ROLLBACK_COMPLETE.\n• CodeBuildRun: build failed\n")
+    junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--cause",
+            str(cause),
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "• CodeBuildRun: build failed" in summary
+    assert summary.index("CodeBuildRun") < summary.index("is resumed by the next")
+
+
+def test_an_empty_or_missing_cause_leaves_the_failed_stage_post_unchanged(
+    tmp_path: Path, capsys
+):
+    """The after_script always creates the file, and empty means nothing to quote."""
+    empty = tmp_path / "failure-cause.txt"
+    empty.write_text("")
+    args = ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "publish"]
+    junit_summary.main(args)
+    plain = json.loads(capsys.readouterr().out)["summary"]
+    junit_summary.main(args + ["--cause", str(empty)])
+    assert json.loads(capsys.readouterr().out)["summary"] == plain
+    junit_summary.main(args + ["--cause", str(tmp_path / "absent.txt")])
+    assert json.loads(capsys.readouterr().out)["summary"] == plain
+
+
+def test_a_long_cause_keeps_the_post_inside_its_budget(tmp_path: Path, capsys):
+    cause = tmp_path / "failure-cause.txt"
+    cause.write_text("\n".join(f"line {i} " + "x" * 80 for i in range(100)))
+    junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--cause",
+            str(cause),
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert len(summary) <= junit_summary._DEFAULT_MAX_CHARS + len("\n… (truncated — see the job log)")
+    assert "line 0 " in summary
+
+
+# ── why a publish or deploy failed ──────────────────────────────────────────
+
+
+def test_the_decisive_lines_of_a_job_log_are_quoted():
+    log = "\n".join(
+        ["Installing...", "\x1b[31mERROR: npm run build exited 2\x1b[0m", "Done", "make: *** [build] Error 2"]
+    )
+    assert failure_cause.log_cause(log) == [
+        "ERROR: npm run build exited 2",
+        "make: *** [build] Error 2",
+    ]
+
+
+def test_a_log_with_no_decisive_line_is_quoted_from_its_end():
+    log = "\n".join(f"step {i}" for i in range(40))
+    lines = failure_cause.log_cause(log)
+    assert lines[-1] == "step 39"
+    assert len(lines) == failure_cause.MAX_LOG_LINES
+
+
+def test_a_job_that_wrote_no_output_is_said_to_have_failed_in_setup():
+    text = failure_cause.describe("publish", None, None)
+    assert "before its main step started" in text
+
+
+_T0 = datetime(2026, 10, 30, 0, 17, tzinfo=timezone.utc)
+_ROOT = "arn:aws:cloudformation:us-west-2:1:stack/root/a"
+_CHILD = "arn:aws:cloudformation:us-west-2:1:stack/root-CHILD/b"
+
+
+def _event(stack_id, minutes, logical, status, reason="", rtype="AWS::Lambda::Function", physical=None):
+    return {
+        "StackId": stack_id,
+        "Timestamp": _T0 + timedelta(minutes=minutes),
+        "LogicalResourceId": logical,
+        "ResourceStatus": status,
+        "ResourceStatusReason": reason,
+        "ResourceType": rtype,
+        "PhysicalResourceId": physical if physical is not None else logical,
+    }
+
+
+class _Paged:
+    def __init__(self, pages):
+        self._pages = pages
+
+    def paginate(self, **kwargs):
+        return self._pages(**kwargs)
+
+
+class _StubCfn:
+    """Events newest first, as describe_stack_events returns them."""
+
+    def __init__(self, events, resources=(), status="UPDATE_ROLLBACK_COMPLETE"):
+        self._events = events
+        self._resources = resources
+        self._status = status
+
+    def describe_stacks(self, StackName):
+        return {"Stacks": [{"StackStatus": self._status}]}
+
+    def get_paginator(self, name):
+        if name == "describe_stack_events":
+            return _Paged(
+                lambda StackName: [{"StackEvents": sorted(
+                    [e for e in self._events if e["StackId"] == StackName or (StackName == "root" and e["StackId"] == _ROOT)],
+                    key=lambda e: e["Timestamp"], reverse=True,
+                )}]
+            )
+        return _Paged(lambda StackName: [{"StackResourceSummaries": list(self._resources)}])
+
+
+def _failed_update_events():
+    return [
+        # Last night's successful update, which must not be reported.
+        _event(_ROOT, -1440, "root", "UPDATE_IN_PROGRESS", "User Initiated", "AWS::CloudFormation::Stack", _ROOT),
+        _event(_ROOT, -1439, "Old", "UPDATE_FAILED", "an old failure"),
+        _event(_ROOT, 0, "root", "UPDATE_IN_PROGRESS", "User Initiated", "AWS::CloudFormation::Stack", _ROOT),
+        _event(_CHILD, 1, "CodeBuildRun", "UPDATE_FAILED",
+               "Received response status [FAILED] from custom resource. Message returned: "
+               "build did not complete - status: [FAILED] (RequestId: abc)", "Custom::CodeBuildRun"),
+        _event(_ROOT, 2, "CHILD", "UPDATE_FAILED",
+               "Embedded stack x was not successfully updated", "AWS::CloudFormation::Stack", _CHILD),
+        _event(_ROOT, 2, "Other", "UPDATE_FAILED", "Resource update cancelled"),
+        _event(_ROOT, 2, "root", "UPDATE_ROLLBACK_IN_PROGRESS", "The following resource(s) failed",
+               "AWS::CloudFormation::Stack", _ROOT),
+        _event(_ROOT, 5, "Image", "UPDATE_FAILED", "Resource handler returned message: did not stabilize"),
+    ]
+
+
+class _StubCodeBuild:
+    def list_builds_for_project(self, projectName):
+        return {"ids": ["p:new", "p:old"]}
+
+    def batch_get_builds(self, ids):
+        return {"builds": [
+            {
+                "id": "p:new",
+                "buildStatus": "FAILED",
+                "startTime": _T0 + timedelta(seconds=30),
+                "phases": [{"phaseType": "BUILD", "phaseStatus": "FAILED",
+                            "contexts": [{"message": "Error while executing command: docker build"}]}],
+                "logs": {"groupName": "g", "streamName": "s"},
+            },
+        ]}
+
+
+class _StubLogs:
+    def get_log_events(self, **kwargs):
+        lines = [
+            "[Container] 2026/10/30 Running command docker build",
+            "Step 2/23 : FROM node AS builder",
+            "Get https://public.ecr.aws/x: net/http: TLS handshake timeout",
+            "",
+            "[Container] 2026/10/30 Command did not exit successfully docker build exit status 1",
+            "after the failure",
+        ]
+        return {"events": [{"message": line + "\n"} for line in lines]}
+
+
+def test_a_deploy_cause_names_the_nested_resource_and_its_build_log():
+    """The CodeBuild run's own log is where the actual reason is."""
+    cfn = _StubCfn(
+        _failed_update_events(),
+        resources=[{"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "p"}],
+    )
+    lines = failure_cause.stack_cause(cfn, _StubCodeBuild(), _StubLogs(), "root")
+    text = "\n".join(lines)
+    assert lines[0].startswith("Stack is UPDATE_ROLLBACK_COMPLETE: it rolled back")
+    assert "• CHILD → CodeBuildRun: build did not complete - status: [FAILED]" in text
+    assert "RequestId" not in text
+    assert "CodeBuild BUILD phase: Error while executing command: docker build" in text
+    assert "TLS handshake timeout" in text
+    assert "after the failure" not in text
+
+
+def test_a_deploy_cause_separates_rollback_failures_and_skips_cascades_and_old_runs():
+    lines = failure_cause.stack_cause(
+        _StubCfn(_failed_update_events(), status="UPDATE_ROLLBACK_FAILED"),
+        _StubCodeBuild(), _StubLogs(), "root",
+    )
+    text = "\n".join(lines)
+    assert "tries to resume it first" in lines[0]
+    assert text.index("CodeBuildRun") < text.index("during the rollback") < text.index("Image")
+    assert "Image: did not stabilize" in text
+    assert "Other" not in text
+    assert "old failure" not in text
+
+
+def test_an_operation_older_than_the_job_is_not_reported_as_its_cause(tmp_path: Path, capsys):
+    """A deploy refused before CloudFormation started must not inherit last night's failure."""
+    lines = failure_cause.stack_cause(
+        _StubCfn(_failed_update_events()), _StubCodeBuild(), _StubLogs(), "root",
+        since=_T0 + timedelta(hours=20),
+    )
+    assert lines == ["Stack is UPDATE_ROLLBACK_COMPLETE: it rolled back to its previous "
+                     "build and is usable, so the next night can deploy over it."]
+    text = failure_cause.describe("deploy", "Error: template URL not readable", lines)
+    assert "Error: template URL not readable" in text
+    assert "CodeBuildRun" not in text
+
+
+def test_the_job_start_time_is_parsed_from_gitlabs_format():
+    parsed = failure_cause._parse_time("2026-10-30T00:12:36Z")
+    assert parsed == datetime(2026, 10, 30, 0, 12, 36, tzinfo=timezone.utc)
+    assert failure_cause._parse_time("") is None
+    assert failure_cause._parse_time("not a time") is None
+
+
+def test_a_build_log_longer_than_one_page_is_read_to_the_failure():
+    pages = {
+        None: {"events": [{"message": "Step 1/2\n"}], "nextForwardToken": "t1"},
+        "t1": {"events": [{"message": "net/http: TLS handshake timeout\n"},
+                          {"message": "[Container] Command did not exit successfully\n"}],
+               "nextForwardToken": "t2"},
+    }
+
+    class Logs:
+        calls = 0
+
+        def get_log_events(self, **kwargs):
+            Logs.calls += 1
+            return pages[kwargs.get("nextToken")]
+
+    lines = failure_cause._build_log_cause(Logs(), "g", "s")
+    assert lines[-1] == "net/http: TLS handshake timeout"
+    assert Logs.calls == 2
+
+
+def test_a_child_reported_failed_twice_has_its_failures_listed_once():
+    """The parent reports a child's failure in the update and again in the rollback."""
+    events = _failed_update_events() + [
+        _event(_ROOT, 6, "CHILD", "UPDATE_FAILED",
+               "Embedded stack x was not successfully updated", "AWS::CloudFormation::Stack", _CHILD),
+    ]
+    failures = failure_cause.own_failures(_StubCfn(events), "root", _T0)
+    assert [f["where"] for f in failures].count("CHILD → CodeBuildRun") == 1
+
+
+def test_the_quoted_build_is_the_newest_failed_one_before_the_resource_failed():
+    """Across every project in the stack, not the first project listed."""
+
+    def build(build_id, minutes, message):
+        return {
+            "id": build_id,
+            "buildStatus": "FAILED",
+            "startTime": _T0 + timedelta(minutes=minutes),
+            "phases": [{"phaseType": "BUILD", "phaseStatus": "FAILED", "contexts": [{"message": message}]}],
+            "logs": {},
+        }
+
+    builds = {
+        "ui": [build("ui:1", 0.2, "ui build, older")],
+        "img": [build("img:1", 0.5, "image build, the one"), build("img:2", 3, "after the failure")],
+    }
+
+    class CodeBuild:
+        def list_builds_for_project(self, projectName):
+            return {"ids": [b["id"] for b in builds[projectName]]}
+
+        def batch_get_builds(self, ids):
+            # Deliberately out of order: the API promises none.
+            return {"builds": [b for p in builds.values() for b in p if b["id"] in ids][::-1]}
+
+    cfn = _StubCfn(
+        [],
+        resources=[
+            {"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "ui"},
+            {"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "img"},
+        ],
+    )
+    quoted: set[str] = set()
+    window = (_T0, _T0 + timedelta(minutes=1))
+    lines = failure_cause._build_cause(CodeBuild(), None, cfn, "child", window, quoted)
+    assert lines == ["CodeBuild BUILD phase: image build, the one"]
+    # Quoted once: another resource failing in the same window does not repeat it.
+    assert failure_cause._build_cause(CodeBuild(), None, cfn, "child", window, quoted) == [
+        "CodeBuild BUILD phase: ui build, older"
+    ]
+
+
+def test_a_resume_that_failed_tonight_is_said_to_need_a_person():
+    log = "Error: the resumed rollback did not complete.\n✗ CHILD → Image: did not stabilize\n"
+    text = failure_cause.describe("deploy", log, ["Stack is UPDATE_ROLLBACK_FAILED: ..."])
+    assert "needs a person" in text
+
+
+def test_a_stack_cause_is_preferred_to_the_log_but_the_log_fills_in_when_it_says_nothing():
+    stack_lines = ["Stack is UPDATE_COMPLETE."]
+    text = failure_cause.describe("deploy", "Error: No updates are to be performed", stack_lines)
+    assert text.splitlines() == ["Stack is UPDATE_COMPLETE.", "Error: No updates are to be performed"]
+    assert failure_cause.describe("deploy", "Error: x", ["Stack is A.", "Failed:"]) == "Stack is A.\nFailed:"
+
+
+def test_the_cause_script_never_fails_the_after_script(tmp_path: Path, capsys):
+    """No credentials, no stack: still a cause from the log, and exit 0."""
+    log = tmp_path / "deploy-output.log"
+    log.write_text("Error: something broke\n")
+    with mock.patch.object(failure_cause, "_stack_cause_or_none", return_value=None):
+        code = failure_cause.main(["--stage", "deploy", "--log", str(log), "--stack", "s"])
+    assert code == 0
+    assert "Error: something broke" in capsys.readouterr().out
+
+
+# ── resuming a stuck rollback ───────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _no_sleeping_in_the_rollback_wait():
+    with mock.patch.object(resume_rollback.time, "sleep") as sleep:
+        yield sleep
+
+
+def test_the_wait_starts_only_once_the_stack_has_left_the_stuck_state(
+    _no_sleeping_in_the_rollback_wait,
+):
+    """The waiter would read a lingering UPDATE_ROLLBACK_FAILED as a final failure."""
+    cfn = mock.Mock()
+    order = []
+    cfn.describe_stacks.side_effect = lambda StackName: order.append("describe") or {
+        "Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED" if len(order) < 3 else "UPDATE_ROLLBACK_IN_PROGRESS"}]
+    }
+    cfn.get_waiter.return_value.wait.side_effect = lambda **kw: order.append("wait")
+    resume_rollback.resume_if_stuck(cfn, "s")
+    assert order == ["describe", "describe", "describe", "wait"]
+    assert _no_sleeping_in_the_rollback_wait.call_count == 1
+
+
+def test_a_stack_in_any_other_state_is_left_alone():
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]}
+    assert resume_rollback.resume_if_stuck(cfn, "s") is False
+    cfn.continue_update_rollback.assert_not_called()
+
+
+def test_a_resumed_rollback_that_fails_names_the_resources_that_failed_again(capsys):
+    """The waiter's error names only the final status; the reasons are in the events."""
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]}
+    cfn.get_waiter.return_value.wait.side_effect = RuntimeError("Waiter encountered a terminal failure state")
+    failed = [{"where": "CHILD → Image", "reason": "Resource handler returned message: did not stabilize"}]
+    with mock.patch.object(resume_rollback.failure_cause, "own_failures", return_value=failed):
+        with pytest.raises(RuntimeError):
+            resume_rollback.resume_if_stuck(cfn, "s")
+    out = capsys.readouterr().out
+    assert "✗ CHILD → Image: did not stabilize" in out
+    # A line the cause step's log reader picks out of deploy-output.log.
+    assert failure_cause.log_cause(out)[:1] == ["Error: the resumed rollback did not complete."]
+
+
+def test_a_resumed_rollback_still_running_after_the_wait_is_not_called_failed(capsys):
+    """Running out of waiting time is not a failure that needs a person."""
+    cfn = mock.Mock()
+    cfn.describe_stacks.side_effect = [
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]},
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_IN_PROGRESS"}]},
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_IN_PROGRESS"}]},
+    ]
+    cfn.get_waiter.return_value.wait.side_effect = RuntimeError("Max attempts exceeded")
+    with mock.patch.object(resume_rollback.failure_cause, "own_failures", return_value=[]):
+        with pytest.raises(RuntimeError):
+            resume_rollback.resume_if_stuck(cfn, "s")
+    out = capsys.readouterr().out
+    assert "still running" in out
+    assert "needs a person" not in failure_cause.describe("deploy", out, ["Stack is X."])
+
+
+def test_only_a_failed_status_line_is_treated_as_decisive():
+    log = "Status: UPDATE_IN_PROGRESS\nStatus: UPDATE_ROLLBACK_FAILED\n"
+    assert failure_cause.log_cause(log) == ["Status: UPDATE_ROLLBACK_FAILED"]
+
+
+def test_a_stuck_rollback_is_resumed_without_skipping_resources_and_awaited():
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]}
+    assert resume_rollback.resume_if_stuck(cfn, "s") is True
+    cfn.continue_update_rollback.assert_called_once_with(StackName="s")
+    cfn.get_waiter.assert_called_once_with("stack_rollback_complete")
+    cfn.get_waiter.return_value.wait.assert_called_once()
+
+
+# ── the per-test listing ────────────────────────────────────────────────────
+
+_GROUPED_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="5" time="100.0">
+  <testcase classname="integ-tests.test_lma_integration" name="test_stack_status_is_complete" time="1.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[A]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[B]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_appsync_reachable" time="2.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_ws_stream_transcribes_to_meeting" time="90.0">
+    <failure message="AssertionError: no transcript segments">trace</failure>
+  </testcase>
+</testsuite></testsuites>
+"""
+
+
+def test_every_test_is_named_in_the_summary(tmp_path: Path, capsys):
+    """The counts say how it went; the list says what it covered."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "stack_status_is_complete ✓" in summary
+    assert "appsync_reachable ✓" in summary
+    assert "ws_stream_transcribes_to_meeting ✗" in summary
+
+
+def test_parametrised_cases_collapse_to_one_line_with_a_count(tmp_path: Path, capsys):
+    """Seven values of one check are one check, not seven lines of a capped message."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "output_present ✓ (×2)" in summary
+    assert "output_present[A]" not in summary
+
+
+def test_a_module_with_too_many_checks_is_summarised_not_listed(tmp_path: Path, capsys):
+    """The plumbing suite is numerous and uniform; it must not bury the live suite."""
+    cases = "".join(
+        f'<testcase classname="integ-tests.test_ci_plumbing" name="test_p{i}" time="0.01"/>'
+        for i in range(30)
+    )
+    report = _write(
+        tmp_path,
+        '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" '
+        f'errors="0" failures="0" skipped="0" tests="30" time="1.0">{cases}</testsuite></testsuites>',
+    )
+    junit_summary.main(["--report", str(report), "--status", "success", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ci_plumbing — all 30 passed" in summary
+    assert "p17" not in summary
+
+
+def test_the_deployed_template_is_named_when_given(tmp_path: Path, capsys):
+    report = _write(tmp_path, _PASSING_REPORT)
+    junit_summary.main(
+        [
+            "--report",
+            str(report),
+            "--status",
+            "success",
+            "--template-url",
+            "https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml",
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "Deployed: https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml" in summary
+
+
+# ── the triage agent's report, as the notification sees it ──────────────────
+
+
+def test_the_agent_report_is_appended_under_its_own_heading(tmp_path: Path, capsys):
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: the transcriber rejected the upgrade\nEVIDENCE: a log line\n")
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "🤖 Triage:" in summary
+    assert "ROOT CAUSE: the transcriber rejected the upgrade" in summary
+    # The deterministic detail is still there: the agent adds to it, never
+    # replaces it.
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+
+
+def test_an_empty_or_absent_agent_report_changes_nothing(tmp_path: Path, capsys):
+    """A green run touches the file; a disabled agent writes nothing to it."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    empty = tmp_path / "triage-report.txt"
+    empty.write_text("")
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(empty)]
+    )
+    with_empty = json.loads(capsys.readouterr().out)["summary"]
+
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(tmp_path / "nope")]
+    )
+    with_absent = json.loads(capsys.readouterr().out)["summary"]
+
+    assert "Triage" not in with_empty
+    assert with_empty == with_absent
+
+
+def test_a_verbose_agent_cannot_crowd_out_the_test_results(tmp_path: Path, capsys):
+    """The facts outrank the interpretation, so both get their own budget."""
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: x\n" + "padding line\n" * 2000)
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+    assert "ROOT CAUSE: x" in summary
+    # Slack rejects the whole post past 4000 characters.
+    assert len(summary) < 4000
+
+
+def test_the_agent_refuses_to_run_without_read_only_credentials(monkeypatch):
+    """It would otherwise inherit the nightly's administrative credentials."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", True)
+    monkeypatch.setattr(failure_agent, "AGENT_ROLE_ARN", "")
+    # Would raise if reached: nothing may be launched without the role.
+    monkeypatch.setattr(
+        failure_agent, "ensure_claude_code", lambda: pytest.fail("launched without a role")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )
+
+
+def test_the_agent_brief_gives_the_run_window_in_epoch_milliseconds(tmp_path: Path):
+    """The agent cannot compute a timestamp: command substitution is denied."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text(
+        '<testsuites><testsuite name="pytest" tests="1" time="600.0" '
+        'timestamp="2026-11-12T01:40:00+00:00"><testcase classname="a" name="b"/>'
+        "</testsuite></testsuites>"
+    )
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "stack", "us-west-2")
+    # 01:35 to 01:55 UTC: the run's 10 minutes and 5 either side.
+    assert "--start-time 1794447300000 --end-time 1794448500000" in brief
+
+
+def test_the_agent_brief_survives_a_report_without_a_timestamp(tmp_path: Path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    report = tmp_path / "report.xml"
+    report.write_text("<testsuites><testsuite/></testsuites>")
+    brief = failure_agent.build_brief(report, tmp_path / "none.log", "s", "us-west-2")
+    assert "Run window: unknown" in brief
+
+
+def test_the_commands_the_agent_was_denied_are_read_from_its_output():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    stdout = json.dumps(
+        {
+            "result": "ROOT CAUSE: not determined",
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": "aws logs x $(date)"}},
+            ],
+        }
+    )
+    assert failure_agent._denied_commands(stdout) == ["Bash: aws logs x $(date)"]
+    assert failure_agent._denied_commands("not json") == []
+    assert failure_agent._denied_commands(json.dumps({"result": "ok"})) == []
+
+
+def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", False)
+    monkeypatch.setattr(
+        failure_agent, "_readonly_credentials", lambda: pytest.fail("ran while disabled")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )
+
+
+# ---------------------------------------------------------------------------
+# The nightly pipeline's own configuration
+# ---------------------------------------------------------------------------
+
+
+def _nightly_deploy_command() -> str:
+    """The nightly deploy job's `lma deploy` command line, comments stripped.
+
+    Read as text rather than parsed: the file uses YAML anchors and GitLab's
+    own `!reference` tags, and the assertions below are about which flags are
+    on a command line, which does not need a parse.
+
+    Comments are removed first, and deliberately so. The job carries a comment
+    explaining why each flag is there, naming the flags -- so a substring
+    search over the raw job passes even with the flag deleted from the command,
+    which is exactly the sort of test that looks like a guard and is not.
+    """
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    job = config.split("nightly_deploy:", 1)[1].split("\nnightly_integ_tests:", 1)[0]
+    lines = [
+        line for line in job.splitlines() if not line.lstrip().lstrip("-").strip().startswith("#")
+    ]
+    return "\n".join(lines)
+
+
+def test_the_nightly_deploy_refuses_to_pass_off_an_unchanged_stack() -> None:
+    """The nightly deploys so the suite can test what was just built.
+
+    If CloudFormation declines the update as a no-op, the stack keeps running
+    the code it already had and every result afterwards describes that older
+    code while the summary says otherwise. The flag is what turns that into a
+    red pipeline, and nothing else in the run can detect it -- which is why it
+    is asserted here rather than left to review.
+    """
+    deploy_job = _nightly_deploy_command()
+    assert "lma deploy" in deploy_job, "could not locate the nightly deploy command"
+    assert "--fail-if-unchanged" in deploy_job, (
+        "the nightly deploy must fail when CloudFormation finds no changes, or a "
+        "stack that has stopped tracking develop reports green"
+    )
+
+
+def test_the_nightly_deploy_waits_for_the_stack_before_testing_it() -> None:
+    """Without --wait the suite races the update it just started."""
+    assert "--wait" in _nightly_deploy_command()
+
+
+def test_the_nightly_deploy_resumes_a_stuck_rollback_before_deploying() -> None:
+    """Otherwise one failed rollback fails every night after it."""
+    deploy_job = _nightly_deploy_command()
+    assert "integ-tests/resume_rollback.py" in deploy_job
+    assert deploy_job.index("resume_rollback.py") < deploy_job.index("lma deploy")
+
+
+def test_the_nightly_publish_and_deploy_capture_what_the_cause_step_reads() -> None:
+    """The after_script reads $NIGHTLY_STAGE-output.log; a renamed file quotes nothing."""
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    assert '--log "$NIGHTLY_STAGE-output.log"' in config
+    assert "--cause failure-cause.txt" in config
+    assert '--since "$CI_JOB_STARTED_AT"' in config
+    publish = config.split("nightly_publish:", 1)[1].split("\nnightly_deploy:", 1)[0]
+    assert "| tee publish-output.log" in publish
+    assert "| tee -a deploy-output.log" in _nightly_deploy_command()
+
+
+def test_a_skip_from_an_off_by_default_feature_is_not_an_environment_gap() -> None:
+    """`--no-skips` must distinguish a gap from a feature nobody enabled.
+
+    The flag exists so a run that exercised nothing cannot report green. But a
+    test for a feature that is off by default has nothing to exercise until
+    somebody opts in, and enabling it on the nightly stack is a decision about
+    that stack's deploy time and cost. Without this exemption, merging such a
+    test turns every nightly run red and the only ways out are reverting the
+    test or dropping `--no-skips` entirely.
+    """
+    import conftest
+
+    assert conftest._is_deselected_by_marker(_marked("optional_feature")) is True
+    assert conftest._is_deselected_by_marker(_marked("live")) is True
+    assert conftest._is_deselected_by_marker(_marked("external_meeting")) is True
+    # A skip with no marker is still a gap, which is the whole point.
+    assert conftest._is_deselected_by_marker(_marked(None)) is False
+
+
+def _marked(name):
+    """A stand-in for a pytest item carrying (or lacking) one marker."""
+
+    class Item:
+        def get_closest_marker(self, marker):
+            return object() if name is not None and marker == name else None
+
+    return Item()
+
+
+def test_the_voice_enrollment_test_is_marked_as_an_optional_feature() -> None:
+    """It needs EnableVoiceEnrollment, which is off by default.
+
+    Asserted on the source rather than by collecting the suite, which would
+    need AWS credentials.
+    """
+    source = (
+        Path(__file__).resolve().parent / "test_lma_integration.py"
+    ).read_text()
+    head = source.split("def test_voice_enrollment_consent_lifecycle", 1)[0]
+    assert head.rstrip().endswith("@pytest.mark.optional_feature"), (
+        "test_voice_enrollment_consent_lifecycle must carry the "
+        "optional_feature marker, or --no-skips reports its clean skip as a "
+        "failure on every deployment that has not enabled the feature"
+    )
+
+
+def test_the_google_meet_test_is_marked_as_an_external_meeting() -> None:
+    """It needs LMA_TEST_MEET_URL, and Google Meet may turn its guest away.
+
+    Without the marker, the scheduled run's --no-skips would turn either skip
+    into a failure.
+    """
+    source = (Path(__file__).resolve().parent / "test_meet_end_to_end.py").read_text()
+    head = source.split("def test_vp_transcribes_speech_and_chat_from_a_google_meet", 1)[0]
+    assert head.rstrip().endswith("@pytest.mark.external_meeting")
+
+
+# ── The guest-free live meeting test (test_vp_live_meeting.py) ──────────────
+#
+# What is tested here is what decides whether a scheduled run can pass without
+# having joined a meeting: the gate, the secret, and the verdicts. The meeting
+# value used below is the documentation's placeholder, not a real meeting.
+
+_MEET_LINK = "https://meet.google.com/abc-defg-hij"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [("1", True), ("true", True), ("yes", True), ("", False), ("0", False), ("false", False), ("no", False)],
+)
+def test_the_live_meeting_test_is_switched_on_only_by_its_flag(value, expected) -> None:
+    assert live_meeting.enabled({"LMA_TEST_VP_LIVE_MEETING": value}) is expected
+    assert live_meeting.enabled({}) is False
+
+
+def test_the_live_meeting_secret_has_a_default_name_and_can_be_renamed() -> None:
+    assert live_meeting.secret_id({}) == "lma/integ-tests/live-meeting"
+    assert live_meeting.secret_id({"LMA_TEST_LIVE_MEETING_SECRET_ID": " other/name "}) == "other/name"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [_MEET_LINK, json.dumps({"url": _MEET_LINK}), json.dumps({"meeting_id": "abc-defg-hij"})],
+)
+def test_a_google_meet_secret_can_be_a_bare_link_or_json(raw) -> None:
+    meeting = live_meeting.parse_secret(raw, "s")
+    assert meeting.platform == "GOOGLE_MEET"
+    assert live_meeting.google_meet_code(meeting.meeting_id) == "abc-defg-hij"
+
+
+def test_a_secret_can_name_another_platform_with_a_password() -> None:
+    meeting = live_meeting.parse_secret(
+        json.dumps({"platform": "zoom", "meeting_id": "1234567890", "passcode": "pw-1234"}), "s"
+    )
+    assert (meeting.platform, meeting.meeting_id, meeting.password) == ("ZOOM", "1234567890", "pw-1234")
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ("", "is empty"),
+        ("{not json", "does not parse"),
+        (json.dumps(["x-secret-value"]), "is not a JSON object"),
+        (json.dumps({"platform": "SKYPE", "url": "x-secret-value"}), "names platform"),
+        (json.dumps({"link": "x-secret-value"}), "has no meeting"),
+        ("https://meet.google.com/lookup/x-secret-value", "/lookup/"),
+        (json.dumps({"url": "https://example.com/x-secret-value"}), "Google Meet meeting code"),
+    ],
+)
+def test_a_malformed_secret_fails_without_quoting_its_value(raw, message) -> None:
+    """Each is a failure, not a skip, and the message names the key, not the value."""
+    with pytest.raises(live_meeting.LiveMeetingUnavailable, match=message) as caught:
+        live_meeting.parse_secret(raw, "lma/integ-tests/live-meeting")
+    assert "x-secret-value" not in str(caught.value)
+    assert "lma/integ-tests/live-meeting" in str(caught.value)
+
+
+def _secrets_session(payload=None, error=None):
+    client = mock.Mock()
+    if error is not None:
+        client.get_secret_value.side_effect = error
+    else:
+        client.get_secret_value.return_value = payload
+    session = mock.Mock()
+    session.client.return_value = client
+    return mock.Mock(return_value=session), client
+
+
+def test_the_meeting_is_read_from_the_default_secret() -> None:
+    factory, client = _secrets_session({"SecretString": _MEET_LINK})
+    meeting = live_meeting.resolve("us-west-2", env={}, session_factory=factory)
+    assert meeting.platform == "GOOGLE_MEET"
+    factory.assert_called_once_with(region_name="us-west-2")
+    client.get_secret_value.assert_called_once_with(SecretId="lma/integ-tests/live-meeting")
+
+
+def test_an_unreadable_live_meeting_secret_fails_with_what_to_do() -> None:
+    """A missing secret or a role without access to it, once the test is switched on."""
+    factory, _ = _secrets_session(error=RuntimeError("ResourceNotFoundException"))
+    with pytest.raises(live_meeting.LiveMeetingUnavailable) as caught:
+        live_meeting.resolve(
+            "us-west-2", env={"LMA_TEST_LIVE_MEETING_SECRET_ID": "lma/x"}, session_factory=factory
+        )
+    text = str(caught.value)
+    assert "'lma/x'" in text and "ResourceNotFoundException" in text
+    assert "LMA_TEST_VP_LIVE_MEETING" in text and "us-west-2" in text
+
+
+def test_a_binary_live_meeting_secret_fails() -> None:
+    factory, _ = _secrets_session({"SecretBinary": b"x"})
+    with pytest.raises(live_meeting.LiveMeetingUnavailable, match="no SecretString"):
+        live_meeting.resolve(None, env={}, session_factory=factory)
+
+
+def test_the_meeting_does_not_show_its_link_in_repr_or_in_redacted_text() -> None:
+    meeting = live_meeting.LiveMeeting("GOOGLE_MEET", _MEET_LINK, "pw-1234")
+    assert "abc" not in repr(meeting) and "pw-1234" not in repr(meeting)
+    text = f"joined {_MEET_LINK}; code abc-defg-hij, also abcdefghij; pw-1234"
+    assert meeting.redact(text) == "joined <meeting>; code <meeting>, also <meeting>; <meeting>"
+    assert meeting.redact(None) == ""
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [("JOINING", None), ("MANUAL_ACTION_REQUIRED", None), ("JOINED", "joined"), ("ACTIVE", "joined"),
+     ("FAILED", "left"), ("COMPLETED", "left"), ("ENDED", "left")],
+)
+def test_join_state(status, expected) -> None:
+    assert live_meeting.join_state({"status": status}) == expected
+
+
+def test_a_vp_alone_in_a_meeting_passes_only_by_completing_through_the_watchdog() -> None:
+    ok = {"status": "COMPLETED", "endTrigger": "attendees-left"}
+    assert live_meeting.left_on_its_own_problem(ok) is None
+    assert "still ACTIVE" in live_meeting.left_on_its_own_problem({"status": "ACTIVE"})
+    assert "expected COMPLETED" in live_meeting.left_on_its_own_problem(
+        {"status": "ENDED", "endTrigger": "attendees-left"}
+    )
+    assert "expected COMPLETED" in live_meeting.left_on_its_own_problem({"status": "FAILED"})
+    assert "'navigated-away'" in live_meeting.left_on_its_own_problem(
+        {"status": "COMPLETED", "endTrigger": "navigated-away"}
+    )
+
+
+@pytest.mark.parametrize(
+    "launch_type, expected",
+    [("FARGATE", ("COMPLETED",)), ("ec2", ("COMPLETED",)), ("MICROVM", ("ENDED", "COMPLETED")),
+     (None, ("ENDED", "COMPLETED"))],
+)
+def test_completed_is_required_after_an_end_only_where_a_shutdown_handler_runs(launch_type, expected) -> None:
+    assert live_meeting.statuses_after_end(launch_type) == expected
+
+
+def test_a_vp_ended_from_lma_passes_with_an_accepted_status_and_the_tests_reason() -> None:
+    reason = "ended by the test"
+    for status in ("ENDED", "COMPLETED"):
+        assert live_meeting.ended_from_lma_problem({"status": status, "endReason": reason}, reason) is None
+    ecs = live_meeting.statuses_after_end("FARGATE")
+    assert "expected COMPLETED" in live_meeting.ended_from_lma_problem(
+        {"status": "ENDED", "endReason": reason}, reason, ecs
+    )
+    assert "FAILED" in live_meeting.ended_from_lma_problem({"status": "FAILED", "endReason": reason}, reason)
+    assert "ACTIVE" in live_meeting.ended_from_lma_problem({"status": "ACTIVE"}, reason)
+    assert "endReason" in live_meeting.ended_from_lma_problem({"status": "ENDED", "endReason": "x"}, reason)
+
+
+def test_wait_for_returns_the_last_value_when_time_runs_out() -> None:
+    now = [0.0]
+    values = iter([None, "", 0])
+    result = live_meeting.wait_for(
+        lambda: next(values), timeout=10, interval=5,
+        clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s),
+    )
+    assert result == 0
+
+
+def test_the_status_trail_records_each_change_once() -> None:
+    trail = live_meeting.StatusTrail()
+    for status in ("JOINING", "JOINING", "JOINED", "ACTIVE", "ACTIVE", "COMPLETED"):
+        trail.note({"status": status})
+    assert str(trail) == "JOINING -> JOINED -> ACTIVE -> COMPLETED"
+    assert trail.reached(("ACTIVE",)) and not trail.reached(("FAILED",))
+
+
+def test_the_live_meeting_tests_are_opt_in_external_meetings() -> None:
+    """Without the marker, the scheduled run's --no-skips would fail its opt-in skip every night."""
+    import test_vp_live_meeting
+
+    names = [m.name for m in test_vp_live_meeting.pytestmark]
+    assert "external_meeting" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_live_meeting_tests_never_skip_once_switched_on() -> None:
+    """Once opted in, every way of not joining is a failure; a skip would pass under the marker."""
+    source = (Path(__file__).resolve().parent / "test_vp_live_meeting.py").read_text()
+    assert "pytest.skip(" not in source
+    assert "importorskip" not in source
+
+
+def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_DESKTOP_VIDEO=1 and a stack that keeps desktop key frames.
+
+    Without the marker, the scheduled run's --no-skips would turn their opt-in
+    skip into a failure every night.
+    """
+    import test_desktop_video
+
+    names = [m.name for m in test_desktop_video.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_every_marker_used_in_the_suite_is_registered() -> None:
+    """An unregistered marker is silently ignored, so the exemption would lapse."""
+    registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()
+    for marker in ("live", "optional_feature", "external_meeting"):
+        assert f"    {marker}:" in registered, f"{marker} is not registered in pytest.ini"
+
+
+def test_the_meeting_consent_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_CONSENT=1, and change a deployment-wide setting while they run.
+
+    Without the marker, the scheduled run's --no-skips would turn their opt-in
+    skip into a failure every night.
+    """
+    import test_meeting_consent
+
+    names = [m.name for m in test_meeting_consent.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_transcript_deletion_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_TRANSCRIPT_DELETION=1, and change a deployment-wide setting."""
+    import test_transcript_deletion
+
+    names = [m.name for m in test_transcript_deletion.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+class _FakeConfigurationStore:
+    """The parts of lma_config.ConfigurationStore the consent override uses."""
+
+    def __init__(self, body: dict, active: str | None = "custom") -> None:
+        import meeting_consent_probe
+
+        self.errors = meeting_consent_probe._lma_config()
+        self.active = active
+        self.body = body
+        self.version = 1
+        self.writes: list[str] = []
+        # Called before the next write, to stand in for somebody else's save.
+        self.before_next_write = None
+
+    def active_profile_name(self, consistent_read: bool = False):
+        return self.active
+
+    def read_profile(self, name: str, consistent_read: bool = False):
+        from types import SimpleNamespace
+
+        assert name == self.active
+        return SimpleNamespace(
+            exists=True, body=json.loads(json.dumps(self.body)), version=self.version, metadata={}
+        )
+
+    def _write(self, kind: str, expected_version) -> None:
+        if self.before_next_write:
+            hook, self.before_next_write = self.before_next_write, None
+            hook()
+        if expected_version is not None and expected_version != self.version:
+            raise self.errors.ConcurrentModification("moved on")
+        self.version += 1
+        self.writes.append(kind)
+
+    def write_section(self, name, section, values, *, updated_by, expected_version, comment=None):
+        self._write("section", expected_version)
+        self.body[section] = dict(values)
+        return self.version
+
+    def write_profile(self, name, body, *, updated_by, expected_version, comment=None):
+        self._write("profile", expected_version)
+        self.body = dict(body)
+        return self.version
+
+
+def _override(store):
+    import meeting_consent_probe
+
+    return meeting_consent_probe.ConsentSettingsOverride(store=store)
+
+
+def test_consent_override_removes_a_section_the_profile_did_not_have() -> None:
+    store = _FakeConfigurationStore({"asr_engine": {"x": 1}})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in", consentRule="owner_attests")
+    assert store.body["meeting_consent"] == {"mode": "opt_in", "consentRule": "owner_attests"}
+    override.apply(mode="notify")
+    assert store.body["meeting_consent"] == {"mode": "notify"}
+    override.restore()
+    assert store.body == {"asr_engine": {"x": 1}}
+
+
+def test_consent_override_puts_back_the_saved_section() -> None:
+    saved = {"mode": "notify", "notifyNoticeText": "Recorded."}
+    store = _FakeConfigurationStore({"meeting_consent": dict(saved)})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in", consentRule="owner_attests")
+    # The other keys of the saved section are kept while the test runs.
+    assert store.body["meeting_consent"]["notifyNoticeText"] == "Recorded."
+    override.restore()
+    assert store.body == {"meeting_consent": saved}
+
+
+def test_an_override_of_another_section_changes_only_that_section() -> None:
+    """test_transcript_deletion.py overrides Retention with the same class."""
+    import meeting_consent_probe
+
+    store = _FakeConfigurationStore(
+        {"retention": {"meetingRecordExpirationInDays": 30}, "meeting_consent": {"mode": "notify"}}
+    )
+    override = meeting_consent_probe.ConsentSettingsOverride(store=store, section="retention")
+    override.save()
+    override.apply(transcriptDeletionAfterSummary="immediately")
+    assert store.body["retention"] == {
+        "meetingRecordExpirationInDays": 30,
+        "transcriptDeletionAfterSummary": "immediately",
+    }
+    assert store.body["meeting_consent"] == {"mode": "notify"}
+    override.restore()
+    assert store.body["retention"] == {"meetingRecordExpirationInDays": 30}
+
+
+def test_consent_override_restore_keeps_other_sections_saved_meanwhile_and_retries() -> None:
+    store = _FakeConfigurationStore({})
+    override = _override(store)
+    override.save()
+    override.apply(mode="opt_in")
+
+    def somebody_else_saves() -> None:
+        store.body["chat_buttons"] = {"saved": "meanwhile"}
+        store.version += 1
+
+    store.before_next_write = somebody_else_saves
+    override.restore()
+    assert store.body == {"chat_buttons": {"saved": "meanwhile"}}
+    assert store.writes == ["section", "profile"]
+
+
+def test_consent_override_restore_is_a_no_op_unless_something_was_applied() -> None:
+    store = _FakeConfigurationStore({"meeting_consent": {"mode": "off"}})
+    override = _override(store)
+    override.restore()
+    override.save()
+    override.restore()
+    override.apply(mode="notify")
+    override.restore()
+    override.restore()
+    assert store.writes == ["section", "profile"]
+    assert store.body == {"meeting_consent": {"mode": "off"}}
+
+
+def test_an_override_on_a_deployment_running_on_its_default_uses_a_temporary_profile() -> None:
+    """The default profile is read-only, so the test works in a Custom copy of it."""
+    store = _FakeConfigurationStore({}, active=None)
+    from types import SimpleNamespace
+
+    created: set = set()
+    store.read_profile = lambda name, consistent_read=False: SimpleNamespace(
+        exists=name in created, body={}, version=1 if name in created else 0, metadata={}
+    )
+    calls: list = []
+    store.create_profile = lambda name, **_: calls.append(("create", name)) or created.add(name)
+    store.activate_profile = lambda name: calls.append(("activate", name)) or setattr(store, "active", name)
+    store.delete_profile = lambda name: calls.append(("delete", name))
+    override = _override(store)
+    override.save()
+    assert calls == [("create", "integ-tests"), ("activate", "integ-tests")]
+    assert override.profile == "integ-tests"
+    override.apply(mode="opt_in")
+    override.restore()
+    assert calls[-2:] == [("activate", "default"), ("delete", "integ-tests")]
+
+
+def _profiles_store(active: str, profiles: dict) -> tuple:
+    """A fake store holding named profiles, recording activations and deletions.
+
+    ``profiles`` maps a name to its metadata; a profile the override creates is
+    added with the origin create_profile gives a copy.
+    """
+    from types import SimpleNamespace
+
+    store = _FakeConfigurationStore({}, active=active)
+    stored = {name: dict(metadata) for name, metadata in profiles.items()}
+    calls: list = []
+
+    def read_profile(name, consistent_read=False):
+        exists = name in stored
+        return SimpleNamespace(
+            exists=exists, body={}, version=1 if exists else 0, metadata=stored.get(name, {})
+        )
+
+    def create_profile(name, *, copy_from=None, **_):
+        calls.append(("create", name))
+        stored[name] = {"ProfileOrigin": f"copied-from-{copy_from or 'default'}"}
+
+    def activate_profile(name):
+        calls.append(("activate", name))
+        store.active = name
+
+    def delete_profile(name):
+        calls.append(("delete", name))
+        stored.pop(name, None)
+
+    store.read_profile = read_profile
+    store.create_profile = create_profile
+    store.activate_profile = activate_profile
+    store.delete_profile = delete_profile
+    return store, calls
+
+
+@pytest.mark.parametrize(
+    ("origin", "reactivated"),
+    [
+        ("copied-from-standard", "standard"),
+        ("copied-from-default", "default"),
+        # A profile it cannot trace back is replaced by the deployment's baseline.
+        (None, "default"),
+        ("copied-from-gone", "default"),
+    ],
+)
+def test_a_temporary_profile_an_interrupted_run_left_active_is_put_back_first(
+    origin, reactivated
+) -> None:
+    """The next run reactivates what it replaced, then works in a fresh copy of that."""
+    import meeting_consent_probe
+
+    left_over = {"ProfileOrigin": origin} if origin else {}
+    store, calls = _profiles_store(
+        "integ-tests",
+        {"integ-tests": left_over, "standard": {"Managed": True}, "default": {"Managed": True}},
+    )
+    override = meeting_consent_probe.ConsentSettingsOverride(store=store, section="retention")
+    override.save()
+    assert calls == [
+        ("activate", reactivated),
+        ("delete", "integ-tests"),
+        ("create", "integ-tests"),
+        ("activate", "integ-tests"),
+    ]
+    override.apply(transcriptDeletionAfterSummary="immediately")
+    override.restore()
+    assert calls[-2:] == [("activate", reactivated), ("delete", "integ-tests")]
+    assert store.active == reactivated
+
+
+def test_an_operators_custom_profile_is_edited_in_place_not_replaced() -> None:
+    """Only the override's own profile name is taken for a left-over one."""
+    store, calls = _profiles_store("custom", {"custom": {"ProfileOrigin": "copied-from-default"}})
+    override = _override(store)
+    override.save()
+    assert calls == []
+    assert override.profile == "custom"

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -12,7 +12,8 @@
  * takes one mono 16 kHz stream per session, so each channel is split out and
  * resampled here. Both steps are pure and stateful-per-call, never per frame.
  */
-import { appendSpeakerLabel, formatSpeakerLabel } from './diarization';
+import { transcriptChannelFor } from './channels';
+import { appendSpeakerLabel, formatSpeakerLabel, isVoiceId } from './diarization';
 
 export const ASR_SAMPLE_RATE = 16000;
 
@@ -21,14 +22,14 @@ const STEREO_FRAME_BYTES = BYTES_PER_SAMPLE * 2;
 const INT16_MIN = -32768;
 const INT16_MAX = 32767;
 
-/** ch_0 is the browser tab / meeting audio (CALLER), ch_1 the microphone (AGENT). */
+/** ch_0 is the browser tab / meeting audio (REMOTE), ch_1 the microphone (LOCAL). */
 export const ASR_CHANNEL_IDS = ['ch_0', 'ch_1'] as const;
 export type AsrChannelId = (typeof ASR_CHANNEL_IDS)[number];
 
 export const CHANNEL_INDEX: Record<AsrChannelId, number> = { ch_0: 0, ch_1: 1 };
 
 export const channelToTranscriptChannel = (channelId: AsrChannelId): string =>
-    channelId === 'ch_0' ? 'CALLER' : 'AGENT';
+    transcriptChannelFor(channelId);
 
 /**
  * Splits the interleaved stereo stream into per-channel mono buffers.
@@ -202,6 +203,12 @@ export class ChannelResampler {
  * a channel took that channel's placeholder name alone, and a reviewer reading such
  * a transcript concluded two correctly separated speakers had been merged.
  *
+ * With voice enrollment on, the engine may instead report the NAME of somebody
+ * who consented to be recognised. A name is not a voice id and is not treated
+ * like one: it stands as the speaker on its own rather than becoming a suffix,
+ * because "Other Participant (Sarah Lee)" says the opposite of what is known —
+ * that she is identified, not that she is some unknown participant.
+ *
  * Stateless: it holds no counter, because nothing needs renumbering.
  */
 export class SpeakerNameRegistry {
@@ -215,6 +222,10 @@ export class SpeakerNameRegistry {
         speakerId: string | null | undefined,
         channelName: string
     ): string {
-        return appendSpeakerLabel(channelName, formatSpeakerLabel(speakerId ?? undefined));
+        const label = formatSpeakerLabel(speakerId ?? undefined);
+        if (label !== undefined && !isVoiceId(label)) {
+            return label;
+        }
+        return appendSpeakerLabel(channelName, label);
     }
 }

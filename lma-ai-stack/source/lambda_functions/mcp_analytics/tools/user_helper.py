@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -62,6 +62,10 @@ def has_zoom_credentials(cognito_sub: str) -> bool:
     """Check whether the user has stored Zoom credentials.
 
     Returns False on any error so we always fall back to guest join.
+
+    The secret-name layout matches zoom_credentials_manager (which writes the
+    secret) and the LMA SDK's VirtualParticipantOperations.has_zoom_credentials
+    (lib/lma_sdk); keep the three in step.
     """
     if not cognito_sub:
         return False

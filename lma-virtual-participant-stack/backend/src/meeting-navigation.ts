@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -38,6 +38,9 @@
  * a fully-quiesced page — they need the document.
  */
 import type { Page } from 'playwright-core';
+import { createLogger } from './logger.js';
+
+const log = createLogger('meeting-navigation');
 
 /**
  * Budget for the initial meeting-page load. Deliberately generous: the cost of
@@ -82,7 +85,7 @@ export async function gotoMeetingPage(
     } catch (err) {
         const current = page.url();
         if (arrivedAtExpectedHost(current, expectedHostPattern)) {
-            console.warn(
+            log.warn(
                 `[${label}] ${url} reported "${String(err).split('\n')[0]}" but the page ` +
                     `settled at ${current} — continuing.`,
             );
@@ -101,4 +104,6 @@ export const MEETING_HOST_PATTERNS = {
     teams: /https:\/\/teams\.(microsoft|live)\.com\//,
     webex: /https:\/\/([a-z0-9-]+\.)*webex\.com\//,
     chime: /https:\/\/([a-z0-9-]+\.)*chime\.aws\//,
+    // Meet, and Google's cookie-consent page that some regions see before it.
+    googleMeet: /https:\/\/(meet|consent)\.google\.com\//,
 } as const;

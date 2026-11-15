@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Drivers that know how to inject a single synthetic meeting into LMA.
 
 Each driver implements the same async contract so scenarios can mix & match:

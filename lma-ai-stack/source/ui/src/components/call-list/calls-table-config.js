@@ -1,14 +1,14 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
 import {
+  Box,
   Button,
   ButtonDropdown,
   CollectionPreferences,
-  Icon,
   Link,
   SpaceBetween,
   StatusIndicator,
@@ -21,10 +21,10 @@ import { TableHeader } from '../common/table';
 import { CALLS_PATH } from '../../routes/constants';
 import { SentimentIndicator } from '../sentiment-icon/SentimentIcon';
 import { SentimentTrendIndicator } from '../sentiment-trend-icon/SentimentTrendIcon';
-import { CategoryAlertPill } from './CategoryAlertPill';
-import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
+import { parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { shareModal, deleteModal } from '../common/meeting-controls';
+import { sharedWithEntries } from '../common/shared-with';
 import CustomDateRangeModal from './CustomDateRangeModal';
 
 export const KEY_COLUMN_ID = 'callId';
@@ -36,13 +36,6 @@ export const COLUMN_DEFINITIONS_MAIN = [
     cell: (item) => <Link href={`#${CALLS_PATH}/${encodeURIComponent(item.callId)}`}>{item.callId}</Link>,
     sortingField: 'callId',
     width: 325,
-  },
-  {
-    id: 'alerts',
-    header: '⚠',
-    cell: (item) => <CategoryAlertPill alertCount={item.alertCount} categories={item.callCategories} />,
-    sortingField: 'alertCount',
-    width: 85,
   },
   {
     id: 'agentId',
@@ -67,13 +60,19 @@ export const COLUMN_DEFINITIONS_MAIN = [
   {
     id: 'sharedWith',
     header: 'Shared With',
-    cell: (item) => item.sharedWith,
+    // A row read by query carries SharedWith as stored ("[a, b]" or "a,b"); one
+    // updated by a subscription message carries "[a, b]". Both show the same.
+    cell: (item) => sharedWithEntries(item.sharedWith).join(', '),
     sortingField: 'sharedWith',
   },
   {
     id: 'summary',
     header: 'Summary',
     cell: (item) => {
+      // A meeting whose summary is on its way, or failed, says so rather than
+      // "Not available" -- the same words the meeting page uses.
+      const status = item.callSummaryText ? null : summaryStatusText(parseSummaryState(item.callSummaryState));
+      if (status) return <Box color="text-body-secondary">{status}</Box>;
       const summary = getTextOnlySummary(item.callSummaryText);
       return (
         <Popover
@@ -90,13 +89,6 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'summary',
   },
   {
-    id: 'callerPhoneNumber',
-    header: 'Caller Phone Number',
-    cell: (item) => item.callerPhoneNumber,
-    sortingField: 'callerPhoneNumber',
-    width: 175,
-  },
-  {
     id: 'recordingStatus',
     header: 'Status',
     cell: (item) => (
@@ -107,25 +99,25 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'callerSentiment',
-    header: 'Caller Sentiment',
+    header: 'Remote Sentiment',
     cell: (item) => <SentimentIndicator sentiment={item?.callerSentimentLabel} />,
     sortingField: 'callerSentimentLabel',
   },
   {
     id: 'callerSentimentTrend',
-    header: 'Caller Sentiment Trend',
+    header: 'Remote Sentiment Trend',
     cell: (item) => <SentimentTrendIndicator trend={item?.callerSentimentTrendLabel} />,
     sortingField: 'callerSentimentTrendLabel',
   },
   {
     id: 'agentSentiment',
-    header: 'Agent Sentiment',
+    header: 'Local Sentiment',
     cell: (item) => <SentimentIndicator sentiment={item?.agentSentimentLabel} />,
     sortingField: 'agentSentimentLabel',
   },
   {
     id: 'agentSentimentTrend',
-    header: 'Agent Sentiment Trend',
+    header: 'Local Sentiment Trend',
     cell: (item) => <SentimentTrendIndicator trend={item?.agentSentimentTrendLabel} />,
     sortingField: 'agentSentimentTrendLabel',
   },
@@ -135,37 +127,9 @@ export const COLUMN_DEFINITIONS_MAIN = [
     cell: (item) => item.conversationDurationTimeStamp,
     sortingField: 'conversationDurationTimeStamp',
   },
-  {
-    id: 'menu',
-    header: '',
-    cell: (item) => (
-      <ButtonDropdown
-        items={[
-          {
-            text: 'Open in PCA',
-            href: item.pcaUrl,
-            external: true,
-            disabled: !item.pcaUrl,
-            externalIconAriaLabel: '(opens in new tab)',
-          },
-        ]}
-        expandToViewport
-      >
-        <Icon name="menu" />
-      </ButtonDropdown>
-    ),
-    width: 120,
-  },
-  {
-    id: 'callCategories',
-    header: 'Categories',
-    cell: (item) => <CategoryPills categories={item.callCategories} />,
-    sortingField: 'callCategoryCount',
-    width: 200,
-  },
 ];
 
-export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[3];
+export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN.find((column) => column.id === 'initiationTimeStamp');
 
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.callId}`,
@@ -209,6 +173,23 @@ export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
   visibleContent: VISIBLE_CONTENT,
   wraplines: false,
+};
+
+const COLUMN_IDS = new Set(COLUMN_DEFINITIONS_MAIN.map((column) => column.id));
+
+/**
+ * The saved meeting-list preferences, holding only columns the list still has.
+ * Preferences are kept in the browser's local storage, so they can name a column
+ * an earlier version had and this one does not; such an id is dropped rather
+ * than handed to the table and the preferences dialog.
+ */
+export const withKnownColumns = (preferences) => {
+  const saved = Array.isArray(preferences?.visibleContent) ? preferences.visibleContent : VISIBLE_CONTENT;
+  return {
+    ...DEFAULT_PREFERENCES,
+    ...preferences,
+    visibleContent: saved.filter((id) => COLUMN_IDS.has(id)),
+  };
 };
 
 /* eslint-disable react/prop-types, react/jsx-props-no-spreading */

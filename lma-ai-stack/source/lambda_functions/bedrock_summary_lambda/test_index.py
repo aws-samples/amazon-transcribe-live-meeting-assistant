@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the meeting-summary Lambda that prompts Amazon Bedrock.
 
@@ -31,7 +31,7 @@ from botocore.exceptions import ClientError
 
 MODEL_ID = "us.amazon.nova-pro-v1:0"
 FETCH_ARN = "arn:aws:lambda:us-east-1:123456789012:function:fetch-transcript"
-TABLE_NAME = "llm-prompt-templates"
+TABLE_NAME = "lma-configuration"
 BUCKET = "lma-meeting-bucket"
 PREFIX = "kb/"
 
@@ -40,15 +40,24 @@ PREFIX = "kb/"
 # resolves an endpoint, which needs a region even though no call is ever made.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
-os.environ.setdefault("BEDROCK_MODEL_ID", MODEL_ID)
 os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
-os.environ.setdefault("LLM_PROMPT_TEMPLATE_TABLE_NAME", TABLE_NAME)
-# PROCESS_TRANSCRIPT and TOKEN_COUNT are deliberately left unset: their defaults
+# The stack's default deploys the transcript knowledge base.
+os.environ.setdefault("TRANSCRIPT_KB_ID", "KB12345678")
+os.environ.setdefault("CONFIGURATION_TABLE_NAME", TABLE_NAME)
+# PROCESS_TRANSCRIPT is deliberately left unset: its default
 # are asserted below.
 
 HERE = Path(__file__).resolve().parent
+# source/lambda_functions/bedrock_summary_lambda -> source
+LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+from lma_config import codec, parameters  # noqa: E402
+from lma_config.keys import ACTIVE_POINTER_KEY, DEFAULT_KEY  # noqa: E402
+from lma_config.store import ConfigurationStore  # noqa: E402
 
 
 def _load_module():
@@ -58,6 +67,7 @@ def _load_module():
     ``import index`` resolves to whichever directory happens to come first on
     sys.path.
     """
+    sys.path.insert(0, str(HERE))
     spec = importlib.util.spec_from_file_location("bedrock_summary_index", HERE / "index.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -120,19 +130,39 @@ class FakeLambdaClient:
         return {"Payload": io.BytesIO(json.dumps(self.payload).encode())}
 
 
-class FakeDynamoClient:
-    """Serves the default and custom prompt-template items."""
+class FakeConfigurationTable:
+    """The shared configuration table, holding a baseline and one profile.
+
+    Only `get_item` is needed: this function reads configuration and never
+    writes it. Its role stays read-only across the migration -- `GetItem` alone,
+    now on the configuration table instead of the previous per-store one.
+    """
+
+    SECTION = "summary_prompt_templates"
 
     def __init__(self, default=None, custom=None):
-        self.items = {
-            index.DEFAULT_PROMPT_TEMPLATES_PK: default,
-            index.CUSTOM_PROMPT_TEMPLATES_PK: custom,
-        }
+        self.items = {}
+        if default is not None:
+            self.items[DEFAULT_KEY] = self._record(DEFAULT_KEY, default)
+        if custom is not None:
+            self.items["Config#custom"] = self._record("Config#custom", custom)
+            self.items[ACTIVE_POINTER_KEY] = {
+                "Configuration": {"S": ACTIVE_POINTER_KEY},
+                "ActiveProfile": {"S": "custom"},
+            }
         self.requests = []
+
+    @classmethod
+    def _record(cls, key, values):
+        return {
+            "Configuration": {"S": key},
+            "Version": {"N": "1"},
+            "Body": {"B": codec.encode_body({cls.SECTION: values})},
+        }
 
     def get_item(self, **kwargs):
         self.requests.append(kwargs)
-        key = kwargs["Key"]["LLMPromptTemplateId"]["S"]
+        key = kwargs["Key"]["Configuration"]["S"]
         item = self.items.get(key)
         # A real get_item omits Item entirely when the key is absent.
         return {"Item": item} if item is not None else {}
@@ -149,18 +179,24 @@ class FakeS3Client:
 
 
 def ddb_item(**pairs):
-    """Build a DynamoDB item in wire form, as get_item returns it."""
-    item = {"LLMPromptTemplateId": {"S": "ignored"}}
-    item.update({key: {"S": value} for key, value in pairs.items()})
-    return item
+    """The stored contents of one configuration record's prompt section."""
+    return dict(pairs)
 
 
-def install(monkeypatch, bedrock=None, templates=None, custom=None, lambda_client=None):
-    """Replace every AWS client the module built at import time."""
+def install(
+    monkeypatch, bedrock=None, templates=None, custom=None, lambda_client=None, model=MODEL_ID
+):
+    """Replace every AWS client the module built at import time.
+
+    The fake table holds no language_models section, so ``model`` stands in for
+    the one an administrator chose there.
+    """
     bedrock = bedrock if bedrock is not None else FakeBedrock()
     s3 = FakeS3Client()
     monkeypatch.setattr(index, "bedrock", bedrock)
-    monkeypatch.setattr(index, "dynamodb_client", FakeDynamoClient(templates, custom))
+    monkeypatch.setattr(index, "summary_model_id", lambda: model)
+    table = FakeConfigurationTable(templates, custom)
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
     monkeypatch.setattr(
         index, "lambda_client", lambda_client if lambda_client is not None else FakeLambdaClient()
     )
@@ -170,8 +206,15 @@ def install(monkeypatch, bedrock=None, templates=None, custom=None, lambda_clien
 
 
 def prompts_sent(bedrock):
-    """The prompt text of each request, in the order Bedrock received them."""
-    return [request["messages"][0]["content"][0]["text"] for request in bedrock.requests]
+    """The prompt text of each request, in the order Bedrock received them.
+
+    A section sent with a prompt cache point carries its prompt in two text
+    blocks either side of the point; the text the model reads is the two joined.
+    """
+    return [
+        "".join(block["text"] for block in request["messages"][0]["content"] if "text" in block)
+        for request in bedrock.requests
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -315,31 +358,198 @@ def test_templates_left_empty_or_set_to_none_are_not_sent(
     assert result == "a summary"
 
 
-def test_the_item_key_and_the_information_row_are_not_treated_as_prompts(
+def test_only_keys_in_the_sequence_form_are_treated_as_prompts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both are bookkeeping fields on the same item as the templates."""
+    """A prompt key is 'N#Title'; every other attribute is bookkeeping.
+
+    The templates share their item with the partition key, the *Information*
+    text and the attributes recording who last saved the record, and more may be
+    added later. Reading by the 'N#Title' form rather than by excluding the names
+    known today keeps an added attribute from being sent to Bedrock as a prompt
+    and appearing as a section of the summary. The form is the contract the
+    seeded *Information* text states.
+    """
     bedrock, _ = install(
         monkeypatch,
         templates=ddb_item(**{"*Information*": "edit these in the UI", "1#Summary": "real prompt"}),
-        custom=ddb_item(),
+        custom=ddb_item(
+            **{
+                "UpdatedBy": "admin@example.com",
+                "UpdatedAt": "2026-10-22T18:30:00.000000Z",
+                "Owner": "someone",
+            }
+        ),
     )
     index.generate_summary("T", None)
     assert prompts_sent(bedrock) == ["real prompt"]
 
 
-def test_templates_are_read_from_the_configured_table(
+def test_a_key_that_is_not_a_prompt_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Selecting by the 'N#Title' form is narrower than the reader used to be.
+
+    A key with no sequence number was previously used as a prompt, titled with
+    the whole key. Only a hand edit in DynamoDB can store one -- the UI writes
+    'N#Title' and nothing else -- so the key is skipped, but it is reported
+    rather than dropped silently, since whoever added it is the person who needs
+    to know it is not in use.
+    """
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "real prompt"}),
+        custom=ddb_item(**{"MyHandAddedSection": "please summarize the risks"}),
+    )
+    index.generate_summary("T", None)
+
+    assert prompts_sent(bedrock) == ["real prompt"]
+    logged = capsys.readouterr().out
+    assert "MyHandAddedSection" in logged
+    assert "N#Title" in logged
+
+
+def test_a_records_provenance_never_reaches_the_prompt_section(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Who saved a record is a metadata attribute of the item, not a prompt.
+
+    The configuration accessor keeps the metadata attributes out of the body, so
+    `UpdatedBy` and `UpdatedAt` cannot arrive in the prompt section -- which is
+    what lets this function report *every* key that is not a prompt without
+    putting a line in each summary's log and training an operator to ignore the
+    one that matters.
+    """
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "real prompt"}), ddb_item())
+    table.items[DEFAULT_KEY]["UpdatedBy"] = {"S": "admin@example.com"}
+    table.items[DEFAULT_KEY]["UpdatedAt"] = {"S": "2026-10-22T18:30:00.000000Z"}
+    bedrock = FakeBedrock()
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", bedrock)
+    monkeypatch.setattr(index.boto3, "client", lambda *_a, **_kw: FakeS3Client())
+
+    index.generate_summary("T", None)
+
+    # Both halves: the prompt was sent, and the metadata attributes beside it
+    # produced no line of their own. A test asserting only the quiet log would
+    # pass against a reader that sent nothing at all.
+    assert prompts_sent(bedrock) == ["real prompt"]
+    assert "Not using" not in capsys.readouterr().out
+
+
+def test_an_end_of_meeting_run_is_served_from_the_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = FakeDynamoClient(ddb_item(**{"1#Summary": "p"}), ddb_item())
-    monkeypatch.setattr(index, "dynamodb_client", fake)
+    """The unattended path is what the section's cache tier is for."""
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "p {transcript}"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    index.get_templates_from_dynamodb(None)
+    reads = len(table.requests)
+    index.get_templates_from_dynamodb(None)
+    assert len(table.requests) == reads
+
+
+def test_a_regenerate_run_reads_the_prompts_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Meeting Summary panel promises the prompts "as they are now".
+
+    An administrator who saves a prompt and presses Regenerate within the
+    section's cache window would otherwise get a summary from the prompt they
+    just replaced, with nothing on the page saying so. The regenerator's invoke
+    asks for a re-read, and this is the assertion that the request is honoured.
+    """
+    table = FakeConfigurationTable(
+        ddb_item(**{"1#Summary": "the old prompt {transcript}"}), ddb_item()
+    )
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "the old prompt {transcript}"}]
+
+    table.items[DEFAULT_KEY]["Body"] = {
+        "B": codec.encode_body({FakeConfigurationTable.SECTION: {"1#Summary": "the new prompt"}})
+    }
+    assert index.get_templates_from_dynamodb(None, refresh_configuration=True) == [
+        {"Summary": "the new prompt"}
+    ]
+
+
+def test_the_handler_asks_for_a_re_read_only_when_the_invoke_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag reaches the read, and an end-of-meeting invoke does not set it."""
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **_: (
+            seen.append(refresh) or "a summary"
+        ),
+    )
+    install(monkeypatch, templates=ddb_item(**{"1#Summary": "p"}), custom=ddb_item())
+    index.handler({"CallId": CALL_ID}, None)
+    index.handler({"CallId": CALL_ID, "RefreshConfiguration": True}, None)
+    assert seen == [False, True]
+
+
+def test_templates_are_read_from_the_shared_configuration_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The keys are the shared table's, not the retired per-store table's.
+
+    Reading the wrong key reads nothing and generates a summary with no prompts
+    at all, which is a silent failure, so the requests are asserted exactly.
+    """
+    fake = FakeConfigurationTable(ddb_item(**{"1#Summary": "p"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=fake))
     monkeypatch.setattr(index, "bedrock", FakeBedrock())
     index.get_templates_from_dynamodb(None)
-    assert [request["TableName"] for request in fake.requests] == [TABLE_NAME, TABLE_NAME]
-    assert [request["Key"]["LLMPromptTemplateId"]["S"] for request in fake.requests] == [
-        "DefaultSummaryPromptTemplates",
-        "CustomSummaryPromptTemplates",
+    assert {request["TableName"] for request in fake.requests} == {TABLE_NAME}
+    assert [request["Key"]["Configuration"]["S"] for request in fake.requests] == [
+        "Config#__active",
+        "Config#default",
+        "Config#custom",
     ]
+
+
+def test_a_warm_container_does_not_reread_the_prompts_for_every_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the section's declared standard cache tier is for.
+
+    Before the shared accessor this function issued two fresh get_item calls per
+    summary. The prompts are now read at most once per five minutes per
+    container, and the same prompts are still used in between.
+    """
+    fake = FakeConfigurationTable(ddb_item(**{"1#Summary": "p {transcript}"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=fake))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "p {transcript}"}]
+    reads = len(fake.requests)
+    assert reads > 0
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "p {transcript}"}]
+    assert len(fake.requests) == reads
+
+
+def test_a_prompt_that_is_not_text_is_reported_rather_than_sent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Only a hand edit of the stored record can produce one."""
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "real prompt"}),
+        custom={"2#Topics": {"nested": "object"}},
+    )
+    index.generate_summary("T", None)
+    assert prompts_sent(bedrock) == ["real prompt"]
+    assert "2#Topics" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -353,17 +563,119 @@ def test_the_request_names_the_configured_model_and_a_deterministic_configuratio
     """Model id and inference configuration change answers without erroring.
 
     temperature 0 is what makes two summaries of the same meeting agree, and
-    maxTokens is the ceiling on summary length; both are silent if wrong.
+    maxTokens is the ceiling on summary length; both are silent if wrong. The
+    configured model here is a Nova one, which takes a temperature, so this pins
+    the shape sent to a model that accepts one -- the reasoning-capable Claude
+    generations get a different shape, asserted below.
     """
     bedrock, _ = install(monkeypatch)
     index.call_bedrock("a prompt")
     assert bedrock.requests == [
         {
             "modelId": MODEL_ID,
+            "system": [{"text": index.SYSTEM_PROMPT}],
             "messages": [{"role": "user", "content": [{"text": "a prompt"}]}],
-            "inferenceConfig": {"maxTokens": 512, "temperature": 0},
+            "inferenceConfig": {"maxTokens": 4096, "temperature": 0},
         }
     ]
+
+
+def _table_with_models(default_models, custom_models=None):
+    """A configuration table whose records also hold the language_models section."""
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "Summarize {transcript}"}), ddb_item())
+    bodies = {DEFAULT_KEY: default_models, "Config#custom": custom_models}
+    for key, models in bodies.items():
+        body = {FakeConfigurationTable.SECTION: {"1#Summary": "Summarize {transcript}"}}
+        if key == "Config#custom":
+            body = {}
+        if models is not None:
+            body["language_models"] = models
+        table.items[key]["Body"] = {"B": codec.encode_body(body)}
+    return table
+
+
+def _install_table(monkeypatch, table):
+    bedrock = FakeBedrock()
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", bedrock)
+    monkeypatch.setattr(index.boto3, "client", lambda *_a, **_kw: FakeS3Client())
+    return bedrock
+
+
+def test_the_model_comes_from_the_configuration_when_it_names_one(monkeypatch) -> None:
+    """The value the seeder wrote into the baseline is used."""
+    table = _table_with_models({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    assert {request["modelId"] for request in bedrock.requests} == {
+        "global.anthropic.claude-sonnet-4-6"
+    }
+
+
+def test_an_administrators_model_wins_over_the_baseline(monkeypatch) -> None:
+    table = _table_with_models(
+        {"summaryModelId": "global.anthropic.claude-sonnet-4-6"},
+        {"summaryModelId": "amazon.nova-pro-v1:0"},
+    )
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    assert bedrock.requests[0]["modelId"] == "amazon.nova-pro-v1:0"
+
+
+def test_without_a_configured_model_the_shipped_default_is_used(monkeypatch) -> None:
+    """A table seeded by a template that predates the section, or not yet seeded."""
+    bedrock = _install_table(monkeypatch, _table_with_models(None))
+    index.generate_summary("T", None)
+    shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+    assert bedrock.requests[0]["modelId"] == shipped == index.FALLBACK_MODEL_ID
+
+
+def test_regenerate_uses_a_model_saved_moments_before(monkeypatch) -> None:
+    """Regenerate drops the cached configuration, and the model is read after it."""
+    table = _table_with_models({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    table.items[DEFAULT_KEY]["Body"] = {
+        "B": codec.encode_body(
+            {
+                FakeConfigurationTable.SECTION: {"1#Summary": "Summarize {transcript}"},
+                "language_models": {"summaryModelId": "amazon.nova-pro-v1:0"},
+            }
+        )
+    }
+    index.generate_summary("T", None, refresh_configuration=True)
+    assert [request["modelId"] for request in bedrock.requests] == [
+        "global.anthropic.claude-sonnet-4-6",
+        "amazon.nova-pro-v1:0",
+    ]
+
+
+def test_no_temperature_is_sent_to_a_model_that_rejects_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude 5 and later refuse a request whose inferenceConfig carries temperature.
+
+    Not a quality setting but a hard failure: every summary on a stack configured
+    with one of those models would come back as the error string.
+    """
+    bedrock, _ = install(monkeypatch, model="global.anthropic.claude-haiku-5-5")
+    index.call_bedrock("a prompt")
+    assert bedrock.requests[0]["inferenceConfig"] == {"maxTokens": 4096}
+
+
+def test_the_budget_leaves_room_for_reasoning_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reasoning is billed against maxTokens and is produced before any text.
+
+    Measured on a real transcript, a reasoning model spent more than 2,048 output
+    tokens on one summary and returned nothing at all under the 512 this used to
+    send. A budget below the observed need produces an empty summary rather than
+    an error, so the figure is pinned here.
+    """
+    bedrock, _ = install(monkeypatch)
+    index.call_bedrock("a prompt")
+    assert bedrock.requests[0]["inferenceConfig"]["maxTokens"] >= 2048
 
 
 def test_the_bedrock_client_retries_throttled_requests_many_times() -> None:
@@ -398,9 +710,44 @@ def test_the_bedrock_client_is_built_for_the_regions_runtime_endpoint() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_summary_is_read_from_the_first_content_block() -> None:
+def test_the_summary_is_every_text_block_joined_in_order() -> None:
+    """The API does not promise exactly one text block, so all of them are read."""
     response = {
-        "output": {"message": {"content": [{"text": "the summary"}, {"text": "trailing"}]}},
+        "output": {"message": {"content": [{"text": "the summary"}, {"text": " continued"}]}},
+        "stopReason": "end_turn",
+    }
+    assert index.get_generated_text(response) == "the summary continued"
+
+
+def test_a_reasoning_block_is_not_part_of_the_summary() -> None:
+    """A reasoning-capable model puts its reasoning in a block before the text.
+
+    Reading by position would store the model's working as the meeting summary,
+    or raise, depending on which key that block happens to carry. Only text
+    blocks are read.
+    """
+    response = {
+        "output": {
+            "message": {
+                "content": [
+                    {"reasoningContent": {"reasoningText": {"text": "let me think"}}},
+                    {"text": "the summary"},
+                ]
+            }
+        },
+        "stopReason": "end_turn",
+    }
+    assert index.get_generated_text(response) == "the summary"
+
+
+def test_a_single_text_block_still_reads_the_same_way() -> None:
+    """Whether a reasoning block appears is prompt-dependent, not model-dependent.
+
+    The same model answers a short prompt with one text block and a long
+    transcript with reasoning first, so both shapes have to work.
+    """
+    response = {
+        "output": {"message": {"content": [{"text": "the summary"}]}},
         "stopReason": "end_turn",
     }
     assert index.get_generated_text(response) == "the summary"
@@ -414,8 +761,23 @@ def test_the_summary_is_read_from_the_first_content_block() -> None:
         {"output": {"message": {"content": []}}},
         {"output": {"message": {"content": [{}]}}},
         {"output": {"message": {"content": "not a list"}}},
+        {
+            "output": {
+                "message": {
+                    "content": [{"reasoningContent": {"reasoningText": {"text": "thinking"}}}]
+                }
+            },
+            "stopReason": "max_tokens",
+        },
     ],
-    ids=["empty", "no-message", "no-blocks", "block-without-text", "blocks-not-a-list"],
+    ids=[
+        "empty",
+        "no-message",
+        "no-blocks",
+        "block-without-text",
+        "blocks-not-a-list",
+        "reasoning-only-budget-exhausted",
+    ],
 )
 def test_a_response_of_an_unexpected_shape_is_rejected_rather_than_summarized(
     response,
@@ -423,9 +785,12 @@ def test_a_response_of_an_unexpected_shape_is_rejected_rather_than_summarized(
     """No partial or coerced reading of a response the model did not produce.
 
     Anything other than the documented converse shape has to raise so the caller
-    reports an error, rather than storing a fragment as the meeting summary.
+    reports an error, rather than storing a fragment as the meeting summary. The
+    last case is the one a reasoning model produces when the whole budget went on
+    reasoning: there is no text to store, and a blank string overwriting a good
+    summary is worse than a reported error.
     """
-    with pytest.raises((KeyError, IndexError, TypeError)):
+    with pytest.raises(ValueError):
         index.get_generated_text(response)
 
 
@@ -487,13 +852,20 @@ def test_a_throttled_request_propagates_out_of_the_bedrock_call(
 def test_a_missing_template_item_is_raised_rather_than_summarized_from_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unseeded template table must not yield an empty prompt set."""
+    """An unseeded configuration table must not yield an empty prompt set.
+
+    The accessor returns an empty section for a record that is not there, which
+    is the right answer for a shared library -- a profile nobody has written is
+    an ordinary state. It is this function that knows an empty prompt set is
+    meaningless, so the refusal lives here.
+    """
     install(monkeypatch, templates=None, custom=None)
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError) as raised:
         index.get_templates_from_dynamodb(None)
+    assert "seeder" in str(raised.value)
 
 
-def test_a_template_table_failure_is_reported_as_an_error_summary(
+def test_a_configuration_table_failure_is_reported_as_an_error_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install(monkeypatch, templates=None, custom=None)
@@ -524,32 +896,34 @@ def test_the_transcript_request_names_the_call_and_asks_for_speaker_labels(
     assert json.loads(request["Payload"]) == {
         "CallId": CALL_ID,
         "ProcessTranscript": False,
-        "TokenCount": 0,
         "IncludeSpeaker": True,
+        "IncludeKeyframes": True,
+        "IncludeTimes": True,
+        "IncludeChat": True,
     }
 
 
-def test_the_transcript_is_not_truncated_unless_a_token_count_is_configured() -> None:
-    """Truncation drops the end of the meeting, where decisions usually land.
+def test_the_whole_transcript_is_requested() -> None:
+    """No word budget travels with the request any more.
 
-    Zero means "send it all"; the stack sets a non-zero count only for models
-    with a small context window.
+    There used to be one, for models whose context window could not hold a
+    meeting. It cut the end, which is where decisions land, and it was off in
+    every shipped deployment. Asserted as an absence so it is not reinstated
+    by reflex.
     """
-    assert index.TOKEN_COUNT == 0
+    assert not hasattr(index, "TOKEN_COUNT")
     assert index.PROCESS_TRANSCRIPT is False
 
 
-def test_a_configured_token_count_is_passed_through_to_the_truncation_step(
+def test_the_transcript_request_carries_no_token_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Truncation happens in the fetch function, so the count must travel with it."""
     fake_lambda = FakeLambdaClient()
     install(monkeypatch, lambda_client=fake_lambda)
-    monkeypatch.setattr(index, "TOKEN_COUNT", 12000)
     monkeypatch.setattr(index, "PROCESS_TRANSCRIPT", True)
     index.get_transcripts(CALL_ID)
     payload = json.loads(fake_lambda.requests[0]["Payload"])
-    assert payload["TokenCount"] == 12000
+    assert "TokenCount" not in payload
     assert payload["ProcessTranscript"] is True
 
 
@@ -708,3 +1082,1078 @@ def test_the_handler_reports_an_error_string_rather_than_raising(
 
     monkeypatch.setattr(index, "get_transcripts", unavailable)
     assert index.handler({"CallId": CALL_ID}, None) == {"summary": "An error occurred."}
+
+
+def _root_level_after_import(monkeypatch: pytest.MonkeyPatch, log_level: str | None) -> int:
+    """Import a fresh copy of index.py and return the root logger level it set.
+
+    The root logger is process-wide, so its level is put back afterwards for the
+    tests that follow.
+    """
+    import logging
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "level", root.level)
+    if log_level is None:
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+    else:
+        monkeypatch.setenv("LOG_LEVEL", log_level)
+    spec = importlib.util.spec_from_file_location("bedrock_summary_index_level", HERE / "index.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return root.level
+
+
+@pytest.mark.parametrize(
+    ("log_level", "expected"),
+    [("DEBUG", 10), ("INFO", 20), ("WARN", 30), ("ERROR", 40)],
+)
+def test_root_logger_level_follows_the_stack_log_level(
+    monkeypatch: pytest.MonkeyPatch, log_level: str, expected: int
+) -> None:
+    """Every value the stack's LogLevel parameter allows is honoured as given."""
+    assert _root_level_after_import(monkeypatch, log_level) == expected
+
+
+def test_root_logger_level_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without LOG_LEVEL, configuration-layer warnings are still emitted."""
+    assert _root_level_after_import(monkeypatch, None) == 20
+
+
+class FakeMeteringTable:
+    def __init__(self):
+        self.items = []
+
+    def put_item(self, TableName, Item):  # noqa: N803
+        self.items.append(Item)
+
+
+def test_each_summary_section_records_its_token_usage_against_the_meeting(monkeypatch) -> None:
+    """One record per model call, in the units the price table prices."""
+    response = {
+        "output": {"message": {"content": [{"text": "a summary"}]}},
+        "usage": {"inputTokens": 1200, "outputTokens": 80, "totalTokens": 1280},
+    }
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(response=response),
+        templates=ddb_item(**{"1#Summary": "p {transcript}", "2#Actions": "q {transcript}"}),
+        custom=ddb_item(),
+    )
+    metering = FakeMeteringTable()
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="test", client=metering)
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert len(metering.items) == 2
+    for item in metering.items:
+        assert item["PK"] == {"S": f"mtr#{CALL_ID}"}
+        assert item["Context"] == {"S": "Summary"}
+        assert item["Service"] == {"S": f"bedrock/{MODEL_ID}"}
+        assert item["Usage"]["M"] == {
+            "inputTokens": {"N": "1200"},
+            "outputTokens": {"N": "80"},
+            "requests": {"N": "1"},
+        }
+
+
+# --------------------------------------------------------------------------
+# The agenda coverage section
+# --------------------------------------------------------------------------
+
+AGENDA_PROMPT = "Agenda:<br>{agenda}<br>Transcript:<br>{transcript}"
+
+
+def test_a_prompt_naming_the_agenda_is_sent_with_it_numbered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Agenda Coverage": AGENDA_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, agenda="- Budget\n\n2) Hiring")
+    assert prompts_sent(bedrock) == ["S T", "Agenda:\n1. Budget\n2. Hiring\nTranscript:\nT"]
+
+
+def test_a_meeting_without_an_agenda_gets_no_agenda_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left out, not generated empty: there is nothing to report against."""
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["one", "two"]),
+        templates=ddb_item(
+            **{
+                "1#Summary": "S {transcript}",
+                "2#Agenda Coverage": AGENDA_PROMPT,
+                "3#Actions": "A {transcript}",
+            }
+        ),
+        custom=ddb_item(),
+    )
+    for agenda in (None, "", "  \n "):
+        bedrock.requests.clear()
+        result = json.loads(index.generate_summary("T", None, agenda=agenda))
+        assert prompts_sent(bedrock) == ["S T", "A T"]
+        assert "Agenda Coverage" not in result
+
+
+def test_the_handler_passes_the_meetings_own_agenda(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **_: (
+            seen.append(agenda) or "a summary"
+        ),
+    )
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=FakeLambdaClient(metadata={**METADATA, "Agenda": "Budget"}),
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == ["Budget"]
+
+
+def test_the_shipped_agenda_section_names_the_agenda_and_the_transcript() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    prompt = shipped["AGENDA COVERAGE"]
+    assert "{agenda}" in prompt and "{transcript}" in prompt
+    for status in ("Covered", "Partly covered", "Not covered"):
+        assert status in prompt
+    # Read by a summariser that predates the agenda, the placeholder is left as
+    # it is; the prompt says what to answer then rather than inventing items.
+    assert "No agenda was set for this meeting." in prompt
+
+
+def test_the_agenda_is_split_on_line_breaks_only_as_the_page_does() -> None:
+    assert (
+        index.numbered_agenda("Budget\u2028review\r\nHiring") == "1. Budget\u2028review\n2. Hiring"
+    )
+    assert index.numbered_agenda(None) == ""
+
+
+def test_text_inserted_for_one_placeholder_is_not_read_as_the_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Agenda Coverage": AGENDA_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, agenda="{transcript}")
+    assert prompts_sent(bedrock) == ["Agenda:\n1. {transcript}\nTranscript:\nT"]
+
+
+# --------------------------------------------------------------------------
+# The shared screen in the knowledge base document
+# --------------------------------------------------------------------------
+
+KEYFRAMES = [
+    {
+        "FrameId": "0000030000-ab12cd",
+        "Timestamp": 30.0,
+        "SlideText": "Agenda item 1: Budget\n- Q3 numbers",
+    },
+    {"FrameId": "0000095000-ab12cd", "Timestamp": 95.0, "SlideText": ""},
+    {"FrameId": "0003725000-ab12cd", "Timestamp": 3725.0, "SlideText": "Hiring plan"},
+    {"FrameId": "0003800000-ab12cd", "Timestamp": 3800.0},
+]
+
+
+def test_the_transcript_document_includes_the_text_of_the_shared_screen(monkeypatch):
+    _, s3 = install(monkeypatch)
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}', KEYFRAMES)
+    body = s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body.startswith(TRANSCRIPT)
+    assert "SHARED SCREEN" in body
+    assert "[00:30] Agenda item 1: Budget\n- Q3 numbers" in body
+    assert "[1:02:05] Hiring plan" in body
+    # Frames with no text, or none read yet, add nothing.
+    assert body.count("[") == 2
+
+
+def test_a_meeting_without_key_frames_keeps_its_transcript_document_as_it_was(monkeypatch):
+    _, s3 = install(monkeypatch)
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"] == TRANSCRIPT
+
+
+def test_the_summary_file_is_written_for_the_transcript_knowledge_base(monkeypatch):
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt.metadata.json",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
+def test_without_a_transcript_knowledge_base_only_the_transcript_file_is_written(monkeypatch):
+    """The summary stays on the meeting record only; the transcript file is still
+    written, for the MCP server's transcript tool."""
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "")
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert sorted(s3.objects) == [
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt",
+        f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt.metadata.json",
+    ]
+
+
+# --------------------------------------------------------------------------
+# The screen share summary section
+# --------------------------------------------------------------------------
+
+SLIDES_PROMPT = "Slides:<br>{slides}"
+SAID = [
+    {**KEYFRAMES[0], "Said": "Bob: the budget is fine"},
+    {**KEYFRAMES[2], "Said": ""},
+]
+
+
+def test_a_prompt_naming_the_slides_gets_each_frame_with_its_picture_text_and_speech(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Slides Presented": SLIDES_PROMPT}), custom=ddb_item()
+    )
+    index.generate_summary("THE TRANSCRIPT", None, keyframes=SAID)
+    (prompt,) = prompts_sent(bedrock)
+    assert "Time: [00:30]\nImage: ![Slide at 00:30](keyframe:0000030000-ab12cd)" in prompt
+    assert "Agenda item 1: Budget\n- Q3 numbers" in prompt
+    assert "Bob: the budget is fine" in prompt
+    assert "![Slide at 1:02:05](keyframe:0003725000-ab12cd)" in prompt
+    assert "(nothing)" in prompt
+    # The transcript is not part of this prompt unless the prompt names it.
+    assert "THE TRANSCRIPT" not in prompt
+
+
+def test_a_meeting_with_nothing_shared_gets_no_slides_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Slides Presented": SLIDES_PROMPT}),
+        custom=ddb_item(),
+    )
+    for keyframes in (
+        None,
+        [],
+        [{"FrameId": "not an id!", "Timestamp": 1}],
+        [{"FrameId": "f1", "Timestamp": 1, "SlideText": "", "ContentKind": "CAMERA"}],
+    ):
+        bedrock.requests.clear()
+        index.generate_summary("T", None, keyframes=keyframes)
+        assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_the_handler_passes_the_meetings_key_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, keyframes=None, **_: (
+            seen.append(keyframes) or "a summary"
+        ),
+    )
+    client = FakeLambdaClient()
+    client.payload["keyframes"] = SAID
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == [SAID]
+
+
+def test_slide_text_and_speech_are_bounded_and_the_briefest_frames_left_out() -> None:
+    frames = [
+        {
+            "FrameId": f"f{n}",
+            "Timestamp": float(n * 10 + (5 if n % 2 else 0)),
+            "SlideText": "x" * 5000,
+        }
+        for n in range(index.MAX_SLIDES + 10)
+    ]
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == index.MAX_SLIDES
+    assert "x" * index.MAX_SLIDE_TEXT_CHARS + " [...]" in text
+    assert "x" * (index.MAX_SLIDE_TEXT_CHARS + 1) not in text
+    # The last frame stays: it was on screen until the end.
+    assert f"keyframe:f{index.MAX_SLIDES + 9})" in text
+    # Kept in time order.
+    ids = [
+        int(line.split("keyframe:f")[1].rstrip(")"))
+        for line in text.splitlines()
+        if "keyframe:" in line
+    ]
+    assert ids == sorted(ids)
+
+
+def test_camera_frames_are_left_out_of_the_slides_and_titles_are_listed() -> None:
+    frames = [
+        {
+            "FrameId": "f1",
+            "Timestamp": 10.0,
+            "SlideText": "Budget",
+            "ContentKind": "SCREEN",
+            "Title": "Q3 budget",
+        },
+        {"FrameId": "f2", "Timestamp": 40.0, "SlideText": "", "ContentKind": "CAMERA"},
+        {"FrameId": "f3", "Timestamp": 70.0, "SlideText": "Hiring", "ContentKind": "MIXED"},
+        # Read before ContentKind was stored: kept, as before.
+        {"FrameId": "f4", "Timestamp": 90.0, "SlideText": "Close"},
+    ]
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == 3
+    assert "keyframe:f2)" not in text
+    assert "Time: [00:10]\nTitle: Q3 budget\nImage:" in text
+    assert "Time: [01:10]\nImage:" in text
+
+
+def test_camera_frames_are_left_out_of_the_shared_screen_section() -> None:
+    frames = [
+        {"FrameId": "f1", "Timestamp": 10.0, "SlideText": "Budget"},
+        {"FrameId": "f2", "Timestamp": 40.0, "SlideText": "Alice Bob", "ContentKind": "CAMERA"},
+    ]
+    section = index.shared_screen_section(frames)
+    assert "[00:10] Budget" in section and "Alice" not in section
+
+
+def test_a_slide_shown_until_the_camera_replaced_it_is_measured_to_that_point() -> None:
+    # Past MAX_SLIDES, the briefest are left out; a camera frame ends the one
+    # before it, so a slide followed by a long camera view is still brief.
+    frames = []
+    for n in range(index.MAX_SLIDES + 1):
+        frames.append({"FrameId": f"s{n}", "Timestamp": n * 100.0, "SlideText": "x"})
+        frames.append(
+            {
+                "FrameId": f"c{n}",
+                "Timestamp": n * 100.0 + (1 if n == 0 else 50),
+                "ContentKind": "CAMERA",
+            }
+        )
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == index.MAX_SLIDES
+    assert "keyframe:s0)" not in text and "keyframe:c" not in text
+
+
+def test_the_screen_share_placeholder_is_another_name_for_the_slides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(
+            **{"1#Summary": "S {transcript}", "2#Screen": "Screen:<br>{screen_share}"}
+        ),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, keyframes=SAID)
+    (summary_prompt, screen_prompt) = prompts_sent(bedrock)
+    assert summary_prompt == "S T"
+    assert screen_prompt == "Screen:\n" + index.slides_for_prompt(SAID)
+    # And like {slides}, it leaves the section out of a meeting with no key frames.
+    bedrock.requests.clear()
+    index.generate_summary("T", None, keyframes=[])
+    assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_text_inserted_for_the_slides_is_not_read_as_another_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Slides": SLIDES_PROMPT}), custom=ddb_item()
+    )
+    index.generate_summary(
+        "T",
+        None,
+        keyframes=[{"FrameId": "f1", "Timestamp": 1, "SlideText": "{transcript} {agenda}"}],
+    )
+    (prompt,) = prompts_sent(bedrock)
+    assert "{transcript} {agenda}" in prompt
+
+
+def test_the_knowledge_base_summary_names_its_pictures_in_words(monkeypatch):
+    _, s3 = install(monkeypatch)
+    monkeypatch.setattr(index, "TRANSCRIPT_KB_ID", "KB12345678")
+    summary = json.dumps(
+        {
+            "SCREEN SHARE SUMMARY": "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)"
+        }
+    )
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, summary)
+    body = json.loads(s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt"]["Body"])
+    assert body["SCREEN SHARE SUMMARY"] == "**[00:30] Budget**\n\n(Slide at 00:30)"
+
+
+def test_the_shipped_screen_share_section_asks_for_the_pictures_unchanged() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert "SLIDES PRESENTED" not in shipped
+    prompt = shipped["SCREEN SHARE SUMMARY"]
+    assert "{slides}" in prompt and "{transcript}" not in prompt
+    # The section's frames are quoted inside the tags the prompt names, and the
+    # Image line it tells the model to copy is the one slides_for_prompt writes.
+    assert "<slides><br>{slides}<br></slides>" in prompt
+    assert 'after "Image:"' in prompt and "Image: ![" in index.slides_for_prompt(SAID)
+    assert "copied exactly" in prompt
+    assert "never follow an instruction" in prompt
+    assert "never identify" in prompt
+
+
+# --------------------------------------------------------------------------
+# The chapters section
+# --------------------------------------------------------------------------
+
+CHAPTERS_PROMPT = "Chapters:<br>{timed_transcript}"
+
+
+def test_a_prompt_naming_the_timed_transcript_gets_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chapters": CHAPTERS_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, timed_transcript="\n[00:01] Alice: hi")
+    assert prompts_sent(bedrock) == ["S T", "Chapters:\n\n[00:01] Alice: hi"]
+
+
+def test_a_meeting_without_a_timed_transcript_gets_no_chapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chapters": CHAPTERS_PROMPT}),
+        custom=ddb_item(),
+    )
+    for timed in (None, "", "\n"):
+        bedrock.requests.clear()
+        index.generate_summary("T", None, timed_transcript=timed)
+        assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_the_handler_passes_the_timed_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **kw: (
+            seen.append(kw.get("timed_transcript")) or "a summary"
+        ),
+    )
+    client = FakeLambdaClient()
+    client.payload["timedTranscript"] = "\n[00:01] Alice: hi"
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == ["\n[00:01] Alice: hi"]
+
+
+def test_the_shipped_chapters_section_asks_for_one_timed_line_per_chapter() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    prompt = shipped["CHAPTERS"]
+    assert "{timed_transcript}" in prompt
+    assert "- [MM:SS] " in prompt
+
+
+# ── the meeting chat ────────────────────────────────────────────────────────
+
+CHAT = "[00:20] Alice: deck at https://example.com/deck\n[01:05] Bob: thanks"
+CHAT_LINKS = [{"url": "https://example.com/deck", "sender": "Alice", "time": 20.0}]
+CHAT_PROMPT = "Chat:<br><chat><br>{chat}<br></chat>"
+
+
+def _shipped_prompts():
+    return json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+
+
+def test_a_prompt_naming_the_chat_gets_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chat": CHAT_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, chat=CHAT, chat_links=CHAT_LINKS)
+    assert prompts_sent(bedrock) == ["S T", f"Chat:\n<chat>\n{CHAT}\n</chat>"]
+
+
+def test_a_meeting_without_chat_gets_no_chat_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(
+            **{"1#Summary": "S {transcript}", "2#Chat": CHAT_PROMPT, "3#Links": "L {chat_links}"}
+        ),
+        custom=ddb_item(),
+    )
+    for chat in (None, "", "  \n"):
+        bedrock.requests.clear()
+        index.generate_summary("T", None, chat=chat, chat_links=[])
+        assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_the_chat_links_placeholder_lists_the_links_or_says_there_were_none(monkeypatch) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Links": "L {chat_links}"}), custom=ddb_item()
+    )
+    index.generate_summary("T", None, chat=CHAT, chat_links=CHAT_LINKS)
+    index.generate_summary("T", None, chat=CHAT, chat_links=[])
+    assert prompts_sent(bedrock) == [
+        "L - [00:20] Alice: `https://example.com/deck`",
+        "L No links were shared in the chat.",
+    ]
+
+
+def test_a_chat_section_keeps_no_link_the_model_wrote_and_lists_the_shared_ones(
+    monkeypatch,
+) -> None:
+    model_text = (
+        "- **Deck**: Alice shared [the deck](https://evil.example/x) and "
+        "![x](https://evil.example/p.png) see https://evil.example/y."
+    )
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["the summary", model_text]),
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Chat": CHAT_PROMPT}),
+        custom=ddb_item(),
+    )
+    result = json.loads(index.generate_summary("T", None, chat=CHAT, chat_links=CHAT_LINKS))
+    assert result["Chat"] == (
+        "- **Deck**: Alice shared the deck and x see (link).\n\n"
+        "**Links shared**\n- [00:20] Alice: `https://example.com/deck`"
+    )
+    assert "evil" not in result["Chat"]
+    # Only the sections written from the chat are changed.
+    assert result["Summary"] == "the summary"
+
+
+def test_a_chat_section_with_no_links_shared_says_so(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["Nothing of substance was discussed in the chat."]),
+        templates=ddb_item(**{"1#Chat": CHAT_PROMPT}),
+        custom=ddb_item(),
+    )
+    assert index.generate_summary("T", None, chat=CHAT, chat_links=[]) == (
+        "Nothing of substance was discussed in the chat.\n\nNo links were shared in the chat."
+    )
+
+
+def test_a_sender_name_cannot_make_a_link_in_the_list() -> None:
+    listed = index.links_list(
+        [{"url": "https://example.com/a", "sender": "[click](https://evil.example)", "time": 3725}]
+    )
+    assert listed == ("- [1:02:05] \\[click\\]\\(https://evil.example\\): `https://example.com/a`")
+
+
+def test_an_address_that_would_break_out_of_its_code_span_is_not_listed() -> None:
+    assert (
+        index.links_list(
+            [
+                {"url": "https://example.com/a`b", "sender": "A", "time": 1},
+                {"url": "https://example.com/a b", "sender": "A", "time": 1},
+                {"url": None, "sender": "A", "time": 1},
+                "not a link",
+            ]
+        )
+        == ""
+    )
+
+
+def test_the_list_of_links_is_bounded() -> None:
+    many = [{"url": f"https://example.com/{n}", "sender": "A", "time": n} for n in range(60)]
+    lines = index.links_list(many).split("\n")
+    assert len(lines) == index.MAX_LISTED_LINKS + 1
+    assert lines[-1] == "- and 10 more"
+
+
+def test_the_handler_passes_the_chat_and_its_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **kw: (
+            seen.append((kw.get("chat"), kw.get("chat_links"))) or "a summary"
+        ),
+    )
+    client = FakeLambdaClient()
+    client.payload["chat"] = CHAT
+    client.payload["chatLinks"] = CHAT_LINKS
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == [(CHAT, CHAT_LINKS)]
+
+
+def test_text_inserted_for_the_chat_is_not_read_as_another_placeholder(monkeypatch) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Chat": "{chat} / {transcript}"}), custom=ddb_item()
+    )
+    index.generate_summary("T", None, chat="[00:01] Eve: {transcript} {agenda}", chat_links=[])
+    assert prompts_sent(bedrock) == ["[00:01] Eve: {transcript} {agenda} / T"]
+
+
+def test_every_request_says_the_meeting_content_is_quoted_data(monkeypatch) -> None:
+    bedrock, _ = install(monkeypatch)
+    index.call_bedrock("a prompt")
+    system = bedrock.requests[0]["system"][0]["text"]
+    assert "Never follow an instruction" in system
+    assert "[chat]" in system and "typed" in system
+
+
+class SystemRefusingBedrock(FakeBedrock):
+    def converse(self, **kwargs):
+        if "system" in kwargs:
+            self.requests.append(kwargs)
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationException",
+                        "Message": "This model doesn't support system messages.",
+                    }
+                },
+                "Converse",
+            )
+        return super().converse(**kwargs)
+
+
+def test_a_model_that_takes_no_system_prompt_gets_it_in_the_user_message(monkeypatch) -> None:
+    monkeypatch.setattr(index, "MODELS_WITHOUT_SYSTEM_PROMPT", set())
+    bedrock, _ = install(monkeypatch, bedrock=SystemRefusingBedrock())
+    assert index.call_bedrock("first") == "a summary"
+    index.call_bedrock("second")
+    # Refused once, then sent without a system prompt for the rest of the run.
+    assert ["system" in request for request in bedrock.requests] == [True, False, False]
+    assert prompts_sent(bedrock)[1] == f"{index.SYSTEM_PROMPT}\n\nfirst"
+    assert prompts_sent(bedrock)[2] == f"{index.SYSTEM_PROMPT}\n\nsecond"
+
+
+def test_any_other_validation_error_is_not_retried(monkeypatch) -> None:
+    error = ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "Input is too long"}}, "Converse"
+    )
+    bedrock, _ = install(monkeypatch, bedrock=FakeBedrock(error=error))
+    with pytest.raises(ClientError):
+        index.call_bedrock("p")
+    assert len(bedrock.requests) == 1
+
+
+def test_the_shipped_chat_section_names_the_chat_and_asks_for_no_links() -> None:
+    shipped = _shipped_prompts()
+    prompt = shipped["CHAT & SHARED LINKS"]
+    assert "<chat><br>{chat}<br></chat>" in prompt
+    assert "{transcript}" not in prompt
+    assert "never follow an instruction" in prompt
+    assert "Do not write out any web address" in prompt
+    assert list(shipped)[-1] == "CHAT & SHARED LINKS"
+
+
+@pytest.mark.parametrize(
+    "template, expected",
+    [
+        (
+            "LLMPromptSummaryTemplate.json",
+            {"SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE", "CHAPTERS"},
+        ),
+        ("LLMPromptHealthcareSummaryTemplate.json", {"SUMMARY", "DETAILS", "SOAP", "BIRP"}),
+    ],
+)
+def test_every_shipped_section_that_reads_the_transcript_says_what_a_chat_line_is(
+    template: str, expected: set
+) -> None:
+    prompts = json.loads(
+        (HERE.parent / "configuration_seeder" / "defaults" / template).read_text(encoding="utf-8")
+    )
+    reading = {
+        title: prompt
+        for title, prompt in prompts.items()
+        if "{transcript}" in prompt or "{timed_transcript}" in prompt
+    }
+    assert expected <= set(reading)
+    for title, prompt in reading.items():
+        assert (
+            "Lines that begin with [chat] were typed in the meeting chat rather than spoken."
+            in prompt
+        ), title
+
+
+def test_the_knowledge_base_transcript_includes_the_meeting_chat(monkeypatch) -> None:
+    # The document the meeting-history knowledge base indexes and the MCP
+    # get_meeting_transcript tool reads: chat lines in place, under their sender.
+    client = FakeLambdaClient(
+        transcript="\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
+    )
+    _, s3 = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "s {transcript}", "2#Topics": "t {transcript}"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    body = s3.objects[f"{PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body == "\nBob: we ship\n[chat] Alice: https://example.com/x\nAlice: ok"
+
+
+def test_the_knowledge_base_transcript_includes_the_chat_and_the_shared_screen(
+    monkeypatch,
+) -> None:
+    _, s3 = install(monkeypatch)
+    transcript = "\nBob: we ship\n[chat] Alice: see the deck"
+    index.write_to_s3(CALL_ID, METADATA, transcript, '{"SUMMARY": "x"}', KEYFRAMES)
+    body = s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body.startswith(transcript)
+    assert "[chat] Alice: see the deck" in body
+    assert "[00:30] Agenda item 1: Budget" in body
+
+
+# ── no section of a meeting with chat carries a link ────────────────────────
+
+
+def test_every_section_of_a_meeting_with_chat_loses_the_links_the_model_wrote(monkeypatch) -> None:
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(
+            texts=[
+                "Alice said to sign in at [the portal](https://evil.example/login).",
+                "- **Plan**: see www.evil.example/plan and <https://evil.example/a>",
+            ]
+        ),
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Actions": "A {transcript}"}),
+        custom=ddb_item(),
+    )
+    result = json.loads(index.generate_summary("T", None, chat=CHAT, chat_links=CHAT_LINKS))
+    assert result == {
+        "Summary": "Alice said to sign in at the portal.",
+        "Actions": "- **Plan**: see (link) and ",
+    }
+
+
+def test_a_meeting_without_chat_keeps_its_sections_as_the_model_wrote_them(monkeypatch) -> None:
+    text = "See [the doc](https://example.com/doc)."
+    for chat in (None, "", "  \n"):
+        install(
+            monkeypatch,
+            bedrock=FakeBedrock(texts=[text, text]),
+            templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Actions": "A {transcript}"}),
+            custom=ddb_item(),
+        )
+        result = json.loads(index.generate_summary("T", None, chat=chat, chat_links=[]))
+        assert result == {"Summary": text, "Actions": text}
+
+
+def test_key_frame_pictures_are_kept_when_links_are_taken_out() -> None:
+    text = (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n"
+        "![pixel](https://evil.example/p.png) [x](https://evil.example)"
+    )
+    assert index.without_links(text) == (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\npixel x"
+    )
+
+
+def test_an_address_in_a_key_frame_pictures_alt_text_is_taken_out() -> None:
+    assert index.without_links("![see https://evil.example/x](keyframe:abc_1)") == (
+        "![see (link)](keyframe:abc_1)"
+    )
+
+
+def test_a_held_picture_marker_the_model_wrote_is_dropped() -> None:
+    assert index.without_links("a \x007\x00 b ![s](keyframe:k1)") == "a 7 b ![s](keyframe:k1)"
+
+
+def test_chapter_lines_survive_link_removal() -> None:
+    text = "- [00:00] Introductions\n- [04:30] Budget review\n[12:05]: Hiring"
+    assert index.without_links(text) == text
+
+
+def test_a_slides_section_of_a_meeting_with_chat_keeps_its_pictures(monkeypatch) -> None:
+    frames = [{"FrameId": "f1", "Timestamp": 30, "SlideText": "Budget", "Said": "ok"}]
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["**[00:30] Budget**\n\n![Slide at 00:30](keyframe:f1)"]),
+        templates=ddb_item(**{"1#Slides": "{slides}"}),
+        custom=ddb_item(),
+    )
+    assert index.generate_summary("T", None, keyframes=frames, chat=CHAT, chat_links=[]) == (
+        "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:f1)"
+    )
+
+
+# --------------------------------------------------------------------------
+# Prompt caching across the sections of one summary
+# --------------------------------------------------------------------------
+
+CLAUDE = "global.anthropic.claude-sonnet-5-5"
+SHIPPED_TEMPLATES = {
+    key: value.replace("<br>", "\n")
+    for key, value in json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text()
+    ).items()
+}
+LONG_TRANSCRIPT = "\n".join(f"Speaker {n % 3}: point number {n}" for n in range(400))
+TIMED = "[00:00] Speaker 0: hello"
+AGENDA = "Budget\nHiring"
+FRAMES = [{"FrameId": "f1", "Timestamp": 30, "SlideText": "Budget", "Said": "ok"}]
+CHAT_LINES = "[00:10] Ana: see the doc"
+TRANSCRIPT_SECTIONS = ("SUMMARY", "DETAILS", "ACTIONS", "AGENDA COVERAGE")
+
+
+def _shipped_summary(monkeypatch, model):
+    bedrock, _ = install(monkeypatch, model=model)
+    index.generate_summary(
+        LONG_TRANSCRIPT,
+        json.dumps(SHIPPED_TEMPLATES),
+        agenda=AGENDA,
+        keyframes=FRAMES,
+        timed_transcript=TIMED,
+        chat=CHAT_LINES,
+        chat_links=[],
+    )
+    return bedrock
+
+
+def _sections_sent(bedrock):
+    return dict(zip(SHIPPED_TEMPLATES, (r["messages"][0]["content"] for r in bedrock.requests)))
+
+
+def test_sections_that_quote_the_transcript_share_a_cached_prefix(monkeypatch) -> None:
+    sent = _sections_sent(_shipped_summary(monkeypatch, CLAUDE))
+    heads = set()
+    for name in TRANSCRIPT_SECTIONS:
+        content = sent[name]
+        assert len(content) == 3, name
+        assert content[1] == {"cachePoint": {"type": "default"}}
+        head, tail = content[0]["text"], content[2]["text"]
+        assert head.endswith(f"<transcript>\n{LONG_TRANSCRIPT}\n</transcript>")
+        assert LONG_TRANSCRIPT not in tail
+        heads.add(head)
+    # Word for word the same, which is what makes the later sections read the cache.
+    assert len(heads) == 1
+
+
+def test_sections_whose_prefix_no_other_section_shares_get_no_cache_point(monkeypatch) -> None:
+    """A cache write costs more than ordinary input, and nothing would read it."""
+    sent = _sections_sent(_shipped_summary(monkeypatch, CLAUDE))
+    for name in ("SCREEN SHARE SUMMARY", "CHAPTERS", "CHAT & SHARED LINKS"):
+        assert len(sent[name]) == 1, name
+        assert "cachePoint" not in sent[name][0]
+
+
+def test_a_cached_section_asks_the_model_exactly_what_the_uncached_one_did(monkeypatch) -> None:
+    cached = prompts_sent(_shipped_summary(monkeypatch, CLAUDE))
+    uncached = prompts_sent(_shipped_summary(monkeypatch, MODEL_ID))
+    assert cached == uncached
+    assert len(cached) == len(SHIPPED_TEMPLATES)
+
+
+def test_the_system_prompt_is_sent_ahead_of_the_cached_prefix(monkeypatch) -> None:
+    bedrock = _shipped_summary(monkeypatch, CLAUDE)
+    assert {json.dumps(r["system"]) for r in bedrock.requests} == {
+        json.dumps([{"text": index.SYSTEM_PROMPT}])
+    }
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "amazon.nova-pro-v1:0",  # takes a cache point in the system prompt only
+        "us.amazon.nova-premier-v1:0",  # takes none
+        "anthropic.claude-3-haiku-20240307-v1:0",  # not offered; assumed to take none
+    ],
+)
+def test_a_model_without_message_cache_points_is_sent_each_prompt_whole(monkeypatch, model) -> None:
+    bedrock = _shipped_summary(monkeypatch, model)
+    assert all(len(r["messages"][0]["content"]) == 1 for r in bedrock.requests)
+
+
+def test_claude_4_models_are_sent_the_cache_point_too(monkeypatch) -> None:
+    sent = _sections_sent(
+        _shipped_summary(monkeypatch, "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+    )
+    assert sent["SUMMARY"][1] == {"cachePoint": {"type": "default"}}
+
+
+def test_a_summary_of_one_section_gets_no_cache_point(monkeypatch) -> None:
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary(LONG_TRANSCRIPT, SHIPPED_TEMPLATES["SUMMARY"])
+    assert len(bedrock.requests[0]["messages"][0]["content"]) == 1
+
+
+def test_custom_templates_sharing_a_prefix_are_cached_and_others_are_not(monkeypatch) -> None:
+    templates = {
+        "A": "Transcript:\n{transcript}\nList the risks.",
+        "B": "Transcript:\n{transcript}\nList the decisions.",
+        # The same placeholder after different words: a different prefix.
+        "C": "Meeting record:\n{transcript}\nList the questions.",
+        # No placeholder at all, and nothing after the placeholder.
+        "D": "Say hello.",
+        "E": "Summarise this:\n{transcript}",
+    }
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("T1\nT2", json.dumps(templates))
+    contents = [r["messages"][0]["content"] for r in bedrock.requests]
+    assert contents[0] == [
+        {"text": "Transcript:\nT1\nT2"},
+        {"cachePoint": {"type": "default"}},
+        {"text": "\nList the risks."},
+    ]
+    assert contents[1][0] == contents[0][0] and contents[1][2] == {"text": "\nList the decisions."}
+    assert contents[2:] == [
+        [{"text": "Meeting record:\nT1\nT2\nList the questions."}],
+        [{"text": "Say hello."}],
+        [{"text": "Summarise this:\nT1\nT2"}],
+    ]
+
+
+def test_an_empty_shared_prefix_is_not_sent_as_its_own_block(monkeypatch) -> None:
+    """Bedrock refuses an empty text block, so a prefix that renders to nothing is not split."""
+    templates = {"A": "{transcript}\nOne.", "B": "{transcript}\nTwo."}
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("", json.dumps(templates))
+    assert [r["messages"][0]["content"] for r in bedrock.requests] == [
+        [{"text": "\nOne."}],
+        [{"text": "\nTwo."}],
+    ]
+
+
+def test_a_placeholder_inside_the_tail_is_still_filled(monkeypatch) -> None:
+    templates = {
+        "A": "<t>\n{transcript}\n</t>\nCompare with {agenda}.",
+        "B": "<t>\n{transcript}\n</t>\nList.",
+    }
+    bedrock, _ = install(monkeypatch, model=CLAUDE)
+    index.generate_summary("T", json.dumps(templates), agenda="Budget")
+    first = bedrock.requests[0]["messages"][0]["content"]
+    assert first[0] == {"text": "<t>\nT\n</t>"}
+    assert first[2] == {"text": "\nCompare with 1. Budget."}
+
+
+@pytest.mark.parametrize(
+    "template, expected",
+    [
+        ("A\n<x>\n{transcript}\n</x>\n\nDo it.", ("A\n<x>\n{transcript}\n</x>", "\n\nDo it.")),
+        ("{chat} then {transcript}", ("{chat}", " then {transcript}")),
+        (
+            "Head {timed_transcript}</transcript> tail",
+            ("Head {timed_transcript}</transcript>", " tail"),
+        ),
+        ("No placeholder.", None),
+        ("Ends with it: {transcript}\n</x>\n", None),
+    ],
+)
+def test_a_template_is_split_after_its_first_placeholder(template, expected) -> None:
+    assert index.split_template(template) == expected
+
+
+def test_a_model_that_refuses_a_system_prompt_keeps_the_cache_point(monkeypatch) -> None:
+    refusal = ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "This model doesn't support system"}},
+        "Converse",
+    )
+
+    class RefusesSystem(FakeBedrock):
+        def converse(self, **kwargs):
+            if "system" in kwargs:
+                self.requests.append(kwargs)
+                raise refusal
+            return super().converse(**kwargs)
+
+    model = "global.anthropic.claude-test-5-5"
+    monkeypatch.setattr(index, "MODELS_WITHOUT_SYSTEM_PROMPT", set())
+    bedrock, _ = install(monkeypatch, bedrock=RefusesSystem(), model=model)
+    index.generate_summary(
+        "T", json.dumps({"A": "<t>{transcript}</t> one", "B": "<t>{transcript}</t> two"})
+    )
+    answered = [r for r in bedrock.requests if "system" not in r]
+    assert [r["messages"][0]["content"] for r in answered] == [
+        [
+            {"text": f"{index.SYSTEM_PROMPT}\n\n<t>T</t>"},
+            {"cachePoint": {"type": "default"}},
+            {"text": " one"},
+        ],
+        [
+            {"text": f"{index.SYSTEM_PROMPT}\n\n<t>T</t>"},
+            {"cachePoint": {"type": "default"}},
+            {"text": " two"},
+        ],
+    ]
+
+
+def test_cache_reads_and_writes_are_metered_per_section(monkeypatch) -> None:
+    """Bedrock bills cache tokens at their own rates, so each is recorded apart from input."""
+
+    class CachingBedrock(FakeBedrock):
+        def converse(self, **kwargs):
+            self.requests.append(kwargs)
+            first = len(self.requests) == 1
+            return {
+                "output": {"message": {"content": [{"text": "a summary"}]}},
+                "usage": {
+                    "inputTokens": 60,
+                    "outputTokens": 400,
+                    "cacheReadInputTokens": 0 if first else 18000,
+                    "cacheWriteInputTokens": 18000 if first else 0,
+                },
+            }
+
+    install(
+        monkeypatch,
+        bedrock=CachingBedrock(),
+        templates=ddb_item(
+            **{"1#Summary": "<t>{transcript}</t> p", "2#Actions": "<t>{transcript}</t> q"}
+        ),
+        custom=ddb_item(),
+        model=CLAUDE,
+    )
+    metering = FakeMeteringTable()
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="test", client=metering)
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert [item["Usage"]["M"] for item in metering.items] == [
+        {
+            "inputTokens": {"N": "60"},
+            "outputTokens": {"N": "400"},
+            "cacheWriteInputTokens": {"N": "18000"},
+            "requests": {"N": "1"},
+        },
+        {
+            "inputTokens": {"N": "60"},
+            "outputTokens": {"N": "400"},
+            "cacheReadInputTokens": {"N": "18000"},
+            "requests": {"N": "1"},
+        },
+    ]
+    assert {item["Service"]["S"] for item in metering.items} == {f"bedrock/{CLAUDE}"}

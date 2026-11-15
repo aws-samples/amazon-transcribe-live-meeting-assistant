@@ -1,40 +1,89 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { describe, it, expect } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
 
 import { NAV_PATHS } from './navigation';
 import { generateNavigationItems } from '../common/navigation-items';
-import { DESKTOP_CAPTURE_APP_PATH, ASR_CONFIG_PATH } from '../../routes/constants';
+import {
+  ASR_CONFIG_PATH,
+  CONFIGURATION_PATH,
+  DESKTOP_CAPTURE_APP_PATH,
+  NOVA_SONIC_CONFIG_PATH,
+  TRANSCRIPT_SUMMARY_PATH,
+  TROUBLESHOOTING_PATH,
+  VOICE_ENROLLMENT_PATH,
+} from '../../routes/constants';
 
 // Pages whose route deliberately renders no side navigation.
-const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH]);
+const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH, VOICE_ENROLLMENT_PATH]);
 
 describe('side navigation visibility', () => {
   it('renders on every internal page it links to', () => {
-    // The Transcription Engine page shipped with an empty navigation panel: its route mounted
+    // A configuration page once shipped with an empty navigation panel: its route mounted
     // <Navigation />, but the component returns null off NAV_PATHS, and only the
     // activeHref branch had been added for the new path. Any admin nav link that
     // is an internal route must also be a path the navigation renders on.
-    const links = generateNavigationItems({ AsrEngineAvailable: 'true' }, true)
+    const links = generateNavigationItems({ AsrEngineAvailable: 'true', VoiceEnrollmentAvailable: 'true' }, true)
       .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
       .filter((item) => item.type === 'link' && item.href.startsWith('#/') && !item.external)
-      .map((item) => item.href.slice(1));
+      // A link may carry a query (a Configuration section); the navigation renders by path.
+      .map((item) => item.href.slice(1).split('?')[0]);
 
     const missing = links.filter((path) => !NO_SIDE_NAV.has(path) && !NAV_PATHS.includes(path));
     expect(missing).toEqual([]);
   });
 
-  it('offers the Transcription Engine page only when the on-demand engine is deployed', () => {
-    const hrefs = (settings) =>
-      generateNavigationItems(settings, true)
+  it('offers one Configuration page to admins, in place of the pages for single sections', () => {
+    const hrefs = (settings, isAdmin = true) =>
+      generateNavigationItems(settings, isAdmin)
         .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
         .filter((item) => item.type === 'link')
         .map((item) => item.href.slice(1));
 
-    expect(hrefs({ AsrEngineAvailable: 'true' })).toContain(ASR_CONFIG_PATH);
-    expect(hrefs({})).not.toContain(ASR_CONFIG_PATH);
+    expect(hrefs({ AsrEngineAvailable: 'true' })).toContain(CONFIGURATION_PATH);
+    expect(hrefs({}, false)).not.toContain(CONFIGURATION_PATH);
+    // Those paths still open, as a redirect to their section of the Configuration page.
+    [ASR_CONFIG_PATH, NOVA_SONIC_CONFIG_PATH, TRANSCRIPT_SUMMARY_PATH].forEach((path) => {
+      expect(hrefs({ AsrEngineAvailable: 'true' })).not.toContain(path);
+    });
+  });
+
+  it('offers the Troubleshooting page to admins only', () => {
+    const hrefs = (isAdmin) =>
+      generateNavigationItems({}, isAdmin)
+        .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
+        .filter((item) => item.type === 'link')
+        .map((item) => item.href.slice(1));
+
+    expect(hrefs(true)).toContain(TROUBLESHOOTING_PATH);
+    expect(hrefs(false)).not.toContain(TROUBLESHOOTING_PATH);
+  });
+
+  it('offers the enrollment portal only where the deployment stores voiceprints', () => {
+    const hrefs = (settings, isAdmin = true) =>
+      generateNavigationItems(settings, isAdmin)
+        .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
+        .filter((item) => item.type === 'link')
+        .map((item) => item.href.slice(1));
+
+    expect(hrefs({ VoiceEnrollmentAvailable: 'true' })).toContain(VOICE_ENROLLMENT_PATH);
+    expect(hrefs({})).not.toContain(VOICE_ENROLLMENT_PATH);
+    // Enrolling your own voice is self-service, not an admin task: only the
+    // person whose voice it is can consent to it being stored.
+    expect(hrefs({ VoiceEnrollmentAvailable: 'true' }, false)).toContain(VOICE_ENROLLMENT_PATH);
+  });
+
+  it('marks the Enroll My Voice entry Beta', () => {
+    const entry = generateNavigationItems({ VoiceEnrollmentAvailable: 'true' }, false).find(
+      (item) => item.text === 'Enroll My Voice',
+    );
+    expect(entry).toBeTruthy();
+    render(entry.info);
+    expect(screen.getByText('Beta')).toBeTruthy();
+    cleanup();
   });
 });

@@ -14,6 +14,7 @@ title: "Stack Updates & Upgrades"
 - [What May Change](#what-may-change)
 - [Data Retention On Stack Deletion](#data-retention-on-stack-deletion)
 - [Version Migration Notes](#version-migration-notes)
+  - [v0.4.0](#v040)
   - [v0.3.0](#v030)
   - [v0.2.0](#v020)
 - [Related Documentation](#related-documentation)
@@ -112,10 +113,11 @@ after the table.
 | `CustomerManagedEncryptionKey` | Main stack | The KMS key every other retained resource is encrypted with |
 | `UserPool` | Cognito stack | User accounts and group memberships |
 | `IdentityPool` | Cognito stack | Identity pool and the identity ids issued from it |
-| `LLMPromptTemplateTable` | LLM template stack | Prompt templates edited from the web UI |
-| `ChatButtonConfigTable` | Chat button stack | Chat button definitions edited from the web UI |
-| `NovaSonicConfigTable` | Nova Sonic stack | Voice assistant prompt and model settings |
-| `AsrConfigTable` | ASR MicroVM stack | Diarization operating point tuned from the ASR Config page |
+| `ConfigurationTable` | AI stack | Runtime configuration edited from the web UI: the deployment baseline, the profiles holding an administrator's edits, and the pointer naming the active one. See [Unified Configuration Store](configuration-store.md) |
+| `LLMPromptTemplateTable` | LLM template stack | The troubleshooting agent's system prompt, which it reads from here; and the summary prompt templates as they were stored before `ConfigurationTable`. Still written by its own stack so a deployment can be rolled back, and read by the configuration seeder when `Config#custom` is absent. Note that a prompt edit saved after the upgrade lives only in `ConfigurationTable`, so a rollback reverts to the prompts as they were before it |
+| `ChatButtonConfigTable` | Chat button stack | The chat button definitions as they were stored before `ConfigurationTable`. Still written by its own stack so a deployment can be rolled back, and read by the configuration seeder while `Config#custom` holds no chat buttons. A button saved after the upgrade lives only in `ConfigurationTable`, so a rollback reverts to the buttons as they were before it |
+| `NovaSonicConfigTable` | Nova Sonic stack | The voice assistant's prompt and model settings as they were stored before `ConfigurationTable`. Still written by its own stack so a deployment can be rolled back, read by the configuration seeder while `Config#custom` holds no Nova Sonic settings, and read by the Virtual Participant only when `ConfigurationTable` cannot be read or holds no shipped Nova Sonic settings. A setting saved after the upgrade lives only in `ConfigurationTable`, so a rollback reverts to the settings as they were before it |
+| `AsrConfigTable` | ASR MicroVM stack | The three Transcription Engine switches as they were stored before `ConfigurationTable`. Read by the configuration seeder while `Config#custom` holds no ASR switches, and by the WebSocket transcriber only when `ConfigurationTable` cannot be read or holds no shipped ASR switches. A switch saved after the upgrade lives only in `ConfigurationTable`, so a rollback reverts to the switches as they were before it |
 | `S3VectorBucket`, `S3VectorIndex` | Bedrock KB stack | Knowledge base vector store and its embeddings |
 
 `CustomerManagedEncryptionKey` matters more than it looks: without the key, the
@@ -136,10 +138,8 @@ deleted with the stack either way, deliberately:
 |----------|-------|------------------------|
 | `WebAppBucket` | AI stack | Build artifacts a redeployment regenerates; emptied on deletion regardless of this parameter |
 | `MCPServerExternalAppClient` | AI stack | Configuration rather than data; recreated by a redeployment |
-| `TranscriberCallEventTable` | Transcriber stack | Short-lived, TTL'd handoff state for the Post Call Analytics path, not user data. Its template does not read this parameter at all |
 | `AsrImageSourceBucket` | ASR MicroVM stack | Per-stack build context for the MicroVM image, rebuilt from the repository on the next deployment |
 | `CustomHeaderNameSecret`, `CustomHeaderValueSecret` | Transcriber stack | CloudFront origin-verification secrets, regenerated per deployment; retaining them would leave Secrets Manager entries that a new stack cannot use |
-| `CategorySNSTopic` | AI stack | A topic, not a store — it holds no messages between deliveries. Any subscriptions you added to it by hand are lost with it |
 
 One consequence to be aware of when deleting a stack: `AsrImageSourceBucket` has
 versioning enabled and, unlike `WebAppBucket`, no custom resource that empties it
@@ -151,6 +151,293 @@ changing the parameter on an existing stack only takes effect once the stack
 update that carries it has completed.
 
 ## Version Migration Notes
+
+### v0.4.0
+
+**Stack parameters that were defaults of runtime settings are removed.** 0.4.0
+drops the 24 such parameters v0.3.10 had, among them the Amazon Bedrock model ids, the Amazon Transcribe
+language and redaction options, `EnableAudioRecording`, the wake phrase, the voice
+assistant settings and `MeetingInactivityTimeoutInMinutes`. Each is now only a
+setting on the Configuration page, with a shipped default; the full list is in
+[Settings that were stack parameters before 0.4.0](configuration-guide.md#settings-that-were-stack-parameters-before-040).
+This is a clean break:
+
+- **The values those parameters held are not carried across.** After the update,
+  a deployment upgraded from v0.3.10 uses the shipped default for every one of
+  these settings, since no released version had them on a Configuration page. Check these four first, because they change
+  what is captured: `IsContentRedactionEnabled=true` becomes redaction **off**,
+  `EnableAudioRecording=false` becomes recording **on**,
+  `MeetingInactivityTimeoutInMinutes=0` becomes a reaper that ends meetings after
+  240 minutes without speech, and a voice assistant provider becomes `none`. To keep values you had set with the
+  parameters, note them before you update (the stack's **Parameters** tab in the
+  CloudFormation console), then either create a Custom profile with them and
+  activate it, or write them into a configuration file and deploy with the new
+  `CustomConfigPath` parameter, which makes them the deployment default; see
+  [Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
+- **Remove the parameters from deploy commands and pipelines.** CloudFormation
+  refuses an update that names a parameter the template does not declare.
+  `lma deploy` leaves them out on its own.
+- **Enable the shipped default models first, or turn model validation off.**
+  With the default `ModelValidation=true`, the update to 0.4.0 checks access to
+  `global.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-haiku-5-5` and
+  `global.anthropic.claude-haiku-4-5-20251001-v1:0`, the shipped defaults of the
+  Amazon Bedrock Models section, and to the knowledge base embedding model
+  `amazon.titan-embed-text-v2:0` (which v0.3.10 already checked), and fails if
+  the account cannot invoke them. Enable all four in the Amazon Bedrock console
+  before updating, or set
+  `ModelValidation=false` for a deployment that uses other models.
+- **The inactive-meeting reaper is always deployed.** A timeout of 0 on the
+  Configuration page makes it end nothing.
+
+**Configuration profiles work like IDP's.** The Configuration page lists the
+deployment's profiles, one of them active. A deployment runs on its Managed
+`default` profile, which every update rewrites with the release's defaults,
+until an Admin creates and activates a Custom profile. On upgrade from v0.3.10,
+the settings carried across from the previous tables (summary prompts, Nova
+Sonic settings, chat buttons, Transcription Engine switches) form a Custom
+profile, which stays active; a deployment with nothing to carry across runs on
+the default profile. The pages that edit one setting outside the Configuration
+page save into the active profile, and refuse while a Managed one is active. See
+[Configuration profiles](configuration-guide.md#configuration-profiles).
+
+Every Lambda function, MicroVM and CodeBuild project in the deployment now logs
+to a log group the stack declares, with the retention set by
+`CloudWatchLogsExpirationInDays` and the deployment's customer-managed key. That
+includes the two Bedrock Knowledge Base stacks, whose functions had no declared
+group at all and so logged to implicit ones. Nothing breaks on upgrade, but six
+things are worth knowing before you click **Update**.
+
+**The MicroVM log groups are renamed, and a deployment using MicroVM compute
+rebuilds its image.** CloudFormation cannot take ownership of a log group that
+already exists, so these two could not be declared under the names the service
+had already created:
+
+| Logs written before this upgrade | Logs written after |
+|---|---|
+| `/aws/lambda-microvms/<stack>-vp` | `/aws/lambda-microvms/<stack>-vp-logs` |
+| `/aws/lambda-microvms/<stack>-asr` | `/aws/lambda-microvms/<stack>-asr-logs` |
+
+The new groups receive both the image build output and the output of every
+MicroVM — each Virtual Participant and each ASR session — launched after the
+upgrade. A MicroVM that was already running when you upgraded keeps logging to
+the old group until it ends, and so does one launched during the update before
+its launcher function was updated. CloudFormation updates each launcher only
+after that stack's image rebuild finishes, so most launches during an update
+still go to the old group.
+
+Changing where a MicroVM image logs is an image update, so the Virtual
+Participant image (roughly 8–10 minutes) and the ASR image (longer — it
+re-downloads the model bundle) are rebuilt as part of this upgrade. **The ASR
+rebuild depends on an external model host being reachable at upgrade time.** If
+that download fails all five of its retries, the image build fails and the
+nested ASR stack rolls back — and because the rollback has to put the old log
+group name back, it is itself another update that may rebuild against the same
+unreachable host. If that leaves the nested stack in `UPDATE_ROLLBACK_FAILED`,
+run `aws cloudformation continue-update-rollback` on it and retry the upgrade
+later. Deployments not using MicroVM compute are unaffected.
+
+**CodeBuild build output moves to `/<stack>/codebuild/<project>`.** The six
+build projects (the web UI, the MCP server layer, the WebSocket transcriber and
+Virtual Participant images, and the browser extension and desktop capture app
+packages) previously wrote to `/aws/codebuild/<project>`, which CodeBuild creates
+on the first build. The new groups sit under the same `/<stack>/` prefix as the
+Lambda groups, so `lma logs` lists them, and each one is deleted with the stack
+that owns it. Output from builds that ran before the upgrade stays in the old
+groups. The builds the upgrade itself runs start only after their project has
+been updated, so they already write to the new groups.
+
+**Nothing is migrated, and the old groups are left behind.** Logs already in the
+implicit `/aws/lambda/<function-name>` groups, in the two MicroVM groups and in
+the `/aws/codebuild/<project>` groups above, stay exactly where they are.
+CloudFormation does not own them, this upgrade does not delete them, and they
+still have no expiry — so they are permanent leftovers until you delete them.
+See [Cleanup](cleanup.md) for the prefixes to sweep.
+
+**VPC Flow Log retention now follows your setting.** The VPC stack applied its
+own 14-day default whatever `CloudWatchLogsExpirationInDays` was set to at the
+top level, because the parameter was never passed down to it. If your top-level
+value is higher than 14 — the default is 90 — your VPC Flow Logs will start
+retaining for longer, and costing more, after this upgrade. Lower it on the VPC
+stack's behalf by lowering the top-level parameter if that is not what you want.
+
+**Two log groups are removed if the feature they belong to is currently off.**
+`BedrockSummaryLambdaLogGroup` and `CognitoUserPoolEmailDomainVerifyFunctionLogGroup`
+now exist only when the function that writes to them exists. If your deployment
+has the Bedrock summariser or the sign-up email domain restriction switched
+**off**, the corresponding group is deleted by this upgrade — along with anything
+it still holds from a period when the feature was on. Export what you need from
+those two before upgrading. The alternative was leaving an unowned group behind
+to block its own re-creation when the feature is switched back on. The PCA
+integration's log group is removed with the integration itself; see the next
+paragraph.
+
+**The call analytics features inherited from Live Call Analytics are removed.**
+LMA no longer has the Post-Call Analytics (PCA) integration, the Amazon
+Transcribe Call Analytics streaming mode and its post-call output, call
+categories and their alerts, or "issues detected". What this means on upgrade:
+
+- The WebSocket transcriber stack no longer has the `CallAnalyticsPrefix`,
+  `TranscribeApiMode`, `PcaS3BucketName`, `PcaTranscriptsPrefix`,
+  `PcaPlaybackAudioFilePrefix`, `PcaWebAppURL` and `PcaWebAppCallPathPrefix`
+  parameters. The main stack never exposed them, so a deployment made from the
+  main template needs no change; one that deploys the nested transcriber
+  template on its own must stop passing them. The update deletes the PCA
+  integration function, its log group (with the logs in it), its EventBridge
+  rule, and the transcriber's `TranscriberCallEventTable`.
+- The main stack's `SNSCategoryTopicName` output and the AI stack's category SNS
+  topic are deleted. Anything subscribed to that topic, and anything that reads
+  that output, stops receiving or finding it.
+- The GraphQL API no longer has the `PcaUrl`, `CallCategories` and
+  `IssuesDetected` fields of `Call`, or the `updatePcaUrl`, `addCallCategory`
+  and `addIssuesDetected` mutations. A client that selects or calls any of them
+  gets a validation error and must drop them.
+- Meetings recorded before the upgrade keep any of these attributes they were
+  stored with; nothing reads or shows them.
+- The `CATEGORY_MATCH` value of the GraphQL `Channel` enum is removed. Older
+  meetings' transcripts may still hold category markers stored with that
+  channel. `getTranscriptSegments` and `getTranscriptSegmentsWithSentiment`
+  leave them out of their results, so an older meeting's transcript loads and
+  shares as before. The markers stay in the table until they expire with the
+  rest of the transcript, until [transcript deletion](transcript-deletion.md)
+  removes them with it, or until the meeting is deleted. A client that sends
+  `CATEGORY_MATCH` as a channel to `addTranscriptSegment` gets a validation
+  error.
+- Deleting a meeting removes every item stored under its transcript, whatever
+  its channel and including partial segments. Earlier versions deleted only the
+  final segments the transcript query returned, and left the rest to expire.
+
+**The Amazon Connect Contact Lens transcript ingestion is removed.** LMA never
+receives Contact Lens events, so the call event processor no longer accepts the
+Contact Lens record shape: records that identify the meeting by `ContactId`,
+with Contact Lens `Segments`, and the Amazon Connect contact-attribute lookup
+that filled in phone numbers for them. Every producer LMA ships (the WebSocket
+transcriber, the Virtual Participant and the ASR MicroVM engine) identifies the
+meeting by `CallId` and is unaffected. The AI stack's `CallAudioSource`
+parameter, which only ever selected among Live Call Analytics telephony sources
+and which nothing read, is removed too. The main stack never exposed it, so a
+deployment made from the main template needs no change; one that deploys the
+nested AI stack template on its own must stop passing it.
+
+**The two speech channels are renamed: `CALLER` is now `REMOTE` and `AGENT` is
+now `LOCAL`.** `REMOTE` is the meeting audio, everyone else in the meeting;
+`LOCAL` is the local side, the user's microphone or a Virtual Participant's
+voice assistant. The old names came from the telephony solution LMA started
+from. Every producer LMA ships writes the new names, and the meeting page, the
+meeting list and the sentiment charts label the channels Remote and Local. An
+[uploaded recording](upload-audio.md) puts every speaker on `REMOTE`, since it
+has no local microphone; with speaker identification on, earlier versions put
+the first speaker on `CALLER` and the others on `AGENT`.
+
+- Meetings recorded before the upgrade keep `CALLER` and `AGENT` on their
+  transcript segments, in their sentiment and in the keys of their speaker
+  names until they expire. LMA reads them as `REMOTE` and `LOCAL` everywhere:
+  the transcript, its downloads and embeds, speaker naming, summaries, agendas
+  and the Meeting Assistant. A speaker name saved on such a meeting is stored
+  under the new name the next time the meeting's speaker names change.
+- The GraphQL `Channel` enum declares `REMOTE` and `LOCAL` and keeps `CALLER`
+  and `AGENT`, marked deprecated in the schema, so older segments still load.
+  The `OverallSentiment` and `SentimentByChannel` types, and their inputs, gain
+  `REMOTE` and `LOCAL` fields beside `CALLER` and `AGENT`. A meeting recorded
+  after the upgrade has its sentiment under `REMOTE` and `LOCAL` only, so a
+  client that reads a meeting's sentiment must select those fields, and a
+  client that reads `TranscriptSegment.Channel` must accept the new values.
+- A [transcript Lambda hook](lambda-hook-functions.md#input-event-schema)
+  receives `REMOTE` or `LOCAL` in `Channel`. A hook that compares the channel
+  must be updated. A hook that returns `CALLER` or `AGENT` still works: LMA
+  stores them as the new names.
+- A producer that writes transcript segments to the Kinesis data stream, or
+  calls `addTranscriptSegment`, may keep sending `CALLER` and `AGENT`; LMA
+  stores them as `REMOTE` and `LOCAL`. WebSocket streaming clients send audio
+  rather than channel names and need no change; see the
+  [WebSocket streaming API](websocket-streaming-api.md#channel-based-attribution-stereo).
+
+**The remaining telephony names inherited from Live Call Analytics are removed
+or renamed.**
+
+- The `AGENT_VOICETONE` and `CALLER_VOICETONE` values of the GraphQL `Channel`
+  enum are removed, with the fields of those names on `OverallSentiment`,
+  `SentimentByChannel` and their inputs. No LMA producer ever wrote them. Any
+  stored item that carries one is left out of `getTranscriptSegments` and
+  `getTranscriptSegmentsWithSentiment`, as `CATEGORY_MATCH` items are. A client
+  that sends one of these channels to `addTranscriptSegment`, or selects or
+  sends one of these sentiment fields, gets a validation error and must drop it.
+- The meeting page's Voice Tone Analysis panel is removed. It was shown only
+  when the deployment's settings held `EnableVoiceToneAnalysis`, which no stack
+  ever wrote there. The AI stack's `EnableVoiceToneAnalysis` parameter goes with
+  it. The main stack never exposed it, so a deployment made from the main
+  template needs no change; one that deploys the nested AI stack template on its
+  own must stop passing it.
+- The meeting list's Caller Phone Number column is removed. It was not offered
+  in the column preferences, but a preference saved by an earlier version could
+  still name it; such a column id is now ignored, and the rest of the saved
+  preference applies. The meeting's `CustomerPhoneNumber` and
+  `SystemPhoneNumber` attributes and GraphQL fields are unchanged.
+  `CustomerPhoneNumber` holds the name given for the other participants (the
+  Stream Audio page's participant name, or "Virtual Participant"), which the
+  transcript shows in place of the placeholder speaker name, and it is passed to
+  the start-of-call and end-of-call Lambda hooks as before. In the meeting list's
+  Excel export, the column that held it is now `remoteParticipantName` (it was
+  `callerPhoneNumber`), and the `systemPhoneNumber` column is gone.
+- The [WebSocket streaming API](websocket-streaming-api.md#611-start-message)
+  documents the two speaker names as `localSpeakerName` (the microphone) and
+  `remoteSpeakerName` (the meeting audio). The older `agentId` and `fromNumber`
+  are still accepted in every message, and `toNumber` is still accepted and
+  stored, so existing clients need no change; if a message carries both
+  spellings, the documented one is used. The Stream Audio page, the embeddable
+  components, the browser extension and the sample CLI client send the new
+  names. The Desktop Capture Apps still send the older ones, so they keep
+  working against deployments of earlier versions. When a START names no remote
+  speaker, the server now uses "Other Participant" (it used "Customer Phone"),
+  and stores "System" as `SystemPhoneNumber` when it has no `toNumber` (it used
+  "System Phone"). An uploaded recording with no participant name uses "Other
+  Participant" too (it used "Customer").
+- The `createUploadMeeting` GraphQL input takes the same two names,
+  `localSpeakerName` (required, here or as `agentId`) and `remoteSpeakerName`.
+  `agentId`, `fromNumber` and `toNumber` are still accepted, so existing upload
+  clients need no change; when both spellings are sent, the documented one is
+  used. `agentId` is no longer a non-null field of the input.
+- `getTranscriptSegments` and `getTranscriptSegmentsWithSentiment` take an
+  optional `nextToken` and return a meeting's transcript a page at a time. A
+  client that reads only the first page gets what it got before; one that needs
+  a whole long meeting (past about 2,300 segments) passes each page's
+  `nextToken` back until it is null.
+
+**One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
+sets retention for the scheduled Virtual Participant state machine's execution
+history. The default matches the value that was previously hardcoded, so no
+deployment changes unless you raise it.
+
+#### The Meeting Assistant's knowledge-base model
+
+The Meeting Assistant's two knowledge-base tools — `document_search` over your
+documents and `meeting_history` over past meeting transcripts — now generate with
+a model of their own: **Amazon Bedrock Models › Meeting assistant knowledge
+bases** on the Configuration page. Until now they used the agent's model. A Bedrock
+Knowledge Base generates through orchestration and generation prompt templates it
+supplies itself, which cover fewer models than the agent's own API, and which
+models they cover is a property of the individual model rather than of its family
+or version — Claude Opus 4.1 is refused where Claude Opus 4.6 is accepted. So the
+setting offers only the seven ids verified against a live knowledge base, and
+defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+
+**After updating**, a deployment that had changed `MeetingAssistServiceBedrockModelID`
+should set this one in a Custom profile, depending on what the agent was running
+on, and enable access to it in the Amazon Bedrock console first:
+
+| The agent's model before the update | What the knowledge-base tools were doing | What to choose |
+|---|---|---|
+| `global.anthropic.claude-haiku-4-5-20251001-v1:0` (the default) | Generating on Claude Haiku 4.5 | Nothing — the default is the same model |
+| Claude Sonnet 4.5, Sonnet 4.6 or Opus 4.6, in either profile form | Generating on that model | The same id |
+| Claude Opus 4.1 | Being refused on every call | Any offered id; the default is the safe pick |
+| Any Nova model, or Claude Opus 4 | Never established | Any offered id; the default is the safe pick |
+
+The Claude 5.5 models are selectable for the agent only; retrieval always uses
+this setting, so choosing one for the agent leaves the knowledge-base tools alone.
+A model chosen on the Configuration page is not checked before it is used: a model
+the account cannot invoke makes the tool fail when it next runs, with the Bedrock
+error in its log. Listing past meetings chronologically still works either way,
+because the `recent_meetings_list` tool involves no knowledge base. See
+[The knowledge-base model](meeting-assistant.md#the-knowledge-base-model).
 
 ### v0.3.0
 

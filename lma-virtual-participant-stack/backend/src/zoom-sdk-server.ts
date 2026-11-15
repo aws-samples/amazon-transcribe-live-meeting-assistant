@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { AddressInfo } from 'net';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom-sdk-server');
 
 const require = createRequire(import.meta.url);
 
@@ -108,7 +111,18 @@ export function buildZoomSdkPageHtml(version: string): string {
             // Skip our own messages echoed back, so intro/start/exit text we
             // posted is never re-parsed as a participant command.
             if (selfId && w.__lmaSelfUserId && selfId === w.__lmaSelfUserId) return;
-            w.__lmaChatQueue.push({ senderName: senderName, text: String(text) });
+            // What the payload carries beyond the sender and the text is read
+            // defensively: the field names are not confirmed against a live
+            // meeting, and meeting-chat.ts logs which of them were present.
+            var receiver = data && data.receiver;
+            w.__lmaChatQueue.push({
+              senderName: senderName,
+              text: String(text),
+              id: (data && (data.msgId || data.messageId || data.id)) || null,
+              time: (data && (data.timestamp || data.time)) || null,
+              receiverId: data && (typeof data.receiverId !== 'undefined' ? data.receiverId : (receiver && receiver.userId)),
+              receiverName: (data && (data.receiverName || (receiver && receiver.name))) || null,
+            });
           } catch (e) { log('chat parse error: ' + e); }
         });
       }
@@ -241,11 +255,14 @@ export function buildZoomSdkPageHtml(version: string): string {
           audioJoined: audioJoined,
           muted: muted,
           videoOff: videoOff && !videoOn,
+          videoOn: videoOn,
         };
       };
 
+      // Answers false when there is no SDK to send with or it threw.
       w.__lmaSendChat = function (message) {
-        try { if (w.ZoomMtg) w.ZoomMtg.sendChat({ message: message }); } catch (e) { log('sendChat error: ' + e); }
+        if (!w.ZoomMtg) return false;
+        try { w.ZoomMtg.sendChat({ message: message }); return true; } catch (e) { log('sendChat error: ' + e); return false; }
       };
 
       w.__lmaLeave = function () {
@@ -316,7 +333,7 @@ export async function startZoomSdkServer(): Promise<ZoomSdkServerHandle> {
 
     const port = (server.address() as AddressInfo).port;
     const origin = `http://127.0.0.1:${port}`;
-    console.log(`[zoom-sdk] embed server listening on ${origin} (SDK v${version})`);
+    log.info(`[zoom-sdk] embed server listening on ${origin} (SDK v${version})`);
 
     return {
         origin,

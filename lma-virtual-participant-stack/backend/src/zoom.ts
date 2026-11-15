@@ -1,7 +1,24 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
+import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
+import { toolbarPanels } from './consent-evidence.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
+import { noteSentChat } from './meeting-chat.js';
+import { meetingChat } from './meeting-chat-runtime.js';
+import { chatAddressing } from './chat-addressing.js';
+import {
+    readZoomChatInPage,
+    ZOOM_CHAT_SELECTORS,
+    ZoomChatPanelKeeper,
+    zoomChatPanelStateInPage,
+    type ZoomChatPanelState,
+} from './zoom-chat-page.js';
+import { dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC, zoomOverlayCheckDelayMs } from './zoom-overlays.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -11,6 +28,8 @@ import {
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
+import { zoomPasswordKind, zoomWebJoinUrl } from './meeting-password.js';
+import { applyZoomPersonalLink, zoomSaysMeetingDoesNotExist } from './zoom-join-link.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import {
     fetchZoomCredentials,
@@ -18,6 +37,21 @@ import {
     dismissPostLoginInterstitials,
     gotoZoomSignin,
 } from './zoom-login.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('zoom');
+
+/**
+ * How long the user has to enter the meeting passcode in the live view when
+ * Zoom did not accept the pwd value of a join link. The same five minutes the
+ * manual sign-in prompt gives.
+ */
+const PASSCODE_PROMPT_TIMEOUT_SECONDS = 300;
+
+/** How often the chat list is read. */
+const ZOOM_CHAT_POLL_MS = 1500;
+/** Rows on screen this long after the chat list is first found were there before the VP listened. */
+const ZOOM_CHAT_BASELINE_SETTLE_MS = 2000;
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
 // SVGs aren't reliable click targets, so we walk up to the nearest
@@ -53,11 +87,66 @@ async function safeEvaluate<T>(
             }),
         ]);
     } catch (e: any) {
-        console.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
+        log.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
         return fallback;
     } finally {
         if (to) clearTimeout(to);
     }
+}
+
+/**
+ * Split a Zoom chat row's aria-label into its sender and the message text.
+ *
+ * Zoom's chat aria-label has two observed shapes:
+ *   colon form:     "<sender> to <recipient>: <text>"
+ *   timestamp form: "<sender> to <recipient>, HH:MM AM, <text>"
+ * (Zoom shipped the timestamp form during 2026; older clients still produce the
+ * colon form.) Match either, but always anchor on the literal
+ * "<sender> to <recipient>" prefix so punctuation inside the message is not
+ * mistaken for the boundary. A label in neither shape is returned whole as the
+ * body, with no sender.
+ */
+export function splitZoomChatLabel(label: string): { sender: string | null; body: string } {
+    const { sender, body } = parseZoomChatLabel(label);
+    return { sender, body };
+}
+
+/** A Zoom chat row's aria-label, read in full: see splitZoomChatLabel for the shapes. */
+export interface ZoomChatLabel {
+    sender: string | null;
+    /** The "<recipient>" of "<sender> to <recipient>", or null when the label has neither shape. */
+    recipient: string | null;
+    body: string;
+    /** The "HH:MM AM" of the timestamp form, or null. */
+    time: string | null;
+}
+
+export function parseZoomChatLabel(label: string): ZoomChatLabel {
+    const match = label.match(
+        /^([^,:]+?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
+    );
+    return {
+        sender: match?.[1]?.trim() || null,
+        recipient: match?.[2]?.trim() || null,
+        body: match ? label.slice(match[0].length) : label,
+        time: match?.[3]?.trim() || null,
+    };
+}
+
+/**
+ * Who a Zoom chat message went to: everyone when the recipient reads as
+ * "Everyone" (in any of the forms Zoom shows it), or as "Meeting Group Chat",
+ * the everyone-recipient of a meeting whose chat continues in a Team Chat group
+ * chat; privately otherwise ("to You", "to <name>", a "(Direct Message)" or
+ * "(Privately)" mark); and unknown when the label showed no recipient. English
+ * labels only: in another language the label is in neither shape and the
+ * recipient is unknown, and the meeting chat capture does not add a message
+ * whose recipient is unknown.
+ */
+export function zoomChatAudience(recipient: string | null): 'everyone' | 'direct' | undefined {
+    if (!recipient) return undefined;
+    if (/privately|direct message/i.test(recipient)) return 'direct';
+    return /^(everyone|meeting group chat)\b/i.test(recipient) ? 'everyone' : 'direct';
 }
 
 export default class Zoom {
@@ -71,6 +160,8 @@ export default class Zoom {
     // run to completion.
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
+    // Stops the in-meeting notice dismisser (startOverlayDismisser).
+    private stopOverlayDismisser: () => void = () => {};
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -99,10 +190,10 @@ export default class Zoom {
             { maxRetries, delayMs },
         );
         if (!result) {
-            console.log(`Failed to resolve ${step} after retries (primaries: ${selectors.join(', ')})`);
+            log.warn(`Failed to resolve ${step} after retries (primaries: ${selectors.join(', ')})`);
             return null;
         }
-        console.log(`Resolved ${step} via ${result.source}: ${result.selector}`);
+        log.info(`Resolved ${step} via ${result.source}: ${result.selector}`);
         return { element: result.element, selector: result.selector };
     }
 
@@ -165,12 +256,12 @@ export default class Zoom {
                 })
                 .catch(() => false);
             if (hasControl && Date.now() - stableSince > 1200) {
-                console.log(`[zoom] prejoin settled at ${url}`);
+                log.info(`[zoom] prejoin settled at ${url}`);
                 return true;
             }
             await new Promise((r) => setTimeout(r, 300));
         }
-        console.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
+        log.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
         return false;
     }
 
@@ -184,6 +275,24 @@ export default class Zoom {
      * buttons, the speaker/gallery video containers) AND that prejoin controls
      * are gone. Any positive in-meeting signal counts.
      */
+    /**
+     * End the join when Zoom shows that the meeting does not exist (an
+     * invalid meeting ID, error 3001). A personal meeting link whose name
+     * Zoom does not know still resolves to a meeting number, so this is where
+     * such a link is found out. Throws the error the missing name field
+     * already throws, which the container reports as "Invalid meeting ID"
+     * (`error:meeting-not-found`).
+     */
+    private async throwIfMeetingDoesNotExist(page: Page): Promise<void> {
+        const text = await page
+            .evaluate(() => (document.body?.innerText || '').slice(0, 20000))
+            .catch(() => '');
+        if (zoomSaysMeetingDoesNotExist(text)) {
+            log.warn('[zoom] Zoom says the meeting does not exist.');
+            throw new Error('Meeting not found or invalid meeting ID');
+        }
+    }
+
     private async isInMeeting(page: Page): Promise<boolean> {
         return page
             .evaluate(() => {
@@ -325,7 +434,7 @@ export default class Zoom {
             await humanClick(page, found.element);
             await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
         } else {
-            console.warn('[zoom] Could not locate a Start Video control this attempt.');
+            log.warn('[zoom] Could not locate a Start Video control this attempt.');
         }
     }
 
@@ -343,12 +452,12 @@ export default class Zoom {
         while (Date.now() < deadline) {
             const state = await this.readInMeetingVideoState(page);
             if (state === 'on') {
-                console.log('[zoom] In-meeting video is ON (avatar camera active).');
+                log.info('[zoom] In-meeting video is ON (avatar camera active).');
                 return;
             }
             if (state === 'off' && clicks < 2) {
                 clicks += 1;
-                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                log.info(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
                 await this.clickStartVideo(page);
                 await new Promise((r) => setTimeout(r, 2000));
                 continue;
@@ -357,6 +466,57 @@ export default class Zoom {
             // toggle video off and disrupt the meeting layout). Just wait.
             await new Promise((r) => setTimeout(r, 1000));
         }
+    }
+
+    /**
+     * Keep Zoom's own notices off the VP's screen for the whole meeting: the
+     * "Introducing My Notes" callout and the hardware-acceleration banner
+     * (zoom-overlays.ts). Every few seconds just after joining, then every 15s;
+     * best-effort, so a failed or hung check never affects the meeting.
+     */
+    private startOverlayDismisser(page: Page): void {
+        const joinedAt = Date.now();
+        let stopped = false;
+        let timer: NodeJS.Timeout | undefined;
+        // Each distinct miss or failure is logged once, not on every check.
+        const reported = new Set<string>();
+        const reportOnce = (line: string): void => {
+            if (reported.has(line) || reported.size >= 50) return;
+            reported.add(line);
+            log.info(line);
+        };
+        const tick = async (): Promise<void> => {
+            if (stopped || page.isClosed()) return;
+            // Bounded like safeEvaluate: a CDP evaluate can hang, and the next
+            // check must still be scheduled.
+            let to: NodeJS.Timeout | undefined;
+            try {
+                const result = await Promise.race([
+                    page.evaluate(dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC),
+                    new Promise<never>((_, reject) => {
+                        to = setTimeout(() => reject(new Error('timed out after 5000ms')), 5000);
+                    }),
+                ]);
+                for (const d of result.dismissed) {
+                    log.info(`[zoom-overlays] dismissed a Zoom notice ("${d.notice}") with "${d.button}"`);
+                }
+                for (const m of result.missed) {
+                    reportOnce(`[zoom-overlays] Zoom notice left on screen ("${m.notice}"); controls near it: ${m.controls}`);
+                }
+            } catch (err: any) {
+                if (!page.isClosed()) reportOnce(`[zoom-overlays] check failed: ${err?.message ?? err}`);
+            } finally {
+                if (to) clearTimeout(to);
+            }
+            if (!stopped && !page.isClosed()) {
+                timer = setTimeout(tick, zoomOverlayCheckDelayMs(Date.now() - joinedAt));
+            }
+        };
+        timer = setTimeout(tick, 1000);
+        this.stopOverlayDismisser = () => {
+            stopped = true;
+            if (timer) clearTimeout(timer);
+        };
     }
 
     /**
@@ -390,7 +550,7 @@ export default class Zoom {
                     // spurious click that would disrupt the meeting layout.
                     consecutiveOff += 1;
                     if (consecutiveOff >= 2) {
-                        console.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
+                        log.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
                         await this.clickStartVideo(page);
                         consecutiveOff = 0;
                     }
@@ -426,6 +586,8 @@ export default class Zoom {
      * only ever click a button whose label is specifically "open the chat
      * panel" — never a "close" button. One click is enough on cloakbrowser's
      * Chromium; no verify-retry loop (that loop caused an open/close war).
+     * The label is matched as a prefix: with unread messages Zoom appends
+     * " 2 unread messages" to it.
      */
     private async openChatPanel(page: Page): Promise<boolean> {
         // Idempotent: if the chat input is already visible the panel is open —
@@ -440,7 +602,7 @@ export default class Zoom {
         // button on an already-open panel. The pre-check above prevents that.
         const chatButtonResult = await findElementWithFallback(
             page,
-            ['button[aria-label="open the chat panel"]'],
+            [ZOOM_CHAT_SELECTORS.openButton],
             {
                 intent: 'Zoom toolbar button that OPENS the in-meeting chat panel (label "open the chat panel"). Not the close button.',
                 platform: 'ZOOM',
@@ -449,10 +611,10 @@ export default class Zoom {
             { maxRetries: 10, delayMs: 500 },
         );
         if (!chatButtonResult) {
-            console.log('Could not locate chat panel button — continuing without chat');
+            log.warn('Could not locate chat panel button — continuing without chat');
             return false;
         }
-        console.log('Opening chat panel.');
+        log.info('Opening chat panel.');
         await humanClick(page, chatButtonResult.element);
         // brief settle for the panel to render its input
         const until = Date.now() + 3000;
@@ -463,7 +625,19 @@ export default class Zoom {
         return this.chatInputVisible(page);
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+    /** Posts chat messages; true when every one was entered and sent. Never throws. */
+    private async sendMessages(page: Page, messages: string[]): Promise<boolean> {
+        // So the meeting chat capture knows these when it reads them back.
+        noteSentChat(messages);
+        try {
+            return await this.sendMessagesNow(page, messages);
+        } catch (e) {
+            log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
+            return false;
+        }
+    }
+
+    private async sendMessagesNow(page: Page, messages: string[]): Promise<boolean> {
         // Make sure the panel is open, but never toggle a panel that's already
         // open (see openChatPanel — the toolbar button is a toggle).
         if (!(await this.chatInputVisible(page))) {
@@ -483,8 +657,8 @@ export default class Zoom {
             { maxRetries: 4, delayMs: 300 },
         );
         if (!found) {
-            console.log('Could not locate chat message input — aborting sendMessages');
-            return;
+            log.warn('Could not locate chat message input — aborting sendMessages');
+            return false;
         }
         for (const message of messages) {
             // Insert the whole message in ONE shot rather than simulating
@@ -522,6 +696,7 @@ export default class Zoom {
             await page.keyboard.press('Enter');
             await new Promise((r) => setTimeout(r, 50));
         }
+        return true;
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
@@ -533,22 +708,22 @@ export default class Zoom {
 
             switch (type) {
                 case 'log':
-                    console.log(`Browser Log: ${text}`);
+                    log.info(`Browser Log: ${text}`);
                     break; 
                 case 'error':
-                    console.error(`Browser Error: ${text}`);
+                    log.error(`Browser Error: ${text}`);
                     break;
                 case 'info':
-                    console.info(`Browser Info: ${text}`);
+                    log.info(`Browser Info: ${text}`);
                     break;
                 default:
-                    console.log(`Browser ${type}: ${text}`);
+                    log.info(`Browser ${type}: ${text}`);
             }
         });
 
         // Add error handlers
         page.on('pageerror', (error: unknown) => {
-            console.error('Page Error:', error);
+            log.error('Page Error:', error);
         });
 
         page.on('crash', () => {
@@ -556,7 +731,7 @@ export default class Zoom {
             // and are sitting in the wait-for-meeting-end race, requestEnd
             // unblocks it cleanly; before join, index.ts's crash latch wins the
             // initialize() race. Either way we never hang on a dead page.
-            console.error('Browser Error: page crashed (renderer crash) — ending meeting');
+            log.error('Browser Error: page crashed (renderer crash) — ending meeting');
             this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
@@ -579,6 +754,17 @@ export default class Zoom {
         // A signed-in session joins far more reliably (the "We detected
         // you may be a bot. ... sign in to join the meeting" guest block
         // becomes rare) and lets the VP join meetings that disallow guests.
+        // A personal meeting link (/my/<name>) does not carry the meeting
+        // number the web client is opened with. Zoom's redirect for it does:
+        // resolve it first, so a link Zoom does not resolve ends the join
+        // here with a clear reason rather than on a page that is not found.
+        if (details.invite.zoomPersonalLink) {
+            await substep('Looking up the personal meeting link…');
+            if (!(await applyZoomPersonalLink(details.invite))) {
+                return { reason: 'never-joined', trigger: 'pre-join:zoom-link-unresolved' };
+            }
+        }
+
         const zoomCredentialsSecretName = (process.env.ZOOM_CREDENTIALS_SECRET_NAME || '').trim();
         let signedInToZoom = false;
         if (zoomCredentialsSecretName) {
@@ -586,17 +772,17 @@ export default class Zoom {
             // because it's the CPU-heavy phase (Bedrock + Zoom SPA hydration) and
             // the one that historically stalls; the Simli avatar is deliberately
             // NOT initialized yet so it doesn't contend for CPU here.
-            console.log('[phase] SIGNING_IN — authenticating to Zoom before join');
-            console.log(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
+            log.info('[phase] SIGNING_IN — authenticating to Zoom before join');
+            log.info(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
             await substep('Signing in to Zoom…');
             try {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
                 const loginResult = await loginToZoom(page, creds);
                 if (loginResult.outcome === 'success') {
-                    console.log('[zoom] Sign-in succeeded — profile will persist at meeting end');
+                    log.info('[zoom] Sign-in succeeded — profile will persist at meeting end');
                     signedInToZoom = true;
                 } else if (loginResult.outcome === 'invalid-credentials') {
-                    console.error('[zoom] Sign-in failed: invalid credentials');
+                    log.error('[zoom] Sign-in failed: invalid credentials');
                     throw new Error('Zoom login failed: invalid credentials');
                 } else {
                     // manual-required: user must finish sign-in (CAPTCHA, 2FA,
@@ -605,7 +791,7 @@ export default class Zoom {
                     // silently degrade to guest join (which joins far less
                     // reliably, and the user explicitly opted into
                     // credentialled login).
-                    console.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
+                    log.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
 
                     // Build a clean, user-facing message by category. Never
                     // surface internal selector/loop detail (e.g. "action
@@ -629,9 +815,9 @@ export default class Zoom {
                     if (loginResult.manualReason === 'captcha') {
                         try {
                             await gotoZoomSignin(page);
-                            console.log('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
+                            log.info('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
                         } catch (e) {
-                            console.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
+                            log.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
                         }
                     }
 
@@ -679,14 +865,14 @@ export default class Zoom {
                         if (signInOK) {
                             signedInToZoom = true;
                             await statusManager.clearManualAction();
-                            console.log('[zoom] User completed sign-in via VNC — profile will persist at meeting end');
+                            log.info('[zoom] User completed sign-in via VNC — profile will persist at meeting end');
                         } else {
                             // Don't auto-clear the manual-action banner — let
                             // the user see what happened. Mark as FAILED with
                             // a clear errorMessage so the UI / MCP poller
                             // surfaces the reason instead of silently joining
                             // as guest (which joins far less reliably).
-                            console.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
+                            log.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
                             await statusManager.setFailed(
                                 'Zoom sign-in not completed in time. Open the LMA viewer next time the VP starts and complete the sign-in there. Alternatively, sign in to Zoom on your laptop with this account at least once before launching LMA so the trusted-device cookie is established.',
                             );
@@ -715,7 +901,7 @@ export default class Zoom {
                 // far less reliably. The user explicitly opted into
                 // stored-credential login, so guest-fallback violates their
                 // intent. Mark FAILED and abort instead.
-                console.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
+                log.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
                 if (details.invite.virtualParticipantId) {
                     const { createStatusManager } = await import('./status-manager.js');
                     const statusManager = createStatusManager(details.invite.virtualParticipantId);
@@ -732,17 +918,25 @@ export default class Zoom {
         // the Simli avatar — its background render + ~20fps JPEG encode load
         // (~1800/2048 CPU units) is acceptable here and the avatar must be
         // ready before the prejoin camera toggle below captures the camera.
-        console.log('[phase] JOINING — navigating to the meeting and joining');
+        log.info('[phase] JOINING — navigating to the meeting and joining');
         await substep('Entering the meeting room…');
         await prepareAvatar();
 
-        console.log('Getting Zoom meeting link.');
+        log.info('Getting Zoom meeting link.');
+        // A password that is the pwd value of a Zoom join link rather than a
+        // passcode goes on the join URL, as the link carries it, and is never
+        // typed: the passcode box takes only the passcode itself.
+        const passwordIsLinkToken =
+            !!details.invite.meetingPassword && zoomPasswordKind(details.invite.meetingPassword) === 'link-token';
+        if (passwordIsLinkToken) {
+            log.info('[zoom] Meeting password is a Zoom link pwd value — passing it on the join URL instead of typing it.');
+        }
         // 60s + tolerate a late-but-successful arrival. A bare goto inherits
         // waitUntil:'load' and the 20s page default, and a live join failed
         // that way AFTER the page had already reached the meeting URL (#547).
         await gotoMeetingPage(
             page,
-            `https://zoom.us/wc/${details.invite.meetingId}/join`,
+            zoomWebJoinUrl(details.invite.meetingId, details.invite.meetingPassword),
             MEETING_HOST_PATTERNS.zoom,
             'zoom-join',
         );
@@ -756,7 +950,7 @@ export default class Zoom {
             try {
                 await dismissPostLoginInterstitials(page);
             } catch (err) {
-                console.warn('[zoom] post-meeting-URL interstitial dismissal threw (non-fatal):', err);
+                log.warn('[zoom] post-meeting-URL interstitial dismissal threw (non-fatal):', err);
             }
         }
 
@@ -771,9 +965,9 @@ export default class Zoom {
                 });
                 
                 if (promptText && promptText.includes('Sign in to join this meeting')) {
-                    console.error('ERROR: Enterprise Zoom authentication required!');
-                    console.error('The host requires authentication on the commercial Zoom platform.');
-                    console.error('This meeting requires signing in with a commercial Zoom account.');
+                    log.error('ERROR: Enterprise Zoom authentication required!');
+                    log.error('The host requires authentication on the commercial Zoom platform.');
+                    log.error('This meeting requires signing in with a commercial Zoom account.');
                     enterpriseLogin = true;
 
                     // Notify frontend that manual action is required.
@@ -808,7 +1002,7 @@ export default class Zoom {
                     if (enterpriseLoggedIn) {
                         await new Promise((resolve) => setTimeout(resolve, 5000));
                     } else {
-                        console.warn('[zoom] Enterprise login not completed within 2 min.');
+                        log.warn('[zoom] Enterprise login not completed within 2 min.');
                     }
                     if (sm) {
                         await sm.clearManualAction().catch(() => {});
@@ -832,7 +1026,7 @@ export default class Zoom {
             // app.zoom.us/signin → /wc/<id>/join and re-renders the form, so
             // filling it too early loses the input. See waitForPrejoinReady.
             await substep('Loading the meeting join screen…');
-            await this.waitForPrejoinReady(page);
+            if (!(await this.waitForPrejoinReady(page))) await this.throwIfMeetingDoesNotExist(page);
 
             // A non-empty meetingPassword doesn't guarantee Zoom renders
             // #input-for-pwd — Personal Meeting Rooms and passcode-disabled
@@ -840,6 +1034,11 @@ export default class Zoom {
             // stable) and proceed if absent rather than failing the join.
             // Type, verify the value landed, and re-type once if not (the
             // form can still re-mount under us right after settling).
+            // A link token was already given on the join URL. If Zoom still
+            // asks for a passcode, it did not accept the token (a truncated
+            // copy, for one), and typing it would be refused as well, so the
+            // user is asked to enter the passcode in the live view instead.
+            let passcodeLeftToUser = false;
             if (details.invite.meetingPassword) {
                 const findPwd = async (): Promise<ElementHandle<Element> | null> => {
                     for (let attempt = 1; attempt <= 6; attempt++) {
@@ -853,11 +1052,25 @@ export default class Zoom {
                     return null;
                 };
                 let passwordHandle = await findPwd();
-                if (passwordHandle) {
+                if (passwordHandle && passwordIsLinkToken) {
+                    log.warn('[zoom] Zoom still asks for a passcode after the link pwd value was given on the URL.');
+                    passcodeLeftToUser = true;
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        await createStatusManager(details.invite.virtualParticipantId)
+                            .setManualActionRequired(
+                                'PASSCODE',
+                                'The meeting password looks like the pwd value from a Zoom link and Zoom did not ' +
+                                    'accept it; enter the meeting passcode from the invitation and select Join.',
+                                PASSCODE_PROMPT_TIMEOUT_SECONDS,
+                            )
+                            .catch((err) => log.warn('[zoom] Could not raise the passcode prompt (non-fatal):', err));
+                    }
+                } else if (passwordHandle) {
                     const pwd = details.invite.meetingPassword;
                     let entered = false;
                     for (let attempt = 1; attempt <= 2 && !entered; attempt++) {
-                        console.log(`Typing meeting password (attempt ${attempt}).`);
+                        log.info(`Typing meeting password (attempt ${attempt}).`);
                         await passwordHandle.evaluate((el: Element) => {
                             const i = el as HTMLInputElement;
                             i.focus();
@@ -870,7 +1083,7 @@ export default class Zoom {
                         if (got.length === pwd.length) {
                             entered = true;
                         } else {
-                            console.warn(
+                            log.warn(
                                 `Passcode value mismatch (expected ${pwd.length} chars, got ${got.length}) — re-locating and retrying.`,
                             );
                             const fresh = await findPwd();
@@ -879,15 +1092,17 @@ export default class Zoom {
                         }
                     }
                     if (!entered) {
-                        console.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
+                        log.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
                     }
+                } else if (passwordIsLinkToken) {
+                    log.info('[zoom] Zoom accepted the link pwd value — no passcode box shown.');
                 } else {
-                    console.log('Meeting does not require a password — skipping password entry.');
+                    log.info('Meeting does not require a password — skipping password entry.');
                 }
             }
 
             await substep('Setting up audio and video…');
-            console.log('Checking audio button state with retry...');
+            log.info('Checking audio button state with retry...');
             // Wait for audio button to appear (handles loading state)
             const audioResult = await this.waitForButtonWithRetry(
                 page,
@@ -898,22 +1113,22 @@ export default class Zoom {
             
             if (audioResult && !voiceAssistant.isEnabled()) {
                 if (audioResult.selector === 'svg.SvgAudioMute') {
-                    console.log('Audio is unmuted, clicking to mute it.');
+                    log.info('Audio is unmuted, clicking to mute it.');
                     await clickClickableAncestor(audioResult.element);
                 } else {
-                    console.log('Audio is already muted, skipping click.');
+                    log.info('Audio is already muted, skipping click.');
                 }
             } else if (voiceAssistant.isEnabled()) {
-                console.log('Voice assistant enabled - keeping microphone unmuted for agent audio');
+                log.info('Voice assistant enabled - keeping microphone unmuted for agent audio');
                 if (audioResult && audioResult.selector === 'svg.SvgAudioUnmute') {
-                    console.log('Audio is muted, clicking to unmute it for voice assistant.');
+                    log.info('Audio is muted, clicking to unmute it for voice assistant.');
                     await clickClickableAncestor(audioResult.element);
                 }
             } else {
-                console.log('Warning: Could not find audio button in either state after retries.');
+                log.warn('Warning: Could not find audio button in either state after retries.');
             }
 
-            console.log('Checking video button state with retry...');
+            log.info('Checking video button state with retry...');
             // Wait for video button to appear (handles loading state)
             const videoResult = await this.waitForButtonWithRetry(
                 page,
@@ -931,12 +1146,12 @@ export default class Zoom {
                 // deliberate off→on toggle guarantees a fresh getUserMedia.
                 if (videoResult.selector === 'svg.SvgVideoOff') {
                     // Currently off → single click turns it on (fresh getUserMedia).
-                    console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
+                    log.info('Simli avatar active - clicking to turn video ON for avatar camera.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
                     // Currently on → toggle off then on to force a fresh
                     // getUserMedia call that the override can intercept.
-                    console.log('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
+                    log.info('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
                     await clickClickableAncestor(videoResult.element);
                     await new Promise((r) => setTimeout(r, 800));
                     const reVideo = await this.waitForButtonWithRetry(
@@ -951,7 +1166,7 @@ export default class Zoom {
                         await clickClickableAncestor(reVideo.element);
                     } else if (reVideo) {
                         // Already back on somehow — leave it on.
-                        console.log('Simli avatar active - video already back on after toggle.');
+                        log.info('Simli avatar active - video already back on after toggle.');
                     }
                 }
                 // Eagerly connect the relay consumer + canvas in the meeting
@@ -959,13 +1174,13 @@ export default class Zoom {
                 await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
             } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
-                    console.log('Video is on, clicking to turn it off.');
+                    log.info('Video is on, clicking to turn it off.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
-                    console.log('Video is already off, skipping click.');
+                    log.info('Video is already off, skipping click.');
                 }
             } else {
-                console.log('Warning: Could not find video button in either state after retries.');
+                log.warn('Warning: Could not find video button in either state after retries.');
             }
 
             // Always overwrite the prejoin display name with the scribe
@@ -988,13 +1203,13 @@ export default class Zoom {
                     i.focus();
                     i.value = '';
                 });
-                console.log(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
+                log.info(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
                 await humanType(page, nameResult.element, details.scribeIdentity);
                 const got = await nameResult.element.evaluate(
                     (el: Element) => (el as HTMLInputElement).value || '',
                 );
                 if (got !== details.scribeIdentity) {
-                    console.warn(
+                    log.warn(
                         `Display-name value mismatch (expected "${details.scribeIdentity}", got "${got}") — clearing and re-typing.`,
                     );
                     await nameResult.element.evaluate((el: Element) => {
@@ -1005,10 +1220,10 @@ export default class Zoom {
                     await humanType(page, nameResult.element, details.scribeIdentity);
                 }
             } else if (!signedInToZoom) {
-                console.log('LMA Virtual Participant was unable to join the meeting.');
+                log.warn('LMA Virtual Participant was unable to join the meeting.');
                 throw new Error('Meeting not found or invalid meeting ID');
             } else {
-                console.log('No prejoin name field on this page — skipping.');
+                log.info('No prejoin name field on this page — skipping.');
             }
 
             // Submit the prejoin form, then VERIFY we actually left it. A
@@ -1034,35 +1249,56 @@ export default class Zoom {
                     { maxRetries: 10, delayMs: 500 },
                 );
                 if (joinButtonResult) {
-                    console.log('Clicking Join button to enter the meeting.');
+                    log.info('Clicking Join button to enter the meeting.');
                     await humanClick(page, joinButtonResult.element);
                 } else if (nameResult) {
-                    console.log('Could not locate Join button — pressing Enter on name field as fallback.');
+                    log.warn('Could not locate Join button — pressing Enter on name field as fallback.');
                     await nameResult.element.press('Enter').catch(() => {});
                 } else {
-                    console.log('Could not locate Join button or name field — pressing Enter on page.');
+                    log.warn('Could not locate Join button or name field — pressing Enter on page.');
                     await page.keyboard.press('Enter').catch(() => {});
                 }
             };
-
-            await clickJoin();
 
             // Did the click advance us past the prejoin form? Poll briefly.
             const waitLeftPrejoin = async (ms: number): Promise<boolean> => {
                 const until = Date.now() + ms;
                 while (Date.now() < until) {
+                    if (page.isClosed()) return false;
                     if (await this.hasLeftPrejoin(page)) return true;
                     await new Promise((r) => setTimeout(r, 500));
                 }
                 return false;
             };
 
-            if (!(await waitLeftPrejoin(6000))) {
-                console.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
+            if (passcodeLeftToUser) {
+                // The user enters the passcode and selects Join in the live
+                // view. Clicking Join here with an empty passcode box would
+                // only show Zoom's error under their cursor.
+                await substep('Waiting for the meeting passcode to be entered in the live view…');
+                const left = await waitLeftPrejoin(PASSCODE_PROMPT_TIMEOUT_SECONDS * 1000);
+                if (details.invite.virtualParticipantId) {
+                    const { createStatusManager } = await import('./status-manager.js');
+                    await createStatusManager(details.invite.virtualParticipantId)
+                        .clearManualAction()
+                        .catch(() => {});
+                }
+                if (!left) {
+                    log.warn('[zoom] The meeting passcode was not entered in the live view in time.');
+                    return { reason: 'never-joined', trigger: 'pre-join:passcode-not-entered' };
+                }
+                log.info('[zoom] Left the prejoin screen after the passcode was entered in the live view.');
+            } else {
+                await clickJoin();
+            }
+
+            if (!passcodeLeftToUser && !(await waitLeftPrejoin(6000))) {
+                log.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
                 await substep('Re-attempting to join the meeting…');
                 // Re-enter passcode if the field is still there (it being
-                // present is itself the signal Join didn't take).
-                if (details.invite.meetingPassword) {
+                // present is itself the signal Join didn't take). A link
+                // token is never typed: it is on the join URL already.
+                if (details.invite.meetingPassword && !passwordIsLinkToken) {
                     const pwd2 = await page.$('#input-for-pwd');
                     if (pwd2) {
                         await pwd2.evaluate((el: Element) => {
@@ -1075,7 +1311,7 @@ export default class Zoom {
                 }
                 await clickJoin();
                 if (await waitLeftPrejoin(6000)) {
-                    console.log('Join succeeded on retry — left the prejoin screen.');
+                    log.info('Join succeeded on retry — left the prejoin screen.');
                 } else if (this.isOffMeetingPage(page)) {
                     // Zoom bounced us to a sign-in wall / CAPTCHA. Fail loudly:
                     // reporting ACTIVE here means transcribing silence for the
@@ -1085,10 +1321,10 @@ export default class Zoom {
                             '— sign-in or CAPTCHA challenge, so the meeting was never joined.',
                     );
                 } else {
-                    console.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
+                    log.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
                 }
-            } else {
-                console.log('Left the prejoin screen — proceeding to admission wait.');
+            } else if (!passcodeLeftToUser) {
+                log.info('Left the prejoin screen — proceeding to admission wait.');
             }
         }
 
@@ -1105,7 +1341,7 @@ export default class Zoom {
             this.startUnknownDialogWatchdog(page);
         }
 
-        console.log('Waiting.');
+        log.info('Waiting.');
         await substep('Waiting to be admitted to the meeting…');
         // Poll for the avatar selector instead of a single waitForSelector
         // call so we can dynamically extend the timeout when the watchdog
@@ -1145,6 +1381,7 @@ export default class Zoom {
             } catch {
                 /* ignore — page may be navigating */
             }
+            await this.throwIfMeetingDoesNotExist(page);
             // Heuristic still says "not in". Ask Claude what screen we're really
             // on every AI_CHECK_INTERVAL_MS so a class-rename can't strand us.
             if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
@@ -1152,19 +1389,19 @@ export default class Zoom {
                 try {
                     const verdict = await classifyJoinState(page, { platform: 'ZOOM' });
                     if (verdict) {
-                        console.log(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        log.info(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
                         if (verdict.state === 'in-meeting') {
-                            console.log('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            log.info('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
                             admitted = true;
                             break;
                         }
                         if (verdict.state === 'error') {
-                            console.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            log.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
                             return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
                         }
                     }
                 } catch (e) {
-                    console.warn('[zoom] AI join-state check failed (non-fatal):', e);
+                    log.warn('[zoom] AI join-state check failed (non-fatal):', e);
                 }
             }
             // Keep the UI alive during the (potentially minutes-long) wait so
@@ -1198,13 +1435,13 @@ export default class Zoom {
                 }
             }
             if (Date.now() > baseDeadline && !extended) {
-                console.log('LMA Virtual Participant was not admitted into the meeting.');
+                log.info('LMA Virtual Participant was not admitted into the meeting.');
                 return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
-            console.log('LMA Virtual Participant was not admitted into the meeting.');
+            log.info('LMA Virtual Participant was not admitted into the meeting.');
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
@@ -1214,7 +1451,7 @@ export default class Zoom {
         // — the VP was in the room but never opened chat / posted intro / went
         // ACTIVE. A timeout lets the sequence proceed even if the install
         // stalls (the popup auto-dismiss is best-effort anyway).
-        console.log('Setting up Zoom popup auto-dismiss handler.');
+        log.info('Setting up Zoom popup auto-dismiss handler.');
         await safeEvaluate(page, 'popup-dismiss-install', () => {
             // Text patterns that indicate a dismissible consent/info popup.
             // Only modals whose text matches one of these will be auto-dismissed.
@@ -1329,7 +1566,12 @@ export default class Zoom {
         // later. (The dominant historical delay was CPU contention from the
         // avatar during join, now removed by deferring Simli init.)
         await new Promise(resolve => setTimeout(resolve, 500));
-        console.log('Popup handler active, proceeding to open chat.');
+        log.info('Popup handler active, proceeding to open chat.');
+
+        // Zoom's feature callouts and advisory banners ("Introducing My Notes",
+        // the hardware-acceleration banner) are not modals, so the handler
+        // above leaves them; dismiss them for the whole meeting.
+        this.startOverlayDismisser(page);
 
         // (Note: the unknown-dialog watchdog is already running — started
         // before the waiting-room poll above so it can catch verification /
@@ -1344,10 +1586,10 @@ export default class Zoom {
         await substep('In the meeting — posting introduction…');
         try {
             await this.openChatPanel(page);
-            console.log('Sending introduction messages.');
+            log.info('Sending introduction messages.');
             await this.sendMessages(page, details.introMessages);
         } catch (err) {
-            console.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
+            log.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
         }
 
         // The prejoin "video on" toggle often doesn't survive admission — verify
@@ -1356,7 +1598,7 @@ export default class Zoom {
         try {
             await this.ensureInMeetingVideoOn(page);
         } catch (err) {
-            console.warn('[zoom] Post-join video check failed (non-fatal):', err);
+            log.warn('[zoom] Post-join video check failed (non-fatal):', err);
         }
         // Then keep watching: Zoom's "Something went wrong" can flip the camera
         // off mid-meeting (the avatar disappears though Simli/bridge stay
@@ -1366,8 +1608,9 @@ export default class Zoom {
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
+            meetingConsent.noteAttendeeCount(number);
             if (number <= 1) {
-                console.log('LMA Virtual Participant got lonely and left.');
+                log.info('LMA Virtual Participant got lonely and left.');
                 details.start = false;
                 this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
@@ -1389,7 +1632,7 @@ export default class Zoom {
             attendeeCounterSelector = found ? found.selector : null;
         }
         if (attendeeCounterSelector) {
-            console.log(`Listening for attendee changes via selector: ${attendeeCounterSelector}`);
+            log.info(`Listening for attendee changes via selector: ${attendeeCounterSelector}`);
             await page.evaluate((selector: string) => {
                 const targetNode = document.querySelector(selector);
                 const config = { characterData: true, subtree: true };
@@ -1413,7 +1656,7 @@ export default class Zoom {
                 }
             }, attendeeCounterSelector);
         } else {
-            console.log('No attendee counter selector available — skipping attendee monitoring');
+            log.info('No attendee counter selector available — skipping attendee monitoring');
         }
 
         // Participants-panel watchdog: the MutationObserver above only fires
@@ -1459,21 +1702,25 @@ export default class Zoom {
                     consecutiveMissingCounter += 1;
                     consecutiveLonely = 0;
                     if (consecutiveMissingCounter >= POLLS_BEFORE_END) {
-                        console.log(
+                        log.info(
                             `[participants-watchdog] counter absent for ${consecutiveMissingCounter} polls (state=${result.state}) — VP appears to have been removed from the meeting`,
                         );
                         clearInterval(watchdogTimer);
                         details.start = false;
                         this.requestEnd({
                             reason: 'removed-from-meeting',
-                            trigger: `participants-ui-${result.state.toLowerCase()}`,
+                            // The state goes after a colon so that
+                            // normalizeExitTrigger slugs it, as it does every
+                            // other detail a trigger carries.
+                            trigger: `participants-ui:${result.state.toLowerCase()}`,
                         });
                     }
                 } else if ((result.count ?? 0) <= 1) {
+                    meetingConsent.noteAttendeeCount(result.count ?? 0);
                     consecutiveLonely += 1;
                     consecutiveMissingCounter = 0;
                     if (consecutiveLonely >= POLLS_BEFORE_END) {
-                        console.log(
+                        log.info(
                             `[participants-watchdog] only ${result.count} attendee(s) for ${consecutiveLonely} polls — leaving meeting`,
                         );
                         clearInterval(watchdogTimer);
@@ -1484,6 +1731,7 @@ export default class Zoom {
                         });
                     }
                 } else {
+                    meetingConsent.noteAttendeeCount(result.count ?? 0);
                     consecutiveMissingCounter = 0;
                     consecutiveLonely = 0;
                 }
@@ -1503,7 +1751,7 @@ export default class Zoom {
             lastReportedAttendeeCount = count;
         });
 
-        console.log('Listening for speaker changes.');
+        log.info('Listening for speaker changes.');
         await page.evaluate((vpIdentity: string) => {
             let observer: MutationObserver | null = null;
             let lastSpeaker: string | null = null;
@@ -1655,7 +1903,7 @@ export default class Zoom {
                     const idleMs = Date.now() - lastSpeakerEventAt;
                     if (idleMs < SPEAKER_STALL_MS) return;
                     if (lastReportedAttendeeCount <= 1) return;
-                    console.log(
+                    log.info(
                         `[speaker-watchdog] no speaker events in ${Math.floor(idleMs / 1000)}s with ${lastReportedAttendeeCount} attendees — asking AI for a fresh selector`,
                     );
                     const found = await findElementWithFallback(
@@ -1677,27 +1925,59 @@ export default class Zoom {
                         lastSpeakerEventAt = Date.now();
                     }
                 } catch (err) {
-                    console.warn('[speaker-watchdog] error:', err);
+                    log.warn('[speaker-watchdog] error:', err);
                 }
             }, 30_000);
         }
 
         // Set up message monitoring with LMA features
-        await page.exposeFunction('messageChange', async (message: string) => {
-            // Zoom's chat aria-label has two observed shapes:
-            //   colon form:     "<sender> to <recipient>: <text>"
-            //   timestamp form: "<sender> to <recipient>, HH:MM AM, <text>"
-            // (Zoom shipped the timestamp form during 2026; older clients
-            // still produce the colon form.) Match either, but always anchor
-            // on the literal "<sender> to <recipient>" prefix so we don't
-            // mistake punctuation inside the message for the boundary.
-            const senderMatch = message.match(
-                /^([^,:]+?)\s+to\s+[^,:]+?(?:\s*:\s*|,\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\s*,\s*)/i,
-            );
-            const sender = senderMatch?.[1]?.trim() || null;
-            const body = senderMatch ? message.slice(senderMatch[0].length) : message;
+        const onChatRow = async (message: string, messageId?: string | null, links?: string[]): Promise<void> => {
+            // `message` is the row's aria-label, sender and recipient included.
+            // Every command below is matched against the body alone.
+            const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
+            // Which LMA VP the message is for, when there are several
+            // (chat-addressing.ts). One for another VP, or the bare "LMA" with
+            // several here, is meeting chat only.
+            const route = chatAddressing.route(rawBody, sender);
+            if (!route.act) {
+                meetingChat.offer({
+                    platform: 'zoom',
+                    text: rawBody,
+                    commandText: route.text,
+                    sender,
+                    id: messageId,
+                    platformTime: time,
+                    audience: zoomChatAudience(recipient),
+                    links,
+                });
+                return;
+            }
+            // Read with its address reduced to "LMA".
+            const body = route.text;
+            // A consent reply, or "LMA start" while consent is withheld.
+            if (await meetingConsent.handleChat(sender, body)) return;
+            // Checked ahead of pause/resume so an assistant-mode toggle lands
+            // whether or not transcription is paused; the two vocabularies are
+            // disjoint. Parsed from the body rather than the raw row, so the
+            // "<sender> to <recipient>" prefix is not part of the match.
+            const assistantToggle = parseAssistantChatCommand(body);
+            // A question for the meeting assistant; answered in the background
+            // so a slow answer does not hold up the next command.
+            const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+            // Not a branch of the chain below: a question is still meeting chat,
+            // and is recorded as such.
+            if (chatQuestion) {
+                void startChatAnswer(chatQuestion, sender, 'zoom', async (messages, answered) => {
+                    await this.sendMessages(page, messages);
+                    // The meeting assistant's answer, not a notice, is added to the
+                    // transcript when the question was (meeting-chat.ts).
+                    if (answered) {
+                        meetingChat.offerAnswer({ platform: 'zoom', text: rawBody, sender, id: messageId }, messages);
+                    }
+                });
+            }
             if (matchesEndCommand(body)) {
-                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                 await this.sendMessages(page, exitMessagesFor(sender));
                 details.start = false;
                 this.requestEnd({
@@ -1706,32 +1986,60 @@ export default class Zoom {
                     requestedBy: sender,
                     matchedMessage: body,
                 });
-            } else if (details.start && message.includes(details.pauseCommand)) {
+            } else if (assistantToggle) {
+                await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
+            } else if (matchesChatCommand(body, details.helpCommand)) {
+                // Answered whether or not transcription is paused: the list is how
+                // someone finds out how to resume it.
+                log.info('[chat-help] posting the chat command list');
+                await this.sendMessages(page, chatHelpMessages(voiceAssistant));
+            } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                 details.start = false;
-                console.log(details.pauseMessages[0]);
+                void recordTranscriptionPause(true, sender);
+                log.info(details.pauseMessages[0]);
                 await this.sendMessages(page, details.pauseMessages);
-            } else if (!details.start && message.includes(details.startCommand)) {
+            } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                 details.start = true;
-                console.log(details.startMessages[0]);
+                void recordTranscriptionPause(false, null);
+                log.info(details.startMessages[0]);
                 await this.sendMessages(page, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
-            } else if (details.start) {
-                // Process meeting messages (LMA feature)
-                const timestamp = new Date().toLocaleTimeString('en-US', {
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
+            } else {
+                // Meeting chat, for the transcript; meeting-chat.ts decides
+                // whether it is added (paused, private, a command in another
+                // state, the setting).
+                meetingChat.offer({
+                    platform: 'zoom',
+                    text: rawBody,
+                    commandText: body,
+                    sender,
+                    id: messageId,
+                    platformTime: time,
+                    audience: zoomChatAudience(recipient),
+                    links,
                 });
-                const formattedMessage = `[${timestamp}] ${message}`;
-                details.messages.push(formattedMessage);
-                console.log('New message:', formattedMessage);
             }
-        });
+        };
 
-        // Resolve chat-list selector node-side first.
-        let chatListSelector: string | null = 'div[aria-label="Chat Message List"]';
-        if (!(await page.$(chatListSelector))) {
+        // The chat reader (zoom-chat-page.ts). Zoom draws the chat rows only
+        // while its panel is open and closes the panel by itself, for one when
+        // someone starts sharing their screen, so the rows are read by polling
+        // whatever list is on the page, and the panel is reopened when the
+        // toolbar shows it closed. A list Zoom does not mark the way the
+        // selectors expect is looked for once by the AI resolver, and its
+        // selector (cached as zoom.monitor.chatList) is read after the built-in ones.
+        const chatSelectors = {
+            lists: [...ZOOM_CHAT_SELECTORS.lists] as string[],
+            rows: [...ZOOM_CHAT_SELECTORS.rows],
+            container: ZOOM_CHAT_SELECTORS.container,
+            settleMs: ZOOM_CHAT_BASELINE_SETTLE_MS,
+        };
+        const listOnPage = async (): Promise<boolean> =>
+            page
+                .evaluate((lists: string[]) => lists.some((s) => !!document.querySelector(s)), chatSelectors.lists)
+                .catch(() => false);
+        if (!(await listOnPage()) && (await this.chatInputVisible(page))) {
             const found = await findElementWithFallback(
                 page,
                 [],
@@ -1742,38 +2050,114 @@ export default class Zoom {
                 },
                 { maxRetries: 1, delayMs: 100 },
             );
-            chatListSelector = found ? found.selector : null;
+            if (found) chatSelectors.lists.push(found.selector);
         }
-        if (chatListSelector) {
-            console.log(`Listening for message changes via selector: ${chatListSelector}`);
-            await page.evaluate((selector: string) => {
-                const targetNode = document.querySelector(selector);
-                const config = { childList: true, subtree: true };
-                const callback = (mutationList: MutationRecord[]) => {
-                    const addedNode = mutationList[mutationList.length - 1].addedNodes[0] as Element;
-                    if (addedNode) {
-                        const message = addedNode
-                            .querySelector('div[id^="chat-message-content"]')
-                            ?.getAttribute('aria-label');
-                        if (message && !message.startsWith('You to Everyone')) {
-                            (window as any).messageChange(message);
+        const panelKeeper = new ZoomChatPanelKeeper();
+        let chatPollInFlight = false;
+        let listMissingLogged = false;
+        let readerLogged = false;
+        // Set while the consent flow shows the participants pane (below).
+        let chatKeeperPaused = false;
+        log.info('Listening for message changes (polling the chat list).');
+        const chatPoll = setInterval(async () => {
+            if (page.isClosed()) {
+                clearInterval(chatPoll);
+                return;
+            }
+            if (chatPollInFlight) return;
+            chatPollInFlight = true;
+            try {
+                const panel = await page
+                    .evaluate(zoomChatPanelStateInPage, {
+                        openButton: ZOOM_CHAT_SELECTORS.openButton,
+                        closeButton: ZOOM_CHAT_SELECTORS.closeButton,
+                    })
+                    .catch((): ZoomChatPanelState => 'unknown');
+                if (!chatKeeperPaused && panelKeeper.shouldReopen(panel, Date.now())) {
+                    log.info('[zoom-chat] the chat panel is closed; reopening it to keep reading the chat');
+                    let opened = false;
+                    try {
+                        const button = await page.$(ZOOM_CHAT_SELECTORS.openButton);
+                        if (button) {
+                            await humanClick(page, button);
+                            const until = Date.now() + 3000;
+                            while (!opened && Date.now() < until) {
+                                await new Promise((r) => setTimeout(r, 300));
+                                opened = await listOnPage();
+                            }
                         }
+                    } catch (err: any) {
+                        log.warn(`[zoom-chat] reopening the chat panel failed: ${err?.message ?? err}`);
                     }
-                };
-                const observer = new MutationObserver(callback);
-                if (targetNode) observer.observe(targetNode, config);
-            }, chatListSelector);
-        } else {
-            console.log('No chat list selector available — skipping chat monitoring');
-        }
+                    panelKeeper.attempted(Date.now(), opened);
+                    if (!opened) {
+                        log.warn(`[zoom-chat] the chat panel is still closed; next attempt in ${Math.round(panelKeeper.currentGapMs / 1000)}s`);
+                    }
+                }
+                const reading = await page.evaluate(readZoomChatInPage, chatSelectors);
+                if (!reading.listFound) {
+                    if (!listMissingLogged && panel === 'open') {
+                        listMissingLogged = true;
+                        log.warn('[zoom-chat] the chat panel is open but no message list was found on the page');
+                    }
+                } else if (!readerLogged && !reading.baseline) {
+                    readerLogged = true;
+                    log.info('[zoom-chat] reading the meeting chat');
+                }
+                // One row at a time, in the order Zoom shows them, on purpose: a
+                // slow reply (help, the exit messages) delays the next row and
+                // the panel keeper, and keeps the replies in order.
+                for (const row of reading.rows) {
+                    await onChatRow(row.label, row.id, row.links);
+                }
+            } catch {
+                /* the page is navigating or closing; read again next tick */
+            } finally {
+                chatPollInFlight = false;
+            }
+        }, ZOOM_CHAT_POLL_MS);
+
+        // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
+        // The participants pane opens beside the chat; it is closed again
+        // after the screenshot, and the chat reopened if Zoom closed it.
+        // The chat panel keeper above stands aside while the participants pane
+        // is shown for the consent evidence, so it does not swap the pane out
+        // before its screenshot; restore() reopens the chat itself.
+        const participantPanels = toolbarPanels(page, {
+            listVisible: ['.participants-section-container', '.participants-ul'],
+            open: ['button[aria-label^="open the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="open" i]'],
+            close: ['button[aria-label^="close the participants list pane" i]', 'button[aria-label*="participants" i][aria-label^="close" i]'],
+            reopenChat: () => this.openChatPanel(page),
+        });
+        attachMeetingConsent(page, {
+            send: (messages) => this.sendMessages(page, messages),
+            panels: {
+                ...participantPanels,
+                showParticipants: async () => {
+                    chatKeeperPaused = true;
+                    return (await participantPanels.showParticipants?.()) ?? false;
+                },
+                restore: async () => {
+                    try {
+                        await participantPanels.restore?.();
+                    } finally {
+                        chatKeeperPaused = false;
+                    }
+                },
+            },
+            leave: (objector) => {
+                details.start = false;
+                this.requestEnd({ reason: 'consent-objection', trigger: 'consent-objection', requestedBy: objector });
+            },
+        });
 
         // Start transcription if enabled (LMA behavior)
         if (details.start) {
-            console.log(details.startMessages[0]);
+            log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
-        console.log('Waiting for meeting end.');
+        log.info('Waiting for meeting end.');
         let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
             // Detect Zoom's own meeting-end UI: host ended the meeting, or the
@@ -1819,18 +2203,20 @@ export default class Zoom {
                 // otherwise it surfaces as an unhandled rejection. Log the
                 // underlying error so unexpected mid-meeting aborts are diagnosable.
                 .catch((err): ExitInfo => {
-                    console.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
+                    log.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
                     return { reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' };
                 });
 
             exitInfo = await Promise.race([this.endRequested, zoomDialogPromise]);
         } catch (error) {
-            console.log('Meeting timed out.');
+            log.info('Meeting timed out.');
             exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
+            clearInterval(chatPoll);
+            this.stopOverlayDismisser();
         }
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        log.info(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
         return exitInfo;
     }
 }

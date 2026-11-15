@@ -1,0 +1,19 @@
+/* A key frame shown in the meeting summary (see SummaryMarkdown.jsx). */
+.summary-keyframe {
+  display: inline-block;
+  margin: 4px 0;
+}
+
+.summary-keyframe img {
+  display: block;
+  max-width: 320px;
+  width: 100%;
+  height: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+
+.summary-keyframe-text {
+  font-style: italic;
+}

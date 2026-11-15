@@ -16,6 +16,10 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
+import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
+import { createLogger, registerSecretValue } from './logger.js';
+
+const log = createLogger('status-manager');
 
 /**
  * Conditions for this participant's ALB listener rule.
@@ -53,6 +57,194 @@ export interface VPTaskRegistryItem {
   expiresAt: number;
 }
 
+/**
+ * Every status a Virtual Participant row can carry.
+ *
+ * The set is a contract between four writers and one reader: this container
+ * (most of them), `backend/entrypoint.sh` (BOOTING, before Node starts), the
+ * Step Functions state machine in `lma-virtual-participant-stack/template.yaml`
+ * (WAITING_FOR_CAPACITY, FAILED), the task reaper Lambda in the same template
+ * (FAILED), and the React UI's `STATUS_CONFIG`, which renders a message, an
+ * icon and a colour per status and shows the bare string for anything it does
+ * not recognise. Declaring them here means a status this file writes is a value
+ * the compiler has seen, rather than a string literal that only a deployed UI
+ * can disprove.
+ */
+export const VP_STATUS = {
+  SCHEDULED: 'SCHEDULED',
+  INITIALIZING: 'INITIALIZING',
+  WAITING_FOR_CAPACITY: 'WAITING_FOR_CAPACITY',
+  BOOTING: 'BOOTING',
+  REGISTERING_NETWORK: 'REGISTERING_NETWORK',
+  VNC_READY: 'VNC_READY',
+  HYDRATING_PROFILE: 'HYDRATING_PROFILE',
+  LAUNCHING_BROWSER: 'LAUNCHING_BROWSER',
+  WARMING_PROFILE: 'WARMING_PROFILE',
+  CONNECTING: 'CONNECTING',
+  JOINING: 'JOINING',
+  JOINED: 'JOINED',
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  ENDED: 'ENDED',
+  CANCELLED: 'CANCELLED',
+  MANUAL_ACTION_REQUIRED: 'MANUAL_ACTION_REQUIRED',
+} as const;
+
+export type VpStatus = (typeof VP_STATUS)[keyof typeof VP_STATUS];
+
+/** All of them, for exhaustiveness checks in tests. */
+export const VP_STATUSES: readonly VpStatus[] = Object.values(VP_STATUS);
+
+/**
+ * Statuses that say the VP is healthy: it is in the meeting, or it finished
+ * normally. Reaching one of these means any status detail written earlier --
+ * a join sub-step, or the reason an earlier attempt in this same run did not
+ * work out -- no longer describes the participant, so it is cleared unless the
+ * caller supplies a replacement.
+ */
+export const HEALTHY_VP_STATUSES: readonly VpStatus[] = [
+  VP_STATUS.JOINED,
+  VP_STATUS.ACTIVE,
+  VP_STATUS.COMPLETED,
+];
+
+/**
+ * Statuses from which a VP never moves on. The updateVirtualParticipant
+ * resolver in `lma-ai-stack/deployment/lma-ai-stack.yaml` keeps the same set
+ * (`$terminalStatuses`) to decide which writes it conditions on the row's end;
+ * `vp-status-updates.test.ts` checks that the two agree.
+ */
+export const TERMINAL_VP_STATUSES: readonly VpStatus[] = [
+  VP_STATUS.COMPLETED,
+  VP_STATUS.FAILED,
+  VP_STATUS.ENDED,
+  VP_STATUS.CANCELLED,
+];
+
+export const isTerminalVpStatus = (status: string): boolean =>
+  (TERMINAL_VP_STATUSES as readonly string[]).includes(status);
+
+export const isVpStatus = (value?: string | null): value is VpStatus =>
+  !!value && (VP_STATUSES as readonly string[]).includes(value);
+
+/**
+ * The status a manual-action prompt is about to interrupt, so it can be put
+ * back afterwards. Null when there is nothing worth recording: an unrecognised
+ * status, or MANUAL_ACTION_REQUIRED itself, which happens when a second prompt
+ * arrives before the first has been cleared and must not displace the status
+ * the first one recorded.
+ */
+export const statusToResume = (currentStatus?: string | null): VpStatus | null =>
+  isVpStatus(currentStatus) && currentStatus !== VP_STATUS.MANUAL_ACTION_REQUIRED
+    ? currentStatus
+    : null;
+
+/**
+ * Where a VP goes when its manual-action prompt is cleared.
+ *
+ * A prompt displaces the status the VP was reporting, and the UI's alert stays
+ * up until the status moves off MANUAL_ACTION_REQUIRED, so clearing a prompt
+ * has to put a status back. The one recorded when the prompt was raised is the
+ * right answer; JOINING is the fallback for a row written before this was
+ * recorded, since every caller that raises a prompt pre-admission is in the
+ * middle of joining.
+ */
+export const resumedStatus = (recordedStatus?: string | null): VpStatus =>
+  statusToResume(recordedStatus) ?? VP_STATUS.JOINING;
+
+/**
+ * Whether a GraphQL failure is DynamoDB declining a conditional write.
+ *
+ * AppSync surfaces it as an error naming `ConditionalCheckFailedException`,
+ * which for the write that restores a prompt's interrupted status is an
+ * expected outcome rather than a fault: it says the row stopped prompting
+ * before the write landed.
+ */
+export const isConditionalCheckFailure = (error: unknown): boolean =>
+  /ConditionalCheckFailed/i.test(error instanceof Error ? error.message : String(error));
+
+/**
+ * Whether a status write should take the status-detail string off the row.
+ *
+ * `errorMessage` is deliberately overloaded: it is the detail line for every
+ * status, not only failures -- the exit reason on COMPLETED ("Asked to leave by
+ * Jeremy."), and the join sub-step while the VP is still JOINING. Because the
+ * mutation leaves fields it was not given alone, a detail written during one
+ * phase stays on the row through every later write that does not mention it.
+ * So a transition into a healthy state with nothing new to say clears it; a
+ * transition that carries its own detail just overwrites it.
+ */
+export const shouldClearStatusDetail = (status: string, statusDetail?: string): boolean =>
+  !statusDetail && (HEALTHY_VP_STATUSES as readonly string[]).includes(status);
+
+/**
+ * The fields every mutation in this file selects, shared so that no write from
+ * the container can be narrower than the UI is subscribed to.
+ *
+ * An AppSync subscription delivers the fields the *mutation* selected: one the
+ * subscriber asked for that the mutation did not return arrives as null. Most
+ * of the UI merges an update into what it already has and treats a null as "no
+ * news", but `ManualActionAlerts` builds an alert out of the payload, so what a
+ * write leaves out it renders as missing — which is why its alerts named the
+ * meeting as "null" until this list included `meetingName`, and why a write
+ * without the prompt fields would describe an open prompt in generic terms.
+ *
+ * Carrying the full set is this side's half of that. The other half is in the
+ * component: a write while a prompt is open is normal — a join sub-step, the
+ * CallId link — and each one returns the open prompt along with whatever it
+ * changed, so the component compares an incoming prompt with the one on screen
+ * and acts only on a new one.
+ *
+ * One list rather than per-mutation lists is the point: the next write added
+ * here cannot forget. `vp-status-updates.test.ts` checks this list against the
+ * subscription's own selection set, read from the UI, and checks that every
+ * mutation in this file uses it.
+ */
+const SUBSCRIBED_FIELDS = `
+            id
+            meetingName
+            meetingPlatform
+            status
+            Owner
+            SharedWith
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            errorMessage
+            updatedAt`;
+
+/**
+ * Whether this process has begun to shut down. Module state rather than a
+ * field, because it describes the process: the platform handlers create a
+ * manager of their own for each write, and every one of them has to see it.
+ */
+let processShuttingDown = false;
+
+/**
+ * Record that this process has begun to shut down, so it stops reporting
+ * progress.
+ *
+ * Called from the signal handler and the emergency cleanup. From then on no
+ * manager in this process writes a progress status, a join sub-step, a
+ * manual-action prompt or the clearing of one; only a terminal status goes
+ * through. Whatever the setup or join code was in the middle of carries on
+ * running until the process exits, and each progress write it would otherwise
+ * make describes a participant that is no longer going to get there. A
+ * terminal status is still written, because recording how the participant
+ * ended is what the shutdown path is for.
+ *
+ * This covers writes that start after the signal, and those whose row read
+ * was still in flight when it came. One whose mutation was already on its way
+ * to AppSync is the resolver's to decline: a progress status does not land on
+ * a row whose end has been recorded (see the updateVirtualParticipant
+ * resolver).
+ */
+export const beginShutdown = (): void => {
+  processShuttingDown = true;
+};
+
 export class VirtualParticipantStatusManager {
   private participantId: string;
   private graphqlEndpoint: string;
@@ -76,7 +268,7 @@ export class VirtualParticipantStatusManager {
     this.awsRegion = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     
     if (!this.graphqlEndpoint) {
-      console.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');
+      log.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');
     }
 
     this.dynamoClient = new DynamoDBClient({
@@ -94,7 +286,7 @@ export class VirtualParticipantStatusManager {
 
   private async signAndSendGraphQLRequest(query: string, variables: any): Promise<any> {
     if (!this.graphqlEndpoint) {
-      console.log('GraphQL endpoint not configured - skipping GraphQL update');
+      log.info('GraphQL endpoint not configured - skipping GraphQL update');
       return null;
     }
 
@@ -116,25 +308,47 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!response.ok) {
-        console.error(`Failed to send GraphQL request: HTTP ${response.status}`);
+        log.error(`Failed to send GraphQL request: HTTP ${response.status}`);
         return null;
       }
 
       const responseData = await response.json();
       
       if (responseData.errors) {
-        console.error('GraphQL errors:', responseData.errors);
+        log.error('GraphQL errors:', responseData.errors);
         throw new Error(`GraphQL errors: ${JSON.stringify(responseData.errors)}`);
       }
 
       return responseData.data;
     } catch (error) {
-      console.error('Failed to send GraphQL request:', error);
+      log.error('Failed to send GraphQL request:', error);
       throw error;
     }
   }
 
-  async updateStatus(status: string, errorMessage?: string): Promise<boolean> {
+  /** Whether a progress write should be skipped because shutdown has begun. */
+  private skipProgressWrite(what: string): boolean {
+    if (!processShuttingDown) return false;
+    log.info(`VP ${this.participantId} is shutting down — not writing ${what}`);
+    return true;
+  }
+
+  /**
+   * Write a lifecycle status, and with it the detail line the UI shows.
+   *
+   * `endTrigger` is the structured counterpart of `errorMessage`: the exact
+   * branch the VP exited through (`ExitInfo.trigger`, e.g.
+   * 'pre-join:not-admitted'). It is persisted alongside the prose so join
+   * outcomes can be counted with a query rather than a log search.
+   */
+  async updateStatus(
+    status: VpStatus,
+    errorMessage?: string,
+    endTrigger?: string,
+  ): Promise<boolean> {
+    if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+      return false;
+    }
     try {
       // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
@@ -155,28 +369,42 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
       const current = currentVP.getVirtualParticipant;
-      console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
-      console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
+      log.info(`Current VP state from query:`, JSON.stringify(current, null, 2));
+      log.info(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
+
+      // Reported, not refused. A VP's own container is the authority on its
+      // progress, and a terminal status can arrive from elsewhere — the
+      // launcher state machine and the task reaper both write FAILED — so a
+      // task that is in fact still running has to be able to carry on saying
+      // so. But the container never moves on from a terminal status under its
+      // own steam, so seeing one here means two writers disagreed about this
+      // participant, and that is worth a line in the log.
+      if (isTerminalVpStatus(current.status) && !isTerminalVpStatus(status)) {
+        log.warn(
+          `VP ${this.participantId} is ${current.status} and is being set to ${status}`,
+        );
+      }
+
+      // Checked again after the read, which is where a write started before a
+      // shutdown spends most of its time.
+      if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+        return false;
+      }
 
       // Update with new status while preserving CallId and VNC fields.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            errorMessage
-            updatedAt
-            Owner
-            SharedWith
+            endTrigger
           }
         }
       `;
@@ -191,7 +419,7 @@ export class VirtualParticipantStatusManager {
       // Preserve CallId if it exists
       if (current.CallId) {
         variables.input.CallId = current.CallId;
-        console.log(`Including CallId in update: ${current.CallId}`);
+        log.info(`Including CallId in update: ${current.CallId}`);
       }
 
       // Preserve VNC fields if they exist
@@ -199,53 +427,81 @@ export class VirtualParticipantStatusManager {
         variables.input.vncEndpoint = current.vncEndpoint;
         variables.input.vncPort = current.vncPort;
         variables.input.vncReady = current.vncReady;
-        console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
+        log.info(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
       }
 
       // The schema's `errorMessage` field is the generic status detail —
       // it's persisted on FAILED *and* on normal terminal states like
       // COMPLETED so the UI can show why the meeting actually ended
-      // (e.g. "Asked to leave by Jeremy"). Without this assignment the
-      // mutation would only carry the status code itself and the detail
-      // string would be silently dropped.
+      // (e.g. "Asked to leave by Jeremy"), and it carries the JOINING
+      // sub-step while the VP is still working its way in. Without this
+      // assignment the mutation would only carry the status code itself
+      // and the detail string would be silently dropped.
+      //
+      // The mutation leaves out fields it was not given, so a detail has to
+      // be taken off the row explicitly once it no longer applies: reaching
+      // a healthy state with nothing new to say clears it, which is what
+      // keeps a message from an earlier attempt out of the UI for a VP that
+      // went on to join successfully.
       if (errorMessage) {
         variables.input.errorMessage = errorMessage;
+      } else if (shouldClearStatusDetail(status)) {
+        variables.input.clearErrorMessage = true;
+        log.info(`Clearing stale status detail on transition to ${status}`);
       }
 
-      if (status === 'FAILED' && errorMessage) {
-        console.error(`VP ${this.participantId} failed: ${errorMessage}`);
+      if (endTrigger) {
+        variables.input.endTrigger = endTrigger;
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      if (status === VP_STATUS.FAILED && errorMessage) {
+        log.error(`VP ${this.participantId} failed: ${errorMessage}`);
+      }
+
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (!isTerminalVpStatus(status) && isConditionalCheckFailure(error)) {
+          // The resolver declines a progress status on a row whose end has
+          // been recorded: the user asked for this participant to end, and
+          // that outcome stands over any progress it reports afterwards.
+          log.info(
+            `VP ${this.participantId} has been ended — not setting its status to ${status}`,
+          );
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
-        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
+        log.always(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
       } else {
-        console.error('Failed to update VP status via GraphQL');
+        log.error('Failed to update VP status via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Unexpected error updating VP status:', error);
+      log.error('Unexpected error updating VP status:', error);
       return false;
     }
   }
 
   async storeTaskArnInRegistry(): Promise<void> {
     try {
-      console.log(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
+      log.info(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
 
       // Get task ARN and private IP from ECS metadata endpoint
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
-        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        log.info('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
         return;
       }
 
       // Get task metadata
       const taskMetadataUrl = `${metadataUri}/task`;
-      console.log(`Fetching task metadata from: ${taskMetadataUrl}`);
+      log.info(`Fetching task metadata from: ${taskMetadataUrl}`);
 
       const response = await fetch(taskMetadataUrl);
       if (!response.ok) {
@@ -256,11 +512,11 @@ export class VirtualParticipantStatusManager {
       const taskArn = metadata.TaskARN;
       const clusterArn = metadata.Cluster;
 
-      console.log(`Retrieved task ARN: ${taskArn}`);
-      console.log(`Retrieved cluster ARN: ${clusterArn}`);
+      log.info(`Retrieved task ARN: ${taskArn}`);
+      log.info(`Retrieved cluster ARN: ${clusterArn}`);
 
       if (!taskArn || !clusterArn) {
-        console.log('Could not get task ARN or cluster ARN from metadata');
+        log.warn('Could not get task ARN or cluster ARN from metadata');
         return;
       }
 
@@ -272,7 +528,7 @@ export class VirtualParticipantStatusManager {
           const network = container.Networks[0];
           if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
             taskPrivateIp = network.IPv4Addresses[0];
-            console.log(`Task private IP: ${taskPrivateIp}`);
+            log.info(`Task private IP: ${taskPrivateIp}`);
           }
         }
       }
@@ -280,11 +536,11 @@ export class VirtualParticipantStatusManager {
       // Store in VPTaskRegistry table
       const registryTableName = details.vpTaskRegistryTableName;
       if (!registryTableName) {
-        console.log('VP_TASK_REGISTRY_TABLE_NAME environment variable not set');
+        log.info('VP_TASK_REGISTRY_TABLE_NAME environment variable not set');
         return;
       }
 
-      console.log(`Using VPTaskRegistry table: ${registryTableName}`);
+      log.info(`Using VPTaskRegistry table: ${registryTableName}`);
 
       // Calculate expiry time (24 hours from now)
       const expiryTime = Math.floor(Date.now() / 1000) + 86400;
@@ -313,10 +569,10 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.dynamoClient.send(putCommand);
-      console.log(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
+      log.info(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
 
     } catch (error) {
-      console.error('Error storing task ARN in registry:', error);
+      log.error('Error storing task ARN in registry:', error);
       // This is non-critical - don't fail the container startup
     }
   }
@@ -337,7 +593,7 @@ export class VirtualParticipantStatusManager {
       });
       return result?.getVirtualParticipant?.status || null;
     } catch (error) {
-      console.error('Error reading VP status:', error);
+      log.error('Error reading VP status:', error);
       return null;
     }
   }
@@ -360,7 +616,7 @@ export class VirtualParticipantStatusManager {
       });
       return !!result?.getVirtualParticipant?.userAcknowledgedFailure;
     } catch (error) {
-      console.error('Error reading userAcknowledgedFailure:', error);
+      log.error('Error reading userAcknowledgedFailure:', error);
       return false;
     }
   }
@@ -382,30 +638,64 @@ export class VirtualParticipantStatusManager {
       });
       
       if (result?.getVirtualParticipant?.CallId) {
-        console.log(`Retrieved CallId ${result.getVirtualParticipant.CallId} for VP ${this.participantId}`);
+        log.info(`Retrieved CallId ${result.getVirtualParticipant.CallId} for VP ${this.participantId}`);
         return result.getVirtualParticipant.CallId;
       } else {
-        console.log(`No CallId found for VP ${this.participantId}`);
+        log.info(`No CallId found for VP ${this.participantId}`);
         return null;
       }
 
     } catch (error) {
-      console.error('Error getting CallId:', error);
+      log.error('Error getting CallId:', error);
       return null;
     }
   }
 
-  // Method to set CallId in VP record
+  /**
+   * The agenda given when this VP was started or scheduled, from its own row.
+   *
+   * Null when the row has none or cannot be read: an agenda is an enhancement,
+   * and a VP that could not read one still joins and records the meeting.
+   */
+  async getAgenda(): Promise<VpAgenda | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            agenda
+            agendaSource
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      const agenda = agendaFromVpRow(result?.getVirtualParticipant);
+      log.info(
+        agenda
+          ? `VP ${this.participantId} has an agenda (${agenda.agenda.length} characters, source ${agenda.agendaSource})`
+          : `VP ${this.participantId} has no agenda`,
+      );
+      return agenda;
+    } catch (error) {
+      log.error('Error getting the agenda:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Link this VP to the call it is recording.
+   *
+   * Sends the CallId and nothing else. `status` is deliberately absent: this
+   * method owns the CallId, not the lifecycle, and the mutation writes only
+   * the fields it is given — so whatever status the VP's own progress last
+   * wrote stays in place.
+   */
   async setCallId(callId: string): Promise<boolean> {
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -413,7 +703,6 @@ export class VirtualParticipantStatusManager {
       const variables = {
         input: {
           id: this.participantId,
-          status: 'SCHEDULED', // Keep current status
           CallId: callId
         }
       };
@@ -421,15 +710,15 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`Successfully set CallId ${callId} for VP ${this.participantId}`);
+        log.info(`Successfully set CallId ${callId} for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to set CallId via GraphQL');
+        log.error('Failed to set CallId via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error setting CallId:', error);
+      log.error('Error setting CallId:', error);
       return false;
     }
   }
@@ -437,87 +726,175 @@ export class VirtualParticipantStatusManager {
   // Status update methods matching Python implementation
   async setScheduled(scheduledTime?: Date): Promise<boolean> {
     const message = scheduledTime ? `Scheduled for ${scheduledTime.toISOString()}` : undefined;
-    return this.updateStatus('SCHEDULED', message);
+    return this.updateStatus(VP_STATUS.SCHEDULED, message);
   }
 
   async setInitializing(): Promise<boolean> {
-    return this.updateStatus('INITIALIZING');
+    return this.updateStatus(VP_STATUS.INITIALIZING);
   }
 
   // Granular sub-states inside the INITIALIZING phase. Each maps to a
   // different long-running setup step so the UI can show progress
   // instead of staying on a generic "Setting up..." for ~60s.
   async setRegisteringNetwork(): Promise<boolean> {
-    return this.updateStatus('REGISTERING_NETWORK');
+    return this.updateStatus(VP_STATUS.REGISTERING_NETWORK);
   }
 
   async setLaunchingBrowser(): Promise<boolean> {
-    return this.updateStatus('LAUNCHING_BROWSER');
+    return this.updateStatus(VP_STATUS.LAUNCHING_BROWSER);
   }
 
   async setHydratingProfile(): Promise<boolean> {
-    return this.updateStatus('HYDRATING_PROFILE');
+    return this.updateStatus(VP_STATUS.HYDRATING_PROFILE);
   }
 
   async setWarmingProfile(): Promise<boolean> {
-    return this.updateStatus('WARMING_PROFILE');
+    return this.updateStatus(VP_STATUS.WARMING_PROFILE);
   }
 
   async setConnecting(): Promise<boolean> {
-    return this.updateStatus('CONNECTING');
+    return this.updateStatus(VP_STATUS.CONNECTING);
   }
 
   async setJoining(): Promise<boolean> {
-    return this.updateStatus('JOINING');
+    return this.updateStatus(VP_STATUS.JOINING);
   }
 
   /**
-   * Refresh the JOINING status with a human-readable sub-step so the long
-   * join span (sign-in → navigate → prejoin → admission → chat) doesn't
-   * look frozen in the UI. Keeps status=JOINING (UI-safe; the detail line
-   * renders this via the errorMessage channel) but bumps updatedAt and the
-   * shown message. Best-effort — never throws or blocks the join.
+   * Publish a human-readable sub-step so the long join span (sign-in →
+   * navigate → prejoin → admission → chat) doesn't look frozen in the UI. The
+   * detail line renders through the errorMessage channel; this also bumps
+   * updatedAt. Best-effort — never throws or blocks the join.
+   *
+   * It writes no status. The row is already JOINING before the platform
+   * handler starts (`index.ts` sets it ahead of `initialize()`), so there is
+   * nothing for a sub-step to add, and writing one would not be harmless: the
+   * dialog watchdog starts at the top of the same handler and runs
+   * concurrently with the join, so a sub-step landing just after the watchdog
+   * raised MANUAL_ACTION_REQUIRED would take the prompt off the screen while
+   * the user is still needed to clear it.
    */
   async setJoiningSubstep(message: string): Promise<void> {
+    if (this.skipProgressWrite('a join sub-step')) return;
     try {
-      await this.updateStatus('JOINING', message);
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+          }
+        }
+      `;
+      await this.signAndSendGraphQLRequest(mutation, {
+        input: {
+          id: this.participantId,
+          errorMessage: message,
+        },
+      });
     } catch {
       /* progress sub-message is best-effort */
     }
   }
 
-  async setJoined(): Promise<boolean> {
-    const result = this.updateStatus('JOINED');
-    if (!result) {
-      throw new Error('Failed to update VP status to JOINED via GraphQL');
+  /**
+   * Write the detail line alone, or clear it with null: the meeting consent
+   * flow's "Waiting for consent…" while capture is withheld in the meeting.
+   * Like a join sub-step it writes no status, so it never moves the
+   * participant's lifecycle. Best-effort.
+   */
+  async setStatusDetail(message: string | null): Promise<void> {
+    if (this.skipProgressWrite('a status detail')) return;
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+          }
+        }
+      `;
+      const input: Record<string, unknown> = { id: this.participantId };
+      if (message) input.errorMessage = message;
+      else input.clearErrorMessage = true;
+      await this.signAndSendGraphQLRequest(mutation, { input });
+    } catch {
+      /* the detail line is best-effort */
     }
-    return result;
+  }
+
+  /**
+   * Record which method joined the meeting (`joinMethod`: for Teams `acs`,
+   * `browser`, or `browser:acs-refused:<subCode>`; see teams-join-method.ts).
+   * A field of its own rather than the detail line, which the status
+   * transitions and the consent flow clear and rewrite; this one is written
+   * once, after admission, and stays. Writes no status. Best-effort.
+   *
+   * `joinMethod` is selected here and not added to SUBSCRIBED_FIELDS: this
+   * write is what delivers it to the Virtual Participant page's subscription,
+   * and keeping it out of the shared set means a container running against an
+   * API that does not have the field yet loses only this write, not every
+   * status write.
+   */
+  async setJoinMethod(joinMethod: string): Promise<void> {
+    if (this.skipProgressWrite('the join method')) return;
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+            joinMethod
+          }
+        }
+      `;
+      await this.signAndSendGraphQLRequest(mutation, { input: { id: this.participantId, joinMethod } });
+    } catch {
+      /* the join method is best-effort */
+    }
+  }
+
+  // Admission. Clears the join sub-step detail with it (no message is
+  // supplied), so the UI stops showing "Waiting to be admitted…" next to a
+  // participant that is by then in the meeting.
+  async setJoined(): Promise<boolean> {
+    const updated = await this.updateStatus(VP_STATUS.JOINED);
+    if (!updated) {
+      // Reported, not thrown: the VP is in the meeting and recording either
+      // way, so a status write that did not land must not end the meeting.
+      log.error('Failed to update VP status to JOINED via GraphQL');
+    }
+    return updated;
   }
 
   async setActive(): Promise<boolean> {
-    return this.updateStatus('ACTIVE');
+    return this.updateStatus(VP_STATUS.ACTIVE);
   }
 
-  async setCompleted(statusMessage?: string): Promise<boolean> {
-    return this.updateStatus('COMPLETED', statusMessage);
+  async setCompleted(statusMessage?: string, endTrigger?: string): Promise<boolean> {
+    return this.updateStatus(VP_STATUS.COMPLETED, statusMessage, endTrigger);
   }
 
-  async setFailed(errorMessage?: string): Promise<boolean> {
-    return this.updateStatus('FAILED', errorMessage);
+  async setFailed(errorMessage?: string, endTrigger?: string): Promise<boolean> {
+    return this.updateStatus(VP_STATUS.FAILED, errorMessage, endTrigger);
   }
 
+  /**
+   * Ask the user to take over in the live view.
+   *
+   * MANUAL_ACTION_REQUIRED is a status, so the prompt displaces whatever the VP
+   * was doing. A prompt can arrive anywhere from sign-in to mid-meeting, so the
+   * displaced status is recorded on the row for `clearManualAction` to go back
+   * to — there is no one status that is right to resume from.
+   */
   async setManualActionRequired(
     actionType: string,
     message: string,
     timeoutSeconds: number
   ): Promise<boolean> {
+    if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
     try {
-      // First, get the current VP to preserve existing CallId and VNC fields
+      // First, get the current VP to preserve existing CallId and VNC fields,
+      // and to record the status this prompt is interrupting.
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
+            statusBeforeManualAction
             CallId
             vncEndpoint
             vncPort
@@ -531,30 +908,23 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
       const current = currentVP.getVirtualParticipant;
-      console.log(`Setting manual action required: ${actionType} - ${message}`);
+      if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
+      log.info(`Setting manual action required: ${actionType} - ${message}`);
 
       // Update with MANUAL_ACTION_REQUIRED status and metadata.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            manualActionType
-            manualActionMessage
-            manualActionTimeoutSeconds
-            manualActionStartTime
-            updatedAt
-            Owner
-            SharedWith
+            statusBeforeManualAction
           }
         }
       `;
@@ -562,7 +932,7 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          status: 'MANUAL_ACTION_REQUIRED',
+          status: VP_STATUS.MANUAL_ACTION_REQUIRED,
           manualActionType: actionType,
           manualActionMessage: message,
           manualActionTimeoutSeconds: timeoutSeconds,
@@ -570,6 +940,14 @@ export class VirtualParticipantStatusManager {
         }
       };
 
+      // Record what to resume, unless a prompt is already pending — a second
+      // prompt arriving before the first is cleared must not overwrite the
+      // stash with MANUAL_ACTION_REQUIRED itself.
+      const interrupted = statusToResume(current.status);
+      if (interrupted) {
+        variables.input.statusBeforeManualAction = interrupted;
+      }
+
       // Preserve CallId if it exists
       if (current.CallId) {
         variables.input.CallId = current.CallId;
@@ -582,34 +960,74 @@ export class VirtualParticipantStatusManager {
         variables.input.vncReady = current.vncReady;
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (isConditionalCheckFailure(error)) {
+          // MANUAL_ACTION_REQUIRED is a progress status, so the resolver
+          // declines it on a row whose end has been recorded.
+          log.info(`VP ${this.participantId} has been ended — not raising a ${actionType} prompt`);
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
-        console.log(`Successfully set manual action required for VP ${this.participantId}`);
+        log.info(`Successfully set manual action required for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to set manual action required via GraphQL');
+        log.error('Failed to set manual action required via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error setting manual action required:', error);
+      log.error('Error setting manual action required:', error);
       return false;
     }
   }
 
+  /**
+   * Take the manual-action prompt off the row once the user has dealt with it.
+   *
+   * The prompt's attributes are removed through the mutation's
+   * `clearManualAction` flag: an omitted field means "leave this attribute
+   * alone", so the prompt needs an explicit signal to come off rather than a
+   * null value, which the mutation ignores.
+   *
+   * The status goes back to the one the prompt interrupted, recorded on the row
+   * by `setManualActionRequired`. It is not a fixed value: this is called from
+   * the Zoom sign-in flow, the Teams and Webex pre-join flows and the dialog
+   * watchdog, which runs for the whole meeting — so a VP prompted mid-meeting
+   * returns to mid-meeting rather than to a join that already happened.
+   *
+   * A VP that is not prompting keeps whatever status it has. That matters for
+   * the callers that clear opportunistically, without knowing whether a prompt
+   * was ever raised.
+   *
+   * Both decisions here are taken from a read of the row, and the row can move
+   * between that read and the write — the same read-modify-write shape
+   * `setCallId` exists to avoid. The difference is that the resolver makes both
+   * forms of this write conditional on the row still being what the read saw:
+   * restoring a status applies only while the row is still
+   * MANUAL_ACTION_REQUIRED, and clearing without a status applies only while it
+   * is not. Either way the writer with current information wins and this call
+   * drops out, which it reports rather than retries.
+   */
   async clearManualAction(): Promise<boolean> {
+    // Clearing a prompt resumes a progress status, and after shutdown has
+    // begun the terminal status being written supersedes the prompt anyway:
+    // the UI shows a prompt only while the status is MANUAL_ACTION_REQUIRED.
+    if (this.skipProgressWrite('the clearing of a prompt')) return false;
     try {
-      // Get current VP to preserve fields
+      log.info(`Clearing manual action for VP ${this.participantId}`);
+
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
-            CallId
-            vncEndpoint
-            vncPort
-            vncReady
+            statusBeforeManualAction
           }
         }
       `;
@@ -619,30 +1037,20 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
       const current = currentVP.getVirtualParticipant;
-      console.log(`Clearing manual action for VP ${this.participantId}`);
+      if (this.skipProgressWrite('the clearing of a prompt')) return false;
 
-      // Update to clear manual action fields by setting them to null.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            manualActionType
-            manualActionMessage
-            manualActionTimeoutSeconds
-            manualActionStartTime
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -650,38 +1058,55 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          status: 'JOINING',
-          manualActionType: null,
-          manualActionMessage: null,
-          manualActionTimeoutSeconds: null,
-          manualActionStartTime: null
+          clearManualAction: true
         }
       };
 
-      // Preserve CallId if it exists
-      if (current.CallId) {
-        variables.input.CallId = current.CallId;
+      // Only a prompting VP gets a status written, and only the one the prompt
+      // displaced. Supplying it is also what makes the write conditional on the
+      // row still prompting (see the resolver), which is what keeps this read
+      // from being able to undo a status written since.
+      if (current.status === VP_STATUS.MANUAL_ACTION_REQUIRED) {
+        variables.input.status = resumedStatus(current.statusBeforeManualAction);
+        log.info(`Resuming VP ${this.participantId} at ${variables.input.status}`);
       }
 
-      // Preserve VNC fields if they exist
-      if (current.vncEndpoint) {
-        variables.input.vncEndpoint = current.vncEndpoint;
-        variables.input.vncPort = current.vncPort;
-        variables.input.vncReady = current.vncReady;
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (isConditionalCheckFailure(error)) {
+          // Not a failure. The row stopped matching what the read above saw,
+          // so another writer acted on more current information than this call
+          // has, and the condition in the resolver let that writer win.
+          log.info(
+            variables.input.status
+              ? // Was restoring a prompt's interrupted status; the VP has since
+                // left MANUAL_ACTION_REQUIRED, and the status that took it
+                // there is newer than the one being restored. The prompt is off
+                // the screen either way, because the UI stops showing one as
+                // soon as the status moves off MANUAL_ACTION_REQUIRED.
+                `VP ${this.participantId} is no longer prompting — leaving its status alone`
+              : // Was clearing opportunistically, having read a row that was
+                // not prompting; one has been raised since, and removing its
+                // description now would leave a prompt nothing can describe.
+                `VP ${this.participantId} is now prompting — leaving the prompt in place`,
+          );
+          return true;
+        }
+        throw error;
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
       if (result) {
-        console.log(`Successfully cleared manual action for VP ${this.participantId}`);
+        log.info(`Successfully cleared manual action for VP ${this.participantId}`);
         return true;
       } else {
-        console.error('Failed to clear manual action via GraphQL');
+        log.error('Failed to clear manual action via GraphQL');
         return false;
       }
 
     } catch (error) {
-      console.error('Error clearing manual action:', error);
+      log.error('Error clearing manual action:', error);
       return false;
     }
   }
@@ -693,12 +1118,12 @@ export class VirtualParticipantStatusManager {
     try {
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
-        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        log.info('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
         return null;
       }
 
       const taskMetadataUrl = `${metadataUri}/task`;
-      console.log(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
+      log.info(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
 
       const response = await fetch(taskMetadataUrl);
       if (!response.ok) {
@@ -715,16 +1140,16 @@ export class VirtualParticipantStatusManager {
           const network = container.Networks[0];
           if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
             const privateIp = network.IPv4Addresses[0];
-            console.log(`Task private IP: ${privateIp}`);
+            log.info(`Task private IP: ${privateIp}`);
             return privateIp;
           }
         }
       }
 
-      console.log('Could not extract private IP from task metadata');
+      log.warn('Could not extract private IP from task metadata');
       return null;
     } catch (error) {
-      console.error('Failed to get task private IP:', error);
+      log.error('Failed to get task private IP:', error);
       return null;
     }
   }
@@ -752,14 +1177,14 @@ export class VirtualParticipantStatusManager {
     try {
       const vpcId = process.env.VPC_ID;
       if (!vpcId) {
-        console.error('VPC_ID environment variable not set');
+        log.error('VPC_ID environment variable not set');
         return null;
       }
 
       // Target group name max 32 chars, must be unique
       const tgName = `vnc-${this.participantId.substring(0, 27)}`;
       
-      console.log(`Creating target group: ${tgName}`);
+      log.info(`Creating target group: ${tgName}`);
 
       const createTGCommand = new CreateTargetGroupCommand({
         Name: tgName,
@@ -784,16 +1209,16 @@ export class VirtualParticipantStatusManager {
       
       if (response.TargetGroups && response.TargetGroups.length > 0) {
         const tgArn = response.TargetGroups[0].TargetGroupArn!;
-        console.log(`✓ Created target group: ${tgArn}`);
+        log.info(`✓ Created target group: ${tgArn}`);
         return tgArn;
       }
 
-      console.error('Failed to create target group - no ARN returned');
+      log.error('Failed to create target group - no ARN returned');
       return null;
 
     } catch (error: any) {
       if (error.name === 'DuplicateTargetGroupName') {
-        console.log('Target group already exists, attempting to find it...');
+        log.info('Target group already exists, attempting to find it...');
         try {
           const tgName = `vnc-${this.participantId.substring(0, 27)}`;
           const describeCommand = new DescribeTargetGroupsCommand({
@@ -802,14 +1227,14 @@ export class VirtualParticipantStatusManager {
           const response = await this.elbClient.send(describeCommand);
           if (response.TargetGroups && response.TargetGroups.length > 0) {
             const tgArn = response.TargetGroups[0].TargetGroupArn!;
-            console.log(`✓ Found existing target group: ${tgArn}`);
+            log.info(`✓ Found existing target group: ${tgArn}`);
             return tgArn;
           }
         } catch (describeError) {
-          console.error('Failed to find existing target group:', describeError);
+          log.error('Failed to find existing target group:', describeError);
         }
       }
-      console.error('Failed to create target group:', error);
+      log.error('Failed to create target group:', error);
       return null;
     }
   }
@@ -831,7 +1256,7 @@ export class VirtualParticipantStatusManager {
 
     const secretArn = process.env.VNC_ORIGIN_VERIFY_SECRET_ARN;
     if (!secretArn) {
-      console.error('VNC_ORIGIN_VERIFY_SECRET_ARN not set - cannot build the listener rule');
+      log.error('VNC_ORIGIN_VERIFY_SECRET_ARN not set - cannot build the listener rule');
       return null;
     }
 
@@ -840,7 +1265,7 @@ export class VirtualParticipantStatusManager {
         new GetSecretValueCommand({ SecretId: secretArn })
       );
       if (!response.SecretString) {
-        console.error('Origin-verify secret has no string value');
+        log.error('Origin-verify secret has no string value');
         return null;
       }
       // Generated by CloudFormation as JSON with the value under `headersecret`
@@ -848,14 +1273,15 @@ export class VirtualParticipantStatusManager {
       // template's own listener rule resolves.
       const value = JSON.parse(response.SecretString).headersecret;
       if (!value) {
-        console.error('Origin-verify secret does not contain a headersecret value');
+        log.error('Origin-verify secret does not contain a headersecret value');
         return null;
       }
+      registerSecretValue(value);
       this.originVerifyHeaderValue = value;
       return value;
     } catch (error) {
       // Deliberately does not log the secret or the response.
-      console.error('Could not read the origin-verify header value:', error);
+      log.error('Could not read the origin-verify header value:', error);
       return null;
     }
   }
@@ -895,13 +1321,13 @@ export class VirtualParticipantStatusManager {
         if (!matchesPath || !rule.RuleArn || rule.IsDefault) {
           continue;
         }
-        console.log(`Removing an existing listener rule for ${pathPattern}`);
+        log.info(`Removing an existing listener rule for ${pathPattern}`);
         await this.elbClient.send(new DeleteRuleCommand({ RuleArn: rule.RuleArn }));
       }
     } catch (error) {
       // Not fatal on its own: if a rule really is in the way, the create below
       // fails and that is the error worth reporting.
-      console.error('Could not check for an existing listener rule:', error);
+      log.error('Could not check for an existing listener rule:', error);
     }
   }
 
@@ -912,13 +1338,13 @@ export class VirtualParticipantStatusManager {
     try {
       const listenerArn = process.env.ALB_LISTENER_ARN;
       if (!listenerArn) {
-        console.error('ALB_LISTENER_ARN environment variable not set');
+        log.error('ALB_LISTENER_ARN environment variable not set');
         return null;
       }
 
       const headerName = process.env.VNC_ORIGIN_VERIFY_HEADER_NAME;
       if (!headerName) {
-        console.error('VNC_ORIGIN_VERIFY_HEADER_NAME not set - cannot build the listener rule');
+        log.error('VNC_ORIGIN_VERIFY_HEADER_NAME not set - cannot build the listener rule');
         return null;
       }
 
@@ -926,7 +1352,7 @@ export class VirtualParticipantStatusManager {
       // rule gets created carrying only the path condition.
       const headerValue = await this.getOriginVerifyHeaderValue();
       if (!headerValue) {
-        console.error('Origin-verify header value unavailable - not creating a listener rule');
+        log.error('Origin-verify header value unavailable - not creating a listener rule');
         return null;
       }
 
@@ -937,7 +1363,7 @@ export class VirtualParticipantStatusManager {
 
       await this.removeStaleListenerRule(listenerArn, pathPattern);
 
-      console.log(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
+      log.info(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
 
       const createRuleCommand = new CreateRuleCommand({
         ListenerArn: listenerArn,
@@ -959,19 +1385,19 @@ export class VirtualParticipantStatusManager {
 
       if (response.Rules && response.Rules.length > 0) {
         const ruleArn = response.Rules[0].RuleArn!;
-        console.log(`✓ Created listener rule: ${ruleArn}`);
+        log.info(`✓ Created listener rule: ${ruleArn}`);
         return ruleArn;
       }
 
-      console.error('Failed to create listener rule - no ARN returned');
+      log.error('Failed to create listener rule - no ARN returned');
       return null;
 
     } catch (error: any) {
       if (error.name === 'PriorityInUse') {
-        console.error(`Priority conflict - trying alternate priority`);
+        log.error(`Priority conflict - trying alternate priority`);
         // Could implement retry with different priority here
       }
-      console.error('Failed to create listener rule:', error);
+      log.error('Failed to create listener rule:', error);
       return null;
     }
   }
@@ -985,34 +1411,34 @@ export class VirtualParticipantStatusManager {
     // the launcher publishes, and there is no ECS task metadata endpoint to
     // read a private IP from. Report success so callers proceed.
     if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
-      console.log('MICROVM launch: skipping ALB target-group registration');
+      log.info('MICROVM launch: skipping ALB target-group registration');
       return true;
     }
     try {
       // Get task private IP
       const privateIp = await this.getTaskPrivateIp();
       if (!privateIp) {
-        console.error('Could not get task private IP');
+        log.error('Could not get task private IP');
         return false;
       }
 
       this.taskPrivateIp = privateIp;
-      console.log(`Task private IP: ${privateIp}`);
+      log.info(`Task private IP: ${privateIp}`);
 
       // Step 1: Create dedicated target group for this VP
-      console.log('Step 1: Creating dedicated target group...');
+      log.info('Step 1: Creating dedicated target group...');
       const targetGroupArn = await this.createVPTargetGroup();
       if (!targetGroupArn) {
-        console.error('Failed to create target group');
+        log.error('Failed to create target group');
         return false;
       }
       this.targetGroupArn = targetGroupArn;
 
       // Step 2: Create listener rule to route /vnc/{vpId}/* to this target group
-      console.log('Step 2: Creating listener rule...');
+      log.info('Step 2: Creating listener rule...');
       const ruleArn = await this.createListenerRule(targetGroupArn);
       if (!ruleArn) {
-        console.error('Failed to create listener rule');
+        log.error('Failed to create listener rule');
         // Clean up target group
         await this.deleteVPTargetGroup();
         return false;
@@ -1020,7 +1446,7 @@ export class VirtualParticipantStatusManager {
       this.listenerRuleArn = ruleArn;
 
       // Step 3: Register this task's IP with the target group
-      console.log(`Step 3: Registering task IP ${privateIp} with target group...`);
+      log.info(`Step 3: Registering task IP ${privateIp} with target group...`);
       const registerCommand = new RegisterTargetsCommand({
         TargetGroupArn: targetGroupArn,
         Targets: [
@@ -1032,29 +1458,29 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.elbClient.send(registerCommand);
-      console.log(`✓ Successfully registered ${privateIp} with target group`);
+      log.info(`✓ Successfully registered ${privateIp} with target group`);
 
       // Step 4: Wait for target to become healthy
-      console.log('Step 4: Waiting for target to become healthy...');
+      log.info('Step 4: Waiting for target to become healthy...');
       const isHealthy = await this.waitForTargetHealthy(targetGroupArn, privateIp);
       
       if (!isHealthy) {
-        console.error('Target did not become healthy within timeout');
+        log.error('Target did not become healthy within timeout');
         return false;
       }
 
-      console.log('✓ Target is healthy and ready to receive traffic');
+      log.info('✓ Target is healthy and ready to receive traffic');
       
       // Additional delay to ensure ALB is fully ready to route WebSocket traffic
-      console.log('Waiting additional 5 seconds for ALB routing to stabilize...');
+      log.info('Waiting additional 5 seconds for ALB routing to stabilize...');
       await new Promise(resolve => setTimeout(resolve, 5000));
-      console.log('✓ ALB routing stabilization complete');
+      log.info('✓ ALB routing stabilization complete');
       
-      console.log(`✓ VP ${this.participantId} fully registered with dedicated routing`);
+      log.info(`✓ VP ${this.participantId} fully registered with dedicated routing`);
       return true;
 
     } catch (error) {
-      console.error('Failed to register with target group:', error);
+      log.error('Failed to register with target group:', error);
       // Attempt cleanup
       await this.cleanupALBResources();
       return false;
@@ -1086,14 +1512,14 @@ export class VirtualParticipantStatusManager {
           const targetHealth = healthResponse.TargetHealthDescriptions[0];
           const state = targetHealth.TargetHealth?.State;
           
-          console.log(`Target health state: ${state}`);
+          log.info(`Target health state: ${state}`);
           
           if (state === 'healthy') {
             return true;
           }
           
           if (state === 'unhealthy') {
-            console.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
+            log.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
             return false;
           }
         }
@@ -1102,12 +1528,12 @@ export class VirtualParticipantStatusManager {
         await new Promise(resolve => setTimeout(resolve, 2000));
 
       } catch (error) {
-        console.error('Error checking target health:', error);
+        log.error('Error checking target health:', error);
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
-    console.error('Timeout waiting for target to become healthy');
+    log.error('Timeout waiting for target to become healthy');
     return false;
   }
 
@@ -1117,27 +1543,27 @@ export class VirtualParticipantStatusManager {
   private async deleteListenerRule(): Promise<boolean> {
     try {
       if (!this.listenerRuleArn) {
-        console.log('No listener rule ARN to delete');
+        log.info('No listener rule ARN to delete');
         return true;
       }
 
-      console.log(`Deleting listener rule: ${this.listenerRuleArn}`);
+      log.info(`Deleting listener rule: ${this.listenerRuleArn}`);
 
       const deleteRuleCommand = new DeleteRuleCommand({
         RuleArn: this.listenerRuleArn
       });
 
       await this.elbClient.send(deleteRuleCommand);
-      console.log(`✓ Deleted listener rule`);
+      log.info(`✓ Deleted listener rule`);
       this.listenerRuleArn = null;
       return true;
 
     } catch (error: any) {
       if (error.name === 'RuleNotFound') {
-        console.log('Listener rule already deleted');
+        log.info('Listener rule already deleted');
         return true;
       }
-      console.error('Failed to delete listener rule:', error);
+      log.error('Failed to delete listener rule:', error);
       return false;
     }
   }
@@ -1148,11 +1574,11 @@ export class VirtualParticipantStatusManager {
   private async deleteVPTargetGroup(): Promise<boolean> {
     try {
       if (!this.targetGroupArn) {
-        console.log('No target group ARN to delete');
+        log.info('No target group ARN to delete');
         return true;
       }
 
-      console.log(`Deleting target group: ${this.targetGroupArn}`);
+      log.info(`Deleting target group: ${this.targetGroupArn}`);
 
       // First deregister all targets
       if (this.taskPrivateIp) {
@@ -1162,12 +1588,12 @@ export class VirtualParticipantStatusManager {
             Targets: [{ Id: this.taskPrivateIp, Port: 5901 }]
           });
           await this.elbClient.send(deregisterCommand);
-          console.log('✓ Deregistered targets from target group');
+          log.info('✓ Deregistered targets from target group');
           
           // Wait a bit for deregistration to complete
           await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (deregError) {
-          console.log('Error deregistering targets (may already be deregistered):', deregError);
+          log.info('Error deregistering targets (may already be deregistered):', deregError);
         }
       }
 
@@ -1176,16 +1602,16 @@ export class VirtualParticipantStatusManager {
       });
 
       await this.elbClient.send(deleteTGCommand);
-      console.log(`✓ Deleted target group`);
+      log.info(`✓ Deleted target group`);
       this.targetGroupArn = null;
       return true;
 
     } catch (error: any) {
       if (error.name === 'TargetGroupNotFound') {
-        console.log('Target group already deleted');
+        log.info('Target group already deleted');
         return true;
       }
-      console.error('Failed to delete target group:', error);
+      log.error('Failed to delete target group:', error);
       return false;
     }
   }
@@ -1194,13 +1620,13 @@ export class VirtualParticipantStatusManager {
    * Clean up all ALB resources (listener rule and target group)
    */
   private async cleanupALBResources(): Promise<void> {
-    console.log('Cleaning up ALB resources...');
+    log.info('Cleaning up ALB resources...');
     
     // Delete in correct order: rule first, then target group
     await this.deleteListenerRule();
     await this.deleteVPTargetGroup();
     
-    console.log('✓ ALB resource cleanup complete');
+    log.info('✓ ALB resource cleanup complete');
   }
 
   /**
@@ -1214,16 +1640,16 @@ export class VirtualParticipantStatusManager {
       return true;
     }
     try {
-      console.log(`Deregistering VP ${this.participantId} from ALB`);
+      log.info(`Deregistering VP ${this.participantId} from ALB`);
       
       // Clean up all ALB resources
       await this.cleanupALBResources();
       
-      console.log(`✓ Successfully deregistered VP ${this.participantId}`);
+      log.info(`✓ Successfully deregistered VP ${this.participantId}`);
       return true;
 
     } catch (error) {
-      console.error('Failed to deregister from target group:', error);
+      log.error('Failed to deregister from target group:', error);
       return false;
     }
   }
@@ -1243,7 +1669,7 @@ export class VirtualParticipantStatusManager {
   async getMicrovmEndpointFromRegistry(attempts = 10, delayMs = 1000): Promise<string> {
     const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
     if (!tableName) {
-      console.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
+      log.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
       return '';
     }
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -1256,23 +1682,23 @@ export class VirtualParticipantStatusManager {
         );
         const endpoint = result.Item?.vncEndpoint?.S || '';
         if (endpoint) {
-          console.log(`Resolved MicroVM endpoint from registry: ${endpoint}`);
+          log.info(`Resolved MicroVM endpoint from registry: ${endpoint}`);
           return endpoint;
         }
       } catch (error) {
-        console.error('Error reading MicroVM endpoint from registry:', error);
+        log.error('Error reading MicroVM endpoint from registry:', error);
       }
       if (attempt < attempts) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
-    console.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
+    log.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
     return '';
   }
 
   async setVncReady(): Promise<boolean> {
     try {
-      console.log(`Signaling VNC ready for VP ${this.participantId}`);
+      log.info(`Signaling VNC ready for VP ${this.participantId}`);
       
       // Under MICROVM the browser connects straight to this MicroVM's own
       // endpoint (no CloudFront/ALB, no /vnc/<vpId> path routing). The launcher
@@ -1289,7 +1715,7 @@ export class VirtualParticipantStatusManager {
           process.env.MICROVM_ENDPOINT || (await this.getMicrovmEndpointFromRegistry()),
         );
         if (!vncEndpoint) {
-          console.error('No MicroVM endpoint available - cannot publish VNC endpoint');
+          log.error('No MicroVM endpoint available - cannot publish VNC endpoint');
           return false;
         }
       } else {
@@ -1297,7 +1723,7 @@ export class VirtualParticipantStatusManager {
         const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
 
         if (!cloudFrontDomain) {
-          console.error('CLOUDFRONT_DOMAIN environment variable not set');
+          log.error('CLOUDFRONT_DOMAIN environment variable not set');
           return false;
         }
 
@@ -1305,7 +1731,7 @@ export class VirtualParticipantStatusManager {
         vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
       }
 
-      console.log(`VNC WebSocket URL with path: ${vncEndpoint}`);
+      log.info(`VNC WebSocket URL with path: ${vncEndpoint}`);
       
       // Get current VP to preserve CallId
       const getQuery = `
@@ -1323,7 +1749,7 @@ export class VirtualParticipantStatusManager {
       });
 
       if (!currentVP?.getVirtualParticipant) {
-        console.error(`VP ${this.participantId} not found`);
+        log.error(`VP ${this.participantId} not found`);
         return false;
       }
 
@@ -1332,25 +1758,25 @@ export class VirtualParticipantStatusManager {
       // Update VP with vncReady flag and full URL.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+            CallId
             vncEndpoint
             vncReady
-            CallId
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
 
+      // VNC_READY is a lifecycle step of its own, not a side effect of
+      // publishing the endpoint: the UI shows it as "Live view ready / About
+      // to navigate to the meeting URL". It is written once, from the single
+      // point in the startup sequence that runs between profile warmup and
+      // the first navigation, so it cannot land on a VP that is further along.
       const variables: any = {
         input: {
           id: this.participantId,
           vncEndpoint: vncEndpoint,
           vncReady: true,
-          status: 'VNC_READY'
+          status: VP_STATUS.VNC_READY
         }
       };
 
@@ -1362,15 +1788,15 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`✓ VNC ready with URL: ${vncEndpoint}`);
+        log.info(`✓ VNC ready with URL: ${vncEndpoint}`);
         return true;
       } else {
-        console.error('Failed to publish VNC ready signal');
+        log.error('Failed to publish VNC ready signal');
         return false;
       }
 
     } catch (error) {
-      console.error('Failed to signal VNC ready:', error);
+      log.error('Failed to signal VNC ready:', error);
       return false;
     }
   }
@@ -1388,7 +1814,7 @@ export class VirtualParticipantStatusManager {
     };
     
     // Log to CloudWatch (will be picked up by container logs)
-    console.log('VNC_AUDIT:', JSON.stringify(logEntry));
+    log.info('VNC_AUDIT:', JSON.stringify(logEntry));
   }
 }
 
@@ -1398,10 +1824,11 @@ export function createStatusManager(participantId: string): VirtualParticipantSt
 }
 
 export async function updateParticipantStatus(
-  participantId: string, 
-  status: string, 
-  errorMessage?: string
+  participantId: string,
+  status: VpStatus,
+  errorMessage?: string,
+  endTrigger?: string
 ): Promise<boolean> {
   const manager = new VirtualParticipantStatusManager(participantId);
-  return manager.updateStatus(status, errorMessage);
+  return manager.updateStatus(status, errorMessage, endTrigger);
 }

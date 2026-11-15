@@ -1,24 +1,22 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
-""" Transcript Batch Processor
-"""
+"""Transcript Batch Processor"""
+
 import asyncio
 import traceback
 from typing import Any, Coroutine, Dict, List, Literal, Optional, Protocol, Tuple, Union
 
-# third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
-from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent
-from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord
-from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
-
-from gql.client import AsyncClientSession
-
-# module imports from Lambda layer
+# third-party and module imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import AppsyncAioGqlClient
+from aws_lambda_powertools import Logger
+from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
+from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent
+from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord
+from gql.client import AsyncClientSession
+from graphql_helpers import describe_exception, traceback_frames
 
 # pylint: enable=import-error
 
@@ -38,26 +36,19 @@ class TranscriptBatchProcessor:
         def __call__(
             self,
             message: object,
-            settings: Dict[str, Any],
             appsync_session: AsyncClientSession,
-            sns_client: object,
             agent_assist_args: Dict[str, object],
-            sentiment_analysis_args: Dict[str, object]
-        ) -> Coroutine[Any, Any, Any]:
-            ...
+            sentiment_analysis_args: Dict[str, object],
+        ) -> Coroutine[Any, Any, Any]: ...
 
     def __init__(
         self,
         appsync_client: AppsyncAioGqlClient,
         api_mutation_fn: ApiMutationFnType,
-        sns_client,
-        settings: Dict[str, Any],
         agent_assist_args: Optional[Dict[str, Any]] = None,
-        sentiment_analysis_args: Optional[Dict[str, object]] = None
+        sentiment_analysis_args: Optional[Dict[str, object]] = None,
     ):
         self._appsync_client = appsync_client
-        self._sns_client = sns_client
-        self._settings = settings
         self._api_mutation_fn = api_mutation_fn
         self._agent_assist_args = agent_assist_args or {}
         self._sentiment_analysis_args = sentiment_analysis_args or {}
@@ -86,9 +77,7 @@ class TranscriptBatchProcessor:
                 coroutines = [
                     self._api_mutation_fn(
                         message=message["result"],
-                        settings=self._settings,
                         appsync_session=appsync_session,
-                        sns_client=self._sns_client,
                         agent_assist_args=self._agent_assist_args,
                         sentiment_analysis_args=self._sentiment_analysis_args,
                     )
@@ -102,7 +91,19 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        LOGGER.error("transcript api mutation exception: %s", result)
+                        # The exception named by type with its GraphQL errors
+                        # reduced to errorType/path, and its traceback as frames
+                        # -- the chain is what says which of a record's mutations
+                        # this was. The frames carry nothing from the response,
+                        # and the description falls back to str(result) only for
+                        # an exception with no GraphQL errors to reduce, whose
+                        # text is its own and not the server's. The frames go in
+                        # without the line a rendered traceback ends in.
+                        LOGGER.error(
+                            "transcript api mutation exception: %s",
+                            describe_exception(result),
+                            extra=dict(frames=traceback_frames(result)),
+                        )
                         self._has_error = True
                         self._errors.append(result)
                     else:

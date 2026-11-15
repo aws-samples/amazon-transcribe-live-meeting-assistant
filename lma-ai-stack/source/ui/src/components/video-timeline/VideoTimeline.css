@@ -1,0 +1,94 @@
+.video-timeline-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  align-items: flex-start;
+}
+
+.video-timeline-frame {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 168px;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.video-timeline-frame:hover,
+.video-timeline-frame:focus-visible {
+  border-color: #879596;
+}
+
+.video-timeline-frame-selected {
+  border-color: #0972d3;
+}
+
+.video-timeline-frame img {
+  width: 160px;
+  height: 90px;
+  object-fit: contain;
+  background: #f2f3f3;
+  border-radius: 4px;
+}
+
+.video-timeline-missing {
+  display: flex;
+  width: 160px;
+  height: 90px;
+  align-items: center;
+  justify-content: center;
+  background: #f2f3f3;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.video-timeline-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.video-timeline-sentinel {
+  flex: 0 0 1px;
+  height: 1px;
+}
+
+.video-timeline-preview {
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 6px;
+  border: 1px solid #e9ebed;
+}
+
+.video-timeline-snippet {
+  width: 160px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #5f6b7a;
+  text-align: left;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.video-timeline-slide-text {
+  white-space: pre-wrap;
+}
+
+/* The chapter a frame begins (see chapterTitlesByFrame). */
+.video-timeline-chapter {
+  display: block;
+  max-width: 160px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}

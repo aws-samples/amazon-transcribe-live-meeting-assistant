@@ -250,8 +250,9 @@ Two pipelines run the same set of no-AWS checks:
 | GitLab `code_checks` | `.gitlab-ci.yml` | Every branch push and merge request |
 | GitLab `nightly_integ_tests` | `.gitlab-ci.yml` | A pipeline schedule only — see [Scheduled Integration Tests](scheduled-integration-tests.md) |
 
-Both take the Node.js version from `.nvmrc` at the repository root (22.23.2;
->= 22.22.2 is required by jsdom 30). That file is the single pin — GitHub
+Both take the Node.js version from `.nvmrc` at the repository root (22.23.4;
+>= 22.23.4 is required by astro 7.4 in the docs site, and >= 22.22.2 by
+jsdom 30). That file is the single pin — GitHub
 Actions reads it via `node-version-file`, the GitLab job downloads the version
 it names, and `make setup-node` installs it with nvm. The pipelines run, in
 order:
@@ -262,7 +263,7 @@ make lint-cfn                                # cfn-lint on all CloudFormation te
 make test-sdk && make test-cli               # LMA SDK + CLI unit tests
 make test-lambdas                            # Lambda unit suites (each dir isolated)
 make lint-ui-force && make test-ui-force     # React UI eslint + vitest
-make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant)
+make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant, websocket-client)
 make test-vp && make test-vp-template        # Virtual Participant unit + template tests
 make test-ai-stack                           # AppSync contract + AI stack CFN invariants
 make test-integ-plumbing                     # Scheduled integ-run machinery (no AWS)
@@ -271,7 +272,16 @@ cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run s
 cd lma-browser-extension-stack && npm install && CI=true npm test && CI=false npm run build
 ```
 
-None of these need AWS credentials or Docker. The local image builds
+None of these need AWS credentials or Docker. The Python unit-test roots also
+refuse to reach AWS: the `conftest.py` of each one loads
+`scripts/testing/no_real_aws.py`, which replaces the credentials with fake ones
+and fails any test that sends a request through botocore, even when the code
+under test catches the error. A test that has to call AWS for real (the AppSync
+template evaluations run with `LMA_EVALUATE_APPSYNC=1`) carries
+`@pytest.mark.real_aws`; tests using botocore's `Stubber` or moto need nothing.
+Tests of the meeting assistant and the troubleshooting agent stand the Strands
+SDK in with `scripts/testing/strands_stand_in.py`, which is held equal to every
+name the code imports from `strands`. The local image builds
 (`make docker-build-check`) do, so they are run manually. The integration tests
 do too, and run on a nightly GitLab schedule against a long-lived stack —
 `make integ-tests` remains the way to run them by hand, and

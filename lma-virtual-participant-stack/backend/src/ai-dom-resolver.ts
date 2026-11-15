@@ -11,8 +11,15 @@ import {
   DeleteItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
+import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
+import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
+import { createLogger } from './logger.js';
+import { InferenceGeographyUnreadable, resolveModelId } from './inference-geography.js';
 
-export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
+const log = createLogger('ai-dom-resolver');
+
+export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME' | 'GOOGLE_MEET';
 
 export interface ResolveOptions {
   intent: string;
@@ -46,6 +53,9 @@ export interface DialogAnalysis {
   primaryActionSelector?: string;
   message: string;
   needsHuman: boolean;
+  /** True when the dialog asks about camera/microphone access or devices;
+   *  undefined when the model did not say. */
+  mediaPermission?: boolean;
 }
 
 /**
@@ -120,6 +130,22 @@ const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const TTL_DAYS = 30;
 
 const memoryCache = new Map<string, CacheEntry>();
+
+// The id the resolver calls Amazon Bedrock with: DEFAULT_MODEL_ID run within the
+// Configuration page's Model inference geography, decided at the first call.
+let resolvedModelId: Promise<string> | null = null;
+function domResolverModelId(): Promise<string> {
+  if (!resolvedModelId) {
+    // A refusal is not retried for the rest of the meeting, and is reported by
+    // each call the same way a failed Bedrock call is. A setting that could not
+    // be read is read again at the next call.
+    resolvedModelId = resolveModelId(DEFAULT_MODEL_ID, AWS_REGION).catch((err: unknown) => {
+      if (err instanceof InferenceGeographyUnreadable) resolvedModelId = null;
+      throw err;
+    });
+  }
+  return resolvedModelId;
+}
 
 // Race a browser-call promise against a wall-clock timeout. evaluate /
 // screenshot / boundingBox can hang for tens of seconds when the page's
@@ -196,7 +222,7 @@ export async function getCachedSelector(
     memoryCache.set(key, entry);
     return entry;
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache GetItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache GetItem failed for ${key}:`, err);
     return null;
   }
 }
@@ -218,7 +244,7 @@ async function persistCacheEntry(
       }),
     );
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache PutItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache PutItem failed for ${key}:`, err);
   }
 }
 
@@ -238,7 +264,7 @@ async function evictCacheEntry(
       }),
     );
   } catch (err) {
-    console.warn(`[ai-dom-resolver] Cache DeleteItem failed for ${key}:`, err);
+    log.warn(`[ai-dom-resolver] Cache DeleteItem failed for ${key}:`, err);
   }
 }
 
@@ -471,15 +497,15 @@ async function invokeClaude(
   userContent.push({ type: 'text', text: prompt });
   messages.push({ role: 'user', content: userContent });
 
+  const modelId = await domResolverModelId();
   const body = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 600,
-    temperature: 0,
+    ...buildClaudeInvokeParams(modelId),
     messages,
   };
 
   const command = new InvokeModelCommand({
-    modelId: DEFAULT_MODEL_ID,
+    modelId,
     body: JSON.stringify(body),
     contentType: 'application/json',
     accept: 'application/json',
@@ -487,6 +513,14 @@ async function invokeClaude(
   const response = await getBedrock().send(command);
   const decoded = new TextDecoder().decode(response.body);
   const parsed = JSON.parse(decoded) as ClaudeResponse;
+  // A cache miss costs a vision call; recorded against the meeting the
+  // Virtual Participant is joining, for its cost estimate.
+  void recordMetering(
+    currentCallId(),
+    CONTEXT_PAGE_AUTOMATION,
+    `bedrock/${modelId}`,
+    anthropicUsage((parsed as { usage?: unknown }).usage),
+  );
   const text = parsed.content
     ?.filter((c) => c.type === 'text')
     .map((c) => c.text || '')
@@ -595,10 +629,15 @@ const DIALOG_PROMPT = (platform: Platform, dialogs: { html: string }[]): string 
     '  "type": "CONSENT" | "RECORDING_NOTICE" | "CAPTCHA" | "SSO_REDIRECT" | "LOGIN_REQUIRED" | "BLOCKED" | "OTHER",',
     '  "primaryActionSelector": "<CSS selector for the button to click to dismiss/accept, or null if a human is needed>",',
     '  "message": "<one sentence describing the dialog for a human user>",',
-    '  "needsHuman": <true if this requires manual user action (CAPTCHA / 2FA / SSO / blocked), else false>',
+    '  "needsHuman": <true if this requires manual user action (CAPTCHA / 2FA / SSO / blocked), else false>,',
+    '  "mediaPermission": <true if the dialog is about camera/microphone access or audio/video devices, else false>',
     '}',
     '',
     'CONSENT and RECORDING_NOTICE should always have a primaryActionSelector and needsHuman=false.',
+    'A camera/microphone permission dialog is CONSENT. Its primaryActionSelector must be the action that keeps',
+    'meeting audio (e.g. "Allow", "Use audio", "Join with computer audio"). Never choose an action that continues or',
+    'joins without audio (e.g. "Continue without audio or video"); if that is the only action, return',
+    'primaryActionSelector=null.',
     'CAPTCHA, SSO_REDIRECT, LOGIN_REQUIRED, BLOCKED should set needsHuman=true.',
     'If unsure, return type=OTHER, needsHuman=true.',
   ].join('\n');
@@ -610,7 +649,7 @@ export async function resolveSelector(
   primarySelectors: string[] = [],
 ): Promise<string | null> {
   if (RESOLVER_DISABLED) {
-    console.log('[ai-dom-resolver] Resolver disabled (no model id) — skipping');
+    log.info('[ai-dom-resolver] Resolver disabled (no model id) — skipping');
     return null;
   }
   // Try cache
@@ -627,7 +666,7 @@ export async function resolveSelector(
       });
       return cached.selector;
     }
-    console.log(
+    log.info(
       `[ai-dom-resolver] Cached selector "${cached.selector}" no longer matches — evicting and re-resolving`,
     );
     await evictCacheEntry(opts.platform, opts.step);
@@ -645,7 +684,7 @@ export async function resolveSelector(
       const text = await invokeClaude(prompt, screenshot);
       const json = extractJson(text);
       if (!json || !json.selector) {
-        console.log(
+        log.info(
           `[ai-dom-resolver] Claude returned no selector for ${opts.step}: ${text.slice(0, 200)}`,
         );
         return null;
@@ -664,7 +703,7 @@ export async function resolveSelector(
           misses: 0,
           expiresAt: ttlEpoch(),
         });
-        console.log(
+        log.info(
           `[ai-dom-resolver] Discovered selector for ${opts.step}: ${selector}`,
         );
         return selector;
@@ -675,7 +714,7 @@ export async function resolveSelector(
           'no element matched, or multiple matched without one visible — try a more specific selector',
       };
     } catch (err) {
-      console.error('[ai-dom-resolver] Bedrock call failed:', err);
+      log.error('[ai-dom-resolver] Bedrock call failed:', err);
       return null;
     }
   }
@@ -733,10 +772,12 @@ export async function analyzeUnknownDialog(
           : undefined,
       message: typeof json.message === 'string' ? json.message : '',
       needsHuman: !!json.needsHuman,
+      mediaPermission:
+        typeof json.mediaPermission === 'boolean' ? json.mediaPermission : undefined,
     };
     return result;
   } catch (err) {
-    console.error('[ai-dom-resolver] Dialog analysis failed:', err);
+    log.error('[ai-dom-resolver] Dialog analysis failed:', err);
     return null;
   }
 }
@@ -884,7 +925,7 @@ export async function analyzePageAction(
     }
     return domAction;
   } catch (err) {
-    console.error('[ai-dom-resolver] analyzePageAction failed:', err);
+    log.error('[ai-dom-resolver] analyzePageAction failed:', err);
     return null;
   }
 }
@@ -917,7 +958,9 @@ export async function scrollIntoViewAndClick(
       // ignore — scroll is best-effort
     }
     try {
-      await handle.click();
+      // Bounded so a miss reaches the DOM-click fallback promptly (see
+      // POSITIONAL_CLICK_TIMEOUT_MS).
+      await handle.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
@@ -931,6 +974,47 @@ export async function scrollIntoViewAndClick(
     }
   } catch {
     return false;
+  }
+}
+
+/**
+ * Visible text of the element `selector` resolves to (label, aria-label,
+ * title, value), collapsed to single spaces. Resolves the selector the same way
+ * scrollIntoViewAndClick does, so it reads the element that would be clicked.
+ * Null when the selector matches nothing or cannot be evaluated.
+ *
+ * If the selector matches a container rather than a button, the text covers
+ * every button inside it, so a container that also holds a "without audio"
+ * action is escalated rather than clicked. That is intended.
+ */
+export async function readActionText(page: Page, selector: string): Promise<string | null> {
+  try {
+    const handle = (await querySelectorAllSafe(page, selector))[0];
+    if (!handle) return null;
+    try {
+      return await withCdpTimeout(
+        handle.evaluate((el: Element) => {
+          const h = el as HTMLElement;
+          const parts = [
+            h.innerText,
+            h.getAttribute('aria-label'),
+            h.getAttribute('title'),
+            (h as HTMLInputElement).value,
+          ];
+          return parts
+            .filter((p) => typeof p === 'string' && p.trim())
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }),
+        2000,
+        `readActionText(${selector})`,
+      );
+    } finally {
+      await handle.dispose().catch(() => {});
+    }
+  } catch {
+    return null;
   }
 }
 
@@ -1041,7 +1125,7 @@ export async function classifyJoinState(
       reason: typeof json.reason === 'string' ? json.reason : '',
     };
   } catch (err) {
-    console.error('[ai-dom-resolver] classifyJoinState failed:', err);
+    log.error('[ai-dom-resolver] classifyJoinState failed:', err);
     return null;
   }
 }

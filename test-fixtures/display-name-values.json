@@ -1,0 +1,31 @@
+{
+  "description": "Values for the Virtual Participant Display name setting (virtual_participant.displayName) and whether its schema accepts them. The setting is restricted to what Microsoft Teams accepts in a guest's name (letters A-Z and a-z, digits, spaces and - ' . _ @), plus the {LMA_USER} placeholder, and must start with a letter or digit. Run against the shipped schema by both copies of the schema validator: lma_config/test_schema.py and the web UI's schema-validation.test.js.",
+  "accepted": [
+    "LMA - {LMA_USER}",
+    "LMA Notetaker - {LMA_USER}",
+    "LMA {LMA_USER}",
+    "LMA",
+    "LMA - Jane Doe",
+    "LMA - jane.doe@example.com",
+    "LMA - O'Brien_2",
+    "LMA - {LMA_USER} {LMA_USER}",
+    "9 LMA"
+  ],
+  "refused": [
+    "",
+    " ",
+    " LMA",
+    "-LMA",
+    "{LMA_USER}",
+    "LMA ({LMA_USER})",
+    "LMA: {LMA_USER}",
+    "LMA - {LMA_USERS}",
+    "LMA - {lma_user}",
+    "LMA - {OTHER}",
+    "LMA - {LMA_USER",
+    "LMA - José",
+    "LMA - Jane, Doe",
+    "LMA\t{LMA_USER}",
+    "LMA - {LMA_USER}\n"
+  ]
+}

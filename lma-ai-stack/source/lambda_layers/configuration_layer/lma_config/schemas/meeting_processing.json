@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_processing",
+  "title": "Meeting processing",
+  "description": "How transcript segments reach a transcript Lambda hook, and when and how far back meetings that were never ended are looked for. The defaults are the shipped values, or the default profile's; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Processing",
+  "appliesText": "A saved change applies within about five minutes.",
+  "order": 10,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "transcriptHookNonPartialOnly": {
+      "order": 0,
+      "type": "boolean",
+      "title": "Send only finished segments to the transcript Lambda hook",
+      "description": "Applies only when the stack names a transcript Lambda hook (TranscriptLambdaHookFunctionArn). Off sends partial segments too."
+    },
+    "inactiveMeetingLookbackDays": {
+      "order": 1,
+      "type": "integer",
+      "title": "Days to look back for meetings that were never ended",
+      "description": "How far back the inactive-meeting reaper looks for meetings to close. A meeting that started earlier than this is never closed automatically.",
+      "minimum": 1,
+      "maximum": 90
+    },
+    "inactiveMeetingTimeoutMinutes": {
+      "order": 2,
+      "type": "integer",
+      "title": "Minutes without speech before a meeting is ended",
+      "description": "How long a meeting may go without a finished transcript segment before the inactive-meeting reaper ends it on its behalf; 0 leaves such meetings open. Keep it longer than the longest quiet stretch your meetings have.",
+      "minimum": 0,
+      "maximum": 10080
+    }
+  },
+  "additionalProperties": false
+}

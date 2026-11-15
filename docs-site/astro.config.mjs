@@ -40,6 +40,8 @@ export default defineConfig({
               slug: "prerequisites-and-deployment",
             },
             { label: "Quick Start Guide", slug: "quick-start-guide" },
+            { label: "Demo Videos", slug: "demo-videos" },
+            { label: "LMA in Action", slug: "lma-in-action" },
           ],
         },
         {
@@ -58,6 +60,13 @@ export default defineConfig({
               label: "Transcript Summarization",
               slug: "transcript-summarization",
             },
+            { label: "Meeting Agenda", slug: "meeting-agenda" },
+            { label: "Meeting Consent", slug: "meeting-consent" },
+            {
+              label: "Transcript Deletion After the Summary",
+              slug: "transcript-deletion",
+            },
+            { label: "Meeting Video and Key Frames", slug: "meeting-video" },
             { label: "Meetings Query Tool", slug: "meetings-query-tool" },
           ],
         },
@@ -116,6 +125,10 @@ export default defineConfig({
               slug: "infrastructure-and-security",
             },
             {
+              label: "Privacy and Data Handling Controls",
+              slug: "privacy-and-data-handling",
+            },
+            {
               label: "Security Scanning (SRT)",
               slug: "security-scanning",
             },
@@ -146,12 +159,28 @@ export default defineConfig({
               slug: "cloudformation-parameters",
             },
             {
+              label: "Configuration Guide",
+              slug: "configuration-guide",
+            },
+            {
+              label: "Unified Configuration Store",
+              slug: "configuration-store",
+            },
+            {
               label: "Stack Updates & Upgrades",
               slug: "stack-updates-and-upgrades",
             },
             {
               label: "Well-Architected Assessment",
               slug: "well-architected",
+            },
+            {
+              label: "Meeting Cost Estimate",
+              slug: "meeting-cost-estimate",
+            },
+            {
+              label: "Monitoring & Alerting",
+              slug: "monitoring",
             },
             { label: "Troubleshooting", slug: "troubleshooting" },
             { label: "Cleanup", slug: "cleanup" },
@@ -173,9 +202,13 @@ export default defineConfig({
             { label: "Blog Update Proposal", slug: "blog-update-proposal" },
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
             { label: "Dependency Upgrade Validation Runbook", slug: "dependency-upgrade-validation-runbook" },
+            { label: "Scheduled Integration Tests", slug: "scheduled-integration-tests" },
             { label: "Teams Acs Sdk", slug: "teams-acs-sdk" },
+            { label: "Test Coverage", slug: "test-coverage" },
+            { label: "Troubleshooting Agent", slug: "troubleshooting-agent" },
             { label: "Upload Audio", slug: "upload-audio" },
             { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
+            { label: "Voice Enrollment", slug: "voice-enrollment" },
             { label: "Zoom Credentials And Join Reliability", slug: "zoom-credentials-and-join-reliability" },
             { label: "Zoom Meeting Sdk", slug: "zoom-meeting-sdk" },
           ],

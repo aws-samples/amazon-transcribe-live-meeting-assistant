@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Shared fixtures for LMA integration tests.
 
 Unlike the unit tests in ``lib/lma_sdk/tests`` (which mock boto3), these run
@@ -36,7 +36,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--vp-platform",
         action="store",
         default="ZOOM",
-        help="Platform for the VP lifecycle test (ZOOM|TEAMS|CHIME|WEBEX).",
+        help="Platform for the VP lifecycle test (ZOOM|TEAMS|CHIME|WEBEX|GOOGLE_MEET).",
     )
     parser.addoption(
         "--vp-meeting-id",
@@ -91,14 +91,37 @@ def pytest_runtest_makereport(  # pylint: disable=unused-argument
 
 
 def _is_deselected_by_marker(item: pytest.Item) -> bool:
-    """Whether the skip came from ``-m``/``--vp-meeting-id`` gating, not a gap.
+    """Whether a skip is a deliberate exclusion rather than an environment gap.
 
-    ``make integ-tests`` passes ``-m "not live"``, which *deselects* rather than
-    skips, so it does not reach here. An explicit ``live`` marker still might if
-    the suite is invoked another way, and a run that has deliberately excluded
-    real-meeting tests should not fail because of them.
+    ``--no-skips`` exists to catch gaps — a lapsed secret, a dropped dependency
+    — by refusing to report green on a run that exercised nothing. Two kinds of
+    skip are not gaps and must stay skips:
+
+    ``live``
+        Needs a real meeting. ``make integ-tests`` passes ``-m "not live"``,
+        which *deselects* rather than skips and so never reaches here, but an
+        explicit marker still might if the suite is invoked another way.
+
+    ``optional_feature``
+        Needs a stack feature that is off by default. The resources do not
+        exist unless somebody opted in, so the test has nothing to assert
+        against and its skip says so. Without this, adding a test for an
+        off-by-default feature turns every nightly run red until the feature
+        is enabled on the nightly stack — which is a decision about that
+        stack's cost and deploy time, not something a new test should force.
+
+    ``external_meeting``
+        Joins a real meeting. It skips when no meeting is configured
+        (``LMA_TEST_MEET_URL`` for the scripted-guest test,
+        ``LMA_TEST_VP_LIVE_MEETING`` for the guest-free one), and when Google
+        Meet turns the scripted guest away after its retries, which is the
+        platform's decision and not an LMA failure. Once configured, the
+        guest-free test does not skip: a missing secret fails it.
     """
-    return item.get_closest_marker("live") is not None
+    return any(
+        item.get_closest_marker(name) is not None
+        for name in ("live", "optional_feature", "external_meeting")
+    )
 
 
 @pytest.fixture(scope="session")

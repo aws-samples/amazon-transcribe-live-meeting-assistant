@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """Unit tests for the stale meeting reaper.
@@ -20,16 +20,20 @@ import pytest
 from botocore.exceptions import ClientError
 
 FUNCTION_DIR = Path(__file__).resolve().parent
-if str(FUNCTION_DIR) not in sys.path:
-    sys.path.insert(0, str(FUNCTION_DIR))
+# The configuration layer the deployed function carries, for lma_config.
+LAYER = FUNCTION_DIR.parents[1] / "lambda_layers" / "configuration_layer"
+for path in (str(FUNCTION_DIR), str(LAYER)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 TABLE_NAME = "test-event-sourcing-table"
 STREAM_NAME = "test-call-data-stream"
+# The shipped default of Meeting Processing › inactiveMeetingTimeoutMinutes, which a
+# run without a readable configuration uses.
 TIMEOUT_MINUTES = 240
 
 os.environ["EVENT_SOURCING_TABLE"] = TABLE_NAME
 os.environ["CALL_DATA_STREAM_NAME"] = STREAM_NAME
-os.environ["MEETING_INACTIVITY_TIMEOUT_IN_MINUTES"] = str(TIMEOUT_MINUTES)
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 
@@ -62,10 +66,15 @@ class StubLogger:
     def exception(self, *args, **kwargs):
         pass
 
+    #: The names of the functions decorated, so a test can check the decorator
+    #: is on the handler: it expects (event, context) and fails on anything else.
+    decorated: list = []
+
     def inject_lambda_context(self, func=None, **kwargs):
         """Identity decorator, so the handler stays callable as written."""
         if func is None:
-            return lambda inner: inner
+            return lambda inner: StubLogger.decorated.append(inner.__name__) or inner
+        StubLogger.decorated.append(func.__name__)
         return func
 
 
@@ -439,7 +448,11 @@ def test_candidate_query_upper_bound_is_the_inactivity_cutoff(run_reaper):
 
 
 def test_timeout_of_zero_disables_the_reaper(run_reaper, monkeypatch):
-    monkeypatch.setattr(reaper, "INACTIVITY_TIMEOUT_MINUTES", 0)
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 0})
+    )
     summary, kinesis, dynamodb = run_reaper(
         [list_row("abandoned")],
         [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
@@ -463,3 +476,73 @@ def test_zulu_and_offset_timestamps_both_parse():
     )
     assert reaper._parse_iso("not-a-timestamp") is None
     assert reaper._parse_iso(None) is None
+
+
+def test_the_lambda_context_decorator_is_on_the_handler_alone():
+    """Powertools' wrapper takes (event, context); on any other function it fails."""
+    assert StubLogger.decorated == ["handler"]
+
+
+class _ConfigurationStore:
+    """Answers the Meeting Processing section from a dict."""
+
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, _name):
+        return type("Section", (), {"values": self.values})()
+
+
+def test_the_lookback_comes_from_the_configuration_when_it_names_one(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingLookbackDays": 30})
+    )
+    assert reaper.lookback_days() == 30
+
+
+def test_without_one_the_lookback_is_the_shipped_default(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _ConfigurationStore({}))
+    assert reaper.lookback_days() == 2
+
+
+def test_without_a_configuration_the_timeout_is_the_shipped_default(monkeypatch):
+    """Not 0: a run that cannot read the configuration still ends stale meetings."""
+    from lma_config import parameters
+
+    monkeypatch.setattr(parameters, "_SHARED_STORE", None)
+    monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+    assert reaper.inactivity_timeout_minutes() == TIMEOUT_MINUTES
+
+
+def test_the_timeout_comes_from_the_configuration_when_it_names_one(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 60})
+    )
+    assert reaper.inactivity_timeout_minutes() == 60
+
+
+def test_a_timeout_of_zero_saved_on_the_page_ends_nothing(run_reaper, monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingTimeoutMinutes": 0})
+    )
+    summary, kinesis, _ = run_reaper(
+        [list_row("abandoned")],
+        [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
+    )
+    assert summary == {"enabled": False, "candidates": 0, "ended": 0}
+    assert kinesis.records == []
+
+
+def test_without_one_the_timeout_is_the_parameters(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _ConfigurationStore({}))
+    assert reaper.inactivity_timeout_minutes() == TIMEOUT_MINUTES

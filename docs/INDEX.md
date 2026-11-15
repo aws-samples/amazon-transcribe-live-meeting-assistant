@@ -18,13 +18,20 @@ title: "LMA Documentation"
 
 - [Prerequisites & Deployment](prerequisites-and-deployment.md) — AWS account setup, Bedrock model access, CloudFormation deployment, initial login
 - [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio or Virtual Participant
+- [Demo Videos](demo-videos.md) — Recorded walkthroughs of LMA features, and how to record and publish a new one
+- [LMA in Action](lma-in-action.md) — An illustrated one-page tour of what LMA does and what sets it apart
 
 ### Core Features
 
 - [Transcription & Translation](transcription-and-translation.md) — Real-time transcription, speaker attribution, multi-language support, live translation, PII redaction, custom vocabulary, audio recording
-- [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — Experimental alternative to Amazon Transcribe streaming: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
+- [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — An alternative to Amazon Transcribe (the default engine), selected per meeting source: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
+- [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Beta, optional and off by default: people enroll their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
-- [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, custom prompt templates, Lambda-based summarization
+- [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
+- [Meeting Agenda](meeting-agenda.md) — An agenda on each meeting: given when a Virtual Participant is started or scheduled (on the form or by an MCP client), the Agenda panel on the meeting page, who can change it, deriving one from the transcript, the summary's agenda coverage section, and asking the assistant how the meeting is going against it
+- [Meeting Consent](meeting-consent.md) — Telling participants a meeting is recorded and transcribed, and waiting for their consent: the off, notify and opt-in modes and the two opt-in rules, the Meeting Consent settings, the consent record kept on each meeting, who can change it, the capture gate and the API capture clients call, and the limitations of what it records
+- [Transcript Deletion After the Summary](transcript-deletion.md) — Deleting each meeting's transcript permanently once it is summarized, immediately or 15, 30 or 60 minutes later: when it happens, what is deleted and what is kept, what users see, how it is carried out, and the copies outside the transcript store that follow their own lifetimes
+- [Meeting Video and Key Frames](meeting-video.md) — Key frames of the shared screen: when they are taken, the screen-share signal per platform, measured cost, storage, retention and access, and the API to read them
 - [Meetings Query Tool](meetings-query-tool.md) — Semantic search across past meetings via transcript knowledge base
 
 ### Meeting Sources
@@ -34,7 +41,7 @@ title: "LMA Documentation"
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Desktop Capture App](desktop-capture-app.md) — Native macOS / Windows app (menu bar / system tray) that captures system + mic audio for meetings joined from native desktop apps (no browser, no bot)
-- [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, and WebEx meetings; runs on AWS Lambda MicroVMs (default), EC2, or Fargate
+- [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, WebEx and Google Meet meetings; runs on AWS Lambda MicroVMs (default), EC2, or Fargate
 - [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 - [Zoom Meeting SDK Join](zoom-meeting-sdk.md) — Join Zoom via the Zoom Meeting Web SDK (alternative to web-client automation), credentials, and approval requirements
 - [Teams ACS SDK Join](teams-acs-sdk.md) — Join Microsoft Teams via Azure Communication Services interop (alternative to web-client automation), ACS resource setup and connection string
@@ -63,7 +70,8 @@ title: "LMA Documentation"
 
 - [User Management](user-management.md) — Admin-only UI to create and delete LMA users (Admin or User roles)
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
-- [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention
+- [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention, and [where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed) (AWS Region, Amazon Bedrock inference geography, optional integrations)
+- [Privacy and Data Handling Controls](privacy-and-data-handling.md) — For administrators and reviewers: the consent options, every kind of meeting data with where it is stored, how long it is kept and what controls that, deleting transcripts, meetings and stacks, where content is processed, and the presets and deploy-time controls for a regulated deployment
 - [Security Scanning (SRT)](security-scanning.md) — Automated security scanning via the AWS Sample Security Review Tool, suppression workflow, GitLab CI integration, DSR → SRT migration
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 
@@ -76,15 +84,20 @@ title: "LMA Documentation"
 ### Administration
 
 - [CloudFormation Parameters Reference](cloudformation-parameters.md) — Complete reference of all stack parameters by category
+- [Configuration Guide](configuration-guide.md) — For administrators: which settings can be changed from the web UI without redeploying, where, when a saved change applies, and what to do when a save is refused
+- [Unified Configuration Store](configuration-store.md) — The shared runtime-configuration table: its key layout, the compressed record body, the three caching tiers a section can declare, conditional saves, the section schemas every save is checked against, the revision history every save records, and deploy-time seeding
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md) — Updating existing stacks, template URLs, version migration notes
 - [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
+- [Meeting Cost Estimate](meeting-cost-estimate.md) — The itemised estimate of what each meeting cost: what is metered and how, the price table and where its prices come from, changing a price, and what the estimate leaves out
+- [Monitoring & Alerting](monitoring.md) — The operational alerts SNS topic and its alarms, the CloudWatch dashboard, how to subscribe a team rather than one person, and why an unconfirmed email subscription delivers nothing
 - [Troubleshooting](troubleshooting.md) — Monitoring, CloudWatch logs, common issues, cost assessment
+- [AI Troubleshooting Agent](troubleshooting-agent.md) — The read-only diagnostic agent: the Admin Troubleshooting page and Diagnose button, how to invoke it directly, the four log and record tools it uses, where its system prompt lives and how to tune it without redeploying, and the spend limits that bound a run
 - [Cleanup](cleanup.md) — Deleting stacks and retained resources
 
 ### Development
 
 - [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
-- [Scheduled Integration Tests](scheduled-integration-tests.md) — The nightly end-to-end run against a live stack: what it covers, how failures surface, and the one-time GitLab schedule / OIDC role / test-user setup it needs
+- [Scheduled Integration Tests](scheduled-integration-tests.md) — The nightly end-to-end run against a live stack: what it covers, how failures surface, and the one-time GitLab schedule / CI role / test-user setup it needs
 - [Test Coverage](test-coverage.md) — `make test-coverage`: line coverage per component, how unimported files are accounted for, and the current baseline
 - [Virtual Participant Local Development](virtual-participant-local-dev.md) — Run the VP locally on EC2 via `make vp-start` with VSCode Remote-SSH + VNC
 - [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, Virtual Participant, and the `lma load` plugin

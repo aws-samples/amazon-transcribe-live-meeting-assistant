@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -29,6 +29,10 @@
  *
  * Order matters: raw HTML has to be parsed into nodes before it can be filtered,
  * so `rehypeRaw` must stay first in the array.
+ *
+ * The meeting summary renders through SummaryMarkdown (components/summary-markdown),
+ * which uses this chain with one addition: an image source may use the
+ * `keyframe:` scheme, which it resolves to a key frame of that meeting.
  */
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';

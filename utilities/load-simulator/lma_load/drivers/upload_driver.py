@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Upload driver — pre-recorded meeting via ``createUploadMeeting`` + S3 PUT.
 
 Flow per meeting (mirrors the UI's Upload Audio feature):
@@ -84,9 +84,8 @@ async def _upload_one(
     input_obj = {
         "callId": call_id,
         "meetingTopic": f"LoadTest Upload {idx:05d}",
-        "agentId": agent_label,
-        "fromNumber": "LoadSim-Customer",
-        "toNumber": "LoadSim-System",
+        "localSpeakerName": agent_label,
+        "remoteSpeakerName": "LoadSim-Customer",
         "filename": filename,
         "contentType": "audio/wav",
         "fileSize": len(wav_bytes),

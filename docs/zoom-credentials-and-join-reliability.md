@@ -11,15 +11,15 @@ LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A gues
 
 ## Browser stack
 
-- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build, pinned at 0.3.31) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Enabling the **Simli avatar** makes the browser's WebRTC behaviour more conspicuous, which makes Zoom more likely to require a login or present a CAPTCHA — see [Simli and join reliability](#simli-and-join-reliability).
+- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build; the wrapper version is pinned in the VP `package.json` and the Dockerfile's `CLOAKBROWSER_PIP_VERSION`, which must match) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Enabling the **Simli avatar** makes the browser's WebRTC behaviour more conspicuous, which makes Zoom more likely to require a login or present a CAPTCHA — see [Simli and join reliability](#simli-and-join-reliability).
 - A per-user **persistent profile** (cookies, "trusted device" markers) is restored from S3 on launch and saved back at meeting end, so a user who has signed in once is recognised on subsequent meetings (see [Persistent Chromium profile per user](#persistent-chromium-profile-per-user) below).
 - Fresh profiles run a short **warmup** (Google → HN → Wikipedia → the meeting-platform home pages) before navigating to the meeting URL, so a first-time profile arrives with normal browsing history rather than zero state.
 
 ## Simli and join reliability
 
-Enabling the **Simli avatar** (both `SimliApiKey` and `SimliFaceId` set) requires browser settings that bridge the avatar's video into the meeting. Those settings change the browser's WebRTC behaviour in a way that meeting platforms are more likely to flag, so **with Simli enabled a Zoom join is more likely to require a login or trigger a CAPTCHA** before it lets the participant in.
+Enabling the **Simli avatar** (both the `SimliApiKey` stack parameter and **Virtual Participant › Simli face ID** on the Configuration page set) requires browser settings that bridge the avatar's video into the meeting. Those settings change the browser's WebRTC behaviour in a way that meeting platforms are more likely to flag, so **with Simli enabled a Zoom join is more likely to require a login or trigger a CAPTCHA** before it lets the participant in.
 
-> **If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, disable Simli** by leaving `SimliApiKey` and `SimliFaceId` unset. Without Simli the VP joins with the most reliable profile. If you do want the avatar, signing in with [per-user Zoom credentials](#per-user-zoom-credentials) makes joins far more reliable.
+> **If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, disable Simli** by leaving `SimliApiKey` and **Virtual Participant › Simli face ID** unset. Without Simli the VP joins with the most reliable profile. If you do want the avatar, signing in with [per-user Zoom credentials](#per-user-zoom-credentials) makes joins far more reliable.
 
 ## Per-user Zoom credentials
 
@@ -74,6 +74,7 @@ Independently of the sign-in feature, every platform handler wraps its hardcoded
 
 - Model: `us.anthropic.claude-haiku-4-5-20251001-v1:0` (override via `BEDROCK_DOM_RESOLVER_MODEL_ID`; set to empty string to disable the fallback entirely).
 - Successful resolutions are cached in the **DomSelectorCache** DynamoDB table (shared across all VP tasks, 30-day TTL on `lastUsedAt`). The first meeting after a Zoom UI change pays the Bedrock-call cost; every subsequent meeting hits the cache.
+- Zoom's own in-meeting notices that are not modal dialogs (the "Introducing My Notes" callout, the graphics/hardware-acceleration banner) are dismissed by their text for the whole meeting: every 3 s for the first two minutes after joining, then every 15 s (`zoom-overlays.ts`, log prefix `[zoom-overlays]`). To cover another notice, add a fragment of its text to `ZOOM_OVERLAY_SPEC.noticeText`.
 - Unknown popup dialogs that the existing keyword auto-dismiss handler can't classify are sent to Claude as `analyzeUnknownDialog`. CONSENT/RECORDING_NOTICE → auto-dismissed; CAPTCHA/SSO/LOGIN/BLOCKED → escalated to `MANUAL_ACTION_REQUIRED` with the live VNC viewer.
 
 ## Operational notes

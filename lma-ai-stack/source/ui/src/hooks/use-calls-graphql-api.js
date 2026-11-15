@@ -1,11 +1,11 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import useAppContext from '../contexts/app';
 
 import listCallsDateRange from '../graphql/queries/listCallsDateRange';
@@ -19,10 +19,149 @@ import onShareMeetings from '../graphql/queries/onShareMeetings';
 import onDeleteCall from '../graphql/queries/onDeleteCall';
 import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
+import updateSpeakerIdentities from '../graphql/queries/updateSpeakerIdentities';
+import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
+import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
+import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
+import updateCallAgenda from '../graphql/queries/updateCallAgenda';
+import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
+import { serializeSummaryState } from '../components/common/summary-state';
+import { canonicalChannel } from '../components/common/channels';
 
 const client = generateClient();
+
+/**
+ * Whether a GraphQL request failed because AppSync stopped waiting for the
+ * resolver -- its 30-second limit -- rather than because it was refused.
+ * AppSync reports that as errorType "ExecutionTimeout" with the message
+ * "Execution timed out."; both are checked, since the type is not always set.
+ */
+export const isRequestTimeout = (error) =>
+  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
+
+/**
+ * A meeting as it reads after an update: the update's fields, with the ones only
+ * getCall selects (and the list keys) kept from what the page already holds when
+ * the update leaves them out.
+ *
+ * An incoming call object replaces the stored one, so a field that the query or
+ * subscription which produced it did not select would otherwise be dropped from
+ * state. ListPK/ListSK come only from the list query, and SpeakerIdentities is
+ * deliberately left out of the list query (it would ship a name map for every
+ * meeting in the range when only the open one needs it), so a list refresh
+ * would otherwise blank the names on the meeting being viewed. The transcript
+ * deletion fields and the capture context are selected only by getCall.
+ *
+ * CallSummaryState is kept for a different reason: the Kinesis pipeline's Call
+ * mutations are published to onUpdateCall too, and they select it only when the
+ * deployed schema declares it, so a status or aggregation update arriving
+ * without it during a live meeting would otherwise blank it -- making a hand-edited summary read as generated and
+ * hiding a regeneration in flight.
+ *
+ * The agenda is kept for the same reason, as one unit keyed on AgendaUpdatedAt:
+ * every agenda write sets that timestamp, so an incoming call without one came
+ * from a mutation that did not select the agenda, while one with it is
+ * authoritative for all four fields -- including an agenda that was cleared,
+ * which a per-field `||` would resurrect.
+ */
+export const mergeCallUpdate = (existing, call) => ({
+  ...call,
+  ListPK: call.ListPK || existing?.ListPK,
+  ListSK: call.ListSK || existing?.ListSK,
+  SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
+  CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
+  // Only getCall selects these, so they are kept from the existing object when
+  // any other update leaves them out.
+  TranscriptDeletionScheduledFor: call.TranscriptDeletionScheduledFor || existing?.TranscriptDeletionScheduledFor,
+  TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
+  TranscriptSegmentsDeleted: call.TranscriptSegmentsDeleted ?? existing?.TranscriptSegmentsDeleted,
+  TranscriptFilesDeleted: call.TranscriptFilesDeleted ?? existing?.TranscriptFilesDeleted,
+  ExpiresAfter: call.ExpiresAfter ?? existing?.ExpiresAfter,
+  // Recorded when the meeting starts and selected only by getCall.
+  CaptureSource: call.CaptureSource || existing?.CaptureSource,
+  TranscriptionEngine: call.TranscriptionEngine || existing?.TranscriptionEngine,
+  TranscriptionLanguage: call.TranscriptionLanguage ?? existing?.TranscriptionLanguage,
+  SpeakerSeparation: call.SpeakerSeparation || existing?.SpeakerSeparation,
+  // Selected by getCall, onUpdateCall and the writes it follows: the Kinesis
+  // pipeline's, the agenda, speaker-name and summary Lambdas', and the page's
+  // own (updateCallAgenda, updateCallSummaryText, updateSpeakerIdentities).
+  // Not by the list query, so an update without it keeps the stored list.
+  DetectedLanguages: call.DetectedLanguages ?? existing?.DetectedLanguages,
+  // Selected by getCall and by the one write that sets it (published to
+  // onUpdateCall); the pipeline's other updates leave it out. Every write is
+  // the whole value, a resume included, so it is never cleared to empty.
+  TranscriptionPause: call.TranscriptionPause || existing?.TranscriptionPause,
+  ...(call.AgendaUpdatedAt
+    ? {}
+    : {
+        Agenda: existing?.Agenda,
+        AgendaSource: existing?.AgendaSource,
+        AgendaUpdatedBy: existing?.AgendaUpdatedBy,
+        AgendaUpdatedAt: existing?.AgendaUpdatedAt,
+      }),
+});
+
+/**
+ * Every stored segment of a meeting. A long meeting's segments span several
+ * pages of the table, and a page can come back empty with a nextToken (the
+ * query's filters apply after each page is read: partial segments, and the
+ * segments the caller may not read), so pages are read until there is no
+ * nextToken.
+ */
+export const fetchAllTranscriptSegments = async (graphql, callId) => {
+  const segments = [];
+  let nextToken = null;
+  do {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await graphql({ query: getTranscriptSegments, variables: { callId, nextToken } });
+    const page = response?.data?.getTranscriptSegments;
+    segments.push(...(page?.TranscriptSegments || []).filter(Boolean));
+    nextToken = page?.nextToken || null;
+  } while (nextToken);
+  return segments;
+};
+
+/** A transcript segment from the API, as the UI holds it. */
+export const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
+  const {
+    CallId: callId,
+    SegmentId: segmentId,
+    StartTime: startTime,
+    EndTime: endTime,
+    Speaker: speaker,
+    Transcript: transcript,
+    IsPartial: isPartial,
+    Channel: channel,
+    CreatedAt: createdAt,
+    Sentiment: sentiment,
+    SentimentScore: sentimentScore,
+    SentimentWeighted: sentimentWeighted,
+    LanguageCode: languageCode,
+  } = transcriptSegmentValue;
+
+  return {
+    callId,
+    segmentId,
+    startTime,
+    endTime,
+    speaker,
+    transcript,
+    isPartial,
+    // A meeting stored before 0.4.0 has its segments on CALLER and AGENT; they
+    // are held, rendered and exported under REMOTE and LOCAL.
+    channel: canonicalChannel(channel),
+    createdAt,
+    sentiment,
+    sentimentScore,
+    sentimentWeighted,
+    // The language the speech engine identified, when it named one (see
+    // common/detected-languages.js); absent otherwise.
+    ...(languageCode ? { languageCode } : {}),
+  };
+};
+
 const logger = new ConsoleLogger('useCallsGraphQlApi');
 
 // Matches the `limit` used server-side by the ListCallsGsiResolver.  One
@@ -32,12 +171,19 @@ const logger = new ConsoleLogger('useCallsGraphQlApi');
 const LIST_PAGE_SIZE = 100;
 const MAX_PAGES_PER_LOAD = 20;
 
+// How long after a meeting's summary arrives it is read again, for the
+// transcript deletion time (see the onUpdateCall subscription).
+const SUMMARY_REFRESH_DELAY_MS = 5000;
+
 const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   // dateRange is { startDateIso, endDateIso } — the active meeting-list window.
   const [dateRange, setDateRange] = useState(initialDateRange || hoursToDateRange(DEFAULT_DATE_RANGE_HOURS));
   // Mirror of dateRange held in a ref so subscription callbacks (which close
   // over an old dateRange otherwise) always see the latest value.
   const dateRangeRef = useRef(dateRange);
+  // Meetings already read again after their summary arrived.
+  const summaryRefreshes = useRef(new Set());
+  const summaryRefreshTimers = useRef([]);
   useEffect(() => {
     dateRangeRef.current = dateRange;
   }, [dateRange]);
@@ -66,16 +212,19 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     return t >= new Date(startDateIso).getTime() && t <= new Date(endDateIso).getTime();
   };
 
+  /**
+   * Replace calls in state with freshly fetched ones, keeping the fields an
+   * update did not select; see mergeCallUpdate for which and why.
+   */
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
       const callValuesCallIds = callValues.map((c) => c.CallId);
       return [
         ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
-        ...callValues.map((call) => ({
-          ...call,
-          ListPK: call.ListPK || currentCalls.find((c) => c.CallId === call.CallId)?.ListPK,
-          ListSK: call.ListSK || currentCalls.find((c) => c.CallId === call.CallId)?.ListSK,
-        })),
+        ...callValues.map((call) => {
+          const existing = currentCalls.find((c) => c.CallId === call.CallId);
+          return mergeCallUpdate(existing, call);
+        }),
       ];
     });
   };
@@ -121,13 +270,30 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
         if (!callUpdateEvent?.CallId) return;
         if (!isWithinActiveRange(callUpdateEvent?.CreatedAt)) return;
         setCallsDeduped([callUpdateEvent]);
+        // The transcript deletion writes when the transcript is due to be
+        // deleted (or was) onto the meeting record directly, so no update
+        // carries it. Read the meeting once more shortly after its summary
+        // first arrives, which is when that time is set.
+        const { CallId: callId, CallSummaryText: summary } = callUpdateEvent;
+        if (summary && !summaryRefreshes.current.has(callId)) {
+          summaryRefreshes.current.add(callId);
+          const timer = setTimeout(async () => {
+            const callValues = await getCallDetailsFromCallIds([callId]);
+            if (callValues.length) setCallsDeduped(callValues);
+          }, SUMMARY_REFRESH_DELAY_MS);
+          summaryRefreshTimers.current.push(timer);
+        }
       },
       error: (error) => {
         logger.error(error);
         setErrorMessage('call update network request failed - please reload the page');
       },
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      summaryRefreshTimers.current.forEach(clearTimeout);
+      summaryRefreshTimers.current = [];
+    };
   }, []);
 
   useEffect(() => {
@@ -216,38 +382,6 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       };
       return { ...current, [callId]: { ...entry } };
     });
-  };
-
-  const mapTranscriptSegmentValue = (transcriptSegmentValue) => {
-    const {
-      CallId: callId,
-      SegmentId: segmentId,
-      StartTime: startTime,
-      EndTime: endTime,
-      Speaker: speaker,
-      Transcript: transcript,
-      IsPartial: isPartial,
-      Channel: channel,
-      CreatedAt: createdAt,
-      Sentiment: sentiment,
-      SentimentScore: sentimentScore,
-      SentimentWeighted: sentimentWeighted,
-    } = transcriptSegmentValue;
-
-    return {
-      callId,
-      segmentId,
-      startTime,
-      endTime,
-      speaker,
-      transcript,
-      isPartial,
-      channel,
-      createdAt,
-      sentiment,
-      sentimentScore,
-      sentimentWeighted,
-    };
   };
 
   useEffect(() => {
@@ -393,8 +527,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
 
   const sendGetTranscriptSegmentsRequest = async (callId) => {
     try {
-      const response = await client.graphql({ query: getTranscriptSegments, variables: { callId } });
-      const transcriptSegments = response?.data?.getTranscriptSegments?.TranscriptSegments;
+      const transcriptSegments = await fetchAllTranscriptSegments((request) => client.graphql(request), callId);
       if (transcriptSegments?.length > 0) {
         const transcriptSegmentsReduced = transcriptSegments
           .map((t) => mapTranscriptSegmentValue(t))
@@ -417,12 +550,239 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     }
   };
 
+  /**
+   * Write a meeting's speaker identity map.
+   *
+   * State is updated optimistically so the transcript re-labels on the keystroke
+   * that confirmed the name rather than on the subscription round trip. Other
+   * clients get the same change pushed through onUpdateCall. A rejected write is
+   * rolled back, because leaving a name on screen that was never stored means the
+   * next reload silently loses it.
+   */
+  const sendUpdateSpeakerIdentities = async (callId, serializedIdentities) => {
+    // Captured from inside the updater, not from `calls` in the render closure:
+    // renaming two voices in quick succession (blurring one field straight into
+    // the next) runs both calls against the same stale `calls`, so a closure read
+    // would roll the second failure back to the state before the FIRST rename and
+    // drop a name that was in fact stored.
+    let previous;
+    // Patch in place rather than via setCallsDeduped: that helper REPLACES the
+    // stored call with the object handed to it, so a two-field payload would
+    // strip the rest of the meeting's attributes out of state.
+    setCalls((currentCalls) => {
+      previous = currentCalls.find((c) => c.CallId === callId)?.SpeakerIdentities;
+      return currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: serializedIdentities } : c));
+    });
+    try {
+      await client.graphql({
+        query: updateSpeakerIdentities,
+        variables: { input: { CallId: callId, SpeakerIdentities: serializedIdentities } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update speaker identities', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to change speaker names on this meeting'
+          : 'failed to save speaker names - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      // Two renames can be in flight at once (blurring one field straight into
+      // the next), and a blind revert would discard a later write that succeeded.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) =>
+          c.CallId === callId && c.SpeakerIdentities === serializedIdentities
+            ? { ...c, SpeakerIdentities: previous }
+            : c,
+        ),
+      );
+      return false;
+    }
+  };
+
+  /**
+   * Ask the backend to infer speaker names for a meeting.
+   *
+   * Nothing is patched into state here: the resolver writes the names through
+   * updateSpeakerIdentities, so they arrive via onUpdateCall like any other
+   * rename and the transcript re-labels itself. Returns the backend's own count
+   * so the caller can say what happened.
+   */
+  // Memoised, unlike its neighbours in this hook, because the Speakers panel
+  // uses it as the dependency of an interval. A fresh identity each render would
+  // tear down and rebuild that interval on every arriving transcript segment, so
+  // it would only ever elapse during silence -- which is exactly when there is
+  // nothing new to read.
+  const sendResolveSpeakerNames = useCallback(async (callId, { force = false } = {}) => {
+    try {
+      const response = await client.graphql({
+        query: resolveSpeakerNames,
+        variables: { input: { CallId: callId, Force: force } },
+      });
+      return response?.data?.resolveSpeakerNames ?? { Success: false, NamesApplied: 0 };
+    } catch (error) {
+      logger.error('failed to resolve speaker names', error);
+      // Deliberately not surfaced as a global error for an automatic pass: it
+      // runs on a timer and a transient failure is not something the user asked
+      // for or can act on. The on-demand caller reports it itself.
+      return { Success: false, Message: 'request failed', NamesApplied: 0 };
+    }
+  }, []);
+
+  /**
+   * Store a meeting's summary text, and record that a person wrote it.
+   *
+   * State is updated optimistically so the edited text appears on the keystroke
+   * that saved it rather than on the subscription round trip. Other clients get
+   * the same change pushed through onUpdateCall. A rejected write is rolled
+   * back, because leaving text on screen that was never stored means the next
+   * reload silently loses it.
+   */
+  const sendUpdateCallSummary = async (callId, text, state) => {
+    const serializedState = serializeSummaryState(state);
+    // Captured from inside the updater, not from `calls` in the render closure,
+    // for the same reason the speaker identity write does it: two saves can be
+    // in flight at once, and a closure read would roll the second failure back
+    // past the first success.
+    let previousText;
+    let previousState;
+    setCalls((currentCalls) => {
+      const existing = currentCalls.find((c) => c.CallId === callId);
+      previousText = existing?.CallSummaryText;
+      previousState = existing?.CallSummaryState;
+      return currentCalls.map((c) =>
+        c.CallId === callId ? { ...c, CallSummaryText: text, CallSummaryState: serializedState } : c,
+      );
+    });
+    try {
+      await client.graphql({
+        query: updateCallSummaryText,
+        variables: { input: { CallId: callId, CallSummaryText: text, CallSummaryState: serializedState } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update the meeting summary', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to edit the summary of this meeting'
+          : 'failed to save the summary - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) =>
+          c.CallId === callId && c.CallSummaryText === text
+            ? { ...c, CallSummaryText: previousText, CallSummaryState: previousState }
+            : c,
+        ),
+      );
+      return false;
+    }
+  };
+
+  /**
+   * Store a meeting's agenda as typed on the meeting page.
+   *
+   * Optimistic, with a rollback on a rejected write, like the summary and
+   * speaker-name writers above. The resolver records the source as 'ui' and the
+   * caller's own username whatever the browser sends, so the patch here only
+   * anticipates what the subscription will confirm.
+   */
+  const sendUpdateCallAgenda = async (callId, agenda, username) => {
+    const AGENDA_FIELDS = ['Agenda', 'AgendaSource', 'AgendaUpdatedBy', 'AgendaUpdatedAt'];
+    let previous;
+    setCalls((currentCalls) => {
+      const existing = currentCalls.find((c) => c.CallId === callId);
+      previous = Object.fromEntries(AGENDA_FIELDS.map((field) => [field, existing?.[field]]));
+      return currentCalls.map((c) =>
+        c.CallId === callId
+          ? {
+              ...c,
+              Agenda: agenda,
+              AgendaSource: 'ui',
+              AgendaUpdatedBy: username ?? c.AgendaUpdatedBy,
+              AgendaUpdatedAt: new Date().toISOString(),
+            }
+          : c,
+      );
+    });
+    try {
+      await client.graphql({
+        query: updateCallAgenda,
+        variables: { input: { CallId: callId, Agenda: agenda } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update the meeting agenda', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to edit the agenda of this meeting'
+          : 'failed to save the agenda - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) => (c.CallId === callId && c.Agenda === agenda ? { ...c, ...previous } : c)),
+      );
+      return false;
+    }
+  };
+
+  /**
+   * Ask the backend to read a meeting's transcript for a stated agenda.
+   *
+   * Nothing is patched into state here: a found agenda is stored through
+   * updateCallAgenda and arrives through onUpdateCall. Returns the backend's own
+   * answer so the panel can say what happened, including "none was stated".
+   */
+  const sendDeriveCallAgenda = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({ query: deriveCallAgenda, variables: { input: { CallId: callId } } });
+      return response?.data?.deriveCallAgenda ?? { Success: false, Message: 'no answer from the server' };
+    } catch (error) {
+      logger.error('failed to derive the meeting agenda', error);
+      // A timeout is not a refusal: a pass that outlasts AppSync's limit still
+      // finishes, so the panel is told the result may yet arrive. Any other
+      // failure -- refused, unreachable, an error in the resolver -- is one.
+      return isRequestTimeout(error)
+        ? { Success: false, Message: 'the request timed out', NoAnswer: true }
+        : { Success: false, Message: 'could not derive an agenda' };
+    }
+  }, []);
+
+  /**
+   * Ask the backend to summarise a meeting again.
+   *
+   * Nothing is patched into state here: the run outlives the request, and the
+   * new summary arrives through onUpdateCall like an end-of-meeting one does.
+   * Returns the backend's own answer so the caller can say what happened.
+   */
+  const sendRegenerateCallSummary = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({
+        query: regenerateCallSummary,
+        variables: { input: { CallId: callId } },
+      });
+      return response?.data?.regenerateCallSummary ?? { Success: false, Message: 'no answer from the server' };
+    } catch (error) {
+      logger.error('failed to start regenerating the summary', error);
+      return { Success: false, Message: 'request failed' };
+    }
+  }, []);
+
   return {
     calls,
     callTranscriptPerCallId,
     isCallsListLoading,
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

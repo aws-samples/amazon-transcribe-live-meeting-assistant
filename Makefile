@@ -28,6 +28,12 @@ ifeq ($(wildcard $(VENV_DIR)/bin/cfn-lint),)
 else
   CFN_LINT := $(CURDIR)/$(VENV_DIR)/bin/cfn-lint
 endif
+# Likewise ruff.
+ifeq ($(wildcard $(VENV_DIR)/bin/ruff),)
+  RUFF := ruff
+else
+  RUFF := $(CURDIR)/$(VENV_DIR)/bin/ruff
+endif
 
 # Project paths
 AI_STACK_DIR := lma-ai-stack
@@ -38,10 +44,38 @@ WEBSOCKET_DIR := lma-websocket-transcriber-stack
 WEBSOCKET_APP_DIR := $(WEBSOCKET_DIR)/source/app
 VP_DIR := lma-virtual-participant-stack
 VP_BACKEND_DIR := $(VP_DIR)/backend
+WEBSOCKET_CLIENT_DIR := utilities/websocket-client
 ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
+LOAD_SIM_DIR := utilities/load-simulator
+MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
+STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requirements.txt
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
+# The ruff version comes from the ASR runtime's pin, so the AI-stack lint and the
+# ASR lint (`test-asr`) run the same ruff release. Each uses its own tree's
+# configuration. Dependabot keeps that pin current.
+RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev.txt)
+# Everything `lint-python` fixes and `lint-python-check` checks. The Lambda
+# layers are included because their code is imported by most of the functions.
+# The rest of scripts/ is not included: those files predate this and
+# reformatting them here would make an unrelated diff. The parameter reference
+# generator and the demo recorder (with its tests) were written to this lint, so
+# they are named.
+PYTHON_LINT_PATHS := \
+	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
+	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
+	$(CURDIR)/scripts/pr_review \
+	$(CURDIR)/scripts/ci \
+	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
+	$(CURDIR)/scripts/bedrock_inference_catalog.py \
+	$(CURDIR)/scripts/ux_recorder.py \
+	$(CURDIR)/scripts/ux_recorder_cdp.py \
+	$(CURDIR)/scripts/ux_recorder_render.py \
+	$(CURDIR)/scripts/ux_test_session.py \
+	$(CURDIR)/scripts/meeting_guest \
+	$(CURDIR)/scripts/tests \
+	$(CURDIR)/scripts/testing
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
@@ -51,8 +85,10 @@ CFN_TEMPLATES := \
 	$(ASR_DIR)/template.yaml \
 	lma-bedrockagent-stack/template.yaml \
 	lma-bedrockkb-stack/template.yaml \
+	lma-browser-extension-stack/template.yaml \
 	lma-chat-button-config-stack/deployment/chat-button-config.yaml \
 	lma-cognito-stack/deployment/lma-cognito-stack.yaml \
+	lma-desktop-capture-app-stack/template.yaml \
 	lma-llm-template-setup-stack/deployment/llm-template-setup.yaml \
 	lma-meetingassist-setup-stack/template.yaml \
 	lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml \
@@ -93,6 +129,16 @@ NODE_PINNED_VERSION := $(strip $(shell cat .nvmrc 2>/dev/null))
 # check-node reports a shortfall in one line, since NPM_CI below runs npm
 # quietly and its EBADENGINE warnings are therefore suppressed.
 NODE_MIN_VERSION := 22.22.2
+
+# When nvm has the pinned version installed, put it first on PATH for every
+# recipe, so `make` uses it even in a shell that was opened before
+# `make setup-node` changed the nvm default (astro in docs-site needs the
+# pinned version, newer than NODE_MIN_VERSION). CI installs Node without nvm,
+# so there this is empty and PATH is unchanged.
+NVM_PINNED_NODE_BIN := $(wildcard $(or $(NVM_DIR),$(HOME)/.nvm)/versions/node/v$(NODE_PINNED_VERSION)/bin)
+ifneq ($(NVM_PINNED_NODE_BIN),)
+export PATH := $(NVM_PINNED_NODE_BIN):$(PATH)
+endif
 
 # npm install invocation shared by every JS target. `--loglevel=error --no-fund`
 # drops npm's notice-level output (funding summaries, transitive `deprecated`
@@ -154,6 +200,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo "Upgrading pip..."
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	@echo "Installing Python lint/dev tools..."
+	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
 		bandit \
 		black \
@@ -161,6 +208,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 		flake8 \
 		mypy \
 		pylint \
+		ruff==$(RUFF_VERSION) \
 		virtualenv \
 		yamllint \
 		boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]
@@ -181,6 +229,12 @@ setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
 	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_sdk[dev]"
 	@echo "Installing LMA CLI with dev dependencies..."
 	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_cli_pkg[dev]"
+	@# The troubleshooting agent's budget is tested through the real Strands event
+	@# loop (lma-meetingassist-setup-stack/test/test_troubleshooting_real_strands.py),
+	@# which skips without it. The version is read from the layer's own pin so the
+	@# tests cannot drift from what is deployed.
+	@echo "Installing the Strands Agents SDK at the version the Strands layer pins..."
+	$(CURDIR)/$(VENV_DIR)/bin/pip install "$$(grep -E '^strands-agents==' $(STRANDS_LAYER_REQUIREMENTS))"
 	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
 
 .PHONY: check-node
@@ -230,11 +284,28 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 		exit 1; \
 	fi
 
-lint-python: ## Lint Python Lambda functions with ruff
-	@echo "Running ruff on Lambda functions..."
-	cd $(AI_STACK_DIR) && ruff check --fix $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
-	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+# Runs from AI_STACK_DIR so that lma-ai-stack/pyproject.toml supplies the ruff
+# configuration. lint-python rewrites files in place; lint-python-check is the
+# read-only form that CI runs, and covers exactly the same paths.
+lint-python: ## Lint and format Python Lambda functions and layers with ruff (fixes in place)
+	@echo "Running ruff on Lambda functions and layers..."
+	cd $(AI_STACK_DIR) && $(RUFF) check --fix $(PYTHON_LINT_PATHS)
+	cd $(AI_STACK_DIR) && $(RUFF) format $(PYTHON_LINT_PATHS)
 	@echo -e "$(GREEN)✅ All Python linting passed!$(NC)"
+
+lint-python-check: ## Check Python Lambda functions and layers with ruff (no modifications)
+	@echo "Checking Lambda functions and layers with ruff..."
+	@if ! (cd $(AI_STACK_DIR) && $(RUFF) check $(PYTHON_LINT_PATHS)); then \
+		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
+		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
+		exit 1; \
+	fi
+	@if ! (cd $(AI_STACK_DIR) && $(RUFF) format --check $(PYTHON_LINT_PATHS)); then \
+		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
+		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
+		exit 1; \
+	fi
+	@echo -e "$(GREEN)✅ Ruff checks passed!$(NC)"
 
 lint-bandit: ## Run bandit security scan on Python Lambda functions
 	@echo "Running bandit security scan..."
@@ -264,16 +335,18 @@ lint-ui: check-node ## Lint React UI (ESLint, skips if source unchanged; use FOR
 lint-ui-force: ## Lint React UI (ignore checksum, always run)
 	@$(MAKE) lint-ui FORCE=1
 
-lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
+lint-typescript: ## TypeScript build check on WebSocket, Virtual Participant and websocket-client
 	@echo "Running TypeScript build check on WebSocket transcriber..."
 	@cd $(WEBSOCKET_APP_DIR) && $(NPM_CI) && npm run build
 	@echo "Running TypeScript build check on Virtual Participant..."
 	@cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm run build
+	@echo "Running TypeScript build check on utilities/websocket-client..."
+	@cd $(WEBSOCKET_CLIENT_DIR) && $(NPM_CI) && npm run buildcheck
 	@echo -e "$(GREEN)✅ All TypeScript builds succeeded!$(NC)"
 
 format: ## Format Python code with ruff
-	@echo "Formatting Python Lambda functions with ruff..."
-	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+	@echo "Formatting Python Lambda functions and layers with ruff..."
+	cd $(AI_STACK_DIR) && $(RUFF) format $(PYTHON_LINT_PATHS)
 	@echo -e "$(GREEN)✅ Python code formatted!$(NC)"
 
 lint-cicd: ## CI/CD lint — checks only, no modifications
@@ -282,16 +355,7 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
-		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
-		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
-		exit 1; \
-	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff format --check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
-		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
-		echo -e "$(YELLOW)Run 'make format' locally to fix these issues.$(NC)"; \
-		exit 1; \
-	fi
+	@$(MAKE) --no-print-directory lint-python-check
 	@if ! make lint-ui; then \
 		echo -e "$(RED)ERROR: UI lint failed$(NC)"; \
 		exit 1; \
@@ -317,7 +381,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-load-simulator test-pr-review test-ux-recorder test-ci-tooling ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -333,23 +397,39 @@ test-cli: ## Run LMA CLI unit tests
 # imports, so each directory must be run with that dir on sys.path — a single
 # top-level `pytest lambda_functions/` collides on duplicate module names. This
 # target discovers every dir containing test_*.py and runs pytest from within
-# it. No AWS required (the suites mock boto3 / set dummy env).
+# it. No AWS required (the suites mock boto3 / set dummy env), and none reached:
+# lma-ai-stack/conftest.py, the ASR Lambdas' and the meeting-assist tests'
+# conftest.py load scripts/testing/no_real_aws.py, which fails a test that sends
+# a request to AWS.
 #
 # LAMBDA_LAYERS_DIR is searched too. The layer holds the code the Lambdas share
 # (transcript normalisation, the TTLs, the AppSync helpers), so a test there
 # covers every function at once; it was previously outside this glob, which meant
 # a test placed beside the layer would have been collected by nothing.
+#
+# MEETINGASSIST_TEST_DIR is searched for the same reason: it holds the tests
+# for the troubleshooting agent, which nothing else would collect.
+# Unusually for this repository those tests are NOT beside their source, and
+# that is deliberate — three functions in that stack share one `Code: ./src`,
+# so a test file there would ship in all three deployment packages and editing
+# a test would change the meeting-assist function's code hash. A conftest.py
+# in the test directory restores the sibling imports.
+#
+# -rs lists the skips. Several suites skip themselves when a runtime dependency
+# is absent, which is right for a developer who has run only `make setup-python`
+# and wrong to pass silently in CI, where `make setup-cli-dev` installs them: a
+# suite that has quietly stopped running shows up in this output.
 test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
-	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions $(MEETINGASSIST_TEST_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
 		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \
 		echo -e "$(CYAN)  pytest $$d$(NC)"; \
 		if ! ( cd "$$d" && AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
 			AWS_REGION=$${AWS_REGION:-us-east-1} \
-			$(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+			$(PYTHON) -m pytest -q -rs $$files ); then FAILED=1; fi; \
 	done; \
 	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
 	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \
@@ -404,6 +484,48 @@ test-integ-plumbing: ## Unit tests for the scheduled integ-test machinery (no AW
 	$(PYTHON) -m pytest integ-tests/test_ci_plumbing.py -q
 	@echo -e "$(GREEN)✅ Integration-test plumbing tests passed!$(NC)"
 
+# The advisory AI review's own machinery. The disclosure guard is the part that
+# matters: it decides whether a model-written comment describing a security
+# weakness reaches a public pull request, so both of its failure directions are
+# covered — a miss (publishes a weakness, nobody finds out) and a false positive
+# (withholds a legitimate review, which is how a guard gets deleted). The rest
+# pins the four workflow properties an edit removes without noticing.
+test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no model call)
+	@echo "Running advisory AI review tests..."
+	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
+	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
+
+# The CI step selection (scripts/ci/changed_areas.py): which steps of the "Lint and
+# unit tests" job a pull request's changed files need, plus the check that every
+# gated step in code-checks.yml and .gitlab-ci.yml names a real selection key.
+test-ci-tooling: ## Unit tests for the CI step selection (scripts/ci; no AWS)
+	@echo "Running CI step-selection tests..."
+	$(PYTHON) -m pytest scripts/ci -q
+	@echo -e "$(GREEN)✅ CI step-selection tests passed!$(NC)"
+
+# The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
+# product-demo skill's storyboard file. Needs no AWS, Chrome or network; the
+# render tests skip without ffmpeg and Pillow.
+test-ux-recorder: ## Unit tests for the product demo recorder, its session helper and the meeting guest (no AWS)
+	@echo "Running demo recorder tests..."
+	$(PYTHON) -m pytest scripts/tests -q
+	@echo -e "$(GREEN)✅ Demo recorder tests passed!$(NC)"
+
+# Run one review locally and PRINT it rather than posting. Usage:
+#   make ai-pr-review PR=800
+#   make ai-pr-review PR=800 ARGS=--no-redact-artifact   # keep withheld text locally
+# Needs a `claude` CLI on PATH and AWS credentials with bedrock:InvokeModel. This
+# is a real Bedrock spend (~$1-4); see scripts/pr_review/README.md.
+#
+# `--remote github` because a developer checkout of this repository has two
+# remotes and `origin` is the GitLab mirror, which carries no refs/pull/* refs.
+ai-pr-review: ## Dry-run the advisory AI review on one PR, printed not posted (Usage: make ai-pr-review PR=<n>)
+	@if [ -z "$(PR)" ]; then \
+		echo -e "$(RED)Usage: make ai-pr-review PR=<number>$(NC)"; exit 1; \
+	fi
+	$(PYTHON) scripts/pr_review/ai_pr_review.py \
+		--forge github --remote github --mr $(PR) --dry-run $(ARGS)
+
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	@echo "Running ASR MicroVM runtime tests..."
 	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
@@ -411,6 +533,13 @@ test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	cd $(ASR_SOURCE_DIR) && .venv/bin/python -m pytest -q && .venv/bin/ruff check .
 	$(ASR_SOURCE_DIR)/.venv/bin/python $(ASR_DIR)/scripts/sync_bundles.py --check
 	@echo -e "$(GREEN)✅ ASR MicroVM runtime tests passed!$(NC)"
+
+test-load-simulator: ## Run load simulator unit tests, including the ASR benchmark (no AWS)
+	@echo "Running load simulator tests..."
+	@test -d $(LOAD_SIM_DIR)/.venv || $(PYTHON) -m venv $(LOAD_SIM_DIR)/.venv
+	@$(LOAD_SIM_DIR)/.venv/bin/pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[dev]"
+	cd $(LOAD_SIM_DIR) && .venv/bin/python -m pytest -q tests
+	@echo -e "$(GREEN)✅ Load simulator tests passed!$(NC)"
 
 test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
@@ -448,27 +577,37 @@ test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
         docker-build-check-all integ-tests integ-tests-live integ-tests-nightly \
         integ-deploy-and-test test-lambdas \
         test-vp test-vp-template test-vp-microvm-e2e test-ai-stack \
-        test-integ-plumbing test-coverage test-coverage-python test-asr
+        test-integ-plumbing test-coverage test-coverage-python test-asr \
+        test-pr-review ai-pr-review
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
 # rolls back. The transcriber image runs 'tsc && eslint' at build time, so this
 # also catches missing lint/build config. Requires a running Docker daemon.
+# A failed image build fails the target. Only removing the throwaway tag
+# afterwards is allowed to fail. A missing docker CLI or a stopped daemon is
+# reported as an error rather than skipped, because a check that skips quietly
+# reads the same as one that passed.
+DOCKER_BUILD_CHECK_PREFLIGHT = command -v docker >/dev/null 2>&1 \
+	|| { echo -e "$(RED)ERROR: docker CLI not found; docker-build-check needs Docker.$(NC)"; exit 1; }; \
+	docker info >/dev/null 2>&1 \
+	|| { echo -e "$(RED)ERROR: Docker daemon not reachable (is it running?); docker-build-check needs it.$(NC)"; exit 1; }
+
 docker-build-check: docker-build-check-transcriber ## Build container images locally as CodeBuild does (transcriber; use docker-build-check-all for VP too)
 	@echo -e "$(GREEN)✅ Docker build check passed!$(NC)"
 
 docker-build-check-transcriber: ## Build the WebSocket transcriber image (fast; runs tsc + eslint 10)
-	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@$(DOCKER_BUILD_CHECK_PREFLIGHT)
 	@echo -e "$(CYAN)Building transcriber image (source/app/)...$(NC)"
-	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local . \
-		&& docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
+	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local .
+	@docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
 	@echo -e "$(GREEN)✅ Transcriber image built.$(NC)"
 
 docker-build-check-vp: ## Build the Virtual Participant image (heavy; downloads CloakBrowser Chromium)
-	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@$(DOCKER_BUILD_CHECK_PREFLIGHT)
 	@echo -e "$(CYAN)Building Virtual Participant image (backend/) — this is heavy...$(NC)"
-	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local . \
-		&& docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
+	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local .
+	@docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
 	@echo -e "$(GREEN)✅ Virtual Participant image built.$(NC)"
 
 docker-build-check-all: docker-build-check-transcriber docker-build-check-vp ## Build BOTH container images locally
@@ -493,6 +632,21 @@ test-vp-microvm-e2e: ## VP MicroVM launch-path e2e against a local container (no
 # (make setup-cli-dev) and AWS creds (AWS_PROFILE=default). Resolves the target
 # stack from STACK, else $LMA_STACK_NAME, else 'LMA'.
 INTEG_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),LMA)
+
+asr-benchmark: ## Compare ASR model configurations on a live dev stack (Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c|WAV=<stereo.wav> [BUNDLES=<a,b>] [TRANSCRIBE=1] [REFERENCE=<stm>] [KEEP_BUNDLE=1] [DRY_RUN=1], or STACK=<name> SWITCH_ONLY=<bundle>)
+ifeq ($(STACK),)
+	$(error Set STACK to the dev stack to benchmark: this target updates that stack's ASR bundle)
+endif
+ifeq ($(WAV)$(DATASET)$(SWITCH_ONLY),)
+	$(error Set DATASET (e.g. ami/IS1009c) or WAV. Usage: make asr-benchmark STACK=<name> DATASET=ami/IS1009c BUNDLES=<a,b> [TRANSCRIBE=1])
+endif
+	@test -d $(LOAD_SIM_DIR)/.venv || $(PYTHON) -m venv $(LOAD_SIM_DIR)/.venv
+	@$(LOAD_SIM_DIR)/.venv/bin/python -c "import lma_load, numpy" 2>/dev/null || $(LOAD_SIM_DIR)/.venv/bin/pip install -q -e lib/lma_sdk -e "$(LOAD_SIM_DIR)[benchmark]"
+	$(LOAD_SIM_DIR)/.venv/bin/python -m lma_load.cli asr-benchmark --stack-name "$(STACK)" \
+		$(if $(SWITCH_ONLY),--switch-only "$(SWITCH_ONLY)",$(if $(DATASET),--dataset "$(DATASET)",--wav "$(WAV)")) \
+		$(if $(BUNDLES),--bundles "$(BUNDLES)") $(if $(TRANSCRIBE),--transcribe) \
+		$(if $(REFERENCE),--reference "$(REFERENCE)") $(if $(KEEP_BUNDLE),--keep-bundle) \
+		$(if $(DRY_RUN),--dry-run)
 
 integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests STACK=<name>)
 	@echo -e "$(CYAN)Running LMA integration tests against stack '$(INTEG_STACK)'...$(NC)"
@@ -572,6 +726,28 @@ integ-deploy-and-test: ## Deploy (create/update) a stack from local code, then r
 	fi
 	@$(MAKE) integ-tests STACK="$(INTEG_DEPLOY_STACK)"
 
+##@ Product Demo Recording
+# Narrated demo videos of the web UI: see .claude/skills/product-demo.md. The
+# recording is driven by the agent between browser steps; these only check the
+# tools and prepare a sign-in.
+
+ux-record-deps: ## Check the tools the demo recorder needs (ffmpeg, ffprobe, boto3, Pillow)
+	@$(PYTHON) scripts/ux_recorder.py deps
+
+# Creates a REAL Cognito user with a known password in the stack's pool, for
+# recording as a role other than your own (GROUP=User for a non-admin).
+ux-test-session: ## Create a throwaway sign-in for a demo (Usage: make ux-test-session STACK_NAME=<stack> [REGION=...] [GROUP=Admin|User] [EMAIL_DOMAIN=...])
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make ux-test-session STACK_NAME=<stack-name> [REGION=... GROUP=...])
+endif
+	@echo "Creating a throwaway sign-in for $(STACK_NAME)..."
+	@$(PYTHON) scripts/ux_test_session.py setup $(STACK_NAME) \
+	    --group $(if $(GROUP),$(GROUP),Admin) \
+	    $(if $(REGION),--region $(REGION),) \
+	    $(if $(EMAIL_DOMAIN),--email-domain $(EMAIL_DOMAIN),)
+	@echo -e "$(YELLOW)Record as described in .claude/skills/product-demo.md$(NC)"
+	@echo -e "$(YELLOW)Remember to run the teardown command printed above.$(NC)"
+
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
 ui-start: ## Start UI dev server (requires STACK_NAME for .env generation)
@@ -607,7 +783,7 @@ endif
 
 ##@ Virtual Participant Development
 # Usage:
-#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME> MEETING_ID=<id> \
+#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME|GOOGLE_MEET> MEETING_ID=<id> \
 #                 [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1]
 #
 # Runs the Virtual Participant Docker container locally against a deployed LMA
@@ -618,7 +794,7 @@ ifndef STACK_NAME
 	$(error STACK_NAME is not set. Usage: make vp-start STACK_NAME=<stack> PLATFORM=<platform> MEETING_ID=<id> [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1])
 endif
 ifndef PLATFORM
-	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME)
+	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME, GOOGLE_MEET)
 endif
 ifndef MEETING_ID
 	$(error MEETING_ID is not set)

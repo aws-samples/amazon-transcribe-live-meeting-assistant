@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """Transcribe API Mutation Processor"""
@@ -7,11 +7,23 @@
 import asyncio
 import json
 import re
-import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+from functools import lru_cache
 from os import getenv
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, TypedDict
+from types import MappingProxyType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Coroutine,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Pattern,
+    Tuple,
+)
 
 # third-party imports from Lambda layer
 import boto3
@@ -24,19 +36,37 @@ from botocore.config import Config as BotoCoreConfig
 from eventprocessor_utils import (
     get_meeting_ttl,
     get_owner_from_jwt,
+    get_transcription_ttl,
     normalize_transcript_segments,
     transform_segment_to_add_sentiment,
-    transform_segment_to_categories_agent_assist,
 )
 from gql.client import AsyncClientSession as AppsyncAsyncClientSession
 from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
 from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
+    describe_exception,
+    graphql_error_messages,
+    optional_graphql_field,
+    require_graphql_field,
+    traceback_frames,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
+    video_keyframe_fields,
 )
-from sns_utils import publish_sns
+
+# Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
+from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
+from lma_channels import canonical_channel, is_speech_channel  # noqa: E402
+from lma_config import (  # noqa: E402
+    MEETING_AGENDA,
+    MEETING_ASSIST,
+    MEETING_PROCESSING,
+    read_setting,
+    shipped_setting_defaults,
+)
+from metrics_utils import catalogue as metric_names
+from metrics_utils.emf import METRICS
 
 # The AWS-free computation, split out so it can be tested without importing this
 # module (which needs aiohttp, powertools and the layer on the path). See pure.py.
@@ -45,13 +75,17 @@ from pure import (  # noqa: E402
     Sentiment,
     SentimentByPeriodEntry,
     SentimentEntry,
-    SentimentLabelType,
-    SentimentPeriodType,
     SentimentPerChannel,
+    agenda_derivation_due,
+    apply_meeting_access,
+    capture_context_fields,
     convert_keys_to_uppercamelcase,
+    forget_language,
     get_sentiment_per_quarter,
-    matches_wake_phrase,
+    language_to_record,
     merge_dicts,
+    segment_analyses,
+    transcription_pause_state,
 )
 
 # pylint: enable=import-error
@@ -59,16 +93,10 @@ if TYPE_CHECKING:
     from boto3 import Session as Boto3Session
     from mypy_boto3_lambda.client import LambdaClient
     from mypy_boto3_lambda.type_defs import InvocationResponseTypeDef
-    from mypy_boto3_sns.client import SNSClient
-    from mypy_boto3_ssm.client import SSMClient
 else:
     LambdaClient = object
     InvocationResponseTypeDef = object
     Boto3Session = object
-    SNSClient = object
-    SSMClient = object
-
-SNS_TOPIC_ARN = getenv("SNS_TOPIC_ARN", "")
 
 IS_SENTIMENT_ANALYSIS_ENABLED = getenv("IS_SENTIMENT_ANALYSIS_ENABLED", "true").lower() == "true"
 
@@ -84,16 +112,95 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 )
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
+SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
+# Deletes a meeting's transcript once it is summarized, when the Retention
+# section says to; told when each meeting ends and when its summary is stored.
+TRANSCRIPT_DELETION_FUNCTION_ARN = getenv("TRANSCRIPT_DELETION_FUNCTION_ARN", "")
+# The automatic agenda pass: a meeting with no agenda is read once, about
+# agenda_derivation_threshold() seconds in, for an agenda somebody stated. 0
+# turns it off. See agenda_deriver.
+AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
+# Reads the text of each key frame, once, after it is stored. See
+# keyframe_text_extractor.
+KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
+#: The threshold used when the Meeting Agenda section cannot be read: 300
+#: seconds, the setting's shipped default in setting_defaults.json.
+AGENDA_DERIVATION_AFTER_SECONDS = 300.0
+# Meetings this execution environment has already queued the pass for; see
+# agenda_derivation_due for why this is not what makes the pass run once.
+AGENDA_PASS_QUEUED: set = set()
+# The languages this execution environment has added to each meeting's
+# DetectedLanguages; see language_to_record.
+DETECTED_LANGUAGES_NOTED: Dict[str, set] = {}
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
 
-TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = (
-    getenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true").lower() == "true"
-)
+
+def transcript_hook_nonpartial_only() -> bool:
+    """Whether the transcript Lambda hook is sent finished segments only.
+
+    The Meeting Processing section's value on the Configuration page, else the
+    shipped default in setting_defaults.json.
+    """
+    return read_setting(
+        MEETING_PROCESSING.name,
+        "transcriptHookNonPartialOnly",
+        default=True,
+    )
+
+
+def agenda_derivation_threshold() -> float:
+    """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
+
+    The Meeting Agenda section's value on the Configuration page, else the
+    shipped default in setting_defaults.json. Read on the section's standard
+    tier, so a saved change reaches meetings about five minutes later.
+    """
+    return float(
+        read_setting(
+            MEETING_AGENDA.name,
+            "autoDeriveAfterSeconds",
+            default=AGENDA_DERIVATION_AFTER_SECONDS,
+        )
+    )
+
+
+@lru_cache(maxsize=8)
+def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
+    """``pattern`` compiled, or None when it is not a regular expression."""
+    try:
+        return re.compile(pattern)
+    except re.error as error:
+        LOGGER.warning(
+            "the configured wake phrase is not a regular expression (%s); using the "
+            "shipped pattern until it is corrected",
+            error,
+        )
+        return None
+
+
+def wake_phrase_pattern() -> Optional[Pattern[str]]:
+    """The regular expression that wakes the meeting assistant.
+
+    The Meeting Assistant section of the Configuration page, with its shipped
+    default. When the saved pattern does not compile, the shipped one is used
+    until it is corrected.
+    """
+    configured = read_setting(MEETING_ASSIST.name, "wakePhraseRegex")
+    compiled = _compiled_wake_phrase(configured) if configured else None
+    if compiled is not None:
+        return compiled
+    return _compiled_wake_phrase(shipped_setting_defaults()[MEETING_ASSIST.name]["wakePhraseRegex"])
+
+
 if (
     TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
+    or SPEAKER_NAME_RESOLVER_ARN
+    or TRANSCRIPT_DELETION_FUNCTION_ARN
+    or AGENDA_DERIVER_ARN
+    or KEYFRAME_TEXT_EXTRACTOR_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
     or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
     or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
@@ -102,8 +209,6 @@ if (
 
 
 IS_LAMBDA_AGENT_ASSIST_ENABLED = False
-
-SETTINGS: Dict[str, Any]
 
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 EVENT_LOOP = asyncio.get_event_loop()
@@ -115,21 +220,78 @@ CALL_EVENT_TYPE_TO_STATUS = {
     "ADD_S3_VIDEO_RECORDING_URL": "ENDED",
 }
 
-# DEFAULT_CUSTOMER_PHONE_NUMBER used to replace an invalid CustomerPhoneNumber
-# such as seen from calls originating with Skype ('anonymous')
-DEFAULT_CUSTOMER_PHONE_NUMBER = getenv("DEFAULT_CUSTOMER_PHONE_NUMBER", "+18005550000")
-DEFAULT_SYSTEM_PHONE_NUMBER = getenv("DEFAULT_SYSTEM_PHONE_NUMBER", "+18005551111")
-CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER", "LCA Caller Phone Number"
-)
-CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER", "LCA System Phone Number"
-)
-
 CUSTOMER_PHONE_NUMBER = ""
 CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
+
+# The two messages a resolver raises when DynamoDB rejects its condition. Most
+# of them share ``source/appsync/dDbPutCondition.response.vtl``, which raises the
+# first; ``createCall`` writes transactionally and has its own
+# ``source/appsync/createCall.response.vtl``, which raises the second.
+PUT_CONDITION_FAILURE_MESSAGES = frozenset(
+    {
+        "item put condition failure",
+        "Item already exists",
+    }
+)
+
+# Stands in for a createCall result when the meeting was already created, so the
+# START branch can tell a first delivery from a redelivered one and invoke the
+# start-of-call hook once per meeting. Read-only rather than documented as such:
+# it is module state that ends up in the batch's results.
+CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
+
+# Stands in for an addCallSummaryText result when the resolver rejected the
+# write, so the ADD_SUMMARY branch can drop the event without reporting the
+# summary as stored. Read-only for the same reason as CALL_ALREADY_CREATED.
+SUMMARY_NOT_STORED: Mapping[str, Any] = MappingProxyType({"ok": True, "SummaryNotStored": True})
+
+
+def is_put_condition_failure(error: Any) -> bool:
+    """Whether a write was rejected by its resolver's own condition.
+
+    Passed to ``execute_gql_query_with_retries`` as its
+    ``should_ignore_exception_fn``. What a rejection means is per resolver, and on
+    each of the four live call sites retrying buys nothing: on the first three
+    the row already holds a version of this write that should not be replaced,
+    and on the fourth there is no row to write to
+    (``execute_update_call_aggregation_mutation`` passes it too but has no
+    callers):
+
+    * ``createCall`` writes with ``attribute_not_exists(#PK)``, so a rejection is
+      a meeting that is already created -- a redelivered START event.
+    * ``addTranscriptSegment`` conditions only a *partial* segment, on
+      ``attribute_not_exists(IsPartial) OR IsPartial = :true``, so a rejection is
+      a partial arriving after the final segment it would have overwritten.
+    * ``updateCallAggregation`` writes through ``updateCall.request.vtl``, whose
+      condition is ``attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt``, so a
+      rejection is an aggregation already superseded by a newer one -- which the
+      concurrent writes for one Kinesis batch produce routinely, because a later
+      segment's aggregation can land first. Dropping the superseded write is
+      intended: the one that won already covers the same segments, and the next
+      non-partial segment aggregates again. The same condition is rejected when
+      the meeting row is not there at all, and dropping that is harmless for a
+      different reason -- ``get_call_details`` reads the meeting earlier in the
+      same record and has already failed it on a null ``getCall``, so the
+      aggregation write is not reached.
+    * ``addCallSummaryText`` writes through the same template, with no
+      ``UpdatedAt`` of its own, so the template stamps it with the resolver's
+      clock and a rejection is, in practice, a meeting deleted before its summary
+      arrived. ``execute_add_call_summary_text_mutation`` answers with
+      :data:`SUMMARY_NOT_STORED`, and the ADD_SUMMARY branch logs which half of
+      the condition failed and drops the event.
+
+    The messages are read off whatever the transport raised -- gql keeps them in
+    an ``errors`` attribute on the exception, and a bare error mapping is
+    accepted as well. Any other shape yields no messages, so an unrecognised
+    failure is retried and reported rather than ignored, and nothing here raises:
+    the retry wrapper calls this from inside an ``except``.
+    """
+    return any(
+        message in PUT_CONDITION_FAILURE_MESSAGES for message in graphql_error_messages(error)
+    )
+
 
 ##########################################################################
 # Transcripts
@@ -137,31 +299,26 @@ CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
 
 def add_transcript_segments(
-    message: Dict[str, object],
-    people_can_access: List[str],
+    message: Dict[str, Any],
+    meeting: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
-    """Add Transcript Segment GraphQL Mutation"""
+    """Add Transcript Segment GraphQL Mutation
+
+    The segment takes the meeting's Owner and SharedWith (``meeting`` is what
+    get_call_details read), set on ``message`` itself so that the sentiment
+    write of the same segment, which replaces the item, carries them too.
+    """
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
     tasks = []
     if message:
-        issues_detected = message.get("IssuesDetected", None)
-        transcript = message["Transcript"]
         if "OriginalTranscript" not in message:
-            message["OriginalTranscript"] = transcript
+            message["OriginalTranscript"] = message["Transcript"]
 
-        if issues_detected and len(issues_detected) > 0:
-            LOGGER.debug("issue detected in add transcript segment")
-            offsets = issues_detected[0].get("CharacterOffsets")
-            start = int(offsets.get("Begin"))
-            end = int(offsets.get("End"))
-            transcript = f"{transcript[:start]}<span class='issue-span'>{transcript[start:end]}</span>{transcript[end:]}<br/><span class='issue-pill'>Issue Detected</span>"
-            message["Transcript"] = transcript
-
-        message["SharedWith"] = people_can_access
+        apply_meeting_access(message, meeting)
 
         query = dsl_gql(
             DSLMutation(
@@ -171,15 +328,12 @@ def add_transcript_segments(
             )
         )
 
-        def ignore_exception_fn(e):
-            return True if (e["message"] == "item put condition failure") else False
-
         tasks.append(
             execute_gql_query_with_retries(
                 query,
                 client_session=appsync_session,
                 logger=LOGGER,
-                should_ignore_exception_fn=ignore_exception_fn,
+                should_ignore_exception_fn=is_put_condition_failure,
             ),
         )
 
@@ -235,6 +389,52 @@ def add_transcript_sentiment_analysis(
     return tasks
 
 
+async def add_detected_language(
+    call_id: str,
+    language_code: str,
+    appsync_session: AppsyncAsyncClientSession,
+) -> None:
+    """Add a language to the meeting's DetectedLanguages (addCallDetectedLanguage).
+
+    Made once per new language rather than per segment (language_to_record
+    decides). A language the meeting already lists fails the write's condition,
+    which is the outcome wanted and is not an error. Any other failure is logged
+    and forgotten, so a later segment in the language tries again; it never
+    fails the segment, since the list is a summary of what the segments carry.
+    """
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+    if not hasattr(schema.Mutation, "addCallDetectedLanguage"):
+        # The running API predates the mutation (during a stack update).
+        return
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.addCallDetectedLanguage.args(
+                input={"CallId": call_id, "LanguageCode": language_code}
+            ).select(*call_fields(schema))
+        )
+    )
+    try:
+        await execute_gql_query_with_retries(
+            query,
+            client_session=appsync_session,
+            logger=LOGGER,
+            should_ignore_exception_fn=is_put_condition_failure,
+        )
+        LOGGER.info(
+            "Meeting %s: detected language %s recorded or already listed", call_id, language_code
+        )
+    except Exception:  # pylint: disable=broad-except
+        forget_language(call_id, language_code, DETECTED_LANGUAGES_NOTED)
+        LOGGER.warning(
+            "Meeting %s: could not add detected language %s",
+            call_id,
+            language_code,
+            exc_info=True,
+        )
+
+
 async def execute_create_call_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -255,24 +455,6 @@ async def execute_create_call_mutation(
         print(f"Using AgentId as owner: {owner}")
     message.update({"Owner": owner})
 
-    # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
-    # have CreatedAt, so we will create a new message structure that conforms to other KDS channels.
-
-    if "ContactId" in message.keys():
-        CALL_ID = message.get("ContactId")
-        created_at = datetime.utcnow().astimezone().isoformat()
-        (CUSTOMER_PHONE_NUMBER, system_phone_number) = (
-            get_caller_and_system_phone_numbers_from_connect(message)
-        )
-        message.update(
-            {
-                "CallId": CALL_ID,
-                "CreatedAt": created_at,
-                "CustomerPhoneNumber": CUSTOMER_PHONE_NUMBER,
-                "SystemPhoneNumber": system_phone_number,
-            }
-        )
-
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.createCall.args(input=message).select(
@@ -281,20 +463,96 @@ async def execute_create_call_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
+    # A rejected condition here means the meeting is already created, and the
+    # caller has to be able to tell that from having created it: a redelivered
+    # START must not invoke the start-of-call hook a second time.
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=CALL_ALREADY_CREATED,
     )
 
     query_string = print_ast(query)
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+# What the summary step stores when it could not produce a summary; the same
+# list as summary_regenerator's UNUSABLE_SUMMARIES. Compared case-insensitively
+# after stripping.
+FAILED_SUMMARY_TEXTS = frozenset(
+    {"", "an error occurred.", "an error occurred", "no summary available"}
+)
+
+
+def summary_was_produced(text: Any) -> bool:
+    """Whether a stored summary is one, rather than a failed run's placeholder."""
+    return isinstance(text, str) and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+
+
+# The summary state (Call.CallSummaryState) the end-of-meeting run writes: one
+# JSON object, the same shape summary_regenerator writes for a regeneration and
+# ui/src/components/common/summary-state.js reads. `trigger` tells the two runs
+# apart, because the meeting page words them differently and gives up waiting
+# for this one sooner.
+SUMMARY_TRIGGER_MEETING_END = "meeting-end"
+SUMMARY_FAILED_MESSAGE = "the summary could not be generated"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def summary_queued_state() -> str:
+    """The state a meeting carries from the moment its summary is queued.
+
+    Written with the ENDED status, in the same mutation, so there is no moment
+    at which the meeting page sees an ended meeting with no summary and nothing
+    to say why.
+    """
+    return json.dumps(
+        {
+            "source": "generated",
+            "status": "running",
+            "trigger": SUMMARY_TRIGGER_MEETING_END,
+            "startedAt": _now_iso(),
+        }
+    )
+
+
+def summary_outcome_state(text: Any) -> str:
+    """The state written beside the end-of-meeting summary: done, or failed."""
+    if summary_was_produced(text):
+        return json.dumps(
+            {
+                "source": "generated",
+                "status": "idle",
+                "trigger": SUMMARY_TRIGGER_MEETING_END,
+                "updatedAt": _now_iso(),
+            }
+        )
+    return json.dumps(
+        {
+            "source": "generated",
+            "status": "failed",
+            "trigger": SUMMARY_TRIGGER_MEETING_END,
+            "message": SUMMARY_FAILED_MESSAGE,
+            "updatedAt": _now_iso(),
+        }
+    )
+
+
+def was_already_created(create_call_result: Any) -> bool:
+    """Whether a createCall result came from a meeting that already existed.
+
+    True only for :data:`CALL_ALREADY_CREATED`, which
+    :func:`execute_create_call_mutation` returns in place of a result when the
+    resolver rejected its condition.
+    """
+    return bool(isinstance(create_call_result, Mapping) and create_call_result.get("AlreadyExists"))
 
 
 async def execute_update_call_status_mutation(
@@ -313,14 +571,6 @@ async def execute_update_call_status_mutation(
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
-
-    # Contact Lens event requires CallId mapped to ContactId
-
-    if "ContactId" in message.keys():
-        call_id = message.get("ContactId")
-        updated_at = datetime.utcnow().astimezone().isoformat()
-        message["CallId"] = call_id
-        message["UpdatedAt"] = updated_at
 
     query = dsl_gql(
         DSLMutation(
@@ -352,7 +602,7 @@ async def get_call_status(
     meeting were still open, because doing the end-of-meeting work twice is
     better than not doing it at all.
     """
-    call_id = message.get("ContactId") or message.get("CallId")
+    call_id = message.get("CallId")
     if not call_id or not appsync_session.client.schema:
         return None
 
@@ -371,11 +621,23 @@ async def get_call_status(
             client_session=appsync_session,
             logger=LOGGER,
         )
-    except Exception:  # pylint: disable=broad-except
-        LOGGER.exception("could not read current status for call %s", call_id)
+    except Exception as error:  # pylint: disable=broad-except
+        # Frames and the reduced errors rather than a rendered traceback: nothing
+        # above sees this exception, since the fail-open contract swallows it, so
+        # this line is the whole record of it, and a rendered traceback would end
+        # in the exception's own text.
+        LOGGER.error(
+            "could not read current status for call %s - error: [%s]",
+            call_id,
+            describe_exception(error),
+            extra=dict(frames=traceback_frames(error)),
+        )
         return None
 
-    status = (result or {}).get("getCall", {}).get("Status")
+    # Optional, not required: a null getCall or a response without one leaves the
+    # status unknown, and an unknown status is what the fail-open contract above
+    # is for. The shape that came back is logged by the helper.
+    status = optional_graphql_field(result, "getCall", "Status", logger=LOGGER)
     LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
     return status
 
@@ -393,42 +655,99 @@ async def execute_get_transcript_segments_query(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    # get_transcript_segments_input = {
-    #     "CallId": call_id
-    # }
-    query = dsl_gql(
-        DSLQuery(
-            schema.Query.getTranscriptSegmentsWithSentiment.args(callId=call_id).select(
-                schema.TranscriptSegmentsWithSentimentList.TranscriptSegmentsWithSentiment.select(
-                    schema.TranscriptSegmentWithSentiment.PK,
-                    schema.TranscriptSegmentWithSentiment.SK,
-                    schema.TranscriptSegmentWithSentiment.CallId,
-                    schema.TranscriptSegmentWithSentiment.Channel,
-                    schema.TranscriptSegmentWithSentiment.SegmentId,
-                    schema.TranscriptSegmentWithSentiment.StartTime,
-                    schema.TranscriptSegmentWithSentiment.EndTime,
-                    schema.TranscriptSegmentWithSentiment.Sentiment,
-                    schema.TranscriptSegmentWithSentiment.SentimentWeighted,
+    # A long meeting's segments span several pages of the table, and a page can
+    # come back empty with a nextToken, so pages are read until there is none.
+    # The pages are returned as one response of the query's shape. A page that
+    # does not carry the list is returned as it came, for the caller to treat
+    # as no answer.
+    segments: List[Any] = []
+    next_token: Optional[str] = None
+    while True:
+        query = dsl_gql(
+            DSLQuery(
+                schema.Query.getTranscriptSegmentsWithSentiment.args(
+                    callId=call_id, nextToken=next_token
+                ).select(
+                    schema.TranscriptSegmentsWithSentimentList.TranscriptSegmentsWithSentiment.select(
+                        schema.TranscriptSegmentWithSentiment.PK,
+                        schema.TranscriptSegmentWithSentiment.SK,
+                        schema.TranscriptSegmentWithSentiment.CallId,
+                        schema.TranscriptSegmentWithSentiment.Channel,
+                        schema.TranscriptSegmentWithSentiment.SegmentId,
+                        schema.TranscriptSegmentWithSentiment.StartTime,
+                        schema.TranscriptSegmentWithSentiment.EndTime,
+                        schema.TranscriptSegmentWithSentiment.Sentiment,
+                        schema.TranscriptSegmentWithSentiment.SentimentWeighted,
+                    ),
+                    schema.TranscriptSegmentsWithSentimentList.nextToken,
                 )
             )
         )
-    )
-    result = await execute_gql_query_with_retries(
-        query,
-        client_session=appsync_session,
-        logger=LOGGER,
-    )
+        result = await execute_gql_query_with_retries(
+            query,
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        LOGGER.debug(
+            "get transcript segments result", extra=dict(query=print_ast(query), result=result)
+        )
+        page = (result or {}).get("getTranscriptSegmentsWithSentiment")
+        if not isinstance(page, dict) or not isinstance(
+            page.get("TranscriptSegmentsWithSentiment"), list
+        ):
+            return result
+        segments.extend(page["TranscriptSegmentsWithSentiment"])
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
 
-    query_string = print_ast(query)
-    LOGGER.debug("get transcript segments result", extra=dict(query=query_string, result=result))
+    return {
+        "getTranscriptSegmentsWithSentiment": {
+            "TranscriptSegmentsWithSentiment": segments,
+            "nextToken": None,
+        }
+    }
 
-    return result
+
+def latest_speech_end_seconds(segments: List[Any]) -> float:
+    """The latest EndTime, in seconds, of the final speech segments listed.
+
+    This is how long the meeting has run on the transcript's clock. A meeting's
+    final segments arrive in more than one batch, and not in order, so the end
+    time of the one segment a batch carries is not it: written as the duration,
+    the value stored is whichever batch wrote last.
+    """
+    latest = 0.0
+    for segment in segments:
+        if not isinstance(segment, dict) or not is_speech_channel(segment.get("Channel")):
+            continue
+        try:
+            latest = max(latest, float(segment.get("EndTime") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return latest
 
 
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+) -> Optional[Sentiment]:
+    """The meeting's sentiment aggregation, or None if the segments were unreadable."""
+    sentiment, _latest_end = await get_sentiment_and_latest_end(
+        message=message, appsync_session=appsync_session
+    )
+    return sentiment
+
+
+async def get_sentiment_and_latest_end(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Tuple[Optional[Sentiment], float]:
+    """The meeting's sentiment aggregation and the latest end of its final speech segments.
+
+    Both come from one read of the meeting's final segments. The aggregation is
+    None if the segments were unreadable, and the end time is then 0.0.
+    """
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -438,17 +757,53 @@ async def get_aggregated_sentiment(
         raise ValueError("invalid AppSync schema")
     DSLSchema(appsync_session.client.schema)
 
-    result = await execute_get_transcript_segments_query(
-        message=message, appsync_session=appsync_session
-    )
+    try:
+        result = await execute_get_transcript_segments_query(
+            message=message, appsync_session=appsync_session
+        )
+    except Exception as error:  # pylint: disable=broad-except
+        # The segments could not be read at all -- a response carrying errors
+        # arrives from gql as a raised exception rather than as a null field.
+        # Letting it out would fail the record, and the transcript segment goes
+        # with it: its own write is gathered after this read. The aggregation is
+        # recomputed on the next final segment, so it is the cheaper thing to
+        # lose. `get_call_details` reads the same meeting earlier in this record
+        # and would already have failed it if AppSync were unreachable.
+        LOGGER.error(
+            "could not read the scored segments for call %s; aggregating nothing - error: [%s]",
+            call_id,
+            describe_exception(error),
+            extra=dict(frames=traceback_frames(error)),
+        )
+        return None, 0.0
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
-    for segment in result.get("getTranscriptSegmentsWithSentiment").get(
-        "TranscriptSegmentsWithSentiment"
-    ):
-        channel = segment.get("Channel", None)
-        if channel and channel in ["AGENT", "CALLER"]:
+    # An empty list is a valid answer -- the meeting has no scored segments yet
+    # -- and aggregates to nothing. No list at all is not an answer: the caller
+    # returns None for it so that nothing is written, because an empty
+    # aggregation written with a fresh UpdatedAt passes updateCall's condition
+    # and would replace the stored one. Failing instead would fail the record
+    # that carried the segment, which is the outcome this read exists to avoid.
+    segments = optional_graphql_field(
+        result,
+        "getTranscriptSegmentsWithSentiment",
+        "TranscriptSegmentsWithSentiment",
+        logger=LOGGER,
+    )
+    if segments is None:
+        return None, 0.0
+    latest_end = latest_speech_end_seconds(segments)
+
+    for segment in segments:
+        # The list's element type is nullable, and a null entry carries nothing
+        # to aggregate.
+        if not isinstance(segment, dict):
+            continue
+        # A meeting recorded across an upgrade holds both spellings of a channel;
+        # they are aggregated as one, under the current name.
+        channel = canonical_channel(segment.get("Channel", None))
+        if is_speech_channel(channel):
             if segment.get("SentimentWeighted", None):
                 LOGGER.debug("Aggregating sentiment entry", extra=segment)
                 sentiment_entry: SentimentEntry = {
@@ -491,21 +846,41 @@ async def get_aggregated_sentiment(
         "SentimentByPeriod": {"QUARTER": sentiment_by_period_by_channel},
     }
 
-    return aggregated_sentiment
+    return aggregated_sentiment, latest_end
 
 
 async def get_aggregate_call_data(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+    record_latest_end: Optional[float] = None,
+) -> Optional[Dict]:
+    """The meeting aggregation to write, or None when there is nothing to write.
+
+    ``record_latest_end`` is the latest end time of the final speech segments
+    the current Kinesis record carries. Those segments are written after this
+    read, so the read may not include them. Without it, ``message`` is taken as
+    the record's only segment.
+    """
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
         raise TypeError(error_message)
 
-    total_duration = float(message.get("EndTime", 0.0)) * 1000
+    sentiment, latest_end = await get_sentiment_and_latest_end(
+        message=message, appsync_session=appsync_session
+    )
+    if sentiment is None:
+        # The scored segments could not be read. Writing the aggregation anyway
+        # would replace the stored one with an empty aggregation.
+        return None
 
-    sentiment = await get_aggregated_sentiment(message=message, appsync_session=appsync_session)
+    # The meeting's duration so far: the latest end of all its final speech
+    # segments, which the read above returned, or of this record's own final
+    # speech segments when one of them ends later still (they may not be
+    # readable yet). Both are limited to the speech channels.
+    if record_latest_end is None:
+        record_latest_end = latest_speech_end_seconds([message])
+    total_duration = max(record_latest_end, latest_end) * 1000
 
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")
@@ -525,10 +900,18 @@ async def get_aggregate_call_data(
 async def get_call_aggregation_tasks(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
+    record_latest_end: Optional[float] = None,
 ) -> List[Coroutine]:
+    """The updateCallAggregation task for this message, or none to send.
+
+    ``record_latest_end`` is passed through to ``get_aggregate_call_data``.
+    """
     call_aggregation = await get_aggregate_call_data(
-        message=message, appsync_session=appsync_session
+        message=message, appsync_session=appsync_session, record_latest_end=record_latest_end
     )
+    if call_aggregation is None:
+        return []
+
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -543,15 +926,12 @@ async def get_call_aggregation_tasks(
 
     tasks = []
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     tasks.append(
         execute_gql_query_with_retries(
             query,
             client_session=appsync_session,
             logger=LOGGER,
-            should_ignore_exception_fn=ignore_exception_fn,
+            should_ignore_exception_fn=is_put_condition_failure,
         ),
     )
 
@@ -565,6 +945,10 @@ async def execute_update_call_aggregation_mutation(
     call_aggregation = await get_aggregate_call_data(
         message=message, appsync_session=appsync_session
     )
+    if call_aggregation is None:
+        # Same reasoning as get_call_aggregation_tasks: nothing to write beats
+        # replacing the stored aggregation with an empty one.
+        return {"ok": True}
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
@@ -578,14 +962,11 @@ async def execute_update_call_aggregation_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
     )
 
     query_string = print_ast(query)
@@ -611,6 +992,91 @@ async def execute_add_s3_recording_mutation(
             schema.Mutation.updateRecordingUrl.args(
                 input={**message, "RecordingUrl": recording_url}
             ).select(*call_fields(schema))
+        )
+    )
+
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+
+    query_string = print_ast(query)
+    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
+
+    return result
+
+
+async def execute_update_capture_context_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Sets the capture context fields an UPDATE_CAPTURE_CONTEXT event carries.
+
+    Sent after START when the meeting is transcribed by another engine than the
+    one START named. The write is conditional on the meeting existing, so an
+    event processed before its START in the same batch fails and is redelivered.
+    """
+    call_id = message.get("CallId")
+    fields = capture_context_fields(message)
+    if not call_id or not fields:
+        error_message = "update capture context event has no CallId or no field to set"
+        raise TypeError(error_message)
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.updateCaptureContext.args(input={"CallId": call_id, **fields}).select(
+                schema.Call.CallId,
+                schema.Call.CaptureSource,
+                schema.Call.TranscriptionEngine,
+                schema.Call.TranscriptionLanguage,
+                schema.Call.SpeakerSeparation,
+            )
+        )
+    )
+
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+
+    query_string = print_ast(query)
+    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
+
+    return result
+
+
+async def execute_update_transcription_pause_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Sets Call.TranscriptionPause from an UPDATE_TRANSCRIPTION_PAUSE event.
+
+    Sent by a Virtual Participant when someone pauses or resumes transcription
+    with the meeting chat commands. Published to onUpdateCall, so the meeting
+    page shows or hides its pause banner as it happens; the selection carries
+    the usual Call fields so the update reads like the pipeline's others.
+    """
+    call_id = message.get("CallId")
+    state = transcription_pause_state(message, _now_iso())
+    if not call_id or state is None:
+        error_message = "update transcription pause event has no CallId or no Paused flag"
+        raise TypeError(error_message)
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.updateTranscriptionPause.args(
+                input={"CallId": call_id, "TranscriptionPause": state}
+            ).select(*call_fields(schema), schema.Call.TranscriptionPause)
         )
     )
 
@@ -659,118 +1125,122 @@ async def execute_add_s3_video_recording_mutation(
     return result
 
 
-async def execute_add_pca_url_mutation(
+async def execute_add_video_keyframe_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-    pca_url = message.get("PcaUrl")
-    if not pca_url:
-        error_message = "pca url doesn't exist in add pca url event"
-        raise TypeError(error_message)
+    """Store one key frame of the shared screen on the meeting (ADD_VIDEO_KEYFRAME).
+
+    The frame takes the meeting's Owner and SharedWith, read here rather than
+    trusted from the event, so it is visible to the people who can see the
+    transcript; see keyframe_input.py. A meeting that is not there yet fails the
+    record, which is redelivered, as a transcript segment's would be.
+
+    An event that can never be stored -- a field missing or of the wrong kind --
+    is logged and dropped rather than raised: raising reports the record for
+    redelivery, and it would fail the same way every time while holding up the
+    rest of its shard (see the failure policy in batch_item_failures.py).
+    """
+    try:
+        keyframe = build_keyframe_input(
+            message,
+            owner=None,
+            shared_with=None,
+            # Key frames are not deleted with the transcript, so they keep the
+            # transcript retention period in full.
+            expires_after=get_transcription_ttl(limited_by_deletion=False),
+        )
+    except KeyframeEventError as error:
+        LOGGER.error(
+            "dropping an ADD_VIDEO_KEYFRAME event that cannot be stored: %s",
+            error,
+            extra=dict(call_id=message.get("CallId"), frame_id=message.get("FrameId")),
+        )
+        return {"ok": False, "Dropped": True}
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    query = dsl_gql(
-        DSLMutation(
-            schema.Mutation.updatePcaUrl.args(input={**message, "PcaUrl": pca_url}).select(
-                *call_fields(schema)
+    access_query = dsl_gql(
+        DSLQuery(
+            schema.Query.getCall.args(CallId=keyframe["CallId"]).select(
+                schema.Call.CallId,
+                schema.Call.Owner,
+                schema.Call.SharedWith,
             )
         )
     )
-
-    result = await execute_gql_query_with_retries(
-        query,
+    access = await execute_gql_query_with_retries(
+        access_query,
         client_session=appsync_session,
         logger=LOGGER,
     )
-
-    query_string = print_ast(query)
-    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
-
-    return result
-
-
-async def execute_add_call_category_mutation(
-    message: Dict[str, Any],
-    appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
-    if not appsync_session.client.schema:
-        raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
-
-    categories = message["CategoryEvent"]["MatchedCategories"]
-    if len(categories) == 0:
-        error_message = "No MatchedCategories in ADD_CALL_CATEGORY event"
-        raise TypeError(error_message)
+    call = require_graphql_field(access, "getCall", logger=LOGGER)
+    for field in ("Owner", "SharedWith"):
+        if call.get(field) is not None:
+            keyframe[field] = call[field]
 
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.addCallCategory.args(
-                input={**message, "CallCategories": categories}
-            ).select(*call_fields(schema))
+            schema.Mutation.addVideoKeyframe.args(input=keyframe).select(
+                *video_keyframe_fields(schema)
+            )
         )
     )
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
     )
-
-    query_string = print_ast(query)
-    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
-
+    LOGGER.debug("video keyframe stored", extra=dict(frame_id=keyframe["FrameId"]))
+    queue_keyframe_text(keyframe)
     return result
 
 
-async def execute_add_issues_detected_mutation(
-    message: Dict[str, Any],
-    appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
-    issues_detected = message.get("IssuesDetected", None)
-    issueText = ""
-    if issues_detected and len(issues_detected) > 0:
-        LOGGER.debug("issue detected in add issues detected mutation")
-        offsets = issues_detected[0].get("CharacterOffsets")
-        start = int(offsets.get("Begin"))
-        end = int(offsets.get("End"))
-        if start >= 0 and end >= 0:
-            transcript = message["Transcript"]
-            issueText = transcript[start:end]
+def queue_keyframe_text(keyframe: Mapping[str, Any]) -> None:
+    """Have the frame's text read, asynchronously, once it is stored.
 
-    if not appsync_session.client.schema:
-        raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
-
-    query = dsl_gql(
-        DSLMutation(
-            schema.Mutation.addIssuesDetected.args(
-                input={**message, "IssuesDetected": issueText}
-            ).select(*call_fields(schema))
+    Fire-and-forget, as the agenda pass: nothing in this batch waits on it, and
+    a frame without its text is handled by every reader. The extractor skips a
+    frame that already has its text, so a redelivered event costs nothing.
+    """
+    if not KEYFRAME_TEXT_EXTRACTOR_ARN:
+        return
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=KEYFRAME_TEXT_EXTRACTOR_ARN,
+            InvocationType="Event",
+            Payload=json.dumps(
+                {
+                    "CallId": keyframe["CallId"],
+                    "FrameId": keyframe["FrameId"],
+                    "ImageUrl": keyframe["ImageUrl"],
+                }
+            ),
         )
-    )
-
-    result = await execute_gql_query_with_retries(
-        query,
-        client_session=appsync_session,
-        logger=LOGGER,
-    )
-
-    query_string = print_ast(query)
-    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
-
-    return result
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the text read of a key frame; continuing",
+            extra=dict(call_id=keyframe.get("CallId"), frame_id=keyframe.get("FrameId")),
+        )
 
 
 async def execute_add_call_summary_text_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
+    """Store the end-of-meeting summary, and the outcome of the run beside it.
+
+    A run that produced nothing usable -- the summariser's placeholder text, or
+    none -- stores no text. The input field is required, so it is sent blank,
+    and updateCall.request.vtl writes no attribute for a blank value: whatever
+    the meeting already holds stays, and the state says the run failed, which
+    is what the meeting page shows alongside its Regenerate action.
+    """
     calltext = message.get("CallSummaryText", None)
     call_summary_text = ""
-    if calltext and len(calltext) > 0:
+    if summary_was_produced(calltext):
         call_summary_text = calltext
 
     if not appsync_session.client.schema:
@@ -780,21 +1250,81 @@ async def execute_add_call_summary_text_mutation(
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.addCallSummaryText.args(
-                input={**message, "CallSummaryText": call_summary_text}
+                input={
+                    **message,
+                    "CallSummaryText": call_summary_text,
+                    "CallSummaryState": summary_outcome_state(calltext),
+                }
             ).select(*call_fields(schema))
         )
     )
 
+    # A rejected condition is answered with SUMMARY_NOT_STORED rather than
+    # retried: retrying cannot make a meeting row appear, and the record would
+    # otherwise be failed and redelivered, holding up every record behind it on
+    # the shard. The ADD_SUMMARY branch says which of the two cases it was.
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=SUMMARY_NOT_STORED,
     )
 
     query_string = print_ast(query)
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+def was_summary_not_stored(add_call_summary_text_result: Any) -> bool:
+    """Whether an addCallSummaryText result is the resolver having rejected the write.
+
+    True only for :data:`SUMMARY_NOT_STORED`, which
+    :func:`execute_add_call_summary_text_mutation` returns in place of a result
+    when ``updateCall.request.vtl``'s condition was not met.
+    """
+    return bool(
+        isinstance(add_call_summary_text_result, Mapping)
+        and add_call_summary_text_result.get("SummaryNotStored")
+    )
+
+
+async def log_summary_not_stored(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> None:
+    """Record why a summary was dropped, telling a removed meeting from a stale write.
+
+    ``updateCall.request.vtl`` conditions the write on
+    ``attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt``. The summary event
+    carries no ``UpdatedAt``, so the template stamps the write with the
+    resolver's own clock, and the first half is the one expected to fail: the
+    meeting was deleted between its end and its summary arriving, by a user or
+    by an integration test that removes its own meeting when it has checked it.
+    Nothing is left to attach the summary to, so that is logged at info. The
+    read that tells the two apart is fail-open and logs its own error when it
+    fails, so an unreadable status is reported the same way as a missing row.
+
+    A meeting that is still stored means the second half failed: the row holds
+    an ``UpdatedAt`` at or after the resolver's clock. Nothing in the pipeline
+    is meant to write one, so that is logged as a warning, naming the meeting;
+    its summary state stays as it was.
+    """
+    call_id = message.get("CallId")
+    status = await get_call_status(message=message, appsync_session=appsync_session)
+    if status is None:
+        LOGGER.info(
+            "ADD_SUMMARY: the meeting is not stored (or its status could not be read), "
+            "so there is nothing to attach the summary to; dropping the event",
+            extra=dict(call_id=call_id),
+        )
+    else:
+        LOGGER.warning(
+            "ADD_SUMMARY: the meeting's record was updated at or after the summary's "
+            "write time, so the summary was not stored; dropping the event",
+            extra=dict(call_id=call_id, status=status),
+        )
 
 
 async def execute_add_agent_assist_mutation(
@@ -862,193 +1392,6 @@ async def execute_update_agent_mutation(
 
 
 ##########################################################################
-# Call Categories
-##########################################################################
-
-
-async def send_call_category(
-    transcript_segment_args: Dict[str, Any],
-    category: str,
-    appsync_session: AppsyncAsyncClientSession,
-):
-    """Send Call Category Transcript Segment"""
-    if not appsync_session.client.schema:
-        raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
-
-    transcript_segment = {**transcript_segment_args, "Transcript": category}
-
-    query = dsl_gql(
-        DSLMutation(
-            schema.Mutation.addTranscriptSegment.args(input=transcript_segment).select(
-                *transcript_segment_fields(schema),
-            )
-        )
-    )
-
-    result = await execute_gql_query_with_retries(
-        query,
-        client_session=appsync_session,
-        logger=LOGGER,
-    )
-
-    return result
-
-
-async def publish_sns_category(sns_client: SNSClient, category_name: str, call_id: str):
-    LOGGER.debug("Publishing Call Category to SNS")
-    isAlert = False
-    if "AlertRegEx" in SETTINGS:
-        isMatch = SETTINGS["AlertRegEx"].match(category_name)
-        if isMatch:
-            isAlert = True
-
-    result = await publish_sns(
-        category_name=category_name,
-        call_id=call_id,
-        sns_topic_arn=SNS_TOPIC_ARN,
-        sns_client=sns_client,
-        alert=isAlert,
-    )
-
-    return result
-
-
-def add_call_category(
-    message: Dict[str, Any], appsync_session: AppsyncAsyncClientSession, sns_client: SNSClient
-) -> List[Coroutine]:
-    """Add Categories GraphQL Mutations"""
-    # pylint: disable=too-many-locals
-    LOGGER.debug("Detected Call Category")
-
-    tasks = []
-    for category in message["CategoryEvent"]["MatchedCategories"]:
-        # Publish SNS message for the category
-        sns_task = publish_sns_category(
-            sns_client=sns_client, category_name=category, call_id=message["CallId"]
-        )
-        tasks.append(sns_task)
-        # Insert Category marker into transcript, if timestamps are provided in the event.
-        try:
-            timestampRanges = message["CategoryEvent"]["MatchedDetails"][category][
-                "TimestampRanges"
-            ]
-        except KeyError:
-            LOGGER.debug(
-                "Category: %s has no TimestampRanges. Skip transcript insertion.", category
-            )
-            continue
-        for timestampRange in timestampRanges:
-            start_time = timestampRange["EndOffsetMillis"] / 1000
-            end_time = start_time + 0.1
-            send_call_category_args = []
-            send_call_category_args.append(
-                dict(
-                    category=category,
-                    transcript_segment_args=dict(
-                        CallId=message["CallId"],
-                        Channel="CATEGORY_MATCH",
-                        CreatedAt=message["CreatedAt"],
-                        EndTime=end_time,
-                        ExpiresAfter=get_meeting_ttl(),
-                        SegmentId=str(uuid.uuid4()),
-                        StartTime=start_time,
-                        IsPartial=False,
-                        Status="TRANSCRIBING",
-                    ),
-                )
-            )
-            for call_category_args in send_call_category_args:
-                task = send_call_category(
-                    appsync_session=appsync_session,
-                    **call_category_args,
-                )
-                tasks.append(task)
-
-    return tasks
-
-
-def add_contact_lens_call_category(
-    message: Dict[str, Any], appsync_session: AppsyncAsyncClientSession, sns_client: SNSClient
-) -> List[Coroutine]:
-    """Add Categories GraphQL Mutations"""
-    # pylint: disable=too-many-locals
-    LOGGER.debug("Detected Call Category")
-    send_call_category_args = []
-    tasks = []
-    call_id = message["ContactId"]
-
-    if not appsync_session.client.schema:
-        raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
-
-    for segment in message.get("Segments", []):
-        # only handle categories and transcripts with issues
-        if (
-            "Transcript" in segment and not segment["Transcript"].get("IssuesDetected")
-        ) and "Categories" not in segment:
-            continue
-
-        categories = segment.get("Categories", {})
-        matched_categories = categories.get("MatchedCategories", [])
-
-        if len(matched_categories) > 0:
-            query = dsl_gql(
-                DSLMutation(
-                    schema.Mutation.addCallCategory.args(
-                        input={"CallId": message["ContactId"], "CallCategories": matched_categories}
-                    ).select(*call_fields(schema))
-                )
-            )
-
-            tasks.append(
-                execute_gql_query_with_retries(
-                    query,
-                    client_session=appsync_session,
-                    logger=LOGGER,
-                ),
-            )
-
-        for category in categories.get("MatchedCategories", []):
-            category_details = categories["MatchedDetails"][category]
-            category_segment = transform_segment_to_categories_agent_assist(
-                category=category,
-                category_details=category_details,
-                call_id=call_id,
-            )
-
-            send_call_category_args.append(
-                dict(
-                    category=category_segment["Transcript"],
-                    transcript_segment_args=dict(
-                        CallId=message["ContactId"],
-                        Channel="CATEGORY_MATCH",
-                        CreatedAt=category_segment["CreatedAt"],
-                        EndTime=category_segment["EndTime"],
-                        ExpiresAfter=get_meeting_ttl(),
-                        SegmentId=str(uuid.uuid4()),
-                        StartTime=category_segment["StartTime"],
-                        IsPartial=category_segment["IsPartial"],
-                        Status="TRANSCRIBING",
-                    ),
-                )
-            )
-
-    for call_category_args in send_call_category_args:
-        task = send_call_category(
-            appsync_session=appsync_session,
-            **call_category_args,
-        )
-        tasks.append(task)
-        sns_task = publish_sns_category(
-            sns_client=sns_client, category_name=category, call_id=message["ContactId"]
-        )
-        tasks.append(sns_task)
-
-    return tasks
-
-
-##########################################################################
 # Transcript Lambda Hook
 # User provided function should return a copy of the input event with
 # optionally modified "Transcript" field (to support custom redaction or
@@ -1060,7 +1403,7 @@ def add_contact_lens_call_category(
 
 
 def invoke_transcript_lambda_hook(message: Dict[str, Any]):
-    if not message.get("IsPartial") or not TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY:
+    if not message.get("IsPartial") or not transcript_hook_nonpartial_only():
         LOGGER.debug("Transcript Lambda Hook Arn: %s", TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN)
         LOGGER.debug("Transcript Lambda Hook Request: %s", message)
         lambda_response = LAMBDA_HOOK_CLIENT.invoke(
@@ -1076,7 +1419,40 @@ def invoke_transcript_lambda_hook(message: Dict[str, Any]):
                 "Transcript Lambda Hook result payload parsing exception. Lambda must return JSON object with (modified) input event fields",
                 extra=error,
             )
+        # A hook written for an earlier version may hand back an older channel name.
+        if isinstance(message, dict) and message.get("Channel"):
+            message["Channel"] = canonical_channel(message["Channel"])
     return message
+
+
+def queue_agenda_derivation(call_id: str) -> None:
+    """Queue the automatic agenda pass for a meeting, fire-and-forget.
+
+    Asynchronous for the reason the end-of-meeting speaker-naming invoke is: a
+    synchronous one would hold up every other record in the batch, live segments
+    for other meetings included, for the length of a model call. The deriver
+    decides for itself whether the pass is still wanted -- the meeting may have
+    an agenda, or another environment may already have run it -- so queueing it
+    a few times over costs only a conditional write each. A failure to queue is
+    logged and the segment processed regardless: an agenda is an enhancement.
+    """
+    # Bounded: a warm environment sees meeting after meeting. Forgetting them
+    # all costs at most a repeat queue each, which the deriver's claim absorbs.
+    if len(AGENDA_PASS_QUEUED) >= 5000:
+        AGENDA_PASS_QUEUED.clear()
+    AGENDA_PASS_QUEUED.add(call_id)
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=AGENDA_DERIVER_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": "auto"}),
+        )
+        LOGGER.debug("Queued the automatic agenda pass", extra=dict(call_id=call_id))
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the automatic agenda pass; continuing",
+            extra=dict(call_id=call_id),
+        )
 
 
 async def get_call_details(
@@ -1105,99 +1481,31 @@ async def get_call_details(
         logger=LOGGER,
     )
 
-    result = result["getCall"]
-    LOGGER.debug("Get Call result %s", json.dumps(result))
+    # Required, not optional: every field returned below comes from the meeting
+    # record, so a response without one leaves nothing to return. Raising fails
+    # the Kinesis record, which the event source mapping redelivers and finally
+    # describes to its on-failure destination -- the opposite of returning blanks
+    # and reporting success.
+    call = require_graphql_field(result, "getCall", logger=LOGGER)
+    LOGGER.debug("Get Call result %s", json.dumps(call))
 
-    CUSTOMER_PHONE_NUMBER = result["CustomerPhoneNumber"]
-    CALL_ID = result["CallId"]
-    call_summary = result.get("CallSummaryText", "")
-    people_can_access = result.get("SharedWith", None)
+    # CallId is required because it is how the caller names the meeting. The
+    # other three the schema declares nullable, so a stored meeting with any of
+    # them unset is a response this has to return.
+    CALL_ID = require_graphql_field(call, "CallId", logger=LOGGER)
+    CUSTOMER_PHONE_NUMBER = call.get("CustomerPhoneNumber")
+    call_summary = call.get("CallSummaryText", "")
+    people_can_access = call.get("SharedWith", None)
 
     return dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
         CallSummaryText=call_summary,
+        Owner=call.get("Owner"),
         SharedWith=people_can_access,
+        DetectedLanguages=call.get("DetectedLanguages"),
     )
-
-
-def get_caller_and_system_phone_numbers_from_connect(message: Dict[str, Any]):
-    instanceId = message.get("InstanceId")
-    contactId = message.get("ContactId")
-
-    client = boto3.client("connect")
-    response = client.get_contact_attributes(InstanceId=instanceId, InitialContactId=contactId)
-    # Try to retrieve customer phone number from contact attribute
-    customer_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER)
-    if not customer_phone_number:
-        LOGGER.warning(
-            f"Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER}'. Reverting to default."
-        )
-        customer_phone_number = DEFAULT_CUSTOMER_PHONE_NUMBER
-    # Try to retrieve system phone number from contact attribute: "LCA System Phone Number"
-    system_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER)
-    if not system_phone_number:
-        LOGGER.warning(
-            "Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER}'. Reverting to default."
-        )
-        system_phone_number = DEFAULT_SYSTEM_PHONE_NUMBER
-    LOGGER.info(
-        f"Setting customer_phone_number={customer_phone_number}, system_phone_number={system_phone_number}"
-    )
-    return (customer_phone_number, system_phone_number)
-
-
-def add_contact_lens_agent_assistances(
-    message: Dict[str, Any],
-    appsync_session: AppsyncAsyncClientSession,
-) -> List[Coroutine]:
-    """Add Contact Lens Agent Assist GraphQL Mutations"""
-    # pylint: disable=too-many-locals
-    if not appsync_session.client.schema:
-        raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
-
-    call_id = message["ContactId"]
-
-    tasks = []
-    for segment in message.get("Segments", []):
-        # only handle categories and transcripts with issues
-        if (
-            "Transcript" in segment and not segment["Transcript"].get("IssuesDetected")
-        ) and "Categories" not in segment:
-            continue
-
-        transcript_segments = []
-
-        categories = segment.get("Categories", {})
-        for category in categories.get("MatchedCategories", []):
-            category_details = categories["MatchedDetails"][category]
-            category_segment = transform_segment_to_categories_agent_assist(
-                category=category,
-                category_details=category_details,
-                call_id=call_id,
-            )
-            category_segment["Transcript"] = "[Matched Category] " + category_segment["Transcript"]
-            transcript_segments.append(category_segment)
-
-        for transcript_segment in transcript_segments:
-            query = dsl_gql(
-                DSLMutation(
-                    schema.Mutation.addTranscriptSegment.args(input=transcript_segment).select(
-                        *transcript_segment_fields(schema),
-                    )
-                )
-            )
-            tasks.append(
-                execute_gql_query_with_retries(
-                    query,
-                    client_session=appsync_session,
-                    logger=LOGGER,
-                ),
-            )
-
-    return tasks
 
 
 ##########################################################################
@@ -1211,34 +1519,6 @@ def add_contact_lens_agent_assistances(
 
 
 ##########################################################################
-# Send call id to session id mapping event
-##########################################################################
-
-
-def send_call_session_mapping_event(call_id, session_id):
-    client = boto3.client("events")
-
-    LOGGER.debug(
-        "Sending CALL_SESSION_MAPPING event. callId: %s, SessionId: %s", call_id, session_id
-    )
-    event_response = client.put_events(
-        Entries=[
-            {
-                "Source": "lca-solution",
-                "DetailType": "CALL_SESSION_MAPPING",
-                "Detail": json.dumps(
-                    {
-                        "callId": call_id,
-                        "sessionId": session_id,
-                    }
-                ),
-            }
-        ]
-    )
-    LOGGER.debug("Send CALL_SESSION_MAPPING Response: ", extra=event_response)
-
-
-##########################################################################
 # check for agent assist wake phrase
 ##########################################################################
 ##########################################################################
@@ -1248,20 +1528,16 @@ def send_call_session_mapping_event(call_id, session_id):
 
 async def execute_process_event_api_mutation(
     message: Dict[str, Any],
-    settings: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
-    sns_client: SNSClient,
     agent_assist_args: Dict[str, Any],
     sentiment_analysis_args: Dict[str, Any],
 ) -> Dict[Literal["successes", "errors"], List]:
     """Executes AppSync API Mutation"""
     # pylint: disable=global-statement
     global IS_LAMBDA_AGENT_ASSIST_ENABLED
-    global SETTINGS
     # pylint: enable=global-statement
 
     IS_LAMBDA_AGENT_ASSIST_ENABLED = agent_assist_args.get("is_lambda_agent_assist_enabled")
-    SETTINGS = settings
 
     return_value: Dict[Literal["successes", "errors"], List] = {
         "successes": [],
@@ -1291,11 +1567,11 @@ async def execute_process_event_api_mutation(
         UPDATE_AGENT="UPDATE_AGENT",
         ADD_SUMMARY="ADD_SUMMARY",
         ADD_AGENT_ASSIST="ADD_AGENT_ASSIST",
-        ADD_CALL_CATEGORY="ADD_CALL_CATEGORY",
         ADD_S3_RECORDING_URL="ADD_S3_RECORDING_URL",
         ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
-        ADD_PCA_URL="ADD_PCA_URL",
-        CALL_ANALYTICS_METADATA="CALL_ANALYTICS_METADATA",
+        ADD_VIDEO_KEYFRAME="ADD_VIDEO_KEYFRAME",
+        UPDATE_CAPTURE_CONTEXT="UPDATE_CAPTURE_CONTEXT",
+        UPDATE_TRANSCRIPTION_PAUSE="UPDATE_TRANSCRIPTION_PAUSE",
     )
 
     msg_event_type = message.get("EventType", "")
@@ -1303,18 +1579,9 @@ async def execute_process_event_api_mutation(
 
     if event_type == "":
         # This is possibly a message from Flume. Let's fix the message if it is
-        if message.get("UtteranceEvent", "") != "" or message.get("TranscriptEvent", "") != "":
+        if message.get("TranscriptEvent", "") != "":
             message["EventType"] = "ADD_TRANSCRIPT_SEGMENT"
             event_type = "ADD_TRANSCRIPT_SEGMENT"
-        if message.get("CategoryEvent", "") != "":
-            message["EventType"] = "ADD_CALL_CATEGORY"
-            event_type = "ADD_CALL_CATEGORY"
-        if (
-            message.get("Service-type", "") == "CallAnalytics"
-            and message.get("Detail-type", "") == "CallAnalyticsMetadata"
-        ):
-            message["EventType"] = "CALL_ANALYTICS_METADATA"
-            event_type = "CALL_ANALYTICS_METADATA"
 
     message["EventType"] = event_type
     # default expiration for meeting (note: transcript segments can have a different - earlier - expiration)
@@ -1333,8 +1600,32 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # Counted on the same condition as the start-of-call hook below, and
+            # for the same reason: a redelivered START must not read as a second
+            # meeting. Kept out of the hook's own branch because the count is
+            # wanted whether or not a deployment configures a hook.
+            #
+            # Inside the success branch, matching the END branch below. A
+            # non-duplicate failure raises rather than being returned here, so
+            # in practice this line is unreachable with an exception in hand --
+            # but the branch above shows the contract allows one, and a meeting
+            # that could not be created has not started.
+            if not was_already_created(response):
+                METRICS.count(metric_names.MEETINGS_STARTED)
 
-        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+        # At most once per meeting. Redelivery is routine on this stream -- the
+        # END branch below explains why -- and a deployment's own start-of-call
+        # hook would read a second invocation as a second meeting starting.
+        #
+        # At most, not exactly: a rejected condition is read as "somebody already
+        # created this meeting", and it is also what a first delivery sees when
+        # its own earlier attempt stored the meeting and then came back as a
+        # transport error, or when the invoke below raised after the meeting was
+        # created and the record came back. Delivering the hook exactly once
+        # needs a durable record of having delivered it, which this does not
+        # have; skipping it is the safer of the two mistakes, because invoking it
+        # twice is visible in whatever the hook does.
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
@@ -1344,6 +1635,12 @@ async def execute_process_event_api_mutation(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
                 InvocationType="Event",
                 Payload=json.dumps(payload),
+            )
+        elif START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+            LOGGER.info(
+                "START event for a meeting that is already created; not invoking the "
+                "start-of-call hook again",
+                extra=dict(call_id=message.get("CallId")),
             )
 
     elif event_type in [
@@ -1360,13 +1657,58 @@ async def execute_process_event_api_mutation(
             await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
         )
 
+        # Name the separated voices once at the end of the meeting.
+        #
+        # Only when summaries are OFF. When they are on, the summary orchestrator
+        # runs the naming pass itself, synchronously, immediately before
+        # summarising -- which is what gets the names into the summary. Doing it
+        # from here as well would pay for a second model call for nothing.
+        #
+        # Fire-and-forget deliberately. A synchronous invoke here would block this
+        # event loop, and with it every other record in the same Kinesis batch
+        # including live segments for other meetings; it would also be retried by
+        # the client's own retry policy if it outran the socket timeout, running
+        # the whole pass several times over. Nothing downstream waits on the
+        # names, so there is nothing to order against.
+        if (
+            SPEAKER_NAME_RESOLVER_ARN
+            and not IS_TRANSCRIPT_SUMMARY_ENABLED
+            and not was_already_ended
+        ):
+            try:
+                LAMBDA_HOOK_CLIENT.invoke(
+                    FunctionName=SPEAKER_NAME_RESOLVER_ARN,
+                    InvocationType="Event",
+                    Payload=json.dumps({"CallId": message.get("CallId"), "Trigger": "meeting-end"}),
+                )
+                LOGGER.debug("END Event: queued the speaker name resolver")
+            except Exception:  # pylint: disable=broad-except
+                LOGGER.exception(
+                    "END Event: could not queue speaker naming; continuing to close the meeting",
+                    extra=dict(call_id=message.get("CallId")),
+                )
+
+        # The transcript deletion, scheduled before the summary is asked for and
+        # not wrapped in a try, for the same reason the summary invoke below is
+        # not: a failure redelivers the record with the meeting still open, so
+        # the retry schedules it. The function is idempotent, and returns at
+        # once while the Retention section leaves transcripts alone.
+        if TRANSCRIPT_DELETION_FUNCTION_ARN and not was_already_ended:
+            LAMBDA_HOOK_CLIENT.invoke(
+                FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                InvocationType="Event",
+                Payload=json.dumps({"CallId": message.get("CallId"), "Trigger": "meeting-ended"}),
+            )
+            LOGGER.debug("END Event: told the transcript deletion function")
+
         # Summary first, status second. The invoke is not wrapped in a try, so a
         # transient failure propagates and the record is redelivered — and it has
         # to find the meeting still open when it comes back, or the check above
         # would skip the summary on the retry and the meeting would end with no
         # summary at all. Ordering it ahead of the status mutation makes the worst
         # case a duplicate summary rather than a missing one.
-        if IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
+        summary_queued = IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended
+        if summary_queued:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,
                 InvocationType="Event",
@@ -1380,13 +1722,28 @@ async def execute_process_event_api_mutation(
                 extra=dict(call_id=message.get("CallId")),
             )
 
+        # The status write carries the "summary in progress" state when a
+        # summary has just been queued, so the meeting page can tell a summary
+        # on its way from no summary at all. Only then: with summaries switched
+        # off nothing is coming, and a redelivered END must not reset the state
+        # of a summary that may already have landed.
+        status_message = (
+            {**message, "CallSummaryState": summary_queued_state()} if summary_queued else message
+        )
         response = await execute_update_call_status_mutation(
-            message=message, appsync_session=appsync_session
+            message=status_message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # Counted once per meeting, on the write that closed it, so that a
+            # redelivered END does not produce a second ending. A failed write
+            # is not counted at all -- it raises rather than reaching here, the
+            # batch processor attributes it to this record's sequence number,
+            # and the record is redelivered with the meeting still open.
+            if not was_already_ended:
+                METRICS.count(metric_names.MEETINGS_ENDED)
 
     elif event_type == "ADD_SUMMARY":
         LOGGER.debug("ADD_SUMMARY MUTATION ")
@@ -1394,10 +1751,41 @@ async def execute_process_event_api_mutation(
             message=message, appsync_session=appsync_session
         )
 
+        if was_summary_not_stored(response):
+            # Dropped, not failed: redelivery would be rejected the same way, and
+            # a failed record holds up everything behind it on its shard. Nothing
+            # was stored, so neither the transcript deletion nor the post-call
+            # summary hook below is told about it.
+            await log_summary_not_stored(message=message, appsync_session=appsync_session)
+            return_value["successes"].append(response)
+            return return_value
+
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # The summary is stored, so the transcript deletion can count its
+            # delay from now. Fire-and-forget: if this is lost, the deletion
+            # scheduled at the end of the meeting still runs, later. Not for a
+            # failed run's placeholder text: the transcript then waits for the
+            # end-of-meeting fallback, leaving time to regenerate the summary.
+            if TRANSCRIPT_DELETION_FUNCTION_ARN and summary_was_produced(
+                message.get("CallSummaryText")
+            ):
+                try:
+                    LAMBDA_HOOK_CLIENT.invoke(
+                        FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                        InvocationType="Event",
+                        Payload=json.dumps(
+                            {"CallId": message.get("CallId"), "Trigger": "summary-written"}
+                        ),
+                    )
+                except Exception:  # pylint: disable=broad-except
+                    LOGGER.exception(
+                        "ADD_SUMMARY: could not tell the transcript deletion function; the "
+                        "deletion scheduled at the end of the meeting still applies",
+                        extra=dict(call_id=message.get("CallId")),
+                    )
 
         if POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN:
             payload = await get_call_details(message=message, appsync_session=appsync_session)
@@ -1412,6 +1800,13 @@ async def execute_process_event_api_mutation(
         LOGGER.debug("ADD_AGENT_ASSIST MUTATION ")
         normalized_message = normalize_transcript_segments({**message})
 
+        # The answer takes the meeting's Owner and SharedWith, as the meeting's
+        # other transcript segments do, rather than the identity of whoever asked.
+        meeting = await get_call_details(
+            message=normalized_message[0], appsync_session=appsync_session
+        )
+        apply_meeting_access(normalized_message[0], meeting)
+
         response = await execute_add_agent_assist_mutation(
             message=normalized_message[0], appsync_session=appsync_session
         )
@@ -1422,57 +1817,69 @@ async def execute_process_event_api_mutation(
             return_value["successes"].append(response)
 
     elif event_type == "ADD_TRANSCRIPT_SEGMENT":
-        # ADD_TRANSCRIPT_SEGMENT event supports these 3 types of message structure.
+        # ADD_TRANSCRIPT_SEGMENT event supports these types of message structure.
         #   The logic for populating transcripts, sentiment values and agent assist messages depend on
-        #    which one of these 3 json structures are populated in the KDS Event message.
+        #    which one of these json structures are populated in the KDS Event message.
         #
         #  1. custom i.e. source populates invidividual transcript fields, including optional sentiment field
         #  2. TranscriptEvent - json structure from standard Transcribe API
-        #  3. UtteranceEvent - json structure from TCA streaming API
-
-        utteranceEvent = message.get("UtteranceEvent", None)
-        if utteranceEvent:
-            participantRole = utteranceEvent.get("ParticipantRole", None)
-            if not participantRole:
-                return return_value
 
         # normalize_transcript_segments also sets transcript segment expiration time
         normalized_messages = normalize_transcript_segments({**message})
 
         add_transcript_tasks = []
         add_transcript_sentiment_tasks = []
+        # At most one per language new to the meeting; see language_to_record.
+        detected_language_tasks = []
 
         for normalized_message in normalized_messages:
             # Invoke custom lambda hook (if any) and use returned version of message.
             if TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN:
                 normalized_message = invoke_transcript_lambda_hook(normalized_message)
 
-            issues_detected = normalized_message.get("IssuesDetected", None)
-            if issues_detected and len(issues_detected) > 0:
-                LOGGER.debug("Add Issues Detected to Call Summary")
-                response = await execute_add_issues_detected_mutation(
-                    message=normalized_message, appsync_session=appsync_session
-                )
-                if isinstance(response, Exception):
-                    return_value["errors"].append(response)
-                else:
-                    return_value["successes"].append(response)
-
             payload = await get_call_details(
                 message=normalized_message, appsync_session=appsync_session
             )
 
-            people_can_access = payload.get("SharedWith", None)
+            # The Owner the event itself carried, before the segment takes the
+            # meeting's: the agent assist request below is made as before, and
+            # the orchestrator passes its Owner on as the identity of whoever
+            # asked, which a wake phrase spoken in the meeting does not have.
+            event_owner = normalized_message.get("Owner")
+
+            new_language = language_to_record(
+                normalized_message.get("CallId"),
+                normalized_message.get("LanguageCode"),
+                payload.get("DetectedLanguages"),
+                DETECTED_LANGUAGES_NOTED,
+            )
+            if new_language:
+                detected_language_tasks.append(
+                    add_detected_language(
+                        normalized_message["CallId"], new_language, appsync_session
+                    )
+                )
 
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
                 add_transcript_segments(
                     message=normalized_message,
-                    people_can_access=people_can_access,
+                    meeting=payload,
                     appsync_session=appsync_session,
                 )
             )
-            if IS_SENTIMENT_ANALYSIS_ENABLED and not normalized_message["IsPartial"]:
+            # Sentiment and the wake phrase are for what was said: a message
+            # typed in the meeting chat is stored, and the transcript hook above
+            # sees it, but it gets neither.
+            analyses = segment_analyses(
+                is_speech=is_speech_channel(normalized_message.get("Channel")),
+                is_partial=normalized_message["IsPartial"],
+                sentiment_enabled=IS_SENTIMENT_ANALYSIS_ENABLED,
+                agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
+                wake_pattern=wake_phrase_pattern,
+                transcript=normalized_message.get("Transcript", ""),
+            )
+            if analyses.sentiment:
                 LOGGER.debug("Add Sentiment Analysis")
                 add_transcript_sentiment_tasks.extend(
                     add_transcript_sentiment_analysis(
@@ -1482,72 +1889,69 @@ async def execute_process_event_api_mutation(
                     )
                 )
             if (
-                IS_LAMBDA_AGENT_ASSIST_ENABLED
-                and (
-                    not normalized_message["IsPartial"] or "ContactId" in normalized_message.keys()
-                )
-                and matches_wake_phrase(
-                    SETTINGS.get("AssistantWakePhraseRegEx"),
-                    normalized_message["Transcript"],
+                AGENDA_DERIVER_ARN
+                and not normalized_message["IsPartial"]
+                # A meeting already queued here needs no read of the threshold.
+                and normalized_message.get("CallId") not in AGENDA_PASS_QUEUED
+                and agenda_derivation_due(
+                    normalized_message.get("CallId"),
+                    normalized_message.get("EndTime"),
+                    agenda_derivation_threshold(),
+                    AGENDA_PASS_QUEUED,
                 )
             ):
+                queue_agenda_derivation(normalized_message["CallId"])
+            if analyses.agent_assist:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType="Event",
-                    Payload=json.dumps(normalized_message),
+                    Payload=json.dumps({**normalized_message, "Owner": event_owner}),
                 )
 
-        add_call_category_tasks = []
-
-        if "ContactId" in message.keys():
-            add_call_category_tasks = add_contact_lens_call_category(
-                message=message,
-                appsync_session=appsync_session,
-                sns_client=sns_client,
-            )
-
+        # One aggregation per record, built for its last final segment. A record
+        # can normalize into several final segments, and the last one need not
+        # end latest, so the duration is given the latest end of all of them.
         update_call_aggregation_tasks = []
-        for normalized_message in normalized_messages:
-            if not normalized_message["IsPartial"]:
-                update_call_aggregation_tasks = await get_call_aggregation_tasks(
-                    message=normalized_message,
-                    appsync_session=appsync_session,
-                )
+        final_messages = [m for m in normalized_messages if not m["IsPartial"]]
+        if final_messages:
+            update_call_aggregation_tasks = await get_call_aggregation_tasks(
+                message=final_messages[-1],
+                appsync_session=appsync_session,
+                record_latest_end=latest_speech_end_seconds(final_messages),
+            )
 
         task_responses = await asyncio.gather(
             *add_transcript_tasks,
             *add_transcript_sentiment_tasks,
-            *add_call_category_tasks,
             *update_call_aggregation_tasks,
-            # *add_tca_agent_assist_tasks,
+            *detected_language_tasks,
             return_exceptions=True,
         )
 
-        for response in task_responses:
-            if isinstance(response, Exception):
-                return_value["errors"].append(response)
-            else:
-                return_value["successes"].append(response)
-
-    elif event_type == "ADD_CALL_CATEGORY":
-        LOGGER.debug("Add Call Category to Call details")
-        response = await execute_add_call_category_mutation(
-            message=message, appsync_session=appsync_session
-        )
-        if isinstance(response, Exception):
-            return_value["errors"].append(response)
-        else:
-            return_value["successes"].append(response)
-
-        LOGGER.debug("Add Call Category to Transcript segments")
-        add_call_category_tasks = []
-        add_call_category_tasks = add_call_category(
-            message=message, appsync_session=appsync_session, sns_client=sns_client
-        )
-        task_responses = await asyncio.gather(
-            *add_call_category_tasks,
-            return_exceptions=True,
-        )
+        # Counted here because this is where a lost transcript line stops being
+        # visible to anything else. `return_exceptions=True` turns a failed
+        # mutation into an ordinary result, which is collected into
+        # return_value["errors"] below and never raised -- so the batch
+        # processor does not attribute the record, nothing redelivers it on its
+        # own account, and AWS/Lambda Errors stays flat. (Another record in the
+        # same batch raising would redeliver this one along with the rest of the
+        # tail, but nothing makes that happen for this failure's sake.) These
+        # two numbers are the only notice that a segment did not reach the
+        # meeting page.
+        #
+        # gather preserves the order it was given, so the transcript-segment
+        # results are exactly the leading slice. Sentiment and aggregation
+        # results follow and are deliberately not counted here:
+        # those failures cost an annotation, not a transcript line.
+        segment_responses = task_responses[: len(add_transcript_tasks)]
+        failed_segments = sum(1 for r in segment_responses if isinstance(r, Exception))
+        if failed_segments:
+            METRICS.count(metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED, failed_segments)
+        if len(segment_responses) - failed_segments:
+            METRICS.count(
+                metric_names.TRANSCRIPT_SEGMENTS_WRITTEN,
+                len(segment_responses) - failed_segments,
+            )
 
         for response in task_responses:
             if isinstance(response, Exception):
@@ -1577,10 +1981,29 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-    elif event_type == "ADD_PCA_URL":
-        # ADD PCA URL
-        LOGGER.debug("Add PCA url")
-        response = await execute_add_pca_url_mutation(
+    elif event_type == "UPDATE_CAPTURE_CONTEXT":
+        LOGGER.debug("Update capture context")
+        response = await execute_update_capture_context_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "UPDATE_TRANSCRIPTION_PAUSE":
+        LOGGER.debug("Update transcription pause")
+        response = await execute_update_transcription_pause_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "ADD_VIDEO_KEYFRAME":
+        LOGGER.debug("Add video keyframe")
+        response = await execute_add_video_keyframe_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
@@ -1598,15 +2021,6 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
-    elif event_type == "CALL_ANALYTICS_METADATA":
-        meta = json.loads(message["Metadata"])
-        LOGGER.debug("S3 URL from metadata %s", meta["oneTimeMetadata"]["s3RecordingUrl"])
-
-        session_id = re.search(
-            r"(?i)\/(.+\/)*(.+)\.(wav)$", meta["oneTimeMetadata"]["s3RecordingUrl"]
-        ).group(2)
-        send_call_session_mapping_event(meta["callId"], session_id)
-
     else:
         LOGGER.warning("unknown event type [%s]", event_type)
 

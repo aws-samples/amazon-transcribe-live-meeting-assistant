@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Publish operations namespace — thin wrapper over _core.publish."""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Synthetic Kinesis (KDS) end-to-end pipeline probe.
 
 Drives the *downstream* half of LMA's data flow that neither unit tests nor the
@@ -40,6 +40,19 @@ def _stream_name(cfn, stack_name: str) -> str:
     raise RuntimeError("CallDataStreamName output not found on stack")
 
 
+
+def _stack_resources(cfn, stack_name):
+    """Every resource summary of a stack.
+
+    ListStackResources returns at most 100 resources per page, and the AI
+    nested stack has more than that, so a single call can miss the table.
+    """
+    return [
+        r
+        for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name)
+        for r in page["StackResourceSummaries"]
+    ]
+
 def _event_sourcing_table(cfn, ddb, stack_name: str) -> str:
     """Resolve the active AISTACK's EventSourcingTable name.
 
@@ -47,14 +60,14 @@ def _event_sourcing_table(cfn, ddb, stack_name: str) -> str:
     nested-stack resources.
     """
     # The AISTACK physical id is a resource of the parent stack.
-    resources = cfn.list_stack_resources(StackName=stack_name)["StackResourceSummaries"]
+    resources = _stack_resources(cfn, stack_name)
     ai_stack = next(
         (r["PhysicalResourceId"] for r in resources if r["LogicalResourceId"] == "AISTACK"),
         None,
     )
     if not ai_stack:
         raise RuntimeError("AISTACK nested stack not found")
-    ai_resources = cfn.list_stack_resources(StackName=ai_stack)["StackResourceSummaries"]
+    ai_resources = _stack_resources(cfn, ai_stack)
     for r in ai_resources:
         if r["LogicalResourceId"] == "EventSourcingTable":
             return r["PhysicalResourceId"]
@@ -94,7 +107,7 @@ def run_probe(stack_name: str, region: str | None = None, timeout_s: float = 90.
     put({
         "EventType": "START",
         "CallId": call_id,
-        "CustomerPhoneNumber": "Integ Test Caller",
+        "CustomerPhoneNumber": "Integ Test Participant",
         "SystemPhoneNumber": "LMA Integ Test",
         "AgentId": owner,
         "CreatedAt": now_iso,

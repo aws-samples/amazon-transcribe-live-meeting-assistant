@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for Stage 1 of the meeting-upload pipeline (``createUploadMeeting``).
 
@@ -24,12 +24,15 @@ per test replace those handles entirely.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from botocore.exceptions import ClientError
@@ -46,6 +49,15 @@ os.environ["EVENT_SOURCING_TABLE"] = TABLE
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer, which the deployed function gets as a Lambda layer.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
+# The cases the upload's combination check is held to, shared with lma_config's
+# tests and the WebSocket transcriber's.
+COMBINATIONS = json.loads(
+    (HERE.parents[3] / "test-fixtures" / "transcribe-option-combinations.json").read_text(
+        encoding="utf-8"
+    )
+)["cases"]
 
 
 def _load_by_path(name: str, path: Path):
@@ -65,6 +77,7 @@ def _load_by_path(name: str, path: Path):
 with mock.patch("boto3.client"), mock.patch("boto3.resource"):
     index = _load_by_path("upload_meeting_initiator_index", HERE / "index.py")
 
+from lma_config import section_schema  # noqa: E402  (the layer path is set above)
 
 # The instant every test observes, so timestamp and TTL arithmetic can be asserted
 # as exact values instead of as a tolerance window.
@@ -126,22 +139,49 @@ def conditional_check_failed() -> ClientError:
     )
 
 
+class FakeStore:
+    """The configuration store: the Transcription section's saved values."""
+
+    def __init__(self, values: dict | None = None, error: Exception | None = None) -> None:
+        self.values = dict(values or {})
+        self.error = error
+        self.reads = 0
+
+    def get_section(self, name):
+        assert name == "transcription"
+        self.reads += 1
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(values=dict(self.values))
+
+
 @pytest.fixture(name="env")
 def env_fixture(monkeypatch: pytest.MonkeyPatch):
-    """Install the fakes and the frozen clock, and hand both back to the test."""
+    """Install the fakes and the frozen clock, and hand both back to the test.
+
+    The Transcription section holds nothing, so the shipped defaults (en-US) apply.
+    """
     table = FakeTable()
     s3_client = FakeS3()
     monkeypatch.setattr(index, "job_table", table)
     monkeypatch.setattr(index, "s3_client", s3_client)
     monkeypatch.setattr(index, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(index, "_STORE", FakeStore())
     return table, s3_client
+
+
+def configure(monkeypatch: pytest.MonkeyPatch, **values) -> FakeStore:
+    """Save these Transcription settings on the Configuration page."""
+    store = FakeStore(values)
+    monkeypatch.setattr(index, "_STORE", store)
+    return store
 
 
 def make_event(identity: dict | None = None, field_name: str = "createUploadMeeting", **overrides):
     """Build an AppSync direct-Lambda resolver event with sensible defaults."""
     payload = {
         "meetingTopic": "Weekly Sync",
-        "agentId": "bob@example.com",
+        "localSpeakerName": "bob@example.com",
         "filename": "recording.mp3",
         "contentType": "audio/mpeg",
     }
@@ -222,6 +262,7 @@ def test_the_response_carries_exactly_the_fields_the_ui_needs(env) -> None:
         "uploadKey",
         "contentType",
         "expiresInSeconds",
+        "transcriptionLanguage",
     }
     assert result["uploadUrl"] == PRESIGNED_URL
     assert result["uploadBucket"] == BUCKET
@@ -286,6 +327,155 @@ def test_a_long_filename_is_truncated_but_keeps_its_extension(env) -> None:
     name = result["uploadKey"].rsplit("/", 1)[-1]
     assert len(name) == 128
     assert name.endswith(".mp4")
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("会议记录.m4a", "recording.m4a"),
+        ("회의 녹음.m4a", "recording.m4a"),
+        ("Встреча 2025-01-02.mp3", "2025-01-02.mp3"),
+        ("συνάντηση.τελική.wav", "recording.wav"),
+        ("Réunion équipe.mp4", "R_union_quipe.mp4"),
+    ],
+    ids=[
+        "non-latin-only",
+        "non-latin-hangul",
+        "non-latin-and-ascii",
+        "non-latin-with-dots",
+        "accented-latin",
+    ],
+)
+def test_a_name_outside_the_character_set_still_keeps_its_extension(
+    env, filename, expected
+) -> None:
+    """The format decides the key's extension, which Stage 3 names the promoted
+    recording after, and the MediaFormat Stage 2 hands Transcribe, so a name made
+    of characters the key cannot carry must lose the name, never the format."""
+    result = invoke(callId="call-abc", filename=filename)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected}"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type", "expected_name", "expected_format"),
+    [
+        ("Meeting.M4A", "audio/x-m4a", "Meeting.m4a", "m4a"),
+        (".m4a", "audio/x-m4a", "recording.m4a", "m4a"),
+        ("talk.mp4 ", "video/mp4", "talk.mp4", "mp4"),
+        ("Weekly 1.5 sync", "audio/x-m4a", "Weekly_1.5_sync.m4a", "m4a"),
+        ("notes.txt", "audio/mpeg", "notes.txt.mp3", "mp3"),
+        ("clip", "audio/webm;codecs=opus", "clip.webm", "webm"),
+        ("clip.mp3", "audio/mp4", "clip.mp3", "mp3"),
+        ("clip.mov", "video/quicktime", "clip.mov", None),
+        ("clip", "audio/aac", "clip", None),
+    ],
+    ids=[
+        "extension-in-upper-case",
+        "extension-only-name",
+        "trailing-space",
+        "dotted-name-without-extension",
+        "unsupported-extension-uses-content-type",
+        "content-type-with-parameters",
+        "name-extension-wins-over-content-type",
+        "unsupported-name-and-type",
+        "no-extension-unsupported-type",
+    ],
+)
+def test_the_extension_is_a_supported_media_format_or_absent(
+    env, filename, content_type, expected_name, expected_format
+) -> None:
+    """The extension is taken only from a format Transcribe accepts, from the
+    name first and the content type second; whatever else follows a dot stays
+    part of the name. The same format is stored on the row for Stage 2."""
+    table, _ = env
+    result = invoke(callId="call-abc", filename=filename, contentType=content_type)
+    assert result["uploadKey"] == f"lma-uploads-pending/call-abc/{expected_name}"
+    assert table.item.get("MediaFormat") == expected_format
+    if expected_format is None:
+        assert "MediaFormat" not in table.item
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected_format"),
+    sorted(index.CONTENT_TYPE_MEDIA_FORMATS.items()),
+)
+def test_every_mapped_content_type_names_a_format_transcribe_accepts(
+    content_type, expected_format
+) -> None:
+    """A mapping to a value Transcribe rejects would turn a valid upload into a
+    failed job, so every target must be one of its MediaFormat values."""
+    assert expected_format in index.SUPPORTED_MEDIA_FORMATS
+    assert index._media_format("recording", content_type) == expected_format
+
+
+def _isolated_aws_env(region: str) -> dict[str, str]:
+    """The process environment with every ``AWS_*`` variable replaced: dummy keys,
+    the region under test, and no config or credentials file, so neither the
+    environment nor ``~/.aws`` of whoever runs the tests (a profile, a session
+    token, an endpoint override, FIPS or dual-stack) changes the URL."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env.update(
+        {
+            "AWS_REGION": region,
+            "AWS_DEFAULT_REGION": region,
+            "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+            "AWS_SECRET_ACCESS_KEY": "not-a-real-secret",  # pragma: allowlist secret
+            "AWS_CONFIG_FILE": os.devnull,
+            "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+        }
+    )
+    return env
+
+
+def test_the_s3_client_leaves_the_host_to_botocore() -> None:
+    """Without an addressing style botocore presigns on the global endpoint, which
+    S3 redirects (307) for a bucket outside us-east-1 until its DNS settles, and a
+    browser does not follow a redirect on a CORS request, so the upload fails as a
+    network error. No endpoint_url: a fixed one would give every partition the
+    commercial DNS suffix."""
+    with (
+        mock.patch("boto3.client") as client,
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, {"AWS_REGION": "eu-west-1"}),
+    ):
+        _load_by_path("upload_meeting_initiator_index_client", HERE / "index.py")
+    kwargs = client.call_args.kwargs
+    assert kwargs["region_name"] == "eu-west-1"
+    assert "endpoint_url" not in kwargs
+    assert kwargs["config"].s3 == {
+        "addressing_style": "virtual",
+        "us_east_1_regional_endpoint": "regional",
+    }
+    assert kwargs["config"].signature_version == "s3v4"
+
+
+@pytest.mark.parametrize(
+    ("region", "host_suffix"),
+    [
+        ("eu-west-1", "s3.eu-west-1.amazonaws.com"),
+        ("us-east-1", "s3.us-east-1.amazonaws.com"),
+        ("us-gov-west-1", "s3.us-gov-west-1.amazonaws.com"),
+        ("cn-north-1", "s3.cn-north-1.amazonaws.com.cn"),
+    ],
+)
+def test_the_presigned_url_names_the_bucket_on_the_regional_endpoint(region, host_suffix) -> None:
+    """Signed by the real botocore client (locally, with no AWS call): the browser
+    PUTs to the bucket on its Region's own endpoint, signed for the same Region,
+    in us-east-1 as well as elsewhere, and with the partition's DNS suffix."""
+    with (
+        mock.patch("boto3.resource"),
+        mock.patch.dict(os.environ, _isolated_aws_env(region), clear=True),
+    ):
+        module = _load_by_path(f"upload_meeting_initiator_index_signed_{region}", HERE / "index.py")
+        url = module._generate_presigned_put_url("lma-uploads-pending/call-abc/a.mp3", "audio/mpeg")
+    parsed = urlparse(url)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == f"{BUCKET}.{host_suffix}"
+    assert parsed.path == "/lma-uploads-pending/call-abc/a.mp3"
+    query = parse_qs(parsed.query)
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    assert f"/{region}/s3/aws4_request" in query["X-Amz-Credential"][0]
+    assert "content-type" in query["X-Amz-SignedHeaders"][0].split(";")
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +556,7 @@ def test_the_row_carries_every_field_the_later_stages_read(env) -> None:
     meeting that uploads, then silently never transcribes."""
     table, _ = env
     call_id = invoke(
-        fromNumber="+15550001111",
+        remoteSpeakerName="+15550001111",
         toNumber="+15550002222",
         languageCode="es-US",
         meetingDateTime="2025-01-01T10:00:00Z",
@@ -387,6 +577,7 @@ def test_the_row_carries_every_field_the_later_stages_read(env) -> None:
         "EnableDiarization": True,
         "MaxSpeakers": 6,
         "LanguageCode": "es-US",
+        "LanguageSource": "REQUEST",
         "MeetingDateTime": "2025-01-01T10:00:00Z",
         "PendingObjectBucket": BUCKET,
         "PendingObjectKey": f"lma-uploads-pending/{call_id}/recording.mp3",
@@ -403,17 +594,20 @@ def test_optional_fields_are_left_out_rather_than_stored_as_null(env) -> None:
     invoke()
     item = table.item
     assert "FileSize" not in item
-    assert "LanguageCode" not in item
     assert "MeetingDateTime" not in item
+    # A specific language: no identification fields.
+    assert "LanguageIdentification" not in item
+    assert "LanguageOptions" not in item
     assert [k for k, v in item.items() if v is None] == []
 
 
 def test_the_parties_default_to_the_placeholder_names_the_ui_shows(env) -> None:
     """These become CustomerPhoneNumber/SystemPhoneNumber on the Kinesis START
-    event, which the meetings list renders verbatim."""
+    event; CustomerPhoneNumber is the name the transcript gives the other
+    participants when their voices have no name of their own."""
     table, _ = env
     invoke()
-    assert table.item["FromNumber"] == "Customer"
+    assert table.item["FromNumber"] == "Other Participant"
     assert table.item["ToNumber"] == "System"
 
 
@@ -537,8 +731,8 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"meetingTopic": "   "}, "meetingTopic is required"),
         ({"meetingTopic": None}, "meetingTopic is required"),
         ({"meetingTopic": "t" * 201}, "200 characters or fewer"),
-        ({"agentId": ""}, "agentId is required"),
-        ({"agentId": "a" * 201}, "200 characters or fewer"),
+        ({"localSpeakerName": ""}, r"localSpeakerName \(or agentId\) is required"),
+        ({"localSpeakerName": "a" * 201}, "200 characters or fewer"),
         ({"contentType": ""}, "contentType is required"),
         ({"contentType": "application/pdf"}, "contentType must start with"),
         ({"contentType": "text/plain"}, "contentType must start with"),
@@ -550,9 +744,9 @@ def test_presigned_urls_are_signed_with_sigv4(env) -> None:
         ({"maxSpeakers": 31}, "maxSpeakers must be between 2 and 30"),
         ({"maxSpeakers": "many"}, "maxSpeakers must be an integer"),
         ({"meetingDateTime": "last tuesday"}, "ISO-8601"),
-        ({"languageCode": "e"}, "BCP-47"),
-        ({"languageCode": "en_US"}, "BCP-47"),
-        ({"languageCode": "english!"}, "BCP-47"),
+        ({"languageCode": "e"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "en_US"}, "is not a language Amazon Transcribe can transcribe"),
+        ({"languageCode": "english!"}, "is not a language Amazon Transcribe can transcribe"),
     ],
 )
 def test_malformed_input_is_rejected_before_anything_is_written(env, overrides, message) -> None:
@@ -632,6 +826,219 @@ def test_a_numeric_string_file_size_is_stored_as_a_number(env) -> None:
 def test_surrounding_whitespace_is_trimmed_from_the_topic_and_agent(env) -> None:
     """The topic becomes a slug and part of a key; the agent becomes the Owner."""
     table, _ = env
-    invoke(meetingTopic="  Weekly Sync  ", agentId="  bob@example.com  ")
+    invoke(meetingTopic="  Weekly Sync  ", localSpeakerName="  bob@example.com  ")
     assert table.item["MeetingTopic"] == "Weekly Sync"
     assert table.item["AgentId"] == "bob@example.com"
+
+
+def test_the_older_speaker_names_are_still_accepted(env) -> None:
+    table, _ = env
+    invoke(localSpeakerName=None, agentId="carol@example.com", fromNumber="Room 3")
+    assert table.item["AgentId"] == "carol@example.com"
+    assert table.item["FromNumber"] == "Room 3"
+
+
+def test_a_documented_speaker_name_wins_over_its_older_name(env) -> None:
+    table, _ = env
+    invoke(
+        localSpeakerName="dana@example.com",
+        agentId="older@example.com",
+        remoteSpeakerName="Room 4",
+        fromNumber="older room",
+    )
+    assert table.item["AgentId"] == "dana@example.com"
+    assert table.item["FromNumber"] == "Room 4"
+
+
+def test_a_local_speaker_name_is_required_under_one_name_or_the_other(env) -> None:
+    table, _ = env
+    with pytest.raises(index.ValidationError, match=r"localSpeakerName \(or agentId\) is required"):
+        invoke(localSpeakerName=None, agentId="  ")
+    assert table.calls == []
+
+
+# ---------------------------------------------------------------------------
+# The transcription language: the Configuration page's Amazon Transcribe settings
+# ---------------------------------------------------------------------------
+
+_LANGUAGE_ENUM = section_schema("transcription")["properties"]["languageCode"]["enum"]
+SPECIFIC_LANGUAGES = [code for code in _LANGUAGE_ENUM if code not in index.IDENTIFY_MODES]
+
+
+def test_with_nothing_saved_an_upload_is_transcribed_in_the_shipped_en_us(env) -> None:
+    """A deployment that never changed the setting gets the result it gets today."""
+    table, _ = env
+    result = invoke()
+    assert result["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+    assert table.item["LanguageSource"] == "CONFIGURATION"
+
+
+@pytest.mark.parametrize("language_code", SPECIFIC_LANGUAGES)
+def test_an_upload_is_transcribed_in_the_configured_language(
+    env, monkeypatch, language_code
+) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=language_code)
+    result = invoke()
+    assert result["transcriptionLanguage"] == language_code
+    item = table.item
+    assert item["LanguageCode"] == language_code
+    assert item["LanguageSource"] == "CONFIGURATION"
+    assert "LanguageIdentification" not in item
+    assert "LanguageOptions" not in item
+
+
+@pytest.mark.parametrize("mode", index.IDENTIFY_MODES)
+def test_an_identify_mode_records_the_language_options_as_candidates(
+    env, monkeypatch, mode
+) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=mode, languageOptions=" ja-JP, es-US ,fr-CA")
+    result = invoke()
+    assert result["transcriptionLanguage"] == mode
+    item = table.item
+    assert item["LanguageIdentification"] == mode
+    assert item["LanguageOptions"] == ["ja-JP", "es-US", "fr-CA"]
+    assert item["LanguageSource"] == "CONFIGURATION"
+    assert "LanguageCode" not in item
+
+
+def test_the_preferred_language_does_not_apply_to_an_upload(env, monkeypatch) -> None:
+    """Batch jobs have no preferred language, so one outside the options is not refused."""
+    table, _ = env
+    configure(
+        monkeypatch,
+        languageCode="identify-language",
+        languageOptions="de-DE, it-IT",
+        preferredLanguage="pt-BR",
+    )
+    invoke()
+    assert table.item["LanguageOptions"] == ["de-DE", "it-IT"]
+    assert "PreferredLanguage" not in table.item
+
+
+@pytest.mark.parametrize("mode", index.IDENTIFY_MODES)
+def test_speaker_diarization_is_kept_with_language_identification(env, monkeypatch, mode) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode=mode, languageOptions="hi-IN, th-TH")
+    invoke(enableDiarization=True, maxSpeakers=5)
+    assert table.item["EnableDiarization"] is True
+    assert table.item["MaxSpeakers"] == 5
+    assert table.item["LanguageIdentification"] == mode
+
+
+_REFUSED = [case for case in COMBINATIONS if case["upload"]]
+
+
+@pytest.mark.parametrize("case", _REFUSED, ids=[case["name"] for case in _REFUSED])
+def test_settings_an_upload_cannot_use_are_refused_when_it_starts(env, monkeypatch, case) -> None:
+    table, s3_client = env
+    configure(monkeypatch, **case["options"])
+    with pytest.raises(index.ValidationError) as raised:
+        invoke()
+    assert str(raised.value) == (
+        "The Amazon Transcribe settings on the Configuration page cannot be used for an "
+        f"upload: {case['upload']}"
+    )
+    assert table.calls == []
+    assert s3_client.calls == []
+
+
+@pytest.mark.parametrize("language_code", ["es-US", "zh-CN"])
+def test_a_requested_language_wins_and_skips_the_settings(env, monkeypatch, language_code) -> None:
+    """An API caller that sets languageCode keeps working, even where the settings
+    would refuse an upload; the settings are not read at all."""
+    table, _ = env
+    store = configure(monkeypatch, languageCode="identify-language", languageOptions="")
+    result = invoke(languageCode=language_code)
+    assert result["transcriptionLanguage"] == language_code
+    assert table.item["LanguageCode"] == language_code
+    assert table.item["LanguageSource"] == "REQUEST"
+    assert store.reads == 0
+
+
+def test_settings_are_read_for_every_upload(env, monkeypatch) -> None:
+    """A change saved between two uploads applies to the second."""
+    table, _ = env
+    store = configure(monkeypatch, languageCode="fr-FR")
+    invoke()
+    store.values["languageCode"] = "it-IT"
+    invoke()
+    assert [call["Item"]["LanguageCode"] for call in table.calls] == ["fr-FR", "it-IT"]
+    assert store.reads == 2
+
+
+def test_a_value_no_longer_offered_is_the_shipped_default(env, monkeypatch) -> None:
+    table, _ = env
+    configure(monkeypatch, languageCode="xx-XX")
+    assert invoke()["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+
+
+def test_unreadable_settings_refuse_the_upload(env, monkeypatch) -> None:
+    """Refused rather than transcribed in a language the deployment may not use."""
+    table, s3_client = env
+    throttled = ClientError({"Error": {"Code": "Throttling", "Message": "slow"}}, "GetItem")
+    monkeypatch.setattr(index, "_STORE", FakeStore(error=throttled))
+    with pytest.raises(index.ConfigurationUnavailableError, match="try the upload again"):
+        invoke()
+    assert table.calls == []
+    assert s3_client.calls == []
+
+
+def test_without_a_configuration_table_the_shipped_defaults_apply(env, monkeypatch) -> None:
+    table, _ = env
+    monkeypatch.setattr(index, "_STORE", None)
+    monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+    assert invoke()["transcriptionLanguage"] == "en-US"
+    assert table.item["LanguageCode"] == "en-US"
+
+
+# ---------------------------------------------------------------------------
+# A requested languageCode: one Amazon Transcribe batch jobs accept
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language_code",
+    ["zz-ZZ", "en-us", "xx", "identify-language", "en-US, es-US"],
+    ids=["unknown", "wrong-case", "no-region", "identify-mode", "list"],
+)
+def test_a_language_transcribe_does_not_accept_is_refused_before_any_url(
+    env, monkeypatch, language_code
+) -> None:
+    """StartTranscriptionJob would refuse it after the file is uploaded, and the
+    meeting would never end; it is refused before a row or a URL exists."""
+    table, s3_client = env
+    store = configure(monkeypatch, languageCode="ja-JP")
+    with pytest.raises(index.ValidationError, match="is not a language Amazon Transcribe"):
+        invoke(languageCode=language_code)
+    assert table.calls == []
+    assert s3_client.calls == []
+    assert store.reads == 0
+
+
+@pytest.mark.parametrize("language_code", ["nl-NL", "ar-SA", "sv-SE"])
+def test_a_batch_language_the_configuration_page_does_not_offer_is_accepted(
+    env, language_code
+) -> None:
+    """API callers may name any language batch transcription supports, not only the
+    streaming languages the Configuration page lists."""
+    table, _ = env
+    assert invoke(languageCode=language_code)["transcriptionLanguage"] == language_code
+    assert table.item["LanguageCode"] == language_code
+    assert table.item["LanguageSource"] == "REQUEST"
+
+
+def test_every_language_the_configuration_page_offers_is_a_batch_language() -> None:
+    """Otherwise a setting the page accepts would start a job Transcribe refuses."""
+    assert set(SPECIFIC_LANGUAGES) <= index.BATCH_LANGUAGE_CODES
+
+
+def test_the_accepted_languages_come_from_the_transcribe_service_model() -> None:
+    import botocore.session
+
+    model = botocore.session.get_session().get_service_model("transcribe")
+    assert index.BATCH_LANGUAGE_CODES == frozenset(model.shape_for("LanguageCode").enum)
+    assert len(index.BATCH_LANGUAGE_CODES) > len(SPECIFIC_LANGUAGES)

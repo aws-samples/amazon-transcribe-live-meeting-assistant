@@ -47,6 +47,11 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-mock>=3.11",
+    "numpy>=1.26",
+]
+# The ASR benchmark's packaged datasets (``--dataset``) mix their audio with numpy.
+benchmark = [
+    "numpy>=1.26",
 ]
 # ``pip install lma-load-simulator[websocket]`` now only pulls in the
 # audio-processing extras the WS driver can optionally use (for
@@ -91,4 +96,11 @@ lma-sdk = { path = "../../lib/lma_sdk", editable = true }
 include = ["lma_load*"]
 
 [tool.setuptools.package-data]
-lma_load = ["fixtures/*.wav", "fixtures/*.jsonl", "observability/*.json"]
+lma_load = [
+    "fixtures/*.wav",
+    "fixtures/*.jsonl",
+    "observability/*.json",
+    "asr_benchmark/datasets/ami/*.stm",
+    "asr_benchmark/datasets/ami/*.json",
+    "asr_benchmark/datasets/ami/*.md",
+]

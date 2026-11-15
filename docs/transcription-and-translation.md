@@ -9,11 +9,15 @@ title: "Transcription & Translation"
 - [How Transcription Works](#how-transcription-works)
 - [Speaker Attribution](#speaker-attribution)
   - [Speaker Identification within a Channel](#speaker-identification-within-a-channel)
+  - [Naming the Voices](#naming-the-voices)
+    - [Finding the names automatically](#finding-the-names-automatically)
 - [Language Configuration](#language-configuration)
   - [Single Language](#single-language)
   - [Automatic Single Language Identification](#automatic-single-language-identification)
   - [Automatic Multi-Language Identification](#automatic-multi-language-identification)
   - [Setting the Language](#setting-the-language)
+  - [Detected languages](#detected-languages)
+    - [On the ASR MicroVM engine](#on-the-asr-microvm-engine)
 - [Live Translation](#live-translation)
 - [Content Redaction (PII)](#content-redaction-pii)
 - [Custom Vocabulary](#custom-vocabulary)
@@ -63,8 +67,10 @@ Enable it in the client's own settings, independently for each channel:
 | Incoming / system audio | Identify separate speakers in meeting audio | The call has several remote participants |
 | Microphone | Identify separate speakers on my microphone | Several people share one microphone |
 
-Both are off by default. The `ShowSpeakerLabel` CloudFormation parameter sets the
-deployment-wide default for clients that do not send their own choice.
+Both are off by default. For clients that do not send their own choice, the
+deployment-wide default is **Identify speakers within a channel by default** in
+the Amazon Transcribe section of the [Configuration page](configuration-guide.md)
+(off unless an Admin changes it).
 
 **Limitations:**
 
@@ -86,11 +92,246 @@ deployment-wide default for clients that do not send their own choice.
   for the thresholds and the `[DIARIZATION]` log lines used to tune them.
 - Diarization support varies by language; on an unsupported language the speaker
   names are simply left unlabelled.
-- Labels are numbers, not names. To get real participant names, use the
+- Labels are numbers, not names. Name them yourself on the meeting page -- see
+  [Naming the Voices](#naming-the-voices) below -- or use the
   [Chrome Extension](browser-extension.md) or a
-  [Virtual Participant](virtual-participant.md), which read them from the meeting
-  itself.
+  [Virtual Participant](virtual-participant.md), which read real names from the
+  meeting itself.
 - There is no additional Amazon Transcribe charge for speaker partitioning.
+
+### Naming the Voices
+
+Speaker separation can tell voices apart but cannot know who they are, so a
+conference-room transcript reads `Other Participant (spk_0)`. The **Speakers**
+panel, on the meeting page's **Details** tab, turns those voice ids into names
+(**Name speakers** in the page header opens it). It works the same way
+whichever engine produced the labels -- Amazon Transcribe speaker partitioning or
+the [on-demand MicroVM engine](microvm-asr.md) -- and on a meeting with no
+separation at all, where it names the channel.
+
+Each row in the panel is one voice, with the number of turns it has taken and how
+long it has spoken. Type a name and the whole transcript updates: **naming is per
+voice, not per segment**, so one name relabels every segment that voice has
+already produced as well as every segment it produces afterwards. The turn count
+on the row is how many segments a rename will move.
+
+The voices of a name that can be shown as
+[one person or several people](#one-person-or-several-people) are listed
+together under that name, as **Voice 1**, **Voice 2** in the order they were
+first heard, with the name's one-person / several-people icon toggle beside it.
+Each unnamed voice's field shows what its lines read as (`ConfRm_1 · Voice 2`).
+Under a name shown as one person, naming any of its voices names all of them
+(except a locked one), because the transcript shows one name for every line
+under it. In that mode, the name's lines that carry no voice label are counted in the turns of
+the name's first voice rather than listed as a voice of their own, and naming or
+merging that voice takes them with it. On a Virtual Participant meeting these are
+the lines the meeting page named before a voice label was attributed to the name;
+see
+[Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well).
+Selecting a speaker in the meeting page header opens the panel at that speaker's
+voice.
+
+Names are stored as a map on the meeting and applied wherever the transcript is
+read, so a rename is immediate and reversible, and it reaches the meeting
+summary, the Meeting Assistant and the transcript download as well as the screen.
+The underlying voice id is never overwritten.
+
+One path is a snapshot rather than a live read. When a meeting's summary is
+generated, the transcript of that moment is also written to S3 for the Bedrock
+Knowledge Base to ingest, and the Meeting Assistant's meeting-history search
+reads that copy. It carries whatever names were set when it was written, so if
+you name speakers *after* the summary has run, press **Regenerate** on the
+Meeting Summary panel to refresh it -- see
+[Regenerating and Editing a Summary](transcript-summarization.md#regenerating-and-editing-a-summary).
+The transcript on the meeting page, the download, and the assistant's
+questions about the current meeting are all live and need no such step.
+
+### One person or several people
+
+On a [Virtual Participant](virtual-participant.md) meeting, and on any meeting
+whose channel carries a real name, a voice label is added to the name the
+meeting platform showed: `Bob Strahan (spk_0)`. For an individual the label is
+noise — speaker separation routinely splits one person's voice into two or three
+labels — while for a conference room (`ConfRm_1`) the labels are the only thing
+telling the people in it apart. So each name that carries voice labels is shown
+in one of two ways:
+
+- **One person** — every line under the name shows the name alone: `Bob Strahan`.
+  If its voices have been given a name (by you, or by **Identify speakers**) and
+  they agree on it, that name is shown instead.
+- **Several people** — each voice is shown on its own, as `ConfRm_1 · Voice 1`,
+  `ConfRm_1 · Voice 2` and so on, numbered in the order the voices were first
+  heard, until it is named. Naming one renames every line that voice spoke.
+
+With no choice made, LMA decides from the transcript. A name is shown as
+several people when either of these holds, and as one person otherwise:
+
+| Rule | Example |
+|---|---|
+| The name reads as a room or a room device | `ConfRm_1`, `Conference Room B`, `Zoom Room 4`, `Huddle 3`, `SEA54-12.401`, `BLDG-3-ROOM`, `Polycom Studio` |
+| Its voices were given different names | voice 1 named *Priya*, voice 2 named *Sam* |
+
+How many voices a name has, and how long each of them spoke, are deliberately not
+a rule. Speaker separation splitting one person's voice into two or three labels
+that each speak at length looks the same as two people sharing a seat, and the
+first is far more common now that
+[Virtual Participant voice separation](virtual-participant.md#several-people-behind-one-attendee)
+is on by default. So a shared seat whose name does not read as a room is shown as
+one person until somebody switches it, or its voices are given different names.
+
+The room-name patterns and the names that stand for nobody are kept in one file,
+`speaker_mode_rules.json` in the configuration layer's `lma_speakers` module (with
+a byte-identical copy for the web UI), so they are easy to extend. A live meeting's
+lines change from one person to several only when two of a name's voices are given
+different names (by a person, or by **Identify speakers**), or when somebody
+switches the name.
+
+Names that stand for nobody in particular — `Unknown`, `none`, the default
+`Other Participant`, `Other participants`, `Others` and `Me` labels — are never
+grouped: their voice labels are kept, because they are the only way to tell the
+people behind them apart, and those voices are named as described above.
+
+Correcting the default takes one click: on the **Transcript** tab, the speaker chips
+are grouped by name, and each name that speaker separation gave a voice label to
+(or that is shown as several people) has a small icon toggle beside it — a person icon while the name is shown
+as **one person**, a group icon while it is shown as **several people**. Clicking
+it switches to the other mode. Its tooltip, shown on hover and on keyboard focus,
+says which mode the name is in, why, and what a click does (for example *Click if
+several people share this name*); a screen reader hears the same text, and reads
+the button as pressed while the name is shown as several people. In **Several
+people** each voice's chip has a pencil to name it in place.
+One voice label is enough for the toggle: a name with one label so far can gain a
+second at any moment of a live meeting, and several people behind one name may be
+heard as one voice until separation tells them apart. Lines of the name that carry
+no voice label are not counted as a voice. A name no voice label was ever given
+to (a meeting without speaker separation) has no toggle.
+The same toggle is beside the name in the Speakers panel, and the speakers named in
+the page header follow the choice. See
+[Transcript tab](web-ui-guide.md#transcript-tab). The choice is stored with the
+meeting's speaker names, so like them it reaches the transcript download, the
+summary (after **Regenerate**), the agenda, and the Meeting Assistant. Changing it
+never rewrites the stored transcript, and it can be changed back at any time.
+Only the meeting's owner, an Admin, and anyone the meeting is shared with can
+change it.
+
+### Finding the names automatically
+
+Most meetings start with people saying who they are, to each other rather than to
+any assistant. **Identify speakers** in the Speakers panel reads the transcript
+and looks for exactly that, so a meeting where everyone introduced themselves can
+often be named without typing anything.
+
+It also runs by itself: every 45 seconds while a meeting is live and voices remain
+unnamed, and once more when the meeting ends — the end-of-meeting pass is the most
+accurate, because it sees the whole transcript, and it runs before the summary so
+the summary reads names rather than voice ids. The in-meeting passes only happen
+while somebody has the meeting page open, which is also the only time watching a
+name appear is worth anything; a meeting nobody watched is covered by the
+end-of-meeting pass.
+
+The automatic passes stop as soon as there is nothing for them to do. When every
+voice already has a name — on a Virtual Participant meeting every voice carries
+the name the meeting platform showed — the panel says *Every voice already has a
+name from the meeting platform* and stops; what is left to tidy there is how a
+name's voices are grouped, which is the one-person / several-people toggle
+above. They also stop once the meeting has ended (the end-of-meeting pass covers
+it), and after a pass that found nothing they wait until somebody speaks again.
+**Identify speakers** always answers when pressed. *Nothing in the transcript
+names them yet* means there are voices to name but nothing said so far names
+them.
+
+Two kinds of evidence are used, and they are **not** treated the same way:
+
+| Evidence | Example | What happens |
+|---|---|---|
+| Someone clearly says who they are | "Hi everyone, I'm Sarah Lee, I run the platform team" | Applied as a name |
+| Someone gives their name less explicitly | "Sarah Lee, platform engineering", "Me llamo Sarah Lee" | Offered as a **suggestion** |
+| Someone is addressed by name | "That's a good point, Sarah" | Offered as a **suggestion** to confirm |
+
+The difference matters. A self-introduction is the speaker naming themselves, which
+is about as unambiguous as evidence gets. Being addressed by name identifies
+whoever spoke the *previous* turn, which depends on the turn boundaries being
+right — and speaker separation does sometimes absorb the first seconds of one
+person's turn into the previous speaker's. So that inference is only ever
+suggested, never applied: a suggested name is shown with a dotted underline in the
+transcript and a **suggested** marker in the panel, with **Confirm** and **Not
+\<name\>** beside it. Rejecting a name also stops it being suggested again.
+
+Names you typed yourself, and names you have locked, are never changed by an
+automatic pass.
+
+Nothing a model returns is taken at face value. It is asked only for a name,
+which kind of evidence supports it, and which numbered turn that evidence is in.
+Three things are then checked against the transcript before anything is applied:
+the cited turn must exist, it must belong to the voice the model named, and the
+name must actually appear in the words of that turn. A proposal failing any of
+them is discarded, as are non-names like "Speaker 1" and invented evidence
+categories. A third-party mention — "Bob said yesterday that…" — names nobody.
+
+A name is applied outright only when the turn also *reads* like an introduction.
+That test recognises English phrasing, so an introduction in another language, or
+an English one phrased unusually, produces a suggestion rather than a settled
+name. The name is still found either way; it just waits for somebody to agree
+with it.
+
+What that does and does not guarantee is worth being precise about. It means an
+applied name always goes to the voice that spoke the words containing it. It does
+not mean a wrong name is impossible: the model still chooses which turn to cite,
+so a genuinely ambiguous passage can still be read wrongly. That is why only
+self-introductions are applied, and why everything weaker is a suggestion.
+
+Which voices count as unnamed depends on the label they carry. A voice under the
+default label (`Other Participant`, the desktop app's `Other participants`, or
+`Me`) is always a candidate. A label you typed yourself — the participant name on
+the Stream Audio form, or your address on the microphone channel — is treated as
+a person's name while one voice is heard on that channel, and as a channel label
+once speaker separation has split it into two or more voices, at which point those
+voices are named like any other. On a meeting the Virtual Participant captured,
+as its record's capture source says, roster names are never treated as a channel
+label: one attendee whose voice separation split into two voices is still that
+attendee, even when nobody else spoke, so it starts no automatic passes and does
+not open the Speakers panel on its own. Voices under a default label on such a
+meeting are still candidates. A meeting recorded before LMA stored the capture
+source has none, and a single name split into several voices on it is treated as
+a channel label, as described above.
+
+The default labels count as unnamed on an unseparated channel too, so a meeting
+whose remote side is a single `Other Participant` or `Other participants` voice,
+or whose microphone is `Me`, keeps its automatic passes running until that voice
+is named.
+
+On a long meeting the opening turns and the most recent ones are used rather than
+the whole transcript — introductions cluster at the start, and keeping the recent
+end means a late "by the way, I'm Priya" is still found.
+
+The pass is skipped entirely when no new speech could name anybody, so an
+ordinary meeting does not spend model calls reading the same transcript over and
+over. Pressing the button overrides that, as does the end-of-meeting pass.
+
+That skip recognises introductions in a list of languages, so a meeting in a
+language outside it may get no names during the meeting and all of them at the
+end, when the pass runs regardless. Pressing **Identify speakers** at any point
+has the same effect. If your meetings are routinely in a language this misses,
+that is worth knowing about rather than discovering.
+
+The panel also offers:
+
+- **Merge** -- fold one voice into another when the engine split a single person
+  across two ids. Naming both rows without merging would leave two rows with the
+  same name, which then reads as two people in any summary.
+- **Lock** -- pin a name you are confident about.
+- **Only this segment** -- available from the popover that opens when you click a
+  speaker name in the transcript. Use it where separation attributed a single
+  turn to the wrong voice, which no voice-level rename can correct.
+- **Known attendees (optional)** -- paste the attendee list from a meeting
+  invite, an email recipient line, or any list of names, and each row's name
+  field offers them as suggestions. This is entirely optional: with nothing
+  pasted the fields are plain text inputs and everything else behaves the same
+  way. There is no automatic attendee list for a browser or desktop-app meeting,
+  which is why it is a paste-in.
+
+Anyone who can view a meeting sees the names; only its owner, a user it has been
+shared with, or an admin can change them.
 
 ## Language Configuration
 
@@ -126,15 +367,87 @@ Select this option when participants may switch between languages during a singl
 
 Configure the language mode using the **Language for Transcription** CloudFormation parameter when deploying or updating the LMA stack.
 
+### Detected languages
+
+With either identification mode, Amazon Transcribe names the language of each
+result it returns. The ASR MicroVM engine, with a multilingual model bundle,
+names the language of each final row it writes (see
+[On the ASR MicroVM engine](#on-the-asr-microvm-engine) below). LMA keeps the
+language with the transcript:
+
+- Each transcript segment stores the language it was identified in as
+  `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio,
+  the browser extension and the desktop apps) and the Virtual Participant both
+  pass it on, on the meeting channel and on the voice assistant's channel; it is
+  part of the `ADD_TRANSCRIPT_SEGMENT` event, the `TranscriptSegment` type of
+  the GraphQL API and the `onAddTranscriptSegment` subscription.
+- The meeting record lists the languages heard as `DetectedLanguages`, in the
+  order each was first heard. The call event processor adds a language the first
+  time a segment arrives in it, with one conditional write per language rather
+  than per segment.
+- The meeting page names the detected languages on the **Details** tab, beside
+  the language setting, and, when there is more than one, marks each line of the
+  transcript with a short language code whose tooltip names the language (see
+  [Transcript tab](web-ui-guide.md#transcript-tab)). The transcript downloads
+  carry the same codes.
+
+A meeting Amazon Transcribe transcribes in one fixed language has no detected
+languages: Amazon Transcribe names a language only when it identifies one, and
+the configured language is already shown as **Transcription language**. Upload
+Audio follows the same language setting with its Amazon Transcribe batch jobs,
+and an uploaded recording keeps the identify mode as its **Transcription
+language** like a streaming meeting does. With `identify-language`, every
+segment of the recording takes the one language the job identified. With
+`identify-multiple-languages`, the batch transcript names a language per word,
+and each segment takes the language most of its words were identified in. An
+upload in a fixed language has no detected languages. Segments stored before
+this was recorded carry no language.
+
+#### On the ASR MicroVM engine
+
+A multilingual bundle transcribes whatever language is spoken, whatever the
+meeting's language setting (see [Languages](microvm-asr.md#languages)), but none
+of its speech models reports which language that was. So the engine identifies
+the language of each **final** row from the row's text, and the row's
+`LanguageCode` is set from that:
+
+- **Only the deployed bundle's languages can be named.** With the default bundle
+  that is the 20 languages listed in [Languages](microvm-asr.md#languages). A
+  bundle with one language, such as an English-only bundle, names none, so its
+  meetings have no detected languages, as with a fixed language on Amazon
+  Transcribe.
+- **Some rows carry no language.** Live (partial) rows never do; the row's final
+  sets it. Neither does a row of one or two words, such as *Okay.* or *Sí,
+  claro.*, nor one the classifier is not confident about. In a meeting with more
+  than one language, such a line shows no language mark.
+- **The region comes from the meeting, not from the speech.** The engine names a
+  base language (`es`), because text does not say which region's Spanish it is.
+  A row in the meeting's own language takes the meeting's code (a meeting set to
+  `en-GB` gets `en-GB`); any other language gets a fixed region: `en-US`,
+  `es-US`, `fr-FR`, `pt-BR`, `de-DE`, `it-IT`, `nl-NL` and so on, the form
+  Amazon Transcribe's codes take. A Spanish speaker in an `en-US` meeting is
+  therefore listed as `es-US` whether they spoke Castilian or Mexican Spanish.
+- **A meeting in one language lists that language.** Because rows in the
+  meeting's language are named too, a MicroVM meeting's **Details** tab shows its
+  own language under detected languages, where an Amazon Transcribe meeting in a
+  fixed language shows none. Lines are marked only when there is more than one.
+
+How the engine identifies the language, and how accurately, is described in
+[Row languages](microvm-asr.md#row-languages).
+
 ## Live Translation
 
 LMA supports live translation of transcripts into 75+ languages via Amazon Translate. Users select their preferred target language directly in the LMA web UI. Translation is performed client-side, translating the transcribed text as it appears in the interface. This allows each user to independently choose their own target language without affecting other participants.
+
+Amazon Translate takes one line per request, so a long meeting is translated a line at a time, a few lines at once. During a live meeting the newest lines are translated first; after it, the lines on screen are translated first and the rest follow. Each line shows its translation as soon as it arrives, and the transcript shows **Translating N of M lines** while it works through a long meeting. A request the service refuses because too many were sent is retried after a short wait. If some lines still cannot be translated -- for example because the language pair is not supported, or the signed-in user has no permission to use Amazon Translate -- the transcript says how many and why, with **Try again**. Translations are kept while the page is open, so turning **Translate** off and on, or going back to a language already used, does not translate the same lines again.
 
 ## Content Redaction (PII)
 
 LMA can automatically redact personally identifiable information (PII) from transcripts using Amazon Transcribe's built-in content redaction.
 
-**Enabling redaction:** Set the **Enable Content Redaction for Transcripts** CloudFormation parameter to `true`.
+**Enabling redaction:** Since v0.4.0 redaction is a setting, not a stack parameter. An Admin turns on **Amazon Transcribe › Redact personal information** on the [Configuration page](configuration-guide.md) and chooses the types in **Entity types to redact**; the change applies to meetings that start after it is saved, with no stack update (see [Configuration Parameters](#configuration-parameters) below). The two regulated [configuration presets](configuration-guide.md#configuration-presets) turn it on.
+
+Redaction applies to meetings transcribed by Amazon Transcribe. It does not apply to meetings that use language identification, or to meetings on the on-demand MicroVM engine, which has no redaction. It redacts the transcript text only: the audio recording, the meeting video, key frames and their text, and the meeting chat are not redacted.
 
 **Supported languages:** Content redaction is supported for the following languages only:
 
@@ -180,7 +493,7 @@ LMA can optionally record meeting audio as stereo WAV files stored in Amazon S3.
 
 - **Format:** Stereo WAV files preserving the two-channel audio (microphone and incoming).
 - **Storage:** Recordings are stored in the S3 bucket created by the LMA stack.
-- **Retention:** Configurable via the **Record Expiration In Days** CloudFormation parameter. The default retention period is 90 days, after which recordings are automatically deleted by an S3 lifecycle policy.
+- **Retention:** Set by the `AudioRecordingExpirationInDays` stack parameter (console label *Audio Recording Expiration In Days*). The default is 90 days, after which an S3 lifecycle rule expires the recording; the earlier version that S3 keeps in the versioned bucket is removed about a day later. See [Privacy and Data Handling Controls](privacy-and-data-handling.md#what-lma-stores-and-for-how-long).
 - **Playback:** Recordings are accessible via the audio player in the meeting details view of the LMA UI.
 
 ## Partial vs Non-Partial Transcripts
@@ -194,14 +507,27 @@ Both types flow through the LMA pipeline. You can configure Lambda hook function
 
 ## Configuration Parameters
 
-| Parameter Name | Description | Default Value |
+For meetings streamed from the Stream Audio page, the browser extension and the
+desktop app, the language, redaction, custom vocabulary, custom language model and
+speaker-identification default are set in the **Amazon Transcribe** section of the
+[Configuration page](configuration-guide.md), and whether audio is recorded in its
+**Meeting Recording** section, while the stack runs, with no stack update. A
+Virtual Participant reads the same sections when it starts. These are not stack
+parameters; to change one, an Admin makes and activates a Custom configuration
+profile (see [Configuration profiles](configuration-guide.md#configuration-profiles))
+and saves the setting there.
+
+| Setting on the Configuration page | Description | Default Value |
 |---|---|---|
-| Language for Transcription | Language or language identification mode for Amazon Transcribe | `en-US` |
-| Enable Content Redaction for Transcripts | Enable PII redaction in transcripts (supported languages only) | `false` |
-| Default for Speaker Identification on Streaming Sessions (`ShowSpeakerLabel`) | Deployment-wide default for per-channel speaker partitioning on WebSocket streaming sessions. Clients that send their own per-channel choice take precedence. | `false` |
-| Transcription Custom Vocabulary Name | Name of a custom vocabulary created in Amazon Transcribe | (empty) |
-| Transcription Custom Language Model Name | Name of a custom language model created in Amazon Transcribe | (empty) |
-| Record Expiration In Days | Number of days to retain audio recordings in S3 | `90` |
+| **Amazon Transcribe › Language** | Language or language identification mode for Amazon Transcribe | `en-US` |
+| **Amazon Transcribe › Redact personal information** | Enable PII redaction in transcripts (supported languages only) | `false` |
+| **Amazon Transcribe › Identify speakers within a channel by default** | Deployment-wide default for per-channel speaker partitioning on WebSocket streaming sessions. Clients that send their own per-channel choice take precedence. | `false` |
+| **Amazon Transcribe › Custom vocabulary** | Name of a custom vocabulary created in Amazon Transcribe | (empty) |
+| **Amazon Transcribe › Custom language model** | Name of a custom language model created in Amazon Transcribe | (empty) |
+
+How long audio recordings are kept in S3 (90 days by default) is still a stack
+parameter, `AudioRecordingExpirationInDays`; see
+[CloudFormation Parameters](cloudformation-parameters.md#audiorecordingexpirationindays).
 
 ## Related Documentation
 

@@ -86,7 +86,7 @@ crash-loop the transcriber task.
 **Pass criteria:**
 - [ ] Transcript segments appear in the UI in near-real-time (proves the WS
       route accepts audio and streams to Transcribe under the v11 handler).
-- [ ] Both channels transcribe (agent + caller / mic + tab).
+- [ ] Both channels transcribe (microphone and meeting tab).
 - [ ] The ECS transcriber task does **not** restart during the session
       (CloudWatch logs show no `Error starting websocket server` / crash loop).
 - [ ] `GET /health/check` on the transcriber ALB target returns 200.

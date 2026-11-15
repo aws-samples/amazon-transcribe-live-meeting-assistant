@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_assist",
+  "title": "Meeting assistant",
+  "description": "When a transcript wakes the meeting assistant, whether its answers use Amazon Bedrock prompt caching, how much its model reasons before answering, and what a request made in the meeting is answered from. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Assistant",
+  "appliesText": "A saved change applies within about five minutes, to transcript segments processed and answers started after that.",
+  "order": 9,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "wakePhraseRegex": {
+      "order": 0,
+      "type": "string",
+      "title": "Wake phrase (regular expression)",
+      "description": "A Python regular expression searched for in each finished transcript segment; a segment it matches is sent to the meeting assistant. A pattern that is not a valid regular expression is logged and the shipped one is used.",
+      "examples": ["(OK|Okay)[.,! ]*[Aa]ssistant"],
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "promptCachingEnabled": {
+      "order": 1,
+      "type": "boolean",
+      "title": "Use Amazon Bedrock prompt caching",
+      "description": "Mark the assistant's instructions, tool definitions and, on Claude models, the conversation so far as cacheable, so the model calls of one answer, and answers given within a few minutes of each other, read the repeated part from the cache at a lower price instead of paying for it again. Applies only to the meeting assistant models that support prompt caching (Claude 4 and later, Nova Micro, Lite and Pro, and Nova 2 Lite); other models are unaffected. The answers themselves do not change."
+    },
+    "assistantReasoningEffort": {
+      "order": 2,
+      "type": "string",
+      "title": "Reasoning effort",
+      "description": "How much the meeting assistant model reasons before it answers. Low answers soonest and costs least; medium is the model's own default; high reasons longest, for questions that need several steps, and costs the most, since reasoning is billed as output. Applies only to the Claude 5 generation (Claude Haiku, Sonnet and Opus 5.5); other meeting assistant models are unaffected.",
+      "enum": ["low", "medium", "high"],
+      "enumLabels": {
+        "low": "Low (fastest, lowest cost)",
+        "medium": "Medium (the model's default)",
+        "high": "High (most thorough, highest cost)"
+      }
+    },
+    "inMeetingRequestTools": {
+      "order": 3,
+      "type": "string",
+      "title": "In-meeting requests",
+      "description": "What the meeting assistant may use to answer a request made in the meeting by whoever is in it: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant, and a request spoken with the wake phrase. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers and the Virtual Participant browser controls. The meeting page's own assistant chat is always unrestricted.",
+      "enum": ["current_meeting_only", "unrestricted"],
+      "enumLabels": {
+        "current_meeting_only": "Current meeting only (default)",
+        "unrestricted": "Unrestricted: every tool, acting for the meeting's owner"
+      }
+    }
+  },
+  "additionalProperties": false
+}

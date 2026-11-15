@@ -23,7 +23,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 - **Secure:** All data stays within your AWS environment
 - **Async Tool Processing:** Tools execute in background without blocking conversation
 - **Pre-Tool Acknowledgment:** Announces tool execution to set user expectations
-- **Customizable Config:** Edit system prompts and voice ID via DynamoDB
+- **Customizable Config:** Edit system prompts and voice ID in the Nova Sonic Voice Assistant section of the Configuration page
 
 ## Step 1: Enable AWS Nova Sonic 2 Model Access
 
@@ -37,7 +37,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
    only the voice assistant's model calls go there. Everything else — the
    transcript store, the meeting assistant, the Nova Sonic configuration you set in
    the LMA UI — stays in the stack's own region. See
-   [CloudFormation Parameters](cloudformation-parameters.md#voice-assistant).
+   [CloudFormation Parameters](cloudformation-parameters.md#meeting-assist-voice-assistant).
 
 ### 1.2 Enable Model Access
 
@@ -49,14 +49,26 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 
 ## Step 2: Deploy LMA with AWS Nova Sonic 2 Configuration
 
-### 2.1 Required CloudFormation Parameters
+### 2.1 Required Settings
 
-When deploying or updating your LMA stack, set these parameters:
+The voice assistant is chosen in the **Virtual Participant** section of the
+[Configuration page](configuration-guide.md), not with stack parameters. The
+provider, the activation mode, the wake phrases and the activation duration can
+be changed there while the stack runs, with no stack update, and apply to the
+next Virtual Participant to start. To change them, an Admin opens the
+Configuration page, makes and activates a Custom configuration profile if one is
+not already active (**Create profile** in the profile list, then **Activate**;
+see [Configuration profiles](configuration-guide.md#configuration-profiles)),
+and saves:
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `VoiceAssistantProvider` | `amazon_nova_sonic` | Enable AWS Nova Sonic 2 voice assistant |
-| `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
+| Setting | Value | Description |
+|---------|-------|-------------|
+| **Virtual Participant › Voice assistant** | Amazon Nova Sonic (`amazon_nova_sonic`) | Enable AWS Nova Sonic 2 voice assistant |
+| **Virtual Participant › Voice assistant activation mode** | Wake phrase (`wake_phrase`) or Always listening (`always_active`) | Choose activation mode |
+
+To start a new deployment with these values already set, point the
+`CustomConfigPath` stack parameter at a configuration file that holds them; see
+[Choosing the default configuration at deploy time](configuration-store.md#choosing-the-default-configuration-at-deploy-time).
 
 That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
@@ -66,33 +78,36 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 - Agent activates when user says "Hey Alex"
 - Saves costs by only connecting when needed
 - Automatically disconnects after configurable timeout (default: 30 seconds)
-- Set: `VoiceAssistantActivationMode=wake_phrase`
+- Set: **Virtual Participant › Voice assistant activation mode** to **Wake phrase** (`wake_phrase`)
 
 **Always Active Mode**
 - Agent is always listening
 - Responds immediately without wake phrase
 - Higher costs (continuous connection)
-- Set: `VoiceAssistantActivationMode=always_active`
+- Set: **Virtual Participant › Voice assistant activation mode** to **Always listening** (`always_active`)
 
-### 2.3 Optional Parameters
+### 2.3 Optional Settings
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `VoiceAssistantActivationDuration` | `30` | Seconds to stay active after wake phrase |
-| `VoiceAssistantWakePhrases` | `hey alex` | Comma-separated wake phrases |
+These are also in the **Virtual Participant** section of the Configuration page.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Virtual Participant › Seconds the voice assistant stays active** | `30` | Seconds the assistant stays active once idle after a wake phrase; a lookup or an answer still playing does not count against it |
+| **Virtual Participant › Wake phrases** | `hey alex,ok alex,hi alex,hello alex` | Comma-separated wake phrases |
 
 ## Step 3: Verify Installation
 
-### 3.1 Check CloudFormation Outputs
+### 3.1 Check the Configuration and CloudFormation Outputs
 
-1. Go to AWS CloudFormation console
-2. Find your LMA stack
-3. Go to the **Outputs** tab
-4. Verify these outputs exist:
-   - `VoiceAssistantProvider`: Should show `amazon_nova_sonic`
-   - `StrandsLambdaArn`: Should show the Lambda ARN
-   - `DefaultNovaSonicConfig`: Link to view default configuration
-   - `CustomNovaSonicConfig`: Link to edit custom configuration
+1. Open the LMA web UI as an Admin, go to the Configuration page, and verify
+   that **Virtual Participant › Voice assistant** in the active profile shows
+   **Amazon Nova Sonic**
+2. Go to AWS CloudFormation console
+3. Find your LMA stack
+4. Go to the **Outputs** tab
+5. Verify this output exists:
+   - `DefaultNovaSonicConfig`: Link to view the record holding the shipped configuration
+   - `CustomNovaSonicConfig`: Link to view the record holding your custom configuration
 
 ### 3.2 Test Voice Assistant
 
@@ -110,16 +125,13 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
 ### 4.1 Access Configuration
 
-After stack deployment, you'll find two console links in the CloudFormation outputs:
+Open the LMA web UI as a member of the **Admin** group, go to **Configuration ▸ Configuration** and open the **Nova Sonic Voice Assistant** section (or follow `/#/configuration/settings?section=nova_sonic_config`). Each field shows the setting in force; one you have changed from the shipped default is marked **Changed**, with **Reset to default** beside it, and **Reset section to defaults** puts back every shipped value. Your settings are preserved during stack updates. See the [Configuration Guide](configuration-guide.md).
 
-1. **DefaultNovaSonicConfig** - View the default configuration (read-only, do not edit)
-2. **CustomNovaSonicConfig** - Edit your custom configuration (preserved during stack updates)
-
-Click the **CustomNovaSonicConfig** link to open the DynamoDB console.
+The settings are stored in the stack's shared configuration table — the shipped ones in its `Config#default` record and yours in the `Config#custom` profile, as the `nova_sonic_config` section — compressed, so they are edited on the page rather than in the DynamoDB console. The `DefaultNovaSonicConfig` and `CustomNovaSonicConfig` stack outputs link to those two records, which show who last saved each one and when. See [Unified Configuration Store](configuration-store.md).
 
 ### 4.2 Customizable Settings
 
-You can customize these settings in the `CustomNovaSonicConfig` item:
+These are the settings the page edits, under the names the configuration stores them by:
 
 | Attribute | Type | Description | Example |
 |-----------|------|-------------|---------|
@@ -181,7 +193,7 @@ The `meetingMode` field controls how the voice assistant behaves in a meeting. T
 | **Group Meeting** | `group` | Passive listening; only speaks when "Alex" is mentioned |
 | **Translator** | `translator` | Real-time bidirectional interpreter between two languages |
 
-> **Requires `VoiceAssistantActivationMode = always_active`** for `group` and `translator` modes to take effect. The Meeting Mode selector in the Nova Sonic Configuration UI is disabled when the deployment uses `wake_phrase` mode.
+> **Requires the voice assistant activation mode to be Always listening** (`always_active`) for `group` and `translator` modes to take effect. The mode is **Virtual Participant › Voice assistant activation mode** on the Configuration page; while it is saved as `wake_phrase`, the Nova Sonic Voice Assistant section says those modes are ignored.
 
 ---
 
@@ -285,10 +297,11 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.7 Example Customizations
 
+Each example lists the fields to set in the Nova Sonic Voice Assistant section of the Configuration page, by their stored names; anything not listed keeps its default.
+
 **Example 1: Professional Assistant (Fast Response)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a professional executive assistant. Provide concise, actionable responses. Always confirm understanding before taking action.",
   "promptMode": "replace",
   "voiceId": "matthew",
@@ -299,7 +312,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 2: Friendly Team Assistant**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "Always end responses with 'Anything else I can help with?' to encourage engagement.",
   "promptMode": "inject",
   "voiceId": "olivia",
@@ -310,7 +322,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 3: Technical Support (Patient Listening)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a technical support specialist for AWS services. Provide detailed, accurate information. Use technical terminology when appropriate.",
   "promptMode": "replace",
   "voiceId": "tiffany",
@@ -321,7 +332,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 4: Group Meeting Assistant (Passive Mode)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a helpful meeting assistant. Provide concise, relevant information when asked.",
   "promptMode": "base",
   "voiceId": "tiffany",
@@ -333,7 +343,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 5: Live Translator (English ↔ Spanish)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "meetingMode": "translator",
   "translatorLanguageA": "English",
   "translatorLanguageB": "Spanish",
@@ -344,7 +353,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 6: Accessibility-Focused (Maximum Patience)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a patient, supportive assistant. Speak slowly and clearly. Wait for users to finish their thoughts completely.",
   "promptMode": "replace",
   "voiceId": "amy",
@@ -354,10 +362,12 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.8 Apply Configuration Changes
 
-1. Edit the `CustomNovaSonicConfig` item in DynamoDB
-2. Save your changes
-3. **No redeployment needed** - changes take effect immediately
+1. Change the settings in the **Nova Sonic Voice Assistant** section of the Configuration page
+2. Select **Save changes**, then **Save** in the dialog
+3. **No redeployment needed** - the next virtual participant to start uses them; one already in a meeting keeps the settings it started with
 4. Start a new virtual participant to test
+
+If someone else saved the configuration while you had the page open, the save is refused with a message asking you to reload the page and apply your changes again, rather than replacing what they saved.
 
 ## Step 5: Monitor and Troubleshoot
 
@@ -399,7 +409,7 @@ View logs in CloudWatch:
 - Speak clearly: "Hey Alex" (pause) "your question"
 - Check microphone is working in the meeting
 - Try: "Hey Alex, are you there?" as a simple test
-- Verify `VoiceAssistantActivationMode=wake_phrase` is set
+- Verify **Virtual Participant › Voice assistant activation mode** is **Wake phrase** on the Configuration page
 - Check CloudWatch logs for wake phrase detection
 
 ### Issue: "Model Access Denied"
@@ -571,19 +581,15 @@ Once configured, the voice assistant can:
 
 ### Custom Wake Phrases
 
-Set multiple wake phrases:
-
-```bash
-VoiceAssistantWakePhrases="hey alex,ok alex,hi alex,hello alex"
-```
+Set multiple wake phrases, separated by commas, in **Virtual Participant ›
+Wake phrases** on the Configuration page, for example
+`hey alex,ok alex,hi alex,hello alex`.
 
 ### Custom Activation Duration
 
-Set longer activation for complex queries:
-
-```bash
-VoiceAssistantActivationDuration=60  # 60 seconds
-```
+Set longer activation for complex queries by changing **Virtual Participant ›
+Seconds the voice assistant stays active** on the Configuration page, for
+example to `60`.
 
 ## What's New in v0.2.27
 
@@ -600,7 +606,10 @@ VoiceAssistantActivationDuration=60  # 60 seconds
 ### Pre-Tool Acknowledgment
 - Nova announces: "Let me search for that information. This may take a moment."
 - Sets proper user expectations
-- Confirmation-based prompting strategy
+- One short preamble sentence, then the tool call; Nova is told never to speak its reasoning, plans or tool names
+- Required before every lookup, including follow-up questions in the same conversation
+- If Nova has not started speaking within one second of a lookup starting, the Virtual Participant plays a short acknowledgement of its own ("One moment, let me look that up."), spoken by Nova Sonic in the configured voice and rendered once when the Virtual Participant starts. Rendering it opens one short Nova Sonic session each time a Virtual Participant starts, in the background, so it never delays the start. If Amazon Bedrock refuses that session because the account's Nova Sonic streams are all in use (see [Nova Sonic Concurrency Quota](voice-assistant.md#nova-sonic-concurrency-quota)), the render is retried over about half a minute and then skipped, and that meeting has no fallback acknowledgement. It is not played while the assistant is muted or still talking, while a stop request is being handled, or once someone has spoken over the assistant or said something new since the lookup started, and a stop request or barge-in cuts it off like any other assistant speech. A preamble from Nova that arrives after it is dropped, so the room does not hear two.
+- Each lookup writes one `[tool-ack]` line to the Virtual Participant's log stream: `source=model` or `source=fallback` with `latency_ms` from the start of the lookup, or `source=none` with the reason nothing was played
 
 ## Comparison: AWS Nova Sonic 2 vs ElevenLabs
 
@@ -614,7 +623,7 @@ VoiceAssistantActivationDuration=60  # 60 seconds
 | **Async Processing** | Yes (v0.2.27+) | Depends on configuration |
 | **Cost Model** | AWS Bedrock pricing | ElevenLabs pricing |
 | **Voice Quality** | High quality | Very high quality |
-| **Customization** | System prompts & 16 voice IDs via DynamoDB | Extensive via API |
+| **Customization** | System prompts & 16 voice IDs on the configuration page | Extensive via API |
 
 ## Support
 
@@ -648,7 +657,7 @@ For issues specific to:
 - Cost-optimized with wake phrase mode
 - Pre-tool acknowledgment
 - Async tool execution
-- **Customizable prompts and voices via DynamoDB** (no code changes needed)
+- **Customizable prompts and voices from the web UI** (no code changes needed)
 
 ✅ **Customization:**
 - 3 prompt modes (base, inject, replace)
@@ -656,7 +665,7 @@ For issues specific to:
 - 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
 - **3 meeting modes**: Normal, Group Meeting (passive), Translator (live interpreter)
 - Barge-in support (interrupt Nova mid-sentence)
-- Edit via the Nova Sonic Configuration page in the LMA UI or directly in DynamoDB
-- Changes apply immediately (no redeployment)
+- Edit in the Nova Sonic Voice Assistant section of the Configuration page in the LMA UI
+- Changes apply to the next meeting (no redeployment)
 
 That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 — from active 1-on-1 conversations, to passive group meeting support, to real-time multilingual interpretation.

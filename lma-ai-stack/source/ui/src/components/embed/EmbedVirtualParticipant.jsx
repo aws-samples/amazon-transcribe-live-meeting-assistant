@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  *
  * EmbedVirtualParticipant - Embeddable virtual participant component.
@@ -27,7 +27,7 @@ import {
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
-import mapCallsAttributes from '../common/map-call-attributes';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 
@@ -131,6 +131,12 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     callTranscriptPerCallId,
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -229,36 +235,33 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
   // and the effect below will auto-load it.
   const effectiveCallId = paramCallId || vpDetails?.CallId;
 
-  const fetchCallForVP = useCallback(
-    async (cid) => {
-      if (!cid) return false;
-      try {
-        setCallLoading(true);
-        const response = await getCallDetailsFromCallIds([cid]);
-        const callsMap = mapCallsAttributes(response, settings);
-        const callDetails = callsMap[0];
+  const fetchCallForVP = useCallback(async (cid) => {
+    if (!cid) return false;
+    try {
+      setCallLoading(true);
+      const response = await getCallDetailsFromCallIds([cid]);
+      const callsMap = mapCallsAttributes(response);
+      const callDetails = callsMap[0];
 
-        if (!callDetails) {
-          return false;
-        }
-
-        setCall(callDetails);
-        if (!callTranscriptPerCallId[cid]) {
-          await sendGetTranscriptSegmentsRequest(cid);
-        }
-        if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
-          setLiveTranscriptCallId(cid);
-        }
-        return true;
-      } catch (err) {
-        logger.error('Error fetching call details for VP:', err);
+      if (!callDetails) {
         return false;
-      } finally {
-        setCallLoading(false);
       }
-    },
-    [settings],
-  );
+
+      setCall(callDetails);
+      if (!callTranscriptPerCallId[cid]) {
+        await sendGetTranscriptSegmentsRequest(cid);
+      }
+      if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+        setLiveTranscriptCallId(cid);
+      }
+      return true;
+    } catch (err) {
+      logger.error('Error fetching call details for VP:', err);
+      return false;
+    } finally {
+      setCallLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!effectiveCallId || !showCallPanels) return () => {};
@@ -281,10 +284,30 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
       return;
     }
 
-    const callsMap = mapCallsAttributes([matching], settings);
+    const callsMap = mapCallsAttributes([matching]);
     const callDetails = callsMap[0];
-    if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
-      setCall(callDetails);
+    // Same guard as CallDetails.js and EmbedCallDetails.jsx: this view renders
+    // CallPanel too, and a speaker rename deliberately does not move UpdatedAt,
+    // so without the second test a rename made here would not re-label until
+    // the page was reloaded -- and a second rename would serialize from the
+    // pre-first-rename map and lose the first name.
+    const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
+    const speakerNamesChanged =
+      callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
+    const summaryChanged =
+      (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
+      (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
+    // A meeting that started or ended is a change whatever its UpdatedAt says
+    // (CallDetails.js); an update carrying no status says nothing about it.
+    const statusChanged =
+      callDetails?.recordingStatusLabel !== 'Unknown' &&
+      call.recordingStatusLabel !== callDetails?.recordingStatusLabel &&
+      // ...unless this copy is older than the one on screen.
+      !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
+    const changed = timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged;
+    if (changed || agendaChanged(call, callDetails)) {
+      // Keeping the fields only getCall reads, as CallDetails.js does.
+      setCall(adoptMeetingCopy(call, callDetails));
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
         setLiveTranscriptCallId(effectiveCallId);
       }
@@ -300,6 +323,12 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     isCallsListLoading,
     selectedItems,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,
@@ -359,7 +388,6 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
             <VNCViewer
               vpId={vpId}
               vncEndpoint={vpDetails.vncEndpoint}
-              websocketUrl={vpDetails.vncEndpoint}
               status={vpDetails.status}
               manualActionType={vpDetails.manualActionType}
               manualActionMessage={vpDetails.manualActionMessage}
@@ -406,6 +434,10 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
               setToolsOpen={setToolsOpen}
               callTranscriptPerCallId={callTranscriptPerCallId}
               getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+              // Open from the start when the embed asked for the chat;
+              // otherwise as on the meeting page (open on a live meeting the
+              // first time, then as the user last left it).
+              assistantDefaultOpen={showChat ? true : undefined}
             />
           </div>
         )}

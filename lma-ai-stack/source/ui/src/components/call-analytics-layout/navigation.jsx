@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
@@ -18,10 +18,9 @@ import {
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  CONFIGURATION_PATH,
+  TROUBLESHOOTING_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -37,20 +36,19 @@ const defaultOnFollowHandler = (ev) => {
 
 // Paths on which the side navigation is rendered at all. A page whose route mounts
 // <Navigation /> but whose path is missing here shows an empty navigation panel -
-// which is exactly how the Transcription Engine page shipped, because only the activeHref
+// which is exactly how one configuration page once shipped, because only the activeHref
 // branch below was added for it. Exported so a test can pin the two together.
 export const NAV_PATHS = [
   CALLS_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  CONFIGURATION_PATH,
   STREAM_AUDIO_PATH,
   UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
+  TROUBLESHOOTING_PATH,
 ];
 
 /* eslint-disable react/prop-types */
@@ -71,14 +69,12 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MEETINGS_QUERY_PATH}`;
   } else if (path.includes(MCP_SERVERS_PATH)) {
     activeHref = `#${MCP_SERVERS_PATH}`;
-  } else if (path.includes(ASR_CONFIG_PATH)) {
-    activeHref = `#${ASR_CONFIG_PATH}`;
-  } else if (path.includes(NOVA_SONIC_CONFIG_PATH)) {
-    activeHref = `#${NOVA_SONIC_CONFIG_PATH}`;
-  } else if (path.includes(TRANSCRIPT_SUMMARY_PATH)) {
-    activeHref = `#${TRANSCRIPT_SUMMARY_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
+  } else if (path.includes(TROUBLESHOOTING_PATH)) {
+    activeHref = `#${TROUBLESHOOTING_PATH}`;
+  } else if (path.includes(CONFIGURATION_PATH)) {
+    activeHref = `#${CONFIGURATION_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {

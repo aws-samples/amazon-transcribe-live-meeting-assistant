@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -14,6 +14,17 @@ import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
+import { meterAsrMicrovm } from './metering.js';
+import { createLogger } from './logger.js';
+import {
+    microvmRowLanguageCode,
+    parseBundleLanguages,
+    transcribeOnlyOptions,
+    type TranscribeOnlyOptionSettings,
+} from './configuration-store.js';
+import { REMOTE_CHANNEL, type SpeechChannel } from './channels.js';
+
+const log = createLogger('asr-microvm-client');
 
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const ASR_LAUNCHER_FUNCTION_ARN = process.env.ASR_LAUNCHER_FUNCTION_ARN || '';
@@ -24,6 +35,10 @@ export const ASR_SAMPLE_RATE = 16000;
 const BYTES_PER_SECOND = ASR_SAMPLE_RATE * 2;
 const ASR_READY_TIMEOUT_MS = parseInt(process.env.ASR_READY_TIMEOUT_MS || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env.ASR_FINISH_TIMEOUT_MS || '5000', 10);
+// How much longer finishing waits for the engine's last finals, per second of the
+// connection's audio not yet finalised, and the ceiling on the whole wait.
+const ASR_FINISH_MS_PER_OPEN_SECOND = parseInt(process.env.ASR_FINISH_MS_PER_OPEN_SECOND || '2000', 10);
+const ASR_FINISH_MAX_WAIT_MS = parseInt(process.env.ASR_FINISH_MAX_WAIT_MS || '60000', 10);
 const ASR_HANDSHAKE_TIMEOUT_MS = parseInt(process.env.ASR_HANDSHAKE_TIMEOUT_MS || '15000', 10);
 // Audio held while the MicroVM starts or a session reconnects: 60 s of 16 kHz mono PCM.
 const ASR_MAX_PENDING_BYTES = parseInt(process.env.ASR_MAX_PENDING_BYTES || String(16000 * 2 * 60), 10);
@@ -42,15 +57,21 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 export type AsrEngineName = 'transcribe' | 'microvm';
 
-/** The Transcription Engine page's switches that concern a Virtual Participant. */
+/** The Transcription Engine switches that concern a Virtual Participant. */
 export interface AsrRuntimeSwitches {
     virtualParticipantEngineMicrovm: boolean;
     diarizeVirtualParticipant: boolean;
 }
 
+/**
+ * What a VP uses when the switches cannot be read, or a field is absent: Amazon
+ * Transcribe, which every deployment has, and voice separation on, the shipped
+ * default (AsrEngine.json in the configuration seeder), which works on either
+ * engine. A saved `false` is read as such and wins.
+ */
 export const DEFAULT_SWITCHES: AsrRuntimeSwitches = {
     virtualParticipantEngineMicrovm: false,
-    diarizeVirtualParticipant: false,
+    diarizeVirtualParticipant: true,
 };
 
 export interface AsrLease {
@@ -68,6 +89,18 @@ export interface AsrSegment {
     isPartial: boolean;
     /** Engine voice id (spk_0, spk_1, ...) when diarization is active; otherwise undefined. */
     speaker?: string;
+    /**
+     * Which engine session produced the row. Voice ids are numbered afresh by
+     * every session, including a reconnect, so `spk_0` means the same voice only
+     * within one value of this.
+     */
+    session?: string;
+    /**
+     * The row's language as a locale (`es-US`), from the language the engine
+     * named for a final's text (microvmRowLanguageCode). Absent on partials and
+     * when the engine named none.
+     */
+    languageCode?: string;
 }
 
 export type SegmentHandler = (segment: AsrSegment) => void;
@@ -79,6 +112,8 @@ interface AsrServerMessage {
     start?: number;
     end?: number;
     speaker?: string | null;
+    /** Base language (`es`) of a final's text; absent or null when the engine names none. */
+    language?: string | null;
     code?: string;
     message?: string;
     audio_seconds?: number;
@@ -90,21 +125,67 @@ export const isMicrovmAsrConfigured = (): boolean =>
     ASR_LAUNCHER_FUNCTION_ARN.length > 0 || ASR_DIRECT_ENDPOINT.length > 0;
 
 /**
+ * This VP's Amazon Transcribe options, from its environment, which carries the
+ * Configuration page's values once stack-settings.ts has applied them. Redaction
+ * is the flag as saved (CONTENT_REDACTION_REQUESTED), or the task's combined
+ * flag when the saved one is not known. The VP has no custom language model
+ * setting, so none is ever named.
+ */
+export const vpTranscribeOnlySettings = (
+    env: Record<string, string | undefined> = process.env,
+): TranscribeOnlyOptionSettings => {
+    const flag = (name: string): boolean => (env[name] ?? '').trim().toLowerCase() === 'true';
+    return {
+        languageCode: env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
+        contentRedactionEnabled: flag('CONTENT_REDACTION_REQUESTED') || flag('ENABLE_CONTENT_REDACTION'),
+        customVocabularyName: env.CUSTOM_VOCABULARY_NAME || '',
+        customLanguageModelName: '',
+    };
+};
+
+/**
  * Per-VP ASR_ENGINE wins (local testing), then the deployment's runtime setting;
  * an engine the deployment cannot serve falls back to Amazon Transcribe.
+ *
+ * A VP whose Amazon Transcribe options use one the ASR MicroVM engine does not
+ * offer (content redaction, a custom vocabulary or language model, language
+ * identification, a language the deployed bundle does not transcribe) stays on Amazon Transcribe, so the
+ * option is applied rather than dropped. The bundle's languages are ASR_MODEL_LANGUAGES, the ASR stack's
+ * AsrModelLanguages output; without it only English is taken. A per-VP ASR_ENGINE=microvm does not override
+ * that: the options are the deployment's, set by an administrator.
  */
 export function resolveVpAsrEngine(
     switches: AsrRuntimeSwitches,
     override: string | undefined = process.env.ASR_ENGINE,
+    transcribeOptions: TranscribeOnlyOptionSettings = vpTranscribeOnlySettings(),
+    bundleLanguages: readonly string[] = parseBundleLanguages(process.env.ASR_MODEL_LANGUAGES),
 ): AsrEngineName {
-    const requested =
-        (override || '').trim().toLowerCase() ||
-        (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
+    const explicit = (override || '').trim().toLowerCase();
+    const requested = explicit || (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
     if (requested !== 'microvm') {
         return 'transcribe';
     }
+    // Info for a VP that took the deployment's default; a per-VP ASR_ENGINE
+    // override is told louder.
+    const report = (message: string): void => {
+        if (explicit) {
+            log.warn(message);
+        } else {
+            log.info(message);
+        }
+    };
     if (!isMicrovmAsrConfigured()) {
-        console.warn('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        // A switch or per-VP override asked for the MicroVM engine on a
+        // deployment without it: the expected fallback.
+        report('[ASR] MicroVM ASR requested but this deployment has no ASR launcher configured; using Amazon Transcribe.');
+        return 'transcribe';
+    }
+    const transcribeOnly = transcribeOnlyOptions(transcribeOptions, bundleLanguages);
+    if (transcribeOnly.length > 0) {
+        report(
+            `[ASR] MicroVM ASR requested, but this VP's Amazon Transcribe options use ${transcribeOnly.join(', ')}, ` +
+                'which the MicroVM engine does not offer; using Amazon Transcribe.',
+        );
         return 'transcribe';
     }
     return 'microvm';
@@ -135,7 +216,7 @@ export async function fetchAsrRuntimeSwitches(
             body: JSON.stringify({ query: GET_ASR_CONFIG, variables: { AsrConfigId: 'CustomAsrConfig' } }),
         });
         if (!response.ok) {
-            console.warn(`[ASR] getAsrConfig returned HTTP ${response.status}; using defaults`);
+            log.warn(`[ASR] getAsrConfig returned HTTP ${response.status}; using defaults`);
             return { ...DEFAULT_SWITCHES };
         }
         const body = (await response.json()) as {
@@ -148,34 +229,31 @@ export async function fetchAsrRuntimeSwitches(
             errors?: unknown[];
         };
         if (body.errors?.length) {
-            console.warn(`[ASR] getAsrConfig errors: ${JSON.stringify(body.errors)}; using defaults`);
+            log.warn(`[ASR] getAsrConfig errors: ${JSON.stringify(body.errors)}; using defaults`);
             return { ...DEFAULT_SWITCHES };
         }
         const record = body.data?.getAsrConfig;
         return {
             virtualParticipantEngineMicrovm: record?.virtualParticipantEngineMicrovm === true,
-            diarizeVirtualParticipant: record?.diarizeVirtualParticipant === true,
+            diarizeVirtualParticipant:
+                typeof record?.diarizeVirtualParticipant === 'boolean'
+                    ? record.diarizeVirtualParticipant
+                    : DEFAULT_SWITCHES.diarizeVirtualParticipant,
         };
     } catch (error: any) {
-        console.warn(`[ASR] could not read the ASR config; using defaults: ${error?.message || error}`);
+        log.warn(`[ASR] could not read the ASR config; using defaults: ${error?.message || error}`);
         return { ...DEFAULT_SWITCHES };
     }
 }
 
 // --- speaker labels ---------------------------------------------------------
 
-/** Normalise an engine voice id to the `spk_N` form used everywhere else in LMA. */
-export const formatSpeakerLabel = (raw: string | null | undefined): string | undefined => {
-    const trimmed = (raw ?? '').trim();
-    if (trimmed.length === 0) {
-        return undefined;
-    }
-    return trimmed.startsWith('spk_') ? trimmed : `spk_${trimmed}`;
-};
+export { formatSpeakerLabel } from './transcribe-diarization.js';
+import { formatSpeakerLabel as labelOf } from './transcribe-diarization.js';
 
 /** Roster name plus the engine's voice id when diarization is on, in the transcriber's label format. */
 export const speakerNameFor = (rosterName: string, voiceId: string | null | undefined): string => {
-    const label = formatSpeakerLabel(voiceId);
+    const label = labelOf(voiceId);
     return label === undefined ? rosterName : `${rosterName} (${label})`;
 };
 
@@ -204,7 +282,7 @@ const invokeLauncher = async (payload: Record<string, string>): Promise<Record<s
             }),
         );
         if (response.FunctionError) {
-            console.error(
+            log.error(
                 `[ASR] launcher ${payload.action} failed: ${response.FunctionError} ${
                     response.Payload ? Buffer.from(response.Payload).toString('utf8') : ''
                 }`,
@@ -215,19 +293,19 @@ const invokeLauncher = async (payload: Record<string, string>): Promise<Record<s
             ? (JSON.parse(Buffer.from(response.Payload).toString('utf8')) as Record<string, string>)
             : undefined;
         if (!body || String(body.ok) !== 'true') {
-            console.error(`[ASR] launcher ${payload.action} refused: ${body ? body.reason : 'no response'}`);
+            log.error(`[ASR] launcher ${payload.action} refused: ${body ? body.reason : 'no response'}`);
             return undefined;
         }
         return body;
     } catch (error: any) {
-        console.error(`[ASR] launcher ${payload.action} error: ${error?.message || error}`);
+        log.error(`[ASR] launcher ${payload.action} error: ${error?.message || error}`);
         return undefined;
     }
 };
 
 export const acquireLease = async (callId: string): Promise<AsrLease | undefined> => {
     if (ASR_DIRECT_ENDPOINT) {
-        console.log(`[ASR] using ASR_DIRECT_ENDPOINT ${ASR_DIRECT_ENDPOINT} (no MicroVM launch)`);
+        log.info(`[ASR] using ASR_DIRECT_ENDPOINT ${ASR_DIRECT_ENDPOINT} (no MicroVM launch)`);
         return { endpointUrl: ASR_DIRECT_ENDPOINT };
     }
     const started = Date.now();
@@ -235,12 +313,40 @@ export const acquireLease = async (callId: string): Promise<AsrLease | undefined
     if (!body) {
         return undefined;
     }
-    console.log(`[ASR] acquired ASR MicroVM ${body.microvmId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    log.info(`[ASR] acquired ASR MicroVM ${body.microvmId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    if (body.microvmId) {
+        const memoryMiB = Number((body as Record<string, unknown>).memoryMiB);
+        leases.set(body.microvmId, { callId, acquiredAtMs: started, memoryMiB: memoryMiB > 0 ? memoryMiB : 0 });
+    }
     return { endpointUrl: `wss://${body.endpoint}`, microvmId: body.microvmId, authToken: body.authToken };
 };
 
+/**
+ * When each MicroVM this process launched was asked for, and its size, so that
+ * whichever path releases it can meter its lifetime for the meeting cost
+ * estimate. Keyed by MicroVM id; an entry is removed on release.
+ */
+const leases = new Map<string, { callId: string; acquiredAtMs: number; memoryMiB: number }>();
+
+/**
+ * The size the ASR image is built at when the launcher does not report one: the
+ * `BundleMemory` mapping in lma-asr-microvm-stack/template.yaml gives every
+ * bundle 8 GiB.
+ */
+const DEFAULT_ASR_MICROVM_MEMORY_MIB = 8192;
+
 export const releaseLease = async (microvmId: string): Promise<void> => {
     await invokeLauncher({ action: 'release', microvmId });
+    const lease = leases.get(microvmId);
+    if (lease) {
+        leases.delete(microvmId);
+        await meterAsrMicrovm(
+            lease.callId,
+            (Date.now() - lease.acquiredAtMs) / 1000,
+            lease.memoryMiB || DEFAULT_ASR_MICROVM_MEMORY_MIB,
+            { size: lease.memoryMiB ? 'reported by the launcher' : 'assumed from the image default' },
+        );
+    }
 };
 
 export const subprotocols = (authToken?: string): string[] =>
@@ -274,6 +380,23 @@ export const coalesceBacklog = (pending: Buffer[], maxFrameBytes: number = ASR_B
     return frames;
 };
 
+/**
+ * How long finishing a session waits for the engine's termination after eos.
+ *
+ * On eos the engine decodes what it has not yet reached, then closes the
+ * utterance still open and sends its final, which is the only row that
+ * utterance gets. That takes longer the more audio is not yet finalised, and on
+ * a busy MicroVM it has taken well over five seconds, so a fixed grace cut the
+ * final off. The wait is the usual grace plus `perOpenSecondMs` per second not
+ * yet finalised, up to `maxMs`; an engine that has caught up answers at once.
+ */
+export const finishWaitMs = (
+    unfinalisedSeconds: number,
+    baseMs: number = ASR_FINISH_TIMEOUT_MS,
+    perOpenSecondMs: number = ASR_FINISH_MS_PER_OPEN_SECOND,
+    maxMs: number = ASR_FINISH_MAX_WAIT_MS,
+): number => Math.min(Math.max(baseMs, maxMs), baseMs + Math.max(0, unfinalisedSeconds) * perOpenSecondMs);
+
 // --- session ----------------------------------------------------------------
 
 export interface MicrovmAsrSessionOptions {
@@ -284,11 +407,17 @@ export interface MicrovmAsrSessionOptions {
     /** False once the meeting is over, so a closed socket is not reconnected. */
     isMeetingLive: () => boolean;
     /** Transcript channel this session feeds; tags its segment ids and log lines. */
-    channel?: 'CALLER' | 'AGENT';
+    channel?: SpeechChannel;
     /** Ordinal of this run within the meeting, so a restart cannot reuse earlier segment ids. */
     run?: number;
     /** Meeting time already covered by earlier runs; rows continue from here. */
     timeBaseSeconds?: number;
+    /**
+     * The meeting's language code, which a row in that language takes as its
+     * LanguageCode. Defaults to the VP's Amazon Transcribe language setting, read
+     * when each row arrives.
+     */
+    meetingLanguageCode?: () => string;
 }
 
 /** The VP's single ASR session: a WebSocket to the MicroVM plus message-to-row mapping. */
@@ -313,13 +442,15 @@ export class MicrovmAsrSession {
     private sentBytes = 0;
     private finishing: Promise<void> | null = null;
     private unsentDroppedBytes = 0;
+    /** Engine time, on the current connection's clock, up to which the engine has sent finals. */
+    private finalisedThroughSeconds = 0;
     private lease: AsrLease;
     private readonly channel: string;
     private readonly logPrefix: string;
 
     constructor(private readonly options: MicrovmAsrSessionOptions) {
         this.lease = options.lease;
-        this.channel = options.channel ?? 'CALLER';
+        this.channel = options.channel ?? REMOTE_CHANNEL;
         this.logPrefix = `[ASR ${this.channel}]`;
         this.timeOffsetSeconds = options.timeBaseSeconds ?? 0;
         this.observedMaxEnd = this.timeOffsetSeconds;
@@ -343,6 +474,20 @@ export class MicrovmAsrSession {
 
     get microvmId(): string | undefined {
         return this.lease.microvmId;
+    }
+
+    /**
+     * The MicroVM to connect to. A session can be created, and pushed audio,
+     * before its MicroVM is acquired: it holds that audio (up to
+     * ASR_MAX_PENDING_BYTES) and sends it when start() connects.
+     */
+    updateLease(lease: AsrLease): void {
+        this.lease = lease;
+    }
+
+    /** Seconds of audio waiting for a connection. */
+    get heldSeconds(): number {
+        return (this.pendingBytes + this.outboundBytes) / BYTES_PER_SECOND;
     }
 
     /** Connect and wait for the engine's ready handshake. */
@@ -384,7 +529,7 @@ export class MicrovmAsrSession {
                 this.ws.send(frame);
                 this.sentBytes += frame.length;
             } catch (error: any) {
-                console.log(`${this.logPrefix} send failed: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} send failed: ${error?.message || error}`);
             }
             return;
         }
@@ -394,6 +539,11 @@ export class MicrovmAsrSession {
         this.pendingBytes += frame.length;
         while (this.pendingBytes > ASR_MAX_PENDING_BYTES && this.pending.length > 1) {
             const oldest = this.pending.shift()!;
+            if (this.droppedBytes === 0) {
+                log.warn(
+                    `${this.logPrefix} more than ${(ASR_MAX_PENDING_BYTES / BYTES_PER_SECOND).toFixed(0)}s of audio is waiting for the engine; dropping the oldest`,
+                );
+            }
             this.pendingBytes -= oldest.length;
             this.droppedBytes += oldest.length;
             this.unsentDroppedBytes += oldest.length;
@@ -416,24 +566,39 @@ export class MicrovmAsrSession {
             const terminated = new Promise<void>((resolve) => {
                 this.terminationResolve = resolve;
             });
+            // The engine still has to decode what it has not reached (a backlog
+            // sent when the connection opened, say) and close the open utterance;
+            // that grows with the audio not yet finalised (finishWaitMs).
+            const unfinalised = Math.max(0, this.sentBytes / BYTES_PER_SECOND - this.finalisedThroughSeconds);
+            const waitMs = finishWaitMs(unfinalised);
+            const startedAt = Date.now();
             try {
                 this.ws.send(JSON.stringify({ type: 'eos' }));
                 let timer: NodeJS.Timeout | undefined;
-                await Promise.race([
-                    terminated,
-                    new Promise<void>((resolve) => {
-                        timer = setTimeout(resolve, ASR_FINISH_TIMEOUT_MS);
+                const outcome = await Promise.race([
+                    terminated.then(() => 'terminated' as const),
+                    new Promise<'timeout'>((resolve) => {
+                        timer = setTimeout(() => resolve('timeout'), waitMs);
                     }),
                 ]);
                 clearTimeout(timer);
+                if (outcome === 'timeout') {
+                    log.warn(
+                        `${this.logPrefix} the engine had not finished ${waitMs} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio not yet finalised); closing without its last rows`,
+                    );
+                } else {
+                    log.info(
+                        `${this.logPrefix} engine finished ${Date.now() - startedAt} ms after the end of the stream (${unfinalised.toFixed(1)}s of audio had not been finalised)`,
+                    );
+                }
             } catch (error: any) {
-                console.log(`${this.logPrefix} eos failed: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} eos failed: ${error?.message || error}`);
             }
         }
         this.terminationResolve = null;
         this.close();
         if (this.droppedBytes > 0) {
-            console.warn(
+            log.warn(
                 `${this.logPrefix} dropped ${(this.droppedBytes / BYTES_PER_SECOND).toFixed(1)}s of audio while disconnected`,
             );
         }
@@ -472,7 +637,7 @@ export class MicrovmAsrSession {
                 handshakeTimeout: ASR_HANDSHAKE_TIMEOUT_MS,
             });
         } catch (error: any) {
-            console.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
+            log.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
             this.settleReady(false);
             void this.scheduleReconnect();
             return;
@@ -489,6 +654,10 @@ export class MicrovmAsrSession {
                 interim_results: true,
                 word_timestamps: false,
                 diarize: this.options.diarize,
+                // A voice label on partials too, read from the open row's own
+                // latest audio, so a live row can be named by its voice before
+                // its final (engines without it send none).
+                partial_speakers: this.options.diarize,
                 max_speakers: 0,
                 // Nothing else: the threshold, utterance floor and turn-cut
                 // behaviour are the bundle's operating point baked into the image.
@@ -496,6 +665,7 @@ export class MicrovmAsrSession {
             this.sentBytes = 0;
             this.timeOffsetSeconds += this.unsentDroppedBytes / BYTES_PER_SECOND;
             this.unsentDroppedBytes = 0;
+            this.finalisedThroughSeconds = 0;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
@@ -503,7 +673,7 @@ export class MicrovmAsrSession {
                     this.sentBytes += frame.length;
                 }
             } catch (error: any) {
-                console.error(`${this.logPrefix} handshake failed: ${error?.message || error}`);
+                log.error(`${this.logPrefix} handshake failed: ${error?.message || error}`);
             }
             this.pending = [];
             this.pendingBytes = 0;
@@ -517,22 +687,28 @@ export class MicrovmAsrSession {
             try {
                 message = JSON.parse(data.toString()) as AsrServerMessage;
             } catch (error: any) {
-                console.warn(`${this.logPrefix} unparseable frame: ${error?.message || error}`);
+                log.warn(`${this.logPrefix} unparseable frame: ${error?.message || error}`);
                 return;
             }
             this.onMessage(message);
         });
 
         socket.on('error', (error: Error) => {
-            console.error(`${this.logPrefix} websocket error: ${error.message}`);
+            log.error(`${this.logPrefix} websocket error: ${error.message}`);
         });
 
         socket.on('close', (code: number, reason: Buffer) => {
             this.open = false;
-            if (this.finished || !this.options.isMeetingLive()) {
+            if (this.finished) {
+                // Nothing more can arrive: a finish waiting for termination stops waiting.
+                this.terminationResolve?.();
+                this.terminationResolve = null;
                 return;
             }
-            console.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
+            if (!this.options.isMeetingLive()) {
+                return;
+            }
+            log.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
             this.settleReady(false);
             void this.scheduleReconnect();
         });
@@ -548,7 +724,7 @@ export class MicrovmAsrSession {
         this.readyAt = 0;
         this.attempt += 1;
         if (this.attempt > ASR_MAX_RETRIES) {
-            console.error(
+            log.error(
                 `${this.logPrefix} giving up after ${ASR_MAX_RETRIES} consecutive failures; the rest of this meeting will not be transcribed by the MicroVM engine`,
             );
             this.gaveUp = true;
@@ -588,28 +764,31 @@ export class MicrovmAsrSession {
                 this.readyAt = Date.now();
                 this.diarizeEffective = message.effective_config?.diarize === true;
                 if (this.options.diarize && !this.diarizeEffective) {
-                    console.warn(
+                    log.warn(
                         '[ASR] per-voice labels were requested but this ASR image has no speaker model baked in; rows carry the roster name only',
                     );
                 }
-                console.log(
+                log.info(
                     `${this.logPrefix} session ready (generation ${this.generation}, diarize=${this.diarizeEffective}, timeOffset=${this.timeOffsetSeconds.toFixed(2)}s)`,
                 );
                 this.settleReady(true);
                 break;
-            case 'partial':
             case 'final':
+                this.finalisedThroughSeconds = Math.max(this.finalisedThroughSeconds, message.end ?? message.start ?? 0);
+                this.emitSegment(message);
+                break;
+            case 'partial':
                 this.emitSegment(message);
                 break;
             case 'termination':
-                console.log(
+                log.info(
                     `${this.logPrefix} terminated after ${message.audio_seconds?.toFixed(1) ?? '?'}s audio, ${message.segments ?? 0} segment(s)`,
                 );
                 this.terminationResolve?.();
                 this.terminationResolve = null;
                 break;
             case 'error':
-                console.error(`${this.logPrefix} engine error ${message.code}: ${message.message}`);
+                log.error(`${this.logPrefix} engine error ${message.code}: ${message.message}`);
                 this.settleReady(false);
                 break;
             default:
@@ -627,6 +806,10 @@ export class MicrovmAsrSession {
         if (endSec > this.observedMaxEnd) {
             this.observedMaxEnd = endSec;
         }
+        const languageCode = microvmRowLanguageCode(
+            message.type === 'final' ? message.language : undefined,
+            this.options.meetingLanguageCode?.() ?? vpTranscribeOnlySettings().languageCode,
+        );
         // The id excludes the speaker: a partial's provisional label can be corrected
         // by its final, and both must land on one row.
         this.options.onSegment({
@@ -636,6 +819,8 @@ export class MicrovmAsrSession {
             text,
             isPartial: message.type !== 'final',
             speaker: message.speaker ?? undefined,
+            session: `r${this.options.run ?? 0}-g${this.generation}`,
+            ...(languageCode ? { languageCode } : {}),
         });
     }
 }

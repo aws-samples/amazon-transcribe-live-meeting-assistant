@@ -1,13 +1,11 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """Transcription Passthrough Lambda Function"""
 
 import asyncio
-import json
-import re
 from os import environ, getenv
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -25,6 +23,11 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from batch_item_failures import SequenceTrackingBatchProcessor, send_discarded_records
 from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
+from graphql_helpers import describe_exception, traceback_frames
+
+# from the configuration layer
+from lma_metering import MeteringWriter, comprehend_units
+from metrics_utils.emf import METRICS
 
 # pylint: enable=import-error
 
@@ -34,18 +37,14 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDbTable
     from mypy_boto3_lambda.client import LambdaClient
-    from mypy_boto3_sns.client import SNSClient
     from mypy_boto3_sqs.client import SQSClient
-    from mypy_boto3_ssm.client import SSMClient
 else:
     Boto3Session = object
     DynamoDBServiceResource = object
     DynamoDbTable = object
     LambdaClient = object
     ComprehendClient = object
-    SNSClient = object
     SQSClient = object
-    SSMClient = object
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
 APPSYNC_CLIENT = AppsyncAioGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
@@ -72,8 +71,21 @@ else:
     COMPREHEND_CLIENT = None
 COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
-SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
-SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
+# Comprehend sentiment is one request per final transcript segment, so it is
+# metered on a running counter per meeting rather than a record per request.
+# Inert when METERING_TABLE_NAME is unset.
+METERING = MeteringWriter(source="call-event-processor")
+
+
+def meter_sentiment_request(call_id: str, text: str) -> None:
+    """Count one DetectSentiment request against the meeting's cost estimate."""
+    METERING.add(
+        call_id,
+        "Sentiment",
+        "comprehend/detect-sentiment",
+        {"units": comprehend_units(text), "requests": 1},
+    )
+
 
 # Records that cannot be decoded are copied here instead of being reported as
 # batch item failures. The event source mapping's own on-failure destination is
@@ -85,13 +97,6 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_LOOP = asyncio.get_event_loop()
 
-setting_response = SSM_CLIENT.get_parameter(Name=getenv("PARAMETER_STORE_NAME"))
-SETTINGS = json.loads(setting_response["Parameter"]["Value"])
-if "CategoryAlertRegex" in SETTINGS:
-    SETTINGS["AlertRegEx"] = re.compile(SETTINGS["CategoryAlertRegex"])
-if "AssistantWakePhraseRegEx" in SETTINGS:
-    SETTINGS["AssistantWakePhraseRegEx"] = re.compile(SETTINGS["AssistantWakePhraseRegEx"])
-
 
 async def process_event(event) -> SequenceTrackingBatchProcessor:
     """Processes a Batch of Transcript Records"""
@@ -101,12 +106,12 @@ async def process_event(event) -> SequenceTrackingBatchProcessor:
             is_lambda_agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
         ),
         sentiment_analysis_args=dict(
-            comprehend_client=COMPREHEND_CLIENT, comprehend_language_code=COMPREHEND_LANGUAGE_CODE
+            comprehend_client=COMPREHEND_CLIENT,
+            comprehend_language_code=COMPREHEND_LANGUAGE_CODE,
+            on_comprehend_request=meter_sentiment_request,
         ),
         # called for each record right before the context manager exits
         api_mutation_fn=execute_process_event_api_mutation,
-        sns_client=SNS_CLIENT,
-        settings=SETTINGS,
     ) as processor:
         await processor.handle_event(event=event)
 
@@ -122,7 +127,22 @@ def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
     configured with ``FunctionResponseTypes: [ReportBatchItemFailures]``, so the
     shard checkpoint advances past every record except the ones named here. See
     ``batch_item_failures`` for which failures are reported and why.
+
+    The body is a separate function so that the metric record is written on
+    every exit path. ``finally`` rather than a trailing call: this handler
+    raises deliberately when a failure cannot be expressed as a sequence
+    number, and that invocation's measurements -- which include the segment
+    write failures that are the reason for measuring at all -- would otherwise
+    be the ones lost.
     """
+    try:
+        return _handle(event)
+    finally:
+        METRICS.flush()
+
+
+def _handle(event) -> Dict[str, List[Dict[str, str]]]:
+    """Process one Kinesis batch. See :func:`handler`."""
     LOGGER.debug("lambda event", extra={"event": event})
 
     processor = EVENT_LOOP.run_until_complete(process_event(event=event))
@@ -131,10 +151,18 @@ def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
 
     errors = event_processor_results.get("errors", [])
     for error in errors:
+        # The exception's type with its GraphQL errors reduced to errorType/path
+        # -- that is what a log query or metric filter matches on -- and the
+        # traceback as frames, which is the chain that makes an unexpected
+        # response shape diagnosable. Frames rather than `exc_info` because a
+        # rendered traceback ends in the exception's own text, and a GraphQL
+        # transport exception's text is its first error message.
         LOGGER.error(
             "event processor error: %s",
-            error,
-            exc_info=error if isinstance(error, BaseException) else None,
+            describe_exception(error) if isinstance(error, BaseException) else error,
+            extra=dict(
+                frames=(traceback_frames(error) if isinstance(error, BaseException) else []),
+            ),
         )
 
     discarded = processor.discarded_sequence_numbers

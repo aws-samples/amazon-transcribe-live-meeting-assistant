@@ -248,6 +248,7 @@ public sealed class TrayApp
             SyncTaskbar();
         });
         _controller.OnLog = msg => _app.Dispatcher.Invoke(() => _panel.OnLog(msg));
+        _controller.OnConsentState = state => _app.Dispatcher.Invoke(() => _panel.OnConsentState(state));
         // Surface a video-source fallback (chosen window closed -> whole screen):
         // privacy-relevant, so it gets a notification, not just a log line.
         _controller.OnVideoFallback = msg => _app.Dispatcher.Invoke(() =>
@@ -474,6 +475,8 @@ public sealed class TrayApp
         host.Content = _panel;
         _panelHost = host;
         _panel.Refresh();
+        // Whenever the panel is shown: the meeting consent settings in force.
+        _panel.RefreshConsentSettings();
     }
 
     /// <summary>
@@ -534,18 +537,11 @@ public sealed class TrayApp
                 if (_controller.IsAuthenticated &&
                     _controller.CurrentState.Kind != CaptureController.StateKind.Streaming)
                 {
-                    // First-ever recording: gate on the consent disclaimer — show
-                    // the panel with the dialog instead of silently starting.
-                    if (_panel.NeedsDisclaimer)
-                    {
-                        _panel.ShowDisclaimerGate();
-                        ShowControlPanel();
-                        return;
-                    }
-                    // Same settings path as the panel's Start button, so
-                    // JumpList-started recordings get the right speaker labels.
-                    _panel.PushSettingsToController();
-                    _controller.Start();
+                    // The same checks as the panel's Start button — the meeting
+                    // consent step, then the first-ever recording disclaimer — so a
+                    // JumpList start shows the panel when either needs the user
+                    // rather than starting without it.
+                    _panel.StartFromCommand(ShowControlPanel);
                 }
                 else
                 {

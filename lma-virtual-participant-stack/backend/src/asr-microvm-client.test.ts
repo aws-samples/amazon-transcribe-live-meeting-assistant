@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -28,7 +28,7 @@ import type { AsrSegment } from './asr-microvm-client.js';
 // at 2 s backoff, no endpoint - and the timing and fallback tests below would run
 // against those. A dynamic import after the assignments is what makes the env
 // actually apply.
-const { MicrovmAsrSession, coalesceBacklog, fetchAsrRuntimeSwitches, resolveVpAsrEngine, speakerNameFor } =
+const { MicrovmAsrSession, coalesceBacklog, fetchAsrRuntimeSwitches, finishWaitMs, resolveVpAsrEngine, speakerNameFor } =
     await import('./asr-microvm-client.js');
 
 interface FakeAsr {
@@ -79,7 +79,7 @@ const newSession = (
     rows: AsrSegment[],
     live = { value: true },
     diarize = true,
-    channel: 'CALLER' | 'AGENT' = 'CALLER',
+    channel: 'REMOTE' | 'LOCAL' = 'REMOTE',
 ) =>
     new MicrovmAsrSession({
         callId: 'vp-test-call',
@@ -118,6 +118,46 @@ test('a partial and its final land on one row, and speaker labels follow the eng
         assert.equal(rows[1].speaker, 'spk_1');
         assert.equal(rows[1].text, 'Hello there.');
         assert.ok(asr.audioBytes >= 3200, 'audio reached the engine');
+    } finally {
+        await asr.close();
+    }
+});
+
+test('a diarized session asks for voice labels on partials too, and passes them through', async () => {
+    const configs: Record<string, unknown>[] = [];
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) {
+                const message = JSON.parse(data.toString());
+                if (message.type === 'config') configs.push(message);
+                return;
+            }
+            socket.send(
+                JSON.stringify({ type: 'partial', segment: 4, text: 'so what', start: 2.0, end: 3.1, speaker: 'spk_0' }),
+            );
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const diarized = newSession(asr, rows);
+    const plain = newSession(asr, [], { value: true }, false);
+    try {
+        assert.equal(await diarized.start(), true);
+        assert.equal(await plain.start(), true);
+        diarized.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await diarized.finish();
+        await plain.finish();
+
+        assert.deepEqual(
+            configs.map((config) => [config.diarize, config.partial_speakers]),
+            [
+                [true, true],
+                [false, false],
+            ],
+        );
+        assert.equal(rows[0]?.isPartial, true);
+        assert.equal(rows[0]?.speaker, 'spk_0');
     } finally {
         await asr.close();
     }
@@ -246,20 +286,21 @@ test('the per-VP override beats the Virtual Participant engine setting, and both
     );
 });
 
-test('the runtime switches are read from getAsrConfig and default off on any failure', async () => {
-    const okFetch = (async () =>
-        new Response(
-            JSON.stringify({ data: { getAsrConfig: { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true } } }),
-        )) as unknown as typeof fetch;
-    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', okFetch), {
-        virtualParticipantEngineMicrovm: true,
-        diarizeVirtualParticipant: true,
-    });
+const answering = (record: unknown) =>
+    (async () => new Response(JSON.stringify({ data: { getAsrConfig: record } }))) as unknown as typeof fetch;
 
-    const noRecord = (async () => new Response(JSON.stringify({ data: { getAsrConfig: null } }))) as unknown as typeof fetch;
-    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', noRecord), {
+test('the runtime switches are read from getAsrConfig; any failure means Amazon Transcribe with voice separation', async () => {
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches(
+            'https://example/graphql',
+            answering({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true }),
+        ),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true },
+    );
+
+    assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', answering(null)), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
 
     const failing = (async () => {
@@ -267,13 +308,28 @@ test('the runtime switches are read from getAsrConfig and default off on any fai
     }) as unknown as typeof fetch;
     assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', failing), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
 
     assert.deepEqual(await fetchAsrRuntimeSwitches(''), {
         virtualParticipantEngineMicrovm: false,
-        diarizeVirtualParticipant: false,
+        diarizeVirtualParticipant: true,
     });
+});
+
+test('a saved choice of no voice separation wins over the default', async () => {
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches(
+            'https://example/graphql',
+            answering({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false }),
+        ),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false },
+    );
+    // A record without the field takes the default.
+    assert.deepEqual(
+        await fetchAsrRuntimeSwitches('https://example/graphql', answering({ virtualParticipantEngineMicrovm: true })),
+        { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true },
+    );
 });
 
 test('speaker names are the roster name plus the voice id in the shared label format', () => {
@@ -312,15 +368,15 @@ test('two sessions on one engine never share a segment id', async () => {
     });
     const meeting: AsrSegment[] = [];
     const agent: AsrSegment[] = [];
-    const a = newSession(asr, meeting, { value: true }, true, 'CALLER');
-    const b = newSession(asr, agent, { value: true }, false, 'AGENT');
+    const a = newSession(asr, meeting, { value: true }, true, 'REMOTE');
+    const b = newSession(asr, agent, { value: true }, false, 'LOCAL');
     try {
         assert.deepEqual(await Promise.all([a.start(), b.start()]), [true, true]);
         a.pushPcm(Buffer.alloc(3200));
         b.pushPcm(Buffer.alloc(3200));
         await until(() => meeting.length === 1 && agent.length === 1);
-        assert.equal(meeting[0].segmentId, 'vp-caller-r0-g0-s1');
-        assert.equal(agent[0].segmentId, 'vp-agent-r0-g0-s1');
+        assert.equal(meeting[0].segmentId, 'vp-remote-r0-g0-s1');
+        assert.equal(agent[0].segmentId, 'vp-local-r0-g0-s1');
         await Promise.all([a.finish(), b.finish()]);
     } finally {
         await asr.close();
@@ -394,7 +450,7 @@ test('a later run continues the meeting timeline and never reuses an earlier seg
         diarize: false,
         onSegment: (segment) => rows.push(segment),
         isMeetingLive: () => true,
-        channel: 'CALLER',
+        channel: 'REMOTE',
         run: 1,
         timeBaseSeconds: 600,
     });
@@ -403,7 +459,7 @@ test('a later run continues the meeting timeline and never reuses an earlier seg
         assert.equal(await session.start(), true);
         session.pushPcm(Buffer.alloc(3200));
         await until(() => rows.length === 1);
-        assert.equal(rows[0].segmentId, 'vp-caller-r1-g0-s0');
+        assert.equal(rows[0].segmentId, 'vp-remote-r1-g0-s0');
         assert.equal(rows[0].startSec, 600.5);
         assert.equal(rows[0].endSec, 602);
         await session.finish();
@@ -571,4 +627,213 @@ test('after an outage longer than the buffer, the newest audio is kept and rows 
     } finally {
         await asr.close();
     }
+});
+
+test('an enrolled name is not turned into a voice id', () => {
+    // With voice enrollment on, the engine reports the enrolled person's NAME
+    // in the field that otherwise carries a voice id. Prefixing it produced
+    // "spk_Sarah Lee"; the WebSocket transcriber had the same defect.
+    assert.equal(speakerNameFor('Conference Room', 'Sarah Lee'), 'Conference Room (Sarah Lee)');
+    assert.equal(speakerNameFor('Conference Room', '李雷'), 'Conference Room (李雷)');
+});
+
+test('a bare Transcribe index still becomes spk_N', () => {
+    assert.equal(speakerNameFor('Conference Room', '0'), 'Conference Room (spk_0)');
+    assert.equal(speakerNameFor('Conference Room', '29'), 'Conference Room (spk_29)');
+});
+
+test('a final row carries the language the engine named, as a locale; a partial carries none', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket, false);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            socket.send(JSON.stringify({ type: 'partial', segment: 0, text: 'hola a', start: 0.5, end: 1 }));
+            socket.send(
+                JSON.stringify({ type: 'final', segment: 0, text: 'Hola a todos.', start: 0.5, end: 1.5, language: 'es' }),
+            );
+            socket.send(
+                JSON.stringify({
+                    type: 'final',
+                    segment: 1,
+                    text: 'Thanks everyone for joining.',
+                    start: 2,
+                    end: 3,
+                    language: 'en',
+                }),
+            );
+            socket.send(JSON.stringify({ type: 'final', segment: 2, text: 'Okay.', start: 3.5, end: 4 }));
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: asr.url },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => true,
+        meetingLanguageCode: () => 'en-GB',
+    });
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await session.finish();
+
+        assert.equal(rows.length, 4);
+        assert.equal('languageCode' in rows[0], false, 'a partial names no language');
+        assert.equal(rows[1].languageCode, 'es-US', 'another language gets its default region');
+        assert.equal(rows[2].languageCode, 'en-GB', 'a row in the meeting language keeps the meeting region');
+        assert.equal('languageCode' in rows[3], false, 'a row the engine named no language for has none');
+    } finally {
+        await asr.close();
+    }
+});
+
+test('without a meeting language option a row takes the Virtual Participant language setting', async () => {
+    const previous = process.env.TRANSCRIBE_LANGUAGE_CODE;
+    process.env.TRANSCRIBE_LANGUAGE_CODE = 'es-ES';
+    const asr = await startFakeAsr((socket) => {
+        ready(socket, false);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            socket.send(
+                JSON.stringify({ type: 'final', segment: 0, text: 'Hola a todos.', start: 0.5, end: 1.5, language: 'es' }),
+            );
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows, { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await session.finish();
+        assert.equal(rows[0]?.languageCode, 'es-ES');
+    } finally {
+        await asr.close();
+        if (previous === undefined) delete process.env.TRANSCRIBE_LANGUAGE_CODE;
+        else process.env.TRANSCRIBE_LANGUAGE_CODE = previous;
+    }
+});
+
+test('a session created before its MicroVM exists sends what it held once it is given one, even after the meeting ended', async () => {
+    // The engine answers eos only after a second, twice the usual grace in this
+    // file (ASR_FINISH_TIMEOUT_MS=500), as it would while decoding a backlog.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(JSON.stringify({ type: 'final', segment: 0, text: 'said while it launched', start: 0.2, end: 1.4 }));
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 1.5, segments: 1 }));
+                }, 1000);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const live = { value: true };
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: '' },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => live.value,
+    });
+    try {
+        // A second and a half captured while the MicroVM launches, then the meeting ends.
+        for (let i = 0; i < 15; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        live.value = false;
+        assert.equal(session.heldSeconds, 1.5);
+        session.updateLease({ endpointUrl: asr.url, microvmId: 'm-1' });
+        assert.equal(session.microvmId, 'm-1');
+        assert.equal(await session.start(), true);
+        await session.finish();
+        assert.equal(asr.audioBytes, 3200 * 15, 'every held byte reached the engine');
+        assert.deepEqual(rows.map((row) => [row.text, row.startSec]), [['said while it launched', 0.2]]);
+    } finally {
+        await asr.close();
+    }
+});
+
+test('a stream that ends mid-utterance gets that utterance\'s final before finish returns', async () => {
+    // Only partials have been sent for the utterance in progress when the
+    // meeting ends; on eos the engine closes it, and its final takes three
+    // times the usual grace in this file (ASR_FINISH_TIMEOUT_MS=500) to arrive.
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+                socket.send(JSON.stringify({ type: 'partial', segment: 0, text: 'I bumped into', start: 0.5, end: 2 }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(
+                        JSON.stringify({ type: 'final', segment: 0, text: 'I bumped into the wall.', start: 0.5, end: 3 }),
+                    );
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 3, segments: 1 }));
+                }, 1500);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows, { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        // Three seconds of live audio, none of it finalised.
+        for (let i = 0; i < 30; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        await session.finish();
+        assert.deepEqual(
+            rows.map((row) => [row.text, row.isPartial]),
+            [
+                ['I bumped into', true],
+                ['I bumped into the wall.', false],
+            ],
+        );
+        assert.equal(rows[0].segmentId, rows[1].segmentId, 'the final closes the row its partial opened');
+    } finally {
+        await asr.close();
+    }
+});
+
+test('finishing stops waiting when the engine closes the connection', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: false } }));
+            }
+            if (message.type === 'eos') socket.close();
+        });
+    });
+    const session = newSession(asr, [], { value: true }, false);
+    try {
+        assert.equal(await session.start(), true);
+        // Ten seconds unfinalised: a wait of several seconds were the close ignored.
+        for (let i = 0; i < 100; i += 1) {
+            session.pushPcm(Buffer.alloc(3200, 1));
+        }
+        const started = Date.now();
+        await session.finish();
+        assert.ok(Date.now() - started < 1000, `finish took ${Date.now() - started} ms`);
+    } finally {
+        await asr.close();
+    }
+});
+
+test('the finish wait grows with the audio not yet finalised, within its bounds', () => {
+    assert.equal(finishWaitMs(0, 5000, 2000, 60000), 5000);
+    assert.equal(finishWaitMs(17, 5000, 2000, 60000), 39000);
+    assert.equal(finishWaitMs(3600, 5000, 2000, 60000), 60000);
+    assert.equal(finishWaitMs(10, 5000, 2000, 1000), 5000);
 });

@@ -1,29 +1,53 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 #
 import json
+import logging
 import os
 
 import boto3
 from botocore.config import Config
 
-print("Boto3 version: ", boto3.__version__)
+# pylint: disable=import-error
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    knowledge_base_prompt_templates,
+    read_setting,
+    resolve_model_id,
+)
+from lma_config import (
+    model_arn as bedrock_model_arn,
+)
+
+# pylint: enable=import-error
+
+# Questions, answers and the transcript passages they cite are logged at DEBUG
+# only; set LOG_LEVEL to DEBUG to see them.
+LOGGER = logging.getLogger()
+LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
 KB_ID = os.environ.get("KB_ID")
 KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
 
-# use inference profile for model id and arn as Nova models require the use of inference profiles
-MODEL_ID = os.environ.get("MODEL_ID")
 
-# if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
-# else it is an Inference Profile and use the profile's ARN
-if MODEL_ID.startswith("anthropic"):
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
-else:
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{MODEL_ID}"
+def model_arn():
+    """The ARN of the model the knowledge base answers with.
+
+    The model is the summaries' one: the Amazon Bedrock Models section's value
+    on the Configuration page, else the shipped default in setting_defaults.json.
+    Read per request, so a change reaches this function within the section's
+    cache tier rather than at its next cold start. Run within the section's
+    Model inference geography; a plain model id is addressed as a foundation
+    model and any other as an inference profile.
+    """
+    model_id = resolve_model_id(
+        read_setting(LANGUAGE_MODELS.name, "summaryModelId"), region=KB_REGION
+    )
+    return bedrock_model_arn(model_id, KB_REGION, KB_ACCOUNT_ID)
+
 
 KB_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
@@ -38,7 +62,8 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
         "retrieveAndGenerateConfiguration": {
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KB_ID,
-                "modelArn": MODEL_ARN,
+                "modelArn": model_arn(),
+                **knowledge_base_prompt_templates(),
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
                         "filter": {"equals": {"key": "Owner", "value": userId}}
@@ -49,19 +74,19 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
         },
     }
     if isAdminUser:
-        print("Admin user, no retrieval filters")
+        LOGGER.info("Admin user, no retrieval filters")
         input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop(
             "retrievalConfiguration", None
         )
     if sessionId:
         input["sessionId"] = sessionId
-    print("Amazon Bedrock KB Request: ", input)
+    LOGGER.debug("Amazon Bedrock KB Request: %s", input)
     try:
         resp = KB_CLIENT.retrieve_and_generate(**input)
     except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
+        LOGGER.warning("Amazon Bedrock KB Exception: %s", e)
         resp = {"systemMessage": "Amazon Bedrock KB Error: " + str(e)}
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
+    LOGGER.debug("Amazon Bedrock KB Response: %s", json.dumps(resp))
     return resp
 
 
@@ -94,7 +119,7 @@ def markdown_response(kb_response):
 
 
 def handler(event, context):
-    print("Received event: %s" % json.dumps(event))
+    LOGGER.debug("Received event: %s", json.dumps(event))
     query = event["arguments"]["input"]
     sessionId = event["arguments"].get("sessionId") or None
     userId = event["identity"]["username"]
@@ -104,5 +129,5 @@ def handler(event, context):
         isAdminUser = "Admin" in groups
     kb_response = get_kb_response(query, userId, isAdminUser, sessionId)
     kb_response["markdown"] = markdown_response(kb_response)
-    print("Returning response: %s" % json.dumps(kb_response))
+    LOGGER.debug("Returning response: %s", json.dumps(kb_response))
     return json.dumps(kb_response)

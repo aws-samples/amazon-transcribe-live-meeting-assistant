@@ -6,7 +6,7 @@ title: "Browser Extension"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
-The extension adds a side panel to meeting tabs on **Zoom, Microsoft Teams, Amazon Chime, Cisco Webex and Google Meet**, capturing both your microphone and the other participants' audio from the tab without adding a bot to the meeting. Google Meet is supported here and **not** by the [Virtual Participant](virtual-participant.md#supported-platforms), so the extension is the route for Meet meetings.
+The extension adds a side panel to meeting tabs on **Zoom, Microsoft Teams, Amazon Chime, Cisco Webex and Google Meet**, capturing both your microphone and the other participants' audio from the tab without adding a bot to the meeting. The [Virtual Participant](virtual-participant.md#google-meet) can also join a Google Meet meeting where the meeting accepts guests from a browser; the extension works whatever the meeting's guest settings, because you are the one in the meeting.
 
 ### Download and unzip the extension
 
@@ -51,6 +51,43 @@ Choose `Allow` on the popup asking you to share the browser tab.
    <p align="center"><img src="../images/readme-browser-extension-listening.png" alt="Browser Extension Listening" width="350"/></p>
 
 Choose `Open in LMA` to see your live transcript, select language, and to interact with the meeting assistant.
+
+## How meeting speakers are named
+
+Your microphone's lines carry your name. The meeting tab's lines are named from
+the meeting page's active speaker, which the extension reads from the page and
+sends to LMA each time it changes.
+
+- **Each line is named after whoever the page showed while it was said**, not
+  after whoever is showing when the line reaches the transcript, which is a second
+  or more later. The server places each change of active speaker on the meeting's
+  audio clock as it arrives. Changes are moved back by 0.75 s to allow for the
+  page showing a change late. This allowance is the Virtual Participant's value for
+  meeting pages; it has not been measured for the extension. An administrator can
+  change it with the `SPEAKER_CHANGE_LAG_SECONDS` environment variable on the
+  WebSocket transcriber task. This applies on the ASR MicroVM engine, and on Amazon
+  Transcribe when speakers within a channel are identified (below). Otherwise,
+  Amazon Transcribe lines are named as before.
+- **When speakers within a channel are identified**, each line also carries a
+  voice id, and the voice corrects the page. Once a voice has been heard for long
+  enough alongside one participant, its lines are named after that participant,
+  even where the page's indicator is late or flickers, as it does on short replies.
+  A voice that starts to carry a second person goes back to the page's names, and
+  a [voice enrollment](voice-enrollment.md) name always wins. A voice id is shown
+  only under the participant the voice is attributed to, so it does not appear
+  under two names. This is the same rule the Virtual Participant uses; see
+  [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)
+  for its thresholds and for what it did on a measured meeting.
+
+The extension does not choose whether speakers within a channel are identified, so
+the deployment default applies: the WebSocket transcriber stack's
+`ShowSpeakerLabel` parameter, or **Identify speakers within a channel by default**
+on the Configuration page. Both are off unless an administrator turns them on.
+
+When the page shows nobody speaking, the last person it showed carries on. Until
+the page has shown anybody, or when the extension cannot read the page (see
+below), lines are named as before, after the name the extension started the
+meeting with for the other participants.
 
 ## If the panel shows no platform, name or active speaker
 

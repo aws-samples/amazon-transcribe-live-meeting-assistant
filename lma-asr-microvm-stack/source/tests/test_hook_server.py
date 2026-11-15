@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the Lambda MicroVMs lifecycle hook server.
 
@@ -64,6 +64,8 @@ class Harness:
             sleep=self._sleep,
             now=lambda: self.clock,
             log=self.messages.append,
+            # The warm-up runs inline here, so one call shows its outcome.
+            run_in_background=lambda work: work(),
         )
 
     def _spawn(self):
@@ -243,3 +245,123 @@ def test_the_warm_exercise_asks_for_speaker_labels_when_a_diarizer_is_baked(
     (tmp_path / "diarizer").mkdir()
     (tmp_path / "diarizer" / "model_quantized.onnx").write_bytes(b"graph")
     assert hook_server.speaker_labels_baked() is True
+
+
+def test_ready_answers_while_the_warm_decode_runs_and_starts_only_one() -> None:
+    """Lambda's retries get 503 at once while the decode runs, then 200."""
+    import threading
+
+    harness = Harness()
+    release = threading.Event()
+    started = threading.Event()
+
+    def slow_exercise() -> bool:
+        started.set()
+        release.wait(5)
+        harness.exercises += 1
+        return True
+
+    threads: list[threading.Thread] = []
+
+    def in_thread(work):
+        thread = threading.Thread(target=work)
+        threads.append(thread)
+        thread.start()
+
+    harness.deps.exercise = slow_exercise
+    harness.deps.run_in_background = in_thread
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert started.wait(5)
+    # Retries while the decode runs are answered at once and start nothing.
+    assert hooks.on_ready() == 503
+    assert hooks.on_ready() == 503
+    assert len(threads) == 1
+    release.set()
+    threads[0].join(5)
+    assert hooks.on_ready() == 200
+    assert harness.exercises == 1
+
+
+def test_ready_stays_503_until_the_warm_up_decode_completes() -> None:
+    """The snapshot must not be taken before the offline model has decoded."""
+    import threading
+
+    harness = Harness()
+    release = threading.Event()
+    started = threading.Event()
+    order: list[str] = []
+
+    def slow_decode() -> bool:
+        started.set()
+        release.wait(5)
+        order.append("decode")
+        return True
+
+    def exercise() -> bool:
+        order.append("exercise")
+        return True
+
+    threads: list[threading.Thread] = []
+
+    def in_thread(work):
+        thread = threading.Thread(target=work)
+        threads.append(thread)
+        thread.start()
+
+    harness.deps.warm_decode = slow_decode
+    harness.deps.exercise = exercise
+    harness.deps.run_in_background = in_thread
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert started.wait(5)
+    assert hooks.on_ready() == 503
+    assert hooks.state.warm is False
+    release.set()
+    threads[0].join(5)
+    assert hooks.on_ready() == 200
+    # The decode runs before the exercise, so the exercise streams to a warm model.
+    assert order == ["decode", "exercise"]
+    assert hooks.state.warm_decoded is True
+
+
+def test_ready_reports_503_and_skips_the_exercise_when_the_warm_up_decode_fails() -> None:
+    harness = Harness()
+    results = [False, True]
+    harness.deps.warm_decode = lambda: results.pop(0)
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert harness.exercises == 0
+    # The next /ready retries the decode rather than snapshotting without it.
+    assert hooks.on_ready() == 200
+    assert harness.exercises == 1
+
+
+def test_validate_replays_the_warm_up_decode_and_reports_200_even_if_it_fails() -> None:
+    harness = Harness()
+    decodes: list[int] = []
+
+    def decode() -> bool:
+        decodes.append(1)
+        return len(decodes) == 1
+
+    harness.deps.warm_decode = decode
+    hooks = Hooks(harness.deps)
+    assert hooks.on_ready() == 200
+
+    assert hooks.on_validate() == 200
+    assert len(decodes) == 2
+    assert harness.exercises == 2
+    assert hooks.state.validated is False
+
+
+def test_a_ready_request_waits_only_briefly_for_the_listener() -> None:
+    """A model that takes minutes to load does not hold a request open."""
+    harness = Harness(listening_after=10_000)
+    hooks = Hooks(harness.deps)
+
+    assert hooks.on_ready() == 503
+    assert sum(harness.sleeps) <= 10

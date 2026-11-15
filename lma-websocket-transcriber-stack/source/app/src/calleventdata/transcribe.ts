@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { FastifyInstance } from 'fastify';
@@ -11,14 +11,7 @@ import {
     TranscribeStreamingClient,
     StartStreamTranscriptionCommand,
     TranscriptResultStream,
-    StartCallAnalyticsStreamTranscriptionCommand,
-    StartCallAnalyticsStreamTranscriptionCommandInput,
-    CallAnalyticsTranscriptResultStream,
-    ConfigurationEvent,
-    ParticipantRole,
-    ChannelDefinition,
     StartStreamTranscriptionCommandInput,
-    ContentRedactionOutput,
     LanguageCode,
     ContentRedactionType,
     Item,
@@ -29,9 +22,11 @@ import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 
 import {
     CallStartEvent,
+    CallCaptureContextEvent,
     CallEndEvent,
     CallRecordingEvent,
     CallVideoRecordingEvent,
+    CallVideoKeyframeEvent,
     AddTranscriptSegmentEvent,
     SocketCallData,
     CallMetaData,
@@ -40,11 +35,17 @@ import {
     CHANNEL_SYSTEM
 } from './eventtypes';
 
+import { transcriptChannelFor } from './channels';
+import type { CaptureContext, TranscriptionContext } from './capture-context';
+import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
+import { pageSpeakersFor } from './speaker-fusion';
+
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     RunThresholds,
+    SpeakerRun,
     anyChannelDiarized,
     appendSpeakerLabel,
     buildSpeakerRuns,
@@ -62,14 +63,9 @@ import {
 // offline tests that import this module.
 import { normalizeErrorForLogging } from '../utils/common';
 import { stringifyCallMetaData } from '../utils/log-redaction';
-
-const formatPath = function (path: string) {
-    let pathOut = path;
-    if (path.length > 0 && path.charAt(path.length - 1) != '/') {
-        pathOut += '/';
-    }
-    return pathOut;
-};
+import { noteTranscriptSegment } from '../metrics/session';
+import { meterTranscribeRequest, pcmSeconds } from '../metering';
+import { TranscriptionSettings, getSessionSettings, isRedactionApplied } from './session-settings';
 
 import dotenv from 'dotenv';
 // dotenv v17 prints an "injected env" banner to stdout by default; quiet
@@ -77,42 +73,13 @@ import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
-const TRANSCRIBE_API_MODE = process.env['TRANSCRIBE_API_MODE'] || 'standard';
-const isTCAEnabled = TRANSCRIBE_API_MODE === 'analytics';
-const TRANSCRIBE_LANGUAGE_CODE =
-    process.env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
-const TRANSCRIBE_LANGUAGE_OPTIONS =
-    process.env['TRANSCRIBE_LANGUAGE_OPTIONS'] || undefined;
-const TRANSCRIBE_PREFERRED_LANGUAGE =
-    process.env['TRANSCRIBE_PREFERRED_LANGUAGE'] || 'None';
-const CUSTOM_VOCABULARY_NAME =
-    process.env['CUSTOM_VOCABULARY_NAME'] || undefined;
-const CUSTOM_LANGUAGE_MODEL_NAME =
-    process.env['CUSTOM_LANGUAGE_MODEL_NAME'] || undefined;
-const IS_CONTENT_REDACTION_ENABLED =
-    (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
-const CONTENT_REDACTION_TYPE = process.env['CONTENT_REDACTION_TYPE'] || 'PII';
-const TRANSCRIBE_PII_ENTITY_TYPES =
-    process.env['TRANSCRIBE_PII_ENTITY_TYPES'] || undefined;
-const TCA_DATA_ACCESS_ROLE_ARN = process.env['TCA_DATA_ACCESS_ROLE_ARN'] || '';
-const CALL_ANALYTICS_FILE_PREFIX = formatPath(
-    process.env['CALL_ANALYTICS_FILE_PREFIX'] || 'lca-call-analytics-json/'
-);
-const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
-// optional - disable post call analytics output
-const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
-    (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
-// optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
-const POST_CALL_CONTENT_REDACTION_OUTPUT =
-    process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
+// The Amazon Transcribe options -- language, redaction, custom vocabulary and
+// language model, the speaker-partitioning default -- are read per meeting from
+// the Amazon Transcribe section of the Configuration page, with this task's
+// environment as the fallback: see session-settings.ts.
+// Every request is a two-channel stream, with channel identification on.
+const TRANSCRIBE_CHANNELS = 2;
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
-// Deployment-wide DEFAULT for speaker partitioning (CFN parameter
-// ShowSpeakerLabel), used only when the client sends neither
-// diarizeSystemChannel nor diarizeMicChannel in its START frame. An explicit
-// client flag always wins — see diarizationSettingsFor(). Defaults to false so a
-// deployment that never sets it behaves exactly as it did before the feature.
-const showSpeakerLabelDefault =
-    (process.env['SHOW_SPEAKER_LABEL'] || 'false') === 'true';
 // Minimum size for a run of same-speaker words to be split out as its own
 // transcript segment; both must be cleared. Fitted to real recordings, where the
 // spurious runs were consistently 1-2 words — so the WORD threshold does the
@@ -137,12 +104,6 @@ const diarizationMaxSegmentSeconds = parseFloat(
 );
 const DEBUG = (process.env['DEBUG'] || 'false') === 'true';
 
-const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
-
-type transcriptionCommandInput<TCAEnabled> = TCAEnabled extends true
-    ? StartCallAnalyticsStreamTranscriptionCommandInput
-    : StartStreamTranscriptionCommandInput;
-
 const kinesisClient = new KinesisClient({ region: AWS_REGION });
 const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
 
@@ -150,12 +111,15 @@ const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
  * Effective per-channel diarization settings for a call.
  *
  * Precedence: an EXPLICIT client flag always wins. Only when the client sent
- * neither flag do we fall back to the deployment default (CFN ShowSpeakerLabel),
- * applied to both channels. Kept here rather than in diarization.ts because it
- * reads the environment, and diarization.ts must stay env-free so the offline
- * unit tests can import it.
+ * neither flag do we fall back to the deployment default, applied to both
+ * channels: the "Identify speakers within a channel by default" setting of the
+ * Amazon Transcribe section, whose own default is the ShowSpeakerLabel stack
+ * parameter. The caller reads it (see session-settings.ts) and passes it in.
  */
-export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationSettings => {
+export const diarizationSettingsFor = (
+    callMetaData: CallMetaData,
+    deploymentDefault: boolean
+): DiarizationSettings => {
     const clientSpecified =
         typeof callMetaData.diarizeSystemChannel === 'boolean' ||
         typeof callMetaData.diarizeMicChannel === 'boolean';
@@ -166,14 +130,27 @@ export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationS
         };
     }
     return {
-        diarizeSystemChannel: showSpeakerLabelDefault,
-        diarizeMicChannel: showSpeakerLabelDefault,
+        diarizeSystemChannel: deploymentDefault,
+        diarizeMicChannel: deploymentDefault,
     };
 };
 
+/**
+ * Writes one event to the call data stream. Errors are logged and swallowed, so
+ * a lost event never ends a call -- except with `rethrow`, for a caller that has
+ * something to undo when the event was not written (the key frames, see
+ * videokeyframes.ts).
+ */
 export const writeCallEvent = async (
-    callEvent: CallStartEvent | CallEndEvent | CallRecordingEvent | CallVideoRecordingEvent,
-    server: FastifyInstance
+    callEvent:
+        | CallStartEvent
+        | CallCaptureContextEvent
+        | CallEndEvent
+        | CallRecordingEvent
+        | CallVideoRecordingEvent
+        | CallVideoKeyframeEvent,
+    server: FastifyInstance,
+    { rethrow = false }: { rethrow?: boolean } = {}
 ) => {
     const putParams = {
         StreamName: kdsStreamName,
@@ -201,25 +178,55 @@ export const writeCallEvent = async (
                 error
             )} Event: ${stringifyCallMetaData(callEvent)}`
         );
+        if (rethrow) {
+            throw error;
+        }
     }
 };
 
+/**
+ * The meeting's START event, which creates its record. `captureContext` is how
+ * the meeting is captured and transcribed (capture-context.ts), stored on the
+ * record with it.
+ */
 export const writeCallStartEvent = async (
     callMetaData: CallMetaData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    captureContext?: CaptureContext
 ): Promise<void> => {
     const callStartEvent: CallStartEvent = {
         EventType: 'START',
         CallId: callMetaData.callId,
-        CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
-        SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        CustomerPhoneNumber: callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME,
+        SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AgentId: callMetaData.agentId,
         CreatedAt: new Date().toISOString(),
+        ...captureContext,
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callStartEvent, server);
+};
+
+/**
+ * The meeting record's transcription fields again, for a meeting transcribed by
+ * another engine than the one its START event named.
+ */
+export const writeCaptureContextEvent = async (
+    callMetaData: CallMetaData,
+    context: TranscriptionContext,
+    server: FastifyInstance
+): Promise<void> => {
+    const event: CallCaptureContextEvent = {
+        EventType: 'UPDATE_CAPTURE_CONTEXT',
+        CallId: callMetaData.callId,
+        ...context,
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
+    };
+    await writeCallEvent(event, server);
 };
 
 export const writeCallEndEvent = async (
@@ -229,8 +236,8 @@ export const writeCallEndEvent = async (
     const callEndEvent: CallEndEvent = {
         EventType: 'END',
         CallId: callMetaData.callId,
-        CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
-        SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        CustomerPhoneNumber: callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME,
+        SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
@@ -309,6 +316,85 @@ export const frameAudioChunk = (
     return frames;
 };
 
+/**
+ * One Transcribe request's view of the meeting's shared audio stream.
+ *
+ * Each request reads the shared source through a sink of its own, so closing a
+ * request never destroys the source the WebSocket handler keeps writing into.
+ * The tap also counts every byte that left the source for this request, which
+ * is the request's share of the meeting's audio: bytes it sent, and bytes still
+ * in its sink when it ended, which no later request will see either. The next
+ * request's audio starts right after them, so that count, not the last word
+ * Transcribe returned, is where the next request's clock starts.
+ */
+export interface AudioTap {
+    readonly sink: stream.PassThrough;
+    /** Detach from the source (idempotent) and return the bytes this tap took from it. */
+    close(): number;
+}
+
+export const openAudioTap = (source: stream.Readable, endWithSource = false): AudioTap => {
+    const sink = new stream.PassThrough();
+    let bytes = 0;
+    let closed = false;
+    // Sees each chunk as the source hands it to the pipe below. Removed along
+    // with the pipe, which leaves the source paused, so audio that arrives
+    // between two requests waits in the source for the next one.
+    const count = (chunk: Buffer): void => {
+        bytes += chunk.length;
+    };
+    source.on('data', count);
+    // A live meeting's source outlives every request, so ending it must not end
+    // a request's sink. The one exception is a request for the audio held for a
+    // meeting that has already ended (heldAudioOnly): there the source's end is
+    // the end of that request's audio.
+    source.pipe(sink, { end: endWithSource });
+    return {
+        sink,
+        close: (): number => {
+            if (!closed) {
+                closed = true;
+                source.unpipe(sink);
+                source.off('data', count);
+                sink.destroy();
+            }
+            return bytes;
+        },
+    };
+};
+
+/**
+ * Resolves true once the meeting's audio stream holds audio for a request, or
+ * false if the meeting ends first. A request opened with no audio coming (a session held for its
+ * client to reconnect) is closed by Amazon Transcribe after its idle timeout
+ * and billed at the request minimum, so it is not opened until there is audio.
+ */
+export const waitForAudio = async (
+    source: stream.Readable,
+    isEnded: () => boolean,
+    pollMs = 200
+): Promise<boolean> => {
+    while (source.readableLength === 0) {
+        if (isEnded() || source.destroyed) {
+            return false;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    return !isEnded();
+};
+
+/**
+ * Where the next Transcribe request's clock starts on the meeting's timeline:
+ * this request's start plus the duration of the audio it took. Transcribe's
+ * item times restart at 0 with every request, and the audio recording holds
+ * every byte, so this is what keeps the two in step.
+ */
+export const nextRequestTimeOffset = (
+    timeOffsetSeconds: number,
+    bytesTaken: number,
+    sampleRate: number
+): number => timeOffsetSeconds + pcmSeconds(bytesTaken, sampleRate, TRANSCRIBE_CHANNELS);
+
 // True when a Transcribe streaming error indicates the SessionId we tried to
 // resume is no longer valid (expired / closed / unknown), so the next attempt
 // must start a fresh session rather than reuse the stale id. Kept in sync with
@@ -329,15 +415,100 @@ const isStaleSessionError = (error: unknown): boolean => {
     );
 };
 
+/**
+ * Lays a meeting's Amazon Transcribe options onto a streaming request: the
+ * language or language identification, redaction where it applies, and the
+ * custom vocabulary and language model when one is named.
+ */
+export const applyTranscribeOptions = (
+    tsParams: StartStreamTranscriptionCommandInput,
+    transcription: TranscriptionSettings
+): void => {
+    const identifying =
+        transcription.languageCode === 'identify-language' ||
+        transcription.languageCode === 'identify-multiple-languages';
+    if (transcription.languageCode === 'identify-language') {
+        tsParams.IdentifyLanguage = true;
+    } else if (transcription.languageCode === 'identify-multiple-languages') {
+        tsParams.IdentifyMultipleLanguages = true;
+    } else {
+        tsParams.LanguageCode = transcription.languageCode as LanguageCode;
+    }
+    if (identifying && transcription.languageOptions) {
+        tsParams.LanguageOptions =
+            transcription.languageOptions.replace(/\s/g, '');
+        if (transcription.preferredLanguage !== 'None') {
+            tsParams.PreferredLanguage =
+                transcription.preferredLanguage as LanguageCode;
+        }
+    }
+
+    if (isRedactionApplied(transcription)) {
+        tsParams.ContentRedactionType = transcription.contentRedactionType as ContentRedactionType;
+        if (transcription.piiEntityTypes) {
+            tsParams.PiiEntityTypes = transcription.piiEntityTypes;
+        }
+    }
+    if (transcription.customVocabularyName) {
+        tsParams.VocabularyName = transcription.customVocabularyName;
+    }
+    if (transcription.customLanguageModelName) {
+        tsParams.LanguageModelName = transcription.customLanguageModelName;
+    }
+};
+
+/** Bytes waiting in a meeting's audio stream that no request has taken yet. */
+export const heldAudioBytes = (source: stream.Readable | undefined): number => {
+    if (!source) {
+        return 0;
+    }
+    const writable = (source as unknown as { writableLength?: number }).writableLength ?? 0;
+    return source.readableLength + writable;
+};
+
+export interface TranscribeStartOptions {
+    /**
+     * The meeting has already ended, while another engine was starting for it
+     * (an ASR MicroVM that could not be acquired in time or at all). Its audio
+     * stream still holds what the client sent meanwhile: that audio is sent in
+     * one request, which ends with it, and no further request is opened.
+     */
+    heldAudioOnly?: boolean;
+}
+
 export const startTranscribe = async (
     socketCallMap: SocketCallData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    options: TranscribeStartOptions = {}
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
-    // Resolved ONCE per call, not per Transcribe session: the settings come from
-    // the START frame and must survive every reconnect unchanged.
-    const diarization = diarizationSettingsFor(callMetaData);
+    // Taken by the first request only; every later attempt is an ordinary one,
+    // which a meeting that has ended does not open.
+    let heldAudioRequestPending = options.heldAudioOnly === true;
+    // Resolved ONCE per call, not per Transcribe session: a meeting keeps the
+    // options it started with across every reconnect, so a change saved on the
+    // Configuration page mid-meeting cannot change its language or redaction
+    // part way through.
+    const { transcription } = socketCallMap.sessionSettings ?? (await getSessionSettings(server.log));
+    const redactionApplied = isRedactionApplied(transcription);
+    if (transcription.contentRedactionEnabled && !redactionApplied) {
+        // Redaction is privacy-bearing, so a request for it that cannot be met
+        // is said out loud rather than left to a redaction=false further down.
+        server.log.warn(
+            `[TRANSCRIBING]: [${callMetaData.callId}] - Redaction is on, but Amazon Transcribe does not redact ` +
+                `${transcription.languageCode} while streaming (only en-US, en-AU, en-GB and es-US); this meeting ` +
+                'is transcribed without redaction.'
+        );
+    }
+    server.log.info(
+        `[TRANSCRIBING]: [${callMetaData.callId}] - Amazon Transcribe options: language=${transcription.languageCode}` +
+            `, redaction=${redactionApplied}, vocabulary=${transcription.customVocabularyName || 'none'}` +
+            `, languageModel=${transcription.customLanguageModelName || 'none'}`
+    );
+    // Resolved ONCE per call too: the settings come from the START frame, with
+    // the deployment default beneath them, and must survive every reconnect.
+    const diarization = diarizationSettingsFor(callMetaData, transcription.showSpeakerLabel);
     server.log.info(
         `[DIARIZATION]: [${callMetaData.callId}] - Speaker partitioning: system/meeting channel (${CHANNEL_SYSTEM})=${
             diarization.diarizeSystemChannel === true
@@ -372,13 +543,30 @@ export const startTranscribe = async (
     // relative to the audio sent in EACH StartStreamTranscription request and
     // reset to 0 on every (re)connect — reusing SessionId does NOT resume the
     // timeline (it is only an identifier). So each time we reconnect we carry a
-    // cumulative offset (seconds) equal to the highest segment EndTime seen so
-    // far, keeping the meeting transcript timeline monotonic instead of
-    // restarting at 0 and overlapping earlier segments (GitHub #292).
+    // cumulative offset (seconds): the duration of the audio the earlier
+    // requests took (see openAudioTap). That keeps the transcript monotonic
+    // (GitHub #292) and on the audio recording's clock. The last segment's end
+    // time would not: it leaves out the silence after the last word and the
+    // audio still in flight when a request ended, so every reconnect would put
+    // the rest of the transcript earlier than the recording.
     const startTranscribeSession = async (retryCount = 0, timeOffsetSeconds = 0): Promise<void> => {
         // Stop retrying once the call has legitimately ended (socket closed /
         // end event) — otherwise we'd spin forever after a normal hang-up.
-        if (socketCallMap.ended) {
+        const heldAudioOnly = heldAudioRequestPending;
+        heldAudioRequestPending = false;
+        if (heldAudioOnly) {
+            const held = heldAudioBytes(audioInputStream);
+            // A capture discarded for consent has its stream destroyed: none of
+            // its audio is transcribed.
+            if (!audioInputStream || audioInputStream.destroyed || socketCallMap.discarded || held === 0) {
+                server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended with no audio held for transcription.`);
+                return;
+            }
+            server.log.info(
+                `[TRANSCRIBING]: [${callMetaData.callId}] - Call ended while its transcription engine was starting; ` +
+                    `transcribing the ${pcmSeconds(held, callMetaData.samplingRate, TRANSCRIBE_CHANNELS).toFixed(1)}s of audio held for it.`
+            );
+        } else if (socketCallMap.ended) {
             server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended; not (re)starting transcription session.`);
             return;
         }
@@ -387,11 +575,56 @@ export const startTranscribe = async (
             return;
         }
 
+        // Audio waits in the shared stream between requests, so this reads its
+        // buffer without taking anything from it.
+        const waitStartMs = Date.now();
+        if (!heldAudioOnly && audioInputStream && !(await waitForAudio(audioInputStream, () => socketCallMap.ended))) {
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended while waiting for audio; not (re)starting transcription session.`);
+            return;
+        }
+        if (Date.now() - waitStartMs >= 1000) {
+            server.log.info(
+                `[TRANSCRIBING]: [${callMetaData.callId}] - Audio resumed after ${Date.now() - waitStartMs} ms; opening the Transcribe request.`
+            );
+        }
         const attemptStartMs = Date.now();
-        // Highest absolute segment EndTime observed during this attempt; seeds
-        // the next reconnect's offset. Starts at the incoming offset so an
-        // attempt that produces nothing still carries the timeline forward.
+        // This attempt's own reader of the shared audio stream. Opened before
+        // the request so its byte count covers everything this attempt takes.
+        const tap = audioInputStream ? openAudioTap(audioInputStream, heldAudioOnly) : undefined;
+        if (heldAudioOnly) {
+            // Nothing more is written to an ended meeting's stream: ending it
+            // flushes what it holds into the tap, whose end ends the request.
+            audioInputStream?.end();
+        }
+        // Audio bytes this attempt's request carried, and whether the request was
+        // accepted at all: Transcribe bills an accepted request for the seconds of
+        // audio it was sent (15-second minimum), and nothing for one it refused.
+        // Metered once per attempt, before any reconnect, so a long meeting's
+        // usage is on record as it goes rather than only at the end.
+        let attemptAudioBytes = 0;
+        let attemptAccepted = false;
+        let attemptMetered = false;
+        const meterAttempt = async (): Promise<void> => {
+            if (attemptMetered || !attemptAccepted) {
+                return;
+            }
+            attemptMetered = true;
+            await meterTranscribeRequest(
+                callMetaData.callId,
+                pcmSeconds(attemptAudioBytes, callMetaData.samplingRate, TRANSCRIBE_CHANNELS),
+                {
+                    redaction: redactionApplied,
+                    customLanguageModel: Boolean(transcription.customLanguageModelName),
+                    channels: TRANSCRIBE_CHANNELS,
+                    logger: server.log,
+                }
+            );
+        };
+        // Highest absolute segment EndTime observed during this attempt, for the
+        // reconnect log line only; the next offset comes from the audio taken.
         let observedMaxEndTime = timeOffsetSeconds;
+        const nextOffset = (): number =>
+            nextRequestTimeOffset(timeOffsetSeconds, tap?.close() ?? 0, callMetaData.samplingRate);
         // Recompute retryCount for the *next* attempt: reset to 0 if this
         // attempt was healthy (ran long enough), otherwise increment.
         // Centralised so both the clean-close and the error paths stay
@@ -419,34 +652,7 @@ export const startTranscribe = async (
             );
 
             const transcribeInput = async function* () {
-                if (isTCAEnabled) {
-                    const channel0: ChannelDefinition = {
-                        ChannelId: 0,
-                        ParticipantRole: ParticipantRole.CUSTOMER,
-                    };
-                    const channel1: ChannelDefinition = {
-                        ChannelId: 1,
-                        ParticipantRole: ParticipantRole.AGENT,
-                    };
-                    const channel_definitions: ChannelDefinition[] = [];
-                    channel_definitions.push(channel0);
-                    channel_definitions.push(channel1);
-                    const configuration_event: ConfigurationEvent = {
-                        ChannelDefinitions: channel_definitions,
-                    };
-                    if (IS_TCA_POST_CALL_ANALYTICS_ENABLED) {
-                        configuration_event.PostCallAnalyticsSettings = {
-                            OutputLocation: tcaOutputLocation,
-                            DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
-                        };
-                        if (IS_CONTENT_REDACTION_ENABLED) {
-                            configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
-                                POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
-                        }
-                    }
-                    yield { ConfigurationEvent: configuration_event };
-                }
-                if (audioInputStream == undefined) {
+                if (tap == undefined) {
                     server.log.error(
                         `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
                     );
@@ -459,36 +665,29 @@ export const startTranscribe = async (
                 // result stream and we reconnect. That would destroy the single
                 // audioInputStream the WebSocket handler keeps writing into,
                 // throwing "Cannot call write after a stream was destroyed" and
-                // breaking every subsequent reconnect. Instead pipe the shared
-                // source into a per-session sink we own, iterate that, and on
-                // teardown detach + destroy only the sink; the shared source
-                // survives for the next session. Audio that arrives during the
-                // brief reconnect gap buffers in the source and flows once the
-                // next session re-pipes.
-                const audioSink = new stream.PassThrough();
-                audioInputStream.pipe(audioSink, { end: false });
+                // breaking every subsequent reconnect. Instead iterate this
+                // session's own sink (openAudioTap), and on teardown detach and
+                // destroy only the sink; the shared source survives for the next
+                // session. Audio that arrives during the brief reconnect gap
+                // buffers in the source and flows to the next session.
                 try {
-                    for await (const chunk of audioSink) {
+                    for await (const chunk of tap.sink) {
                         // Never yield a chunk Transcribe would reject as too big
                         // (see frameAudioChunk): audio queued while this consumer
                         // was starting arrives as one large buffer.
                         for (const frame of frameAudioChunk(chunk)) {
+                            attemptAudioBytes += frame.length;
                             yield { AudioEvent: { AudioChunk: frame } };
                         }
                     }
                 } finally {
-                    audioInputStream.unpipe(audioSink);
-                    audioSink.destroy();
+                    tap.close();
                 }
             };
 
             let tsStream;
-            let outputCallAnalyticsStream:
-            | AsyncIterable<CallAnalyticsTranscriptResultStream>
-            | undefined;
-            let outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined;
 
-            const tsParams: transcriptionCommandInput<typeof isTCAEnabled> = {
+            const tsParams: StartStreamTranscriptionCommandInput = {
                 MediaSampleRateHertz: callMetaData.samplingRate,
                 MediaEncoding: 'pcm',
                 AudioStream: transcribeInput(),
@@ -509,105 +708,40 @@ export const startTranscribe = async (
                 );  
             }
 
-            if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
-                tsParams.IdentifyLanguage = true;
-                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                        tsParams.PreferredLanguage =
-                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-                    }
-                }
-            } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
-                (tsParams as StartStreamTranscriptionCommandInput).IdentifyMultipleLanguages = true;
-                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                        tsParams.PreferredLanguage =
-                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-                    }
-                }
-            } else {
-                tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
+            applyTranscribeOptions(tsParams, transcription);
+
+            tsParams.EnableChannelIdentification = true;
+            tsParams.NumberOfChannels = 2;
+            // ShowSpeakerLabel is a STREAM-level flag, so it goes on as soon
+            // as EITHER channel wants diarization; writeTranscriptionSegment
+            // then applies the labels only to the channel(s) that opted in.
+            // Measured: enabling it does not change segmentation or accuracy
+            // on the other channel, so the asymmetric cases cost nothing.
+            // Note there is no MaxSpeakerLabels in the streaming API (batch
+            // only) — speaker count is not tunable here.
+            if (anyChannelDiarized(diarization)) {
+                tsParams.ShowSpeakerLabel = true;
             }
+            server.log.debug(
+                `[TRANSCRIBING]: [${
+                    callMetaData.callId
+                }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
+                    tsParams
+                )}`
+            );
+            const response = await transcribeClient.send(
+                new StartStreamTranscriptionCommand(tsParams)
+            );
+            sessionId = response.SessionId;
+            attemptAccepted = true;
+            server.log.debug(
+                `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
+            );
 
-            if (
-                IS_CONTENT_REDACTION_ENABLED &&
-            (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'es-US')
-            ) {
-                tsParams.ContentRedactionType =
-                    CONTENT_REDACTION_TYPE as ContentRedactionType;
-                if (TRANSCRIBE_PII_ENTITY_TYPES) {
-                    tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
-                }
-            }
-            if (CUSTOM_VOCABULARY_NAME) {
-                tsParams.VocabularyName = CUSTOM_VOCABULARY_NAME;
-            }
-            if (CUSTOM_LANGUAGE_MODEL_NAME) {
-                tsParams.LanguageModelName = CUSTOM_LANGUAGE_MODEL_NAME;
-            }
+            const outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined =
+                response.TranscriptResultStream;
 
-            if (isTCAEnabled) {
-                server.log.debug(
-                    `[TRANSCRIBING]: [${
-                        callMetaData.callId
-                    }] -StartCallAnalyticsStreamTranscriptionCommand args: ${JSON.stringify(
-                        tsParams
-                    )}`
-                );
-                const response = await transcribeClient.send(
-                    new StartCallAnalyticsStreamTranscriptionCommand(
-                        tsParams as StartCallAnalyticsStreamTranscriptionCommandInput
-                    )
-                );
-                sessionId = response.SessionId;
-                server.log.debug(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from TCA. Session Id: ${sessionId} ===`
-                );
-
-                outputCallAnalyticsStream = response.CallAnalyticsTranscriptResultStream;
-            } else {
-                (
-                    tsParams as StartStreamTranscriptionCommandInput
-                ).EnableChannelIdentification = true;
-                (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
-                // ShowSpeakerLabel is a STREAM-level flag, so it goes on as soon
-                // as EITHER channel wants diarization; writeTranscriptionSegment
-                // then applies the labels only to the channel(s) that opted in.
-                // Measured: enabling it does not change segmentation or accuracy
-                // on the other channel, so the asymmetric cases cost nothing.
-                // Note there is no MaxSpeakerLabels in the streaming API (batch
-                // only) — speaker count is not tunable here.
-                if (anyChannelDiarized(diarization)) {
-                    (tsParams as StartStreamTranscriptionCommandInput).ShowSpeakerLabel = true;
-                }
-                server.log.debug(
-                    `[TRANSCRIBING]: [${
-                        callMetaData.callId
-                    }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
-                        tsParams
-                    )}`
-                );
-                const response = await transcribeClient.send(
-                    new StartStreamTranscriptionCommand(tsParams)
-                );
-                sessionId = response.SessionId;
-                server.log.debug(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
-                );
-
-                outputTranscriptStream = response.TranscriptResultStream;
-            }
-
-            socketCallMap.startStreamTime = new Date();
-
-            if (outputCallAnalyticsStream) {
-                tsStream = stream.Readable.from(outputCallAnalyticsStream);
-            } else if (outputTranscriptStream) {
+            if (outputTranscriptStream) {
                 tsStream = stream.Readable.from(outputTranscriptStream);
             }
 
@@ -629,6 +763,7 @@ export const startTranscribe = async (
             } else {
                 throw new Error('Transcribe stream is empty');
             }
+            await meterAttempt();
 
             // The results stream completed WITHOUT throwing. Amazon Transcribe
             // closes the HTTP/2 stream server-side on its own schedule (idle
@@ -637,13 +772,14 @@ export const startTranscribe = async (
             // transcription stopped permanently while the client kept streaming
             // audio into a dead pipe (GitHub #292). Unless the call has ended,
             // treat an unexpected clean close as a reconnect.
+            const offset = nextOffset();
             if (!socketCallMap.ended) {
                 const next = nextRetryCount();
                 server.log.info(
-                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`
+                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}, timeOffset: ${offset.toFixed(2)}s (last segment ended at ${observedMaxEndTime.toFixed(2)}s)`
                 );
                 await backoff(next);
-                await startTranscribeSession(next, observedMaxEndTime);
+                await startTranscribeSession(next, offset);
             }
         } catch (error) {
             server.log.error(
@@ -651,6 +787,7 @@ export const startTranscribe = async (
                     callMetaData.callId
                 }] - Error in transcription session: ${normalizeErrorForLogging(error)}`
             );
+            await meterAttempt();
             // A reused SessionId can be rejected once Transcribe has closed the
             // session server-side (e.g. "session ... has expired" / not found).
             // Reusing a stale id then fails every retry until MAX_RETRIES aborts
@@ -663,14 +800,21 @@ export const startTranscribe = async (
                 );
                 sessionId = undefined;
             }
+            const offset = nextOffset();
             const next = nextRetryCount();
-            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`);
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}, timeOffset: ${offset.toFixed(2)}s (last segment ended at ${observedMaxEndTime.toFixed(2)}s)`);
             await backoff(next);
-            await startTranscribeSession(next, observedMaxEndTime);
+            await startTranscribeSession(next, offset);
         }
     };
 
-    await startTranscribeSession();
+    // Audio dropped from the front of the stream while an ASR MicroVM was
+    // being acquired (heldAudioDroppedBytes) is in the recording but reaches no
+    // request, so the first request's clock starts after it.
+    await startTranscribeSession(
+        0,
+        pcmSeconds(socketCallMap.heldAudioDroppedBytes ?? 0, callMetaData.samplingRate, TRANSCRIBE_CHANNELS)
+    );
 };
 
 interface Segment {
@@ -739,6 +883,21 @@ function buildDiarizedSegments(
     const selection = selectEmittableWindows(windows, isPartial, progress.settledEmitted);
     progress.settledEmitted = selection.settledEmitted;
     const segments: Record<string, Segment> = {};
+    // The meeting audio is named after who the page showed during each turn, or
+    // the attendee its voice has been proven to (speaker-fusion.ts). Labels
+    // restart with each Transcribe session, and each has its own offset.
+    const pageSpeakers = channelId === CHANNEL_SYSTEM ? pageSpeakersFor(callMetadata) : undefined;
+    const speakerOf = (run: SpeakerRun): string =>
+        pageSpeakers === undefined
+            ? appendSpeakerLabel(speakerName, run.label)
+            : pageSpeakers.nameRow({
+                session: `transcribe-${timeOffsetSeconds}`,
+                label: run.label,
+                startTime: run.startTime + timeOffsetSeconds,
+                endTime: run.endTime + timeOffsetSeconds,
+                isPartial,
+                fallbackName: speakerName,
+            }).speaker;
     for (const window of selection.emit) {
         window.runs.forEach((run, runIndex) => {
             // Window and run index both derive from item timestamps, so a given
@@ -746,7 +905,7 @@ function buildDiarizedSegments(
             const segmentId = `${resultId}-${channelId}-w${window.index}-r${runIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
-                Speaker: appendSpeakerLabel(speakerName, run.label),
+                Speaker: speakerOf(run),
                 StartTime: run.startTime + timeOffsetSeconds,
                 EndTime: run.endTime + timeOffsetSeconds,
                 Transcript: runTranscript(run),
@@ -871,7 +1030,8 @@ function recordDiarizationDiagnostics(
             `[DIARIZATION]: [${callMetadata.callId}] - Speaker partitioning is enabled for ${channelId}` +
                 ` but Amazon Transcribe has returned NO speaker labels across ${diag.finals} final` +
                 ' results. Speaker partitioning is not supported for every transcription language —' +
-                ' check TRANSCRIBE_LANGUAGE_CODE. Segments will carry unlabelled speaker names.' +
+                ' check the language in the Amazon Transcribe section of the Configuration page.' +
+                ' Segments will carry unlabelled speaker names.' +
                 ` (runs seen: ${runCount})`
         );
     }
@@ -885,7 +1045,20 @@ export interface TranscriptSegmentRecord {
     Transcript: string;
     IsPartial: boolean;
     Speaker: string;
+    /** The identified language of the result the segment came from; see AddTranscriptSegmentEvent. */
+    LanguageCode?: string;
 }
+
+/**
+ * The language Amazon Transcribe identified for a result, or undefined when it
+ * names none. A result carries `LanguageCode` only when the stream asked for
+ * language identification (identify-language or identify-multiple-languages);
+ * with a fixed language it is absent, and so is the field on the segment.
+ */
+export const resultLanguageCode = (result: Pick<Result, 'LanguageCode'>): string | undefined => {
+    const code = typeof result.LanguageCode === 'string' ? result.LanguageCode.trim() : '';
+    return code || undefined;
+};
 
 // Shared by every transcription engine (Amazon Transcribe and the MicroVM ASR),
 // so both produce identical ADD_TRANSCRIPT_SEGMENT records downstream.
@@ -908,8 +1081,10 @@ export const writeSegmentToKds = async (
         UpdatedAt: now,
         Sentiment: undefined,
         TranscriptEvent: undefined,
-        UtteranceEvent: undefined,
         Speaker: segment.Speaker,
+        // Left out rather than null when unknown, so a record from a meeting
+        // with a fixed language is the same as before.
+        ...(segment.LanguageCode ? { LanguageCode: segment.LanguageCode } : {}),
         AccessToken: callMetadata.accessToken,
         IdToken: callMetadata.idToken,
         RefreshToken: callMetadata.refreshToken,
@@ -923,6 +1098,13 @@ export const writeSegmentToKds = async (
 
     try {
         await kinesisClient.send(new PutRecordCommand(putParams));
+        // After the write, not before: a segment that did not reach Kinesis has
+        // not been transcribed as far as anything downstream is concerned, and
+        // counting it here would mark the meeting as having produced a
+        // transcript and so suppress the metric that reports it did not. Both
+        // engines write through this function, so this is the only place the
+        // first segment of a meeting has to be recognised.
+        noteTranscriptSegment(callMetadata);
         server.log.debug(
             `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
                 kdsObject.EventType
@@ -1056,8 +1238,8 @@ function addItemToSegment(
 }
 
 // Returns the highest absolute segment EndTime (seconds) written by this call,
-// so the caller can advance the cumulative reconnect offset. Returns
-// timeOffsetSeconds unchanged when nothing was written.
+// which the caller logs when it reconnects. Returns timeOffsetSeconds unchanged
+// when nothing was written.
 export const writeTranscriptionSegment = async function (
     transcribeMessageJson: TranscriptEvent,
     callMetadata: CallMetaData,
@@ -1076,6 +1258,7 @@ export const writeTranscriptionSegment = async function (
                 result.ChannelId === CHANNEL_SYSTEM
                     ? callMetadata.activeSpeaker
                     : callMetadata?.agentId ?? 'n/a';
+            const languageCode = resultLanguageCode(result);
             const segments = processTranscriptionResults(
                 speakerName,
                 result,
@@ -1092,7 +1275,7 @@ export const writeTranscriptionSegment = async function (
                 await writeSegmentToKds(
                     {
                         SegmentId: segment.SegmentId,
-                        Channel: result.ChannelId === CHANNEL_SYSTEM ? 'CALLER' : 'AGENT',
+                        Channel: transcriptChannelFor(result.ChannelId),
                         StartTime: segment.StartTime,
                         EndTime: segment.EndTime,
                         Transcript: segment.Transcript,
@@ -1102,6 +1285,8 @@ export const writeTranscriptionSegment = async function (
                         // Already carries any `(spk_N)` suffix — see
                         // buildDiarizedSegments.
                         Speaker: segment.Speaker,
+                        // Every segment of a result is in the result's language.
+                        LanguageCode: languageCode,
                     },
                     callMetadata,
                     server

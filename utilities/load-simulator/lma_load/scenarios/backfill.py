@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Scenario 2 — Historical backfill.
 
 Fabricates N synthetic meetings distributed across the last Y days so we can

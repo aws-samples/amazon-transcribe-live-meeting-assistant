@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -191,6 +191,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 meeting_password=tool_input.get("meetingPassword"),
                 user_id=user_id,
                 is_admin=is_admin,
+                agenda=tool_input.get("agenda"),
             )
 
         elif tool_name == "start_meeting_now":
@@ -203,6 +204,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 is_admin=is_admin,
                 # Default ON; pass useStoredZoomCredentials=false to opt-out.
                 use_stored_zoom_credentials=tool_input.get("useStoredZoomCredentials", True),
+                agenda=tool_input.get("agenda"),
             )
 
         elif tool_name == "get_virtual_participant_status":
@@ -298,11 +300,36 @@ MCP_TOOLS = [
                 "meetingName": {"type": "string", "description": "Name/title of the meeting"},
                 "meetingPlatform": {
                     "type": "string",
-                    "description": "Platform (Zoom, Teams, Chime, Webex)",
+                    "description": "Platform (Zoom, Teams, Chime, Webex, Google Meet)",
                 },
-                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
+                "meetingId": {
+                    "type": "string",
+                    "description": (
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
+                        "abc-defg-hij). For Zoom, the full join link from the invitation (for "
+                        "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
+                        "instead of the ID and passcode, and is the most reliable option; a "
+                        "personal meeting link (https://<name>.zoom.us/my/<room>) works too."
+                    ),
+                },
                 "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
-                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "meetingPassword": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting passcode, as the invitation text shows it (for "
+                        'example "Passcode: 1234 5678"), not the pwd= value of a join link. '
+                        "If only a Zoom link is available, pass the whole link as meetingId, "
+                        "or the link's pwd value whole here."
+                    ),
+                },
+                "agenda": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting agenda, one item per line -- for example "
+                        "the agenda from the calendar invite. It is stored on the "
+                        "meeting record and shown on the meeting's page."
+                    ),
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
@@ -326,10 +353,35 @@ MCP_TOOLS = [
                 "meetingName": {"type": "string", "description": "Name/title of the meeting"},
                 "meetingPlatform": {
                     "type": "string",
-                    "description": "Platform (Zoom, Teams, Chime, Webex)",
+                    "description": "Platform (Zoom, Teams, Chime, Webex, Google Meet)",
                 },
-                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
-                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "meetingId": {
+                    "type": "string",
+                    "description": (
+                        "Meeting ID (numeric ID only; for Google Meet the meeting code, e.g. "
+                        "abc-defg-hij). For Zoom, the full join link from the invitation (for "
+                        "example https://us05web.zoom.us/j/81234567890?pwd=...) may be passed "
+                        "instead of the ID and passcode, and is the most reliable option; a "
+                        "personal meeting link (https://<name>.zoom.us/my/<room>) works too."
+                    ),
+                },
+                "meetingPassword": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting passcode, as the invitation text shows it (for "
+                        'example "Passcode: 1234 5678"), not the pwd= value of a join link. '
+                        "If only a Zoom link is available, pass the whole link as meetingId, "
+                        "or the link's pwd value whole here."
+                    ),
+                },
+                "agenda": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting agenda, one item per line -- for example "
+                        "the agenda from the calendar invite. It is stored on the "
+                        "meeting record and shown on the meeting's page."
+                    ),
+                },
                 "useStoredZoomCredentials": {
                     "type": "boolean",
                     "description": (
@@ -452,6 +504,7 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 meeting_password=arguments.get("meetingPassword"),
                 user_id=user_id,
                 is_admin=is_admin,
+                agenda=arguments.get("agenda"),
             )
         elif tool_name == "start_meeting_now":
             result = start_meeting_now.execute(
@@ -462,6 +515,7 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 user_id=user_id,
                 is_admin=is_admin,
                 use_stored_zoom_credentials=arguments.get("useStoredZoomCredentials", True),
+                agenda=arguments.get("agenda"),
             )
         elif tool_name == "get_virtual_participant_status":
             result = get_virtual_participant_status.execute(

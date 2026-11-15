@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Unit tests for the kinesis_injector driver."""
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def test_build_events_shapes_match_lma_pipeline():
     assert s1["StartTime"] < 1.0
     assert s3["EndTime"] <= 60.0
     assert s1["EndTime"] > s1["StartTime"]
-    assert s1["Channel"] in ("AGENT", "CALLER")
+    assert s1["Channel"] in ("LOCAL", "REMOTE")
     assert s1["IsPartial"] is False
 
 

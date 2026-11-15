@@ -1,0 +1,93 @@
+{
+  "corpus": "AMI Meeting Corpus",
+  "licence": "CC BY 4.0",
+  "meetings": {
+    "ES2004a": {
+      "audio": "noisy: headsets recorded at a low level, so levelling raises their noise floor",
+      "host": "B",
+      "hostRole": "PM",
+      "seconds": 1049.35,
+      "speakers": {
+        "A": {
+          "headset": "0",
+          "role": "UI",
+          "sha256": "abb4917719c6e033b066fbd400b6d37fe46ddd62c89b513f77016a51f54e2ad1"
+        },
+        "B": {
+          "headset": "1",
+          "role": "PM",
+          "sha256": "9be8e84e4ef93ea7eef669470cd6db017856f38f7321e0054199ad7393a1199c"
+        },
+        "C": {
+          "headset": "2",
+          "role": "ID",
+          "sha256": "a4f2f8ea7d965ede2c010e36bfc31c14c7792d07419bd5bc9519c8ddd1c8bc28"
+        },
+        "D": {
+          "headset": "3",
+          "role": "ME",
+          "sha256": "5b3cf59816d5160d77ff00315dc7f6db816c175edb65e0d61691679fae633572"
+        }
+      },
+      "stereoSha256": "650fad70ffec8a6eeaf633dba40dc142636fdbc081bf13b544e6c5db591526f4"
+    },
+    "IS1009c": {
+      "audio": "clean",
+      "host": "A",
+      "hostRole": "PM",
+      "seconds": 1820.67,
+      "speakers": {
+        "A": {
+          "headset": "0",
+          "role": "PM",
+          "sha256": "2d0b713a9a10ad3b3ea1719c845ab3758be092d09cfced4a37188a5084af412d"
+        },
+        "B": {
+          "headset": "1",
+          "role": "UI",
+          "sha256": "f95638c9089e04f1c523887d18a18a612cc74ffe7805fba0ad9fecaa55ebd62d"
+        },
+        "C": {
+          "headset": "2",
+          "role": "ID",
+          "sha256": "2a58b4c93f34daf6fdafc3f4a7f86020b9c3c7445b6804ad32540d5055081f88"
+        },
+        "D": {
+          "headset": "3",
+          "role": "ME",
+          "sha256": "0728c2e4e6123be0151f4315303654b95e0113244654abec2ff1cffb5e339d24"
+        }
+      },
+      "stereoSha256": "7c520d87f8a2c40d54859db64552c8a0c9df5163a27c42d8f066ec4f3457690b"
+    },
+    "IS1009d": {
+      "audio": "clean",
+      "host": "A",
+      "hostRole": "PM",
+      "seconds": 1944.49,
+      "speakers": {
+        "A": {
+          "headset": "0",
+          "role": "PM",
+          "sha256": "66c73315fc23dfe4dbf20aa62bdd63d8d0347572e4846d3708857c2d77667dee"
+        },
+        "B": {
+          "headset": "1",
+          "role": "UI",
+          "sha256": "b491356392d997f6edaf6bb803eeabb66a3360bababfa3ab8885605cb1c98168"
+        },
+        "C": {
+          "headset": "2",
+          "role": "ID",
+          "sha256": "bfc4661f8e4d6ec82792411c268beb0a0663cdb9b924ecee43dc388255cee772"
+        },
+        "D": {
+          "headset": "3",
+          "role": "ME",
+          "sha256": "45105c65c6b2162368c8f305029db6913edd24d962b6d0f7d93deca10978b402"
+        }
+      },
+      "stereoSha256": "48964150c4c3c78369777f96a00d63248f4ebaf2f49540922a7b286c716ec869"
+    }
+  }
+}

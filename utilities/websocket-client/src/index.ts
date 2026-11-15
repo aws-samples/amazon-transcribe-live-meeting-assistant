@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { emitKeypressEvents } from 'readline';
@@ -9,10 +9,33 @@ import { WebSocket } from 'ws';
 import * as fs from 'fs';
 import { chainUnchecked } from 'stream-chain';
 import { randomUUID } from 'crypto';
-import { CallMetaData } from '../../../lma-websocket-transcriber-stack/source/app/src/lca';
 
 import dotenv from 'dotenv';
 dotenv.config();
+
+/**
+ * The START / END control frame this client sends, as described in
+ * docs/websocket-streaming-api.md. It is declared here rather than imported
+ * from the transcriber because the server's own CallMetaData type is its
+ * internal per-call state (it requires fields the server fills in, such as
+ * activeSpeaker and channels), and importing it would make this utility's
+ * build depend on the transcriber's installed node_modules.
+ */
+type CallEventMessage = {
+    callId: string;
+    /** Speaker name for the microphone channel (ch_1). */
+    localSpeakerName?: string;
+    /** Speaker name for the meeting-audio channel (ch_0). */
+    remoteSpeakerName?: string;
+    samplingRate: number;
+    callEvent: 'START' | 'END';
+};
+
+// LOCAL_SPEAKER_NAME and REMOTE_SPEAKER_NAME; AGENT_ID and CALL_FROM_NUMBER are
+// their older names, still read.
+const LOCAL_SPEAKER_NAME = process.env['LOCAL_SPEAKER_NAME'] || process.env['AGENT_ID'] || 'websocket';
+const REMOTE_SPEAKER_NAME =
+    process.env['REMOTE_SPEAKER_NAME'] || process.env['CALL_FROM_NUMBER'] || 'Other Participant';
 
 const SAMPLE_RATE = parseInt(process.env['SAMPLE_RATE'] || '8000', 10);
 const BYTES_PER_SAMPLE = parseInt(process.env['BYTES_PER_SAMPLE'] || '2', 10);
@@ -27,7 +50,7 @@ const _CALL_ID = randomUUID();
 const timer = (millisec: number) => new Promise(cb => setTimeout(cb, millisec));
 
 new Command()
-    .description('LCA Websocket client')
+    .description('LMA WebSocket streaming client')
     .showHelpAfterError()
     .argument('[serveruri]', 'URI of websocket server')
     .option('--uri <uri>', 'URI of websocket server')
@@ -57,11 +80,10 @@ new Command()
                 console.log('Sending Call start event');
 
                 (async () => {
-                    const metadata: CallMetaData = {
+                    const metadata: CallEventMessage = {
                         callId: _CALL_ID,
-                        fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
-                        toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',
-                        agentId: process.env['AGENT_ID'] || 'websocket',
+                        localSpeakerName: LOCAL_SPEAKER_NAME,
+                        remoteSpeakerName: REMOTE_SPEAKER_NAME,
                         samplingRate: SAMPLE_RATE,
                         callEvent: 'START'
                     };
@@ -99,11 +121,10 @@ new Command()
                     console.log('Finished Sending the audio data chunks');
                     console.log('Sending Call End Event');
 
-                    const metadata: CallMetaData = {
+                    const metadata: CallEventMessage = {
                         callId: _CALL_ID,
-                        fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
-                        toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',
-                        agentId: process.env['AGENT_ID'] || 'websocket',
+                        localSpeakerName: LOCAL_SPEAKER_NAME,
+                        remoteSpeakerName: REMOTE_SPEAKER_NAME,
                         samplingRate: SAMPLE_RATE,
                         callEvent: 'END'
                     };

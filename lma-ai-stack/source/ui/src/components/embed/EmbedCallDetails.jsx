@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  *
  * EmbedCallDetails - Embeddable call details with selectable sub-panels.
@@ -29,6 +29,7 @@ import {
   Popover,
   SpaceBetween,
   Spinner,
+  StatusIndicator,
   Alert,
   TextContent,
   Toggle,
@@ -39,15 +40,22 @@ import markdownRehypePlugins from '../common/markdown-plugins';
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
-import mapCallsAttributes from '../common/map-call-attributes';
+import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
+import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 import { getMarkdownSummary } from '../common/summary';
-import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
+import { SUMMARY_IN_PROGRESS_TEXT, parseSummaryState, summaryStatusText } from '../common/summary-state';
+import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
+import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from '../common/speaker-identities';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 import onCreateCall from '../../graphql/queries/onCreateCall';
 import onUpdateCall from '../../graphql/queries/onUpdateCall';
+import { isChatChannel } from '../common/channels';
+import ChatSegment from '../chat-segment/ChatSegment';
 
 const gqlClient = generateClient();
 const logger = new ConsoleLogger('EmbedCallDetails');
@@ -58,13 +66,23 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 /**
  * Standalone summary panel - renders just the meeting summary.
  */
-const EmbedSummaryPanel = ({ item }) => (
-  <Container header={<Header variant="h4">Meeting Summary</Header>}>
-    <TextContent color="gray">
-      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{getMarkdownSummary(item.callSummaryText)}</ReactMarkdown>
-    </TextContent>
-  </Container>
-);
+const EmbedSummaryPanel = ({ item }) => {
+  // A meeting whose summary is on its way, or failed, says so rather than
+  // "Not available", in the meeting page's words. The panel updates from the
+  // same subscription the page does, so the summary replaces this when it lands.
+  const status = item.callSummaryText ? null : summaryStatusText(parseSummaryState(item.callSummaryState));
+  return (
+    <Container header={<Header variant="h4">Meeting Summary</Header>}>
+      {status === SUMMARY_IN_PROGRESS_TEXT && <StatusIndicator type="loading">{status}</StatusIndicator>}
+      {status && status !== SUMMARY_IN_PROGRESS_TEXT && <Box color="text-body-secondary">{status}</Box>}
+      {!status && (
+        <TextContent color="gray">
+          <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
+        </TextContent>
+      )}
+    </Container>
+  );
+};
 
 EmbedSummaryPanel.propTypes = {
   // eslint-disable-next-line react/forbid-prop-types
@@ -75,6 +93,11 @@ EmbedSummaryPanel.propTypes = {
  * Standalone chat panel - renders just the Meeting Assist Bot iframe.
  */
 const EmbedChatPanel = ({ item }) => {
+  // The chat frame asks its host page to run every request (answers, streamed
+  // tokens, buttons, user context, frames of the shared screen); these are the
+  // same two hooks the meeting page's CallPanel answers it with.
+  useStrandsChatBridge(item.callId);
+  useChatKeyframeLinks(item.callId);
   // Note: encodeURIComponent is required because callId may contain characters like '+'
   // which URLSearchParams.get() would otherwise decode as a space.
   const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;
@@ -106,7 +129,7 @@ const EmbedChatPanel = ({ item }) => {
       }
     >
       <div className="embed-chat-panel">
-        {/* Same sandbox rationale as the CallPanel frame; see the comment there. */}
+        {/* Same sandbox rationale as the meeting page's frame; see the comment in MeetingAssistantPanel.jsx. */}
         <iframe
           style={{ border: '0px', height: '60vh', margin: '0' }}
           title="Meeting Assist"
@@ -182,8 +205,6 @@ const getSentimentImage = (segment, enableSentimentAnalysis) => {
 };
 
 const TranscriptContent = ({ segment, translateCache }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
   const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
   const k = segmentId.concat('-', targetLanguage);
 
@@ -205,7 +226,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
     }
 
     let className = '';
-    let text = t;
+    const text = t;
     const translatedText = result;
 
     switch (channel) {
@@ -213,17 +234,8 @@ const TranscriptContent = ({ segment, translateCache }) => {
       case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
-      case 'AGENT':
-      case 'CALLER':
-        break;
-      case 'CATEGORY_MATCH':
-        if (text.match(regex)) {
-          className = 'transcript-segment-category-match-alert';
-          text = `Alert: ${text}`;
-        } else {
-          className = 'transcript-segment-category-match';
-          text = `Category: ${text}`;
-        }
+      case 'LOCAL':
+      case 'REMOTE':
         break;
       default:
         break;
@@ -233,9 +245,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
         <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
-          {translatedText.trim()}
-        </ReactMarkdown>
+        {/* react-markdown 9 and later take no className: wrapped, so the translation keeps its colour. */}
+        <div className="translated-text">
+          <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{translatedText.trim()}</ReactMarkdown>
+        </div>
       </TextContent>
     );
   });
@@ -250,14 +263,14 @@ const TranscriptContent = ({ segment, translateCache }) => {
 const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
 
-  if (channel === 'CATEGORY_MATCH') {
-    const newSegment = { ...segment, transcript: `${segment.transcript}` };
+  // A message typed in the meeting chat, shown as on the meeting page.
+  if (isChatChannel(channel)) {
+    const k = `${segment.segmentId}-${segment.targetLanguage}`;
+    const translation = segment.translateOn && segment.targetLanguage ? translateCache[k]?.translated ?? '' : '';
     return (
       <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
-        {getSentimentImage(segment, enableSentimentAnalysis)}
-        <SpaceBetween direction="vertical" size="xxs">
-          <TranscriptContent segment={newSegment} translateCache={translateCache} />
-        </SpaceBetween>
+        <div className="sentiment-image" />
+        <ChatSegment segment={segment} time={getTimestampFromSeconds(segment.startTime)} translation={translation} />
       </Grid>
     );
   }
@@ -265,7 +278,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
-  if (channel === 'AGENT' || channel === 'CALLER') {
+  if (channel === 'LOCAL' || channel === 'REMOTE') {
     displayChannel = `${segment.speaker}`.trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
@@ -294,6 +307,8 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   // prettier-ignore
   previous.speaker === current.speaker
   && previous.channel === current.channel
+  // Each chat message is its own row.
+  && !isChatChannel(current.channel)
   && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
 
 const appendToPreviousSegment = ({ previous, current }) => {
@@ -318,10 +333,11 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   const translateCache = {};
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
-  const maxChannels = 6;
+  // Every channel the meeting has; which are shown is decided below.
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
-  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const transcriptChannels = Object.keys(transcriptsForThisCallId);
+  const speakerIdentities = parseSpeakerIdentities(item.speakerIdentities);
 
   const handleLanguageSelect = (event) => {
     setTargetLanguage(event.target.value);
@@ -329,12 +345,16 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   };
 
   const getTurnByTurnSegments = useCallback(() => {
-    const segments = transcriptChannels
+    const allSegments = transcriptChannels
       .map((c) => {
         const { segments: segs } = transcriptsForThisCallId[c];
         return segs;
       })
-      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), []);
+    // One person or several per platform name, over the whole transcript, as the
+    // meeting page decides it.
+    const groups = speakerGroups(allSegments, speakerIdentities);
+    const segments = allSegments
       .reduce((accumulator, current) => {
         if (
           // prettier-ignore
@@ -352,19 +372,23 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         const t = { ...c };
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
-        if (t.speaker === DEFAULT_OTHER_SPEAKER_NAME || t.speaker === '') {
-          t.speaker = item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
-        }
+        // Resolve through the meeting's speaker identity map so an embedded
+        // transcript shows the same names as the full UI. This also fixes the
+        // placeholder substitution for a diarized meeting: matching the whole
+        // speaker string never fired once a voice id was appended, and assigning
+        // the bare name would have dropped the id that keeps two voices on one
+        // channel apart.
+        // A chat message stays under the sender the meeting's chat gave.
+        if (isChatChannel(t.channel)) return t;
+        t.speaker = resolveSpeakerName(
+          t,
+          speakerIdentities,
+          t.channel === 'REMOTE' ? item.remoteParticipantName : undefined,
+          groups,
+        );
         return t;
       })
-      .filter(
-        (s) =>
-          s?.segmentId &&
-          s?.createdAt &&
-          s.channel !== 'AGENT_VOICETONE' &&
-          s.channel !== 'CALLER_VOICETONE' &&
-          s.channel !== 'CHAT_ASSISTANT',
-      )
+      .filter((s) => s?.segmentId && s?.createdAt && s.channel !== 'CHAT_ASSISTANT')
       .map((s) => (
         <TranscriptSegment
           key={`${s.segmentId}-${s.createdAt}`}
@@ -478,7 +502,6 @@ EmbedTranscriptPanel.propTypes = {
  */
 const EmbedCallDetails = ({ params, sendToParent }) => {
   const { callId, show, layout } = params;
-  const { settings } = useSettingsContext();
 
   const [call, setCall] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -490,6 +513,12 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     callTranscriptPerCallId,
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -523,7 +552,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
           return false;
         }
 
-        const callsMap = mapCallsAttributes(validResponses, settings);
+        const callsMap = mapCallsAttributes(validResponses);
         const callDetails = callsMap[0];
 
         if (!callDetails) {
@@ -554,7 +583,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
         throw err;
       }
     },
-    [callId, settings],
+    [callId],
   );
 
   // Initial fetch on mount / callId change.
@@ -625,10 +654,29 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
 
     // Refresh in-place when the call is updated (status transitions etc).
     if (call) {
-      const callsMap = mapCallsAttributes([matching], settings);
+      const callsMap = mapCallsAttributes([matching]);
       const callDetails = callsMap[0];
-      if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
-        setCall(callDetails);
+      // See the note in CallDetails.js: a speaker rename does not move
+      // UpdatedAt, so the embedded transcript needs the same second test to
+      // re-label without a reload -- and the same undefined guard, since this
+      // view runs its own meeting-list load.
+      const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
+      const speakerNamesChanged =
+        callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
+      const summaryChanged =
+        (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
+        (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
+      // A meeting that started or ended is a change whatever its UpdatedAt says
+      // (CallDetails.js); an update carrying no status says nothing about it.
+      const statusChanged =
+        callDetails?.recordingStatusLabel !== 'Unknown' &&
+        call.recordingStatusLabel !== callDetails?.recordingStatusLabel &&
+        // ...unless this copy is older than the one on screen.
+        !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
+      const changed = timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged;
+      if (changed || agendaChanged(call, callDetails)) {
+        // Keeping the fields only getCall reads, as CallDetails.js does.
+        setCall(adoptMeetingCopy(call, callDetails));
         if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
           setLiveTranscriptCallId(callId);
         }
@@ -698,6 +746,12 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     isCallsListLoading,
     selectedItems,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,
@@ -763,6 +817,8 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
             setToolsOpen={setToolsOpen}
             callTranscriptPerCallId={callTranscriptPerCallId}
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+            // The embed asked for the chat, so its panel starts open.
+            assistantDefaultOpen
           />
         </div>
       </CallsContext.Provider>
@@ -804,4 +860,5 @@ EmbedCallDetails.propTypes = {
   sendToParent: PropTypes.func.isRequired,
 };
 
+export { EmbedChatPanel, EmbedTranscriptPanel };
 export default EmbedCallDetails;

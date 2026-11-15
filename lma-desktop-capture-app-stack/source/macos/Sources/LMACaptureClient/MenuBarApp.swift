@@ -60,6 +60,23 @@ final class MenuBarAppState: ObservableObject {
     // Agreement is persisted; Cancel just doesn't start.
     @Published var showDisclaimer = false
 
+    // Meeting consent (see Consent.swift and ConsentView.swift): the step shown
+    // before Start when the deployment's mode is Notify or Opt-in. Asked afresh
+    // for every meeting; cleared when a recording ends.
+    @Published var consentSettings: Consent.Settings?
+    @Published var consentStep = Consent.Step()
+    @Published var consentEvidenceJPEG: Data?
+    @Published var consentEvidencePreview: CGImage?
+    @Published var consentStatus = ""
+    @Published var consentEvidenceStatus = ""
+    @Published var consentBlockedReason: String?
+    @Published var capturingEvidence = false
+    @Published var objectorName = ""
+    /// True while the settings are being read; Start waits for them.
+    @Published private(set) var consentFetchInFlight = false
+    /// The one start waiting for the settings, however often Start was pressed.
+    private var startAfterFetch = false
+
     /// Wall-clock seconds since the current recording started (0 when idle).
     /// Drives the elapsed-time readout in the panel and the menu-bar tooltip.
     @Published var elapsedSeconds = 0
@@ -165,12 +182,122 @@ final class MenuBarAppState: ObservableObject {
                 self.beginElapsedTimer()
             case .ended(let succeeded):
                 self.endElapsedTimer(succeeded: succeeded)
+                // Consent is per meeting: the next one is confirmed afresh.
+                self.resetConsentStep()
             }
+            // Signed in, or back from a recording: read the settings in force.
+            if s == .authenticated { self.refreshConsentSettings() }
         }
         controller.onLevels = { [weak self] m, k, c, p in
             self?.meetingLevel = m; self?.micLevel = k; self?.connected = c; self?.paused = p
         }
         controller.onLog = { [weak self] msg in self?.lastLog = msg }
+        controller.onConsentState = { [weak self] state in
+            guard let self = self else { return }
+            if state.isEvidence {
+                self.consentEvidenceStatus = Consent.describe(state)
+            } else {
+                self.consentStatus = Consent.describe(state)
+            }
+            // Refused or not recorded (rather than objected to): the settings shown
+            // may not be the ones in force, so the next Start reads them again.
+            if state.stopsCapture && state.status != "objected" && state.code != "OBJECTION_RECEIVED" {
+                self.consentSettings = nil
+            }
+        }
+    }
+
+    // MARK: - Meeting consent
+
+    /// Read the consent settings from the transcriber. With `thenStart`, Start
+    /// goes ahead once they are read (or could not be); one start is kept
+    /// however often Start is pressed meanwhile.
+    func refreshConsentSettings(thenStart: Bool = false) {
+        if thenStart { startAfterFetch = true }
+        guard !consentFetchInFlight, controller.isAuthenticated, !isStreaming else {
+            if !consentFetchInFlight { runPendingStart() }
+            return
+        }
+        consentFetchInFlight = true
+        Task { @MainActor in
+            let settings = await self.controller.fetchConsentSettings()
+            self.consentFetchInFlight = false
+            // No answer, or one saying the settings are unavailable, leaves an
+            // earlier answer in place; with none, an unavailable answer is kept so
+            // the panel can say why there is no step.
+            if let settings = settings, settings.available || self.consentSettings == nil {
+                self.consentSettings = settings
+            }
+            self.runPendingStart()
+        }
+    }
+
+    private func runPendingStart() {
+        guard startAfterFetch else { return }
+        startAfterFetch = false
+        startAfterConsentCheck()
+    }
+
+    /// The notice for the meeting about to start, as the panel shows it.
+    var consentNoticeText: String {
+        guard let settings = consentSettings, settings.required else { return "" }
+        return Consent.renderNotice(settings.noticeTemplate, lmaUser: effectiveMicLabel,
+                                    meeting: meetingName, consentPhrase: settings.consentPhrase,
+                                    objectionPhrase: settings.objectionPhrase)
+    }
+
+    func copyConsentNotice() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(consentNoticeText, forType: .string)
+        consentStatus = "Notice copied — paste it into the meeting chat."
+    }
+
+    /// One frame of the selected screen-video source (the meeting window, or the
+    /// main display), kept as evidence. Before Start it is sent once recording
+    /// begins; while recording it is sent at once.
+    func captureConsentEvidence() {
+        capturingEvidence = true
+        let sourceID = videoSourceID
+        let sourceName = videoSourceName
+        Task { @MainActor in
+            defer { self.capturingEvidence = false }
+            guard let image = await VideoCapture.thumbnail(sourceID: sourceID, maxPixel: 1920) else {
+                self.consentEvidenceStatus = "No screenshot was taken. It needs macOS 14 or later, the Screen "
+                    + "Recording permission, and the selected source (\(sourceName)) to be open."
+                return
+            }
+            guard let jpeg = EvidenceImage.jpeg(image) else {
+                self.consentEvidenceStatus = "The screenshot could not be encoded."
+                return
+            }
+            self.consentEvidencePreview = image
+            if self.isStreaming {
+                self.controller.sendConsentEvidence(jpeg, note: "Captured from \(sourceName) while recording")
+                self.consentEvidenceStatus = "Screenshot of \(sourceName) sent to the meeting."
+            } else {
+                self.consentEvidenceJPEG = jpeg
+                self.consentEvidenceStatus = "Screenshot of \(sourceName) will be kept on the meeting when recording starts."
+            }
+        }
+    }
+
+    func clearConsentEvidence() {
+        consentEvidenceJPEG = nil
+        consentEvidencePreview = nil
+        consentEvidenceStatus = ""
+    }
+
+    func reportObjection() {
+        controller.reportObjection(participantName: objectorName)
+        objectorName = ""
+        consentStatus = "Objection reported. Recording and transcription stopped."
+    }
+
+    private func resetConsentStep() {
+        consentStep = Consent.Step()
+        clearConsentEvidence()
+        consentBlockedReason = nil
+        objectorName = ""
     }
 
     // MARK: - Settings
@@ -343,6 +470,21 @@ final class MenuBarAppState: ObservableObject {
         }
     }
     func start() {
+        // The meeting consent step comes first: read the settings if they are not
+        // known yet, and hold an opt-in meeting until it is confirmed.
+        if consentSettings == nil {
+            refreshConsentSettings(thenStart: true)
+            return
+        }
+        startAfterConsentCheck()
+    }
+
+    private func startAfterConsentCheck() {
+        if let why = Consent.startBlockedReason(settings: consentSettings, step: consentStep) {
+            consentBlockedReason = why
+            return
+        }
+        consentBlockedReason = nil
         // One-time recording-consent gate (mirrors the browser extension): the
         // first Start on this machine shows the disclaimer; Agree persists and
         // proceeds, Cancel does nothing. The gate returns if the DEPLOYMENT'S
@@ -393,6 +535,19 @@ final class MenuBarAppState: ObservableObject {
         pushSettingsToController()
         rememberMeetingName(meetingName)
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
+        // The step rides START even when none was shown (see Consent.Settings.notShown).
+        if let settings = consentSettings, settings.required {
+            controller.consentPayload = Consent.payload(
+                settings: settings, step: consentStep, lmaUser: effectiveMicLabel,
+                meetingName: meetingName, noticeText: consentNoticeText)
+            controller.consentEvidenceJPEG = consentEvidenceJPEG
+        } else {
+            controller.consentPayload = Consent.payload(
+                settings: .notShown, step: Consent.Step(), lmaUser: effectiveMicLabel,
+                meetingName: meetingName, noticeText: "")
+            controller.consentEvidenceJPEG = nil
+        }
+        consentStatus = ""
         controller.start(callId: name.isEmpty ? nil : name)
     }
     func stop() { controller.stop() }
@@ -703,6 +858,8 @@ struct MenuBarContentView: View {
                             .help("Recent meeting names")
                         }
                     }
+                    // Meeting consent step (Notify / Opt-in deployments only).
+                    ConsentPanelView(s: s)
                     // What will actually be captured, BEFORE pressing Start —
                     // the mic, and (when screen video is on) which screen or
                     // window. Previously both lived only in Settings, so you
@@ -711,8 +868,11 @@ struct MenuBarContentView: View {
                     Button(action: s.start) {
                         Label("Start Recording", systemImage: "record.circle").frame(maxWidth: .infinity)
                     }
-                    .disabled(s.isBusy)
+                    .disabled(s.isBusy || s.consentFetchInFlight)
                     .keyboardShortcut(.defaultAction)
+                    // Read the consent settings whenever the Start controls show;
+                    // the consent panel above renders nothing until they are known.
+                    .onAppear { s.refreshConsentSettings() }
                     // Persistent consent reminder: the full disclaimer is a
                     // one-time gate, but the obligation is per-meeting — keep a
                     // one-liner next to Start so it stays visible. It reflects
@@ -760,6 +920,9 @@ struct MenuBarContentView: View {
                             Label("Mute system", systemImage: s.meetingMuted ? "speaker.slash" : "speaker.wave.2")
                         }
                     }.toggleStyle(.button).font(.caption)
+                    // While recording: the consent status, more evidence, and
+                    // "Participant objected".
+                    ConsentPanelView(s: s)
                 }
 
                 Divider()
@@ -1167,7 +1330,7 @@ struct LevelBar: View {
 /// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
 final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate,
-                               UNUserNotificationCenterDelegate {
+                               NSMenuItemValidation, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var panelWindow: NSWindow?
@@ -1177,6 +1340,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var restorePanelAfterSettings = false
     private let state: MenuBarAppState
     private var pollTimer: Timer?
+    private var quitting = false
 
     init(state: MenuBarAppState) { self.state = state }
 
@@ -1190,6 +1354,10 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         var v = MenuBarContentView(s: state, host: host)
         v.openSettings = { [weak self] in self?.showSettingsWindow() }
         return v
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        installMainMenu()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1424,7 +1592,6 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         menu.addItem(openItem)
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
-        settingsItem.isEnabled = !state.isStreaming
         menu.addItem(settingsItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit \(name)", action: #selector(quitApp), keyEquivalent: "q")
@@ -1433,7 +1600,60 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         return menu
     }
 
+    /// AppKit routes ⌘X/⌘C/⌘V/⌘A/⌘Z through the Edit menu: without a main menu
+    /// they do nothing in text fields (#756).
+    private func installMainMenu() {
+        let name = state.controller.config.appDisplayName
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About \(name)",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu),
+                                       keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others",
+                                         action: #selector(NSApplication.hideOtherApplications(_:)),
+                                         keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "Show All",
+                        action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
+                           keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+        let mainMenu = NSMenu()
+        for submenu in [appMenu, editMenu, windowMenu] {
+            let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            mainMenu.addItem(item)
+        }
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
+    }
+
     @objc private func openSettingsFromMenu() { showSettingsWindow() }
+
+    /// NSMenu auto-enables items and ignores `isEnabled`, so this is what greys out
+    /// Settings… while recording.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        menuItem.action == #selector(openSettingsFromMenu) ? !state.isStreaming : true
+    }
 
     // MARK: - Notification clicks
 
@@ -1461,6 +1681,17 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    /// Quitting mid-recording stops it the way Stop does first; 1.5 s covers
+    /// CaptureController.stop(), and a repeat Quit meanwhile waits on the same reply.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if quitting { return .terminateLater }
+        guard state.isStreaming else { return .terminateNow }
+        quitting = true
+        state.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
 
     @objc private func openPopoverFromMenu() { showPopover() }
 

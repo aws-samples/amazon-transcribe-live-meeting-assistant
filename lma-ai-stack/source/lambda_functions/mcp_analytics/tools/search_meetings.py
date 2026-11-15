@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -17,23 +17,40 @@ from tools.url_helper import get_meeting_url
 
 logger = logging.getLogger()
 
-# Bedrock inference profile prefixes (cross-region routing).
-# Model IDs starting with these prefixes must use an inference-profile ARN,
-# not a foundation-model ARN.
-_INFERENCE_PROFILE_PREFIXES = ("us.", "eu.", "apac.", "global.")
+
+def _configured_model_id() -> str:
+    """The model the transcript knowledge base answers with.
+
+    The summaries' model: the Amazon Bedrock Models section's value on the
+    Configuration page, else the shipped default in setting_defaults.json. Read
+    per search, so a change reaches it within the section's cache tier.
+
+    The configuration layer is imported here rather than at the top of the
+    module because only this tool reads it: the server's other tools, and their
+    tests, load this module without needing the layer.
+    """
+    # pylint: disable-next=import-error,import-outside-toplevel
+    from lma_config import LANGUAGE_MODELS, read_setting, resolve_model_id
+
+    # Run within the section's Model inference geography.
+    value = resolve_model_id(
+        read_setting(LANGUAGE_MODELS.name, "summaryModelId"),
+        region=os.environ.get("AWS_REGION", ""),
+    )
+    return (value or "").strip()
 
 
 def _build_model_arn(model_id: str, region: str, account_id: str) -> str:
-    """Build the correct Bedrock model ARN based on the model ID prefix.
+    """The inference-profile or foundation-model ARN of ``model_id``.
 
-    Inference profiles (prefixed with region codes like ``us.``, ``eu.``,
-    ``apac.``, or ``global.``) must be referenced via the
-    ``inference-profile`` ARN path. Plain foundation model IDs use the
-    ``foundation-model`` ARN path.
+    The configuration layer's ``model_arn``, which knows the profile prefixes
+    from the shipped catalogue; imported here for the reason
+    :func:`_configured_model_id` gives.
     """
-    if any(model_id.startswith(p) for p in _INFERENCE_PROFILE_PREFIXES):
-        return f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{model_id}"
-    return f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+    # pylint: disable-next=import-error,import-outside-toplevel
+    from lma_config import model_arn
+
+    return model_arn(model_id, region, account_id)
 
 
 def execute(
@@ -67,10 +84,10 @@ def execute(
     if not kb_id:
         raise ValueError("Transcript Knowledge Base not configured")
 
-    # Resolve the model ARN. Prefer BEDROCK_MODEL_ID (builds correct ARN type
+    # Resolve the model ARN. Prefer the configured model (builds correct ARN type
     # for both foundation models and inference profiles). Fall back to the
     # legacy pre-built MODEL_ARN for backward compatibility.
-    model_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    model_id = _configured_model_id()
     if model_id:
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
         account_id = (
@@ -81,7 +98,9 @@ def execute(
         model_arn = os.environ.get("MODEL_ARN")
 
     if not model_arn:
-        raise ValueError("Bedrock model not configured (set BEDROCK_MODEL_ID or MODEL_ARN)")
+        raise ValueError(
+            "Bedrock model not configured: choose one in the Amazon Bedrock Models section of the Configuration page"
+        )
 
     kb_client = boto3.client("bedrock-agent-runtime")
 
@@ -105,6 +124,10 @@ def execute(
     if filters:
         retrieval_config["vectorSearchConfiguration"]["filter"] = {"andAll": filters}
 
+    # In the function for the reason given in _configured_model_id's docstring.
+    # pylint: disable-next=import-error,import-outside-toplevel
+    from lma_config import knowledge_base_prompt_templates
+
     # Query Bedrock Knowledge Base
     try:
         response = kb_client.retrieve_and_generate(
@@ -114,6 +137,7 @@ def execute(
                 "knowledgeBaseConfiguration": {
                     "knowledgeBaseId": kb_id,
                     "modelArn": model_arn,
+                    **knowledge_base_prompt_templates(),
                     "retrievalConfiguration": retrieval_config,
                 },
             },

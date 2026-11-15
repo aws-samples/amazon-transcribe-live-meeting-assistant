@@ -1,0 +1,661 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/**
+ * What the Google Meet handler (google-meet.ts) knows about Meet's web page,
+ * kept apart from the handler so it can be tested without a browser: the
+ * meeting-code and URL rules, the selectors, and the readings of page text that
+ * decide where the VP is (pre-join, waiting to be let in, in the meeting, or on
+ * one of Meet's refusal and end screens).
+ *
+ * Meet's CSS class names are generated and change between releases, so the
+ * selectors lean on accessible names (`aria-label`), roles, `data-*` attributes
+ * and visible text. Everything here was written from Meet's English web client
+ * as publicly documented and observed, and has NOT been exercised against a live
+ * meeting by this code yet. Each assumption that needs a live check is marked
+ * "ASSUMPTION (verify live)" so they can be found and confirmed in one pass.
+ *
+ * The handler opens Meet with `hl=en`, so the text it matches is the English
+ * text whatever the browser's locale.
+ */
+
+/** The only host the VP navigates to for a Meet meeting. */
+export const MEET_HOST = 'meet.google.com';
+
+/** A Meet meeting code: three, four and three lower-case letters. */
+const CODE_PATTERN = /^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$/;
+/**
+ * A meet.google.com link to a meeting code, with or without the scheme, and
+ * including the /meet/<code> form Meet redirects a guest that is not signed in
+ * to (observed live), so a link copied from the address bar can carry either.
+ */
+const LINK_PATTERN = /^(?:https?:\/\/)?meet\.google\.com\/(?:meet\/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})\/?(?:[?#].*)?$/;
+
+/** A meeting the VP can open: its canonical code, and the URL to open. */
+export interface GoogleMeetMeeting {
+    /** `abc-defg-hij`. */
+    code: string;
+    /** The page the VP opens, always on https://meet.google.com and with `hl=en`. */
+    url: string;
+}
+
+/**
+ * Reduce what a user typed or pasted to a Meet meeting, or null when it is not one.
+ *
+ * Accepted: a bare code with or without hyphens and in any case (`abc-defg-hij`,
+ * `ABCDEFGHIJ`), and a link to one on meet.google.com with or without the
+ * scheme (`https://meet.google.com/abc-defg-hij?authuser=0`). Whitespace
+ * anywhere is ignored, as the create form strips it. A link on any other host,
+ * with a port or credentials, or whose path is not a code is refused. That
+ * includes a `/lookup/<name>` link: it is a Meet meeting nickname, which Google
+ * lets only signed-in members of the organiser's Workspace use, and the VP
+ * joins as a guest.
+ *
+ * The same rule is applied by the create form, the invitation parser, the SDK
+ * and the meeting assistant's tools; each runs the shared table in
+ * test-fixtures/google-meet-inputs.json.
+ */
+export function parseGoogleMeetMeeting(input: string | null | undefined): GoogleMeetMeeting | null {
+    const text = (input || '').replace(/\s+/g, '').toLowerCase();
+    if (!text) return null;
+    const link = LINK_PATTERN.exec(text);
+    const code = CODE_PATTERN.exec(link ? link[1] : text);
+    if (!code) return null;
+    const canonical = `${code[1]}-${code[2]}-${code[3]}`;
+    return { code: canonical, url: meetUrlFor(canonical) };
+}
+
+/**
+ * Is this URL where Meet sends a guest it has refused?
+ *
+ * Observed live: the "You can't join this video call" page counts down from
+ * about a minute ("Returning to home screen") and then navigates to Meet's
+ * product page on workspace.google.com. Reaching that page means the refusal
+ * was missed or arrived while nothing was looking, and it is just as final.
+ */
+export function isMeetRefusalRedirect(url: string | null | undefined): boolean {
+    try {
+        const parsed = new URL(url || '');
+        return parsed.hostname.toLowerCase() === 'workspace.google.com' && /^\/products\/meet(\/|$)/i.test(parsed.pathname);
+    } catch {
+        return false;
+    }
+}
+
+function meetUrlFor(code: string): string {
+    // ASSUMPTION (verify live): Meet honours `hl` for its own UI language, as
+    // Google's other web properties do, so the text matched below is English.
+    return `https://${MEET_HOST}/${code}?hl=en`;
+}
+
+// ---------------------------------------------------------------------------
+// Selectors
+// ---------------------------------------------------------------------------
+
+/**
+ * Selectors for the pre-join screen and the meeting, each a list tried in order.
+ *
+ * `:has-text("text")` is not CSS: it is Playwright's case-insensitive match on
+ * an element's text, which `page.$` and findElementWithFallback understand and
+ * `document.querySelector` does not. A list passed into the page with
+ * `page.evaluate` must not use it; `MEET_IN_PAGE_SELECTORS` below holds those.
+ */
+export const MEET_SELECTORS = {
+    /**
+     * The guest name field under "What's your name?".
+     * ASSUMPTION (verify live): aria-label and placeholder are both "Your name".
+     */
+    nameInput: [
+        'input[aria-label="Your name"]',
+        'input[placeholder="Your name"]',
+        'input[type="text"][aria-label*="name" i]',
+    ],
+    /**
+     * The join button. A guest normally sees "Ask to join"; "Join now" appears
+     * when the meeting lets the VP in without asking.
+     * ASSUMPTION (verify live): the buttons' visible text is exactly these, and
+     * `jsname="Qx7uuf"` is the button's stable name in the current release.
+     */
+    joinButton: [
+        'button:has-text("Ask to join")',
+        'button:has-text("Join now")',
+        '[role="button"]:has-text("Ask to join")',
+        '[role="button"]:has-text("Join now")',
+        'button[jsname="Qx7uuf"]',
+    ],
+    /**
+     * The chat composer in the "In-call messages" panel.
+     * ASSUMPTION (verify live): a textarea labelled "Send a message" (the LMA
+     * Chrome extension's Meet integration posts through the same element).
+     */
+    chatInput: [
+        'textarea[aria-label^="Send a message" i]',
+        'textarea[placeholder^="Send a message" i]',
+        '[contenteditable="true"][aria-label^="Send a message" i]',
+    ],
+    /** The composer's send button, used when Enter does not submit. */
+    chatSend: ['button[aria-label^="Send a message" i]', 'button[aria-label="Send message" i]'],
+    /**
+     * The toolbar button that opens the chat panel. A toggle, so the handler
+     * only clicks it when the composer is not already on screen.
+     * ASSUMPTION (verify live): labelled "Chat with everyone".
+     */
+    chatButton: ['button[aria-label^="Chat with everyone" i]', 'button[aria-label*="in-call messages" i]'],
+    /**
+     * The toolbar button that opens the People panel.
+     * ASSUMPTION (verify live): labelled "People" (or "Show everyone" in older
+     * releases), with the number of participants shown inside it.
+     */
+    peopleButton: ['button[aria-label^="People" i]', 'button[aria-label^="Show everyone" i]'],
+    /** A visible element in the People panel, for the consent screenshot. */
+    peopleList: ['[role="list"][aria-label="Participants" i]', '[aria-label="Participants" i] [role="listitem"]'],
+} as const;
+
+/**
+ * Selectors evaluated inside the page with `document.querySelector`, so plain
+ * CSS only. Passed into `page.evaluate` as an argument rather than written inline,
+ * which is what lets google-meet-page.test.ts check them.
+ */
+export const MEET_IN_PAGE_SELECTORS = {
+    /**
+     * Present only while the VP is in the meeting: the red hang-up button.
+     * ASSUMPTION (verify live): labelled "Leave call".
+     */
+    leaveCall: ['button[aria-label="Leave call" i]', 'button[aria-label^="Leave call" i]', '[role="button"][aria-label^="Leave call" i]'],
+    /** The pre-join join buttons, by the jsname of the current release only (text is checked separately). */
+    prejoinJoin: ['button[jsname="Qx7uuf"]'],
+    /** The People button, whose text carries the participant count. */
+    peopleButton: ['button[aria-label^="People" i]', 'button[aria-label^="Show everyone" i]'],
+    /** The chat composer, to tell whether the chat panel is open. */
+    chatInput: [
+        'textarea[aria-label^="Send a message" i]',
+        'textarea[placeholder^="Send a message" i]',
+        '[contenteditable="true"][aria-label^="Send a message" i]',
+    ],
+    /**
+     * One chat message body. ASSUMPTION (verify live): each message carries a
+     * `data-message-id`, which is also what the reader de-duplicates on.
+     */
+    chatMessage: '[data-message-id]',
+    /**
+     * The block that groups a run of messages from one sender under a header
+     * with their name and the time. Checked live (2026-11-07): Meet marks it
+     * with no attribute at all. The header ("Conference Room 4" and "11:02 PM",
+     * or only the time on the reader's own messages) is plain text two levels
+     * above each `data-message-id`, beside the element holding the run of
+     * messages. So the group is found by walking up from the message to the
+     * first ancestor with text outside every message (readMeetChatInPage). This
+     * selector has not been seen to match live; it is kept in case Meet adds
+     * such a mark.
+     */
+    chatGroup: '[data-sender-id]',
+    /**
+     * A participant tile in the meeting grid. The LMA Chrome extension's Meet
+     * integration reads the same attribute.
+     */
+    participantTile: '[data-participant-id]',
+    /**
+     * Where a tile shows the participant's name. The second is what the LMA
+     * Chrome extension's Meet integration reads; the Material icons in a tile
+     * also carry `notranslate`, so they are excluded.
+     */
+    tileName: [
+        '[data-self-name]',
+        '[data-tooltip-id][data-tooltip-anchor-boundary-type] span.notranslate',
+        '.notranslate:not(.google-material-icons)',
+    ],
+    /**
+     * The tile's audio-level indicator, whose class changes while the
+     * participant is heard. The LMA Chrome extension's Meet integration detects
+     * the active speaker the same way (a class mutation on this element while it
+     * is visible).
+     */
+    audioIndicator: '[jscontroller="ES310d"]',
+    /**
+     * The tile's audio-level indicator as a live meeting showed it: an element
+     * holding the level bars, present on every participant's tile but the VP's
+     * own. Observed (one live meeting) carrying `silentIndicatorClass` while the
+     * participant was silent. ASSUMPTION (verify live): the class is dropped
+     * while the participant is heard; see `meetIndicatorSpeaking`.
+     */
+    levelIndicator: '.IisKdb',
+    /**
+     * The class the level indicator carried while the participant was silent.
+     * A class name, not a selector, since it is looked for in a class list.
+     */
+    silentIndicatorClass: 'gjg47c',
+    /**
+     * Elements inside a tile that show the speaking indicator while that
+     * participant is heard. ASSUMPTION (verify live): Meet's speaking indicator
+     * carries one of these generated class names in the current release. They
+     * are the least stable thing in this file; the handler logs what it saw in
+     * the first tiles it reads so they can be confirmed or replaced.
+     */
+    speakingIndicator: ['.Oaajhc', '.HX2H7', '.wEsLMd', '.OgVli'],
+} as const;
+
+// ---------------------------------------------------------------------------
+// Screens, read from page text
+// ---------------------------------------------------------------------------
+
+/** A screen Meet shows that the handler has to act on. */
+export type MeetScreen =
+    /** Meet will not let this browser join ("You can't join this video call"). */
+    | 'refused'
+    /** Someone in the meeting declined the request to join. */
+    | 'denied'
+    /** The request to join timed out with nobody answering it. */
+    | 'no-response'
+    /** The code or link is not a meeting. */
+    | 'invalid-code'
+    /** The VP has asked to join and is waiting to be let in. */
+    | 'waiting'
+    /** Someone removed the VP from the meeting. */
+    | 'removed'
+    /** The meeting was ended for everyone. */
+    | 'ended'
+    /** Meet shows the page it shows after leaving a call. */
+    | 'left';
+
+/**
+ * Phrases per screen, lower-case, with typographic apostrophes already folded to
+ * `'`. Checked in the order of `SCREEN_ORDER`, most specific first, because some
+ * screens share wording: a declined request is shown under the same "You can't
+ * join this call" heading as a refusal.
+ *
+ * ASSUMPTION (verify live): every phrase below. They are Meet's English wording
+ * as known when this was written; a live meeting may show different text, and a
+ * screen whose wording is missed falls through to the AI join-state check during
+ * the admission wait, and to the participant-count watchdog in the meeting.
+ */
+export const MEET_SCREEN_PHRASES: Readonly<Record<MeetScreen, readonly string[]>> = {
+    denied: [
+        'denied your request to join',
+        'your request to join was denied',
+        'your request to join was declined',
+        "you've been denied entry",
+    ],
+    'no-response': [
+        'no one responded to your request',
+        'no one has responded to your request',
+        'nobody responded to your request',
+    ],
+    removed: [
+        "you've been removed from the meeting",
+        'you have been removed from the meeting',
+        "you've been removed from the call",
+        'removed you from the meeting',
+        'removed you from the call',
+    ],
+    ended: [
+        'the call has ended',
+        'this call has ended',
+        'the meeting has ended',
+        'this meeting has ended',
+        'ended the call for everyone',
+        'ended the meeting for everyone',
+        'call ended for everyone',
+    ],
+    left: ['you left the meeting', 'you left the call', "you've left the call", "you've left the meeting"],
+    // Observed live (guest, not signed in, browser on an EC2 host): the page
+    // shows this as its <h1>, before any name field, with a "Return to home
+    // screen" button and a countdown, and then navigates to
+    // workspace.google.com/products/meet (see isMeetRefusalRedirect).
+    refused: ["you can't join this video call", "you can't join this call"],
+    'invalid-code': [
+        'check your meeting code',
+        'invalid video call name',
+        "this video call doesn't exist",
+        "the meeting code you entered doesn't exist",
+    ],
+    waiting: [
+        'asking to be let in',
+        "you'll join the call when someone lets you in",
+        'please wait until a meeting host brings you into the call',
+        'waiting for the host',
+    ],
+};
+
+const SCREEN_ORDER: readonly MeetScreen[] = [
+    'denied',
+    'no-response',
+    'removed',
+    'ended',
+    'left',
+    'refused',
+    'invalid-code',
+    'waiting',
+];
+
+/** Lower-case, collapse whitespace, and fold the apostrophes Meet typesets. */
+export function normalizeMeetText(text: string | null | undefined): string {
+    return (text || '')
+        .replace(/[‘’ʼ]/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+/** Which screen this page text belongs to, or null when it is none of them. */
+export function classifyMeetScreenText(text: string | null | undefined): { screen: MeetScreen; phrase: string } | null {
+    const normalized = normalizeMeetText(text);
+    if (!normalized) return null;
+    for (const screen of SCREEN_ORDER) {
+        const phrase = MEET_SCREEN_PHRASES[screen].find((p) => normalized.includes(p));
+        if (phrase) return { screen, phrase };
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Participant count, names and chat senders
+// ---------------------------------------------------------------------------
+
+/**
+ * The participant count shown on the People button, or null when none can be read.
+ *
+ * The button's text is the icon's ligature name followed by the count (Meet's
+ * icons are font ligatures, so the text reads like "people 3"); the label is
+ * checked second in case a release moves the count there. A value of 0 is
+ * treated as unreadable, since the VP itself is always in the meeting.
+ * ASSUMPTION (verify live): the count includes the VP.
+ */
+export function parseMeetParticipantCount(text: string | null | undefined, label?: string | null): number | null {
+    for (const source of [text, label]) {
+        const numbers = (source || '').match(/\d{1,4}/g);
+        if (!numbers || numbers.length !== 1) continue;
+        const n = Number.parseInt(numbers[0], 10);
+        if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+}
+
+/**
+ * A participant name as a tile or chat header shows it, without Meet's decorations.
+ *
+ * Meet adds "(You)" to the VP's own tile and "(Presentation)" / "is presenting"
+ * to a screen share's tile. A label that is only a decoration gives null.
+ */
+export function cleanMeetParticipantName(raw: string | null | undefined): string | null {
+    let name = (raw || '').replace(/\s+/g, ' ').trim();
+    if (!name) return null;
+    name = name
+        .replace(/\s*\((?:you|presentation|presenting|host|co-host)\)\s*$/i, '')
+        .replace(/\s+is presenting$/i, '')
+        .replace(/\s*\(presentation\)/i, '')
+        .trim();
+    if (!name || name.length > 100) return null;
+    // A Material icon ligature ("visual_effects", "mic_off") is the text of an
+    // icon inside the tile, not a person's name.
+    if (/^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(name)) return null;
+    return name;
+}
+
+/**
+ * The decorations Meet gives a presentation's tile: "Alice (Presentation)" as
+ * its name, "Alice is presenting" or "Presenting" on the tile.
+ * ASSUMPTION (verify live): these are on the tile's name or an `aria-label`
+ * inside it while someone presents, and on no tile otherwise. The key frame
+ * sampler logs "[Keyframes] Screen share on screen" when they are first seen.
+ */
+const MEET_PRESENTATION_LABEL = /\(\s*presentation\s*\)|\bis presenting\b|^\s*presenting\b/i;
+
+/**
+ * Whether the labels read from the meeting's visible tiles (their names and
+ * the `aria-label`s inside them) show a presentation. The VP never presents,
+ * so a presentation on a tile is somebody else's shared screen.
+ */
+export function meetPresentationShown(labels: readonly (string | null | undefined)[]): boolean {
+    return labels.some((label) => MEET_PRESENTATION_LABEL.test((label || '').replace(/\s+/g, ' ')));
+}
+
+/** How far above a chat message its group's header is looked for (it was two levels up, live). */
+export const MEET_CHAT_HEADER_MAX_LEVELS = 4;
+
+/** One chat message as read from the page, before its header is interpreted. */
+export interface MeetChatRaw {
+    header: string | null;
+    text: string;
+    id: string | null;
+    links: string[];
+}
+
+/**
+ * Reads the chat messages not read before, in the page (passed whole to
+ * page.evaluate, so it must not use anything outside its own body).
+ *
+ * Each message's header is the text of its group outside every message: the
+ * group is the element `sels.group` matches when the page marks it, and
+ * otherwise the nearest ancestor, at most `maxLevels` up, that has any such
+ * text. A walk that climbs past one group usually reaches text with more than
+ * one time in it, which senderFromMeetGroupHeader refuses. That guard holds only
+ * when the walk reaches two or more times: a header the walk reaches with a
+ * single time is taken as this message's own.
+ */
+export function readMeetChatInPage(sels: { message: string; group: string; maxLevels: number }): MeetChatRaw[] {
+    const w = window as any;
+    const seen: Set<string> = (w.__lmaMeetSeen ||= new Set<string>());
+    const isMessage = (el: Element | null): boolean => !!el && el.matches(sels.message);
+    const textOutsideMessages = (root: Node): string => {
+        const parts: string[] = [];
+        const walk = (n: Node): void => {
+            if (n.nodeType === 3) {
+                const piece = (n.textContent || '').trim();
+                if (piece) parts.push(piece);
+                return;
+            }
+            if (n.nodeType === 1 && isMessage(n as Element)) return;
+            for (const c of Array.from(n.childNodes)) walk(c);
+        };
+        walk(root);
+        return parts.join(' ');
+    };
+    const out: MeetChatRaw[] = [];
+    for (const node of Array.from(document.querySelectorAll(sels.message))) {
+        // A message nested in another (a reply or quote) is read as part of it.
+        if (node.parentElement?.closest(sels.message)) continue;
+        const text = ((node as HTMLElement).innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        // Not marked seen until it has text, so a row filled in by a later
+        // render is read once it is complete.
+        if (!text || text.length > 2000) continue;
+        const key = node.getAttribute('data-message-id') || `text:${text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let header: string | null = null;
+        const marked = node.closest(sels.group);
+        if (marked) {
+            header = textOutsideMessages(marked) || null;
+        } else {
+            let up: Element | null = node.parentElement;
+            for (let level = 0; up && level < sels.maxLevels && !header; level += 1, up = up.parentElement) {
+                header = textOutsideMessages(up) || null;
+            }
+        }
+        const links = Array.from(node.querySelectorAll('a[href]'))
+            .map((a) => (a as HTMLAnchorElement).href)
+            .filter(Boolean);
+        out.push({ header, text, id: node.getAttribute('data-message-id'), links });
+    }
+    return out;
+}
+
+/**
+ * A chat message's text without the labels of the actions Meet draws on it.
+ *
+ * Meet adds a pin button to each message while the pointer is over it, and
+ * the message's text, read from the page, then ends with that button's icon
+ * name and label: "… keep Pin message", as read live on 2026-11-12. Left in,
+ * the text no longer matches a message the VP posted itself, so its own
+ * consent instructions could be read back as a participant's reply.
+ *
+ * Only Meet's English labels are matched, in the case Meet writes them, so a
+ * participant's own words ending in "pin message" are kept. With Meet shown in
+ * another language the label stays in the text, and the VP still recognises
+ * its own messages through the posted-message ledger (isOwnMeetMessage).
+ */
+export function stripMeetMessageActions(text: string): string {
+    let out = (text || '').replace(/\s+/g, ' ').trim();
+    const trailing = /\s*(?:\b(?:keep|keep_off|push_pin)\s+)?\b(?:Pin|Unpin) message$/;
+    while (trailing.test(out)) out = out.replace(trailing, '').trim();
+    return out;
+}
+
+/**
+ * The sender named by a chat group's header, or null.
+ *
+ * The header reads "<name> <time>" ("Alice Smith 10:32 AM"). The reader's own
+ * messages carry a header with only the time, which gives null. The text passed
+ * in is the group's text with its message bodies removed. It must hold at most
+ * one time: a text with two is more than one group, and taking the first name
+ * from it would credit one person's message to another.
+ */
+export function senderFromMeetGroupHeader(header: string | null | undefined): string | null {
+    const text = (header || '').replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+    const times = text.match(/\b\d{1,2}:\d{2}(?:\s*[ap]\.?m\.?)?/gi) ?? [];
+    if (times.length > 1) return null;
+    const name = (times.length === 1 ? text.slice(0, text.search(/\b\d{1,2}:\d{2}/)) : text).trim();
+    if (!name || name.length > 80) return null;
+    return cleanMeetParticipantName(name);
+}
+
+/**
+ * The time a Meet message group's header shows ("10:42 AM"), or null when it
+ * shows none, or more than one and so is not one group's header. Only used to
+ * report whether the platform gave a time: it is not on the transcript's clock.
+ */
+export function timeFromMeetGroupHeader(header: string | null | undefined): string | null {
+    const times = (header || '').match(/\b\d{1,2}:\d{2}(?:\s*[ap]\.?m\.?)?/gi) ?? [];
+    return times.length === 1 ? times[0].trim() : null;
+}
+
+/**
+ * Is this name the VP's own?
+ *
+ * Meet labels the VP's own tile with its display name, and may label it "You".
+ * Its own chat messages carry a time-only header, so they have no sender at
+ * all. Matched whole, case-insensitively, so a participant whose name merely
+ * contains "LMA" or starts with "You" is not mistaken for the VP.
+ */
+export function isOwnMeetName(name: string | null | undefined, identities: readonly string[]): boolean {
+    const candidate = cleanMeetParticipantName(name);
+    if (!candidate) return false;
+    const folded = candidate.toLowerCase();
+    if (folded === 'you') return true;
+    return identities.some((own) => own && own.trim().toLowerCase() === folded);
+}
+
+/** One participant tile, as the speaker poll reads it from the page. */
+export interface MeetTileReading {
+    name: string | null;
+    speaking: boolean;
+}
+
+/** What the speaker poll reads of one tile's speaking signals. */
+export interface MeetTileSignals {
+    /** The level indicator's class list (`levelIndicator`), or null when the tile has none. */
+    indicatorClasses: string | null;
+    /** Whether that indicator is rendered. */
+    indicatorVisible: boolean;
+    /** The page's observer saw the tile's indicator change to a heard state in the last moment. */
+    heardRecently: boolean;
+    /** One of the `speakingIndicator` elements is visible in the tile. */
+    speakingClassVisible: boolean;
+}
+
+/**
+ * Whether a level indicator with these classes shows its participant heard: it
+ * is there, rendered, and does not carry the silent class. A tile with no
+ * indicator (the VP's own) is never heard this way.
+ */
+export function meetIndicatorSpeaking(
+    classes: string | null | undefined,
+    visible: boolean,
+    silentClass: string = MEET_IN_PAGE_SELECTORS.silentIndicatorClass,
+): boolean {
+    if (classes === null || classes === undefined || !visible) return false;
+    return !classes.split(/\s+/).includes(silentClass);
+}
+
+/** Whether a tile reads as speaking: by its level indicator, the observer, or a speaking class. */
+export function meetTileSpeaking(signals: MeetTileSignals): boolean {
+    return (
+        meetIndicatorSpeaking(signals.indicatorClasses, signals.indicatorVisible)
+        || signals.heardRecently
+        || signals.speakingClassVisible
+    );
+}
+
+/**
+ * The one named participant other than the VP, when there is exactly one, or
+ * null. Several tiles under one name (a camera and a screen share) are one
+ * participant.
+ */
+export function meetSoleOtherParticipant(
+    tiles: readonly MeetTileReading[],
+    identities: readonly string[],
+): string | null {
+    const others = new Set<string>();
+    for (const tile of tiles) {
+        const name = cleanMeetParticipantName(tile.name);
+        if (name && !isOwnMeetName(name, identities)) others.add(name);
+    }
+    return others.size === 1 ? [...others][0] : null;
+}
+
+/** The speaker the poll reports, and what it was decided from. */
+export interface MeetSpeakerChoice {
+    speaker: string;
+    /** `tile`: a tile reads as speaking. `sole-participant`: the only other person present. */
+    source: 'tile' | 'sole-participant';
+}
+
+/**
+ * The speaker to report, or null to leave the current one.
+ *
+ * A tile that reads as speaking decides it (`pickMeetActiveSpeaker`). When none
+ * does and exactly one named participant other than the VP is in the meeting,
+ * that participant is the speaker: whoever is heard from the meeting is them.
+ * This keeps a two-person meeting attributed when the speaking indicator is not
+ * read (its class names changed), and changes nothing once there are more.
+ */
+export function chooseMeetSpeaker(
+    tiles: readonly MeetTileReading[],
+    identities: readonly string[],
+    current: string | null,
+): MeetSpeakerChoice | null {
+    const picked = pickMeetActiveSpeaker(tiles, identities, current);
+    if (picked) return { speaker: picked, source: 'tile' };
+    const sole = meetSoleOtherParticipant(tiles, identities);
+    return sole ? { speaker: sole, source: 'sole-participant' } : null;
+}
+
+/**
+ * The participant to report as speaking, or null to leave the current one.
+ *
+ * Tiles that are not speaking, have no name, or are the VP's own are ignored.
+ * When several are speaking, the current speaker is kept if still among them,
+ * since talking over each other is brief; otherwise the first one wins. When
+ * every one of three or more named tiles reads as speaking, the indicator is not
+ * telling them apart (the class list no longer matches Meet's), and nobody is
+ * reported rather than the wrong person.
+ */
+export function pickMeetActiveSpeaker(
+    tiles: readonly MeetTileReading[],
+    identities: readonly string[],
+    current: string | null,
+): string | null {
+    const named = tiles
+        .map((tile) => ({ name: cleanMeetParticipantName(tile.name), speaking: tile.speaking }))
+        .filter((tile): tile is { name: string; speaking: boolean } => !!tile.name && !isOwnMeetName(tile.name, identities));
+    const distinct = new Map<string, boolean>();
+    for (const tile of named) distinct.set(tile.name, (distinct.get(tile.name) ?? false) || tile.speaking);
+    const speaking = [...distinct].filter(([, isSpeaking]) => isSpeaking).map(([name]) => name);
+    if (speaking.length === 0) return null;
+    if (distinct.size >= 3 && speaking.length === distinct.size) return null;
+    if (current && speaking.includes(current)) return current;
+    return speaking[0];
+}

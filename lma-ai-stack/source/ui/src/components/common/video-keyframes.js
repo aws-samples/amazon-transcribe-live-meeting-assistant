@@ -1,0 +1,175 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/**
+ * Helpers for a meeting's key frames (docs/meeting-video.md): the pictures of
+ * the shared screen kept each time it changed and held still. Kept free of
+ * React so they can be tested directly.
+ */
+
+/**
+ * Whether a frame shows shared content rather than the meeting's camera video.
+ * ContentKind is read with the frame's text (SCREEN, CAMERA or MIXED); a frame
+ * without it -- not read yet, or read before it was stored -- is shown.
+ */
+export const showsSharedContent = (frame) => frame?.ContentKind !== 'CAMERA';
+
+/**
+ * Whether a frame shows the same screen as an earlier one: DuplicateOf names
+ * that frame, set when the frame's text is read. The strip hides such frames
+ * unless asked to show all, and the deck leaves them out.
+ */
+export const isRepeatedFrame = (frame) => Boolean(frame?.DuplicateOf);
+
+/** The frames shown by default: shared content, not repeated. */
+export const isDistinctFrame = (frame) => showsSharedContent(frame) && !isRepeatedFrame(frame);
+
+/** How many of the newest frames are read again with new ones, while their text is not read yet. */
+export const REREAD_UNREAD_FRAMES = 5;
+
+/**
+ * Where to fetch new frames from during a live meeting: after the last frame,
+ * or, when some of the newest frames were loaded before their text was read,
+ * after the frame before the first of them (looking back REREAD_UNREAD_FRAMES),
+ * so they come back with their text, kind and DuplicateOf. '' with no frame
+ * before: fetch from the start.
+ */
+export const newFramesCursor = (frames, lookBack = REREAD_UNREAD_FRAMES) => {
+  const list = frames || [];
+  let first = list.length;
+  for (let i = list.length - 1; i >= Math.max(0, list.length - lookBack); i -= 1) {
+    if (typeof list[i]?.SlideText !== 'string') first = i;
+  }
+  if (first === list.length) return list[list.length - 1]?.FrameId || '';
+  return list[first - 1]?.FrameId || '';
+};
+
+/**
+ * A frame's label on the strip and in the deck: its own Title when the model
+ * gave one, else the titles of the chapters it begins (chapterTitlesByFrame),
+ * else ''.
+ */
+export const frameLabel = (frame, chapterTitles) => {
+  const title = typeof frame?.Title === 'string' ? frame.Title.trim() : '';
+  if (title) return title;
+  return (chapterTitles?.get(frame?.FrameId) || []).join(' / ');
+};
+
+/**
+ * The frames of `existing` and `incoming` in time order, one per FrameId. A
+ * frame in `incoming` replaces the stored one: it carries fresher signed links.
+ * FrameId starts with the zero-padded time in milliseconds, so it sorts in
+ * time order.
+ */
+export const mergeKeyframes = (existing, incoming) => {
+  const byId = new Map();
+  [...(existing || []), ...(incoming || [])].forEach((frame) => {
+    if (frame?.FrameId) byId.set(frame.FrameId, frame);
+  });
+  // Code-unit order, not locale order, which may skip the hyphen.
+  return [...byId.values()].sort((a, b) => {
+    if (a.FrameId === b.FrameId) return 0;
+    return a.FrameId < b.FrameId ? -1 : 1;
+  });
+};
+
+/** "m:ss" under an hour, "h:mm:ss" from an hour, for a time on the transcript's clock. */
+export const formatFrameTime = (seconds) => {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+};
+
+/**
+ * The transcript time of a frame from its FrameId alone, which starts with
+ * that time in zero-padded milliseconds ("0000030000-ab12cd" is 0:30); null
+ * for an id that does not. For a slide named in the summary, before its frame
+ * has been read.
+ */
+export const frameIdSeconds = (frameId) => {
+  const match = /^(\d+)-/.exec(String(frameId || ''));
+  return match ? Number(match[1]) / 1000 : null;
+};
+
+/**
+ * Of a list of transcript start times (in page order), the index of the
+ * segment to show for time `seconds`: the last one that started at or before
+ * it, or the first when it is earlier than all of them. -1 for an empty list.
+ */
+export const segmentIndexForTime = (startTimes, seconds) => {
+  if (!startTimes?.length) return -1;
+  let best = -1;
+  let bestStart = -Infinity;
+  startTimes.forEach((start, i) => {
+    if (start <= seconds && start >= bestStart) {
+      best = i;
+      bestStart = start;
+    }
+  });
+  if (best !== -1) return best;
+  let first = 0;
+  startTimes.forEach((start, i) => {
+    if (start < startTimes[first]) first = i;
+  });
+  return first;
+};
+
+export const HIGHLIGHT_CLASS = 'transcript-segment-highlight';
+
+/**
+ * Scrolls a transcript container to the segment under way at `seconds` and
+ * highlights it. Rows are the container's elements with a `data-start-time`.
+ * Measured against the container itself, so a positioned element between a
+ * row and the container does not move the target. Returns the row, or null
+ * when there is none.
+ */
+export const scrollTranscriptToTime = (container, seconds) => {
+  if (!container || !Number.isFinite(seconds)) return null;
+  const rows = [...container.querySelectorAll('[data-start-time]')];
+  const index = segmentIndexForTime(
+    rows.map((row) => Number(row.getAttribute('data-start-time'))),
+    seconds,
+  );
+  if (index === -1) return null;
+  const row = rows[index];
+  const top = row.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+  if (container.scrollTo) container.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' });
+  row.classList.remove(HIGHLIGHT_CLASS);
+  // Read layout so the animation restarts even for the row highlighted last.
+  // eslint-disable-next-line no-unused-expressions
+  row.offsetWidth;
+  row.classList.add(HIGHLIGHT_CLASS);
+  return row;
+};
+
+/** Lower-case, accents removed, so a search for "resume" finds "Résumé". */
+const fold = (text) =>
+  String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+/** Whether a frame's text contains every word of a search, in any order. */
+export const frameMatches = (frame, search) => {
+  const words = fold(search).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = fold(frame?.SlideText);
+  return words.every((word) => text.includes(word));
+};
+
+/** The first line of a frame's text holding a search word, shortened around it. */
+export const matchSnippet = (frame, search, width = 60) => {
+  const words = fold(search).split(/\s+/).filter(Boolean);
+  const lines = String(frame?.SlideText || '').split('\n');
+  const line = lines.find((l) => words.some((w) => fold(l).includes(w)));
+  if (!line) return '';
+  const at = Math.max(0, fold(line).indexOf(words.find((w) => fold(line).includes(w))));
+  const start = Math.max(0, at - Math.floor(width / 3));
+  const piece = line.slice(start, start + width).trim();
+  return `${start > 0 ? '…' : ''}${piece}${start + width < line.length ? '…' : ''}`;
+};

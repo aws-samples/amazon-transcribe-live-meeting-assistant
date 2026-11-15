@@ -75,7 +75,7 @@ The `vp-start` target wraps `lma-virtual-participant-stack/backend/local-test.sh
 3. Builds the VP Docker image (`lma-vp-local`)
 4. Runs the container with your AWS credentials mounted read-only and ports `5900` (VNC) and `5901` (noVNC) exposed
 
-Accepted `PLATFORM` values: `WEBEX`, `ZOOM`, `TEAMS`, `CHIME`.
+Accepted `PLATFORM` values: `WEBEX`, `ZOOM`, `TEAMS`, `CHIME`, `GOOGLE_MEET`.
 
 ## Managing Secrets (`--reuse-env`)
 
@@ -184,7 +184,7 @@ All `vp-start*` targets accept:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `STACK_NAME` | yes | LMA CloudFormation stack name |
-| `PLATFORM` | yes | `WEBEX`, `ZOOM`, `TEAMS`, or `CHIME` |
+| `PLATFORM` | yes | `WEBEX`, `ZOOM`, `TEAMS`, `CHIME`, or `GOOGLE_MEET` |
 | `MEETING_ID` | yes | Meeting ID to join |
 | `MEETING_PASSWORD` | no | Meeting password, if the platform requires one |
 | `DEV=1` | no | Enable dev mode (implied by `vp-start-dev`) |

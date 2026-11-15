@@ -45,23 +45,31 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # and package.json must stay on the same version line to keep the wrapper that
 # lays the binary down in step with the client that launches it.
 #
-# It had drifted badly: 0.3.31 here vs npm 0.5.x in package.json. Realigned to
-# 0.5.10. `cloakbrowser info` reports the *identical* binary on both
-# (chromium-146.0.7680.177.5), so the patched browser — and therefore the
-# fingerprint surface — is unchanged by this bump; only the downloader moved.
-# The 0.5.x CLI keeps the `install`/`info` subcommands used below, and its new
-# free-tier note ("more than one concurrent session" needs a key) is satisfied
-# by design: one container per meeting runs exactly one browser session.
+# History: it once drifted to 0.3.31 here vs npm 0.5.x, and was realigned at
+# 0.5.10. At 0.6.5 (matching package.json) both wrappers still pin the same free
+# binary as 0.5.10 did (chromium-146.0.7680.177.5 on linux-x64, confirmed in a
+# 0.6.5 image build; 146.0.7680.177.3 on linux-arm64 as of 0.6.4, not re-checked
+# at 0.6.5), so the patched browser — and therefore the
+# fingerprint surface — is unchanged; only the wrapper moved. `cloakbrowser info`
+# below prints the installed build, so a binary change shows up in the build log.
+# The CLI keeps the `install`/`info` subcommands used below, and its free-tier
+# note ("more than one concurrent session" needs a key) is satisfied by design:
+# one container per meeting runs exactly one browser session.
 #
 # The ARG is deliberately NOT named CLOAKBROWSER_VERSION. Docker exposes ARGs as
-# environment variables to RUN, and cloakbrowser 0.5.x reads $CLOAKBROWSER_VERSION
+# environment variables to RUN, and cloakbrowser (0.5.x onward) reads $CLOAKBROWSER_VERSION
 # as a *Chromium binary* version pin — so the wrapper version leaked in as a
 # browser pin and `install` died with "Invalid browser version pin. Use a full
 # numeric Chromium version, e.g. '148.0.7778.215.2'." 0.3.31 ignored the
 # variable, which is why the old pin never tripped over it. Verified by docker
 # build; do not rename this back.
-ARG CLOAKBROWSER_PIP_VERSION=0.5.10
-RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_PIP_VERSION}" \
+ARG CLOAKBROWSER_PIP_VERSION=0.6.5
+# cloakbrowser declares playwright>=1.53 without an upper bound, and playwright
+# 1.65.0 dropped a module cloakbrowser 0.6.5 imports, so pin playwright to the
+# release of the npm `playwright-core` in package-lock.json. Move the two
+# together: bumping playwright-core in package.json does not update this pin.
+ARG PLAYWRIGHT_PIP_VERSION=1.64.1
+RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_PIP_VERSION}" "playwright==${PLAYWRIGHT_PIP_VERSION}" \
     && python -m cloakbrowser install \
     && python -m cloakbrowser info
 

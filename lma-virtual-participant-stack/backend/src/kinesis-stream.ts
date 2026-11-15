@@ -1,6 +1,15 @@
-import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/client-kinesis';
+import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
+import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { SpeakerFusion } from './speaker-fusion.js';
+import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
+import { createLogger } from './logger.js';
+import { resultLanguageCode } from './transcribe-language.js';
+import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
+import type { AsrEngineName } from './asr-microvm-client.js';
+
+const log = createLogger('kinesis-stream');
 
 export interface TranscriptSegment {
   channel: string;
@@ -10,57 +19,117 @@ export interface TranscriptSegment {
   transcript: string;
   isPartial: boolean;
   speaker?: string;
-} 
-
-export interface CallMetaData {
-  callId: string;
-  customerPhoneNumber?: string;
-  systemPhoneNumber?: string;
-  agentId?: string;
-  callStreamingStartTime?: string;
-  callStreamingEndTime?: string;
-  callCategories?: string[];
-  callCategoryScore?: number;
-  issuesDetected?: string[];
-  actionItemsDetected?: string[];
-  callSummaryText?: string;
-  recordingUrl?: string;
-  pcaUrl?: string;
-  sentiment?: {
-    OverallSentiment: {
-      AGENT?: number;
-      CUSTOMER?: number;
-    };
-    SentimentByPeriod: {
-      QUARTER?: {
-        AGENT?: Array<{ Score: number; BeginOffsetMillis: number; EndOffsetMillis: number }>;
-        CUSTOMER?: Array<{ Score: number; BeginOffsetMillis: number; EndOffsetMillis: number }>;
-      };
-    };
-  };
+  /**
+   * The language Amazon Transcribe identified for the row (e.g. `es-US`), when
+   * language identification is on, or the language the ASR MicroVM engine
+   * identified from a final's text (microvmRowLanguageCode). Absent when neither
+   * names one: Amazon Transcribe with a fixed language, and MicroVM partials and
+   * short rows.
+   */
+  languageCode?: string;
 }
 
-export interface KinesisRecord {
-  eventType: 'START' | 'CONTINUE' | 'END' | 'ADD_TRANSCRIPT_SEGMENT' | 'ADD_CALL_CATEGORY' | 'ADD_REAL_TIME_CALL_ANALYTICS_METADATA';
-  callId: string;
-  channel?: string;
-  segmentId?: string;
-  startTime?: number;
-  endTime?: number;
-  transcript?: string;
-  isPartial?: boolean;
-  speaker?: string;
-  callMetaData?: CallMetaData;
-  recordingUrl?: string;
-  timestamp: number;
+/** The record's LanguageCode field, or nothing when the language is not known. */
+const languageField = (code: string | undefined): { LanguageCode?: string } => (code ? { LanguageCode: code } : {});
+
+/** The fields of an ADD_VIDEO_KEYFRAME event other than its envelope. */
+export interface VideoKeyframeEvent {
+  /** Sortable id: the timeline position in milliseconds, zero-padded, plus a suffix. */
+  FrameId: string;
+  /** Seconds on the transcript timeline (the clock of the segments' StartTime). */
+  Timestamp: number;
+  /** Seconds into the meeting's video recording, or null when there is none. */
+  VideoOffset: number | null;
+  /** HTTPS S3 URLs, in the same shape as the recording URLs. */
+  ImageUrl: string;
+  ThumbnailUrl: string;
+  Width: number;
+  Height: number;
+  Source: 'VIRTUAL_PARTICIPANT';
+  /** Whether the platform showed a screen share; null where it gives no signal. */
+  ShareDetected: boolean | null;
+  /** Fraction of the picture that differs from the previous key frame. */
+  ChangeScore: number;
 }
+
+/**
+ * How a meeting is transcribed, as stored on its meeting record next to its
+ * capture source (Call.TranscriptionEngine, TranscriptionLanguage and
+ * SpeakerSeparation; see docs/websocket-streaming-api.md#capture-context).
+ */
+export interface TranscriptionContext {
+  TranscriptionEngine: 'TRANSCRIBE' | 'MICROVM_ASR';
+  /** Amazon Transcribe's language setting; absent for the MicroVM, whose model sets it. */
+  TranscriptionLanguage?: string;
+  /** Only the meeting audio (REMOTE) is ever separated; the assistant's voice never is. */
+  SpeakerSeparation: 'REMOTE' | 'NONE';
+}
+
+/** The transcription fields of a VP meeting's record for one engine. */
+export const vpTranscriptionContext = (
+  engine: AsrEngineName,
+  diarize: boolean,
+  languageCode: string,
+): TranscriptionContext => ({
+  TranscriptionEngine: engine === 'microvm' ? 'MICROVM_ASR' : 'TRANSCRIBE',
+  ...(engine === 'transcribe' && languageCode ? { TranscriptionLanguage: languageCode } : {}),
+  SpeakerSeparation: diarize ? 'REMOTE' : 'NONE',
+});
 
 // Local testing mode
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+/**
+ * Whether to emit per-result diagnostics.
+ *
+ * `DEBUG` is honoured because that is the habit for a local run; `LOG_LEVEL`
+ * is what a deployment actually sets, through the stack's LogLevel parameter.
+ * Gating only on the former meant the separation log could not be switched on
+ * in a deployment at all -- which is the only place a real room's audio exists
+ * to be diagnosed.
+ *
+ * Used only by the diarized path, which logs participant names and no
+ * transcript text. The two `process.env.DEBUG` gates elsewhere in this file
+ * are deliberately separate and keep their own condition.
+ */
+const diagnosticsOn = (): boolean =>
+  Boolean(process.env.DEBUG) || (process.env.LOG_LEVEL || '').toUpperCase() === 'DEBUG';
+
 class KinesisStreamManager {
   private kinesisClient: KinesisClient;
   private callId: string;
+
+  /**
+   * The agenda the VP was started or scheduled with, read from its row before
+   * the meeting starts; see meeting-agenda.ts. Null when there is none.
+   */
+  private agenda: VpAgenda | null = null;
+
+  setAgenda(agenda: VpAgenda | null): void {
+    this.agenda = agenda;
+  }
+
+  /**
+   * The engine, language and speaker separation the meeting is expected to be
+   * transcribed with, stored on its record by the START event. Null leaves them
+   * off the record.
+   */
+  private transcriptionContext: TranscriptionContext | null = null;
+
+  setTranscriptionContext(context: TranscriptionContext | null): void {
+    this.transcriptionContext = context;
+  }
+
+  /**
+   * Whether this meeting's START event has been sent, which is what creates the
+   * meeting record. Segments that do not come from the speech engines (the
+   * meeting chat) wait for it, since there is nothing to add them to before.
+   */
+  private startSent = false;
+
+  get meetingStarted(): boolean {
+    return this.startSent;
+  }
 
   /** The meeting's CallId, so other services (the ASR launcher lease) can key on it. */
   get currentCallId(): string {
@@ -68,10 +137,27 @@ class KinesisStreamManager {
   }
   private streamName: string;
   
-  // Global speaker tracking (matching Python kds.py)
-  private currentSpeakerName: string | null = null;
-  private speakers: string[] = [];
-  private startTimes: number[] = [];
+  // Who the platform showed over a span of the meeting timeline, supplied by
+  // the transcription service from its roster timeline (roster-timeline.ts).
+  // Undefined, or no lookup at all, means nobody is known yet, and the name
+  // the caller passed is used instead.
+  private rosterLookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null = null;
+  // Seconds of a span the platform actually showed each participant for, from
+  // the same roster timeline: the evidence a voice label's vote is built from.
+  // Unlike the lookup above it never guesses -- time before the platform's
+  // first report belongs to nobody -- and with no source set there is none.
+  private rosterCoverage:
+    | ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>)
+    | null = null;
+  // Whether to recover speaker turns from Transcribe's per-item labels. Off
+  // unless the deployment's VP voice-separation switch is on.
+  private diarize = false;
+  // Which participant each Transcribe voice label is attributed to, and so
+  // which rows it names (speaker-fusion.ts). Labels restart with every
+  // Transcribe session, and each session has its own timeline offset, so a
+  // new offset starts a new vote.
+  private voiceLabels = new SpeakerFusion();
+  private voiceLabelsOffset: number | null = null;
 
   constructor() {
     // In local test mode, explicitly use default provider which checks credentials file first
@@ -81,7 +167,7 @@ class KinesisStreamManager {
     };
     
     if (isLocalTest) {
-      console.log('Using AWS credentials from ~/.aws/credentials for Kinesis');
+      log.info('Using AWS credentials from ~/.aws/credentials for Kinesis');
       // Default provider checks credentials file, then environment variables, then instance metadata
       clientConfig.credentials = defaultProvider();
     }
@@ -94,13 +180,18 @@ class KinesisStreamManager {
     this.streamName = details.callDataStreamName;
     
     if (!this.streamName) {
-      console.warn('CALL_DATA_STREAM_NAME not configured - Kinesis streaming disabled');
+      log.warn('CALL_DATA_STREAM_NAME not configured - Kinesis streaming disabled');
     }
   }
 
-  private async sendRecord(record: any): Promise<void> {
+  /**
+   * Writes one record. Errors are logged and swallowed, so a lost event never
+   * ends the meeting -- except with `rethrow`, for a caller that has something
+   * to undo when the record was not written (see sendVideoKeyframe).
+   */
+  private async sendRecord(record: any, { rethrow = false }: { rethrow?: boolean } = {}): Promise<void> {
     if (!this.streamName) {
-      console.log('Kinesis streaming disabled - would send:', record.EventType);
+      log.info('Kinesis streaming disabled - would send:', record.EventType);
       return;
     }
 
@@ -112,16 +203,19 @@ class KinesisStreamManager {
       });
 
       const result = await this.kinesisClient.send(command);
-      console.log(`Kinesis record sent: ${record.EventType}, SequenceNumber: ${result.SequenceNumber}`);
+      log.info(`Kinesis record sent: ${record.EventType}, SequenceNumber: ${result.SequenceNumber}`);
     } catch (error: any) {
       // Handle permission errors gracefully (like Python version)
       if (error.name === 'AccessDeniedException') {
-        console.log(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
-        console.log('Note: This is expected during local testing without proper IAM permissions');
+        log.error(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
+        if (isLocalTest) {
+          log.info('Note: This is expected during local testing without proper IAM permissions');
+        }
       } else {
       // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
-        console.error(`Error sending ${record.EventType} event to Kinesis:`, error);
+        log.error(`Error sending ${record.EventType} event to Kinesis:`, error);
       }
+      if (rethrow) throw error;
       // Don't throw error - continue execution like Python version
     }
   }
@@ -138,123 +232,93 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // Created with the meeting, so it is there from the first event; nothing
+      // is added when the VP has no agenda.
+      ...agendaStartFields(this.agenda, details.lmaUser),
+      CaptureSource: 'VIRTUAL_PARTICIPANT',
+      ...(this.transcriptionContext ?? {}),
     };
 
     await this.sendRecord(record);
+    this.startSent = true;
     
     // Link CallId to VP record (matching Python kds.py behavior)
     const vpId = details.invite.virtualParticipantId;
     if (vpId) {
         try {
             await this.linkCallToVP(vpId, this.callId);
-            console.log(`Linked CallId ${this.callId} to VP ${vpId}`);
+            log.info(`Linked CallId ${this.callId} to VP ${vpId}`);
         } catch (error) {
-            console.log(`Failed to link CallId to VP: ${error}`);
+            log.warn(`Failed to link CallId to VP: ${error}`);
         }
     }
   }
 
+  /**
+   * Link the CallId onto the VP record.
+   *
+   * Delegates to the status manager so there is one implementation of this
+   * write. It used to have its own: read the row's status, then send it back
+   * with the CallId. That is a read-modify-write of a field this call does not
+   * own, and unlike the equivalent at startup it runs here in the middle of the
+   * VP's life — `startTranscription` calls it moments before `markActive`
+   * reports ACTIVE, on the same code path — so losing that race put a
+   * recording VP back to whatever the read had returned.
+   *
+   * The CallId is already linked before the meeting starts (see `index.ts`,
+   * which calls `setCallId` with this same value). This remains as a
+   * belt-and-braces write for a VP whose startup link did not happen.
+   */
   private async linkCallToVP(vpId: string, callId: string): Promise<void> {
-    /**Link CallId to Virtual Participant record via GraphQL (matching Python implementation with SigV4)*/
-    try {
-        const graphqlEndpoint = details.graphqlEndpoint;
-        if (!graphqlEndpoint) {
-            console.log('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
-            return;
-        }
-
-        // Use AWS SigV4 signing (matching Python SigV4Auth)
-        const { createSignedFetcher } = await import('aws-sigv4-fetch');
-        const signedFetch = createSignedFetcher({
-            service: 'appsync',
-            region: process.env.AWS_REGION || 'us-east-1',
-        });
-
-        // First, get the current VP to preserve existing status
-        const getQuery = `
-            query GetVirtualParticipant($id: ID!) {
-                getVirtualParticipant(id: $id) {
-                    id
-                    status
-                }
-            }
-        `;
-
-        const getResponse = await signedFetch(graphqlEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                query: getQuery,
-                variables: { id: vpId }
-            }),
-        });
-
-        if (!getResponse.ok) {
-            throw new Error(`Failed to get VP data: HTTP ${getResponse.status} - ${await getResponse.text()}`);
-        }
-
-        const getData = await getResponse.json();
-        if (getData.errors) {
-            throw new Error(`GraphQL errors getting VP: ${JSON.stringify(getData.errors)}`);
-        }
-
-        const currentVP = getData.data?.getVirtualParticipant;
-        if (!currentVP) {
-            throw new Error(`VP ${vpId} not found`);
-        }
-
-        const currentStatus = currentVP.status || 'INITIALIZING';
-        console.log(`Current VP status: ${currentStatus}`);
-
-        // Now update with CallId while preserving status.
-        const mutation = `
-            mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-                updateVirtualParticipant(input: $input) {
-                    id
-                    status
-                    CallId
-                    updatedAt
-                    Owner
-                    SharedWith
-                }
-            }
-        `;
-
-        const variables = {
-            input: {
-                id: vpId,
-                status: currentStatus,
-                CallId: callId
-            }
-        };
-
-        const response = await signedFetch(graphqlEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                query: mutation,
-                variables: variables
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to link CallId: HTTP ${response.status} - ${await response.text()}`);
-        }
-
-        const responseData = await response.json();
-        if (responseData.errors) {
-            throw new Error(`GraphQL errors linking CallId: ${JSON.stringify(responseData.errors)}`);
-        }
-
-        console.log(`Successfully linked CallId ${callId} to VP ${vpId} with status ${currentStatus}`);
-    } catch (error) {
-        console.error(`Error linking CallId to VP: ${error}`);
-        throw error;
+    if (!details.graphqlEndpoint) {
+        log.warn('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
+        return;
     }
+    const { createStatusManager } = await import('./status-manager.js');
+    const linked = await createStatusManager(vpId).setCallId(callId);
+    if (!linked) {
+        throw new Error(`Failed to link CallId ${callId} to VP ${vpId}`);
+    }
+  }
+
+  /**
+   * UPDATE_CAPTURE_CONTEXT: the record's transcription fields again, for a
+   * meeting transcribed by another engine than the one its START named (the
+   * MicroVM could not be used and Amazon Transcribe took over).
+   */
+  async sendTranscriptionContext(context: TranscriptionContext): Promise<void> {
+    this.transcriptionContext = context;
+    const record: any = {
+      EventType: 'UPDATE_CAPTURE_CONTEXT',
+      CallId: this.callId,
+      ...context,
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
+  }
+
+  /**
+   * UPDATE_TRANSCRIPTION_PAUSE: transcription was paused or resumed with the
+   * meeting chat commands (`LMA pause` / `LMA start`). The
+   * call_event_processor stores it on the meeting record
+   * (Call.TranscriptionPause), from which the meeting page says that, and since
+   * when, the transcript is paused. `pausedBy` is the chat sender's display
+   * name, when the platform shows one. See transcription-pause.ts.
+   */
+  async sendTranscriptionPause(paused: boolean, changedAt: string, pausedBy: string | null): Promise<void> {
+    const record: any = {
+      EventType: 'UPDATE_TRANSCRIPTION_PAUSE',
+      CallId: this.callId,
+      Paused: paused,
+      ChangedAt: changedAt,
+      ...(paused && pausedBy ? { PausedBy: pausedBy } : {}),
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
   }
 
   async sendEndMeeting(recordingUrl?: string): Promise<void> {
@@ -262,8 +326,6 @@ class KinesisStreamManager {
     const record: any = {
       EventType: 'END',
       CallId: this.callId,
-      CustomerPhoneNumber: 'Customer Phone',
-      SystemPhoneNumber: 'System Phone',
       CreatedAt: new Date().toISOString(),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
@@ -285,7 +347,7 @@ class KinesisStreamManager {
     };
 
     await this.sendRecord(record);
-    console.log(`Sent call recording event to Kinesis.`);
+    log.info(`Sent call recording event to Kinesis.`);
   }
 
   async sendCallVideoRecording(url: string): Promise<void> {
@@ -303,19 +365,36 @@ class KinesisStreamManager {
     };
 
     await this.sendRecord(record);
-    console.log(`Sent call video recording event to Kinesis.`);
+    log.info(`Sent call video recording event to Kinesis.`);
   }
 
-  syncTranscriptSegmentState(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): void {
-    this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
+  /**
+   * ADD_VIDEO_KEYFRAME: one key frame of the meeting display (see
+   * keyframe-sampler.ts). The call_event_processor stores it on the meeting and
+   * publishes it on the onAddVideoKeyframe subscription. Throws when the record
+   * was not written, so the sampler can treat the frame as not saved.
+   */
+  async sendVideoKeyframe(frame: VideoKeyframeEvent): Promise<void> {
+    const record: any = {
+      EventType: 'ADD_VIDEO_KEYFRAME',
+      CallId: this.callId,
+      ...frame,
+      CreatedAt: new Date().toISOString(),
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record, { rethrow: true });
   }
 
   // Returns the highest absolute segment EndTime (seconds) written by this call
   // so the caller can advance the cumulative reconnect offset. Returns
   // timeOffsetSeconds unchanged when nothing was written.
   async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
-    console.log("Process speaker changes to identify segments within result");
+    log.info("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
+    // Every row of a result is in the result's language.
+    const language = languageField(resultLanguageCode(transcriptResult));
     let maxEndTime = timeOffsetSeconds;
 
     for (const segment of Object.values(segments)) {
@@ -324,34 +403,34 @@ class KinesisStreamManager {
         maxEndTime = segEnd;
       }
       if (process.env.DEBUG) {
-        console.log(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
+        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
       }
 
       try {
         const record: any = {
           EventType: 'ADD_TRANSCRIPT_SEGMENT',
           CallId: this.callId,
-          Channel: 'CALLER',
+          Channel: REMOTE_CHANNEL,
           SegmentId: (segment as any).SegmentId,
           StartTime: (segment as any).StartTime !== null ? (segment as any).StartTime : 0,
           EndTime: (segment as any).EndTime !== null ? (segment as any).EndTime : 0,
           Transcript: (segment as any).Transcript,
-          IsPartial: transcriptResult.IsPartial || false,
+          IsPartial: KinesisStreamManager.isPartialResult(transcriptResult),
           CreatedAt: new Date().toISOString(),
           UpdatedAt: new Date().toISOString(),
           Sentiment: null,
           TranscriptEvent: null,
-          UtteranceEvent: null,
           Speaker: (segment as any).Speaker,
+          ...language,
           AccessToken: process.env.USER_ACCESS_TOKEN || '',
           IdToken: process.env.USER_ID_TOKEN || '',
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
         };
 
         await this.sendRecord(record);
-        console.log(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
+        log.info(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
       } catch (error) {
-        console.log(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
+        log.error(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
       }
     }
     return maxEndTime;
@@ -368,7 +447,7 @@ class KinesisStreamManager {
     const record: any = {
       EventType: 'ADD_TRANSCRIPT_SEGMENT',
       CallId: this.callId,
-      Channel: segment.channel || 'CALLER',
+      Channel: segment.channel || REMOTE_CHANNEL,
       SegmentId: segment.segmentId,
       StartTime: segment.startTime,
       EndTime: segment.endTime,
@@ -378,8 +457,8 @@ class KinesisStreamManager {
       UpdatedAt: now,
       Sentiment: null,
       TranscriptEvent: null,
-      UtteranceEvent: null,
       Speaker: segment.speaker,
+      ...languageField(segment.languageCode),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
@@ -387,144 +466,178 @@ class KinesisStreamManager {
     await this.sendRecord(record);
   }
 
+  /**
+   * One message from the meeting chat, as a final segment on the MEETING_CHAT
+   * channel (see meeting-chat.ts, which builds it and decides whether to send
+   * it). Its start and end are the one moment on the transcript timeline at
+   * which the message was read.
+   */
+  async sendChatSegment(segment: TranscriptSegment): Promise<void> {
+    await this.sendAsrTranscriptSegment({ ...segment, channel: MEETING_CHAT_CHANNEL, isPartial: false });
+  }
+
+  /**
+   * Turn on recovery of speaker turns from Transcribe's per-item labels.
+   *
+   * Set once per meeting from the deployment's VP voice-separation switch, so
+   * the two engines honour the same control: the on-demand engine reads it when
+   * opening its session, and this path reads it here.
+   */
+  setDiarization(enabled: boolean): void {
+    this.diarize = enabled === true;
+    // Set once per meeting, so a new meeting starts with no label owners.
+    this.voiceLabels = new SpeakerFusion();
+    this.voiceLabelsOffset = null;
+  }
+
+  /**
+   * Name rows after who the platform showed during their audio.
+   *
+   * The lookup is keyed on the meeting timeline -- Transcribe's item times plus
+   * the session offset -- and the transcription service records each
+   * participant change on that same clock at the moment the platform reports
+   * it. Rows used to be named from changes stamped at the last word of
+   * whichever result was in hand when the change was noticed, which lands a
+   * partial's latency (most of a second) before the change and gave the
+   * previous speaker's last words to the next one.
+   */
+  setRosterLookup(lookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null): void {
+    this.rosterLookup = lookup;
+  }
+
+  /**
+   * Where a voice label's evidence comes from: the seconds of a span of the
+   * meeting timeline the platform showed each participant for, as the
+   * on-demand engine's path counts it (RosterTimeline.coverage). Kept apart
+   * from the roster lookup because that one names a row even where the
+   * platform has shown nobody, and such a name must not prove a label.
+   */
+  setRosterCoverage(
+    coverage: ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>) | null,
+  ): void {
+    this.rosterCoverage = coverage;
+  }
+
+  /**
+   * Whether a result is still in progress.
+   *
+   * Derived once and shared, because the places that used to decide it
+   * independently did not agree: the builder tested `=== true`, the record
+   * written to Kinesis used `|| false`, and the resets used `!`. Any truthy
+   * non-boolean therefore split a result as if it were final while every
+   * resulting row was stamped in progress. The SDK deserialises this field to
+   * a real boolean, so it was unreachable through Amazon Transcribe -- but a
+   * property that holds "by construction" should not rest on a wire type.
+   */
+  private static isPartialResult(result: any): boolean {
+    return Boolean(result?.IsPartial);
+  }
+
+  /**
+   * A stable id for a result that arrived without one.
+   *
+   * Keyed on the result's own start time, falling back to the first timed
+   * item's, because that is the one thing a partial and its final both carry:
+   * a final repeats its partial's items, so the first item's time is the same,
+   * while two different results start at different moments. Two requirements
+   * have to hold at once -- a partial and its final must share an id, and two
+   * different results must not -- and anything stateful fails one of them. A
+   * counter makes every delivery unique, which orphans the partial; memoising
+   * on the result object does not help either, because the SDK deserialises a
+   * fresh object per TranscriptEvent, so a partial and its final are never the
+   * same object.
+   *
+   * Two cases this does NOT cover, stated rather than claimed away. If
+   * Transcribe re-decodes the leading word's timestamp between the partial and
+   * the final, the two get different ids and the partial is orphaned. And if a
+   * result carries no StartTime and no timed item at all, the anchor is 0, so
+   * two such results in one session collide -- there is nothing in a result
+   * with no times and no id that distinguishes it from another while still
+   * matching its own final, so this is a limit of the fallback rather than a
+   * choice between designs.
+   *
+   * Both need `ResultId` to be absent, and Transcribe always sends one, so
+   * none of this is reachable through the service. The fallback exists so that
+   * a result without an id still lands on a row of its own wherever it can,
+   * because the failure mode of a colliding id is a meeting overwriting itself
+   * onto one transcript row.
+   */
+  private static fallbackResultId(result: any, timeOffsetSeconds: number): string {
+    const items = result?.Alternatives?.[0]?.Items ?? [];
+    const firstTimed = items.find(
+      (item: any) => item?.Type === 'pronunciation' && item.StartTime !== undefined,
+    );
+    const anchor = result?.StartTime ?? firstTimed?.StartTime ?? 0;
+    return `vp-${timeOffsetSeconds}-${anchor}`;
+  }
+
+  /**
+   * The rows for one Transcribe result: one per participant turn, and with
+   * voice separation on, one per recovered voice turn within that.
+   *
+   * Every word is named after the participant the platform showed for most
+   * of the word, and the result is cut where that changes. With voice
+   * separation on, a voice label proven to one participant names its whole
+   * run instead, and any other label is kept as a hint under the participant
+   * it mostly coincides with (see speaker-fusion.ts).
+   *
+   * Segment ids are keyed on Transcribe's own `ResultId` plus the piece
+   * index, NOT on the speaker name. That is what keeps a partial aligned with
+   * its final: a partial is always one piece at index 0 and is cleanly
+   * replaced by the final's first piece, while later pieces arrive as new
+   * segments. Keying on anything derived from the name would rename the
+   * segment between partial and final and orphan the partial, which would then
+   * sit in the UI for ever marked in-progress.
+   */
   private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
-    const segments: any = {};
+    const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
+    // See fallbackResultId for what it is keyed on and what it does not cover.
+    const resultId =
+      result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
+    if (this.voiceLabelsOffset !== timeOffsetSeconds) {
+      this.voiceLabels = new SpeakerFusion();
+      this.voiceLabelsOffset = timeOffsetSeconds;
+    }
+    const labels = this.voiceLabels;
+    const segments = buildDiarizedSegments(items, {
+      resultId,
+      timeOffsetSeconds,
+      rosterNameFor: (start, end) => this.rosterLookup?.(start, end) ?? speakerName,
+      // A piece is only ever named here when its run's label did not name the
+      // whole run -- the label is unproven, or the page strongly contradicts
+      // it on this run -- so the page names it, as on the on-demand engine's
+      // path. Naming it through `attribute` instead would hand a contradicted
+      // run's pieces straight back to the label's proven name.
+      nameFor: this.diarize
+        ? (roster, label) => labels.attributeByPage(label, roster).speaker
+        : (roster) => roster,
+      isPartial: KinesisStreamManager.isPartialResult(result),
+      useLabels: this.diarize,
+      // Once per labelled run: its evidence is what the platform actually
+      // showed over the run's span, never a fallback name. On a three-person
+      // Zoom standup one Transcribe label coincided with all three
+      // participants, so a Transcribe label often never reaches the share
+      // that lets it name a row, and its rows are then named by the platform.
+      voiceName: this.diarize
+        ? (label, start, end) => {
+            const attribution = labels.attribute({
+              label,
+              pageName: this.rosterLookup?.(start, end) ?? speakerName,
+              coverage: this.rosterCoverage?.(start, end) ?? [],
+            });
+            return attribution.source === 'page' ? undefined : attribution.speaker;
+          }
+        : undefined,
+    });
 
-    if (this.currentSpeakerName !== speakerName) {
-      // Start time of new speaker is the start time of the last item in the results.
-      // Store absolute (offset-adjusted) time so ids/ordering stay monotonic across
-      // reconnects — Transcribe resets Item.StartTime to 0 on every (re)connect.
-      this.currentSpeakerName = speakerName;
-      this.speakers.push(speakerName);
-      const lastItem = result.Alternatives[0].Items[result.Alternatives[0].Items.length - 1];
-      this.startTimes.push((lastItem.StartTime ?? 0) + timeOffsetSeconds);
+    if (diagnosticsOn()) {
+      const names = Object.values(segments).map((segment) => segment.Speaker);
+      log.info(
+        `[DIARIZATION] result=${resultId} partial=${KinesisStreamManager.isPartialResult(result)} ` +
+          `items=${items.length} segments=${names.length} speakers=${names.join(',')}`,
+      );
     }
-
-    const alternative = result.Alternatives[0];
-    for (const item of alternative.Items) {
-      this.addItemToSegment(item, segments, timeOffsetSeconds);
-      if (process.env.DEBUG) {
-        console.log(`DEBUG: Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
-        console.log(`DEBUG: Speakers ${this.speakers}`);
-        console.log(`DEBUG: StartTimes ${this.startTimes}`);
-        console.log(`DEBUG: Segments ${JSON.stringify(segments)}`);
-      }
-    }
-    
-    // If it's a non partial result, then re-initialize globals
-    if (!result.IsPartial) {
-      console.log("INFO: Non partial result - Resetting speaker and start times");
-      this.currentSpeakerName = null;
-      this.speakers = [];
-      this.startTimes = [];
-    }
-    
     return segments;
-  }
-
-  private addItemToSegment(item: any, segments: any, timeOffsetSeconds = 0): any {
-    // startTimes are already absolute (offset-adjusted); compare against the
-    // item's absolute start time so the speaker lookup stays correct.
-    const itemStart = (item.StartTime ?? 0) + timeOffsetSeconds;
-    const itemEnd = (item.EndTime ?? 0) + timeOffsetSeconds;
-    // Find the correct segment index using binary search (matching Python bisect)
-    let segmentIndex = this.binarySearch(this.startTimes, itemStart) - 1;
-    if (segmentIndex < 0) {
-      segmentIndex = 0;
-    }
-
-    const segmentId = `${this.speakers[segmentIndex]}-${this.startTimes[segmentIndex]}`;
-
-    if (!(segmentId in segments)) {
-      segments[segmentId] = {
-        SegmentId: segmentId,
-        Speaker: this.speakers[segmentIndex],
-        StartTime: this.startTimes[segmentIndex],
-        EndTime: itemEnd,
-        Transcript: ''
-      };
-    } else if (item.Type === 'pronunciation') {
-      // Add a space between words
-      segments[segmentId].Transcript += " ";
-    }
-
-    segments[segmentId].EndTime = itemEnd;
-    segments[segmentId].Transcript += item.Content;
-
-    return segments;
-  }
-
-  private binarySearch(arr: number[], target: number): number {
-    // JavaScript implementation of Python's bisect.bisect_left
-    let left = 0;
-    let right = arr.length;
-    
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2);
-      if (arr[mid] < target) {
-        left = mid + 1;
-      } else {
-        right = mid;
-      }
-    }
-    
-    return left;
-  }
-
-  async sendCallCategory(category: string, score?: number): Promise<void> {
-    const record: KinesisRecord = {
-      eventType: 'ADD_CALL_CATEGORY',
-      callId: this.callId,
-      timestamp: Date.now(),
-      callMetaData: {
-        callId: this.callId,
-        callCategories: [category],
-        callCategoryScore: score,
-      },
-    };
-
-    await this.sendRecord(record);
-  }
-
-  async sendRealTimeAnalytics(metadata: Partial<CallMetaData>): Promise<void> {
-    const record: KinesisRecord = {
-      eventType: 'ADD_REAL_TIME_CALL_ANALYTICS_METADATA',
-      callId: this.callId,
-      timestamp: Date.now(),
-      callMetaData: {
-        callId: this.callId,
-        ...metadata,
-      },
-    };
-
-    await this.sendRecord(record);
-  }
-
-  // Batch send multiple records for efficiency
-  async sendBatchRecords(records: KinesisRecord[]): Promise<void> {
-    if (!this.streamName || records.length === 0) {
-      return;
-    }
-
-    try {
-      const command = new PutRecordsCommand({
-        StreamName: this.streamName,
-        Records: records.map(record => ({
-          Data: Buffer.from(JSON.stringify(record)),
-          PartitionKey: this.callId,
-        })),
-      });
-
-      const result = await this.kinesisClient.send(command);
-      console.log(`Kinesis batch sent: ${records.length} records, ${result.FailedRecordCount || 0} failed`);
-      
-      if (result.FailedRecordCount && result.FailedRecordCount > 0) {
-        console.error('Some Kinesis records failed:', result.Records?.filter(r => r.ErrorCode));
-      }
-    } catch (error) {
-      console.error('Failed to send Kinesis batch:', error);
-      throw error;
-    }
   }
 
   getCallId(): string {
@@ -540,9 +653,8 @@ export const sendStartMeeting = () => kinesisStreamManager.sendStartMeeting();
 export const sendEndMeeting = (recordingUrl?: string) => kinesisStreamManager.sendEndMeeting(recordingUrl);
 export const sendAsrTranscriptSegment = (segment: TranscriptSegment) =>
   kinesisStreamManager.sendAsrTranscriptSegment(segment);
+export const sendChatSegment = (segment: TranscriptSegment) => kinesisStreamManager.sendChatSegment(segment);
 export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
   kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
-export const sendCallCategory = (category: string, score?: number) => 
-  kinesisStreamManager.sendCallCategory(category, score);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);
 export const sendCallVideoRecording = (url: string) => kinesisStreamManager.sendCallVideoRecording(url);

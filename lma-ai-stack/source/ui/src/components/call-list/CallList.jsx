@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -8,7 +8,6 @@ import React, { useEffect, useState } from 'react';
 import { Table, Pagination, TextFilter } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import useCallsContext from '../../contexts/calls';
-import useSettingsContext from '../../contexts/settings';
 
 import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
@@ -23,6 +22,7 @@ import {
   SELECTION_LABELS,
   DEFAULT_PREFERENCES,
   DEFAULT_SORT_COLUMN,
+  withKnownColumns,
 } from './calls-table-config';
 
 import { getFilterCounterText, TableEmptyState, TableNoMatchState } from '../common/table';
@@ -33,7 +33,6 @@ const logger = new ConsoleLogger('CallList');
 
 const CallList = () => {
   const [callList, setCallList] = useState([]);
-  const { settings } = useSettingsContext();
 
   const {
     calls,
@@ -48,7 +47,8 @@ const CallList = () => {
     totalCallCountTruncated,
   } = useCallsContext();
 
-  const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
+  const [savedPreferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
+  const preferences = withKnownColumns(savedPreferences);
 
   // prettier-ignore
   const {
@@ -69,7 +69,7 @@ const CallList = () => {
   useEffect(() => {
     if (!isCallsListLoading) {
       logger.debug('setting meeting list', calls);
-      setCallList(mapCallsAttributes(calls, settings));
+      setCallList(mapCallsAttributes(calls));
     } else {
       logger.debug('meeting list is loading');
     }

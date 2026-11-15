@@ -1,15 +1,15 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for transcript-segment normalisation and the DynamoDB TTL it stamps.
 
 `normalize_transcript_segments` is the funnel every transcript on the Kinesis
-stream passes through on its way to the `addTranscriptSegment` mutation, for all
-four producers: Amazon Transcribe streaming (`TranscriptEvent`), Transcribe Call
-Analytics (`UtteranceEvent`), Contact Lens (`ContactId`), and the custom shape the
-WebSocket transcriber and the MicroVM ASR engine emit. Everything it gets wrong
-fails at the AppSync boundary, one record at a time, for reasons that surface as
-missing transcript lines rather than as an error anyone sees.
+stream passes through on its way to the `addTranscriptSegment` mutation, for
+both producer shapes: Amazon Transcribe streaming (`TranscriptEvent`) and the
+custom shape the WebSocket transcriber and the MicroVM ASR engine emit.
+Everything it gets wrong fails at the AppSync boundary, one record at a time, for
+reasons that surface as missing transcript lines rather than as an error anyone
+sees.
 
 Two areas are covered because both have misbehaved in production:
 
@@ -30,11 +30,22 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-import eventprocessor_utils.eventprocessor as ep
+# The configuration layer, which every function writing these records attaches
+# beside this one; the Retention section is read through it.
+CONFIGURATION_LAYER = Path(__file__).resolve().parents[2] / "configuration_layer"
+if str(CONFIGURATION_LAYER) not in sys.path:
+    sys.path.insert(0, str(CONFIGURATION_LAYER))
+
+from lma_config import parameters  # noqa: E402
+
+import eventprocessor_utils.eventprocessor as ep  # noqa: E402
 
 # The record shape shared by the custom-producer cases; each test overrides the
 # fields it is about.
@@ -97,6 +108,104 @@ def test_meeting_and_transcription_ttls_read_their_own_settings(monkeypatch):
         importlib.reload(ep)
 
 
+class _RetentionStore:
+    """Answers the Retention section from a dict, as the configuration store would."""
+
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, name):
+        return SimpleNamespace(values=self.values if name == "retention" else {})
+
+
+def _days_ahead(ttl: int) -> float:
+    return (ttl - datetime.now(timezone.utc).timestamp()) / 86400
+
+
+def test_a_shorter_retention_saved_on_the_page_is_used(monkeypatch):
+    monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"meetingRecordExpirationInDays": 30, "transcriptionExpirationInDays": 2}),
+    )
+    assert abs(_days_ahead(ep.get_meeting_ttl()) - 30) < 0.01
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
+def test_a_retention_longer_than_the_stack_parameter_is_not_used(monkeypatch):
+    """The parameter is the limit, whatever the section holds."""
+    monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "7")
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "3")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"meetingRecordExpirationInDays": 30, "transcriptionExpirationInDays": 30}),
+    )
+    assert abs(_days_ahead(ep.get_meeting_ttl()) - 7) < 0.01
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 3) < 0.01
+
+
+@pytest.mark.parametrize("choice", ["immediately", "after_15_minutes", "after_60_minutes"])
+def test_segment_expiry_is_at_most_two_days_while_transcripts_are_deleted(monkeypatch, choice):
+    """The backstop expiry, should the scheduled deletion never run."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": choice}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 2) < 0.01
+
+
+def test_a_shorter_retention_still_applies_while_transcripts_are_deleted(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore(
+            {"transcriptDeletionAfterSummary": "immediately", "transcriptionExpirationInDays": 0.5}
+        ),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 0.5) < 0.01
+
+
+def test_segment_expiry_is_unchanged_while_deletion_is_off(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "off"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_with_nothing_saved_the_shipped_off_applies(monkeypatch):
+    """The setting has no stack parameter: an empty section is the shipped Off."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _RetentionStore({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
+def test_an_unreadable_setting_gives_the_usual_expiry(monkeypatch):
+    """A segment is never lost over its expiry; the deletion itself still runs."""
+
+    class Unreadable(_RetentionStore):
+        calls = 0
+
+        def get_section(self, name):
+            # The period in days reads first, then the deletion setting.
+            Unreadable.calls += 1
+            if Unreadable.calls > 1:
+                raise RuntimeError("the configuration table is unavailable")
+            return super().get_section(name)
+
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", Unreadable({}))
+    assert abs(_days_ahead(ep.get_transcription_ttl()) - 90) < 0.01
+
+
 def test_segment_expiry_uses_the_transcription_retention(monkeypatch):
     monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "3")
     monkeypatch.setenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "99")
@@ -119,8 +228,9 @@ def test_segment_expiry_is_recomputed_and_not_taken_from_the_producer():
     Asserted deliberately: a producer that sent a stale or hostile `ExpiresAfter`
     would otherwise control how long transcripts are kept.
     """
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                            "ExpiresAfter": 12345})
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "ExpiresAfter": 12345}
+    )
     assert segment["ExpiresAfter"] != 12345
     assert segment["ExpiresAfter"] > datetime.now(timezone.utc).timestamp()
 
@@ -151,51 +261,35 @@ def test_custom_producer_keeps_zero_millisecond_offsets():
 
 def test_custom_producer_prefers_explicit_times_over_offsets():
     """Both spellings present: the explicit times win, including when they are 0."""
-    segment = normalize_one({
-        **CUSTOM_BASE,
-        "BeginOffsetMillis": 5000, "EndOffsetMillis": 9000,
-        "StartTime": 0.0, "EndTime": 1.0,
-    })
+    segment = normalize_one(
+        {
+            **CUSTOM_BASE,
+            "BeginOffsetMillis": 5000,
+            "EndOffsetMillis": 9000,
+            "StartTime": 0.0,
+            "EndTime": 1.0,
+        }
+    )
     assert segment["StartTime"] == 0.0
     assert segment["EndTime"] == 1.0
 
 
 def test_transcribe_streaming_event_keeps_zero_times():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": "AGENT", "ResultId": "r1", "StartTime": 0.0, "EndTime": 0.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "AGENT",
+                "ResultId": "r1",
+                "StartTime": 0.0,
+                "EndTime": 0.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["StartTime"] == 0.0
     assert segment["EndTime"] == 0.0
-
-
-def test_call_analytics_utterance_event_keeps_zero_offsets():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
-    assert segment["StartTime"] == 0.0
-    assert segment["EndTime"] == 0.0
-
-
-def test_call_analytics_offsets_are_converted_to_seconds():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 1500, "EndOffsetMillis": 4250,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
-    assert segment["StartTime"] == 1.5
-    assert segment["EndTime"] == 4.25
 
 
 # ── channel, speaker and identity mapping ───────────────────────────────────
@@ -203,47 +297,82 @@ def test_call_analytics_offsets_are_converted_to_seconds():
 
 @pytest.mark.parametrize(
     ("producer_channel", "expected"),
-    [("CUSTOMER", "CALLER"), ("AGENT", "AGENT"), ("CALLER", "CALLER")],
+    [
+        ("REMOTE", "REMOTE"),
+        ("LOCAL", "LOCAL"),
+        ("CUSTOMER", "REMOTE"),
+        ("CALLER", "REMOTE"),
+        ("AGENT", "LOCAL"),
+    ],
 )
-def test_transcribe_streaming_customer_channel_is_renamed_to_caller(
-    producer_channel, expected
-):
-    """LMA's schema knows CALLER/AGENT; Transcribe Call Analytics says CUSTOMER."""
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": producer_channel, "ResultId": "r1",
-            "StartTime": 1.0, "EndTime": 2.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+def test_transcribe_streaming_channel_is_written_as_remote_or_local(producer_channel, expected):
+    """A producer from before 0.4.0 sends CALLER/AGENT, and CUSTOMER means the remote side."""
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": producer_channel,
+                "ResultId": "r1",
+                "StartTime": 1.0,
+                "EndTime": 2.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["Channel"] == expected
 
 
 def test_transcribe_streaming_without_a_speaker_gets_a_placeholder():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": "AGENT", "ResultId": "r1", "StartTime": 1.0, "EndTime": 2.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "AGENT",
+                "ResultId": "r1",
+                "StartTime": 1.0,
+                "EndTime": 2.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["Speaker"] == "Other Participant"
 
 
 def test_custom_producer_channel_follows_is_caller():
-    caller = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                            "IsCaller": True})
-    agent = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                           "IsCaller": False})
-    assert caller["Channel"] == "CALLER"
-    assert agent["Channel"] == "AGENT"
+    caller = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": True})
+    agent = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": False})
+    assert caller["Channel"] == "REMOTE"
+    assert agent["Channel"] == "LOCAL"
 
 
 def test_custom_producer_explicit_channel_wins_over_is_caller():
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                             "Channel": "AGENT", "IsCaller": True})
-    assert segment["Channel"] == "AGENT"
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": "LOCAL", "IsCaller": True}
+    )
+    assert segment["Channel"] == "LOCAL"
+
+
+@pytest.mark.parametrize(
+    ("producer_channel", "expected"),
+    [
+        ("REMOTE", "REMOTE"),
+        ("LOCAL", "LOCAL"),
+        ("CALLER", "REMOTE"),
+        ("AGENT", "LOCAL"),
+        ("AGENT_ASSISTANT", "AGENT_ASSISTANT"),
+        ("CHAT_ASSISTANT", "CHAT_ASSISTANT"),
+    ],
+)
+def test_custom_producer_older_channel_names_are_written_as_remote_or_local(
+    producer_channel, expected
+):
+    """A producer from before 0.4.0, or outside LMA, may still send CALLER or AGENT."""
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": producer_channel}
+    )
+    assert segment["Channel"] == expected
 
 
 def test_custom_producer_gets_a_generated_segment_id_when_none_is_sent():
@@ -255,46 +384,13 @@ def test_custom_producer_gets_a_generated_segment_id_when_none_is_sent():
 
 
 def test_custom_producer_keeps_the_segment_id_it_is_given():
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                             "SegmentId": "seg-42"})
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "SegmentId": "seg-42"}
+    )
     assert segment["SegmentId"] == "seg-42"
 
 
 # ── partial segments and sentiment ──────────────────────────────────────────
-
-
-def test_call_analytics_partial_segment_carries_no_sentiment():
-    """Sentiment on an incomplete utterance would be scored on half a sentence."""
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 500,
-            "Transcript": "hello", "IsPartial": True,
-            "Sentiment": "POSITIVE", "SentimentWeighted": 5,
-            "SentimentScore": {"Positive": 0.9},
-        },
-    })
-    assert segment["IsPartial"] is True
-    assert segment["Sentiment"] is None
-    assert segment["SentimentWeighted"] is None
-    assert segment["SentimentScore"] is None
-
-
-def test_call_analytics_final_segment_keeps_its_sentiment():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 500,
-            "Transcript": "hello", "IsPartial": False,
-            "Sentiment": "POSITIVE", "SentimentWeighted": 5,
-            "SentimentScore": {"Positive": 0.9},
-        },
-    })
-    assert segment["Sentiment"] == "POSITIVE"
-    assert segment["SentimentWeighted"] == 5
-    assert segment["SentimentScore"] == {"Positive": 0.9}
 
 
 # ── fields every segment carries ────────────────────────────────────────────
@@ -304,8 +400,16 @@ def test_every_segment_carries_the_fields_the_mutation_requires():
     """A missing key is a mutation-time failure, so the shape is pinned here."""
     segment = normalize_one({**CUSTOM_BASE, "StartTime": 0.0, "EndTime": 1.0})
     for field in (
-        "CallId", "Channel", "SegmentId", "StartTime", "EndTime", "Transcript",
-        "IsPartial", "Status", "ExpiresAfter", "CreatedAt",
+        "CallId",
+        "Channel",
+        "SegmentId",
+        "StartTime",
+        "EndTime",
+        "Transcript",
+        "IsPartial",
+        "Status",
+        "ExpiresAfter",
+        "CreatedAt",
     ):
         assert field in segment, f"{field} missing from the normalised segment"
     assert segment["StartTime"] is not None
@@ -313,8 +417,9 @@ def test_every_segment_carries_the_fields_the_mutation_requires():
 
 
 def test_a_new_segment_starts_in_the_transcribing_status():
-    assert normalize_one({**CUSTOM_BASE, "StartTime": 1.0,
-                          "EndTime": 2.0})["Status"] == "TRANSCRIBING"
+    assert (
+        normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0})["Status"] == "TRANSCRIBING"
+    )
 
 
 def test_created_at_is_an_offset_aware_iso_timestamp():
@@ -337,24 +442,51 @@ def test_an_unset_access_token_leaves_the_owner_unset():
     assert segment.get("Owner") in (None, "")
 
 
-# ── Contact Lens ────────────────────────────────────────────────────────────
-
-
-def test_contact_lens_categories_do_not_become_transcript_segments():
-    """Category segments are the agent-assist path's business, not transcript rows."""
-    segments = ep.normalize_transcript_segments({
-        "ContactId": "contact-1",
-        "Segments": [
-            {"Categories": {"MatchedCategories": ["escalation"]}},
-            {"Transcript": {"Id": "t1", "ParticipantId": "AGENT",
-                            "BeginOffsetMillis": 0, "EndOffsetMillis": 1000,
-                            "Content": "hello"}},
-        ],
-    })
-    assert len(segments) == 1
-    assert segments[0]["CallId"] == "contact-1"
-
-
 def test_os_environment_is_not_mutated_by_importing_the_module():
     """Guards the reload-based TTL tests from leaking settings into the rest."""
     assert os.environ.get("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS") in (None, "90", "")
+
+
+def test_a_record_that_is_not_deleted_with_the_transcript_keeps_the_full_period(monkeypatch):
+    """Key frames share the transcript retention but are not deleted with it."""
+    monkeypatch.setenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+    monkeypatch.setattr(
+        parameters,
+        "_SHARED_STORE",
+        _RetentionStore({"transcriptDeletionAfterSummary": "immediately"}),
+    )
+    assert abs(_days_ahead(ep.get_transcription_ttl(limited_by_deletion=False)) - 90) < 0.01
+
+
+# ── the identified language ─────────────────────────────────────────────────
+
+
+def test_custom_producer_keeps_the_identified_language():
+    segment = normalize_one({**CUSTOM_BASE, "LanguageCode": " es-US "})
+    assert segment["LanguageCode"] == "es-US"
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 3])
+def test_a_segment_with_no_identified_language_carries_no_language_field(value):
+    message = dict(CUSTOM_BASE)
+    if value is not None:
+        message["LanguageCode"] = value
+    assert "LanguageCode" not in normalize_one(message)
+
+
+def test_transcribe_streaming_event_keeps_the_identified_language():
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "REMOTE",
+                "ResultId": "r1",
+                "StartTime": 0.0,
+                "EndTime": 1.0,
+                "Transcript": "bonjour",
+                "IsPartial": False,
+                "LanguageCode": "fr-FR",
+            },
+        }
+    )
+    assert segment["LanguageCode"] == "fr-FR"

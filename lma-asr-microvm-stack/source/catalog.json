@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "defaultBundleId": "parakeet-tdt-v3-titanet-small",
+  "defaultBundleId": "parakeet-tdt-v3-live-nemotron35-sortformer",
   "bundleNote": "A bundle names the ASR model, the speaker embedder and the turn-detection model TOGETHER WITH the diarization operating point that goes with them, so a deployment is never asked for a threshold. The default and every bundle marked redistributable are permissively licensed; a bundle marked redistributable: false carries weights under the NVIDIA Open Model License and is offered only for deployments that accept it. The operating point is a property of the EMBEDDER and the segmentation policy (endpointing silence and the minimum utterance floor), not of the ASR model: the embedding is computed from raw samples, and the ASR model contributes nothing to those samples or, under a fixed endpointing configuration, to where a segment starts and ends. That is why one measured embedder can be paired with a different ASR model without re-measuring - and why a different embedder always needs its own measurement (scripts/calibrate.py).",
   "bundles": [
     {
@@ -62,7 +62,7 @@
       "id": "parakeet-tdt-v3-titanet-small",
       "name": "Parakeet TDT 0.6B v3 offline + TitaNet-small (CC-BY-4.0)",
       "status": "vetted",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "titanet-small",
       "segmentationModelId": "pyannote-segmentation-3-0",
@@ -71,7 +71,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Default. Vetted live on 2026-09-22: two voices and an advert narrator labelled correctly on every turn of 2.5 s or more, rows within about 20 s of speech, no dropped words. Offline engine: no live partial text while somebody is speaking."
+      "notes": "The previous default. Vetted live on 2026-09-22: two voices and an advert narrator labelled correctly on every turn of 2.5 s or more, rows within about 20 s of speech, no dropped words. Offline engine: no live partial text while somebody is speaking."
     },
     {
       "id": "parakeet-tdt-v2-titanet-small",
@@ -136,7 +136,7 @@
       "id": "parakeet-tdt-v3-live-titanet-small",
       "name": "Parakeet TDT 0.6B v3 offline with a FastConformer live preview + TitaNet-small (CC-BY-4.0)",
       "status": "calibrated",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "titanet-small",
       "segmentationModelId": "pyannote-segmentation-3-0",
@@ -152,7 +152,7 @@
       "id": "parakeet-tdt-v3-live-nemotron35-titanet-small",
       "name": "Parakeet TDT 0.6B v3 offline with a Nemotron 3.5 live preview + TitaNet-small (CC-BY-4.0 + OpenMDW-1.1)",
       "status": "calibrated",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "titanet-small",
       "segmentationModelId": "pyannote-segmentation-3-0",
@@ -168,7 +168,7 @@
       "id": "parakeet-tdt-v3-sortformer",
       "name": "Parakeet TDT 0.6B v3 offline + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
       "status": "experimental",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "none",
       "segmentationModelId": "none",
@@ -183,7 +183,7 @@
       "id": "parakeet-tdt-v3-live-sortformer",
       "name": "Parakeet TDT 0.6B v3 offline with a FastConformer live preview + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
       "status": "experimental",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "none",
       "segmentationModelId": "none",
@@ -199,7 +199,7 @@
       "id": "parakeet-tdt-v3-live-nemotron35-sortformer",
       "name": "Parakeet TDT 0.6B v3 offline with a Nemotron 3.5 live preview + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
       "status": "experimental",
-      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "modelId": "parakeet-tdt-0.6b-v3",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "none",
       "segmentationModelId": "none",
@@ -209,7 +209,7 @@
       "redistributable": true,
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
-      "notes": "Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
+      "notes": "Default. Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
     }
   ],
   "models": [
@@ -255,7 +255,34 @@
       },
       "sampleRate": 16000,
       "languages": [
-        "multilingual"
+        "en",
+        "es",
+        "fr",
+        "it",
+        "pt",
+        "nl",
+        "de",
+        "tr",
+        "ru",
+        "ar",
+        "hi",
+        "ja",
+        "ko",
+        "vi",
+        "uk",
+        "pl",
+        "sv",
+        "cs",
+        "nb",
+        "da",
+        "bg",
+        "fi",
+        "hr",
+        "sk",
+        "zh",
+        "hu",
+        "ro",
+        "et"
       ],
       "license": "OpenMDW-1.1",
       "licenseUrl": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
@@ -263,7 +290,7 @@
       "onnxruntime": "1.27.0",
       "approxDownloadMb": 475,
       "provenanceVerified": "2026-09-21",
-      "note": "Emits punctuation and casing; multilingual. Live runs on 2026-09-22 showed eight or nine merged or dropped words per two minutes and a real-time factor of 0.6-0.9 for one session on a 4-core host. Open ASR Leaderboard average WER 8.72 (rank 46, 2026-09), the weakest ASR model in this catalog. English validated only."
+      "note": "Emits punctuation and casing; multilingual. Live runs on 2026-09-22 showed eight or nine merged or dropped words per two minutes and a real-time factor of 0.6-0.9 for one session on a 4-core host. Open ASR Leaderboard average WER 8.72 (rank 46, 2026-09), the weakest ASR model in this catalog. Languages are the base languages of the 32 locales NVIDIA's model card lists as transcription-ready or broad-coverage (2026-11-10; nb is the card's nb-NO); its adaptation-ready locales need fine-tuning and are not listed. As a preview in the default bundle on 2026-11-10 it worked without a configured language in es-ES, es-US, fr-FR, de-DE, it-IT, pt-BR and nl-NL, at 12-31% word error rate against 16% for English; forcing a language on it lowered accuracy on mixed-language speech, so none is set."
     },
     {
       "id": "nemotron-streaming-en-0.6b-560ms-int8",
@@ -291,45 +318,168 @@
       "provenanceVerified": "2026-09-21"
     },
     {
-      "id": "parakeet-tdt-0.6b-v3-int8",
-      "name": "NVIDIA Parakeet TDT 0.6B v3 offline (int8, CC-BY-4.0)",
+      "id": "parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA Parakeet TDT 0.6B v3 offline (full precision, CC-BY-4.0)",
       "engine": "accurate",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
-      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
-      "archive": "tar.bz2",
-      "stripComponents": 1,
+      "archive": "files",
       "files": {
-        "encoder": "encoder.int8.onnx",
-        "decoder": "decoder.int8.onnx",
-        "joiner": "joiner.int8.onnx",
-        "tokens": "tokens.txt"
+        "encoder": {
+          "path": "encoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/1a468a35cbba69418f126de829e75261dea4a4e4/encoder.onnx",
+          "sha256": "3eed7ce424bf8339ad09233533c687e2dbd07e74ccf5027b5e7344019ea373b0"
+        },
+        "encoder_data": {
+          "path": "encoder.weights",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/1a468a35cbba69418f126de829e75261dea4a4e4/encoder.weights",
+          "sha256": "3af3f51af5f2d01dbbf5af47d42c7962a2c205f11004254bb4f2b979862f39a8"
+        },
+        "decoder": {
+          "path": "decoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/1a468a35cbba69418f126de829e75261dea4a4e4/decoder.onnx",
+          "sha256": "d593cdb0e571f5a457ec2219af9968cbf6b0e8198e8f7839b40a8754593bf68c"
+        },
+        "joiner": {
+          "path": "joiner.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/1a468a35cbba69418f126de829e75261dea4a4e4/joiner.onnx",
+          "sha256": "b9b0bcf88ac571902e69a6536223ed2d94885e981b85045410f1403d53121a63"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/1a468a35cbba69418f126de829e75261dea4a4e4/tokens.txt",
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
       },
       "sampleRate": 16000,
       "languages": [
-        "en"
+        "bg",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "en",
+        "et",
+        "fi",
+        "fr",
+        "de",
+        "el",
+        "hu",
+        "it",
+        "lv",
+        "lt",
+        "mt",
+        "pl",
+        "pt",
+        "ro",
+        "sk",
+        "sl",
+        "es",
+        "sv",
+        "ru",
+        "uk"
       ],
       "license": "CC-BY-4.0",
       "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
       "sherpaOnnx": "1.13.4",
       "onnxruntime": "1.27.0",
-      "approxDownloadMb": 487,
-      "provenanceVerified": "2026-09-21",
+      "approxDownloadMb": 2550,
+      "provenanceVerified": "2026-11-09",
       "requiresVad": true,
-      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment."
+      "note": "OFFLINE, driven by the accurate engine like the int8 export, which it replaces in every Parakeet v3 bundle. The int8 export drops the rest of an utterance after its first sentences on some segments (on AMI meeting IS1009c, 11 of 55 words on one 15 s segment, 7 of 26 on another); this full-precision export decodes the same audio completely, for about 10% more decode time and about 2.8 GB resident against 1.2 GB. Exported by the sherpa-onnx maintainer from nvidia/parakeet-tdt-0.6b-v3 and fetched file by file pinned to that repository's commit 1a468a3; the encoder keeps its weights in encoder.weights, whose name the graph records. No warm-up WAV, as for the int8 export."
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "name": "NVIDIA Parakeet TDT 0.6B v3 offline (int8, CC-BY-4.0)",
+      "engine": "accurate",
+      "archive": "files",
+      "files": {
+        "encoder": {
+          "path": "encoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/encoder.int8.onnx",
+          "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247"
+        },
+        "decoder": {
+          "path": "decoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/decoder.int8.onnx",
+          "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e"
+        },
+        "joiner": {
+          "path": "joiner.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/joiner.int8.onnx",
+          "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "bg",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "en",
+        "et",
+        "fi",
+        "fr",
+        "de",
+        "el",
+        "hu",
+        "it",
+        "lv",
+        "lt",
+        "mt",
+        "pl",
+        "pt",
+        "ro",
+        "sk",
+        "sl",
+        "es",
+        "sv",
+        "ru",
+        "uk"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 670,
+      "provenanceVerified": "2026-11-07",
+      "requiresVad": true,
+      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment. The int8 export is fetched file by file from the sherpa-onnx maintainer's Hugging Face repository pinned to commit 2bda32e (2025-08-16), so each checksum names a fixed revision. No warm-up WAV: the export's sample clips are not 16 kHz, so the image warms with a synthetic tone. Languages are the 25 European languages of NVIDIA's model card (2026-11-10); the model identifies the spoken language itself, so no language is configured and none is reported back. On synthetic single-speaker clips on 2026-11-10 its final text scored 0-6% word error rate in es-ES, es-US, fr-FR, de-DE, it-IT, pt-BR and nl-NL, and followed a mid-utterance switch from English to Spanish."
     },
     {
       "id": "parakeet-tdt-0.6b-v2-int8",
       "name": "NVIDIA Parakeet TDT 0.6B v2 (offline, int8, CC-BY-4.0)",
       "engine": "accurate",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
-      "sha256": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad",
-      "archive": "tar.bz2",
-      "stripComponents": 1,
+      "archive": "files",
       "files": {
-        "encoder": "encoder.int8.onnx",
-        "decoder": "decoder.int8.onnx",
-        "joiner": "joiner.int8.onnx",
-        "tokens": "tokens.txt"
+        "encoder": {
+          "path": "encoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/encoder.int8.onnx",
+          "sha256": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab"
+        },
+        "decoder": {
+          "path": "decoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/decoder.int8.onnx",
+          "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e"
+        },
+        "joiner": {
+          "path": "joiner.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/joiner.int8.onnx",
+          "sha256": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/tokens.txt",
+          "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+        }
+      },
+      "warmWav": {
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2/test_wavs/0.wav",
+        "sha256": "5fceacff0315d49cb59fcc505bcecf1ed5f2f35c2897b1e65a59f30e5d922150"
       },
       "sampleRate": 16000,
       "languages": [
@@ -339,10 +489,10 @@
       "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2",
       "sherpaOnnx": "1.13.4",
       "onnxruntime": "1.27.0",
-      "approxDownloadMb": 482,
-      "provenanceVerified": "2026-09-21",
+      "approxDownloadMb": 661,
+      "provenanceVerified": "2026-11-07",
       "requiresVad": true,
-      "note": "English-only predecessor of v3; same offline (VAD-segmented) engine."
+      "note": "English-only predecessor of v3; same offline (VAD-segmented) engine. The int8 export is fetched file by file from the sherpa-onnx maintainer's Hugging Face repository pinned to commit 1ab9323 (2025-08-16), so each checksum names a fixed revision; warmWav is the export's 16 kHz sample clip, used for the image's warm decode."
     },
     {
       "id": "qwen3-asr-0.6b-int8",

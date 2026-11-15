@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """LMA end-to-end integration tests against a live deployed stack.
 
 Run with ``make integ-tests STACK=<name>`` (see the ``integ-tests`` skill).
@@ -193,6 +193,51 @@ def test_kds_pipeline_creates_meeting(client: LMAClient) -> None:
         cleanup(client.stack_name, result["call_id"], region=client.region)
 
 
+def test_meeting_chat_segment_is_stored_read_and_deleted(client: LMAClient) -> None:
+    """A meeting chat message, sent as a Virtual Participant sends it, end to end.
+
+    Puts a synthetic START and one MEETING_CHAT segment on the CallDataStream and
+    checks that the segment is stored with an expiry, is returned by AppSync's
+    getTranscriptSegments, is left out of FetchTranscript (what the summary and
+    the meeting assistant read), and is removed by the transcript deletion
+    function. See integ-tests/meeting_chat_probe.py. Self-cleaning.
+    """
+    from meeting_chat_probe import CHAT_CHANNEL, SENDER, ChatProbe, wait_for
+
+    probe = ChatProbe.for_stack(client.stack_name, region=client.region)
+    try:
+        probe.send_start()
+        assert wait_for(probe.meeting, 90), f"no meeting record for {probe.call_id} within 90s"
+        probe.send_chat_segment()
+
+        stored = wait_for(probe.stored_segment, 60)
+        assert stored, (
+            f"the {CHAT_CHANNEL} segment {probe.segment_id} was not stored for {probe.call_id} "
+            "within 60s; check the CallEventProcessor logs (an AppSync enum without "
+            f"{CHAT_CHANNEL} refuses the mutation)"
+        )
+        assert stored["Channel"] == CHAT_CHANNEL
+        assert stored["Speaker"] == SENDER
+        assert stored["Transcript"] == probe.text
+        assert stored["IsPartial"] is False
+        assert stored.get("ExpiresAfter"), "a chat segment must expire with the transcript"
+
+        # The read-back runs where the credentials see every meeting (CI's
+        # assumed role); see ChatProbe.reads_every_meeting.
+        if probe.reads_every_meeting():
+            returned = [s for s in probe.appsync_segments(client.appsync.graphql) if s["SegmentId"] == probe.segment_id]
+            assert returned and returned[0]["Channel"] == CHAT_CHANNEL, "getTranscriptSegments did not return it"
+            assert returned[0]["Speaker"] == SENDER
+
+        assert probe.text not in probe.fetch_transcript(), "FetchTranscript must leave the meeting chat out"
+
+        result = probe.delete_transcript()
+        assert result.get("action") == "deleted" and result.get("segmentsDeleted", 0) >= 1, result
+        assert probe.stored_segment() is None, "the chat segment survived the transcript deletion"
+    finally:
+        probe.cleanup()
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # 3c. WebSocket transcriber front door (Fastify 5 / @fastify/websocket 11 upgrade)
 # ────────────────────────────────────────────────────────────────────────────
@@ -206,7 +251,9 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
     DynamoDB, AND transcript segments were produced. In one shot this guards
     every regression this batch hit:
       * @fastify/websocket 11 upgrade ordering  (500 -> connection drops)
-      * fastify 5 audio handling / Transcribe streaming
+      * fastify 5 audio handling / the speech engine: Amazon Transcribe
+        streaming by default, or the ASR MicroVM engine where the stack has it
+        (EnableMicrovmAsr=true) and an admin turned the streaming engine switch on
       * gql 3.5 <-> AppSync                      (gql-4 break -> no meeting/segments)
 
     Opt-in: requires LMA_TEST_USERNAME / LMA_TEST_PASSWORD (a Cognito user in the
@@ -237,8 +284,10 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
         )
         assert result["segment_count"] > 0, (
             f"connected and meeting created, but 0 transcript segments for "
-            f"{result['call_id']} — Amazon Transcribe streaming or the segment "
-            f"write path is broken (check transcriber processTranscriptionResults)."
+            f"{result['call_id']} — the speech engine (the ASR MicroVM engine by "
+            f"default, or Amazon Transcribe streaming) or the segment write path is "
+            f"broken. Check the transcriber log's [ASR] lines for which engine ran, "
+            f"then processTranscriptionResults."
         )
     finally:
         cleanup(client.stack_name, result["call_id"], region=client.region)
@@ -309,3 +358,95 @@ def test_vp_live_join(client: LMAClient, request: pytest.FixtureRequest) -> None
         )
     finally:
         client.vp.end(result.id, reason="integ-test live cleanup")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 5. Voice enrollment consent lifecycle
+# ────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.optional_feature
+def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
+    """Grant consent, enroll a voice, withdraw — and check what was STORED.
+
+    The reason this exists as an integration test rather than more unit tests:
+    no amount of review can establish that a consent row lands in DynamoDB,
+    that a MicroVM really computes a voiceprint from real audio, or that a
+    withdrawal really destroys it. The assertions are therefore about the
+    records, because the records are what the consent terms promise.
+
+    Skips cleanly when the deployment does not have voice enrollment: with
+    ``EnableVoiceEnrollment=false`` the tables and the portal do not exist at
+    all, which is the default and not a failure.
+
+    Opt-in on credentials like the streaming probe. Self-cleaning: it withdraws
+    at the end, which deletes the voiceprint it created.
+    """
+    if not cognito_test_user.available(client.region):
+        pytest.skip(f"no Cognito test user — {cognito_test_user.describe_sources()}")
+    try:
+        import pycognito  # noqa: F401
+    except ImportError:
+        pytest.skip("pycognito not installed (pip install -r integ-tests/requirements.txt)")
+
+    credentials = cognito_test_user.resolve(client.region)
+    assert credentials, "cognito_test_user.available() was true but resolve() returned nothing"
+    username, password = credentials
+
+    from voice_enrollment_probe import run_probe
+
+    observed = run_probe(client.stack_name, username, password, region=client.region)
+    if not observed["enabled"]:
+        pytest.skip(
+            f"{client.stack_name} has no voice-enrollment tables "
+            f"(EnableVoiceEnrollment=false, which is the default)"
+        )
+
+    # Consent, before any audio exists.
+    assert observed["granted"], f"grantVoiceConsent failed: {observed['grant_message']}"
+    assert not observed["voiceprint_before_audio"], (
+        "a voiceprint existed before any recording was sent — consent is supposed "
+        "to be recorded first, and nothing stored until samples arrive"
+    )
+
+    # The voiceprint itself. A failure here is usually the embedding path:
+    # enrolling needs the ASR MicroVM engine (EnableMicrovmAsr=true, the
+    # default, in a Region with Lambda MicroVMs), because that engine computes
+    # the speaker embeddings and Amazon Transcribe exposes none.
+    assert observed["enrolled"], (
+        f"enrolMyVoice failed ({observed['enrol_message']}) after sending "
+        f"{observed['clips']} clips / {observed['seconds']}s. If it says the "
+        f"on-demand engine is missing, set EnableMicrovmAsr=true."
+    )
+    assert observed["status_after_enrol"] == "active", observed["status_after_enrol"]
+    assert observed["centroid_dimensions"] > 0, "no centroid was stored"
+    assert observed["enrollment_pins_terms"], (
+        "the enrollment does not record which terms were agreed to, so the "
+        "matching path cannot tell whether they have changed since"
+    )
+    assert not observed["audio_on_enrollment"], (
+        "audio was stored on the enrollment — the terms promise the recordings "
+        "are discarded"
+    )
+
+    # The audit trail.
+    assert "GRANTED" in observed["actions"] or "RE_CONSENTED" in observed["actions"], (
+        observed["actions"]
+    )
+    assert not observed["biometric_in_log"], (
+        "the consent log holds biometric data; the two-table split exists so a "
+        "withdrawal can destroy the voiceprint and keep the record"
+    )
+    assert not observed["empty_hash_in_log"], (
+        "a consent-log row records the SHA-256 of an empty string, which reads "
+        "as 'the terms shown were empty' rather than 'not recorded'"
+    )
+
+    # Withdrawal, and the way back.
+    assert observed["revoked"], "revokeVoiceConsent failed"
+    assert not observed["centroid_after_revoke"], "the voiceprint survived a withdrawal"
+    assert observed["status_after_revoke"] == "revoked", observed["status_after_revoke"]
+    assert "REVOKED" in observed["actions_after_revoke"], observed["actions_after_revoke"]
+    assert observed["terms_offered_again"], (
+        "no terms are offered after withdrawing, so enrolling again is impossible "
+        "— the terms say withdrawal is reversible"
+    )

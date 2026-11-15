@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  *
  * Synthetic native-client stand-in for the local E2E harness: opens TWO
@@ -54,8 +54,8 @@ async function main(): Promise<void> {
 
     // START frames.
     audio.send(JSON.stringify({
-        callId: CALL_ID, agentId: 'me@example.com', fromNumber: 'Other participants',
-        toNumber: 'System', samplingRate: SR, callEvent: 'START',
+        callId: CALL_ID, localSpeakerName: 'me@example.com', remoteSpeakerName: 'Other participants',
+        samplingRate: SR, callEvent: 'START',
     }));
     video.send(JSON.stringify({ callId: CALL_ID, callEvent: 'START_VIDEO', videoTimeOffsetMs: 120 }));
     await sleep(200);

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -30,8 +30,8 @@ test('the combined stream never reaches the engine; each session has its own sou
     const run = methodBody('private async runMicrovmTranscriptionOnce');
     assert.doesNotMatch(run, /pushPcm\(event/);
     assert.doesNotMatch(run, /AudioEvent\.AudioChunk/);
-    assert.match(run, /channel: 'CALLER'/);
-    assert.match(run, /channel: 'AGENT'/);
+    assert.match(run, /channel: REMOTE_CHANNEL/);
+    assert.match(run, /channel: LOCAL_CHANNEL/);
     assert.match(run, /diarize: false/);
     assert.match(run, /voiceAssistant\.isEnabled\(\)/);
     assert.match(methodBody('private startMeetingAudioFanout'), /meeting_audio\.monitor/);
@@ -57,11 +57,13 @@ test('a dead meeting session hands the rest of the meeting to Amazon Transcribe'
 
 test('meeting rows are attributed by start time and drive wake phrases; assistant rows are the VP and do not', () => {
     const meeting = methodBody('private handleMeetingAsrSegment');
-    assert.match(meeting, /rosterTimeline\.speakerFor\(segment\.startSec, segment\.endSec, rosterLagSeconds\(\)\)/);
+    assert.match(meeting, /const lag = rosterLagSeconds\(\)/);
+    assert.match(meeting, /rosterTimeline\.speakerFor\(segment\.startSec, segment\.endSec, lag\)/);
     assert.match(meeting, /processTranscriptResult\(/);
     const agent = methodBody('private handleAgentAsrSegment');
-    assert.match(agent, /channel: 'AGENT'/);
-    assert.match(agent, /lmaIdentity/);
+    assert.match(agent, /channel: LOCAL_CHANNEL/);
+    assert.match(agent, /this\.vpName\(\)/);
+    assert.match(methodBody('private vpName'), /lmaIdentity/);
     assert.doesNotMatch(agent, /processTranscriptResult/);
     assert.match(methodBody('async speakerChange'), /rosterTimeline\.record\(/);
     assert.match(methodBody('private teardownSessionProcesses'), /agentAudioProcess/);
@@ -91,21 +93,24 @@ test('the roster lag allowance is wider for the Zoom SDK monitor and can be over
     const saved = process.env.ASR_ROSTER_LAG_SECONDS;
     delete process.env.ASR_ROSTER_LAG_SECONDS;
     try {
-        assert.equal(rosterLagSeconds('ZOOM'), 2.0);
+        assert.equal(rosterLagSeconds('ZOOM', 'sdk'), 2.0);
+        assert.equal(rosterLagSeconds('ZOOM', 'dom'), 0);
         assert.equal(rosterLagSeconds('Teams'), 0.75);
         process.env.ASR_ROSTER_LAG_SECONDS = '1.25';
-        assert.equal(rosterLagSeconds('ZOOM'), 1.25);
+        assert.equal(rosterLagSeconds('ZOOM', 'sdk'), 1.25);
     } finally {
         if (saved === undefined) delete process.env.ASR_ROSTER_LAG_SECONDS;
         else process.env.ASR_ROSTER_LAG_SECONDS = saved;
     }
 });
 
-test('stop waits, with a bound, for the engine run to release its MicroVM, and a run stopped early releases at once', () => {
+test('stop waits, with a bound, for the engine run to release its MicroVM, and a run stopped early finishes what it captured, then releases', () => {
     const stop = methodBody('async stopTranscription');
     assert.match(stop, /const run = this\.microvmRun/);
     assert.match(stop, /ASR_STOP_RELEASE_TIMEOUT_MS/);
     const once = methodBody('private async runMicrovmTranscriptionOnce');
-    assert.match(once, /const lease = await acquireLease\(callId\);[\s\S]*if \(!this\.isTranscribing\) \{\s*if \(lease\.microvmId\)/);
-    assert.match(once, /if \(!meetingReady && !this\.isTranscribing\)/);
+    assert.match(
+        once,
+        /const acquired = pending \?\? \(await acquireLease\(callId\)\) \?\? null;[\s\S]*const meetingReady = await meetingSession\.start\(\);\s*if \(!this\.isTranscribing\) \{[\s\S]*?await this\.finishMicrovmSessions\(\);\s*await this\.releaseMicrovm\(meetingSession\);\s*return true;/,
+    );
 });

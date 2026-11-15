@@ -1,0 +1,2 @@
+# No third-party dependencies: boto3 ships with the python3.12 runtime, and
+# lma_consent and lma_config come from the configuration layer.

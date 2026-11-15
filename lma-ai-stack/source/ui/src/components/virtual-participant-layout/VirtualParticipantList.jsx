@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -15,14 +15,9 @@ import {
   Modal,
   Form,
   FormField,
-  Input,
-  Select,
   Alert,
   Flashbar,
-  DatePicker,
-  TimeInput,
   Checkbox,
-  Toggle,
   Textarea,
   Pagination,
   TextFilter,
@@ -31,6 +26,8 @@ import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
+import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import useLocalStorage from '../common/local-storage';
@@ -50,6 +47,17 @@ import {
 } from './vp-table-config';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
+import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
+import VirtualParticipantFormFields from './VirtualParticipantFormFields';
+import {
+  CREATE_MIN_LEAD_MINUTES,
+  EMPTY_VP_FORM,
+  browserTimeZone,
+  formFieldsAreValid,
+  formMeetingTimestamp,
+  meetingTimeError,
+  submittedMeetingFields,
+} from './vp-form';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -84,6 +92,8 @@ const createVirtualParticipant = /* GraphQL */ `
       meetingPlatform
       meetingId
       status
+      Owner
+      SharedWith
       createdAt
     }
   }
@@ -97,6 +107,7 @@ const parseMeetingInvitation = /* GraphQL */ `
 
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
+  const { isAdmin } = useUserGroups();
   const { settings } = useSettingsContext();
   const zoomSdkEnabled = String(settings?.ZoomSdkEnabled ?? '').toLowerCase() === 'true';
 
@@ -104,20 +115,30 @@ const VirtualParticipantList = () => {
   const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    meetingName: '',
-    meetingPlatform: 'ZOOM',
-    meetingId: '',
-    meetingPassword: '',
-    meetingDate: '',
-    meetingTime: '',
-  });
-  const [meetingTimeError, setMeetingTimeError] = useState('');
+  // Why a parsed invitation left the meeting ID empty, shown on the field itself.
+  const [meetingIdNote, setMeetingIdNote] = useState('');
+  // The note belongs to the invitation just parsed: it goes when the form
+  // closes (cancel, dismiss or create), and when another platform is chosen.
+  useEffect(() => {
+    if (!showCreateModal) setMeetingIdNote('');
+  }, [showCreateModal]);
+  const [createForm, setCreateForm] = useState(EMPTY_VP_FORM);
   const [consentChecked, setConsentChecked] = useState(false);
   // Per-VP screen-recording toggle. Default ON (matches the ENABLE_VIDEO_RECORDING
   // task-definition default); users untick to launch a VP that records audio +
   // transcript only.
   const [enableVideoRecording, setEnableVideoRecording] = useState(true);
+  const [meetingConsentChoice, setMeetingConsentChoice] = useState('default');
+  // Read each time the form opens. Null until read, or when it cannot be:
+  // every choice is then offered, and the VP still applies the deployment's rule.
+  const consentDefaults = useMeetingConsentDefaults(showCreateModal);
+  // A choice the selected platform cannot support, or the deployment would not
+  // use, goes back to the default.
+  useEffect(() => {
+    if (!meetingConsentChoiceAvailable(meetingConsentChoice, createForm.meetingPlatform, consentDefaults)) {
+      setMeetingConsentChoice('default');
+    }
+  }, [createForm.meetingPlatform, meetingConsentChoice, consentDefaults]);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creatingType, setCreatingType] = useState(null);
@@ -416,6 +437,9 @@ const VirtualParticipantList = () => {
           meetingPassword: data.meetingPassword || prev.meetingPassword,
           meetingDate: data.meetingDate || prev.meetingDate,
           meetingTime: data.meetingTime || prev.meetingTime,
+          // Only the agenda the invitation lists; the parser is told not to
+          // invent one, and leaves it null when there is none.
+          agenda: data.agenda || prev.agenda,
         }));
 
         // Close paste invite modal and open create modal
@@ -423,10 +447,17 @@ const VirtualParticipantList = () => {
         setInvitationText('');
         setShowCreateModal(true);
 
-        setNotification({
-          type: 'success',
-          content: 'Meeting invitation parsed successfully! Please review and verify the details.',
-        });
+        // The parser leaves out a meeting ID the form cannot use, and says why;
+        // the reason is shown on the Meeting ID field, inside the form.
+        setMeetingIdNote(data.meetingIdNote || '');
+        setNotification(
+          data.meetingIdNote
+            ? null
+            : {
+                type: 'success',
+                content: 'Meeting invitation parsed successfully! Please review and verify the details.',
+              },
+        );
       } else {
         setParseError(parsedResponse.error || 'Failed to parse meeting invitation');
       }
@@ -516,21 +547,20 @@ const VirtualParticipantList = () => {
       // Calculate meeting time for scheduling
       let meetingTimestamp = null;
 
-      if (isScheduled && createForm.meetingDate && createForm.meetingTime) {
-        const meetingDateTime = new Date(`${createForm.meetingDate}T${createForm.meetingTime}`);
-        meetingTimestamp = Math.floor(meetingDateTime.getTime() / 1000);
+      if (isScheduled) {
+        meetingTimestamp = formMeetingTimestamp(createForm.meetingDate, createForm.meetingTime);
       }
 
       // A join URL carries its password server-side and the password field is
       // hidden, so never submit a (possibly stale) separate password with one.
-      const submittingUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
-      const effectivePassword = submittingUrl ? '' : createForm.meetingPassword || '';
+      // Google Meet has no meeting password, and is stored as its meeting code.
+      const { meetingId: effectiveMeetingId, meetingPassword: effectivePassword } = submittedMeetingFields(createForm);
 
       // Create VP record with scheduling information
       const vpInput = {
         meetingName: createForm.meetingName,
         meetingPlatform: createForm.meetingPlatform,
-        meetingId: createForm.meetingId.replace(/ /g, ''),
+        meetingId: effectiveMeetingId,
         meetingPassword: effectivePassword,
         status: isScheduled ? 'SCHEDULED' : 'INITIALIZING',
         // Persisted on the row so the VPScheduler Lambda can plumb
@@ -539,10 +569,28 @@ const VirtualParticipantList = () => {
         enableVideoRecording,
       };
 
+      // Stored on the VP row for immediate and scheduled meetings alike; the VP
+      // reads it from there when it starts and puts it on the meeting record.
+      const agendaText = (createForm.agenda || '').trim();
+      if (agendaText) vpInput.agenda = agendaText;
+
+      // Stored on the VP row too, and read by the VP when it starts.
+      Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
+
+      // Recorded so the Virtual Participant page can show the Zoom account
+      // choice; only where the form offers it.
+      if (createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled) {
+        vpInput.useStoredZoomAccount = !!userZoomSub;
+      }
+
       // Add scheduling fields if this is a scheduled VP
       if (isScheduled && meetingTimestamp) {
         vpInput.meetingTime = meetingTimestamp;
         vpInput.isScheduled = true;
+        // The date and time fields are read in this browser's time zone; it is
+        // recorded so the Virtual Participant page can show the time as entered.
+        const timeZone = browserTimeZone();
+        if (timeZone) vpInput.scheduledTimeZone = timeZone;
         // Persist userSub / userZoomSub on the row so the VPScheduler
         // Lambda can plumb LMA_USER_SUB and ZOOM_CREDENTIALS_SECRET_NAME
         // to the launched ECS task at meeting time. Immediate (non-scheduled)
@@ -573,7 +621,7 @@ const VirtualParticipantList = () => {
             apiInfo: { httpMethod: 'POST' },
             data: {
               meetingPlatform: createForm.meetingPlatform,
-              meetingID: createForm.meetingId.replace(/ /g, ''),
+              meetingID: effectiveMeetingId,
               meetingPassword: effectivePassword,
               meetingName: createForm.meetingName,
               meetingTime: '',
@@ -618,17 +666,10 @@ const VirtualParticipantList = () => {
 
       // Reset form and close modal
       setShowCreateModal(false);
-      setCreateForm({
-        meetingName: '',
-        meetingPlatform: 'ZOOM',
-        meetingId: '',
-        meetingPassword: '',
-        meetingDate: '',
-        meetingTime: '',
-      });
-      setMeetingTimeError('');
+      setCreateForm(EMPTY_VP_FORM);
       setConsentChecked(false);
       setEnableVideoRecording(true);
+      setMeetingConsentChoice('default');
 
       loadParticipants();
 
@@ -678,53 +719,19 @@ const VirtualParticipantList = () => {
     }
   };
 
-  // Validate meeting time for scheduling
-  const validateMeetingTime = (time) => {
-    if (!time) {
-      setMeetingTimeError('');
-      return;
-    }
-
-    if (time.length !== 5) {
-      setMeetingTimeError('Meeting time is incomplete.');
-      return;
-    }
-
-    if (!createForm.meetingDate) {
-      setMeetingTimeError('Please select a meeting date first.');
-      return;
-    }
-
-    // Create meeting datetime
-    const meetingDateTime = new Date(`${createForm.meetingDate}T${time}`);
-    const currentTime = new Date();
-    const minuteDifference = (meetingDateTime.getTime() - currentTime.getTime()) / (1000 * 60);
-
-    if (minuteDifference >= 2) {
-      setMeetingTimeError('');
-    } else {
-      setMeetingTimeError('Meeting time must be at least two minutes from now.');
-    }
-  };
-
-  // A meetingId that is a full join URL (http/https) carries its own password
-  // server-side, so the UI relabels the field and hides the password input.
-  const meetingIdIsUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
+  // The date and time are read in this browser's time zone.
+  const meetingTimeErrorText = meetingTimeError(
+    createForm.meetingDate,
+    createForm.meetingTime,
+    CREATE_MIN_LEAD_MINUTES,
+  );
 
   // Check if form is ready for immediate execution
-  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
+  const isFormValidForImmediate = formFieldsAreValid(createForm) && consentChecked;
 
   // Check if form is ready for scheduling
   const isFormValidForScheduling =
-    isFormValidForImmediate && createForm.meetingTime && createForm.meetingDate && !meetingTimeError;
-
-  const platformOptions = [
-    { label: 'Zoom', value: 'ZOOM', disabled: false },
-    { label: 'Chime', value: 'CHIME', disabled: false },
-    { label: 'Teams', value: 'TEAMS', disabled: false },
-    { label: 'WebEx', value: 'WEBEX', disabled: false },
-    { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
-  ];
+    isFormValidForImmediate && createForm.meetingTime && createForm.meetingDate && !meetingTimeErrorText;
 
   /* eslint-disable react/jsx-props-no-spreading */
   return (
@@ -752,6 +759,7 @@ const VirtualParticipantList = () => {
             onPasteInvite={() => setShowPasteInviteModal(true)}
             onCreateVP={() => setShowCreateModal(true)}
             onNotify={setNotification}
+            viewer={{ username: user?.username, isAdmin }}
             items={filteredParticipants}
           />
         }
@@ -811,136 +819,51 @@ const VirtualParticipantList = () => {
       >
         <Form>
           <SpaceBetween direction="vertical" size="l">
-            <FormField label="Meeting Name" stretch>
-              <Input
-                value={createForm.meetingName}
-                onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingName: detail.value }))}
-                placeholder="Enter meeting name"
-              />
-            </FormField>
-
-            <FormField label="Meeting Platform" stretch>
-              <Select
-                selectedOption={platformOptions.find((opt) => opt.value === createForm.meetingPlatform)}
-                onChange={({ detail }) =>
-                  setCreateForm((prev) => ({ ...prev, meetingPlatform: detail.selectedOption.value }))
-                }
-                options={platformOptions}
-              />
-            </FormField>
-
-            {/* A full join URL (e.g. a Webex "j.php?MTID=..." launch link) carries
-                the meeting and password server-side, so relabel the field "Meeting
-                URL" and hide the separate password input when a URL is entered. A
-                bare numeric ID keeps the "Meeting ID" + password layout. */}
-            <FormField label={meetingIdIsUrl ? 'Meeting URL' : 'Meeting ID'} stretch>
-              <Input
-                value={createForm.meetingId}
-                onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingId: detail.value }))}
-                placeholder={meetingIdIsUrl ? 'Enter meeting URL' : 'Enter meeting ID or paste a meeting URL'}
-              />
-            </FormField>
-
-            {!meetingIdIsUrl && (
-              <FormField label="Meeting Password (Optional)" stretch>
-                <Input
-                  value={createForm.meetingPassword}
-                  onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingPassword: detail.value }))}
-                  placeholder="Enter meeting password if required"
-                />
-              </FormField>
-            )}
-
-            {createForm.meetingPlatform === 'ZOOM' && zoomSdkEnabled && (
-              <FormField label="Zoom account" stretch>
-                <Alert type="info">
-                  Joining via the Zoom Meeting SDK. No Zoom account sign-in is needed — the participant authenticates
-                  with a meeting signature.
-                </Alert>
-              </FormField>
-            )}
-
-            {createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled && (
-              <FormField
-                label="Zoom account (Optional)"
-                description={
-                  'Stored Zoom credentials let LMA join meetings as authenticated user. Two-factor and ' +
-                  'CAPTCHA challenges still require manual action via the LMA viewer.'
-                }
-                stretch
-              >
-                <SpaceBetween direction="vertical" size="s">
-                  <ZoomCredentialsManager onChange={handleZoomCredsChange} />
-                  {zoomCredsStatus.present && (
-                    <Checkbox checked={useZoomLogin} onChange={({ detail }) => setUseZoomLogin(detail.checked)}>
-                      Use my stored Zoom account when joining this meeting (recommended)
-                    </Checkbox>
-                  )}
-                </SpaceBetween>
-              </FormField>
-            )}
-
-            <FormField
-              label="Stored browser profile (Optional)"
-              description={
-                'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
-                'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
-                'Remove it to start fresh.'
+            <VirtualParticipantFormFields
+              form={createForm}
+              onChange={(patch) => setCreateForm((prev) => ({ ...prev, ...patch }))}
+              zoomSdkEnabled={zoomSdkEnabled}
+              zoomAccountField={
+                <FormField
+                  label="Zoom account (Optional)"
+                  description={
+                    'Stored Zoom credentials let LMA join meetings as authenticated user. Two-factor and ' +
+                    'CAPTCHA challenges still require manual action via the LMA viewer.'
+                  }
+                  stretch
+                >
+                  <SpaceBetween direction="vertical" size="s">
+                    <ZoomCredentialsManager onChange={handleZoomCredsChange} />
+                    {zoomCredsStatus.present && (
+                      <Checkbox checked={useZoomLogin} onChange={({ detail }) => setUseZoomLogin(detail.checked)}>
+                        Use my stored Zoom account when joining this meeting (recommended)
+                      </Checkbox>
+                    )}
+                  </SpaceBetween>
+                </FormField>
               }
-              stretch
-            >
-              <ChromeProfileManager platform={createForm.meetingPlatform} />
-            </FormField>
-
-            <FormField
-              label="Meeting Time (Optional)"
-              description="Choose a date and time that is at least two minutes from now to schedule the participant."
-              stretch
-            >
-              <SpaceBetween direction="horizontal" size="l">
-                <DatePicker
-                  onChange={({ detail }) => {
-                    setCreateForm((prev) => ({ ...prev, meetingDate: detail.value }));
-                    if (createForm.meetingTime) {
-                      validateMeetingTime(createForm.meetingTime);
-                    }
-                  }}
-                  value={createForm.meetingDate}
-                  isDateEnabled={(date) => {
-                    const currentDate = new Date();
-                    currentDate.setDate(currentDate.getDate() - 1);
-                    return date > currentDate;
-                  }}
-                  placeholder="YYYY/MM/DD"
-                />
-                <TimeInput
-                  onChange={({ detail }) => {
-                    setCreateForm((prev) => ({ ...prev, meetingTime: detail.value }));
-                    validateMeetingTime(detail.value);
-                  }}
-                  onBlur={() => validateMeetingTime(createForm.meetingTime)}
-                  value={createForm.meetingTime}
-                  disabled={createForm.meetingDate.length !== 10}
-                  format="hh:mm"
-                  placeholder="hh:mm (24-hour format)"
-                  use24Hour
-                />
-              </SpaceBetween>
-              {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
-            </FormField>
-
-            <FormField
-              label="Video recording"
-              description={
-                'Capture the meeting screen (screen shares, slides, participants) as an MP4 alongside the audio ' +
-                'recording. Adds CPU/storage cost. Turn off to record audio and transcript only.'
+              browserProfileField={
+                <FormField
+                  label="Stored browser profile (Optional)"
+                  description={
+                    'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
+                    'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
+                    'Remove it to start fresh.'
+                  }
+                  stretch
+                >
+                  <ChromeProfileManager platform={createForm.meetingPlatform} />
+                </FormField>
               }
-              stretch
-            >
-              <Toggle checked={enableVideoRecording} onChange={({ detail }) => setEnableVideoRecording(detail.checked)}>
-                Record meeting video
-              </Toggle>
-            </FormField>
+              meetingIdNote={meetingIdNote}
+              onMeetingIdNoteClear={() => setMeetingIdNote('')}
+              meetingTimeError={meetingTimeErrorText}
+              consentChoice={meetingConsentChoice}
+              onConsentChoiceChange={setMeetingConsentChoice}
+              consentDefaults={consentDefaults}
+              enableVideoRecording={enableVideoRecording}
+              onEnableVideoRecordingChange={setEnableVideoRecording}
+            />
 
             <Checkbox onChange={({ detail }) => setConsentChecked(detail.checked)} checked={consentChecked}>
               I will not violate legal, corporate, or ethical restrictions that apply to meeting transcription and
@@ -958,15 +881,7 @@ const VirtualParticipantList = () => {
           setInvitationText('');
           setParseError('');
           // Reset the form completely when modal is closed
-          setCreateForm({
-            meetingName: '',
-            meetingPlatform: 'ZOOM',
-            meetingId: '',
-            meetingPassword: '',
-            meetingDate: '',
-            meetingTime: '',
-          });
-          setMeetingTimeError('');
+          setCreateForm(EMPTY_VP_FORM);
           setConsentChecked(false);
         }}
         header="Paste Meeting Invitation"
@@ -980,15 +895,7 @@ const VirtualParticipantList = () => {
                   setInvitationText('');
                   setParseError('');
                   // Reset the form completely when modal is cancelled
-                  setCreateForm({
-                    meetingName: '',
-                    meetingPlatform: 'ZOOM',
-                    meetingId: '',
-                    meetingPassword: '',
-                    meetingDate: '',
-                    meetingTime: '',
-                  });
-                  setMeetingTimeError('');
+                  setCreateForm(EMPTY_VP_FORM);
                   setConsentChecked(false);
                 }}
               >

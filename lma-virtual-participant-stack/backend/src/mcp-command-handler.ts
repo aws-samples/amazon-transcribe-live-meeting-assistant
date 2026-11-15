@@ -3,6 +3,9 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { AppSyncEventsClient } from './events-api-client.js';
 import { createHash } from 'crypto';
+import { createLogger } from './logger.js';
+
+const log = createLogger('mcp-command-handler');
 
 /**
  * MCP Command Handler for Virtual Participant
@@ -29,11 +32,11 @@ export class MCPCommandHandler {
         this.awsRegion = process.env.AWS_REGION || 'us-east-1';
         
         if (!this.graphqlEndpoint) {
-            console.warn('GRAPHQL_ENDPOINT not configured - MCP command handler disabled');
+            log.warn('GRAPHQL_ENDPOINT not configured - MCP command handler disabled');
         }
         
         if (!this.eventsApiUrl) {
-            console.warn('APPSYNC_EVENTS_URL not configured - MCP command handler disabled');
+            log.warn('APPSYNC_EVENTS_URL not configured - MCP command handler disabled');
         }
     }
     
@@ -45,11 +48,11 @@ export class MCPCommandHandler {
      */
     async start(): Promise<void> {
         if (!this.graphqlEndpoint) {
-            console.log('GraphQL endpoint not configured - skipping MCP handler');
+            log.info('GraphQL endpoint not configured - skipping MCP handler');
             return;
         }
         
-        console.log('🔌 Starting MCP command handler...');
+        log.info('🔌 Starting MCP command handler...');
         
         try {
             // Initialize MCP client
@@ -59,12 +62,12 @@ export class MCPCommandHandler {
             await this.subscribeToCommands();
             
             this.isRunning = true;
-            console.log('✓ MCP command handler ready');
-            console.log(`  VP ID: ${this.vpId}`);
-            console.log(`  Call ID: ${this.callId}`);
-            console.log(`  Available tools: ${this.availableTools.length}`);
+            log.info('✓ MCP command handler ready');
+            log.info(`  VP ID: ${this.vpId}`);
+            log.info(`  Call ID: ${this.callId}`);
+            log.info(`  Available tools: ${this.availableTools.length}`);
         } catch (error) {
-            console.error('Failed to start MCP command handler:', error);
+            log.error('Failed to start MCP command handler:', error);
             throw error;
         }
     }
@@ -74,7 +77,7 @@ export class MCPCommandHandler {
      * Uses stdio transport to spawn chrome-devtools-mcp as a child process
      */
     private async initializeMCP(): Promise<void> {
-        console.log('Initializing MCP client connection to Chrome DevTools...');
+        log.info('Initializing MCP client connection to Chrome DevTools...');
         
         try {
             // Create stdio transport to chrome-devtools-mcp
@@ -98,15 +101,15 @@ export class MCPCommandHandler {
             
             // Connect to MCP server
             await this.mcpClient.connect(transport);
-            console.log('✓ MCP client connected to Chrome DevTools');
+            log.info('✓ MCP client connected to Chrome DevTools');
             
             // Get available tools
             const toolsList = await this.mcpClient.listTools();
             this.availableTools = toolsList.tools || [];
-            console.log(`✓ Retrieved ${this.availableTools.length} MCP tools`);
+            log.info(`✓ Retrieved ${this.availableTools.length} MCP tools`);
             
         } catch (error) {
-            console.error('Failed to initialize MCP client:', error);
+            log.error('Failed to initialize MCP client:', error);
             throw error;
         }
     }
@@ -117,7 +120,7 @@ export class MCPCommandHandler {
      */
     private async publishTools(): Promise<void> {
         if (!this.mcpClient || this.availableTools.length === 0) {
-            console.log('No tools to publish');
+            log.info('No tools to publish');
             return;
         }
         
@@ -135,9 +138,9 @@ export class MCPCommandHandler {
                 tools: toolsJson
             });
             
-            console.log(`✓ Published ${this.availableTools.length} MCP tools to AppSync`);
+            log.info(`✓ Published ${this.availableTools.length} MCP tools to AppSync`);
         } catch (error) {
-            console.error('Failed to publish MCP tools:', error);
+            log.error('Failed to publish MCP tools:', error);
             // Non-critical - continue without publishing
         }
     }
@@ -147,12 +150,12 @@ export class MCPCommandHandler {
      * Listens for commands sent by the Strands agent
      */
     private async subscribeToCommands(): Promise<void> {
-        console.log(`📡 Subscribing to MCP commands for call ${this.callId}...`);
-        console.log(`   Events API URL: ${this.eventsApiUrl}`);
-        console.log(`   AWS Region: ${this.awsRegion}`);
+        log.info(`📡 Subscribing to MCP commands for call ${this.callId}...`);
+        log.info(`   Events API URL: ${this.eventsApiUrl}`);
+        log.info(`   AWS Region: ${this.awsRegion}`);
         
         if (!this.eventsApiUrl) {
-            console.error('❌ Events API URL not configured');
+            log.error('❌ Events API URL not configured');
             return;
         }
         
@@ -162,38 +165,38 @@ export class MCPCommandHandler {
             
             // Connect to Events API
             await this.eventsClient.connect();
-            console.log('✓ Connected to AppSync Events API');
+            log.info('✓ Connected to AppSync Events API');
             
             // Subscribe to MCP commands channel
             // Use first 16 chars of SHA256 hash (Event API has channel length limit)
             const callIdHash = createHash('sha256').update(this.callId).digest('hex').substring(0, 16);
             const channel = `/mcp-commands/${callIdHash}`;
             
-            console.log(`   Original CallId: ${this.callId}`);
-            console.log(`   Channel hash: ${callIdHash}`);
+            log.info(`   Original CallId: ${this.callId}`);
+            log.info(`   Channel hash: ${callIdHash}`);
             
             this.eventsClient.subscribe(channel, async (event: any) => {
-                console.log('📨 ========================================');
-                console.log('📨 EVENT RECEIVED FROM EVENTS API!');
-                console.log('📨 ========================================');
-                console.log('   Event data:', JSON.stringify(event, null, 2));
+                log.info('📨 ========================================');
+                log.info('📨 EVENT RECEIVED FROM EVENTS API!');
+                log.info('📨 ========================================');
+                log.info('   Event data:', JSON.stringify(event, null, 2));
                 
                 if (event) {
-                    console.log(`📨 Received MCP command: ${event.toolName} (${event.commandId})`);
-                    console.log(`   CallId: ${event.CallId}`);
-                    console.log(`   Arguments: ${event.arguments}`);
+                    log.info(`📨 Received MCP command: ${event.toolName} (${event.commandId})`);
+                    log.info(`   CallId: ${event.CallId}`);
+                    log.info(`   Arguments: ${event.arguments}`);
                     await this.handleCommand(event);
                 } else {
-                    console.log('⚠️  No event data');
+                    log.warn('⚠️  No event data');
                 }
             });
             
-            console.log('✓ MCP command subscription active (Events API)');
-            console.log(`   Channel: ${channel}`);
-            console.log('   Waiting for commands...');
+            log.info('✓ MCP command subscription active (Events API)');
+            log.info(`   Channel: ${channel}`);
+            log.info('   Waiting for commands...');
             
         } catch (error) {
-            console.error('❌ Failed to set up MCP command subscription:', error);
+            log.error('❌ Failed to set up MCP command subscription:', error);
             throw error;
         }
     }
@@ -209,9 +212,9 @@ export class MCPCommandHandler {
             const { commandId, toolName, arguments: args } = command;
             const toolArgs = typeof args === 'string' ? JSON.parse(args) : args;
             
-            console.log(`🔧 Executing MCP tool: ${toolName}`);
-            console.log(`   Command ID: ${commandId}`);
-            console.log(`   Arguments: ${JSON.stringify(toolArgs)}`);
+            log.info(`🔧 Executing MCP tool: ${toolName}`);
+            log.info(`   Command ID: ${commandId}`);
+            log.info(`   Arguments: ${JSON.stringify(toolArgs)}`);
             
             if (!this.mcpClient) {
                 throw new Error('MCP client not initialized');
@@ -228,11 +231,11 @@ export class MCPCommandHandler {
             // Publish result back via AppSync
             await this.publishResult(commandId, true, result, null, executionTime);
             
-            console.log(`✓ MCP tool ${toolName} completed in ${executionTime}ms`);
+            log.info(`✓ MCP tool ${toolName} completed in ${executionTime}ms`);
             
         } catch (error) {
             const executionTime = Date.now() - startTime;
-            console.error(`❌ MCP tool execution failed:`, error);
+            log.error(`❌ MCP tool execution failed:`, error);
             
             await this.publishResult(
                 command.commandId,
@@ -276,9 +279,9 @@ export class MCPCommandHandler {
                 }
             });
             
-            console.log(`✓ Published result for command ${commandId}`);
+            log.info(`✓ Published result for command ${commandId}`);
         } catch (error) {
-            console.error('Failed to publish MCP result:', error);
+            log.error('Failed to publish MCP result:', error);
         }
     }
     
@@ -314,7 +317,7 @@ export class MCPCommandHandler {
             
             return responseData.data;
         } catch (error) {
-            console.error('GraphQL request failed:', error);
+            log.error('GraphQL request failed:', error);
             throw error;
         }
     }
@@ -336,7 +339,7 @@ export class MCPCommandHandler {
             this.mcpClient = null;
         }
         
-        console.log('✓ MCP command handler stopped');
+        log.info('✓ MCP command handler stopped');
     }
     
     /**

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.agenda_helper import normalize_agenda
+from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, normalize_platform
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
 
@@ -31,16 +33,21 @@ def execute(
     user_id: str = None,
     is_admin: bool = False,
     use_stored_zoom_credentials: bool = True,
+    agenda: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Schedule a future meeting with virtual participant.
 
     Args:
         meeting_name: Name/title of the meeting
-        meeting_platform: Platform (Zoom, Teams, Chime, Webex)
-        meeting_id: Meeting ID (numeric ID only, not URL)
+        meeting_platform: Platform (Zoom, Teams, Chime, Webex, Google Meet)
+        meeting_id: Meeting ID (numeric ID only; for Zoom, the full join link
+            or a personal meeting link (/my/<room>) may be given instead; for
+            Google Meet the meeting code, e.g. abc-defg-hij, or its
+            meet.google.com link)
         scheduled_time: ISO 8601 datetime when meeting should start
-        meeting_password: Optional meeting password
+        meeting_password: Optional meeting passcode, as the invitation text
+            shows it; for Zoom, a link's whole pwd value is accepted too
         user_id: User ID for access control
         is_admin: Whether user is admin
         use_stored_zoom_credentials: When the user has stored Zoom
@@ -48,6 +55,9 @@ def execute(
             the meeting (recommended; joins far more reliably and can join
             meetings that disallow guests). Set to False to force
             a guest join. Has no effect on non-Zoom platforms.
+        agenda: Optional meeting agenda, one item per line (for example the
+            agenda from a calendar invite). Stored on the Virtual Participant
+            and carried onto the meeting record when the meeting starts.
 
     Returns:
         Dict with scheduled virtual participant details
@@ -57,18 +67,16 @@ def execute(
             "meeting_name, meeting_platform, meeting_id, and scheduled_time are required"
         )
 
-    # Remove ALL whitespace from meeting_id (including internal spaces)
-    meeting_id = "".join(meeting_id.split())
+    agenda = normalize_agenda(agenda)
 
-    # Validate and normalize platform (VP code expects uppercase)
-    valid_platforms = {"zoom": "ZOOM", "teams": "TEAMS", "chime": "CHIME", "webex": "WEBEX"}
-
-    platform_lower = meeting_platform.lower()
-    if platform_lower not in valid_platforms:
-        raise ValueError("Invalid platform. Must be one of: Zoom, Teams, Chime, Webex")
-
-    # Convert to uppercase for VP infrastructure
-    meeting_platform = valid_platforms[platform_lower]
+    # The platform as the VP expects it (upper case), and the meeting ID with all
+    # whitespace removed (a Google Meet link reduced to its meeting code).
+    meeting_platform = normalize_platform(meeting_platform)
+    meeting_id = normalize_meeting_id(meeting_platform, meeting_id)
+    # A Zoom link must be one the VP reads, and a Zoom password a passcode or a
+    # whole link pwd value (platform_helper.check_zoom_meeting).
+    if meeting_platform == "ZOOM":
+        check_zoom_meeting(meeting_id, meeting_password)
 
     # Validate and parse scheduled time
     try:
@@ -103,6 +111,8 @@ def execute(
             isScheduled
             status
             owner
+            Owner
+            SharedWith
             createdAt
         }
     }
@@ -141,6 +151,9 @@ def execute(
             # owner override — only honored by the resolver when the caller
             # is IAM (ours is, the MCP Lambda role).
             **({"owner": user_id} if user_id else {}),
+            # Stored on the VP row; the VP puts it on the meeting record when the
+            # meeting starts. The resolver records its source as "mcp".
+            **({"agenda": agenda} if agenda else {}),
             # Persisted on the VP row so VPScheduler can read them later.
             **({"userSub": cognito_sub} if cognito_sub else {}),
             **({"userZoomSub": cognito_sub} if use_zoom_creds else {}),

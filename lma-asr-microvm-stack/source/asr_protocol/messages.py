@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Pydantic v2 models for every WebSocket wire message in ``design.md`` §5.
 
@@ -16,6 +16,22 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, PositiveInt, TypeAdapter
 
 # --- Client -> server ------------------------------------------------------
+
+
+class EnrolledVoiceConfig(BaseModel):
+    """One known voice the session should recognise from the first word.
+
+    Sent only by a deployment with voice enrollment turned on, and only for
+    people who consented to it. ``label`` is the name to put in the transcript,
+    and ``vector`` is their stored voiceprint, which must match the dimension of
+    the session's own embedding model.
+    """
+
+    label: str = Field(min_length=1, max_length=64)
+    vector: list[float] = Field(min_length=1)
+    # How many observations the seed counts as, anchoring the identity so one
+    # mis-assigned utterance cannot move it as far as the whole enrollment did.
+    weight: PositiveInt = 8
 
 
 class Config(BaseModel):
@@ -64,6 +80,10 @@ class Config(BaseModel):
     # Withhold the first embedding that matches nobody until a second one agrees
     # with it. ``None`` means "use the server's configured value".
     require_corroboration: bool | None = None
+    # Voices to recognise by name from the first word. Capped so a malformed or
+    # hostile config cannot make session setup unbounded work; a meeting with
+    # more enrolled attendees than this is better served by the transcript miner.
+    enrolled_voices: list[EnrolledVoiceConfig] = Field(default_factory=list, max_length=32)
     # Split one endpointed utterance into a row per speaker turn, retroactively at
     # the end of the utterance.
     split_on_speaker_change: bool | None = None
@@ -75,6 +95,11 @@ class Config(BaseModel):
     # Close a row after this much unbroken speech even with no boundary found, so a
     # monologue does not sit as one unlabelled row. 0 disables the bound.
     max_open_segment_ms: int | None = None
+    # Label partials with the voice under the most recent audio of the open
+    # segment, where the bundle's diarizer labels audio as it arrives (Sortformer).
+    # Off by default: it runs the diarizer more often while someone is speaking.
+    # Honoured only with ``diarize``; other diarizers send partials unlabelled.
+    partial_speakers: bool = False
 
 
 class Eos(BaseModel):
@@ -97,11 +122,13 @@ class Ready(BaseModel):
 class Partial(BaseModel):
     """Evolving interim transcript for a segment (R4.1).
 
-    ``speaker`` is the **provisional** speaker for the in-progress segment (the
-    last speaker identified), so a UI can attribute interim text immediately. The
-    segment's audio is incomplete, so it is not embedded yet; the following
-    ``final`` carries the authoritative label. ``None`` when diarization is off or
-    no speaker has been identified yet.
+    ``speaker`` is ``None`` unless the client asked for ``partial_speakers`` on a
+    bundle whose diarizer labels audio as it arrives (Sortformer). Then it is the
+    **provisional** label of the voice under the most recent labelled audio of
+    this segment (about the last second), read from the same frames the final's
+    labels come from, and ``None`` until enough of the segment is labelled. It
+    never comes from an earlier segment. The following ``final`` carries the
+    authoritative label, and may split the row where the voice changes.
     """
 
     type: Literal["partial"] = "partial"
@@ -129,6 +156,12 @@ class Final(BaseModel):
     diarization is enabled, else ``None``. It is derived from the SAME audio
     samples and segment boundaries as this transcript, so the label cannot drift
     away from the text the way a separately-run diariser's turns would.
+
+    ``language`` is the base ISO 639-1 code (e.g. ``"es"``, no region) of the
+    language the segment's text is in, identified by the server from that text
+    among the languages the deployed bundle transcribes; ``None`` when the bundle
+    has one language, the row is too short to tell, or the server is not confident.
+    Only finals carry it. Optional, so a client that predates it ignores it.
     """
 
     type: Literal["final"] = "final"
@@ -138,6 +171,7 @@ class Final(BaseModel):
     end: float
     words: list[Word] = Field(default_factory=list)
     speaker: str | None = None
+    language: str | None = None
 
 
 class Embedding(BaseModel):
@@ -154,11 +188,18 @@ class Embedding(BaseModel):
 
 
 class Termination(BaseModel):
-    """End-of-session summary sent just before close (R6.3)."""
+    """End-of-session summary sent just before close (R6.3).
+
+    ``audio_seconds`` is the audio the engine processed. ``dropped_seconds`` is
+    audio that was received but dropped because the engine fell behind; row times
+    already include it (they track the audio received), so ``audio_seconds +
+    dropped_seconds`` is the audio received. Clients that predate the field ignore it.
+    """
 
     type: Literal["termination"] = "termination"
     audio_seconds: float
     segments: int
+    dropped_seconds: float = 0.0
 
 
 class Error(BaseModel):

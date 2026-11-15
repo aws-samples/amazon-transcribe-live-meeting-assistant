@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 AWSTemplateFormatVersion: "2010-09-09"
@@ -74,6 +74,22 @@ Parameters:
     Default: 15
     Description: >-
       Approximate percentage of overlapped tokens between two consecutive chunks (typical overlap is around 10% - 20%)
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: >-
+      The number of days log events are kept in this stack's Lambda log groups.
+      Must be one of the retention periods CloudWatch Logs accepts;
+      lma-main.yaml constrains the value it passes to that list.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of a customer managed KMS key used to encrypt this stack's
+      CloudWatch Logs log groups. Left empty, the groups use the CloudWatch Logs
+      default encryption.
 
   PermissionsBoundaryArn:
     Type: String
@@ -163,12 +179,29 @@ Conditions:
       - Condition: IsChunkingStrategyFixed
       - Condition: IsChunkingStrategyDefault
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
+  HasS3DataSourceAndEncryptionKey: !And
+    - !Condition IsS3DataSource
+    - !Condition HasEncryptionKey
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
 
 Resources:
+  # Named independently of the function on purpose: !Sub-ing the function's
+  # generated physical name would make this group depend on the function, so
+  # CloudFormation would create the function first and the first invocation
+  # would let Lambda create the group itself.
+  GetS3VectorBucketNameFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/GetS3VectorBucketNameFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   # Generate short S3 vector bucket name using hash
   GetS3VectorBucketNameFunction:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - GetS3VectorBucketNameFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -183,6 +216,8 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      LoggingConfig:
+        LogGroup: !Ref GetS3VectorBucketNameFunctionLogGroup
       InlineCode: |
         import cfnresponse
         import hashlib
@@ -304,6 +339,24 @@ Resources:
                     - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}/*"
                     - !Sub "${S3VectorBucket.VectorBucketArn}/*"
           - !Ref "AWS::NoValue"
+        # The transcript knowledge base reads the recordings bucket, whose
+        # objects are encrypted with the stack's customer-managed key. Decrypt
+        # only, and only through Amazon S3.
+        - !If
+          - HasS3DataSourceAndEncryptionKey
+          - PolicyName: s3-read-encrypted-objects
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: S3ObjectKeyDecrypt
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+          - !Ref "AWS::NoValue"
 
   #
   # Bedrock Knowledge Base (S3 Vectors)
@@ -394,8 +447,17 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBaseS3Vectors}"
           PolicyName: BedrockPolicy
 
+  StartIngestionJobFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/StartIngestionJobFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   StartIngestionJobFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - StartIngestionJobFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -413,6 +475,8 @@ Resources:
       Timeout: 600
       MemorySize: 128
       Code: ./src/start_ingestion_job_custom_resource
+      LoggingConfig:
+        LogGroup: !Ref StartIngestionJobFunctionLogGroup
       TracingConfig:
         Mode: Active
 

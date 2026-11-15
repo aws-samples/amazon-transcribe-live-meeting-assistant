@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -37,6 +37,9 @@ import {
     redactPerMeetingConfig,
     type PerMeetingConfig,
 } from './launch-mode.js';
+import { bindLogContext, createLogger, logMeetingPlatform, registerSecretValuesFromEnv } from './logger.js';
+
+const log = createLogger('microvm-supervisor');
 
 /** Hooks are served under this prefix; the port is set in the image config. */
 const HOOK_PREFIX = '/aws/lambda-microvms/runtime/v1';
@@ -173,6 +176,13 @@ export class Supervisor {
         }
 
         const applied = applyPerMeetingConfig(this.env, config);
+        // This process learns which meeting it serves only here.
+        bindLogContext({
+            vpId: this.env.VIRTUAL_PARTICIPANT_ID,
+            microvmId: parsedId,
+            meetingPlatform: logMeetingPlatform(this.env.MEETING_PLATFORM),
+        });
+        registerSecretValuesFromEnv(this.env);
         this.deps.log(
             `[run] microvmId=${parsedId ?? 'unknown'} applied=${applied.join(',') || '(none)'} ` +
                 `config=${JSON.stringify(redactPerMeetingConfig(config))}`,
@@ -268,29 +278,38 @@ export function hookNameFromPath(path: string | undefined): string | undefined {
 async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
     const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
     if (!tableName) {
-        console.log('[supervisor] VP_TASK_REGISTRY_TABLE_NAME not set; no staged config');
+        log.info('[supervisor] VP_TASK_REGISTRY_TABLE_NAME not set; no staged config');
         return {};
     }
     const { DynamoDBClient, GetItemCommand } = await import('@aws-sdk/client-dynamodb');
     const region = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     const client = new DynamoDBClient({ region });
     for (let attempt = 1; attempt <= 10; attempt += 1) {
+        let raw: string | undefined;
         try {
             const result = await client.send(
                 new GetItemCommand({ TableName: tableName, Key: { vpId: { S: vpId } } }),
             );
-            const raw = result.Item?.vpConfig?.S;
-            if (raw) {
-                const parsed = JSON.parse(raw) as Record<string, string>;
-                console.log(`[supervisor] loaded ${Object.keys(parsed).length} staged config values`);
-                return parsed as PerMeetingConfig;
-            }
+            raw = result.Item?.vpConfig?.S;
         } catch (err) {
-            console.error('[supervisor] error reading staged config:', err);
+            log.error('[supervisor] error reading staged config:', err);
+        }
+        // Parsed outside the try, and reported by error name only. The staged
+        // config holds the meeting's credentials, and a V8 SyntaxError quotes
+        // the fragment of its input that it stopped on.
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw) as Record<string, string>;
+                log.info(`[supervisor] loaded ${Object.keys(parsed).length} staged config values`);
+                return parsed as PerMeetingConfig;
+            } catch (err) {
+                const name = err instanceof Error ? err.name : 'error';
+                log.error(`[supervisor] staged config is not valid JSON (${name})`);
+            }
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    console.error('[supervisor] staged config not found after 10 attempts');
+    log.error('[supervisor] staged config not found after 10 attempts');
     return {};
 }
 
@@ -352,12 +371,12 @@ async function defaultWarmWorkload(): Promise<boolean> {
             // A page failure still leaves the binary pages sampled; keep going.
         }
         await context.close();
-        console.log(
+        log.info(
             `[supervisor] validate warm-up launched Chromium in ${((Date.now() - started) / 1000).toFixed(1)}s`,
         );
         return true;
     } catch (err) {
-        console.error('[supervisor] validate warm-up failed:', err);
+        log.error('[supervisor] validate warm-up failed:', err);
         return false;
     }
 }
@@ -369,7 +388,7 @@ function defaultSpawnApp(env: Record<string, string | undefined>): ChildProcess 
         detached: false,
     });
     child.on('exit', (code, signal) => {
-        console.log(`[supervisor] VP app exited code=${code} signal=${signal}`);
+        log.info(`[supervisor] VP app exited code=${code} signal=${signal}`);
         // Mirror the app's exit status so MicroVM logs/metrics reflect reality.
         process.exit(code === null ? 1 : code);
     });
@@ -385,7 +404,9 @@ async function main(): Promise<void> {
             spawnApp: defaultSpawnApp,
             warmWorkload: defaultWarmWorkload,
             fetchConfig: defaultFetchConfig,
-            log: (m) => console.log(`[supervisor] ${m}`),
+            // Few lines, and they are how a MicroVM's start and stop are
+            // traced, so they are written at any threshold.
+            log: (m) => log.always(`[supervisor] ${m}`),
         },
         process.env as Record<string, string | undefined>,
     );
@@ -412,7 +433,7 @@ async function main(): Promise<void> {
                     // template literal there is a tainted-format-string finding
                     // (CodeQL js/tainted-format-string). dispatch() only acts on
                     // known hook names, but this is also logged for unknown ones.
-                    console.error('[supervisor] hook %s threw:', hook, err);
+                    log.error('[supervisor] hook %s threw:', hook, err);
                 }
                 res.writeHead(status, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ hook, status, state: supervisor.state }));
@@ -421,7 +442,7 @@ async function main(): Promise<void> {
     });
 
     server.listen(HOOK_PORT, '0.0.0.0', () => {
-        console.log(`[supervisor] hooks listening on :${HOOK_PORT}${HOOK_PREFIX}`);
+        log.info(`[supervisor] hooks listening on :${HOOK_PORT}${HOOK_PREFIX}`);
     });
 }
 

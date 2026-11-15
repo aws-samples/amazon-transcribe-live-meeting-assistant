@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 AWSTemplateFormatVersion: "2010-09-09"
@@ -8,6 +8,21 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
+  # Since 0.4.0 the Amazon Transcribe options (redaction, language, entity
+  # types, custom vocabulary and language model), ShowSpeakerLabel and
+  # EnableAudioRecording are Configuration page settings. lma-main.yaml no
+  # longer passes these parameters, so each stays at its default, which is the
+  # setting's shipped default, and is the task's fallback when the
+  # configuration cannot be read. The task reads the configuration first
+  # (source/app/src/calleventdata/session-settings.ts).
+  LMAStackName:
+    Description: >-
+      Name of the top-level LMA stack. Used as the CloudWatch namespace for the
+      application metrics this service publishes, so that the dashboard and the
+      alarms in the parent template -- which are named for the parent stack --
+      select the series this task writes.
+    Type: String
+
   # networking parameters
   VPC:
     Description: VPC ID
@@ -49,13 +64,6 @@ Parameters:
       The Amazon S3 prefix where the merged output audio files will be saved (must
       end in "/")
 
-  CallAnalyticsPrefix:
-    Type: String
-    Default: lca-call-analytics/
-    Description:
-      The Amazon S3 prefix where the post-call analytics files will be
-      saved, when using analytics api mode (must end in "/")
-
   CallDataStreamName:
     Type: String
     Description: >-
@@ -78,14 +86,6 @@ Parameters:
       - PriceClass_All
     ConstraintDescription: >-
       Allowed Price Classes PriceClass_100 PriceClass_200 and PriceClass_All
-
-  TranscribeApiMode:
-    Type: String
-    Default: analytics
-    AllowedValues:
-      - standard
-      - analytics
-    Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
     Type: String
@@ -197,35 +197,6 @@ Parameters:
       job. Leave blank if no
       custom language model is to be used. If yes, the custom language model must
       pre-exist in your account.
-  PcaS3BucketName:
-    Type: String
-    Description: >
-      Value of PCA stack "InputBucket". Effective only Transcribe API Mode parameter
-      is 'analytics'.
-    # yamllint disable rule:line-length
-    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
-    # yamllint enable rule:line-length
-
-  PcaTranscriptsPrefix:
-    Type: String
-    Default: originalTranscripts/
-    Description: Value of PCA stack "InputBucketTranscriptPrefix".
-
-  PcaPlaybackAudioFilePrefix:
-    Type: String
-    Default: mp3/
-    Description: Value of PCA stack "InputBucketPlaybackAudioPrefix".
-
-  PcaWebAppURL:
-    Type: String
-    AllowedPattern: '^(|https:\/\/.*)$'
-    Description: Value of PCA stack "WebAppURL".
-
-  PcaWebAppCallPathPrefix:
-    Type: String
-    Default: dashboard/parsedFiles/
-    Description: PCA path prefix for call detail pages.
-
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store
@@ -290,15 +261,64 @@ Parameters:
       (Optional) ARN of the MicroVM ASR session launcher. When empty, meetings are
       always transcribed by Amazon Transcribe streaming.
 
+  VoiceEnrollmentSeedsFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the function that lists the enrolled voices a starting
+      meeting may label by name. When empty, voice enrollment is off for this
+      deployment and meetings label separated voices as spk_0, spk_1 and so on
+      until somebody names them.
+
+  EventSourcingTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Name of the meeting table. When supplied, the transcriber records
+      each meeting's Amazon Transcribe seconds and ASR MicroVM time there, under
+      the meeting's mtr# partition, for the meeting cost estimate.
+
+  MeetingRecordExpirationInDays:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Days a meeting record is kept. Metering records expire with the
+      meeting they belong to. Empty leaves them without a TTL.
+
   AsrConfigTableName:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Runtime ASR configuration table, holding the three switches the
-      Transcription Engine admin page edits (streaming-meetings engine, Virtual Participant
-      engine, Virtual Participant voice separation). Read at meeting start, so a
+      (Optional) The table the three switches the Transcription Engine section
+      of the Configuration page edits (streaming-meetings engine, Virtual Participant engine, Virtual
+      Participant voice separation) were stored in before they moved into the
+      configuration table. Read only as a fallback, when ConfigurationTableName
+      holds no shipped ASR switches or cannot be read. Empty when the on-demand
+      engine is not deployed.
+
+  ConfigurationTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The shared configuration table created by the AI stack. The
+      Transcription Engine switches are read from it at meeting start, so a
       change needs no stack update.
-      Empty when the on-demand engine is not deployed.
+
+  AppSyncGraphQLUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The AI stack's GraphQL endpoint. A meeting whose client sends
+      a consent step has it recorded on the meeting through this API, with the
+      task's role. When empty no consent can be recorded, so a meeting in an
+      opt-in deployment is not recorded or transcribed.
+
+  AppSyncApiId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The ID of the same GraphQL API, which scopes the task role's
+      access to the meeting consent mutations.
 
   AsrDiarizationAvailable:
     Type: String
@@ -316,13 +336,21 @@ Parameters:
     Default: ""
     Description: >-
       Which model bundle the deployed ASR image was built from. Shown on the
-      Transcription Engine page.
+      Transcription Engine section of the Configuration page.
 
   AsrModelBundleName:
     Type: String
     Default: ""
     Description: >-
-      Display name of that bundle, shown on the Transcription Engine page.
+      Display name of that bundle, shown in the Transcription Engine section of the Configuration page.
+
+  AsrModelLanguages:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated base language codes (such as "en,es,fr") the deployed ASR
+      bundle transcribes. A meeting in another language stays on Amazon
+      Transcribe; empty means English only.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -393,8 +421,11 @@ Parameters:
   # Task count and auto scaling.
   #
   # Running more than one task requires that any client connection for a meeting
-  # can be served by any task. That holds for audio: a meeting uses a single
-  # WebSocket connection for its lifetime. It does not hold when
+  # can be served by any task. That mostly holds for audio: a meeting uses a
+  # single WebSocket connection unless it drops, and a client that reconnects
+  # continues the meeting only on the task that held it (another task starts a
+  # second session for it; see docs/websocket-streaming-api.md, Reconnection).
+  # It does not hold when
   # EnableVideoRecording is true, because the desktop capture app opens the
   # video stream as a *second* WebSocket connection, and the task that receives
   # it can only attach it to an audio session it is hosting itself — the load
@@ -512,12 +543,17 @@ Conditions:
       - !Equals [!Ref TranscribeLanguageCode, "en-AU"]
       - !Equals [!Ref TranscribeLanguageCode, "en-GB"]
       - !Equals [!Ref TranscribeLanguageCode, "es-US"]
-  ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, ""]]
   # Video handling needs a bigger task (ffmpeg mux) and more ephemeral storage.
   # Audio-only deployments keep the original, cheaper shape.
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
   ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
+  HasVoiceEnrollment: !Not [!Equals [!Ref VoiceEnrollmentSeedsFunctionArn, ""]]
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
+  HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
+  HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, ""]]
+  HasConsentApi: !And
+    - !Not [!Equals [!Ref AppSyncGraphQLUrl, ""]]
+    - !Not [!Equals [!Ref AppSyncApiId, ""]]
   ShouldEnableTranscriberAutoScaling:
     !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
 
@@ -537,6 +573,40 @@ Outputs:
   TranscriberWebsocketFargateServiceSecurityGroup:
     Description: Egress security group for ECS
     Value: !Ref TranscriberWebsocketFargateServiceSecurityGroup
+
+  # ── Identifiers the top-level stack's CloudWatch alarms and dashboard need ──
+  # The cluster, the service and both load-balancer resources are auto-named by
+  # CloudFormation, so the parent cannot reconstruct these from its own stack
+  # name. Each value is the literal a CloudWatch metric dimension takes.
+  TranscribingClusterName:
+    Description: >-
+      Name of the ECS cluster running the transcriber service, for the
+      ClusterName dimension of ECS/ContainerInsights metrics
+    Value: !Ref TranscribingCluster
+
+  TranscriberServiceName:
+    Description: >-
+      Name of the transcriber ECS service, for the ServiceName dimension of
+      ECS/ContainerInsights metrics
+    Value: !GetAtt TranscriberWebsocketFargateService.Name
+
+  TranscriberLoadBalancerFullName:
+    Description: >-
+      Full name of the transcriber application load balancer, for the
+      LoadBalancer dimension of AWS/ApplicationELB metrics
+    Value: !GetAtt TranscribingWebsocketLoadBalancer.LoadBalancerFullName
+
+  TranscriberTargetGroupFullName:
+    Description: >-
+      Full name of the transcriber target group, for the TargetGroup dimension
+      of AWS/ApplicationELB metrics
+    Value: !GetAtt TranscribingWebsocketLoadBalancerListenerTargetGroup.TargetGroupFullName
+
+  TranscriberFargateLogGroupName:
+    Description: >-
+      Log group the transcriber container writes to, for Logs Insights
+      dashboard widgets
+    Value: !Ref TranscriberWebsocketTaskDefWebsocketContainerLogGroup
 
 Resources:
   ##########################################################################
@@ -739,11 +809,10 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
               - Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebsocketTranscriberCodeBuildProjectLogGroup}"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebsocketTranscriberCodeBuildProjectLogGroup}:*"
                 Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
               - Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${TranscriberECRRepository}"
@@ -773,12 +842,28 @@ Resources:
               and therefore
               cannot be specificed directly.
 
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  WebsocketTranscriberCodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/WebsocketTranscriberCodeBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   WebsocketTranscriberCodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
         Builds docker images : ${AWS::StackName}
       ServiceRole: !Ref TranscriberCodeBuildServiceRole
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref WebsocketTranscriberCodeBuildProjectLogGroup
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS
@@ -814,7 +899,28 @@ Resources:
                 # liblzma5 5.4.1-1 flagged by Mirador/CVE-2026-34743) even though
                 # the Dockerfile already applies the fix. Patching happens here at
                 # build time, so it adds zero container-startup cost.
-                - docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
+                #
+                # Retried, up to three attempts, when the failure is a network
+                # fetch (a registry, apt or npm timing out or resetting the
+                # connection): one such blip otherwise fails the whole stack
+                # update and rolls it back. Only the end of the log is matched,
+                # so a network warning the build recovered from does not get an
+                # unrelated failure retried.
+                - |
+                  for attempt in 1 2 3; do
+                    # Streamed through tee, so the build's output reaches the log
+                    # as it runs; its exit status is carried out of the pipe in
+                    # a file, which works in any POSIX sh.
+                    { docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/; echo $? > /tmp/docker-build.rc; } 2>&1 | tee /tmp/docker-build.log
+                    if [ "$(cat /tmp/docker-build.rc)" = 0 ]; then
+                      break
+                    fi
+                    if [ "$attempt" = 3 ] || ! tail -n 50 /tmp/docker-build.log | grep -Eq 'TLS handshake timeout|i/o timeout|connection reset|Client\.Timeout|unexpected EOF|toomanyrequests|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure resolving|Could not connect'; then
+                      exit 1
+                    fi
+                    echo "docker build hit a network error (attempt $attempt of 3); retrying in $((attempt * 30))s"
+                    sleep $((attempt * 30))
+                  done
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'
                   $REPOSITORY_URI $PROJECT_NAME $ARTIFACT_BUCKET > build.json
@@ -843,7 +949,9 @@ Resources:
             Value: !Ref BootstrapVersion
           - Name: SOURCE_CODE_LOCATION
             Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}"
-      TimeoutInMinutes: 10
+      # A build takes about 2.5 minutes; this leaves room for the docker build's
+      # three attempts and their back-off.
+      TimeoutInMinutes: 20
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role
@@ -941,35 +1049,6 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  TranscriberCallEventTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      AttributeDefinitions:
-        # primary key attributes
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
-      TimeToLiveSpecification:
-        AttributeName: ExpiresAfter
-        Enabled: true
-      StreamSpecification:
-        StreamViewType: NEW_IMAGE
 
   ##########################################################################
   # ELB
@@ -1157,11 +1236,6 @@ Resources:
                 - "arn:aws:s3:::${bucket}/*"
                 - bucket: !Ref S3BucketName
           - Action:
-              - iam:PassRole
-            Effect: Allow
-            Resource:
-              - !GetAtt TcaDataAccessRole.Arn
-          - Action:
               - transcribe:DeleteTranscriptionJob
               - transcribe:GetTranscriptionJob
               - transcribe:GetVocabulary
@@ -1169,7 +1243,6 @@ Resources:
               - transcribe:ListVocabularies
               - transcribe:StartStreamTranscription
               - transcribe:StartTranscriptionJob
-              - transcribe:StartCallAnalyticsStreamTranscription
             Effect: Allow
             Resource: "*"
           - Action:
@@ -1181,15 +1254,6 @@ Resources:
                 - streamName: !Ref CallDataStreamName
 
           - Action:
-              - dynamodb:Query
-              - dynamodb:Scan
-              - dynamodb:GetItem
-              - dynamodb:PutItem
-              - dynamodb:UpdateItem
-            Effect: Allow
-            Resource:
-              - !GetAtt TranscriberCallEventTable.Arn
-          - Action:
               - kms:Decrypt
               - kms:DescribeKey
             Effect: Allow
@@ -1197,6 +1261,26 @@ Resources:
             Condition:
               StringEquals:
                 "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+          # The recordings bucket and the call data stream are encrypted with
+          # the stack's customer-managed key: recordings and consent evidence
+          # are written (and multipart uploads completed) through Amazon S3, and
+          # transcript events are put on the stream through Kinesis.
+          - Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+          - Action:
+              - kms:Encrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
           - Action:
               - logs:CreateLogStream
               - logs:PutLogEvents
@@ -1210,12 +1294,61 @@ Resources:
               Effect: Allow
               Resource: !Ref AsrLauncherFunctionArn
             - !Ref AWS::NoValue
-          # Runtime diarization overrides, read once per meeting (and cached).
+          # Ask which enrolled voices a starting meeting may label by name.
+          # Invoke on that one function and nothing else: the task is given no
+          # access to the enrollment table or its key, so the voiceprints reach
+          # it only as the answer to this call.
+          - !If
+            - HasVoiceEnrollment
+            - Action: lambda:InvokeFunction
+              Effect: Allow
+              Resource: !Ref VoiceEnrollmentSeedsFunctionArn
+            - !Ref AWS::NoValue
+          # The configuration table, read at meeting start: the Transcription
+          # Engine switches (cached for 30 seconds; the previous table only as
+          # a fallback), and the Amazon Transcribe options and the recording
+          # default (read afresh for every meeting).
+          - !If
+            - HasConfigurationTable
+            - Action: dynamodb:GetItem
+              Effect: Allow
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+            - !Ref AWS::NoValue
           - !If
             - HasAsrConfigTable
             - Action: dynamodb:GetItem
               Effect: Allow
               Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
+            - !Ref AWS::NoValue
+          # Record a meeting's consent step: the meeting's owner (getCall), read
+          # first, and the consent mutations a backend role may call, on this
+          # deployment's GraphQL API, and nothing else on it. Evidence images are
+          # written under lma-consent-evidence/ by the bucket statement above.
+          - !If
+            - HasConsentApi
+            - Action: appsync:GraphQL
+              Effect: Allow
+              Resource:
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Query/fields/getCall"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/startMeetingConsent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/recordMeetingConsentNotice"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/recordMeetingConsentEvent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/attestMeetingConsent"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/addMeetingConsentEvidence"
+                - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/verifyMeetingConsentEvidence"
+            - !Ref AWS::NoValue
+          # Metering records for the meeting cost estimate: PutItem only, and
+          # only under the mtr# partitions of the meeting table. The table's
+          # key is covered by the kms statement above.
+          - !If
+            - HasEventSourcingTable
+            - Action: dynamodb:PutItem
+              Effect: Allow
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTableName}"
+              Condition:
+                ForAllValues:StringLike:
+                  "dynamodb:LeadingKeys":
+                    - "mtr#*"
             - !Ref AWS::NoValue
         Version: "2012-10-17"
       PolicyName: !Sub ${AWS::StackName}-TranscriberWebsocketTaskDefTaskRoleDefaultPolicy
@@ -1228,55 +1361,6 @@ Resources:
             reason:
               comprehend, translate, and connect do not support resource-level
               permissions.
-
-  TcaDataAccessRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - transcribe.streaming.amazonaws.com
-            Action:
-              - sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Sub ${AWS::AccountId}
-      Path: /
-      Policies:
-        - PolicyName: tca-post-call-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
-                    - bucket: !Ref S3BucketName
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
-                    - bucket: !Ref S3BucketName
-
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: >-
-              Transcribe does not support resource-level permissions and KVS streams
-              are dynamic
 
   TranscriberWebsocketTaskDef:
     Type: AWS::ECS::TaskDefinition
@@ -1296,26 +1380,22 @@ Resources:
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
               Value: !Ref AudioFilePrefix
-            - Name: CALL_ANALYTICS_FILE_PREFIX
-              Value: !Ref CallAnalyticsPrefix
-            - Name: TCA_DATA_ACCESS_ROLE_ARN
-              Value: !GetAtt TcaDataAccessRole.Arn
-            - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: "redacted"
             - Name: SERVERHOST
               Value: "0.0.0.0"
             - Name: SERVERPORT
               Value: "8080"
             - Name: KINESIS_STREAM_NAME
               Value: !Ref CallDataStreamName
-            - Name: TRANSCRIBER_CALL_EVENT_TABLE_NAME
-              Value: !Ref TranscriberCallEventTable
+            # Transcribe seconds and ASR MicroVM time per meeting, for the
+            # meeting cost estimate. Empty disables metering (see metering.ts).
+            - Name: METERING_TABLE_NAME
+              Value: !Ref EventSourcingTableName
+            - Name: METERING_EXPIRATION_DAYS
+              Value: !Ref MeetingRecordExpirationInDays
             - Name: SAVE_PARTIAL_TRANSCRIPTS
               Value: "true"
             - Name: SHOW_SPEAKER_LABEL
               Value: !Ref ShowSpeakerLabel
-            - Name: TRANSCRIBE_API_MODE
-              Value: !Ref TranscribeApiMode
             - Name: IS_CONTENT_REDACTION_ENABLED
               Value: !If
                 - ShouldEnableContentRedaction
@@ -1356,10 +1436,40 @@ Resources:
             # and every meeting is transcribed by Amazon Transcribe.
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            # The languages the deployed bundle transcribes; a meeting in any
+            # other stays on Amazon Transcribe. Empty means English only.
+            - Name: ASR_MODEL_LANGUAGES
+              Value: !Ref AsrModelLanguages
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
+            - Name: CONFIGURATION_TABLE_NAME
+              Value: !Ref ConfigurationTableName
+            # Meeting consent: where a client's consent step is recorded, and the
+            # recordings-bucket folder its evidence images are stored under.
+            - Name: GRAPHQL_ENDPOINT
+              Value: !If [HasConsentApi, !Ref AppSyncGraphQLUrl, ""]
+            - Name: CONSENT_EVIDENCE_PREFIX
+              Value: "lma-consent-evidence/"
+            # Voice enrollment. Empty unless the deployment has it switched on,
+            # in which case a meeting asks this function at session start which
+            # enrolled voices consent lets it label by name.
+            - Name: VOICE_ENROLLMENT_SEEDS_FUNCTION_ARN
+              Value: !Ref VoiceEnrollmentSeedsFunctionArn
             - Name: WS_LOG_LEVEL
               Value: !Ref LogLevel
+            # The CloudWatch namespace for the application metrics this task
+            # publishes. The parent stack's name, not this nested stack's: the
+            # dashboard and the alarms that read these metrics are named for the
+            # parent. Unset or wrong and the task runs normally while publishing
+            # to a namespace nothing reads.
+            #
+            # No cloudwatch:PutMetricData grant accompanies this. The records are
+            # Embedded Metric Format written to stdout, which the container's
+            # awslogs driver already carries, and CloudWatch Logs extracts the
+            # metrics from them -- AWS documents that as needing only the
+            # log-writing permission the task already has.
+            - Name: METRIC_NAMESPACE
+              Value: !Ref LMAStackName
             - Name: DEBUG
               Value: "false"
           Essential: true
@@ -1722,181 +1832,31 @@ Resources:
             - !GetAtt WebSocketCloudFrontDistribution.DomainName
             - "/api/v1/ws"
         recordingDisclaimer: !Ref RecordingDisclaimer
-        # Read by the Transcription Engine page: whether the deployed image carries a speaker
+        # Read by the Configuration page's Transcription Engine section: whether the deployed image carries a speaker
         # model, so the page can say whether speaker labels are available and
         # enable the Virtual Participant voice-separation switch.
         AsrDiarizationAvailable: !If
           - ShouldEnableMicrovmAsr
           - !Ref AsrDiarizationAvailable
           - "false"
-        # Read by the Transcription Engine page, so it can say which bundle this deployment
+        # Read by the Configuration page's Transcription Engine section, so it can say which bundle this deployment
         # runs. The engine switches are not settings here: the page, the Stream
         # Audio form and the transcriber read them live from the config table
         # (getAsrConfig).
         AsrModelBundleId: !Ref AsrModelBundleId
         AsrModelBundleName: !Ref AsrModelBundleName
+        # And which languages that bundle transcribes, so the section can say
+        # which meeting languages it takes.
+        AsrModelLanguages: !Ref AsrModelLanguages
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
-        # bundle). The Transcription Engine page shows it, and the Stream Audio form only
+        # bundle). The Configuration page's Transcription Engine section shows its engine choices only when it
+        # is true (Virtual Participant voice separation is shown either way), and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
+        # Whether this deployment has voice enrollment at all. The UI offers
+        # the consent portal only when it is true, since it has nothing to talk
+        # to otherwise.
+        VoiceEnrollmentAvailable: !If [HasVoiceEnrollment, "true", "false"]
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
-
-  PCAIntegrationFunction:
-    Type: AWS::Serverless::Function
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      Description: >-
-        AWS Lambda Function that will be triggered Transcribe Call Analytics completes
-        after end of streaming session
-      Handler: index.handler
-      Layers:
-        # periodically update the Lambda Insights Layer
-        # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-extension-versions.html
-        - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:38"
-      Role: !GetAtt PCAIntegrationFunctionRole.Arn
-      Runtime: nodejs22.x
-      MemorySize: 768
-      Timeout: 900
-      Tracing: Active
-      Environment:
-        Variables:
-          REGION: !Ref AWS::Region
-          KINESIS_STREAM_NAME: !Ref CallDataStreamName
-          TRANSCRIBER_CALL_EVENT_TABLE_NAME: !Ref TranscriberCallEventTable
-          LCA_BUCKET_NAME: !Ref S3BucketName
-          CALL_ANALYTICS_FILE_PREFIX: !Ref CallAnalyticsPrefix
-          PCA_S3_BUCKET_NAME: !Ref PcaS3BucketName
-          PCA_TRANSCRIPTS_PREFIX: !Ref PcaTranscriptsPrefix
-          PCA_AUDIO_PLAYBACK_FILE_PREFIX: !Ref PcaPlaybackAudioFilePrefix
-          PCA_WEB_APP_URL: !Ref PcaWebAppURL
-          PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
-          IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
-          LOG_LEVEL: !Ref LogLevel
-      CodeUri: ../source/lambda_functions/pca_integration
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    DependsOn:
-      - PCAIntegrationFunctionLogGroup
-
-  PCAIntegrationFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  PCAIntegrationFunctionRole:
-    Type: AWS::IAM::Role
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Path: /
-      ManagedPolicyArns:
-        # CloudWatch Insights Managed Policy
-        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
-        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
-      Policies:
-        - PolicyName: lambda-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt TranscriberCallEventTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-              - Action:
-                  - kinesis:PutRecord
-                Effect: Allow
-                Resource:
-                  - !Ref CallDataStreamArn
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref S3BucketName
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref PcaS3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref PcaS3BucketName
-
-  AllowEventBridgeToCallPCAIntegrationFunction:
-    Type: "AWS::Lambda::Permission"
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      FunctionName: !Ref PCAIntegrationFunction
-      Action: "lambda:InvokeFunction"
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt EventBridgeRuleToTriggerPCAIntegrationFunction.Arn
-      SourceAccount: !Ref AWS::AccountId
-
-  EventBridgeRuleToTriggerPCAIntegrationFunction:
-    Type: AWS::Events::Rule
-    Condition: ShouldInstallPcaIntegration
-    Properties:
-      Description: "This rule is triggered when TCA post call output job completes"
-      EventPattern:
-        detail-type:
-          - "Call Analytics Post Call Job State Change"
-        source:
-          - aws.transcribe
-      Targets:
-        - Id: PCAIntegrationTarget
-          Arn: !GetAtt PCAIntegrationFunction.Arn
-      State: "ENABLED"

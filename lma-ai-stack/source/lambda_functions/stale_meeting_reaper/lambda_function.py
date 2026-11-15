@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """Close out meetings that have stopped producing activity.
@@ -17,8 +17,8 @@ meeting row keeps the status it had — ``STARTED`` or ``TRANSCRIBING`` — and 
 UI shows it as in progress for as long as the row is retained.
 
 This function is the backstop for those meetings. On a schedule it looks for
-meeting rows whose last activity is older than
-``MEETING_INACTIVITY_TIMEOUT_IN_MINUTES`` and emits the same ``END`` event the
+meeting rows whose last activity is older than the Meeting Processing section's
+inactivity timeout and emits the same ``END`` event the
 client would have sent, so the meeting ends, its summary is generated, and it
 leaves the in-progress list.
 
@@ -40,7 +40,7 @@ default is deliberately several hours for that reason.
 Candidates are found through the ``TypeDateIndex`` GSI, which is range-sorted by
 the meeting-list row's ``SK`` (``ts#<ISO8601>#id#<CallId>``) and therefore
 chronological on meeting start time. The query covers meetings started between
-``REAPER_LOOKBACK_IN_DAYS`` ago and the inactivity cutoff: anything newer than
+the lookback (see ``lookback_days``) ago and the inactivity cutoff: anything newer than
 the cutoff cannot be stale yet, and the lower bound keeps a single invocation's
 work bounded. A meeting that started before the lookback window and is still
 open is not reaped, so the lookback wants to comfortably exceed the longest
@@ -74,6 +74,9 @@ from boto3.dynamodb.conditions import Key
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
+# pylint: disable-next=import-error
+from lma_config import MEETING_PROCESSING, read_setting  # configuration layer
+
 if TYPE_CHECKING:
     from mypy_boto3_kinesis.client import KinesisClient
 else:
@@ -83,12 +86,6 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
-# 0 disables the reaper without removing its resources. int(float(...)) because
-# the CloudFormation Number type accepts a fractional value.
-INACTIVITY_TIMEOUT_MINUTES = int(
-    float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
-)
-LOOKBACK_DAYS = float(os.environ.get("REAPER_LOOKBACK_IN_DAYS", "2"))
 # Bounds the work a single invocation does; the next scheduled run continues.
 MAX_CANDIDATES = int(float(os.environ.get("REAPER_MAX_CANDIDATES", "500")))
 MAX_MEETINGS_PER_RUN = int(float(os.environ.get("REAPER_MAX_MEETINGS_PER_RUN", "100")))
@@ -278,7 +275,7 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
     payload = {
         "EventType": "END",
         "CallId": call_id,
-        "CustomerPhoneNumber": call_row.get("CustomerPhoneNumber") or "Customer",
+        "CustomerPhoneNumber": call_row.get("CustomerPhoneNumber") or "Other Participant",
         "SystemPhoneNumber": call_row.get("SystemPhoneNumber") or "System",
         "AgentId": call_row.get("Owner") or call_row.get("AgentId") or DEFAULT_OWNER,
         "CreatedAt": _now().isoformat(),
@@ -290,16 +287,37 @@ def _emit_end_event(call_row: Dict[str, Any]) -> None:
     )
 
 
+def lookback_days() -> int:
+    """How many days back a run looks for meetings to close.
+
+    The Meeting Processing section of the Configuration page, else its shipped
+    default (``setting_defaults.json``). Read per run, so a change applies from
+    the next scheduled run that starts five minutes after it.
+    """
+    return read_setting(MEETING_PROCESSING.name, "inactiveMeetingLookbackDays")
+
+
+def inactivity_timeout_minutes() -> int:
+    """How long a meeting may go without activity before a run ends it.
+
+    The Meeting Processing section of the Configuration page, else its shipped
+    default (``setting_defaults.json``). Read per run, like the lookback. 0 ends
+    nothing; the function and its schedule always exist.
+    """
+    return read_setting(MEETING_PROCESSING.name, "inactiveMeetingTimeoutMinutes")
+
+
 @LOGGER.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Scheduled entry point. Returns a summary of the run for the logs."""
-    if INACTIVITY_TIMEOUT_MINUTES <= 0:
+    timeout_minutes = inactivity_timeout_minutes()
+    if timeout_minutes <= 0:
         LOGGER.info("meeting inactivity timeout is 0; nothing to do")
         return {"enabled": False, "candidates": 0, "ended": 0}
 
     now = _now()
-    cutoff = now - timedelta(minutes=INACTIVITY_TIMEOUT_MINUTES)
-    window_start = now - timedelta(days=LOOKBACK_DAYS)
+    cutoff = now - timedelta(minutes=timeout_minutes)
+    window_start = now - timedelta(days=lookback_days())
 
     candidate_ids = _query_candidate_call_ids(window_start, cutoff)
     rows = _batch_get_rows(candidate_ids)
@@ -332,7 +350,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 "call_id": call_id,
                 "status": call_row.get("Status"),
                 "last_activity": call_row.get("UpdatedAt") or call_row.get("CreatedAt"),
-                "inactivity_timeout_minutes": INACTIVITY_TIMEOUT_MINUTES,
+                "inactivity_timeout_minutes": timeout_minutes,
             },
         )
 

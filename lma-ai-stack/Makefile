@@ -32,6 +32,22 @@ SAMCONFIG_FILE ?= samconfig.toml
 SAM_BUILD_DIR ?= .aws-sam
 SRC_DIR := src
 
+# Build the Lambda bundles inside SAM's build container, which is the right
+# default: it pins the interpreter and produces manylinux wheels whatever the
+# developer is running, and on macOS it is the only way to get them.
+#
+# Set SAM_BUILD_IN_CONTAINER=false to build with the local interpreter instead.
+# That is for a builder which already IS the Lambda platform and has no Docker
+# daemon to offer -- a linux/amd64 CI runner on python3.12. Getting either half
+# of that wrong yields wheels Lambda cannot import, so the flag is explicit
+# rather than inferred from `uname`.
+SAM_BUILD_IN_CONTAINER ?= true
+ifeq ($(SAM_BUILD_IN_CONTAINER),true)
+SAM_BUILD_CONTAINER_ARGS ?= --use-container --build-image public.ecr.aws/sam/build-python3.12:latest-x86_64
+else
+SAM_BUILD_CONTAINER_ARGS ?=
+endif
+
 OUT_DIR ?= out
 $(OUT_DIR):
 	@echo '[INFO] creating build output dir: [$(@)]'
@@ -300,7 +316,9 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 	  exit 1 || true
 
 	@echo '[INFO] configuring docker multiarchitecture for sam cross platform build'
-	@if [ "$$(uname -s)" = "Linux" ]; then \
+	@if [ "$(SAM_BUILD_IN_CONTAINER)" != "true" ]; then \
+		echo '[INFO] SAM_BUILD_IN_CONTAINER=$(SAM_BUILD_IN_CONTAINER) — skipping QEMU setup'; \
+	elif [ "$$(uname -s)" = "Linux" ]; then \
 		docker run --rm --privileged multiarch/qemu-user-static --reset -p yes; \
 	else \
 		echo '[INFO] Skipping QEMU setup on macOS (Docker Desktop handles x86_64 emulation)'; \
@@ -308,8 +326,7 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'
 	sam build \
-		--use-container \
-		--build-image public.ecr.aws/sam/build-python3.12:latest-x86_64 \
+		$(SAM_BUILD_CONTAINER_ARGS) \
 		--parallel \
 		--cached \
 		--template-file '$(PACKAGE_RELEASE_REPLACE_OUT_FILE)' \

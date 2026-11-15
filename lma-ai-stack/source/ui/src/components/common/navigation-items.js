@@ -1,8 +1,9 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
+
 import React from 'react';
 import { Badge } from '@cloudscape-design/components';
 
@@ -15,10 +16,10 @@ import {
   BROWSER_EXTENSION_PATH,
   DESKTOP_CAPTURE_APP_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  CONFIGURATION_PATH,
+  VOICE_ENROLLMENT_PATH,
+  TROUBLESHOOTING_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -70,38 +71,53 @@ export const generateNavigationItems = (settings, isAdmin) => {
     },
   ];
 
+  // Enrolling your own voice is self-service and open to every user, not an
+  // admin task: a voiceprint is biometric data about a person, so only that
+  // person can consent to it being stored. Offered only where the deployment
+  // has enrollment switched on, since the portal has nothing to talk to
+  // otherwise. External rather than nested, because the page is a standalone
+  // task with its own layout. Marked Beta, as the portal page is too.
+  if (`${settings?.VoiceEnrollmentAvailable}` === 'true') {
+    navigationItems.push({
+      type: 'link',
+      text: 'Enroll My Voice',
+      href: `#${VOICE_ENROLLMENT_PATH}`,
+      external: true,
+      info: <Badge color="blue">Beta</Badge>,
+    });
+  }
+
   // Add Configuration section (admin only)
   if (isAdmin) {
+    // Questions about the deployment, answered by the troubleshooting agent.
+    // Admin only, as every troubleshooting diagnosis is.
+    navigationItems.push({
+      type: 'link',
+      text: 'Troubleshooting',
+      href: `#${TROUBLESHOOTING_PATH}`,
+    });
     navigationItems.push({
       type: 'section',
       text: 'Configuration',
       items: [
+        // The configuration profiles and every section of the runtime
+        // configuration, edited from its schema, with each profile's revisions.
+        {
+          type: 'link',
+          text: 'View / Edit Configuration',
+          href: `#${CONFIGURATION_PATH}`,
+        },
+        // The Meeting Cost Prices section of the same page, as the IDP
+        // Accelerator lists its Pricing page.
+        {
+          type: 'link',
+          text: 'Meeting Cost Prices',
+          href: `#${CONFIGURATION_PATH}?section=call_pricing`,
+        },
         {
           type: 'link',
           text: 'MCP Servers',
           href: `#${MCP_SERVERS_PATH}`,
-        },
-        {
-          type: 'link',
-          text: 'Nova Sonic Config',
-          href: `#${NOVA_SONIC_CONFIG_PATH}`,
-        },
-        // Only offered when the on-demand engine is deployed; the page has nothing
-        // to configure otherwise. JSX in this .js file relies on jsxInJsPlugin.
-        ...(`${settings?.AsrEngineAvailable}` === 'true'
-          ? [
-              {
-                type: 'link',
-                text: 'Transcription Engine',
-                href: `#${ASR_CONFIG_PATH}`,
-                info: <Badge color="severity-medium">Experimental</Badge>,
-              },
-            ]
-          : []),
-        {
-          type: 'link',
-          text: 'Transcript Summary',
-          href: `#${TRANSCRIPT_SUMMARY_PATH}`,
         },
         {
           type: 'link',

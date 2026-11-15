@@ -1,0 +1,358 @@
+{
+  "description": "Where each Amazon Bedrock model LMA offers can run, by the region it is called from. profilePrefixes names each inference-profile prefix and where it runs inference. geographies maps a region (an exact name, or a prefix ending in '-') to its geography's profile prefixes, narrowest first; the first entry that matches wins, and a region no entry matches has no geography profile. regions lists, for each region checked, the non-global inference profiles and the on-demand in-region model ids Amazon Bedrock offers there for those models. Regenerate regions and models with scripts/bedrock_inference_catalog.py; edit profilePrefixes and geographies by hand.",
+  "listedOn": "2026-11-06",
+  "profilePrefixes": {
+    "global": "any commercial AWS Region",
+    "us": "AWS Regions in the United States",
+    "us-gov": "AWS GovCloud (US) Regions",
+    "eu": "AWS Regions in Europe",
+    "apac": "AWS Regions in Asia Pacific",
+    "jp": "AWS Regions in Japan",
+    "au": "AWS Regions in Australia",
+    "ca": "AWS Regions in Canada",
+    "in": "AWS Regions in India"
+  },
+  "geographies": [
+    {
+      "match": "us-gov-",
+      "prefixes": [
+        "us-gov"
+      ]
+    },
+    {
+      "match": "us-",
+      "prefixes": [
+        "us"
+      ]
+    },
+    {
+      "match": "ca-",
+      "prefixes": [
+        "ca"
+      ]
+    },
+    {
+      "match": "eu-",
+      "prefixes": [
+        "eu"
+      ]
+    },
+    {
+      "match": "ap-northeast-1",
+      "prefixes": [
+        "jp",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-northeast-3",
+      "prefixes": [
+        "jp",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-southeast-2",
+      "prefixes": [
+        "au",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-southeast-4",
+      "prefixes": [
+        "au",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-south-1",
+      "prefixes": [
+        "in",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-south-2",
+      "prefixes": [
+        "in",
+        "apac"
+      ]
+    },
+    {
+      "match": "ap-",
+      "prefixes": [
+        "apac"
+      ]
+    }
+  ],
+  "models": [
+    "amazon.nova-2-lite-v1:0",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-micro-v1:0",
+    "amazon.nova-premier-v1:0",
+    "amazon.nova-pro-v1:0",
+    "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "anthropic.claude-haiku-5-5",
+    "anthropic.claude-opus-4-1-20250805-v1:0",
+    "anthropic.claude-opus-4-20250514-v1:0",
+    "anthropic.claude-opus-4-6-v1",
+    "anthropic.claude-opus-5-5",
+    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "anthropic.claude-sonnet-4-6",
+    "anthropic.claude-sonnet-5-5"
+  ],
+  "regions": {
+    "ap-northeast-1": {
+      "profiles": [
+        "apac.amazon.nova-lite-v1:0",
+        "apac.amazon.nova-micro-v1:0",
+        "apac.amazon.nova-pro-v1:0",
+        "jp.amazon.nova-2-lite-v1:0",
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "jp.anthropic.claude-haiku-5-5",
+        "jp.anthropic.claude-opus-5-5",
+        "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "jp.anthropic.claude-sonnet-4-6"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0"
+      ]
+    },
+    "ap-northeast-2": {
+      "profiles": [
+        "apac.amazon.nova-lite-v1:0",
+        "apac.amazon.nova-micro-v1:0",
+        "apac.amazon.nova-pro-v1:0"
+      ],
+      "inRegion": []
+    },
+    "ap-northeast-3": {
+      "profiles": [
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "jp.anthropic.claude-haiku-5-5",
+        "jp.anthropic.claude-opus-5-5",
+        "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "jp.anthropic.claude-sonnet-4-6"
+      ],
+      "inRegion": []
+    },
+    "ap-south-1": {
+      "profiles": [
+        "apac.amazon.nova-lite-v1:0",
+        "apac.amazon.nova-micro-v1:0",
+        "apac.amazon.nova-pro-v1:0",
+        "in.anthropic.claude-haiku-4-5-20251001-v1:0"
+      ],
+      "inRegion": []
+    },
+    "ap-southeast-1": {
+      "profiles": [
+        "apac.amazon.nova-lite-v1:0",
+        "apac.amazon.nova-micro-v1:0",
+        "apac.amazon.nova-pro-v1:0"
+      ],
+      "inRegion": []
+    },
+    "ap-southeast-2": {
+      "profiles": [
+        "apac.amazon.nova-lite-v1:0",
+        "apac.amazon.nova-micro-v1:0",
+        "apac.amazon.nova-pro-v1:0",
+        "au.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "au.anthropic.claude-haiku-5-5",
+        "au.anthropic.claude-opus-4-6-v1",
+        "au.anthropic.claude-opus-5-5",
+        "au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "au.anthropic.claude-sonnet-4-6",
+        "au.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-pro-v1:0"
+      ]
+    },
+    "ca-central-1": {
+      "profiles": [
+        "ca.amazon.nova-lite-v1:0",
+        "ca.anthropic.claude-haiku-5-5",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": []
+    },
+    "eu-central-1": {
+      "profiles": [
+        "eu.amazon.nova-2-lite-v1:0",
+        "eu.amazon.nova-lite-v1:0",
+        "eu.amazon.nova-micro-v1:0",
+        "eu.amazon.nova-pro-v1:0",
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-4-6-v1",
+        "eu.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-6",
+        "eu.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": []
+    },
+    "eu-north-1": {
+      "profiles": [
+        "eu.amazon.nova-2-lite-v1:0",
+        "eu.amazon.nova-lite-v1:0",
+        "eu.amazon.nova-micro-v1:0",
+        "eu.amazon.nova-pro-v1:0",
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-4-6-v1",
+        "eu.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-6",
+        "eu.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0"
+      ]
+    },
+    "eu-west-1": {
+      "profiles": [
+        "eu.amazon.nova-2-lite-v1:0",
+        "eu.amazon.nova-lite-v1:0",
+        "eu.amazon.nova-micro-v1:0",
+        "eu.amazon.nova-pro-v1:0",
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-4-6-v1",
+        "eu.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-6",
+        "eu.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": []
+    },
+    "eu-west-2": {
+      "profiles": [
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-4-6-v1",
+        "eu.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-6",
+        "eu.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-pro-v1:0",
+        "anthropic.claude-opus-4-6-v1",
+        "anthropic.claude-opus-5-5",
+        "anthropic.claude-sonnet-4-6"
+      ]
+    },
+    "eu-west-3": {
+      "profiles": [
+        "eu.amazon.nova-2-lite-v1:0",
+        "eu.amazon.nova-lite-v1:0",
+        "eu.amazon.nova-micro-v1:0",
+        "eu.amazon.nova-pro-v1:0",
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-4-6-v1",
+        "eu.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-6",
+        "eu.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": []
+    },
+    "sa-east-1": {
+      "profiles": [],
+      "inRegion": []
+    },
+    "us-east-1": {
+      "profiles": [
+        "us.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-lite-v1:0",
+        "us.amazon.nova-micro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-pro-v1:0"
+      ]
+    },
+    "us-east-2": {
+      "profiles": [
+        "us.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-lite-v1:0",
+        "us.amazon.nova-micro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0"
+      ]
+    },
+    "us-west-1": {
+      "profiles": [
+        "us.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-lite-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": []
+    },
+    "us-west-2": {
+      "profiles": [
+        "us.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-lite-v1:0",
+        "us.amazon.nova-micro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "inRegion": [
+        "amazon.nova-lite-v1:0"
+      ]
+    }
+  }
+}

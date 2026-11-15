@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Synthetic Cognito user provisioning & JWT fetching.
 
 We mint N load-test users in the target LMA User Pool using the

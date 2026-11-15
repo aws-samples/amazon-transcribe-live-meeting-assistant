@@ -1,13 +1,13 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 import json
 import uuid
 from datetime import datetime
 from os import getenv
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import boto3
 
@@ -39,6 +39,7 @@ LAMBDA_CLIENT: LambdaClient = BOTO3_SESSION.client(
     config=CLIENT_CONFIG,
 )
 KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client("kinesis")
+DYNAMODB_CLIENT = BOTO3_SESSION.client("dynamodb", config=CLIENT_CONFIG)
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
@@ -47,6 +48,60 @@ LAMBDA_AGENT_ASSIST_FUNCTION_ARN = getenv("LAMBDA_AGENT_ASSIST_FUNCTION_ARN", ""
 IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv("IS_LAMBDA_AGENT_ASSIST_ENABLED", "false").lower() == "true"
 
 DYNAMODB_TABLE_NAME = getenv("DYNAMODB_TABLE_NAME", "")
+
+#: The channel of the meeting page's assistant chat (strands_chat_interface).
+#: Its questions arrive stamped with the wall-clock time they were asked, not a
+#: time on the meeting's transcript timeline.
+CHAT_ASSISTANT_CHANNEL = "CHAT_ASSISTANT"
+
+#: The speaker the meeting assistant's answers are stored under: the name the
+#: meeting page gives the assistant.
+ASSISTANT_SPEAKER = "Meeting Assistant"
+
+#: The meeting assistant's tool scope for a request spoken with the wake phrase
+#: (strands_meeting_assist_function.IN_MEETING_TOOL_SCOPES).
+WAKE_PHRASE_TOOL_SCOPE = "wake_phrase"
+
+
+def meeting_time_seconds(call_id: str) -> float:
+    """How far the meeting's transcript has reached, in seconds from its start.
+
+    The call record's TotalConversationDurationMillis, which the call event
+    processor keeps at the latest end of the meeting's final speech segments:
+    the current point on the transcript timeline while the meeting runs, and
+    its end afterwards. 0 when the meeting has no speech yet or the record
+    cannot be read, so an answer is never placed beyond the meeting.
+    """
+    if not DYNAMODB_TABLE_NAME or not call_id:
+        return 0.0
+    key = f"c#{call_id}"
+    try:
+        item = (
+            DYNAMODB_CLIENT.get_item(
+                TableName=DYNAMODB_TABLE_NAME,
+                Key={"PK": {"S": key}, "SK": {"S": key}},
+                ProjectionExpression="TotalConversationDurationMillis",
+            ).get("Item")
+            or {}
+        )
+        raw = item.get("TotalConversationDurationMillis", {}).get("N")
+        return max(0.0, float(raw) / 1000) if raw is not None else 0.0
+    except Exception as error:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the meeting's transcript extent: %s", error)
+        return 0.0
+
+
+def answer_times(message: Dict[str, Any]) -> Tuple[Any, Any]:
+    """The start and end of the answer segment, on the meeting's transcript timeline.
+
+    A wake-phrase answer takes the times of the transcript segment that asked,
+    which are already on that timeline. A question from the meeting page's
+    chat is placed where the transcript has reached when it is answered.
+    """
+    if message.get("Channel") == CHAT_ASSISTANT_CHANNEL:
+        at = meeting_time_seconds(message.get("CallId", ""))
+        return at, at
+    return message["StartTime"], message["EndTime"]
 
 
 def write_agent_assist_to_kds(message: Dict[str, Any]):
@@ -58,7 +113,7 @@ def write_agent_assist_to_kds(message: Dict[str, Any]):
             KINESIS_CLIENT.put_record(
                 StreamName=CALL_DATA_STREAM_NAME, PartitionKey=callId, Data=json.dumps(message)
             )
-            LOGGER.info("Write AGENT_ASSIST event to KDS: %s", json.dumps(message))
+            LOGGER.debug("Write AGENT_ASSIST event to KDS: %s", json.dumps(message))
         except Exception as error:
             LOGGER.error(
                 "Error writing AGENT_ASSIST event to KDS ",
@@ -70,10 +125,6 @@ def write_agent_assist_to_kds(message: Dict[str, Any]):
 def publish_lambda_agent_assist_transcript_segment(
     message: Dict[str, Any],
 ):
-    if "ContactId" in message.keys():
-        publish_contact_lens_lambda_agent_assist_transcript_segment(message)
-        return
-
     """Add Lambda Agent Assist GraphQL Mutations"""
     # pylint: disable=too-many-locals
 
@@ -81,8 +132,7 @@ def publish_lambda_agent_assist_transcript_segment(
     channel: str = message["Channel"]
     is_partial: bool = message["IsPartial"]
     message["SegmentId"]
-    start_time: float = message["StartTime"]
-    end_time: float = message["EndTime"]
+    start_time, end_time = answer_times(message)
     end_time = float(end_time) + 0.001  # UI sort order
     # Use "OriginalTranscript", if defined (optionally set by transcript lambda hook fn)"
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
@@ -109,6 +159,8 @@ def publish_lambda_agent_assist_transcript_segment(
         IsPartial=is_partial,
         SegmentId=str(uuid.uuid4()),
         StartTime=start_time,
+        # Without one the event processor stores the placeholder participant name.
+        Speaker=ASSISTANT_SPEAKER,
         Status="TRANSCRIBING",
         Owner=owner,  # Pass Owner for userEmail extraction
         ConversationHistory=conversation_history,  # Pass conversation history
@@ -158,8 +210,14 @@ def get_lambda_agent_assist_transcript(
         "dynamodb_pk": f"c#{call_id}",
         "userEmail": owner,  # Add userEmail for tools that require UBAC
     }
+    # A wake phrase is spoken in the meeting by whoever is in it, so it is an
+    # in-meeting request: the meeting assistant answers it as the Meeting
+    # Assistant section's In-meeting requests setting allows. A question from
+    # the meeting page's chat is the signed-in user's, and carries no scope.
+    if transcript_segment_args.get("Channel") != CHAT_ASSISTANT_CHANNEL:
+        payload["toolScope"] = WAKE_PHRASE_TOOL_SCOPE
 
-    LOGGER.info("Agent Assist Lambda Request: %s", content)
+    LOGGER.debug("Agent Assist Lambda Request: %s", content)
 
     lambda_response = LAMBDA_CLIENT.invoke(
         FunctionName=LAMBDA_AGENT_ASSIST_FUNCTION_ARN,
@@ -191,216 +249,12 @@ def process_lambda_response(lambda_response):
     return message
 
 
-def transform_segment_to_issues_agent_assist(
-    segment: Dict[str, Any],
-    issue: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Transcript Issues payload to Agent Assist"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["CallId"]
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-    segment_item = segment["ContactLensTranscript"]
-    transcript = segment_item["Content"]
-
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
-    if not issues_detected:
-        raise ValueError("Invalid issue segment")
-
-    begin_offset = issue["CharacterOffsets"]["BeginOffsetChar"]
-    end_offset = issue["CharacterOffsets"]["EndOffsetChar"]
-    issue_transcript = transcript[begin_offset:end_offset]
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-    end_time = end_time + 0.001  # UI sort order
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=issue_transcript,
-    )
-
-
-def transform_segment_to_categories_agent_assist(
-    category: str,
-    category_details: Dict[str, Any],
-    call_id: str,
-) -> Dict[str, Any]:
-    """Transforms Contact Lens Categories segment payload to Agent Assist"""
-    created_at = datetime.utcnow().astimezone().isoformat()
-    is_partial = False
-    segment_id = str(uuid.uuid4())
-    channel = "AGENT_ASSISTANT"
-
-    transcript = f"{category}"
-    # get the min and maximum offsets to put a time range
-    segment_item = {}
-    segment_item["BeginOffsetMillis"] = min(
-        (
-            point_of_interest["BeginOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-    segment_item["EndOffsetMillis"] = max(
-        (
-            point_of_interest["EndOffsetMillis"]
-            for point_of_interest in category_details["PointsOfInterest"]
-        )
-    )
-
-    start_time: float = segment_item["BeginOffsetMillis"] / 1000
-    end_time: float = segment_item["EndOffsetMillis"] / 1000
-
-    return dict(
-        CallId=call_id,
-        Channel=channel,
-        CreatedAt=created_at,
-        ExpiresAfter=get_transcription_ttl(),
-        EndTime=end_time,
-        IsPartial=is_partial,
-        SegmentId=segment_id,
-        StartTime=start_time,
-        Status="TRANSCRIBING",
-        Transcript=transcript,
-    )
-
-
-def publish_contact_lens_lambda_agent_assist_transcript_segment(
-    segment: Dict[str, Any],
-):
-    """Add Lambda Agent Assist GraphQL Mutations"""
-    # pylint: disable=too-many-locals
-    call_id: str = segment["ContactId"]
-    channel: str = "AGENT_ASSISTANT"
-    status: str = "TRANSCRIBING"
-    is_partial: bool = False
-
-    created_at: str
-    start_time: float
-    end_time: float
-
-    send_lambda_agent_assist_args = []
-    # only send relevant segments to agent assist
-    if not ("ContactLensTranscript" in segment or "Categories" in segment):
-        return
-
-    if "Utterance" in segment and segment["Utterance"].get("ParticipantRole") == "CUSTOMER":
-        is_partial = False
-        segment_item = segment["Utterance"]
-        content = segment_item["PartialContent"]
-        segment_id = str(uuid.uuid4())
-
-        created_at = datetime.utcnow().astimezone().isoformat()
-        start_time = segment_item["BeginOffsetMillis"] / 1000
-        end_time = segment_item["EndOffsetMillis"] / 1000
-        end_time = end_time + 0.001  # UI sort order
-
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=content,
-                transcript_segment_args=dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    CreatedAt=created_at,
-                    ExpiresAfter=get_transcription_ttl(),
-                    EndTime=end_time,
-                    IsPartial=is_partial,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    Status=status,
-                ),
-            )
-        )
-
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
-    if (
-        "ContactLensTranscript" in segment
-        and segment["ContactLensTranscript"].get("ParticipantRole") == "CUSTOMER"
-        and not issues_detected
-    ):
-        is_partial = False
-        segment_item = segment["ContactLensTranscript"]
-        content = segment_item["Content"]
-        segment_id = str(uuid.uuid4())
-
-        created_at = datetime.utcnow().astimezone().isoformat()
-        start_time = segment_item["BeginOffsetMillis"] / 1000
-        end_time = segment_item["EndOffsetMillis"] / 1000
-        end_time = end_time + 0.001  # UI sort order
-
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=content,
-                transcript_segment_args=dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    CreatedAt=created_at,
-                    ExpiresAfter=get_transcription_ttl(),
-                    EndTime=end_time,
-                    IsPartial=is_partial,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    Status=status,
-                ),
-            )
-        )
-    for issue in issues_detected:
-        issue_segment = transform_segment_to_issues_agent_assist(
-            segment={**segment, "CallId": call_id},
-            issue=issue,
-        )
-        send_lambda_agent_assist_args.append(
-            dict(content=issue_segment["Transcript"], transcript_segment_args=issue_segment),
-        )
-
-    categories = segment.get("Categories", {})
-    for category in categories.get("MatchedCategories", []):
-        category_details = categories["MatchedDetails"][category]
-        category_segment = transform_segment_to_categories_agent_assist(
-            category=category,
-            category_details=category_details,
-            call_id=call_id,
-        )
-        send_lambda_agent_assist_args.append(
-            dict(
-                content=category_segment["Transcript"],
-                transcript_segment_args=category_segment,
-            ),
-        )
-
-    for agent_assist_args in send_lambda_agent_assist_args:
-        # write initial message to indicate that wake word was detected and request submitted.
-        checking_segment = {
-            **agent_assist_args["transcript_segment_args"],
-            "Transcript": "Checking...",
-            "IsPartial": True,
-        }
-        write_agent_assist_to_kds(checking_segment)
-
-        transcript_segment = get_lambda_agent_assist_transcript(
-            **agent_assist_args,
-        )
-
-        write_agent_assist_to_kds(transcript_segment)
-
-    # Return the last transcript segment for synchronous callers
-    return transcript_segment if transcript_segment else None
-
-
 @LOGGER.inject_lambda_context
 def handler(event, context: LambdaContext):
     # pylint: disable=unused-argument
     """Lambda handler"""
-    LOGGER.info("Agent assist lambda event", extra={"event": event})
+    # The event carries the transcript segment that asked, so DEBUG only.
+    LOGGER.debug("Agent assist lambda event", extra={"event": event})
 
     data = json.loads(json.dumps(event))
 

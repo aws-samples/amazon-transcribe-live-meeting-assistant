@@ -4,6 +4,14 @@
  * Generic interface for voice AI assistants (ElevenLabs, AWS Nova, etc.)
  */
 
+// Type-only: assistant-toggles.ts imports ActivationMode back from here, and
+// erasing the import keeps the two modules out of a runtime cycle.
+import type {
+  AssistantReconfigureRequest,
+  AssistantReconfigureOutcome,
+  VoiceControlOutcome,
+} from './assistant-toggles.js';
+
 export type VoiceAssistantProviderType = 'none' | 'elevenlabs' | 'amazon_nova_sonic';
 export type ActivationMode = 'always_active' | 'wake_phrase' | 'strands_tool';
 
@@ -58,6 +66,41 @@ export interface VoiceAssistantProvider {
    * Stop the voice assistant (disconnect, cleanup)
    */
   stop(): Promise<void>;
+
+  /**
+   * Change the assistant's meeting mode and/or activation mode while the
+   * meeting is running.
+   *
+   * Both are read once when the provider starts, so changing either means the
+   * provider has to rebuild whatever it baked them into. Only the provider knows
+   * what that is: for Nova Sonic the meeting mode decides the system prompt and
+   * the registered tool set, both of which are fixed for the life of a
+   * bidirectional stream, so a mode change is a session rebuild rather than a
+   * flag flip. A brief gap in what the assistant can hear is expected; the
+   * transcript is produced by a separate audio path and is not affected.
+   *
+   * Providers that cannot honour a request return it undone — `result:
+   * 'declined'` (or `'unchanged'` when the assistant is already doing what was
+   * asked), an empty `changed` list and a `detail` explaining why — rather than
+   * half-applying it.
+   *
+   * Every call logs one line (see `formatAssistantToggleLog`), including the
+   * calls that change nothing, so the record of what a meeting was asked to do
+   * does not depend on the request succeeding.
+   *
+   * @param request What to change, which route asked, and who asked.
+   * @returns What actually changed, and whether the session was rebuilt.
+   */
+  reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome>;
+
+  /**
+   * Whether this provider can change mode during a meeting at all — that is,
+   * whether `reconfigure` is ever able to apply a request rather than decline
+   * every one. The `LMA help` chat reply lists the assistant-mode commands only
+   * when this is true, so participants are not told about commands that are
+   * always answered with a refusal.
+   */
+  supportsModeChanges(): boolean;
 
   /**
    * Send audio chunk to the voice assistant
@@ -131,4 +174,49 @@ export interface VoiceAssistantProvider {
    * Whether the voice assistant is currently muted.
    */
   isMuted(): boolean;
+
+  /**
+   * Act on a participant asking the assistant to stop talking: silence the
+   * utterance in progress and stay silent until the assistant is addressed
+   * again by wake phrase.
+   *
+   * The provider decides, because only it knows which meeting mode it is in —
+   * translator mode is driven by its own pause/resume trigger phrases and
+   * declines — and because only it knows whether it has another way of
+   * recognising the request. Where it does, it may hold the request for a short
+   * window so that route can answer out loud first; it silences the assistant
+   * itself if that does not happen, so an accepted request ends in silence.
+   *
+   * A provider may still call a request off before it resolves, if something
+   * unambiguously asks the assistant back inside the window. Whether it can
+   * tell that apart from the request itself depends on what it can observe, so
+   * that is the provider's judgement and callers should not count on it.
+   *
+   * @param reason Optional log tag identifying the source of the call.
+   * @returns true when the request has been accepted and the assistant will be
+   *   silent, immediately or within the provider's own window, and will stay
+   *   silent until addressed again; false when the current mode does not take
+   *   stop requests from this route.
+   */
+  requestStopTalking(reason?: string): boolean;
+
+  /**
+   * "LMA mute" (`muted` true) or "LMA unmute" typed in the meeting chat.
+   * Optional: a provider without it is answered in chat as having no voice
+   * assistant to mute.
+   *
+   * Unlike requestStopTalking, a chat mute is applied at once and holds: the
+   * assistant stays silent, wake phrase or not, until it is unmuted from chat
+   * or the meeting mode changes. In translator mode the two pause and resume
+   * the translator instead.
+   */
+  setMutedByChat?(muted: boolean): VoiceControlOutcome;
+
+  /**
+   * A participant's finished utterance, from the participants' transcript
+   * (Amazon Transcribe channel 0, or the ASR MicroVM). Optional: Nova Sonic's
+   * translator reads its spoken controls ("stop translating", the resume
+   * phrase, the wake phrase while paused) from it.
+   */
+  noteParticipantUtterance?(text: string): void;
 }

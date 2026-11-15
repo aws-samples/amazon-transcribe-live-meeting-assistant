@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -21,11 +21,12 @@ import BrowserExtensionRoutes from './BrowserExtensionRoutes';
 import DesktopCaptureAppRoutes from './DesktopCaptureAppRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
-import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
-import AsrConfigRoutes from './AsrConfigRoutes';
-import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
+import ConfigurationRoutes from './ConfigurationRoutes';
+import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
+import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
+import TroubleshootingRoutes from './TroubleshootingRoutes';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
 
 import {
@@ -40,11 +41,11 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
-  NOVA_SONIC_CONFIG_PATH,
-  ASR_CONFIG_PATH,
-  TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  CONFIGURATION_PATH,
   EMBED_PATH,
+  VOICE_ENROLLMENT_PATH,
+  TROUBLESHOOTING_PATH,
 } from './constants';
 
 const logger = new ConsoleLogger('AuthRoutes');
@@ -87,11 +88,15 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
         <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
-        <Route path={`${NOVA_SONIC_CONFIG_PATH}/*`} element={<NovaSonicConfigRoutes />} />
-        <Route path={`${ASR_CONFIG_PATH}/*`} element={<AsrConfigRoutes />} />
-        <Route path={`${TRANSCRIPT_SUMMARY_PATH}/*`} element={<TranscriptSummaryRoutes />} />
+        {/* The pages that each edited one section moved into the Configuration
+            page, and the Configuration History page into its revision history
+            dialog; a bookmark to one opens it there. */}
+        {movedConfigurationRoutes()}
         <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
+        <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />
         <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
+        <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
+        <Route path={`${TROUBLESHOOTING_PATH}/*`} element={<TroubleshootingRoutes />} />
         <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
       </Routes>
     </SettingsContext.Provider>

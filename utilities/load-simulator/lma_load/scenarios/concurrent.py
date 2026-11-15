@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Scenarios 1 + 4 (merged) — Concurrent meetings.
 
 Runs N simultaneous meetings for Y duration, using one of four drivers:

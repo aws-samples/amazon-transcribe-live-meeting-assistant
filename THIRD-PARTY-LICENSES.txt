@@ -501,14 +501,56 @@ EnableMicrovmAsr parameter is true. Not used by the default Amazon Transcribe pa
 
 ----------------
 
+** py3langid - https://github.com/adbar/py3langid
+
+BSD 3-Clause License
+
+Modifications (fork): Copyright (c) 2021, Adrien Barbaresi.
+
+Original code: Copyright (c) 2011 Marco Lui <saffsd@gmail.com>.
+Based on research by Marco Lui and Tim Baldwin.
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER ``AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Installed into the on-demand ASR MicroVM image (lma-asr-microvm-stack) when the
+EnableMicrovmAsr parameter is true, to name the language of each transcript row.
+Not used by the default Amazon Transcribe path.
+
+----------------
+
 ** Speech recognition and speaker-embedding model weights (downloaded at image
    build time, NOT redistributed by this project)
 
 The on-demand ASR MicroVM image downloads the models named by the selected bundle in
 lma-asr-microvm-stack/source/catalog.json from their published source and verifies
 each against a pinned SHA256. The weights are baked into that image inside the
-deploying AWS account; this project distributes no model weights. Each model's own
-license file is copied into the image next to its weights, and the deployed bundle's
+deploying AWS account; this project distributes no model weights. Where a model's
+download ships its own license file, that file is copied into the image next to its
+weights, and the deployed bundle's
 licences are reported in the ASR stack's AsrLicenceSummary and AsrRedistributable
 outputs. The default bundle and every bundle the catalog marks redistributable are
 permissively licensed. One bundle (nemotron-titanet-small) carries weights under the
@@ -534,7 +576,10 @@ Speech recognition:
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
   * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
-    every other bundle whose id starts with parakeet-tdt-v3)
+    every other bundle whose id starts with parakeet-tdt-v3). The ONNX exports are the
+    sherpa-onnx project's, fetched at a fixed commit: v3 at full precision from
+    https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3 and v2 in int8
+    from https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.
     CC-BY-4.0
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
@@ -629,3 +674,22 @@ lma-ai-stack/source/ui/public/js/purify.min.js and is copied unmodified into the
 web application bundle served by CloudFront. The file retains its upstream
 version and license banner. This project does not modify any DOMPurify source
 file; it is consumed as an unmodified library.
+
+----------------
+
+** AMI Meeting Corpus - https://groups.inf.ed.ac.uk/ami/corpus/
+
+The AMI Meeting Corpus and its annotations are released under the Creative Commons
+Attribution 4.0 International Public License (CC BY 4.0).
+
+CC BY 4.0 - https://creativecommons.org/licenses/by/4.0/
+
+Attribution: AMI Meeting Corpus, (c) the AMI Consortium, CC BY 4.0. J. Carletta et al.,
+"The AMI Meeting Corpus: A Pre-Announcement", Machine Learning for Multimodal
+Interaction (MLMI 2005), LNCS 3869, Springer, 2006.
+
+Reference transcripts derived from the corpus's manual word annotations (release 1.6.2)
+are included in utilities/load-simulator/lma_load/asr_benchmark/datasets/ami/ for the
+ASR model benchmark, with the changes described in that directory's README.md. No AMI
+audio is redistributed: the benchmark downloads the headset recordings from the AMI
+mirror on first use and verifies each against a pinned SHA-256.

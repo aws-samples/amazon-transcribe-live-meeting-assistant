@@ -1,12 +1,18 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
 /**
  * AppSync Lambda resolver for updateChatButtonConfig mutation
- * Delegates to Lambda function for AF-12 Mass Assignment security fix
+ *
+ * Delegates to a Lambda function, which applies the allowed field list and
+ * re-checks the caller's group membership. `ctx.identity` is forwarded so the
+ * function reads the caller's groups from the validated token rather than from
+ * the mutation arguments. The field name is forwarded because the same function
+ * also answers Query.getChatButtonConfig, and it dispatches on this rather than
+ * on the shape of the arguments.
  */
 
 import { util } from '@aws-appsync/utils';
@@ -16,7 +22,8 @@ export function request(ctx) {
     operation: 'Invoke',
     payload: {
       arguments: ctx.arguments,
-      identity: ctx.identity
+      identity: ctx.identity,
+      info: { fieldName: ctx.info.fieldName }
     }
   };
 }

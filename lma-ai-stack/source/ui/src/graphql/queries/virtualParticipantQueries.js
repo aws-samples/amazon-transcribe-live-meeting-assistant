@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 // Mutation to delete one or more Virtual Participants. Active VPs are ended
@@ -14,7 +14,8 @@ export const deleteVirtualParticipants = /* GraphQL */ `
   }
 `;
 
-// Query to list Virtual Participants with VNC fields for CallPanel preview
+// Query to list Virtual Participants with VNC fields for CallPanel preview, and the
+// platform and video recording choice the meeting page shows
 export const listVirtualParticipants = /* GraphQL */ `
   query ListVirtualParticipants {
     listVirtualParticipants {
@@ -29,6 +30,8 @@ export const listVirtualParticipants = /* GraphQL */ `
       manualActionTimeoutSeconds
       manualActionStartTime
       meetingName
+      meetingPlatform
+      enableVideoRecording
     }
   }
 `;

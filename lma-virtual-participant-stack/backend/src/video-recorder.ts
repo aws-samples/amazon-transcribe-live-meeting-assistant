@@ -31,6 +31,10 @@ import {
 import { S3Client, PutObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { details } from './details.js';
 import path from 'path';
+import { createLogger } from './logger.js';
+import { RecordingStartClock } from './video-start-time.js';
+
+const log = createLogger('video-recorder');
 
 // ─── Configuration (from environment) ────────────────────────────────────────
 const RESOLUTION = process.env.VIDEO_RESOLUTION || '1920x1080';
@@ -60,6 +64,7 @@ class VideoRecorder {
   private chunkWatcher: ReturnType<typeof setInterval> | null = null;
   private lastChunkIndex: number = -1;
   private _isRecording: boolean = false;
+  private startClock: RecordingStartClock | null = null;
 
   constructor() {
     this.s3Client = new S3Client({ region: REGION });
@@ -68,6 +73,18 @@ class VideoRecorder {
   /** Whether video recording is currently active. */
   get isRecording(): boolean {
     return this._isRecording;
+  }
+
+  /**
+   * Wall-clock time of the recording's first captured frame, or null when
+   * nothing is recording or FFmpeg has not captured a frame yet. The
+   * recording's own timeline starts here, so a moment's position in the
+   * recording is its wall-clock time minus this (used for key frames). It is
+   * not the time FFmpeg was launched: FFmpeg can take tens of seconds to grab
+   * its first frame, and that gap is not in the recording (video-start-time.ts).
+   */
+  get startedAtMs(): number | null {
+    return this._isRecording ? (this.startClock?.startMs ?? null) : null;
   }
 
   /** The recordings bucket, resolved at call time so details reflects env. */
@@ -108,7 +125,7 @@ class VideoRecorder {
           { encoding: 'utf-8', timeout: 2000 }
         );
         if (result.trim().length > 0) {
-          console.log(`[VideoRecorder] Audio sink '${sinkName}' is available`);
+          log.info(`[VideoRecorder] Audio sink '${sinkName}' is available`);
           return true;
         }
       } catch {
@@ -116,7 +133,7 @@ class VideoRecorder {
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    console.warn(
+    log.warn(
       `[VideoRecorder] Audio sink '${sinkName}' not available after ${timeoutMs}ms — recording video only`
     );
     return false;
@@ -132,15 +149,15 @@ class VideoRecorder {
    */
   async start(callId: string): Promise<void> {
     if (!details.enableVideoRecording) {
-      console.log('[VideoRecorder] Video recording disabled - skipping recording');
+      log.info('[VideoRecorder] Video recording disabled - skipping recording');
       return;
     }
     if (!this.bucket) {
-      console.error('[VideoRecorder] RECORDINGS_BUCKET_NAME not set, cannot record');
+      log.error('[VideoRecorder] RECORDINGS_BUCKET_NAME not set, cannot record');
       return;
     }
     if (this._isRecording) {
-      console.log('[VideoRecorder] Recording already in progress');
+      log.info('[VideoRecorder] Recording already in progress');
       return;
     }
 
@@ -163,8 +180,8 @@ class VideoRecorder {
     }
 
     const segmentPattern = path.join(CHUNKS_DIR, 'segment_%03d.ts');
-    console.log(`[VideoRecorder] Starting: ${DISPLAY} @ ${RESOLUTION} ${FRAMERATE}fps`);
-    console.log(`[VideoRecorder] Segments: ${SEGMENT_DURATION}s chunks to ${CHUNKS_DIR}`);
+    log.info(`[VideoRecorder] Starting: ${DISPLAY} @ ${RESOLUTION} ${FRAMERATE}fps`);
+    log.info(`[VideoRecorder] Segments: ${SEGMENT_DURATION}s chunks to ${CHUNKS_DIR}`);
 
     // Wait for PulseAudio combined_audio.monitor to become available
     const audioAvailable = await this.waitForAudioSink(AUDIO_SINK);
@@ -178,11 +195,11 @@ class VideoRecorder {
     ];
 
     if (audioAvailable) {
-      console.log('[VideoRecorder] Audio sink available — recording video + audio');
+      log.info('[VideoRecorder] Audio sink available — recording video + audio');
       ffmpegArgs.push('-f', 'pulse', '-i', AUDIO_SINK);
       ffmpegArgs.push('-map', '0:v', '-map', '1:a');
     } else {
-      console.warn('[VideoRecorder] Audio sink NOT available — recording video only');
+      log.warn('[VideoRecorder] Audio sink NOT available — recording video only');
     }
 
     // Video codec settings (optimized for low CPU usage on shared instance)
@@ -209,10 +226,13 @@ class VideoRecorder {
     );
 
     // Launch FFmpeg
+    const launchedAtMs = Date.now();
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    const startClock = new RecordingStartClock(launchedAtMs);
+    this.startClock = startClock;
 
     this.ffmpegProcess.on('error', (error: Error) => {
-      console.error(`[VideoRecorder] FFmpeg error: ${error.message}`);
+      log.error(`[VideoRecorder] FFmpeg error: ${error.message}`);
       this.ffmpegProcess = null;
       this._isRecording = false;
     });
@@ -220,15 +240,22 @@ class VideoRecorder {
     this.ffmpegProcess.on('exit', (code: number | null, signal: string | null) => {
       this._isRecording = false;
       if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
-        console.warn(`[VideoRecorder] FFmpeg exited: code=${code}, signal=${signal}`);
+        log.warn(`[VideoRecorder] FFmpeg exited: code=${code}, signal=${signal}`);
       } else {
-        console.log(`[VideoRecorder] FFmpeg stopped (code=${code}, signal=${signal})`);
+        log.info(`[VideoRecorder] FFmpeg stopped (code=${code}, signal=${signal})`);
       }
     });
 
     // Log FFmpeg errors (filter out noisy progress lines)
     this.ffmpegProcess.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
+      const nowMs = Date.now();
+      if (startClock.feed(msg, nowMs) && startClock.startMs !== null) {
+        log.info(
+          `[VideoRecorder] Recording starts at ${new Date(startClock.startMs).toISOString()} ` +
+          `(${startClock.source}), ${((startClock.startMs - launchedAtMs) / 1000).toFixed(1)}s after FFmpeg was launched`
+        );
+      }
       if (
         !msg.includes('frame=') &&
         !msg.includes('fps=') &&
@@ -238,7 +265,7 @@ class VideoRecorder {
         !msg.includes('speed=') &&
         !msg.includes('Past duration')
       ) {
-        console.log('[VideoRecorder] FFmpeg:', msg.trim());
+        log.info('[VideoRecorder] FFmpeg:', msg.trim());
       }
     });
 
@@ -278,11 +305,11 @@ class VideoRecorder {
             );
             this.uploadedChunks.push(key);
             this.lastChunkIndex = idx;
-            console.log(
+            log.info(
               `[VideoRecorder] Uploaded chunk ${files[i]} (${(fileSize / 1024).toFixed(0)}KB)`
             );
           } catch (uploadErr: any) {
-            console.error(`[VideoRecorder] Chunk upload failed: ${uploadErr.message}`);
+            log.error(`[VideoRecorder] Chunk upload failed: ${uploadErr.message}`);
           }
         }
       } catch {
@@ -310,13 +337,13 @@ class VideoRecorder {
 
     // Graceful stop: SIGINT first (FFmpeg finalizes current segment), SIGTERM fallback
     if (this.ffmpegProcess) {
-      console.log('[VideoRecorder] Stopping FFmpeg (SIGINT)...');
+      log.info('[VideoRecorder] Stopping FFmpeg (SIGINT)...');
       this.ffmpegProcess.kill('SIGINT');
 
       await new Promise<void>((resolve) => {
         const timeout = setTimeout(() => {
           if (this.ffmpegProcess) {
-            console.log('[VideoRecorder] SIGTERM fallback');
+            log.info('[VideoRecorder] SIGTERM fallback');
             this.ffmpegProcess.kill('SIGTERM');
           }
           resolve();
@@ -361,17 +388,17 @@ class VideoRecorder {
         );
         this.uploadedChunks.push(key);
         this.lastChunkIndex = idx;
-        console.log(
+        log.info(
           `[VideoRecorder] Uploaded final chunk ${file} (${(fileSize / 1024).toFixed(0)}KB)`
         );
       }
     } catch (e: any) {
-      console.error(`[VideoRecorder] Final chunk upload error: ${e.message}`);
+      log.error(`[VideoRecorder] Final chunk upload error: ${e.message}`);
     }
 
     // If no chunks were recorded, nothing to concatenate
     if (this.uploadedChunks.length === 0) {
-      console.log('[VideoRecorder] No chunks recorded');
+      log.info('[VideoRecorder] No chunks recorded');
       await this.cleanup();
       return null;
     }
@@ -382,7 +409,7 @@ class VideoRecorder {
       await this.cleanup();
       return finalUrl;
     } catch (e: any) {
-      console.error(`[VideoRecorder] Concat/upload failed: ${e.message}`);
+      log.error(`[VideoRecorder] Concat/upload failed: ${e.message}`);
       await this.cleanup();
       return null;
     }
@@ -425,7 +452,7 @@ class VideoRecorder {
       proc.stderr?.on('data', (data: Buffer) => {
         const msg = data.toString();
         if (msg.includes('error') || msg.includes('Error')) {
-          console.error('[VideoRecorder] Concat:', msg.trim());
+          log.error('[VideoRecorder] Concat:', msg.trim());
         }
       });
     });
@@ -448,7 +475,7 @@ class VideoRecorder {
     );
 
     const url = this.generateRecordingUrl(finalKey);
-    console.log(
+    log.info(
       `[VideoRecorder] Final video uploaded: s3://${this.bucket}/${finalKey} ` +
       `(${(fileSize / 1024 / 1024).toFixed(1)}MB)`
     );
@@ -473,10 +500,10 @@ class VideoRecorder {
           })
         );
       }
-      console.log(`[VideoRecorder] Deleted ${this.uploadedChunks.length} S3 chunk(s)`);
+      log.info(`[VideoRecorder] Deleted ${this.uploadedChunks.length} S3 chunk(s)`);
     } catch (e: any) {
       // Non-fatal: the bucket lifecycle rule on lma-video-chunks/ will reap them.
-      console.error(`[VideoRecorder] Failed to delete S3 chunks: ${e.message}`);
+      log.error(`[VideoRecorder] Failed to delete S3 chunks: ${e.message}`);
     }
   }
 

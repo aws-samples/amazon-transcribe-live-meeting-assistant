@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Standalone entry-point for ``lma-load``.
 
 Kept deliberately dependency-free so the console-script wrapper can always be

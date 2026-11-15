@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -13,9 +13,66 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import logging
 from datetime import datetime
+from bedrock_compat import (
+    MEETING_ASSIST_FALLBACK_MAX_TOKENS,
+    PROMPT_CACHE_MESSAGES,
+    PROMPT_CACHE_SYSTEM,
+    PROMPT_CACHE_TOOLS,
+    accepts_temperature,
+    additional_request_fields,
+    build_inference_config,
+    claude_major_version,
+    extract_text,
+    prompt_cache_sections,
+)
+import tavily_secret
+from configuration_settings import base_model_id, model_arn, read_setting, resolve_model_id
+import call_metering
+import meeting_agenda
+import meeting_frames
+
+# Loaded once at import time, before any tool can run. Strands runs the
+# assistant's tool calls on concurrent threads, and several tools import the
+# GraphQL client inside the call; when two of them do that first import at the
+# same moment, Python's per-module import lock can report a deadlock and fail
+# the whole answer. Importing here means those later imports find the modules
+# already loaded. Unit tests that run without the gql package still import this
+# module, so a missing package is tolerated and the lazy imports stay as they are.
+try:
+    import gql  # noqa: F401
+    import gql.client  # noqa: F401
+    import asst_gql_client  # noqa: F401
+except ImportError:
+    pass
+
+# The stored values of the two speech channels, current and pre-0.4.0 names.
+try:
+    from lma_channels import STORED_SPEECH_CHANNELS  # AI stack's configuration layer
+except ImportError:  # deployed on its own, without the layer; kept equal to it
+    STORED_SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
+
+# The channel of the messages typed in the meeting chat (the Virtual
+# Participant adds them to the transcript); lma_channels.MEETING_CHAT.
+try:
+    from lma_channels import MEETING_CHAT as MEETING_CHAT_CHANNEL
+except ImportError:  # deployed on its own, without the layer; kept equal to it
+    MEETING_CHAT_CHANNEL = "MEETING_CHAT"
+
+# How a meeting chat message is marked in the transcript the assistant reads,
+# as FetchTranscript marks it for the summary.
+CHAT_LINE_MARK = "[chat]"
+# The longest chat message kept on its line; the rest is cut.
+MAX_CHAT_LINE_CHARS = 2000
+
+# Who spoke each line, named as the meeting page names them: the meeting's speaker
+# identity map and speaker modes (AI stack's configuration layer).
+try:
+    from lma_speakers import speaker_namer
+except ImportError:  # deployed on its own, without the layer: speakers as stored
+    speaker_namer = None
 
 # Import MCP server loader
 try:
@@ -35,7 +92,7 @@ except ImportError as e:
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -45,6 +102,165 @@ bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
+
+# Sampling temperature for the assistant's answers, on the models that accept one.
+# Above zero because this path is conversational rather than extractive.
+AGENT_TEMPERATURE = 0.3
+
+# The models used when the configuration cannot be read (or this template is
+# deployed without the configuration layer); each is the same value as its
+# setting's shipped default in setting_defaults.json.
+DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-5-5'
+
+
+def configured_agent_model_id() -> str:
+    """The model the assistant answers with.
+
+    The Amazon Bedrock Models section's value on the Configuration page, else
+    the shipped default in setting_defaults.json. Read per request, so a change
+    reaches the assistant within the section's cache tier. Run within the
+    section's Model inference geography, from this function's own region.
+    """
+    return resolve_model_id(
+        read_setting(
+            'language_models',
+            'meetingAssistModelId',
+            default=DEFAULT_AGENT_MODEL_ID,
+        ),
+        region=os.environ.get('AWS_REGION', ''),
+    )
+
+
+def prompt_caching_enabled() -> bool:
+    """Whether the assistant marks its prompt for Amazon Bedrock prompt caching.
+
+    The Meeting Assistant section's switch on the Configuration page, else the
+    shipped default (on). Read per answer, like the model.
+    """
+    return bool(read_setting('meeting_assist', 'promptCachingEnabled', default=True))
+
+
+# The reasoning effort when the configuration cannot be read; the same value as
+# the setting's shipped default in setting_defaults.json.
+DEFAULT_REASONING_EFFORT = 'low'
+
+
+def configured_reasoning_effort() -> str:
+    """How much the assistant's model reasons before it answers.
+
+    The Meeting Assistant section's Reasoning effort on the Configuration page,
+    else the shipped default (low). Read per answer, like the model. Sent only to
+    the models that take an effort; see bedrock_compat.additional_request_fields().
+
+    Low is the default because the assistant answers mid-meeting: measured on
+    Claude Haiku 5.5 over thirteen meeting-assistant requests, low effort gave
+    answers judged better than Claude Haiku 4.5's on ten of them at about a
+    tenth of the cost, with a median time to the first word of 3.3 seconds
+    against 2.1 seconds for Claude Haiku 4.5.
+    """
+    value = read_setting('meeting_assist', 'assistantReasoningEffort', default=DEFAULT_REASONING_EFFORT)
+    return value if isinstance(value, str) and value else DEFAULT_REASONING_EFFORT
+
+
+def assistant_request_fields(model_id: str) -> Optional[Dict[str, Any]]:
+    """The Converse additionalModelRequestFields of one answer, or None for none.
+
+    ``model_id`` is the id after the Model inference geography mapping, so the
+    us., eu. and other profile forms of a Claude 5 model are recognised as well
+    as the global. one. The fields go beside any prompt cache points; the two do
+    not interact.
+    """
+    return additional_request_fields(model_id, configured_reasoning_effort())
+
+
+def prompt_cache_plan(
+    model_id: str, system_prompt: str, enabled: bool = True
+) -> Tuple[Optional[Dict[str, Any]], Any]:
+    """The prompt caching of one answer: CacheConfig arguments, and the system prompt.
+
+    Returns ``(cache_config_kwargs, system_prompt)``. ``cache_config_kwargs`` is
+    None when the Strands BedrockModel should get no ``cache_config``; otherwise
+    the keyword arguments of the ``strands.models.CacheConfig`` to pass it. The
+    system prompt is returned as given, or as Converse system blocks ending in a
+    cache point.
+
+    Where the cache points go is bedrock_compat.prompt_cache_sections()'s
+    decision, since a point a model does not accept fails the request:
+
+    * Claude 4 and later take points in tools, system and messages, which is what
+      Strands' ``CacheConfig(strategy="anthropic")`` places: one after the tool
+      definitions, one after the system prompt, and one at the end of the last
+      user message, moved forward on every model call. That last one is what
+      pays off most often. An answer that uses a tool is several model calls,
+      each resending the one before it plus the tool's result, so the second and
+      later calls read what the earlier ones wrote -- including a transcript a
+      tool returned. The strategy is named rather than ``"auto"`` so the decision
+      stays with prompt_cache_sections() and not with the SDK's model list.
+    * The Nova models take a point in the system prompt only, so they get one
+      there and no ``cache_config``, which would also place the message point
+      they reject after a tool result.
+
+    A cache point only takes effect once the prefix before it reaches the
+    model's minimum (4,096 tokens for Claude Haiku 4.5, 512 to 1,024 for later
+    Claude models, about 1,000 for Nova); below it the request is answered
+    normally and nothing is cached or charged as a cache write.
+    """
+    sections = prompt_cache_sections(model_id) if enabled else frozenset()
+    if PROMPT_CACHE_SYSTEM in sections and PROMPT_CACHE_MESSAGES in sections:
+        return {
+            'strategy': 'anthropic',
+            'tools_ttl': PROMPT_CACHE_TOOLS in sections,
+        }, system_prompt
+    if PROMPT_CACHE_SYSTEM in sections:
+        return None, [{'text': system_prompt}, {'cachePoint': {'type': 'default'}}]
+    return None, system_prompt
+
+
+def configured_kb_model_id() -> str:
+    """The model the knowledge-base tools generate with.
+
+    As configured_agent_model_id(), for the section's knowledge-base model
+    setting, from the knowledge base's region.
+    """
+    return resolve_model_id(
+        read_setting(
+            'language_models',
+            'knowledgeBaseModelId',
+            default=DEFAULT_KB_MODEL_ID,
+        ),
+        region=os.environ.get('KB_REGION') or os.environ.get('AWS_REGION', ''),
+    )
+
+
+# Claude generation from which a model is assumed to require custom prompt
+# templates. This is a default for ids nobody has checked, not the boundary: see
+# kb_model_supports_retrieve_and_generate().
+KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR = 5
+
+# Models known to be refused by a live knowledge base that the generation default
+# above does not already cover. Claude Opus 4.1 returns the same "custom prompt
+# templates must be provided" ValidationException as the Claude 5.5 models, while
+# Claude Opus 4.6 is accepted, so a generation number alone cannot decide this.
+#
+# The us. profile is the measured one (us-west-2, 2026-10-21; its inference
+# profile exists in that account, so this is a refusal and not an availability
+# problem). Its global. twin is listed with it by inference, since every earlier
+# measurement found the two profile forms of one model behaving alike, and
+# withholding a tool for an id LMA does not offer anywhere is the harmless
+# direction to be wrong in.
+# Matched without the inference-profile prefix, so the geography the Model
+# inference geography setting runs a model in cannot change the answer.
+KB_MODELS_REQUIRING_CUSTOM_PROMPTS = frozenset({
+    'anthropic.claude-opus-4-1-20250805-v1:0',
+})
+
+# Upper bound on Query pages for one meeting's transcript. A 1 MB page holds a
+# great many segments, so this is far above any real meeting; it exists so that a
+# table which keeps handing back a continuation key cannot spin this function for
+# its whole timeout. Matches the limit the fetch_transcript Lambda applies to the
+# same read.
+MAX_TRANSCRIPT_PAGES = 100
 
 # Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
 # CloudFormation parameters. Both are empty by default.
@@ -83,6 +299,56 @@ def get_guardrail_config() -> Dict[str, str]:
     return {}
 
 
+def build_kb_model_arn(model_id: str, kb_region: str, kb_account_id: str) -> str:
+    """The ``modelArn`` a RetrieveAndGenerate call generates its answer with.
+
+    A bare foundation-model id is addressed in the model catalogue, which has no
+    account in its ARN; an inference profile, of any prefix, lives in the
+    deployment's own account.
+    """
+    return model_arn(model_id, kb_region, kb_account_id)
+
+
+def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
+    """Whether a Bedrock Knowledge Base can generate an answer with ``model_id``.
+
+    A Knowledge Base supplies its own orchestration and generation prompt
+    templates, and asking RetrieveAndGenerate for a model those templates do not
+    cover returns a ValidationException stating that custom prompt templates must
+    be provided for both Orchestration and Generation. Which models those are is a
+    property of the individual model: Claude Opus 4.1 is refused and Claude Opus
+    4.6 is accepted, though both are Claude 4, and the five Claude 5.5 ids that
+    were measured -- all three ``global.`` forms, and the ``us.`` Haiku and
+    Sonnet -- were all refused. The inference-profile prefix makes no difference
+    either way. ``us.anthropic.claude-opus-5-5`` is the sixth and was not
+    measured; it is covered by the generation rule below, not by a result.
+
+    The agent's own model is unaffected and may be any of them: it reaches Bedrock
+    through Converse, which carries no such requirement. That difference is why
+    the knowledge-base model is a Configuration page setting of its own rather
+    than the agent's, and that setting -- whose allowed values in the section
+    schema are the ids verified against a live knowledge base -- is what normally
+    decides this. This function is the backstop for a value that did not come
+    through it, such as a standalone deployment of the nested template.
+
+    Two rules, in order: an id known to be refused is refused, and otherwise a
+    Claude generation at or above ``KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR`` is
+    assumed to be. The assumption is there because the two failure directions are
+    not symmetrical, the same reasoning bedrock_compat.accepts_temperature sets
+    out: treating a usable model as unusable costs one tool and is logged, while
+    treating an unusable one as usable costs every call that tool makes. It is a
+    default for ids nobody has checked and not a claim about where the boundary
+    lies -- there is no generational boundary to claim. Anything that is not a
+    Claude model keeps the knowledge base's defaults.
+    """
+    if base_model_id(model_id) in KB_MODELS_REQUIRING_CUSTOM_PROMPTS:
+        return False
+    major = claude_major_version(model_id)
+    if major is None:
+        return True
+    return major < KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR
+
+
 def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
     """
     Attach the configured guardrail to a retrieve_and_generate request, in place.
@@ -106,19 +372,138 @@ def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
     }
     return kb_input
 
-# Module-level reusable AppSync client (avoids recreating SigV4 auth on every call)
-_appsync_client = None
+def new_appsync_client(url: str):
+    """A fresh AppSync GraphQL client for ``url``.
 
-def _get_appsync_client():
-    """Get or create a reusable AppSync GraphQL client."""
-    global _appsync_client
-    if _appsync_client is None and APPSYNC_GRAPHQL_URL:
-        from asst_gql_client import AppsyncRequestsGqlClient
-        _appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-    return _appsync_client
+    One seam for constructing a client, so that the publisher below is the only
+    thing deciding how long one lives.
+    """
+    from asst_gql_client import AppsyncRequestsGqlClient
+    return AppsyncRequestsGqlClient(url=url, fetch_schema_from_transport=False)
+
+
+class AppsyncPublisher:
+    """One AppSync connection, reused for the mutations of a single invocation.
+
+    gql's ``Client.execute`` opens a transport session, runs the mutation and
+    closes the session again, and the requests transport's session is where the
+    TLS connection lives. Publishing a streamed answer token by token through
+    ``Client.execute`` therefore costs one TLS handshake per token: measured
+    against the deployed function's logs, 0.107s per streamed chunk, which on a
+    median answer is of the order of ten seconds spent connecting. Holding one
+    session open for the whole answer leaves a single handshake.
+
+    **Scoped to one invocation, deliberately, rather than cached at module
+    level.** AppSyncIAMAuthentication resolves credentials once, when the client
+    is constructed, and signs every later request with that object. In the Lambda
+    environment those come from botocore's environment-variable provider, which
+    returns static credentials unless AWS_CREDENTIAL_EXPIRATION is set -- and
+    Lambda does not set it -- so a client held at module level would go on signing
+    with whatever was resolved at cold start. This function is kept warm by
+    periodic warmup pings, so its execution environments are long-lived by design,
+    which is exactly the case where that matters. A publisher per invocation
+    always signs with the credentials the environment holds now, and still removes
+    all but one of the handshakes, because one invocation is one answer.
+
+    A failed mutation discards the session instead of keeping one whose state is
+    unknown: the next publish opens a fresh one, so a single failure costs one
+    reconnect rather than the remainder of the answer.
+    """
+
+    def __init__(self, url: str):
+        self._url = url
+        self._client = None
+        self._session = None
+
+    def _connect(self):
+        if self._session is None:
+            client = new_appsync_client(self._url)
+            # connect_sync() hands back a session that stays open until it is
+            # closed, unlike Client.execute(), which opens and closes one per call.
+            self._session = client.connect_sync()
+            self._client = client
+        return self._session
+
+    def execute(self, document, variables: Dict[str, Any]):
+        """Run one mutation on the shared session, reconnecting if it is gone."""
+        session = self._connect()
+        try:
+            return session.execute(document, variable_values=variables)
+        except Exception:
+            self.close()
+            raise
+
+    def close(self):
+        """Release the session. Safe to call more than once, and after a failure."""
+        client, self._client, self._session = self._client, None, None
+        if client is None:
+            return
+        try:
+            client.close_sync()
+        except Exception as e:
+            # Nothing is retried on the way out: the connection is being
+            # abandoned either way, and raising here would mask whatever ended
+            # the stream.
+            logger.warning(f"Error closing AppSync client: {str(e)}")
+
+
+# Parsed once per execution environment rather than per published token: the
+# document is a constant, and gql re-parses the string on every gql() call.
+_CHAT_TOKEN_MUTATION = None
+
+
+def get_chat_token_mutation():
+    """The addChatToken mutation document, parsed on first use."""
+    global _CHAT_TOKEN_MUTATION
+    if _CHAT_TOKEN_MUTATION is None:
+        from gql import gql
+        _CHAT_TOKEN_MUTATION = gql("""
+        mutation AddChatToken($input: AddChatTokenInput!) {
+            addChatToken(input: $input) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+                ThinkingStep {
+                    Type
+                    Content
+                    ToolName
+                    ToolInput
+                    ToolResult
+                    Success
+                }
+            }
+        }
+        """)
+    return _CHAT_TOKEN_MUTATION
+
+
+def subscriber_message_id(transcript_segment_args: Dict[str, Any]) -> Optional[str]:
+    """The MessageId a UI subscriber could be listening on, or None if there is none.
+
+    ``onAddChatToken`` takes both a CallId and a MessageId and both are required,
+    so a published token only ever reaches a subscriber that knows the MessageId
+    in advance. Every caller that has one supplies it in ``transcript_segment_args``:
+    the chat path generates it (``chat-<uuid>``) and returns it to the browser to
+    subscribe with, and the wake-phrase path supplies the SegmentId it is about to
+    write. The Virtual Participant's voice assistant invokes this function
+    directly with no ``transcript_segment_args`` at all, waits for the whole
+    RequestResponse payload and hands the single returned string to its speech
+    model, so nothing is listening and nothing persists the tokens -- addChatToken
+    resolves against a NONE data source that only broadcasts.
+
+    Returning None for that caller is what lets the streaming publish be skipped
+    where it has no audience. It is decided from the payload rather than from a
+    guess about who sent it, and in the direction that fails safe: an unrecognised
+    caller that does supply an id keeps its tokens published.
+    """
+    return (
+        transcript_segment_args.get('MessageId')
+        or transcript_segment_args.get('SegmentId')
+        or None
+    )
 
 
 def send_thinking_step_async(call_id: str, message_id: str, thinking_step: Dict[str, Any], sequence: int):
@@ -170,7 +555,7 @@ class ThinkingStepHookProvider:
                 tool_input = event.tool_use.arguments
             
             logger.info(f"   Tool name: {tool_name}")
-            logger.info(f"   Tool input: {tool_input}")
+            logger.debug(f"   Tool input: {tool_input}")
             
             thinking_step = {
                 'type': 'tool_use',
@@ -220,7 +605,7 @@ class ThinkingStepHookProvider:
             
             logger.info(f"   Tool name: {tool_name}")
             logger.info(f"   Success: {not is_error}")
-            logger.info(f"   Result (truncated): {result_content[:100]}")
+            logger.debug(f"   Result (truncated): {result_content[:100]}")
             
             thinking_step = {
                 'type': 'tool_result',
@@ -241,11 +626,28 @@ class ThinkingStepHookProvider:
             logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
-def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str,
+def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, kb_model_id: str,
                                 call_id: str = None, message_id: str = None):
-    """Factory function to create document search tool with closure"""
+    """Factory function to create document search tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    caller offers the agent no document_search tool at all. A tool that is offered
+    but cannot answer is worse than an absent one: the agent spends a turn calling
+    it and reads the failure back as though it were retrieved material.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "document_search is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Choose a model a knowledge base can generate with as Meeting "
+            "assistant knowledge bases in the Amazon Bedrock Models section of the "
+            "Configuration page.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def document_search(query: str) -> str:
         """Search company knowledge base for internal documents, policies, procedures, or reference materials.
@@ -276,14 +678,13 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
-            logger.info(f"Document search tool executing: {query}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+            logger.info(f"Document search tool executing: query of {len(query or '')} characters")
+            logger.debug(f"Document search query: {query}")
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             # Query knowledge base
             kb_input = {
                 "input": {'text': query},
@@ -313,13 +714,27 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
             
-            logger.info(f"Document search result: {result[:100]}...")
+            logger.info(f"Document search result: {len(result)} characters")
+            logger.debug(f"Document search result: {result[:100]}...")
             return result
             
         except Exception as e:
-            logger.error(f"Error in document search: {str(e)}")
-            return f"Error retrieving documents: {str(e)}"
-    
+            logger.error(
+                "document_search failed: retrieve_and_generate on knowledge base %s with "
+                "model '%s' raised %s: %s",
+                kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for retrieved material. The
+            # previous wording began "Error retrieving documents" and was followed
+            # by the exception text, which reads enough like content that the
+            # model answered from it.
+            return (
+                "DOCUMENT_SEARCH_FAILED. No documents were retrieved and this text is not "
+                "a search result -- it carries no knowledge base content. Tell the user "
+                "that document search is unavailable right now instead of answering from "
+                f"this. Cause: {type(e).__name__}: {e}"
+            )
+
     return document_search
 
 
@@ -464,10 +879,30 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_
 
 
 def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str,
-                                model_id: str, user_email: str, call_id: str = None, message_id: str = None):
-    """Factory function to create meeting history tool with closure"""
+                                kb_model_id: str, user_email: str, call_id: str = None,
+                                message_id: str = None):
+    """Factory function to create meeting history tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    agent is offered no meeting_history tool. The transcript knowledge base is
+    created by default, which makes this the tool most often affected: offered but
+    unable to answer, it was called on most interactions and its failure read back
+    as though past meetings had been searched and found wanting.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "meeting_history is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Choose a model a knowledge base can generate with as Meeting "
+            "assistant knowledge bases in the Amazon Bedrock Models section of the "
+            "Configuration page. The recent_meetings_list tool "
+            "is unaffected, so chronological listing of past meetings still works.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def meeting_history(query: str, call_ids: str = "") -> str:
         """Search past meeting transcripts and summaries with semantic search and user-based access control.
@@ -503,19 +938,18 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
-            logger.info(f"Meeting history tool executing: {query} for user: {user_email}")
+            logger.info(f"Meeting history tool executing: query of {len(query or '')} characters for user: {user_email}")
+            logger.debug(f"Meeting history query: {query}")
             logger.info(f"🔍 DEBUG: KB Configuration:")
             logger.info(f"   transcript_kb_id: {transcript_kb_id}")
             logger.info(f"   kb_region: {kb_region}")
-            logger.info(f"   model_id: {model_id}")
+            logger.info(f"   kb_model_id: {kb_model_id}")
             logger.info(f"   user_email (filter): {user_email}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             logger.info(f"   model_arn: {model_arn}")
             
             # Query with user-based access control filter
@@ -542,20 +976,21 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             
             apply_kb_guardrail(kb_input)
 
-            logger.info(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
+            logger.debug(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
 
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             
-            logger.info(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
+            logger.debug(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
             
             result = response.get("output", {}).get("text", "No past meetings found matching your query")
             
             # Check if this is a guardrail response
             if "Sorry, I am unable to assist you with this request" in result:
-                logger.error(f"❌ GUARDRAIL TRIGGERED! Response: {result}")
+                logger.error(f"❌ GUARDRAIL TRIGGERED! Response of {len(result)} characters")
                 logger.error(f"   This indicates the Knowledge Base has guardrails blocking the query")
-                logger.error(f"   Query: {query}")
                 logger.error(f"   User email filter: {user_email}")
+                logger.debug(f"   Guardrail response: {result}")
+                logger.debug(f"   Query: {query}")
             
             # Send tool result thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
@@ -569,13 +1004,27 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
             
-            logger.info(f"Meeting history result: {result[:100]}...")
+            logger.info(f"Meeting history result: {len(result)} characters")
+            logger.debug(f"Meeting history result: {result[:100]}...")
             return result
             
         except Exception as e:
-            logger.error(f"Error in meeting history search: {str(e)}")
-            error_msg = f"Error retrieving meeting history: {str(e)}"
-            
+            logger.error(
+                "meeting_history failed: retrieve_and_generate on transcript knowledge base "
+                "%s with model '%s' raised %s: %s",
+                transcript_kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for a search result. The
+            # previous wording began "Error retrieving meeting history" and was
+            # followed by the exception text, which reads enough like an answer
+            # that the model summarised it as though past meetings had been read.
+            error_msg = (
+                "MEETING_HISTORY_SEARCH_FAILED. No past meetings were searched and this "
+                "text is not a search result -- it carries no meeting content. Tell the "
+                "user that past-meeting search is unavailable right now instead of "
+                f"answering from this. Cause: {type(e).__name__}: {e}"
+            )
+
             # Send error thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
                 from datetime import datetime
@@ -598,11 +1047,17 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
     from strands import tool
     
     @tool
-    def current_meeting_transcript(lines: int = 20, mode: str = "recent") -> str:
-        """Get transcript from the current meeting.
-        
+    def current_meeting_transcript(lines: int = 20, mode: str = "recent", with_timestamps: bool = False) -> str:
+        """Get transcript from the current meeting, including its meeting chat.
+
+        The transcript holds what was said, each line under its speaker, and
+        the messages typed in the meeting chat, each on one line starting
+        "[chat]" followed by its sender, in time order with the speech. What
+        was shown on the shared screen (each slide, page or view, its title
+        and its text) is read with get_meeting_frames instead.
+
         Use this when:
-        - User asks about what was said in THIS meeting
+        - User asks about what was said or typed in the chat in THIS meeting
         - Need to reference recent statements or discussions
         - Summarizing, extracting action items, or analyzing current meeting
         - User asks about topics, decisions, or questions from current meeting
@@ -616,9 +1071,13 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
         Args:
             lines: Number of recent transcript lines to return (default 20, max 100)
             mode: "recent" for last N lines, "full" for complete transcript, "semantic" for relevant excerpts
-            
+            with_timestamps: Prefix each line with its time from the start of the meeting, as [MM:SS].
+                Use it when the answer should say WHEN something was discussed, such as an
+                agenda progress check.
+
         Returns:
-            Meeting transcript text formatted with speaker names
+            Meeting transcript text formatted with speaker names, and chat
+            messages as "[chat] <sender>: <message>"
         """
         if not dynamodb_table_name:
             return "Current meeting transcript not available - no DynamoDB table configured"
@@ -630,7 +1089,7 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
                 thinking_step = {
                     'type': 'tool_use',
                     'tool_name': 'current_meeting_transcript',
-                    'tool_input': {'lines': lines, 'mode': mode},
+                    'tool_input': {'lines': lines, 'mode': mode, 'with_timestamps': with_timestamps},
                     'timestamp': datetime.utcnow().isoformat()
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
@@ -641,8 +1100,10 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             logger.info(f"Current meeting transcript tool executing: lines={lines}, mode={mode}")
             
             # Fetch full transcript
-            full_transcript = fetch_meeting_transcript(call_id, dynamodb_table_name)
-            
+            full_transcript = fetch_meeting_transcript(
+                call_id, dynamodb_table_name, with_timestamps=with_timestamps
+            )
+
             if not full_transcript:
                 result = "No transcript available for current meeting yet."
             elif mode == "full":
@@ -1145,47 +1606,49 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
     return control_vp_browser
 
 
-def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
+# The most answer text, in UTF-8 bytes, the completion marker carries. AppSync
+# delivers a subscription message of at most 240 KB, and the marker's other
+# fields and JSON escaping take some of that, so the limit leaves room for both.
+MAX_COMPLETION_TOKEN_BYTES = 160 * 1024
+
+
+def completion_token_text(answer_text: str) -> str:
+    """The Token the completion marker of a streamed answer carries.
+
+    The whole answer, as generated. AppSync does not guarantee that a
+    subscriber receives every published message, or receives them in the order
+    they were published, so the streamed chunks alone can reassemble into text
+    that differs from the answer. The chat panel orders the chunks it receives by
+    Sequence while the answer streams, and then replaces them with this text.
+
+    An answer too large to fit in one subscription message is sent as an empty
+    Token, which is what the marker carried before: the panel then keeps the
+    text it assembled from the chunks.
+    """
+    if len(answer_text.encode('utf-8')) > MAX_COMPLETION_TOKEN_BYTES:
+        logger.info(
+            "The answer is larger than one subscription message carries; "
+            "its completion marker is sent without the answer text"
+        )
+        return ''
+    return answer_text
+
+
+def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool,
+                               sequence: int, publisher: Optional[AppsyncPublisher] = None):
     """
     Send a chat token to AppSync for real-time streaming
+
+    ``publisher`` is the AppsyncPublisher holding the connection this answer's
+    tokens go out on; the streaming loop creates one and passes it for every
+    token. Without one a connection is opened and closed for this single token,
+    which is what a caller publishing a single token on its own wants.
     """
     try:
         if not APPSYNC_GRAPHQL_URL:
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping token streaming")
             return
-        
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # GraphQL mutation - parse it into an AST
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+
         variables = {
             'input': {
                 'CallId': call_id,
@@ -1195,11 +1658,14 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
                 'Sequence': sequence
             }
         }
-        
-        # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+
+        mutation = get_chat_token_mutation()
+        if publisher is None:
+            new_appsync_client(APPSYNC_GRAPHQL_URL).execute(mutation, variable_values=variables)
+        else:
+            publisher.execute(mutation, variables)
         logger.debug(f"Sent token {sequence} to AppSync: {token[:50]}...")
-        
+
     except Exception as e:
         logger.error(f"Error sending token to AppSync: {str(e)}")
 
@@ -1222,38 +1688,17 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping thinking step streaming")
             return
         
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # Use addChatToken mutation but with empty token and thinking step data
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+        # A connection of its own, not the streaming publisher's: these are sent
+        # from tool bodies and from background threads (send_thinking_step_async),
+        # and a requests session is not safe to share across threads. There are a
+        # few of these per answer rather than one per token, so they are not what
+        # the measured per-chunk cost was about.
+        appsync_client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+
+        # The same addChatToken mutation the tokens use, with an empty token and
+        # the thinking step attached.
+        mutation = get_chat_token_mutation()
+
         # Create thinking step data
         thinking_step_data = {
             'Type': thinking_step.get('type', 'unknown'),
@@ -1276,46 +1721,324 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
         }
         
         # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+        appsync_client.execute(mutation, variable_values=variables)
         logger.debug(f"Sent thinking step {sequence} ({thinking_step.get('type')}) via ChatToken")
         
     except Exception as e:
         logger.error(f"Error sending thinking step to AppSync: {str(e)}")
 
-def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
+def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
+    """Factory for the tool that reads the current meeting's agenda.
+
+    Offered in every tool scope, the meeting chat's included: the agenda belongs
+    to the meeting, and the people in the meeting chat are the people it is for.
+    It reads only the meeting this invocation is about, and returns its items
+    and source but not who last changed it; see
+    meeting_agenda.describe_agenda_for_agent.
     """
-    Fetch the meeting transcript from DynamoDB
+    from strands import tool
+
+    @tool
+    def get_meeting_agenda() -> str:
+        """Get the agenda of the current meeting.
+
+        Use this when:
+        - Someone asks about the agenda, what is on it, or what is left on it
+        - Someone asks how the meeting is going against the agenda, whether an item
+          has been covered, or what to discuss next
+        - Summarizing the meeting where progress against the agenda matters
+
+        Returns:
+            The agenda items, numbered, with where the agenda came from; or a note
+            that the meeting has no agenda.
+        """
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_use',
+                'tool_name': 'get_meeting_agenda',
+                'tool_input': {},
+                'timestamp': datetime.utcnow().isoformat()
+            }, 0)
+        try:
+            record = meeting_agenda.read_meeting_record(dynamodb.Table(dynamodb_table_name), call_id)
+            result = meeting_agenda.describe_agenda_for_agent(record)
+            success = True
+        except Exception as e:
+            logger.error(f"Error reading the meeting agenda: {str(e)}")
+            result = "The meeting agenda could not be read just now."
+            success = False
+        logger.info(f"Meeting agenda tool for {call_id}: {len(result)} characters")
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_result',
+                'tool_name': 'get_meeting_agenda',
+                'result': result[:200],
+                'success': success,
+                'timestamp': datetime.utcnow().isoformat()
+            }, 1)
+        return result
+
+    return get_meeting_agenda
+
+
+def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id: str,
+                               show_inline: bool, message_id: str = None):
+    """Factory for the tool that shows the agent the meeting's shared screen.
+
+    Offered in every tool scope, the meeting chat's included: the frames are
+    pictures of what was shared with everyone in the meeting. ``show_inline``
+    is whether the answer goes to the meeting page's chat, the one place that
+    can display a frame; elsewhere (the meeting chat, the voice assistant) the
+    agent is told to describe frames in words. The pictures go to the model
+    only when it reads images; see meeting_frames.model_accepts_images.
+    """
+    from strands import tool
+
+    send_images = meeting_frames.model_accepts_images(model_id)
+
+    def run_query(document: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+        from gql import gql
+        client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+        return client.execute(gql(document), variable_values=variables)
+
+    @tool
+    def get_meeting_frames(last: int = 1, start_time: str = "", end_time: str = "", at_time: str = "",
+                           look_at_pictures: bool = False) -> dict:
+        """Get key frames of the meeting's shared screen: the slides, documents and other content
+        that were on screen, each with its title, the text on it, when it was on screen and what
+        was said while it was shown.
+
+        Use this when someone asks about what was shown rather than said:
+        - "What's on this slide?", "Summarize that slide", "Translate the last slide into French"
+        - "Show me the last two slides" (last=2)
+        - "What was on screen at 12:30?" (at_time="12:30")
+        - "What slides did we see between 10:00 and 20:00?" (start_time="10:00", end_time="20:00")
+
+        Args:
+            last: How many of the most recent frames to get (1 to 10). Used when no time is given.
+            start_time: Start of a time range, as MM:SS or H:MM:SS from the start of the meeting.
+            end_time: End of a time range, in the same form.
+            at_time: A moment, in the same form: the frame that was on screen then.
+            look_at_pictures: Also send the pictures. Use it only when the question needs the
+                picture itself (a chart, a diagram, a layout, an image); the text is usually enough.
+
+        Returns:
+            Each frame's times, title, text and transcript, with pictures where needed.
+        """
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_use',
+                'tool_name': 'get_meeting_frames',
+                'tool_input': {'last': last, 'start_time': start_time, 'end_time': end_time,
+                               'at_time': at_time, 'look_at_pictures': look_at_pictures},
+                'timestamp': datetime.utcnow().isoformat()
+            }, 0)
+        success = True
+        try:
+            frames = meeting_frames.load_keyframes(run_query, call_id)
+            shared = [f for f in frames if meeting_frames.shows_shared_content(f)]
+            at_seconds = meeting_frames.parse_meeting_time(at_time)
+            selected = meeting_frames.select_frames(
+                frames,
+                last=last,
+                start=meeting_frames.parse_meeting_time(start_time),
+                end=meeting_frames.parse_meeting_time(end_time),
+                at=at_seconds,
+            )
+            images = {}
+            for frame in meeting_frames.frames_for_pictures(
+                selected, send_images=send_images,
+                wants=lambda f: meeting_frames.needs_picture(f, look_at_pictures),
+            ):
+                data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
+                if data is not None:
+                    images[str(frame.get('FrameId'))] = data
+            segments = []
+            if selected and dynamodb_table_name:
+                # A transcript that cannot be read costs the frames their
+                # transcript, not the frames themselves.
+                try:
+                    segments = query_transcript_items(call_id, dynamodb_table_name)
+                except Exception as e:
+                    logger.warning(f"Meeting frames tool: transcript unreadable, frames go without it: {str(e)}")
+            result = meeting_frames.build_tool_result(
+                selected, segments, images,
+                name_speaker=meeting_speaker_namer(call_id, dynamodb_table_name, segments),
+                total_frames=len(shared), send_images=send_images, show_inline=show_inline,
+                at_time=at_seconds, look=look_at_pictures,
+                first_frame_at=min(
+                    (float(f['Timestamp']) for f in shared if isinstance(f.get('Timestamp'), (int, float))),
+                    default=None,
+                ),
+            )
+        except Exception as e:
+            logger.error(f"Error reading the meeting's key frames: {str(e)}")
+            result = {'status': 'error', 'content': [{'text': "The meeting's key frames could not be read just now."}]}
+            success = False
+        sent = meeting_frames.images_in(result)
+        if sent:
+            # The pictures are billed as the model's input tokens, which the
+            # answer's own record counts; this counts how many there were.
+            call_metering.record(
+                call_id, 'MeetingAssistant', f'bedrock/{model_id}', {'images': sent},
+                source='strands-meeting-assist',
+            )
+        logger.info(f"Meeting frames tool for {call_id}: {len(result.get('content', []))} blocks, {sent} image(s)")
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            summary = result['content'][0].get('text', '') if result.get('content') else ''
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_result',
+                'tool_name': 'get_meeting_frames',
+                'result': f"{sent} picture(s). {summary[:160]}",
+                'success': success,
+                'timestamp': datetime.utcnow().isoformat()
+            }, 1)
+        return result
+
+    return get_meeting_frames
+
+
+def query_transcript_items(
+    call_id: str, dynamodb_table_name: str, include_chat: bool = False
+) -> List[Dict[str, Any]]:
+    """The meeting's final transcript segments (speaker, assistant and caller lines), unsorted.
+
+    With ``include_chat``, the messages typed in the meeting chat
+    (MEETING_CHAT_CHANNEL) too. Raises on a read failure;
+    fetch_meeting_transcript turns that into an empty transcript.
+    """
+    table = dynamodb.Table(dynamodb_table_name)
+    pk = f'trs#{call_id}'
+
+    # Read every page, not just the first. DynamoDB caps a Query response at
+    # 1 MB of items *read* and applies FilterExpression only afterwards, and
+    # the partial segments excluded here are numerous, so they spend the
+    # budget without appearing in the result: even a moderately long meeting
+    # spans several pages. A single query therefore hands the agent the
+    # opening stretch of the meeting as though it were the whole thing, with
+    # nothing to say otherwise. Mirrors get_transcripts() in
+    # lma-ai-stack/source/lambda_functions/fetch_transcript/index.py.
+    query_args = {
+        'KeyConditionExpression': Key('PK').eq(pk),
+        'FilterExpression': (
+            Attr('Channel').is_in([
+                *STORED_SPEECH_CHANNELS,
+                'AGENT_ASSISTANT',
+                *([MEETING_CHAT_CHANNEL] if include_chat else []),
+            ])
+            & Attr('IsPartial').eq(False)
+        ),
+    }
+    items = []
+    start_key = None
+    pages = 0
+    while pages < MAX_TRANSCRIPT_PAGES:
+        response = table.query(
+            **query_args,
+            **({'ExclusiveStartKey': start_key} if start_key else {}),
+        )
+        items.extend(response.get('Items', []))
+        pages += 1
+        next_key = response.get('LastEvaluatedKey')
+        if not next_key or next_key == start_key:
+            # A key identical to the one just used would ask for the same page
+            # again forever. Stop rather than spin.
+            break
+        start_key = next_key
+    if pages >= MAX_TRANSCRIPT_PAGES:
+        logger.warning(
+            "Stopped reading the transcript for %s at the %d page limit; "
+            "the transcript handed to the assistant may be incomplete",
+            call_id, MAX_TRANSCRIPT_PAGES,
+        )
+    logger.info(f"Read {len(items)} transcript segments for {call_id} over {pages} page(s)")
+    return items
+
+
+def meeting_speaker_namer(call_id: str, dynamodb_table_name: str, items: List[Dict[str, Any]]):
+    """A function naming each transcript segment's speaker as the meeting page does.
+
+    Applies the meeting's speaker identity map and speaker modes (lma_speakers,
+    shared with the UI and FetchTranscript), so the assistant says "Bob" where the
+    transcript on screen says "Bob" rather than "Bob (spk_1)". ``items`` must be
+    the whole transcript: whether the voices under one name are one person or
+    several is decided from all of them. Without the configuration layer, speakers
+    are named as stored; if the meeting record cannot be read, the default modes
+    apply with no names.
+    """
+    if speaker_namer is None or not dynamodb_table_name:
+        return meeting_frames.stored_speaker
+    record: Dict[str, Any] = {}
+    try:
+        response = dynamodb.Table(dynamodb_table_name).get_item(
+            Key={'PK': f'c#{call_id}', 'SK': f'c#{call_id}'},
+            ProjectionExpression='SpeakerIdentities, CustomerPhoneNumber',
+        )
+        record = response.get('Item') or {}
+    except Exception as e:
+        logger.warning(f"Speaker names unreadable for {call_id}, using the stored speakers: {str(e)}")
+    if not isinstance(record, dict):
+        # Whatever it is, it is not a meeting record: name by the defaults alone.
+        record = {}
+    name = speaker_namer(items, record.get('SpeakerIdentities'), record.get('CustomerPhoneNumber'))
+    return lambda item: name(item) or 'Unknown'
+
+
+def chat_line_text(text: Any) -> str:
+    """A meeting chat message or sender on one line, cut to MAX_CHAT_LINE_CHARS."""
+    one_line = ' / '.join(part.strip() for part in str(text or '').splitlines() if part.strip())
+    one_line = ' '.join(one_line.split())
+    if len(one_line) > MAX_CHAT_LINE_CHARS:
+        one_line = one_line[:MAX_CHAT_LINE_CHARS].rstrip() + ' [...]'
+    return one_line
+
+
+def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
+    """
+    Fetch the meeting transcript from DynamoDB.
+
+    With ``with_timestamps`` each line starts with its time from the start of
+    the meeting, as [MM:SS], which is what lets an answer say when something was
+    discussed. Off by default: the transcript handed to the agent as context
+    stays as it was.
+
+    The messages typed in the meeting chat are among the lines, in time order,
+    each as "[chat] <sender>: <message>" on one line, so the assistant can tell
+    what was typed from what was said.
     """
     try:
-        table = dynamodb.Table(dynamodb_table_name)
-        pk = f'trs#{call_id}'
-        
-        # Query for transcript segments
-        response = table.query(
-            KeyConditionExpression=Key('PK').eq(pk),
-            FilterExpression=(
-                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT')) 
-                & Attr('IsPartial').eq(False)
-            )
-        )
-        
+        items = query_transcript_items(call_id, dynamodb_table_name, include_chat=True)
+
         # Sort by EndTime and format transcript
-        items = sorted(response.get('Items', []), key=lambda x: x.get('EndTime', 0))
-        
+        # By end time as before; by start time when lines carry their start
+        # times, so the times read in order where two channels overlap.
+        items = sorted(items, key=lambda x: x.get('StartTime' if with_timestamps else 'EndTime', 0))
+
+        # Voices are named from the speech alone; a chat line names its sender.
+        speech = [item for item in items if item.get('Channel') != MEETING_CHAT_CHANNEL]
+        name_speaker = meeting_speaker_namer(call_id, dynamodb_table_name, speech)
         transcript_parts = []
         for item in items:
-            speaker = item.get('Speaker', 'Unknown')
             transcript = item.get('Transcript', '')
             channel = item.get('Channel', '')
-            
+            prefix = f"{meeting_agenda.format_elapsed(item.get('StartTime'))} " if with_timestamps else ''
+
             # Format based on channel
-            if channel == 'AGENT_ASSISTANT':
-                transcript_parts.append(f"MeetingAssistant: {transcript}")
+            if channel == MEETING_CHAT_CHANNEL:
+                sender = chat_line_text(item.get('Speaker')) or 'Unknown sender'
+                transcript_parts.append(
+                    f"{prefix}{CHAT_LINE_MARK} {sender}: {chat_line_text(transcript)}"
+                )
+            elif channel == 'AGENT_ASSISTANT':
+                transcript_parts.append(f"{prefix}MeetingAssistant: {transcript}")
             else:
-                transcript_parts.append(f"{speaker}: {transcript}")
+                transcript_parts.append(f"{prefix}{name_speaker(item)}: {transcript}")
         
         full_transcript = '\n'.join(transcript_parts)
-        logger.info(f"Fetched transcript for {call_id}: {len(full_transcript)} characters")
+        logger.info(
+            f"Fetched transcript for {call_id}: {len(full_transcript)} characters "
+            f"from {len(items)} segments"
+        )
         
         return full_transcript
         
@@ -1326,22 +2049,23 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
 def query_knowledge_base(user_input: str, call_id: str) -> str:
     """
     Query Bedrock Knowledge Base for relevant context
+
+    Nothing in this module calls this today; the per-meeting context it fetches is
+    reached through the current_meeting_transcript tool instead. It is kept on the
+    knowledge-base model for the same reason the two tools are, so that re-enabling
+    it cannot reintroduce the coupling to the agent's model.
     """
     try:
         kb_id = os.environ.get('KB_ID')
         if not kb_id:
             return ""
-        
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+
+        kb_model_id = configured_kb_model_id()
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID')
-        
-        # Determine model ARN based on model type
-        if model_id.startswith("anthropic"):
-            model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-        else:
-            model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-        
+
+        model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
         # Query knowledge base
         kb_input = {
             "input": {
@@ -1368,20 +2092,122 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
 
         apply_kb_guardrail(kb_input)
 
-        logger.info(f"Querying KB with input: {kb_input}")
+        logger.debug(f"Querying KB with input: {kb_input}")
         
         response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
         
         # Extract response text
         kb_response = response.get("output", {}).get("text", "")
         
-        logger.info(f"KB response: {kb_response}")
+        logger.info(f"KB response: {len(kb_response)} characters")
+        logger.debug(f"KB response: {kb_response}")
         
         return kb_response
         
     except Exception as e:
         logger.error(f"Error querying knowledge base: {str(e)}")
         return ""
+
+
+# In-meeting requests: a request made in the meeting by whoever is in it rather
+# than by the signed-in LMA user on the meeting page. Each caller names its own
+# toolScope: the Virtual Participant's meeting chat (`LMA ask`) and voice
+# assistant lookups, and the wake phrase spoken in the transcript
+# (async_agent_assist_orchestrator). The meeting page's own chat sends none.
+IN_MEETING_TOOL_SCOPES = ('meeting_chat', 'voice_assistant', 'wake_phrase')
+
+# What an in-meeting request may be answered with: the Meeting Assistant
+# section's inMeetingRequestTools setting. The values, and the one used when
+# the setting cannot be read or holds anything else; the same value as the
+# setting's shipped default in setting_defaults.json.
+IN_MEETING_TOOLS_CURRENT_MEETING_ONLY = 'current_meeting_only'
+IN_MEETING_TOOLS_UNRESTRICTED = 'unrestricted'
+IN_MEETING_TOOLS_VALUES = (IN_MEETING_TOOLS_CURRENT_MEETING_ONLY, IN_MEETING_TOOLS_UNRESTRICTED)
+DEFAULT_IN_MEETING_TOOLS = IN_MEETING_TOOLS_CURRENT_MEETING_ONLY
+
+
+def configured_in_meeting_request_tools() -> str:
+    """What an in-meeting request may be answered with.
+
+    The Meeting Assistant section's In-meeting requests setting on the
+    Configuration page, else the shipped default (the current meeting only).
+    Read per answer, like the model. A value that is not one of
+    IN_MEETING_TOOLS_VALUES is treated as the default.
+    """
+    value = read_setting(
+        'meeting_assist', 'inMeetingRequestTools', default=DEFAULT_IN_MEETING_TOOLS
+    )
+    if value in IN_MEETING_TOOLS_VALUES:
+        return value
+    logger.warning("Unrecognised inMeetingRequestTools value; using the current meeting only")
+    return DEFAULT_IN_MEETING_TOOLS
+
+
+# Appended to the system prompt of every question typed in the meeting chat.
+MEETING_CHAT_NOTE = (
+    "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
+    "everyone in the meeting to read. Answer briefly in plain sentences."
+)
+
+# Appended to the system prompt of an in-meeting request answered from the
+# current meeting only.
+CURRENT_MEETING_SCOPE_NOTE = (
+    "\n\nThis request was made in the meeting by one of its participants. Only the current "
+    "meeting is available for it: its transcript (current_meeting_transcript, which also "
+    "holds the messages typed in the meeting chat, as lines starting [chat] with their "
+    "sender), its agenda (get_meeting_agenda) and its shared screen (get_meeting_frames: "
+    "each slide, page or view shown, with its title, its text and when it was on screen). "
+    "Do not try any other tool named above, do not search the web, and do not refer to past "
+    "meetings or documents."
+)
+
+
+class InMeetingScope(NamedTuple):
+    """How one request is answered, as decided by ``in_meeting_scope``.
+
+    ``tool_scope``: the in-meeting caller ('meeting_chat', 'voice_assistant',
+    'wake_phrase'), or '' for a request from the meeting page's own chat.
+    ``current_meeting_only``: only the current meeting's transcript (with its
+    chat), agenda and shared screen are offered.
+    ``user_email``: the user the user-scoped tools (meeting history) act for,
+    or '' for none.
+    """
+
+    tool_scope: str
+    current_meeting_only: bool
+    user_email: str
+
+    @property
+    def from_meeting_chat(self) -> bool:
+        """The question was typed in the meeting chat, where everyone reads the answer."""
+        return self.tool_scope == 'meeting_chat'
+
+
+def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
+    """Which tools a request is offered, and the user email to use.
+
+    An event whose toolScope is one of IN_MEETING_TOOL_SCOPES is a request
+    made in the meeting by whoever is in it: a question typed in the meeting
+    chat, a request spoken to the voice assistant, or the wake phrase. What it
+    is answered with is the inMeetingRequestTools setting:
+
+    - current_meeting_only (the default): the current meeting's transcript
+      (with its chat), agenda and shared screen only, and no user email,
+      whatever the event carries.
+    - unrestricted: every configured tool, as the meeting page offers them,
+      acting for the user the event names.
+
+    Every other request (the meeting page's chat) is offered every configured
+    tool.
+    """
+    user_email = event.get('userEmail', '') or event.get('user_email', '')
+    scope = event.get('toolScope')
+    if scope not in IN_MEETING_TOOL_SCOPES:
+        return InMeetingScope('', False, user_email)
+    if configured_in_meeting_request_tools() == IN_MEETING_TOOLS_UNRESTRICTED:
+        return InMeetingScope(scope, False, user_email)
+    return InMeetingScope(scope, True, '')
+
 
 def handler(event, context):
     """
@@ -1443,14 +2269,23 @@ def handler(event, context):
                 'warmup_time_ms': int(warmup_elapsed * 1000)
             }
 
-        logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
+        logger.debug(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
 
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
-        user_email = event.get('userEmail', '') or event.get('user_email', '')
+        request_scope = in_meeting_scope(event)
+        user_email = request_scope.user_email
+        # Only the current meeting's tools: everything else below is left out.
+        current_meeting_only = request_scope.current_meeting_only
+        if request_scope.tool_scope:
+            logger.info(
+                "Tool scope: %s (%s)",
+                request_scope.tool_scope,
+                'current meeting only' if current_meeting_only else 'unrestricted',
+            )
         
         if not user_input:
             return {
@@ -1465,23 +2300,34 @@ def handler(event, context):
         transcript_kb_id = os.environ.get('TRANSCRIPT_KB_ID', '')
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
-        tavily_api_key = os.environ.get('TAVILY_API_KEY', '')
+        model_id = configured_agent_model_id()
+        # The model the knowledge bases generate with, which is deliberately
+        # separate from the agent's: see kb_model_supports_retrieve_and_generate().
+        kb_model_id = configured_kb_model_id()
+        # Whether the web search tool is available is decided from the secret's
+        # ARN alone, so a deployment without a Tavily API key makes no Secrets
+        # Manager call. The key itself is read inside the tool, on the first
+        # search this execution environment performs.
+        web_search_configured = tavily_secret.is_configured()
         
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Get message ID early for tool wrappers and status updates
+        # Get message ID early for tool wrappers and status updates. A caller that
+        # supplies no id of its own has no subscriber either; see
+        # subscriber_message_id(). The synthetic id is still used for logging and
+        # for the thinking-step sequence counters.
         transcript_segment_args = event.get('transcript_segment_args', {})
-        message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-        
+        subscriber_id = subscriber_message_id(transcript_segment_args)
+        message_id = subscriber_id or f"msg-{call_id}"
+
         # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
         
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE:
+        if MCP_LOADER_AVAILABLE and not current_meeting_only:
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
@@ -1516,15 +2362,13 @@ def handler(event, context):
                         'timestamp': datetime.utcnow().isoformat()
                     }, 0)
         
-        # Add web search tool if API key provided (auto-enable)
-        if tavily_api_key:
+        # Add web search tool if an API key is configured (auto-enable). Not
+        # for a chat question answered from the current meeting only.
+        if web_search_configured and not current_meeting_only:
             try:
                 from tavily import TavilyClient
                 from strands import tool
-                
-                # Create Tavily client in closure
-                tavily_client = TavilyClient(api_key=tavily_api_key)
-                
+
                 # Capture call_id and message_id in closure for thinking steps
                 _call_id = call_id
                 _message_id = message_id
@@ -1558,7 +2402,18 @@ def handler(event, context):
                             logger.info(f"🔧 Sending tool_use thinking step: web_search")
                             send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
                         
-                        logger.info(f"Web search tool executing: {query}")
+                        logger.info(f"Web search tool executing: query of {len(query or '')} characters")
+                        logger.debug(f"Web search query: {query}")
+
+                        # Fetched from Secrets Manager on the first search and
+                        # cached for the life of this execution environment.
+                        api_key = tavily_secret.get_api_key()
+                        if not api_key:
+                            return (
+                                "Web search is unavailable: the configured Tavily API key "
+                                "could not be read. Answer from the other available tools."
+                            )
+                        tavily_client = TavilyClient(api_key=api_key)
                         response = tavily_client.search(query, max_results=3)
                         
                         # Format results
@@ -1613,20 +2468,24 @@ def handler(event, context):
             except Exception as e:
                 logger.warning(f"Could not enable web search tool: {str(e)}")
         
-        # Add document retrieval tool if KB configured
-        if kb_id:
-            tools.append(create_document_search_tool(
+        # Add document retrieval tool if KB configured. The factory returns None
+        # when the knowledge-base model cannot generate an answer, in which case
+        # the agent is offered no such tool rather than one that cannot answer.
+        if kb_id and not current_meeting_only:
+            document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Document retrieval tool enabled")
+            )
+            if document_search_tool is not None:
+                tools.append(document_search_tool)
+                logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
-        if dynamodb_table_name and transcript_kb_id and user_email:
+        if dynamodb_table_name and transcript_kb_id and user_email and not current_meeting_only:
             tools.append(create_recent_meetings_tool(
                 dynamodb_table_name=dynamodb_table_name,
                 user_email=user_email,
@@ -1635,18 +2494,21 @@ def handler(event, context):
             ))
             logger.info("Recent meetings list tool enabled")
         
-        # Add meeting history tool if transcript KB configured
-        if transcript_kb_id and user_email:
-            tools.append(create_meeting_history_tool(
+        # Add meeting history tool if transcript KB configured. As above, the
+        # factory returns None when the knowledge-base model cannot generate.
+        if transcript_kb_id and user_email and not current_meeting_only:
+            meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 user_email=user_email,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Meeting history tool enabled")
+            )
+            if meeting_history_tool is not None:
+                tools.append(meeting_history_tool)
+                logger.info(f"Meeting history tool enabled (KB model: {kb_model_id})")
         
         # Add current meeting transcript tool
         if dynamodb_table_name:
@@ -1656,9 +2518,35 @@ def handler(event, context):
                 message_id=message_id
             ))
             logger.info("Current meeting transcript tool enabled")
-        
+
+        # The current meeting's agenda. In every scope, the meeting chat's
+        # included: guests in the meeting may read the agenda of the meeting
+        # they are in, as they read its transcript.
+        if dynamodb_table_name:
+            tools.append(create_meeting_agenda_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name,
+                message_id=message_id
+            ))
+            logger.info("Meeting agenda tool enabled")
+
+        # The meeting's shared screen. In every scope, as the agenda: the
+        # frames show what was shared with everyone in the meeting. Frames
+        # can be shown inline only in the meeting page's chat panel, the one
+        # caller that sends a MessageId (the wake phrase sends a SegmentId,
+        # and its answer is a transcript segment, which shows no frames).
+        if APPSYNC_GRAPHQL_URL and dynamodb_table_name:
+            tools.append(create_meeting_frames_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name,
+                model_id=model_id,
+                show_inline=bool(transcript_segment_args.get('MessageId')) and not request_scope.from_meeting_chat,
+                message_id=message_id
+            ))
+            logger.info("Meeting frames tool enabled")
+
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL:
+        if APPSYNC_GRAPHQL_URL and not current_meeting_only:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -1667,7 +2555,7 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL:
+        if EVENT_API_HTTP_URL and not current_meeting_only:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,
@@ -1678,12 +2566,10 @@ def handler(event, context):
         # Initialize Strands Agent
         try:
             from strands import Agent
-            from strands.models import BedrockModel
+            from strands.models import BedrockModel, CacheConfig
             
-            # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
-            transcript_segment_args = event.get('transcript_segment_args', {})
-            message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-            
+            # message_id and subscriber_id were resolved above, from the same event.
+
             logger.info(f"Using MessageId for streaming: {message_id}")
             logger.info(f"Tools enabled: {len(tools)}")
             
@@ -1694,13 +2580,48 @@ def handler(event, context):
             # arguments the Strands Agents SDK uses to populate the Converse
             # API's guardrailConfig. They are only present when both
             # CloudFormation parameters were supplied; see get_guardrail_config().
+            #
+            # temperature is passed only to models that accept it. Strands puts it
+            # straight into the Converse API's inferenceConfig, and the
+            # reasoning-capable Claude generations reject a request that carries it,
+            # so a model selected from the newer end of the Configuration page's
+            # meeting assistant model list would otherwise fail every turn. See bedrock_compat.accepts_temperature.
             guardrail_config = get_guardrail_config()
-            bedrock_model = BedrockModel(
-                model_id=model_id,
-                temperature=0.3,
-                streaming=ENABLE_STREAMING,
-                **guardrail_config
+            model_kwargs = {
+                'model_id': model_id,
+                'streaming': ENABLE_STREAMING,
+                **guardrail_config,
+            }
+            if accepts_temperature(model_id):
+                model_kwargs['temperature'] = AGENT_TEMPERATURE
+
+            # The reasoning effort, on the models that take one (model_id is the
+            # id after the Model inference geography mapping, so us. and other
+            # profile forms are recognised too). Strands sends it as the Converse
+            # additionalModelRequestFields on every model call of the answer,
+            # beside the cache points below.
+            request_fields = assistant_request_fields(model_id)
+            if request_fields:
+                model_kwargs['additional_request_fields'] = request_fields
+                logger.info(f"Additional request fields: {request_fields}")
+
+            # Prompt caching, on the models that support it, unless the Meeting
+            # Assistant section turns it off. See prompt_cache_plan().
+            cache_config_kwargs, system_prompt = prompt_cache_plan(
+                model_id,
+                (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
+                + (MEETING_CHAT_NOTE if request_scope.from_meeting_chat else '')
+                + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else ''),
+                enabled=prompt_caching_enabled(),
             )
+            if cache_config_kwargs is not None:
+                model_kwargs['cache_config'] = CacheConfig(**cache_config_kwargs)
+                logger.info(f"Prompt caching: {cache_config_kwargs}")
+            elif isinstance(system_prompt, list):
+                logger.info("Prompt caching: system prompt cache point only")
+            else:
+                logger.info("Prompt caching: off for this model or by configuration")
+            bedrock_model = BedrockModel(**model_kwargs)
             if guardrail_config:
                 logger.info(
                     f"Bedrock model configured: {model_id} "
@@ -1720,7 +2641,7 @@ def handler(event, context):
             # Cached MCPClients will be restarted on next invocation via load_tools() -> start().
             agent = Agent(
                 model=bedrock_model,
-                system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
+                system_prompt=system_prompt,
                 tools=tools if tools else None,
                 hooks=[thinking_hook]  # Add hook provider to track all tool usage
             )
@@ -1751,19 +2672,30 @@ def handler(event, context):
             else:
                 context_message = f"User Request: {user_input}"
             
-            # Handle streaming vs non-streaming
-            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
+            # Handle streaming vs non-streaming. Tokens are only streamed when
+            # some caller is listening for them: onAddChatToken requires the
+            # MessageId, so a caller that supplied none cannot be subscribed, and
+            # the mutation persists nothing. The Virtual Participant's voice
+            # assistant is that caller -- it waits for the whole response payload
+            # and speaks the single string this returns -- so it takes the
+            # non-streaming path and the answer reaches it unchanged.
+            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and subscriber_id:
                 logger.info("Streaming mode enabled - sending tokens to AppSync")
-                
+
                 # Import asyncio for async streaming
                 import asyncio
-                
+
+                # One AppSync connection for every token of this answer, created
+                # here so it can be closed whether the stream finishes or raises.
+                # See AppsyncPublisher.
+                token_publisher = AppsyncPublisher(APPSYNC_GRAPHQL_URL)
+
                 async def stream_response():
                     from datetime import datetime
                     sequence = 0
                     thinking_sequence = 0
                     full_response = []
-                    
+
                     # Use stream_async to get async iterator
                     async for event in agent.stream_async(context_message):
                         logger.debug(f"Stream event received: {type(event)} - {event}")
@@ -1838,10 +2770,11 @@ def handler(event, context):
                                     message_id=message_id,
                                     token=token_text,
                                     is_complete=False,
-                                    sequence=sequence
+                                    sequence=sequence,
+                                    publisher=token_publisher
                                 )
                                 sequence += 1
-                        
+
                         # Handle string events (simple text tokens)
                         elif isinstance(event, str):
                             full_response.append(event)
@@ -1850,27 +2783,42 @@ def handler(event, context):
                                 message_id=message_id,
                                 token=event,
                                 is_complete=False,
-                                sequence=sequence
+                                sequence=sequence,
+                                publisher=token_publisher
                             )
                             sequence += 1
-                    
-                    # Send completion token
+
+                    # The completion marker carries the whole answer, so the chat
+                    # panel can show exactly what was generated once streaming
+                    # ends. See completion_token_text.
+                    answer_text = ''.join(full_response)
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
-                        token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
+                        token=completion_token_text(answer_text),
                         is_complete=True,
-                        sequence=sequence
+                        sequence=sequence,
+                        publisher=token_publisher
                     )
-                    
+
                     logger.info(f"Streaming complete. Response tokens: {sequence}, Thinking steps: {thinking_sequence}")
-                    return ''.join(full_response)
-                
+                    return answer_text
+
                 # Run the async streaming function
-                response_text = asyncio.run(stream_response())
+                try:
+                    response_text = asyncio.run(stream_response())
+                finally:
+                    token_publisher.close()
                 
             else:
-                # Non-streaming mode (current behavior)
+                # Non-streaming mode (current behavior). Also the path taken when
+                # streaming is configured but the caller supplied no MessageId, so
+                # no subscription for these tokens can exist.
+                if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and not subscriber_id:
+                    logger.info(
+                        "The caller supplied no MessageId, so no subscriber can be listening "
+                        "for this answer's tokens; answering without publishing a token stream"
+                    )
                 response = agent(context_message)
                 
                 # Convert AgentResult to string if needed
@@ -1881,8 +2829,23 @@ def handler(event, context):
                 else:
                     response_text = response
             
-            logger.info(f"Strands agent response: {response_text}")
-            
+            logger.debug(f"Strands agent response: {response_text}")
+
+            # The tokens of every model call this answer took -- the agent loops
+            # through tool calls, so one question is usually several -- as the
+            # SDK accumulated them, recorded for the meeting's cost estimate.
+            metrics = getattr(agent, 'event_loop_metrics', None)
+            call_metering.record(
+                call_id,
+                'MeetingAssistant',
+                f'bedrock/{model_id}',
+                call_metering.bedrock_usage(
+                    getattr(metrics, 'accumulated_usage', None),
+                    requests=int(getattr(metrics, 'cycle_count', 0) or 1),
+                ),
+                source='strands-meeting-assist',
+            )
+
             # Format response for LMA
             return {
                 'message': response_text,
@@ -1964,6 +2927,29 @@ Examples:
 - "What did we just discuss?" → current_meeting_transcript(lines=20, mode="recent")
 - "Fact check that statement" → current_meeting_transcript(lines=10, mode="recent")
 
+**For agenda questions and progress checks (USE get_meeting_agenda):**
+- "What's on the agenda?" → get_meeting_agenda()
+- "How are we doing against the agenda?", "What's left on the agenda?", "Have we covered X?"
+  → get_meeting_agenda(), then current_meeting_transcript(mode="full", with_timestamps=True)
+- If the meeting has no agenda, say so plainly. Never invent an agenda.
+- For a progress check, list EVERY agenda item in agenda order, one line each, marked:
+  - Covered: discussed and concluded, with the transcript time(s), e.g. "Budget: covered [04:10-09:30]"
+  - In progress: being discussed now or only partly discussed, with the time it started
+  - Remaining: not discussed yet
+- Mark an item covered only when the transcript shows it was discussed. Mention briefly any
+  substantial topic discussed that is not on the agenda.
+
+**For what was shown on screen (USE get_meeting_frames):**
+- "What's on this slide?", "Summarize that slide" → get_meeting_frames(last=1)
+- "Translate the last slide into French" → get_meeting_frames(last=1), then translate its text
+- "What does that chart show?" → get_meeting_frames(last=1, look_at_pictures=True)
+- "Show me the last two slides" → get_meeting_frames(last=2), and include each frame's image markdown
+  when the tool gives one (it does only where the answer can show pictures)
+- "What was on screen at 12:30?" → get_meeting_frames(at_time="12:30")
+- Combine what the frame shows with what was said while it was on screen. Describe content, not
+  people: never identify anyone from a face or a camera tile.
+- If the meeting has no key frames, say so plainly.
+
 **For past meetings queries:**
 - "Last meeting" → recent_meetings_list(limit=1) → meeting_history with CallId
 - "Meetings about X" → meeting_history(query="X")
@@ -1977,6 +2963,7 @@ Examples:
 
 **Decision logic:**
 1. If question mentions "this meeting", "current meeting", "just said", "action items", "summarize" → USE current_meeting_transcript
+   If it mentions the agenda → USE get_meeting_agenda (and current_meeting_transcript with timestamps for progress)
 2. If question is about past meetings → USE meeting_history or recent_meetings_list
 3. If question is general knowledge or current events → USE web_search or answer directly
 4. If ambiguous → DEFAULT to using current_meeting_transcript (most queries are meeting-related)
@@ -1989,7 +2976,7 @@ def fallback_bedrock_response(transcript: str, user_input: str, call_id: str) ->
     """
     try:
         bedrock_client = boto3.client('bedrock-runtime')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = configured_agent_model_id()
         
         # Prepare the prompt
         prompt = f"""You are an AI assistant helping during a meeting.
@@ -2016,6 +3003,9 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         # the agent one.
         guardrail_config = get_guardrail_config()
         converse_kwargs = {}
+        request_fields = assistant_request_fields(model_id)
+        if request_fields:
+            converse_kwargs['additionalModelRequestFields'] = request_fields
         if guardrail_config:
             converse_kwargs['guardrailConfig'] = {
                 'guardrailIdentifier': guardrail_config['guardrail_id'],
@@ -2027,17 +3017,25 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         response = bedrock_client.converse(
             modelId=model_id,
             messages=[message],
-            inferenceConfig={
-                'temperature': 0.3,
-                'maxTokens': 500
-            },
+            inferenceConfig=build_inference_config(
+                model_id, MEETING_ASSIST_FALLBACK_MAX_TOKENS, AGENT_TEMPERATURE
+            ),
             **converse_kwargs
         )
-        
-        # Extract response text
-        response_text = response['output']['message']['content'][0]['text']
-        
-        logger.info(f"Fallback Bedrock response: {response_text}")
+
+        call_metering.record(
+            call_id,
+            'MeetingAssistant',
+            f'bedrock/{model_id}',
+            call_metering.bedrock_usage(response.get('usage')),
+            source='strands-meeting-assist',
+        )
+
+        # Extract response text, leaving out any reasoning block
+        response_text = extract_text(response)
+
+        logger.info(f"Fallback Bedrock response: {len(response_text or '')} characters")
+        logger.debug(f"Fallback Bedrock response: {response_text}")
         
         return {
             'message': response_text,

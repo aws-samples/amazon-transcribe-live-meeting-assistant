@@ -330,6 +330,50 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
+        /* The full-size view of a frame (see openKeyframeOverlay). */
+        .lma-keyframe-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.75);
+            cursor: zoom-out;
+        }
+        .lma-keyframe-overlay img {
+            max-width: 96vw;
+            max-height: 96vh;
+            border-radius: 4px;
+        }
+        .lma-keyframe-overlay.with-actions {
+            flex-direction: column;
+            gap: 10px;
+        }
+        .lma-keyframe-overlay.with-actions img {
+            max-height: calc(96vh - 48px);
+        }
+        .lma-keyframe-overlay button {
+            padding: 6px 14px;
+            border: 0;
+            border-radius: 16px;
+            background: #ffffff;
+            color: #0f141a;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        /* A frame of the shared screen in an answer (see resolveKeyframes). */
+        img.lma-keyframe {
+            display: block;
+            max-width: 100%;
+            min-height: 40px;
+            margin: 6px 0;
+            border: 1px solid #e9ebed;
+            border-radius: 6px;
+            background: #f2f3f3;
+            cursor: zoom-in;
+        }
     </style>
     <!--
       Vendored locally to avoid an external CDN dependency. Versions are pinned;
@@ -375,9 +419,8 @@
         // Thinking steps tracking
         const thinkingSteps = new Map();
         
-        // Load button configuration on page load
+        // Filled by loadButtonConfiguration, which runs at the end of this script.
         let buttonConfig = null;
-        loadButtonConfiguration();
 
         // This page is always served from the same origin as the LMA app that
         // frames it, so the postMessage channel is pinned to that origin in both
@@ -387,13 +430,138 @@
 
         const isFromParent = (event) => event.origin === PARENT_ORIGIN;
 
-        // Listen for reload message from parent
+        // Frames of the shared screen in answers. The assistant shows one as
+        // ![alt](keyframe:<FrameId>) (see get_meeting_frames);
+        // withKeyframePlaceholders (js/render-markdown.js) turns each into a
+        // placeholder image carrying the id, and the page signs a link for it
+        // (STRANDS_RESOLVE_KEYFRAMES) through the meeting's access check.
+        // Signed links last an hour; one fetched more than this long ago is
+        // fetched again rather than shown.
+        const KEYFRAME_LINK_MS = 50 * 60 * 1000;
+        const keyframeLinks = new Map();
+        const freshLink = (frameId) => {
+            const link = keyframeLinks.get(frameId);
+            return link && Date.now() - link.fetchedAt < KEYFRAME_LINK_MS ? link : null;
+        };
+
+        function renderAssistantMarkdown(text) {
+            return renderMarkdownSafe(withKeyframePlaceholders(text));
+        }
+
+        // What the page hosting this frame can do with a frame of the shared
+        // screen, from its STRANDS_HOST_FEATURES message. The meeting page can
+        // show the moment in its transcript; the embeddable chat panel cannot,
+        // and never sends the message.
+        const hostFeatures = { showInTranscript: false };
+
+        // The full-size picture is shown in this frame: the page frames it with
+        // a sandbox that allows no popups, so window.open would be dropped.
+        function openKeyframeOverlay(url, alt, frameId) {
+            const overlay = document.createElement('div');
+            overlay.className = 'lma-keyframe-overlay';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-label', alt || 'Shared screen');
+            const big = document.createElement('img');
+            big.src = url;
+            big.alt = alt || '';
+            overlay.appendChild(big);
+            const close = () => {
+                overlay.remove();
+                document.removeEventListener('keydown', onKey);
+            };
+            const onKey = (event) => {
+                if (event.key === 'Escape') close();
+            };
+            if (hostFeatures.showInTranscript && frameId) {
+                overlay.classList.add('with-actions');
+                const show = document.createElement('button');
+                show.type = 'button';
+                show.textContent = 'Show in transcript';
+                show.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    close();
+                    window.parent.postMessage({ type: 'STRANDS_SHOW_IN_TRANSCRIPT', frameId }, PARENT_ORIGIN);
+                });
+                overlay.appendChild(show);
+            }
+            overlay.addEventListener('click', close);
+            document.addEventListener('keydown', onKey);
+            document.body.appendChild(overlay);
+        }
+
+        function showKeyframe(img, link) {
+            const url = link && (link.image || link.thumbnail);
+            if (!url || !url.startsWith('https://')) return;
+            img.src = url;
+            img.title = 'Show full size';
+            // An expired or failed link is fetched again, once.
+            img.onerror = () => {
+                if (img.dataset.lmaRetried) return;
+                img.dataset.lmaRetried = '1';
+                keyframeLinks.delete(img.dataset.lmaKeyframe);
+                img.removeAttribute('src');
+                resolveKeyframes(img.parentElement);
+            };
+            img.onclick = () => {
+                const current = freshLink(img.dataset.lmaKeyframe);
+                if (current) openKeyframeOverlay(current.image || current.thumbnail, img.alt, img.dataset.lmaKeyframe);
+                else resolveKeyframes(img.parentElement);
+            };
+        }
+
+        function resolveKeyframes(root) {
+            if (!root) return;
+            const missing = new Set();
+            root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                const link = freshLink(img.dataset.lmaKeyframe);
+                if (link) showKeyframe(img, link);
+                else missing.add(img.dataset.lmaKeyframe);
+            });
+            if (!missing.size) return;
+            const requestId = `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            // A page that does not answer leaves the placeholders with their
+            // text, and no listener behind.
+            const giveUp = setTimeout(() => window.removeEventListener('message', onFrames), 30000);
+            const onFrames = (event) => {
+                if (!isFromParent(event) || event.data?.type !== 'STRANDS_KEYFRAMES' || event.data.requestId !== requestId) return;
+                clearTimeout(giveUp);
+                window.removeEventListener('message', onFrames);
+                const fetchedAt = Date.now();
+                Object.entries(event.data.frames || {}).forEach(([frameId, link]) =>
+                    keyframeLinks.set(frameId, { ...link, fetchedAt }));
+                root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                    const link = freshLink(img.dataset.lmaKeyframe);
+                    if (link) showKeyframe(img, link);
+                });
+            };
+            window.addEventListener('message', onFrames);
+            window.parent.postMessage(
+                { type: 'STRANDS_RESOLVE_KEYFRAMES', requestId, callId, frameIds: [...missing].slice(0, 10) },
+                PARENT_ORIGIN,
+            );
+        }
+
+        // Messages from the page that hosts this frame.
         window.addEventListener('message', (event) => {
             if (!isFromParent(event)) return;
             if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
                 // Reload button configuration when admin saves changes
                 loadButtonConfiguration();
+            } else if (event.data?.type === 'STRANDS_FOCUS_INPUT') {
+                // The meeting page's assistant panel was opened.
+                messageInput.focus();
+            } else if (event.data?.type === 'STRANDS_HOST_FEATURES') {
+                hostFeatures.showInTranscript = event.data.showInTranscript === true;
             }
+        });
+
+        // Escape in this frame closes the meeting page's assistant panel. Keys
+        // pressed in a frame do not reach the page that hosts it, so it is told.
+        // A picture open full size takes Escape for itself (openKeyframeOverlay).
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape' || event.defaultPrevented) return;
+            if (document.querySelector('.lma-keyframe-overlay')) return;
+            window.parent.postMessage({ type: 'STRANDS_ESCAPE' }, PARENT_ORIGIN);
         });
         
         // Thinking process functions
@@ -648,9 +816,10 @@
             messageDiv.className = `message ${type}`;
             
             // Use markdown rendering for assistant messages, plain text for user/error
-            const rendered = type === 'assistant' ? renderMarkdownSafe(text) : null;
+            const rendered = type === 'assistant' ? renderAssistantMarkdown(text) : null;
             if (rendered !== null) {
                 messageDiv.innerHTML = rendered;
+                resolveKeyframes(messageDiv);
             } else {
                 messageDiv.textContent = text;
             }
@@ -764,6 +933,33 @@
             });
         }
 
+        // Assembles a streamed answer from its chunks. AppSync does not
+        // guarantee that a subscriber receives the chunks in the order they were
+        // published, so each is placed by its Sequence (the producer numbers an
+        // answer's chunks 0, 1, 2, ...) and a chunk received twice is kept once.
+        // A chunk without a Sequence is placed after every numbered one, in the
+        // order received. add() returns false for a chunk already held.
+        function createAnswerAssembler() {
+            const numbered = new Map();
+            const unnumbered = [];
+            return {
+                add(token) {
+                    const sequence = token.Sequence;
+                    if (Number.isInteger(sequence)) {
+                        if (numbered.has(sequence)) return false;
+                        numbered.set(sequence, token.Token);
+                    } else {
+                        unnumbered.push(token.Token);
+                    }
+                    return true;
+                },
+                text() {
+                    const ordered = [...numbered.keys()].sort((a, b) => a - b).map((key) => numbered.get(key));
+                    return ordered.concat(unnumbered).join('');
+                },
+            };
+        }
+
         function subscribeToTokenStream(messageId) {
             const streamingMessageDiv = document.createElement('div');
             streamingMessageDiv.className = 'message assistant';
@@ -772,7 +968,8 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
-            // Track accumulated text for markdown rendering
+            // The answer's chunks, put back in the order they were published.
+            const answer = createAnswerAssembler();
             let accumulatedText = '';
             
             window.parent.postMessage({
@@ -794,12 +991,20 @@
                         
                         if (token.IsComplete) {
                             finalizeThinkingContainer(messageId);
-                            
+
+                            // The completion marker carries the whole answer as
+                            // generated; it replaces the chunks received. A marker
+                            // without it keeps the text assembled from the chunks.
+                            if (token.Token) {
+                                accumulatedText = token.Token;
+                            }
+
                             // Final render with markdown
                             if (accumulatedText) {
-                                const finalHtml = renderMarkdownSafe(accumulatedText);
+                                const finalHtml = renderAssistantMarkdown(accumulatedText);
                                 if (finalHtml !== null) {
                                     streamingMessageDiv.innerHTML = finalHtml;
+                                    resolveKeyframes(streamingMessageDiv);
                                 } else {
                                     streamingMessageDiv.textContent = accumulatedText;
                                 }
@@ -823,14 +1028,20 @@
                             appendInlineSuggestionButtons();
                             
                             window.removeEventListener('message', tokenHandler);
-                        } else if (token.Token) {
+                        } else if (token.Token && !token.ThinkingStep) {
                             // Only accumulate if there's actual token text (not just thinking steps)
-                            accumulatedText += token.Token;
+                            if (!answer.add(token)) return;
+                            accumulatedText = answer.text();
                             
                             // Render markdown incrementally during streaming
-                            const partialHtml = renderMarkdownSafe(accumulatedText);
+                            const partialHtml = renderAssistantMarkdown(accumulatedText);
                             if (partialHtml !== null) {
                                 streamingMessageDiv.innerHTML = partialHtml;
+                                // Frames already resolved keep their picture while the answer streams.
+                                streamingMessageDiv.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                                    const link = freshLink(img.dataset.lmaKeyframe);
+                                    if (link) showKeyframe(img, link);
+                                });
                             } else {
                                 streamingMessageDiv.textContent = accumulatedText;
                             }
@@ -858,6 +1069,12 @@
             
             // Sort buttons by sequence number
             const sortedButtons = Object.entries(buttonConfig)
+                // A button is stored under an "N#LABEL" key, which is what the sort
+                // and the label below both already assume. Testing for it here too
+                // keeps this renderer from depending on what the parent sent: any
+                // other attribute of the stored record would otherwise draw a button
+                // labelled with its own key.
+                .filter(([key]) => /^\d+#/.test(key))
                 .sort((a, b) => {
                     const getSequence = (key) => {
                         const match = key.match(/^(\d+)#/);
@@ -972,6 +1189,9 @@
             
             // Sort buttons by sequence number (N# prefix)
             const sortedButtons = Object.entries(config)
+                // As above: a button is an "N#LABEL" key, so this renderer states
+                // that for itself rather than trusting what it was handed.
+                .filter(([key]) => /^\d+#/.test(key))
                 .sort((a, b) => {
                     const getSequence = (key) => {
                         const match = key.match(/^(\d+)#/);
@@ -1088,5 +1308,9 @@
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
+
+        // Last, so every declaration it reaches (PARENT_ORIGIN, isFromParent and
+        // the render helpers) is initialised before the request is posted.
+        loadButtonConfiguration();
     </script>
 </body>

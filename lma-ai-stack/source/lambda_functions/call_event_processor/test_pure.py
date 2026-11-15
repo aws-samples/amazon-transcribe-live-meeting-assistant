@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Tests for the computation extracted out of call_event_processor.
 
@@ -42,11 +42,23 @@ if str(HERE) not in sys.path:
 
 from pure import (  # noqa: E402
     QUARTER_COUNT,
+    agenda_derivation_due,
+    capture_context_fields,
     convert_keys_to_uppercamelcase,
+    forget_language,
     get_sentiment_per_quarter,
+    language_to_record,
     matches_wake_phrase,
     merge_dicts,
+    segment_analyses,
 )
+
+# The configuration layer, for the channel names the processor passes in.
+LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+from lma_channels import MEETING_CHAT, STORED_SPEECH_CHANNELS, is_speech_channel  # noqa: E402
 
 
 def entry(begin: float, end: float, score: float, sentiment: str = "POSITIVE") -> dict:
@@ -72,21 +84,25 @@ def test_an_empty_meeting_still_produces_four_periods():
 
 def test_four_evenly_spaced_segments_land_one_per_period():
     """The simplest case, and the one that pins the boundary arithmetic."""
-    quarters = get_sentiment_per_quarter([
-        entry(0, 1000, 1.0),
-        entry(1000, 2000, 2.0),
-        entry(2000, 3000, 3.0),
-        entry(3000, 4000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 1000, 1.0),
+            entry(1000, 2000, 2.0),
+            entry(2000, 3000, 3.0),
+            entry(3000, 4000, 4.0),
+        ]
+    )
     assert [q["Score"] for q in quarters] == [1.0, 2.0, 3.0, 4.0]
 
 
 def test_scores_within_a_period_are_averaged():
-    quarters = get_sentiment_per_quarter([
-        entry(0, 500, 1.0),
-        entry(500, 1000, 3.0),
-        entry(3000, 4000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 500, 1.0),
+            entry(500, 1000, 3.0),
+            entry(3000, 4000, 4.0),
+        ]
+    )
     assert quarters[0]["Score"] == pytest.approx(2.0)
     assert quarters[3]["Score"] == pytest.approx(4.0)
 
@@ -117,10 +133,12 @@ def test_every_segment_is_counted_exactly_once():
 
 def test_a_segment_ending_on_a_boundary_falls_in_the_earlier_period():
     """Two segments, one ending exactly at the midpoint of a 0-4000 meeting."""
-    quarters = get_sentiment_per_quarter([
-        entry(0, 2000, 7.0),   # ends exactly on the 2nd/3rd boundary
-        entry(2000, 4000, 9.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 2000, 7.0),  # ends exactly on the 2nd/3rd boundary
+            entry(2000, 4000, 9.0),
+        ]
+    )
     assert quarters[1]["Score"] == pytest.approx(7.0)
     assert quarters[2]["Score"] == 0
     assert quarters[3]["Score"] == pytest.approx(9.0)
@@ -131,22 +149,29 @@ def test_the_periods_are_derived_from_the_meeting_not_from_zero():
 
     Dividing from zero instead would push every segment into the last period.
     """
-    quarters = get_sentiment_per_quarter([
-        entry(10_000, 11_000, 1.0),
-        entry(11_000, 12_000, 2.0),
-        entry(12_000, 13_000, 3.0),
-        entry(13_000, 14_000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(10_000, 11_000, 1.0),
+            entry(11_000, 12_000, 2.0),
+            entry(12_000, 13_000, 3.0),
+            entry(13_000, 14_000, 4.0),
+        ]
+    )
     assert [q["Score"] for q in quarters] == [1.0, 2.0, 3.0, 4.0]
     assert quarters[0]["BeginOffsetMillis"] == 10_000
 
 
 def test_input_order_does_not_matter():
     """Kinesis does not guarantee order, so the result must not depend on it."""
-    forwards = [entry(0, 1000, 1.0), entry(1000, 2000, 2.0),
-                entry(2000, 3000, 3.0), entry(3000, 4000, 4.0)]
-    assert get_sentiment_per_quarter(list(reversed(forwards))) == \
-        get_sentiment_per_quarter(forwards)
+    forwards = [
+        entry(0, 1000, 1.0),
+        entry(1000, 2000, 2.0),
+        entry(2000, 3000, 3.0),
+        entry(3000, 4000, 4.0),
+    ]
+    assert get_sentiment_per_quarter(list(reversed(forwards))) == get_sentiment_per_quarter(
+        forwards
+    )
 
 
 def test_negative_scores_are_preserved():
@@ -302,3 +327,142 @@ def test_merging_with_an_empty_dict_returns_an_equal_copy():
     result = merge_dicts(original, {})
     assert result == original
     assert result is not original
+
+
+def test_the_agenda_pass_is_due_once_the_threshold_is_reached():
+    queued: set = set()
+    assert agenda_derivation_due("c1", 299.9, 300, queued) is False
+    assert agenda_derivation_due("c1", 300, 300, queued) is True
+    assert agenda_derivation_due("c1", "301.5", 300, queued) is True
+
+
+def test_the_agenda_pass_is_not_due_twice_off_or_without_a_meeting():
+    assert agenda_derivation_due("c1", 900, 300, {"c1"}) is False
+    assert agenda_derivation_due("c1", 900, 0, set()) is False
+    assert agenda_derivation_due("", 900, 300, set()) is False
+    assert agenda_derivation_due("c1", None, 300, set()) is False
+
+
+# ── which segments get sentiment and wake the Meeting Assistant ─────────────
+
+WAKE = re.compile(r"(OK|Okay)[.,! ]*[Aa]ssistant")
+
+
+def analyses_for(
+    channel, transcript="OK Assistant, what did we decide?", is_partial=False, **flags
+):
+    asked = []
+
+    def pattern():
+        asked.append(True)
+        return WAKE
+
+    result = segment_analyses(
+        is_speech=is_speech_channel(channel),
+        is_partial=is_partial,
+        sentiment_enabled=flags.get("sentiment", True),
+        agent_assist_enabled=flags.get("agent_assist", True),
+        wake_pattern=pattern,
+        transcript=transcript,
+    )
+    return result, bool(asked)
+
+
+@pytest.mark.parametrize("channel", STORED_SPEECH_CHANNELS)
+def test_a_final_speech_segment_gets_sentiment_and_can_wake_the_assistant(channel):
+    result, _ = analyses_for(channel)
+    assert result.sentiment is True
+    assert result.agent_assist is True
+
+
+def test_a_chat_message_gets_no_sentiment_and_never_wakes_the_assistant():
+    result, read_pattern = analyses_for(MEETING_CHAT)
+    assert result.sentiment is False
+    assert result.agent_assist is False
+    # The wake phrase is not even read for it.
+    assert read_pattern is False
+
+
+def test_a_partial_segment_gets_neither():
+    result, read_pattern = analyses_for("REMOTE", is_partial=True)
+    assert result == (False, False)
+    assert read_pattern is False
+
+
+def test_each_analysis_follows_its_own_switch():
+    assert analyses_for("REMOTE", sentiment=False)[0] == (False, True)
+    assert analyses_for("REMOTE", agent_assist=False)[0] == (True, False)
+    assert analyses_for("LOCAL", transcript="nothing to see here")[0] == (True, False)
+
+
+def test_the_processor_decides_both_from_the_segments_channel():
+    """call_event_processor.py cannot be imported here; this pins the call site."""
+    source = (HERE / "event_processor" / "call_event_processor.py").read_text(encoding="utf-8")
+    assert 'is_speech=is_speech_channel(normalized_message.get("Channel"))' in source
+    assert "if analyses.sentiment:" in source
+    assert "if analyses.agent_assist:" in source
+    assert "matches_wake_phrase(" not in source
+
+
+# ---------------------------------------------------------------------------
+# capture_context_fields
+# ---------------------------------------------------------------------------
+
+
+def test_capture_context_keeps_only_the_fields_an_event_sets():
+    message = {
+        "EventType": "UPDATE_CAPTURE_CONTEXT",
+        "CallId": "c1",
+        "TranscriptionEngine": "TRANSCRIBE",
+        "TranscriptionLanguage": " en-US ",
+        "SpeakerSeparation": "",
+        "CaptureSource": None,
+    }
+    assert capture_context_fields(message) == {
+        "TranscriptionEngine": "TRANSCRIBE",
+        "TranscriptionLanguage": "en-US",
+    }
+
+
+def test_capture_context_of_an_event_without_one_is_empty():
+    assert capture_context_fields({"EventType": "START", "CallId": "c1"}) == {}
+
+
+# ── language_to_record: when a segment adds to DetectedLanguages ────────────
+
+
+def test_a_new_language_is_recorded_once_per_meeting():
+    noted: dict = {}
+    assert language_to_record("c1", "es-US", None, noted) == "es-US"
+    assert language_to_record("c1", "es-US", None, noted) is None
+    assert language_to_record("c1", "en-US", None, noted) == "en-US"
+    assert language_to_record("c2", "es-US", None, noted) == "es-US"
+
+
+def test_a_language_the_record_lists_is_not_recorded():
+    assert language_to_record("c1", "es-US", ["en-US", "es-US"], {}) is None
+
+
+@pytest.mark.parametrize("code", [None, "", "  ", 7])
+def test_a_segment_without_a_language_records_none(code):
+    noted: dict = {}
+    assert language_to_record("c1", code, None, noted) is None
+    assert noted == {}
+
+
+def test_a_forgotten_language_is_recorded_again():
+    noted: dict = {}
+    assert language_to_record("c1", "fr-FR", None, noted) == "fr-FR"
+    forget_language("c1", "fr-FR", noted)
+    assert language_to_record("c1", "fr-FR", None, noted) == "fr-FR"
+
+
+def test_the_memory_of_languages_is_bounded(monkeypatch):
+    import pure
+
+    monkeypatch.setattr(pure, "DETECTED_LANGUAGES_MEMORY", 2)
+    noted: dict = {}
+    language_to_record("c1", "en-US", None, noted)
+    language_to_record("c2", "en-US", None, noted)
+    language_to_record("c3", "en-US", None, noted)
+    assert set(noted) == {"c3"}

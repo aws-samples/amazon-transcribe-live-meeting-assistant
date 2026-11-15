@@ -66,6 +66,18 @@ function htmlToText(html: string): string {
     }
 }
 
+/** The addresses of the links in an HTML chat message. */
+function htmlLinks(html: string): string[] {
+    try {
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        return Array.from(parsed.querySelectorAll('a[href]'))
+            .map((a) => a.getAttribute('href') || '')
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
 w.__lmaSdkReady = false;
 w.__lmaJoinError = null;
 w.__lmaCallEndReason = null;
@@ -94,18 +106,55 @@ w.__lmaCallState = () => {
     return { page: state.page || 'none', callState: (state.call && state.call.state) || 'None' };
 };
 
+// Whether a remote participant is sharing their screen or a PowerPoint Live
+// deck, read by screen-share-probe.ts to decide when key frames are sampled.
+// Both fields are kept by the adapter's stateful layer; the stream check covers
+// a build that has not set them yet.
+w.__lmaScreenShareActive = () => {
+    const state = getState();
+    const call = state && state.call;
+    if (!call) return false;
+    if (call.screenShareRemoteParticipant || call.contentSharingRemoteParticipant) return true;
+    for (const p of Object.values(call.remoteParticipants || {}) as any[]) {
+        for (const s of Object.values((p && p.videoStreams) || {}) as any[]) {
+            if (s && s.mediaStreamType === 'ScreenSharing' && s.isAvailable) return true;
+        }
+    }
+    return false;
+};
+
 w.__lmaParticipantCount = () => {
     const state = getState();
     if (!state || !state.call || !state.call.remoteParticipants) return -1;
     return Object.keys(state.call.remoteParticipants).length + 1;
 };
 
-w.__lmaSendChat = (message: string) => {
+// The display names of the call's other participants, for the meeting consent
+// flow's participant list. One without a name is left out, so the list is
+// shorter than the count and the flow treats it as incomplete.
+w.__lmaParticipantNames = (): string[] | null => {
+    const state = getState();
+    if (!state || !state.call || !state.call.remoteParticipants) return null;
+    return (Object.values(state.call.remoteParticipants) as any[])
+        .map((p) => (p && typeof p.displayName === 'string' ? p.displayName.trim() : ''))
+        .filter((name) => name.length > 0);
+};
+
+// Answers true once the chat took the message, false when it refused it. A
+// message sent before the chat is ready is queued and posted when it is, and
+// counts as taken.
+w.__lmaSendChat = async (message: string): Promise<boolean> => {
     if (!adapter || !w.__lmaChatReady) {
         pendingOutgoingChat.push(message);
-        return;
+        return true;
     }
-    adapter.sendMessage(message).catch((e: unknown) => log(`sendMessage error: ${e}`));
+    try {
+        await adapter.sendMessage(message);
+        return true;
+    } catch (e: unknown) {
+        log(`sendMessage error: ${e}`);
+        return false;
+    }
 };
 
 function flushOutgoingChat(): void {
@@ -293,16 +342,22 @@ function participantName(identifier: any): string {
     return '';
 }
 
-const JOIN_REJECTIONS: Array<{ pattern: RegExp; reason: string }> = [
+// The join refusals read from the 403 body, with the subCode each stands for:
+// teams-sdk.ts reads the subCode to decide whether the browser join is tried
+// instead (teams-join-method.ts), so it is carried as a number, not only in
+// the prose.
+const JOIN_REJECTIONS: Array<{ pattern: RegExp; reason: string; subCode: number }> = [
     {
         pattern: /AnonymousJoinDisabled|Anonymous Join is disabled/i,
         reason:
-            'Anonymous join is disabled for this Teams tenant by policy (subCode 5723). A tenant admin must enable "Anonymous users can join a meeting" in the Teams admin center meeting settings.',
+            "Teams refused the Azure Communication Services join: the meeting's organisation does not let external application users join (subCode 5723, AnonymousJoinDisabledDueToPolicy). The settings a tenant admin can check are listed in docs/teams-acs-sdk.md.",
+        subCode: 5723,
     },
     {
         pattern: /not allowed to create conversation|"subCode":\s*5222/i,
         reason:
             'This meeting is a personal (Teams Free / teams.live.com) meeting (subCode 5222). ACS Teams interop only supports meetings organized by a Microsoft 365 work or school account on teams.microsoft.com.',
+        subCode: 5222,
     },
 ];
 
@@ -315,7 +370,7 @@ window.fetch = async (...args: Parameters<typeof fetch>) => {
             const body = await res.clone().text();
             const match = JOIN_REJECTIONS.find((r) => r.pattern.test(body));
             if (match) {
-                w.__lmaJoinError = { reason: match.reason, detail: body.slice(0, 400) };
+                w.__lmaJoinError = { reason: match.reason, detail: body.slice(0, 400), subCode: match.subCode };
                 log(`join rejected: ${match.reason}`);
             }
         }
@@ -386,12 +441,19 @@ function setupListeners(): void {
             const senderName = msg.senderDisplayName || '';
             const rawContent =
                 (msg.content && (msg.content.message || msg.content)) || msg.message || '';
-            const text =
-                msg.type === 'html' || /<[a-z][\s\S]*>/i.test(String(rawContent))
-                    ? htmlToText(String(rawContent))
-                    : String(rawContent).trim();
+            const isHtml = msg.type === 'html' || /<[a-z][\s\S]*>/i.test(String(rawContent));
+            const text = isHtml ? htmlToText(String(rawContent)) : String(rawContent).trim();
             if (!text) return;
-            w.__lmaChatQueue.push({ senderName, text });
+            // The id and time are the ACS chat message's own (ChatMessage.id,
+            // createdOn); a Teams meeting chat has no private messages.
+            const createdOn = msg.createdOn instanceof Date ? msg.createdOn.toISOString() : msg.createdOn || null;
+            w.__lmaChatQueue.push({
+                senderName,
+                text,
+                id: msg.id || msg.messageId || null,
+                time: createdOn,
+                links: isHtml ? htmlLinks(String(rawContent)) : [],
+            });
         } catch (err) {
             log(`chat parse error: ${err}`);
         }

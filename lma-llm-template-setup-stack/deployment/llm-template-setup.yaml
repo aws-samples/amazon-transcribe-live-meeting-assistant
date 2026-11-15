@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 AWSTemplateFormatVersion: "2010-09-09"
@@ -140,7 +140,9 @@ Resources:
       ServiceToken: !GetAtt LLMPromptUploadFunction.Arn
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
       Domain: !Ref Domain
-      # hash below is updated by publish.sh script- used to force tempate updates when source has changed.
+      # Publishing writes a hash of ../source into the packaged copy of this
+      # template, so a source change forces this resource to re-run. The value
+      # committed here is not updated and is never deployed.
       source_hash: fdfdef8812782e31
 
 Outputs:

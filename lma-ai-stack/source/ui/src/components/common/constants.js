@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 // eslint-disable import/prefer-default-export
@@ -8,6 +8,8 @@
 export const LMA_VERSION = 'v<VERSION_TOKEN>';
 export const DEFAULT_OTHER_SPEAKER_NAME = 'Other Participant';
 export const DEFAULT_LOCAL_SPEAKER_NAME = 'Me';
+// The Desktop Capture App's default label for the system-audio channel.
+export const DEFAULT_DESKTOP_SYSTEM_LABEL = 'Other participants';
 export const SYSTEM = 'System';
 
 export const COMPREHEND_PII_TYPES = [

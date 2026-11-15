@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """End-to-end tests for Kinesis partial batch reporting (no AWS calls).
@@ -35,20 +35,17 @@ HERE = Path(__file__).parent
 # The function imports appsync_utils / transcript_batch_processor from the
 # transcript enrichment Lambda layer, which is on the path at runtime only.
 LAYER = HERE.parents[1] / "lambda_layers" / "transcript_enrichment_layer"
-for path in (str(HERE), str(LAYER)):
+CONFIG_LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+for path in (str(HERE), str(LAYER), str(CONFIG_LAYER)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
 os.environ.setdefault("APPSYNC_GRAPHQL_URL", "https://example.invalid/graphql")
 os.environ.setdefault("STATE_DYNAMODB_TABLE_NAME", "event-sourcing")
-os.environ.setdefault("PARAMETER_STORE_NAME", "lma-settings")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
 _BOTO3_SESSION = mock.MagicMock()
-_BOTO3_SESSION.client.return_value.get_parameter.return_value = {
-    "Parameter": {"Value": json.dumps({})}
-}
 
 try:
     with mock.patch("boto3.Session", return_value=_BOTO3_SESSION):

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
@@ -48,6 +48,12 @@ const CallAnalyticsLayout = () => {
     setIsCallsListLoading,
     setDateRange,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     totalCallCount,
     totalCallCountTruncated,
   } = useCallsGraphQlApi({ initialDateRange });
@@ -62,6 +68,12 @@ const CallAnalyticsLayout = () => {
     isCallsListLoading,
     selectedItems,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

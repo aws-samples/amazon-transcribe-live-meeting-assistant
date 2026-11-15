@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -19,12 +19,10 @@ When a job completes successfully the finalizer:
    them from ``results.items[]`` if Transcribe's preferred representation isn't
    present) emits an ``ADD_TRANSCRIPT_SEGMENT`` event onto ``CallDataStream``
    with the shape the existing ``call_event_processor`` expects from the live
-   websocket transcriber. Channel mapping:
-     * Non-diarization jobs → all segments are ``CALLER``.
-     * Diarization jobs (``ShowSpeakerLabels=True``) → ``spk_0`` is ``CALLER``,
-       everyone else maps to ``AGENT`` (LMA only supports two channels). The
-       utterance's Speaker label is still set to ``spk_N`` so the UI can show
-       distinct speakers.
+   websocket transcriber. Every segment is on the ``REMOTE`` channel: an
+   uploaded recording has no local microphone. With diarization
+   (``ShowSpeakerLabels=True``) the utterance's Speaker label is ``spk_N``, so
+   the UI can still show distinct speakers.
 4. Copies the media file from ``lma-uploads-pending/<callId>/...`` to
    ``lma-audio-recordings/<callId>.<ext>`` (matching the filename LMA's player
    expects) and removes the pending copy.
@@ -43,12 +41,19 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+
+# pylint: disable=import-error
+from lma_channels import REMOTE  # configuration layer
+from lma_metering import MeteringWriter  # configuration layer
+
+# pylint: enable=import-error
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -72,6 +77,64 @@ job_table = ddb.Table(EVENT_SOURCING_TABLE)
 kinesis_client = boto3.client("kinesis", region_name=AWS_REGION)
 transcribe_client = boto3.client("transcribe", region_name=AWS_REGION)
 s3_client = boto3.client("s3", region_name=AWS_REGION)
+
+# The batch job's seconds, for the meeting cost estimate. Inert when
+# METERING_TABLE_NAME is unset.
+METERING = MeteringWriter(source="upload-meeting-finalizer")
+
+#: Amazon Transcribe batch bills at least this many seconds per job.
+BATCH_MINIMUM_SECONDS = 15
+
+
+def transcribed_seconds(transcript_json: dict) -> float:
+    """How far into the media the transcript reaches: the last item's end time.
+
+    The job's own media duration is not in the transcript or the job record, so
+    this is the closest figure to hand. It stops at the last word, so trailing
+    silence -- which is billed -- is not counted, and the estimate says so.
+    """
+    items = (transcript_json.get("results") or {}).get("items") or []
+    end = 0.0
+    for item in items:
+        try:
+            end = max(end, float(item.get("end_time") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return end
+
+
+def meter_batch_job(call_id: str, transcript_json: dict) -> None:
+    seconds = transcribed_seconds(transcript_json)
+    METERING.record(
+        call_id,
+        "Transcription",
+        "transcribe/batch",
+        {"seconds": max(BATCH_MINIMUM_SECONDS, math.ceil(seconds)), "requests": 1},
+        details={
+            "engine": "amazon-transcribe-batch",
+            "duration": "to the last transcribed word",
+            "minimum": f"{BATCH_MINIMUM_SECONDS}s per job",
+        },
+    )
+
+
+#: The LanguageIdentification Stage 1 records for single-language identification.
+SINGLE_LANGUAGE_IDENTIFICATION = "identify-language"
+
+
+def identified_language(job: dict, transcription_job: dict) -> str | None:
+    """The one language Transcribe identified for the whole recording, or None.
+
+    Only single-language identification names one language for the whole job
+    (``TranscriptionJob.LanguageCode``), and its output names none per word, so
+    every segment is given it. Multiple-language identification names a language
+    per word, which ``_segment_language`` reads for each segment. None for an
+    upload that named its language: the meeting's TranscriptionLanguage already
+    says which, as for a streaming meeting in a fixed language.
+    """
+    if (job.get("LanguageIdentification") or "").strip() != SINGLE_LANGUAGE_IDENTIFICATION:
+        return None
+    return _language(transcription_job.get("LanguageCode"))
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +192,7 @@ def _fetch_transcript_json(bucket: str, key: str) -> dict:
 def _build_segments(
     transcript_json: dict,
     enable_diarization: bool,
+    job_language: str | None = None,
 ) -> list[dict]:
     """Turn a Transcribe output JSON into a list of segment dicts in the shape
     ``call_event_processor`` consumes.
@@ -137,6 +201,10 @@ def _build_segments(
     sentence-like chunks. With diarization enabled each chunk carries a
     ``speaker_label`` (e.g. ``spk_0``). Falls back to a single glued segment
     from ``results.transcripts[]`` if ``audio_segments`` is absent.
+
+    ``job_language`` is the language single-language identification found for
+    the whole recording; a segment whose output names no language of its own
+    is given it as ``LanguageCode``.
     """
     results = transcript_json.get("results") or {}
     audio_segments = results.get("audio_segments") or []
@@ -146,16 +214,18 @@ def _build_segments(
         text = " ".join(t.get("transcript", "") for t in transcripts).strip()
         if not text:
             return []
-        return [
-            {
-                "SegmentId": "seg-0",
-                "Transcript": text,
-                "StartTime": 0.0,
-                "EndTime": 0.0,
-                "Speaker": "spk_0",
-            }
-        ]
+        segment = {
+            "SegmentId": "seg-0",
+            "Transcript": text,
+            "StartTime": 0.0,
+            "EndTime": 0.0,
+            "Speaker": "spk_0",
+        }
+        if job_language:
+            segment["LanguageCode"] = job_language
+        return [segment]
 
+    items_by_id = _items_by_id(results)
     segments = []
     for i, seg in enumerate(audio_segments):
         transcript = (seg.get("transcript") or "").strip()
@@ -170,33 +240,56 @@ def _build_segments(
         except (TypeError, ValueError):
             end = 0.0
         speaker_label = seg.get("speaker_label") or "spk_0"
-        segments.append(
-            {
-                "SegmentId": f"seg-{i:05d}",
-                "Transcript": transcript,
-                "StartTime": start,
-                "EndTime": end,
-                "Speaker": speaker_label,
-            }
-        )
+        segment = {
+            "SegmentId": f"seg-{i:05d}",
+            "Transcript": transcript,
+            "StartTime": start,
+            "EndTime": end,
+            "Speaker": speaker_label,
+        }
+        language_code = _segment_language(seg, items_by_id) or job_language
+        if language_code:
+            segment["LanguageCode"] = language_code
+        segments.append(segment)
     return segments
 
 
-def _channel_for_speaker(speaker_label: str, enable_diarization: bool) -> str:
-    """Map a Transcribe speaker_label into the 2-valued LMA Channel enum.
+def _language(value) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
-    - Non-diarization: everything is CALLER. (The existing LMA UI is built
-      around a 2-party call; uploaded meetings without diarization are visually
-      single-stream and that's correct.)
-    - Diarization: first speaker (spk_0) → CALLER, everyone else → AGENT.
-      The original speaker_label survives as Segment.Speaker, so the UI can
-      still show e.g. "Speaker 2 (spk_3)".
+
+def _items_by_id(results: dict) -> dict:
+    """The transcript's words keyed by id, for the ones that name a language."""
+    return {
+        item.get("id"): code
+        for item in results.get("items") or []
+        if isinstance(item, dict) and (code := _language(item.get("language_code")))
+    }
+
+
+def _segment_language(seg: dict, items_by_id: dict) -> str | None:
+    """The language Transcribe identified for one utterance, or None.
+
+    Only a job run with multiple-language identification names a language per
+    word (``results.items[].language_code``); an utterance (``audio_segments``)
+    lists the ids of its words, and takes the language most of them are in. A
+    ``language_code`` on the utterance itself is used first. A job run in a
+    fixed language or with single-language identification names none here; for
+    single-language identification the caller gives the segment the job's
+    identified language instead, and in a fixed language it carries none.
     """
-    if not enable_diarization:
-        return "CALLER"
-    if speaker_label in ("spk_0", "ch_0"):
-        return "CALLER"
-    return "AGENT"
+    own = _language(seg.get("language_code"))
+    if own:
+        return own
+    counts: dict[str, int] = {}
+    for item_id in seg.get("items") or []:
+        code = items_by_id.get(item_id)
+        if code:
+            counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return None
+    # The most frequent; ties go to the language heard first in the utterance.
+    return max(counts, key=lambda code: counts[code])
 
 
 def _promote_media_file(bucket: str, pending_key: str, call_id: str) -> tuple[str, str]:
@@ -313,16 +406,24 @@ def lambda_handler(event, context):  # noqa: ARG001
         _emit_end_event(job, call_id)
         return {"ok": False, "reason": str(err)}
 
-    segments = _build_segments(transcript_json, enable_diarization)
+    # The meeting's TranscriptionLanguage stays the identify mode START recorded;
+    # the languages heard reach its DetectedLanguages through each segment's
+    # LanguageCode, as they do for a streaming meeting.
+    language = identified_language(job, tj)
+    if language:
+        logger.info("Transcribe identified %s for %s", language, call_id)
+    segments = _build_segments(transcript_json, enable_diarization, language)
     logger.info("Emitting %d transcript segment(s) for %s", len(segments), call_id)
+    meter_batch_job(call_id, transcript_json)
 
     now = _now_iso()
     for seg in segments:
-        channel = _channel_for_speaker(seg["Speaker"], enable_diarization)
         event_record = {
             "EventType": "ADD_TRANSCRIPT_SEGMENT",
             "CallId": call_id,
-            "Channel": channel,
+            # An uploaded recording has no local microphone: every speaker is
+            # on REMOTE, told apart by the Speaker label when diarized.
+            "Channel": REMOTE,
             "SegmentId": seg["SegmentId"],
             "StartTime": seg["StartTime"],
             "EndTime": seg["EndTime"],
@@ -332,6 +433,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             "CreatedAt": now,
             "UpdatedAt": now,
         }
+        if seg.get("LanguageCode"):
+            event_record["LanguageCode"] = seg["LanguageCode"]
         _put_kinesis(call_id, event_record)
 
     # Promote media from pending → audio-recordings and emit the URL.
@@ -343,6 +446,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             logger.exception("Could not promote media file: %s", err)
 
     if recording_s3_url:
+        # No UpdatedAt, as in _emit_end_event: the END below can be applied first,
+        # and a stamp from here would then be refused on every redelivery.
         _put_kinesis(
             call_id,
             {
@@ -350,7 +455,6 @@ def lambda_handler(event, context):  # noqa: ARG001
                 "CallId": call_id,
                 "RecordingUrl": recording_s3_url,
                 "CreatedAt": _now_iso(),
-                "UpdatedAt": _now_iso(),
             },
         )
 
@@ -390,7 +494,7 @@ def _emit_end_event(job: dict, call_id: str) -> None:
         {
             "EventType": "END",
             "CallId": call_id,
-            "CustomerPhoneNumber": job.get("FromNumber") or "Customer",
+            "CustomerPhoneNumber": job.get("FromNumber") or "Other Participant",
             "SystemPhoneNumber": job.get("ToNumber") or "System",
             "AgentId": owner,
             "CreatedAt": now,

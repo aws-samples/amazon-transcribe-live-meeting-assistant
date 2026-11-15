@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """CodeBuild Starter Lambda Function"""
@@ -12,7 +12,7 @@ from botocore.config import Config as BotoCoreConfig
 from crhelper import CfnResource
 
 LOGGER = logging.getLogger(__name__)
-LOG_LEVEL = getenv("LOG_LEVEL", "DEBUG")
+LOG_LEVEL = getenv("LOG_LEVEL", "INFO")
 HELPER = CfnResource(
     json_logging=True,
     log_level=LOG_LEVEL,

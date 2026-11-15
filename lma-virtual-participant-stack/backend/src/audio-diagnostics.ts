@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
@@ -69,11 +69,14 @@
  *
  * `page.on('console')` works, but plain `console.log` from the page never arrives
  * under cloakbrowser. So the page side only ACCUMULATES onto `window.__lmaAudio`
- * and Node drains it with its own console.log, which demonstrably reaches
- * CloudWatch.
+ * and Node drains it and writes it through its own logger, whose stdout
+ * demonstrably reaches CloudWatch.
  */
 import { exec } from 'node:child_process';
 import type { Page } from 'playwright-core';
+import { createLogger } from './logger.js';
+
+const log = createLogger('audio-diagnostics');
 
 /**
  * Sampling period. 1s so a single utterance spans several windows — the 5s window
@@ -369,7 +372,7 @@ export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS
                 const line = `sink=${d.sink ?? '?'} source=${d.source ?? '?'}`;
                 if (last.get('defaults') !== line) {
                     last.set('defaults', line);
-                    console.log(`[LMA-Audio] pulse defaults: ${line}`);
+                    log.info(`[LMA-Audio] pulse defaults: ${line}`);
                 }
             }
 
@@ -380,7 +383,7 @@ export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS
                 const line = formatDeviceSpecs(parsePactlShort(stdout));
                 if (last.get(kind) === line) continue;
                 last.set(kind, line);
-                console.log(`[LMA-Audio] pulse ${kind}: ${line || '(none)'}`);
+                log.info(`[LMA-Audio] pulse ${kind}: ${line || '(none)'}`);
             }
 
             // Capture streams last, so the index->name map is current. The LONG
@@ -393,7 +396,7 @@ export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS
                 const line = formatCaptureStreams(parsePactlSourceOutputs(outputs), sourceNames);
                 if (last.get('captures') !== line) {
                     last.set('captures', line);
-                    console.log(`[LMA-Audio] pulse captures: ${line || '(none)'}`);
+                    log.info(`[LMA-Audio] pulse captures: ${line || '(none)'}`);
                 }
             }
         })();
@@ -428,14 +431,35 @@ export async function installAudioDiagnostics(page: Page): Promise<void> {
         if (md && md.getUserMedia) {
             const original = md.getUserMedia.bind(md);
             md.getUserMedia = async function (constraints?: MediaStreamConstraints) {
-                if (constraints && constraints.audio) {
+                if (constraints && (constraints.audio || constraints.video)) {
                     try {
-                        push(`gUM requested audio=${JSON.stringify(constraints.audio)}`);
+                        push(
+                            `gUM requested audio=${JSON.stringify(constraints.audio ?? false)} ` +
+                                `video=${JSON.stringify(constraints.video ?? false)}`,
+                        );
                     } catch {
                         /* never affect capture */
                     }
                 }
-                const stream = await original(constraints);
+                let stream: MediaStream;
+                try {
+                    stream = await original(constraints);
+                } catch (err) {
+                    // A failed request is otherwise invisible: the meeting client
+                    // only shows its own dialog. The error name (NotFoundError,
+                    // NotAllowedError, NotReadableError, ...) says why (#1094).
+                    try {
+                        const e = err as { name?: string; message?: string };
+                        push(
+                            `gUM FAILED audio=${!!(constraints && constraints.audio)} ` +
+                                `video=${!!(constraints && constraints.video)}: ` +
+                                `${e?.name || 'Error'}${e?.message ? `: ${String(e.message).slice(0, 160)}` : ''}`,
+                        );
+                    } catch {
+                        /* never affect capture */
+                    }
+                    throw err;
+                }
                 try {
                     for (const t of stream.getAudioTracks()) {
                         // The track ID matters as much as the settings: Teams opens
@@ -589,7 +613,7 @@ export function startSenderTrackBypass(page: Page, intervalMs = 5000): () => voi
 }
 
 /**
- * Start Node-side draining. Logs with Node's console.log, which reaches
+ * Start Node-side draining. Writes through the Node logger, which reaches
  * CloudWatch — unlike page console.log (see the module docstring).
  *
  * Returns a stop function so the caller can clear the timer on teardown.
@@ -616,7 +640,7 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                     w.__lmaAudio = [];
                     return buf;
                 });
-                for (const line of lines) console.log(`[LMA-Audio] ${line}`);
+                for (const line of lines) log.info(`[LMA-Audio] ${line}`);
 
                 // 2. Snapshot every outbound audio sender, joined to its media
                 //    source, negotiated codec and the far end's RTCP report.
@@ -676,14 +700,14 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                     // it once rather than every second.
                     if (s.codec && !reportedCodecs.has(s.codec)) {
                         reportedCodecs.add(s.codec);
-                        console.log(`[LMA-Audio] negotiated ${s.codec}`);
+                        log.info(`[LMA-Audio] negotiated ${s.codec}`);
                     }
                     // Which of the two capture streams is on the wire, and whether
                     // Chromium's APM is running on it. Static per sender, so once.
                     const sourceKey = `src:${s.id}:${s.trackId}`;
                     if (s.trackId && !reportedCodecs.has(sourceKey)) {
                         reportedCodecs.add(sourceKey);
-                        console.log(
+                        log.info(
                             `[LMA-Audio] sending trackId=${s.trackId} ` +
                                 `echoCanceller=${s.echoReturnLoss !== undefined ? `ACTIVE (erl=${s.echoReturnLoss})` : 'not running'}`,
                         );
@@ -739,7 +763,7 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                     const problemThrottled = verdict.state === 'problem' && run > 5 && run % 10 !== 0;
                     if (verdict.state === 'ok' || idleHeartbeat || (verdict.state === 'problem' && !problemThrottled)) {
                         const kbps = ((s.bytes - last.bytes) * 8) / 1000 / seconds;
-                        console.log(
+                        log.info(
                             `[LMA-Audio] ${verdict.state.toUpperCase()} ${verdict.reason} | ` +
                                 `captureRatio=${window.captureRatio?.toFixed(3) ?? 'n/a'} ` +
                                 `cumCaptureRatio=${window.cumulativeCaptureRatio?.toFixed(4) ?? 'n/a'} ` +

@@ -166,11 +166,11 @@ Show the VNC live view and transcript for a virtual participant session:
 | `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart`, `diarizeSystem`, `diarizeMic` |
 | `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
 | `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
-| `call-details` | Complete call details view (transcript + summary + chat) | `callId`, `show`, `layout` |
+| `call-details` | Complete call details view (transcript + summary + chat). With all three panels it is the meeting page itself, header and tabs included, with the meeting assistant's panel open beside the tabs; the selected tab is not written to the embedding page's URL | `callId`, `show`, `layout` |
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
 | `chat` | Meeting Assist Bot chat only | `callId` |
-| `vp-details` | Virtual participant details with selectable panels | `vpId`, `show`, `layout` |
+| `vp-details` | Virtual participant details with selectable panels. Any of `transcript`, `summary` or `chat` in `show` renders the full meeting panel once the Virtual Participant has a meeting: the header and the tabs (Overview, Transcript, Screen share, Details), with the recording's player on the Transcript tab after the meeting, and the meeting assistant's panel, open from the start when `show` includes `chat` and otherwise behind the header's **Assistant** button. The selected tab is held in the embed and not written to the embedding page's URL | `vpId`, `show`, `layout` |
 | `vnc` | VNC live view of virtual participant only | `vpId` |
 | `meeting-loader` | Blank meeting starter page (for programmatic control) | `meetingTopic`, `participants`, `owner`, `autoStart` |
 | `vp-loader` | Programmatic Virtual Participant creator (accepts `LMA_CREATE_VP` postMessage) | `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword`, `autoStart` |
@@ -363,7 +363,7 @@ iframe.contentWindow.postMessage({
 iframe.contentWindow.postMessage({
   type: 'LMA_CREATE_VP',
   meetingName: 'Globex Q4 Renewal Sync',  // Required
-  meetingPlatform: 'ZOOM',                // Required: ZOOM | TEAMS | CHIME | WEBEX
+  meetingPlatform: 'ZOOM',                // Required: ZOOM | TEAMS | CHIME | WEBEX | GOOGLE_MEET
   meetingId: '1234567890',                // Required
   meetingPassword: 'optional'             // Optional
 }, targetOrigin);
@@ -435,6 +435,9 @@ window.addEventListener('message', (event) => {
     case 'LMA_MEETING_STOPPED':
       // Meeting recording has stopped
       console.log('Meeting ID:', event.data.callId);
+      if (event.data.reason === 'CONNECTION_LOST') {
+        // The connection to LMA stayed down until LMA ended the meeting
+      }
       break;
     case 'LMA_MEETING_ERROR':
       // An error occurred
@@ -446,6 +449,13 @@ window.addEventListener('message', (event) => {
   }
 });
 ```
+
+The stream-audio and meeting-loader components reconnect to LMA if their
+connection drops and continue the same meeting. `LMA_MEETING_STOPPED` carries
+`reason: 'CONNECTION_LOST'` when the connection could not be restored within
+about a minute, so LMA ended the meeting and the component stopped streaming; it
+has no `reason` when the meeting was stopped by the user or by
+`LMA_STOP_MEETING`. See [Reconnection](websocket-streaming-api.md#reconnection).
 
 #### Call Details Events
 
@@ -701,6 +711,10 @@ Use the `show` parameter to control which panels appear:
 |-----------|-----------------|
 | `call-details` | `transcript`, `summary`, `chat` |
 | `vp-details` | `vnc`, `transcript`, `summary`, `chat`, `details` |
+
+In `vp-details`, `transcript`, `summary` and `chat` are not separate panels: any
+of them shows the whole meeting panel (header and tabs), beside or under the
+`vnc` and `details` panels.
 
 > **Note**: For single-purpose components (`transcript`, `summary`, `chat`, `vnc`), the `show` parameter is automatically set. You only need `show` when using `call-details` or `vp-details` and want to customize which panels appear.
 

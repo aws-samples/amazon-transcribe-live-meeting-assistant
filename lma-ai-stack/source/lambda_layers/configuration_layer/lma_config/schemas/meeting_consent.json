@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/meeting_consent",
+  "title": "Meeting consent",
+  "description": "Whether participants are told that a meeting is recorded and transcribed, and whether their consent is needed first. This is the deployment's default; a meeting can be started with a different choice unless that is turned off below. What LMA records is supporting evidence of what participants said, not a legal determination of consent; see the Meeting Consent documentation.",
+  "sectionLabel": "Meeting Consent",
+  "appliesText": "A saved change applies to meetings whose consent starts after the save; a meeting already under way keeps the mode and rule it started with.",
+  "order": 13,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "order": 0,
+      "type": "string",
+      "title": "Consent mode",
+      "description": "Off: no notice. Notify: a notice is posted and the meeting is recorded and transcribed unless a participant objects, which stops it. Opt-in: a request is posted and nothing is recorded or transcribed until the consent rule below is met; an objection stops it again.",
+      "enum": ["off", "notify", "opt_in"],
+      "enumLabels": {
+        "off": "Off",
+        "notify": "Notify (participants may object)",
+        "opt_in": "Opt-in (consent needed first)"
+      }
+    },
+    "consentRule": {
+      "order": 1,
+      "type": "string",
+      "title": "Consent rule (opt-in)",
+      "description": "Each participant: every participant present replies with consent. Owner attests: the meeting's owner confirms that everyone agreed, for example out loud or in the invitation's terms.",
+      "enum": ["each_participant", "owner_attests"],
+      "enumLabels": {
+        "each_participant": "Each participant consents",
+        "owner_attests": "The meeting owner attests that everyone agreed"
+      },
+      "dependsOn": { "field": "mode", "value": "opt_in" }
+    },
+    "notifyNoticeText": {
+      "order": 2,
+      "type": "string",
+      "title": "Notice text (notify)",
+      "description": "Posted when a notify meeting starts. {LMA_USER} is the person using LMA, {meeting} the meeting's name, and {consent_phrase} and {objection_phrase} the first phrase of each list below. A Virtual Participant posts a line after it saying how to reply (Type or say \"LMA, I consent\" or \"LMA, I object\"), so the text needs no reply instruction of its own.",
+      "format": "textarea",
+      "rows": 3,
+      "minLength": 1,
+      "maxLength": 2000,
+      "dependsOn": { "field": "mode", "value": "notify" }
+    },
+    "optInNoticeText": {
+      "order": 3,
+      "type": "string",
+      "title": "Consent request text (opt-in)",
+      "description": "Posted when an opt-in meeting starts. The same placeholders as the notice text, and the same line on how to reply follows it.",
+      "format": "textarea",
+      "rows": 3,
+      "minLength": 1,
+      "maxLength": 2000,
+      "dependsOn": { "field": "mode", "value": "opt_in" }
+    },
+    "consentPhrases": {
+      "order": 4,
+      "type": "string",
+      "title": "Consent phrases",
+      "description": "Comma-separated. A reply containing one of these, as whole words and ignoring case and punctuation, is read as consent, unless it also contains an objection phrase.",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "objectionPhrases": {
+      "order": 5,
+      "type": "string",
+      "title": "Objection phrases",
+      "description": "Comma-separated. A reply containing one of these is read as an objection. Objections are looked for first, so \"I do not consent\" is an objection although it contains \"consent\".",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "allowPerMeetingOverride": {
+      "order": 6,
+      "type": "boolean",
+      "title": "Allow a different choice per meeting",
+      "description": "On: whoever starts a meeting may choose another mode or rule for it. Off: a meeting may only use this mode and rule or a stricter one."
+    },
+    "keepEvidenceScreenshots": {
+      "order": 7,
+      "type": "boolean",
+      "title": "Keep evidence screenshots",
+      "description": "On: screenshots kept as consent evidence stay with the meeting until it is deleted. Off: each screenshot is deleted as soon as it has been checked, and only the check's result is kept."
+    },
+    "verifierModelId": {
+      "order": 8,
+      "type": "string",
+      "title": "Evidence check model",
+      "description": "The Amazon Bedrock vision model that checks a consent evidence screenshot: whether the notice is visible, which replies are visible and from whom, and whether anybody objected. Its answer is supporting evidence only; it never changes a meeting's consent status. Image-capable models only.",
+      "enum": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5"
+      ]
+    },
+    "clientsWithoutConsent": {
+      "order": 9,
+      "type": "string",
+      "title": "Streaming clients without a consent step",
+      "description": "What the WebSocket transcriber does, when the mode is Notify or Opt-in, with a meeting from a streaming client that shows no consent step: the browser extension, the Stream Audio embed, and Desktop Capture App builds from before the consent step. Accept with a warning: the meeting is recorded and transcribed as before, with no consent record, and a warning is logged. Refuse: the meeting is not recorded or transcribed, and the client is told why. Choose Refuse once every client in use has been updated.",
+      "enum": ["accept_with_warning", "reject"],
+      "enumLabels": {
+        "accept_with_warning": "Accept with a warning (no consent record)",
+        "reject": "Refuse the meeting"
+      }
+    },
+    "leaveOnObjection": {
+      "order": 10,
+      "type": "boolean",
+      "title": "Virtual Participant leaves after an objection",
+      "description": "On: when a participant objects, in the meeting chat or aloud, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
+    },
+    "readSpokenReplies": {
+      "order": 11,
+      "type": "boolean",
+      "title": "Read spoken replies",
+      "description": "On: the Virtual Participant also reads consent replies and objections said aloud and addressed to LMA (\"LMA, I consent\", \"LMA, I object\"). While consent is awaited it sends the meeting audio to the meeting's transcription engine to hear them; nothing it hears is recorded or kept except the replies. Off: it reads replies in the meeting chat only, and sends no meeting audio anywhere until consent is given."
+    }
+  },
+  "additionalProperties": false
+}

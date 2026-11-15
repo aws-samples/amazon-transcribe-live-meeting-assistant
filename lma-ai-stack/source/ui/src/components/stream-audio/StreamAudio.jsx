@@ -1,9 +1,9 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
 import {
@@ -25,7 +25,6 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import * as ReactUseWebSocket from 'react-use-websocket';
 import { generateClient } from 'aws-amplify/api';
 import { fetchUserAttributes } from 'aws-amplify/auth';
 
@@ -34,14 +33,23 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
-
-// react-use-websocket ships a CJS bundle. Vite 8 / rolldown exports the CJS
-// module.exports OBJECT as the ESM default (a "double-wrapped default"), so the
-// hook is not the default itself but one level in. Unwrap to whichever level is
-// actually the function so this works regardless of bundler interop. (Same
-// interop class as the react-audio-player fix; blanks the page if wrong.)
-const useWebSocket =
-  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
+import { uploadErrorMessage, uploadLanguageLabel } from './upload-language';
+import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { toStreamingFrame } from '../common/streaming-frame';
+import ConsentStep from './ConsentStep';
+import {
+  captureEvidenceScreenshot,
+  captureStopped,
+  consentPayload,
+  consentRequired,
+  describeConsentState,
+  frameToJpeg,
+  parseServerFrame,
+  renderNotice,
+  START_REFUSALS,
+  startBlockedReason,
+} from './consent';
+import { CONNECTION_LOST_MESSAGE } from './transcriber-stream';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
@@ -64,7 +72,7 @@ const UPLOAD_PHASE = {
 // AppSync client — reused only for the createUploadMeeting mutation.
 const appsyncClient = generateClient();
 
-// Only the field this form needs; the Transcription Engine page owns the full record.
+// Only the field this form needs; the Configuration page's Transcription Engine section owns the full record.
 const getAsrEngineDefaultQuery = `
   query GetAsrConfig($AsrConfigId: ID!) {
     getAsrConfig(AsrConfigId: $AsrConfigId) {
@@ -91,8 +99,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Distinct from AsrDiarizationAvailable, which is also false for a
   // transcription-only bundle.
   const asrEngineAvailable = `${settings?.AsrEngineAvailable}` === 'true';
-  // Which engine transcribes streaming meetings is a deployment setting on the ASR
-  // Config page, not a per-meeting choice. It is read live from the config table so
+  // Which engine transcribes streaming meetings is a deployment setting in the
+  // Transcription Engine section of the Configuration page, not a per-meeting
+  // choice. It is read live through getAsrConfig so
   // this form follows what an admin has set: the capture sample rate and the
   // speaker-count field below depend on it.
   const [asrEngineDefault, setAsrEngineDefault] = useState('transcribe');
@@ -113,13 +122,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       cancelled = true;
     };
   }, [asrEngineAvailable]);
-  // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
-  // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
-  // since the websocket server's JWT verifier only strictly requires access/id tokens.
-  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
-  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
-  const REFRESH_TOKEN = '';
-
   // In Amplify v6 the `user` object from the Authenticator does NOT reliably
   // expose `.attributes.email`; we must call fetchUserAttributes() for email.
   // Fall back to the Cognito loginId / username which are available on `user`.
@@ -193,6 +195,23 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
 
+  // --- Meeting consent (docs/meeting-consent.md) ---------------------------
+  // The settings come from the transcriber over this page's socket; a
+  // transcriber that does not answer leaves them null and no step is shown.
+  const [consentSettings, setConsentSettings] = useState(null);
+  const [consentStep, setConsentStep] = useState({ confirmed: false, method: '', statement: '' });
+  const [consentEvidence, setConsentEvidence] = useState({ dataUrl: '', capturing: false, error: '' });
+  const [consentFrame, setConsentFrame] = useState(null);
+  const [evidenceFrame, setEvidenceFrame] = useState(null);
+  const [startError, setStartError] = useState('');
+  // Set when the connection stayed down until the transcriber ended the meeting.
+  const [connectionLost, setConnectionLost] = useState(false);
+  const recordingRef = useRef(false);
+  // Set when the transcriber already ended the meeting, so stopping sends no END.
+  const skipEndRef = useRef(false);
+  // Set when the transcriber refused the START itself: no meeting was created.
+  const refusedRef = useRef(false);
+
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
@@ -206,6 +225,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
   const [uploadedCallId, setUploadedCallId] = useState('');
+  // The language createUploadMeeting says the recording is transcribed in.
+  const [uploadedLanguage, setUploadedLanguage] = useState(null);
   const uploadXhrRef = useRef(null);
 
   useEffect(() => {
@@ -221,40 +242,44 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return () => clearInterval(interval);
   }, [recording]);
 
-  const getSocketUrl = useCallback(() => {
-    console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
-    return new Promise((resolve) => {
-      if (settings.WSEndpoint) {
-        console.log(`
-          DEBUG - [${new Date().toISOString()}]: Resolved Websocket URL to ${settings.WSEndpoint}
-        `);
-        resolve(settings.WSEndpoint);
-      }
-    });
-  }, [settings.WSEndpoint]);
-
-  const { sendMessage } = useWebSocket(getSocketUrl, {
-    queryParams: {
-      authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: ID_TOKEN,
-      refresh_token: REFRESH_TOKEN,
-    },
+  // Every connection that opens during a meeting sends the meeting's START
+  // again before anything else, so the transcriber continues the meeting
+  // (see transcriber-stream.js).
+  const transcriber = useTranscriberSocket({
+    endpoint: settings.WSEndpoint,
+    session: currentSession,
     onOpen: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onOpen Event: ${JSON.stringify(event)}
-      `);
+      // Read the consent settings on every connection, so a reconnect after
+      // the transcriber refused or ended a meeting shows the settings in force.
+      event.target.send(JSON.stringify({ callEvent: 'CONSENT_SETTINGS' }));
     },
-    onClose: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onClose Event: ${JSON.stringify(event)}
-      `);
+    onMessage: (event) => {
+      const frame = parseServerFrame(event.data);
+      if (!frame) return;
+      if (frame.event === 'CONSENT_SETTINGS') {
+        setConsentSettings(frame);
+        return;
+      }
+      if (frame.event !== 'CONSENT_STATE') return;
+      if (frame.evidence || String(frame.code || '').startsWith('EVIDENCE_')) {
+        setEvidenceFrame(frame);
+        return;
+      }
+      setConsentFrame(frame);
+      if (captureStopped(frame) && recordingRef.current) {
+        // The transcriber has ended the meeting: nothing more is sent for it, and a
+        // reconnect does not send its START again.
+        transcriber.abandon();
+        skipEndRef.current = true;
+        refusedRef.current = START_REFUSALS.has(frame.code);
+        setRecording(false);
+      }
     },
-    onError: (event) => {
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Websocket onError Event: ${JSON.stringify(event)}
-      `);
+    onResumeExpired: () => {
+      // The transcriber has ended the meeting, so stopping sends no END.
+      setConnectionLost(true);
+      setRecording(false);
     },
-    shouldReconnect: () => true,
   });
 
   const handleCallIdChange = (e) => {
@@ -312,6 +337,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return merger;
   };
 
+  // Consent is per meeting: a confirmation or screenshot given for one stream is
+  // never sent with the next.
+  const resetConsentStep = () => {
+    setConsentStep({ confirmed: false, method: '', statement: '' });
+    setConsentEvidence({ dataUrl: '', capturing: false, error: '' });
+  };
+
   const stopRecording = async () => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
     if (audioProcessor.current) {
@@ -328,14 +360,28 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         DEBUG - [${new Date().toISOString()}]: Error trying to stop recording. AudioWorklet Processor node is not active.
       `);
     }
-    if (streamingStarted && !recording) {
+    if (streamingStarted && !recording && skipEndRef.current) {
+      // The transcriber ended this meeting for its consent; there is nothing to END.
+      skipEndRef.current = false;
+      setStreamingStarted(false);
+      resetConsentStep();
+      // A refused START created no meeting, so there is none to open.
+      if (refusedRef.current) setRecordedMeetingId('');
+      refusedRef.current = false;
+      setCallMetaData({
+        ...callMetaData,
+        callId: crypto.randomUUID(),
+      });
+    } else if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
       // eslint-disable-next-line prettier/prettier
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Send Call END msg: ${JSON.stringify(callMetaData)}
       `);
-      sendMessage(JSON.stringify(callMetaData));
+      // Nothing is sent if the transcriber already ended the meeting.
+      transcriber.end(toStreamingFrame(callMetaData));
       setStreamingStarted(false);
+      resetConsentStep();
       setCallMetaData({
         ...callMetaData,
         callId: crypto.randomUUID(),
@@ -365,6 +411,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return callMetaDataCopy;
   };
 
+  // The notice the consent step shows, as START records it.
+  const noticeText = consentRequired(consentSettings)
+    ? renderNotice(consentSettings.noticeTemplate, {
+        lmaUser: callMetaData.agentId,
+        meeting: meetingTopic,
+        consentPhrase: consentSettings.consentPhrase,
+        objectionPhrase: consentSettings.objectionPhrase,
+      })
+    : '';
+
   const startRecording = async () => {
     console.log(`
       DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
@@ -391,12 +447,37 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
       recordingCallMetaData.callEvent = 'START';
 
+      // The consent step travels with START only: the transcriber records it on
+      // the meeting once the meeting exists, and gates capture on the record.
+      // It is sent even when no step was shown -- as mode off when the settings
+      // were not known -- so the transcriber refuses an opt-in meeting this page
+      // did not ask about rather than taking it for a client without the step.
+      const startFrame = {
+        ...toStreamingFrame(recordingCallMetaData),
+        consent: consentPayload(consentRequired(consentSettings) ? consentSettings : { mode: 'off' }, consentStep, {
+          lmaUser: recordingCallMetaData.agentId,
+          meetingName: meetingTopic,
+          noticeText,
+        }),
+      };
       // eslint-disable-next-line prettier/prettier
-      console.log(
-        `DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`,
-      );
-      sendMessage(JSON.stringify(recordingCallMetaData));
+      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(startFrame)}`);
+      setConsentFrame(null);
+      setEvidenceFrame(null);
+      skipEndRef.current = false;
+      setConnectionLost(false);
+      transcriber.begin(startFrame);
       setStreamingStarted(true);
+      if (consentRequired(consentSettings) && consentEvidence.dataUrl) {
+        transcriber.sendControl(
+          JSON.stringify({
+            callEvent: 'CONSENT_EVIDENCE',
+            image: consentEvidence.dataUrl,
+            capturedAt: consentEvidence.capturedAt,
+            note: 'Captured on the Stream Audio page before streaming started',
+          }),
+        );
+      }
 
       displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);
       micAudioSource.current = audioContext.current.createMediaStreamSource(micStream.current);
@@ -429,7 +510,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
       audioProcessor.current.port.onmessage = (event) => {
         // this is pcm audio
-        sendMessage(event.data);
+        transcriber.sendAudio(event.data);
       };
       channelMerger.current.connect(audioProcessor.current);
     } catch (error) {
@@ -447,11 +528,15 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   }
 
   useEffect(() => {
+    recordingRef.current = recording;
     toggleRecording();
   }, [recording]);
 
   const handleRecording = () => {
     if (!recording) {
+      const blocked = startBlockedReason(consentSettings, consentStep);
+      setStartError(blocked);
+      if (blocked) return recording;
       // eslint-disable-next-line no-restricted-globals
       agreeToRecord.current = confirm(settings.recordingDisclaimer);
 
@@ -466,6 +551,51 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       setRecording(!recording);
     }
     return recording;
+  };
+
+  // --- Consent step handlers ----------------------------------------------
+  const handleCaptureEvidence = async () => {
+    setConsentEvidence((prev) => ({ ...prev, capturing: true, error: '' }));
+    try {
+      // While streaming, the shared tab is already being captured: take a frame
+      // of it and send it at once. Before, ask for the meeting's tab or window.
+      const sharedTrack = recording ? displayStream.current?.getVideoTracks()[0] : undefined;
+      const dataUrl = sharedTrack ? await frameToJpeg(sharedTrack) : await captureEvidenceScreenshot();
+      const capturedAt = new Date().toISOString();
+      if (recording) {
+        transcriber.sendControl(
+          JSON.stringify({
+            callEvent: 'CONSENT_EVIDENCE',
+            image: dataUrl,
+            capturedAt,
+            note: 'Captured from the streamed tab on the Stream Audio page',
+          }),
+        );
+      }
+      setConsentEvidence({ dataUrl, capturedAt, capturing: false, error: '' });
+    } catch (error) {
+      setConsentEvidence((prev) => ({
+        ...prev,
+        capturing: false,
+        error: `No screenshot was taken: ${error?.message || error}`,
+      }));
+    }
+  };
+
+  const handleObjection = (participantName) => {
+    transcriber.sendControl(
+      JSON.stringify({
+        callEvent: 'CONSENT_OBJECTION',
+        ...(participantName ? { participantName } : {}),
+        source: 'voice',
+      }),
+    );
+    // The transcriber ends the meeting on the objection, so the meeting ends
+    // here with no END of its own (after a reconnect, if the objection waits for one).
+    transcriber.end(null);
+    // The transcriber ends the meeting on an objection; stop capturing here at once.
+    skipEndRef.current = true;
+    setRecording(false);
   };
 
   const toggleMicrophoneEnabled = () => {
@@ -518,6 +648,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     setUploadProgress(0);
     setUploadError(null);
     setUploadedCallId('');
+    setUploadedLanguage(null);
     setUploadPhase(UPLOAD_PHASE.IDLE);
   };
 
@@ -539,6 +670,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     setUploadError(null);
     setUploadProgress(0);
     setUploadedCallId('');
+    setUploadedLanguage(null);
 
     const file = uploadFiles[0];
     if (!file) {
@@ -561,9 +693,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       const meetingPrefix = (meetingTopic || 'Uploaded Meeting').replace(/[\/?#%\+&]/g, '|');
       const input = {
         meetingTopic: meetingPrefix,
-        agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
-        fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
-        toNumber: callMetaData.toNumber || SYSTEM,
+        localSpeakerName: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
+        remoteSpeakerName: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
         filename: file.name,
         contentType: file.type || 'application/octet-stream',
         fileSize: file.size,
@@ -586,11 +717,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
       // 3. Hand off to the backend pipeline.
       setUploadedCallId(result.callId);
+      setUploadedLanguage(result.transcriptionLanguage || null);
       setUploadProgress(100);
       setUploadPhase(UPLOAD_PHASE.DONE);
     } catch (err) {
       console.error('Upload failed:', err);
-      setUploadError(err.message || String(err));
+      setUploadError(uploadErrorMessage(err));
       setUploadPhase(UPLOAD_PHASE.ERROR);
     }
   };
@@ -627,6 +759,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     <div>
       <form onSubmit={(e) => e.preventDefault()}>
         <Form
+          errorText={mode === MODE_STREAM && !recording ? startError : undefined}
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               {mode === MODE_UPLOAD && uploadInProgress && (
@@ -834,6 +967,42 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
               )}
             </Container>
 
+            {mode === MODE_STREAM && connectionLost && !recording && (
+              <Alert
+                type="warning"
+                header="Connection lost: meeting ended"
+                dismissible
+                onDismiss={() => setConnectionLost(false)}
+              >
+                {CONNECTION_LOST_MESSAGE}
+              </Alert>
+            )}
+
+            {mode === MODE_STREAM && consentSettings?.available === false && (
+              <Alert type="warning" header="Meeting consent settings unavailable">
+                {consentSettings.message} The transcriber applies the settings in force when you start.
+              </Alert>
+            )}
+
+            {mode === MODE_STREAM && consentRequired(consentSettings) && (
+              <ConsentStep
+                settings={consentSettings}
+                noticeText={noticeText}
+                step={consentStep}
+                onStepChange={(next) => {
+                  setConsentStep(next);
+                  setStartError('');
+                }}
+                evidence={consentEvidence}
+                onCaptureEvidence={handleCaptureEvidence}
+                onClearEvidence={() => setConsentEvidence({ dataUrl: '', capturing: false, error: '' })}
+                streaming={recording}
+                status={describeConsentState(consentFrame)}
+                evidenceStatus={describeConsentState(evidenceFrame)}
+                onObjection={handleObjection}
+              />
+            )}
+
             {mode === MODE_UPLOAD && (
               <Container
                 header={
@@ -951,6 +1120,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                         <span>
                           Meeting ID: <code>{uploadedCallId}</code>
                         </span>
+                        {uploadLanguageLabel(uploadedLanguage) && (
+                          <span data-testid="upload-language">
+                            Transcription language: {uploadLanguageLabel(uploadedLanguage)}
+                          </span>
+                        )}
                         <Link href={`#/calls/${encodeURIComponent(uploadedCallId)}`} external>
                           Open meeting detail page
                         </Link>

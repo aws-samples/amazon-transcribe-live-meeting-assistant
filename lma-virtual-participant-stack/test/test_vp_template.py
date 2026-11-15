@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Unit tests for the Virtual Participant CloudFormation template.
 
@@ -427,6 +427,97 @@ def test_microvm_soft_failures_route_to_the_existing_failure_state(
     assert "MarkVPFailed" in states
 
 
+# The condition every writer of a VP's status outside the container carries, so
+# none of them can overwrite a row whose outcome is already settled. Declared by
+# VPTaskReaperFunction (in Python, inline in this template) and used verbatim by
+# the state-machine states below; the container's entrypoint.sh carries the same
+# expression on its BOOTING write.
+TERMINAL_STATUS_GUARD = (
+    "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))"
+)
+
+# Every state-machine state that writes a status to the VP record, with the
+# attribute values its update is expected to need beyond the guard's four.
+STATUS_WRITING_STATES = {
+    "MarkVPFailed": {":err", ":now"},
+    "MarkWaitingForCapacity": {":status", ":now"},
+}
+
+
+@pytest.mark.parametrize("state_name", sorted(STATUS_WRITING_STATES))
+def test_status_writing_states_carry_the_terminal_status_guard(
+    template: dict, state_name: str
+) -> None:
+    """A settled VP must keep its outcome.
+
+    Nothing offline can evaluate a DynamoDB condition expression — the Step
+    Functions SDK integration passes it through as an opaque string and
+    ValidateStateMachineDefinition does not look inside it — so the guard is
+    asserted literally, and against the reaper's wording rather than a copy, so
+    the three writers cannot drift apart.
+    """
+    states = _rendered_states(template, is_microvm=False)
+    parameters = states[state_name]["Parameters"]
+    assert parameters.get("ConditionExpression") == TERMINAL_STATUS_GUARD
+    assert parameters["ExpressionAttributeNames"]["#s"] == "status"
+
+
+def test_the_reaper_uses_the_same_terminal_status_guard(raw: str) -> None:
+    """The guard above is the reaper's, not a second opinion about it."""
+    # The reaper builds it as an adjacent pair of Python string literals, so the
+    # comparison is against the concatenation with the quoting removed.
+    reaper_source = raw[raw.index("def _mark_failed("):]
+    reaper_source = reaper_source[: reaper_source.index("ExpressionAttributeNames")]
+    collapsed = re.sub(r"'\s*\n\s*'", "", reaper_source)
+    assert TERMINAL_STATUS_GUARD in collapsed
+
+
+@pytest.mark.parametrize("state_name", sorted(STATUS_WRITING_STATES))
+def test_status_writing_states_declare_no_unused_expression_values(
+    template: dict, state_name: str
+) -> None:
+    """DynamoDB rejects an update that declares a value it never references.
+
+    It rejects it at run time, which for these states is in the middle of a
+    launch, so the VP is left showing whatever status it had instead of the one
+    the state exists to write.
+    """
+    states = _rendered_states(template, is_microvm=False)
+    parameters = states[state_name]["Parameters"]
+    referenced = " ".join(
+        (parameters["UpdateExpression"], parameters.get("ConditionExpression", ""))
+    )
+    declared = set(parameters["ExpressionAttributeValues"])
+    unused = {value for value in declared if value not in referenced}
+    assert not unused, f"{state_name} declares unreferenced values: {sorted(unused)}"
+    # And the other direction: every placeholder used has to be declared.
+    used = set(re.findall(r":[A-Za-z][A-Za-z0-9_]*", referenced))
+    assert used - declared == set(), f"{state_name} uses undeclared values"
+    expected = STATUS_WRITING_STATES[state_name] | {
+        ":failed",
+        ":completed",
+        ":ended",
+        ":cancelled",
+    }
+    assert declared == expected
+
+
+def test_booting_status_write_carries_the_terminal_status_guard() -> None:
+    """The container's own first status write is guarded the same way.
+
+    entrypoint.sh writes BOOTING before Node starts, with the AWS CLI rather
+    than the SDK, and swallows every failure — so a conditional-check failure
+    there is simply a no-op, which is the intent for a VP that was cancelled
+    while its task was still being placed.
+    """
+    entrypoint = (TEMPLATE.parent / "backend" / "entrypoint.sh").read_text()
+    booting = entrypoint[entrypoint.index("push_booting_status() {"):]
+    booting = booting[: booting.index("\n}")]
+    assert f'--condition-expression "{TERMINAL_STATUS_GUARD}"' in booting
+    for value in (":failed", ":completed", ":ended", ":cancelled"):
+        assert f'\\"{value}\\"' in booting, f"{value} is used but never declared"
+
+
 def test_scheduled_ecs_target_is_unchanged(template: dict) -> None:
     """The ECS scheduled-meeting target must be preserved exactly.
 
@@ -745,27 +836,58 @@ def test_teams_watchdog_defaults_match_the_container(template: dict) -> None:
     assert _numeric("pollsBeforeEndMissing") == params["VPPollsBeforeEndMissing"]["Default"]
 
 
-def test_teams_watchdog_parameters_reach_the_vp_stack_from_lma_main(template: dict) -> None:
-    """A parameter only the nested stack knows about cannot be set by an operator.
+def test_the_teams_watchdog_values_are_settings_not_main_stack_parameters(template: dict) -> None:
+    """Since 0.4.0 an operator sets these on the Configuration page, not with parameters.
 
-    lma-main.yaml is what a deployment actually launches, so each of these has to
-    exist there with the same default and bounds and be passed through to
-    VIRTUALPARTICIPANTSTACK.
+    lma-main.yaml declares and passes none of them; the nested stack's own
+    parameters stay at their defaults as the task's fallback, and those defaults
+    are the settings' shipped ones.
     """
+    import json
+
     main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
     passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
-
+    shipped = json.loads(
+        (
+            TEMPLATE.parents[1]
+            / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json"
+        ).read_text()
+    )["virtual_participant"]
+    # Only the settings that were a parameter; a newer one never had one.
+    by_parameter = {
+        spec["formerParameter"]: spec["default"] for spec in shipped.values() if "formerParameter" in spec
+    }
     for parameter in TEAMS_WATCHDOG_PARAMS.values():
-        assert parameter in main["Parameters"], f"{parameter} missing from lma-main.yaml"
-        assert passed.get(parameter) == {"Ref": parameter}, (
-            f"{parameter} is not passed through to the VP stack"
-        )
-        nested = template["Parameters"][parameter]
-        top = main["Parameters"][parameter]
-        for field in ("Default", "MinValue", "MaxValue"):
-            assert top[field] == nested[field], (
-                f"{parameter} {field} differs between lma-main.yaml and the VP stack"
-            )
+        assert parameter not in main["Parameters"], f"{parameter} is still a main-stack parameter"
+        assert parameter not in passed, f"{parameter} is still passed to the VP stack"
+        assert template["Parameters"][parameter]["Default"] == by_parameter[parameter]
+
+
+def test_the_display_name_is_a_setting_with_the_parameter_as_its_fallback(template: dict) -> None:
+    """The display name is set on the Configuration page; the parameter is the fallback.
+
+    lma-main.yaml neither declares nor passes LMAIdentity, so the nested stack's
+    parameter is always at its default, and that default must be the setting's
+    shipped one or a VP that cannot read the configuration joins under a
+    different name from one that can.
+    """
+    import json
+
+    main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
+    passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+    shipped = json.loads(
+        (
+            TEMPLATE.parents[1]
+            / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/setting_defaults.json"
+        ).read_text()
+    )["virtual_participant"]["displayName"]
+    assert shipped["formerParameter"] == "LMAIdentity"
+    assert "LMAIdentity" not in main["Parameters"]
+    assert "LMAIdentity" not in passed
+    assert template["Parameters"]["LMAIdentity"]["Default"] == shipped["default"]
+    assert _task_definition_env(template)["LMA_IDENTITY"] == {"Ref": "LMAIdentity"}
+    details = (TEMPLATE.parent / "backend" / "src" / "details.ts").read_text()
+    assert f"process.env.LMA_IDENTITY || '{shipped['default']}'" in details
 
 
 def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -> None:
@@ -1335,10 +1457,6 @@ def _scheduler_source(raw: str) -> str:
     for i, line in enumerate(lines):
         if "ZipFile: |" not in line:
             continue
-        # Several inline functions exist in this template; pick the scheduler by
-        # the API only it calls.
-        if not any("create_schedule" in nxt for nxt in lines[i : i + 200]):
-            continue
         indent = len(line) - len(line.lstrip()) + 2
         body = []
         for candidate in lines[i + 1 :]:
@@ -1348,7 +1466,10 @@ def _scheduler_source(raw: str) -> str:
             if len(candidate) - len(candidate.lstrip()) < indent:
                 break
             body.append(candidate[indent:])
-        return "\n".join(body)
+        # Several inline functions exist in this template; pick the scheduler by
+        # the API only it calls.
+        if any("scheduler_client.create_schedule(" in code for code in body):
+            return "\n".join(body)
     raise AssertionError("could not find the VPScheduler inline code")
 
 
@@ -1531,6 +1652,175 @@ def test_scheduled_launch_fires_before_the_meeting_starts(raw: str) -> None:
         assert 0 < (meeting - fires_at).total_seconds() <= 300, launch_type
 
 
+# Moving a schedule. updateScheduledVirtualParticipant changes the launch
+# settings of a row that is still SCHEDULED; the stream delivers that as a
+# MODIFY, and the scheduler rewrites the one schedule named for the VP.
+
+
+class _ScheduleNotFound(Exception):
+    pass
+
+
+class _MovableScheduler(_FakeScheduler):
+    """Also captures update_schedule, and can answer that there is no schedule."""
+
+    class exceptions:  # noqa: N801 -- mirrors the boto3 client attribute
+        ResourceNotFoundException = _ScheduleNotFound
+
+    def __init__(self, missing: bool = False) -> None:
+        super().__init__()
+        self.updated: list[dict] = []
+        self.missing = missing
+
+    def update_schedule(self, **kwargs):  # noqa: ANN003
+        if self.missing:
+            raise _ScheduleNotFound("no schedule")
+        self.updated.append(kwargs)
+        return {"ScheduleArn": "arn:aws:scheduler:::schedule/g/n"}
+
+
+def _future_row(**changes) -> dict:
+    """SCHEDULED_ROW, still waiting, with a meeting an hour away."""
+    import time
+
+    row = {
+        **SCHEDULED_ROW,
+        "status": {"S": "SCHEDULED"},
+        "meetingTime": {"N": str(int(time.time()) + 3600)},
+    }
+    row.update(changes)
+    return row
+
+
+def _run_modify(raw: str, old: dict, new: dict, missing: bool = False, launch_type="FARGATE"):
+    """Execute the inline scheduler on one MODIFY event."""
+    import types
+    from unittest import mock
+
+    fake = _MovableScheduler(missing=missing)
+    dynamodb = mock.Mock()
+    module = types.ModuleType("vpscheduler")
+    env = {**SCHEDULER_ENV, "VP_LAUNCH_TYPE": launch_type, "VP_TABLE_NAME": "vp-table"}
+    clients = {"scheduler": fake, "dynamodb": dynamodb}
+    with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+        "boto3.client",
+        side_effect=lambda service, *a, **k: clients.get(service, mock.Mock()),
+    ):
+        exec(compile(_scheduler_source(raw), "vpscheduler", "exec"), module.__dict__)
+        record = {
+            "eventName": "MODIFY",
+            "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "OldImage": old, "NewImage": new},
+        }
+        result = module.lambda_handler({"Records": [record]}, None)
+    assert result["statusCode"] == 200, result
+    return fake, dynamodb
+
+
+@pytest.mark.parametrize("launch_type", ["FARGATE", "MICROVM"])
+def test_a_changed_time_moves_the_one_schedule(raw: str, launch_type: str) -> None:
+    old = _future_row()
+    new_time = int(old["meetingTime"]["N"]) + 1800
+    new = _future_row(meetingTime={"N": str(new_time)}, meetingId={"S": "999"})
+    fake, dynamodb = _run_modify(raw, old, new, launch_type=launch_type)
+
+    assert fake.created == [], "a move must never create a second schedule"
+    assert len(fake.updated) == 1
+    schedule = fake.updated[0]
+    assert schedule["Name"] == "vp-1"
+    assert schedule["GroupName"] == SCHEDULER_ENV["SCHEDULE_GROUP_NAME"]
+    fires_at = datetime.strptime(schedule["ScheduleExpression"], "at(%Y-%m-%dT%H:%M:%S)")
+    assert fires_at.replace(tzinfo=timezone.utc).timestamp() == new_time - 120
+    assert "999" in schedule["Target"]["Input"]
+    assert str(new_time) in schedule["Target"]["Input"]
+    # A successful move clears any earlier note that the schedule was not moved.
+    dynamodb.update_item.assert_called_once()
+    cleared = dynamodb.update_item.call_args.kwargs
+    assert cleared["UpdateExpression"] == "REMOVE #e"
+    assert cleared["ExpressionAttributeNames"]["#e"] == "errorMessage"
+    assert cleared["ConditionExpression"] == "#s = :scheduled AND attribute_exists(#e)"
+
+
+def test_an_edit_that_moves_nothing_keeps_an_earlier_schedule_note(raw: str) -> None:
+    """The note from a failed move still applies when the next edit changes only the agenda."""
+    note = {"S": "The changed launch settings were saved, but ... launches as it was scheduled before."}
+    old = _future_row(errorMessage=note)
+    new = _future_row(errorMessage=note, agenda={"S": "1. Budget"})
+    fake, dynamodb = _run_modify(raw, old, new)
+
+    assert fake.updated == [] and fake.created == []
+    dynamodb.update_item.assert_not_called()
+
+
+def test_a_moved_schedule_is_defined_as_a_new_one_would_be(raw: str) -> None:
+    old = _future_row()
+    new = _future_row(meetingName={"S": "Renamed"})
+    fake, _ = _run_modify(raw, old, new)
+    created = _run_scheduler(raw, "FARGATE")
+    assert set(fake.updated[0]) == set(created)
+    assert fake.updated[0]["ActionAfterCompletion"] == "DELETE"
+
+
+def test_a_schedule_that_is_gone_is_not_recreated(raw: str) -> None:
+    """Already fired (and deleted itself) or cancelled: creating one would
+    launch the VP a second time."""
+    old = _future_row()
+    new = _future_row(meetingId={"S": "999"})
+    fake, dynamodb = _run_modify(raw, old, new, missing=True)
+
+    assert fake.created == []
+    dynamodb.update_item.assert_called_once()
+    note = dynamodb.update_item.call_args.kwargs
+    assert note["ConditionExpression"] == "#s = :scheduled"
+    assert "launches as it was scheduled before" in note["ExpressionAttributeValues"][":e"]["S"]
+
+
+def test_a_new_fire_time_already_due_is_not_applied(raw: str) -> None:
+    import time
+
+    old = _future_row()
+    new = _future_row(meetingTime={"N": str(int(time.time()) + 60)})
+    fake, dynamodb = _run_modify(raw, old, new)
+
+    assert fake.updated == [] and fake.created == []
+    dynamodb.update_item.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "old_changes,new_changes",
+    [
+        # The launch, cancellation or the VP's own progress.
+        ({}, {"status": {"S": "INITIALIZING"}}),
+        ({}, {"status": {"S": "CANCELLED"}}),
+        ({"status": {"S": "INITIALIZING"}}, {"status": {"S": "JOINING"}}),
+        # Writes that leave the launch fields alone.
+        ({}, {"SharedWith": {"S": "bob@example.com"}}),
+        ({}, {"agenda": {"S": "Read by the VP from the row"}}),
+        ({}, {"consentMode": {"S": "notify"}}),
+        ({}, {"errorMessage": {"S": "a note"}}),
+    ],
+)
+def test_other_writes_leave_the_schedule_alone(
+    raw: str, old_changes: dict, new_changes: dict
+) -> None:
+    old = _future_row(**old_changes)
+    new = {**old, **new_changes}
+    fake, dynamodb = _run_modify(raw, old, new)
+    assert fake.updated == [] and fake.created == []
+    dynamodb.update_item.assert_not_called()
+
+
+def test_the_scheduler_may_move_its_schedules_and_note_the_row(template: dict) -> None:
+    policies = template["Resources"]["VirtualParticipantSchedulerRole"]["Properties"]["Policies"]
+    statements = policies[0]["PolicyDocument"]["Statement"]
+    actions = {a for s in statements for a in s["Action"]}
+    assert "scheduler:UpdateSchedule" in actions
+    assert "dynamodb:UpdateItem" in actions
+    env = template["Resources"]["VirtualParticipantSchedulerFunction"]["Properties"][
+        "Environment"
+    ]["Variables"]
+    assert "VP_TABLE_NAME" in env
+
+
 def test_scheduler_lambda_can_pass_the_launcher_invoke_role(template: dict) -> None:
     """CreateSchedule needs iam:PassRole on the role it hands to Scheduler.
 
@@ -1595,3 +1885,165 @@ def test_launcher_never_raises_after_starting_a_microvm(launcher: str) -> None:
     assert "try:" in poll and "except" in poll, (
         "the wait-for-RUNNING poll must swallow transient GetMicrovm failures"
     )
+
+
+def test_the_pruner_reruns_whenever_a_version_has_been_added(template: dict) -> None:
+    """The trigger property has to be the thing a rebuild changes.
+
+    A custom resource is only invoked when one of its properties changes. The
+    image adds a version whenever ANY of its properties change -- a hook
+    timeout, a memory floor, an environment variable -- not only when the
+    source zip does, so keying the prune on the source location would skip
+    exactly the rebuilds that go unnoticed. The active version changes on every
+    successful rebuild, which is when there is something to prune.
+    """
+    props = template["Resources"]["VPMicrovmImagePruner"]["Properties"]
+    trigger = json.dumps(props.get("LatestActiveImageVersion"))
+    assert "VPMicrovmImage" in trigger and "LatestActiveImageVersion" in trigger
+    # The source location is not a sufficient trigger on its own.
+    assert "MicrovmSourceCodeLocation" not in json.dumps(props)
+
+
+def test_the_pruner_never_deletes_the_image_it_prunes(template: dict) -> None:
+    """Scoped to the one image, and to reading and removing versions only."""
+    statements = template["Resources"]["VPMicrovmImagePrunerRole"]["Properties"][
+        "Policies"
+    ][0]["PolicyDocument"]["Statement"]
+    actions = {a for s in statements for a in s["Action"]}
+    assert actions == {
+        "lambda:GetMicrovmImage",
+        "lambda:ListMicrovmImageVersions",
+        "lambda:DeleteMicrovmImageVersion",
+    }
+    assert "lambda:DeleteMicrovmImage" not in actions
+    for statement in statements:
+        assert statement["Resource"] != "*", "scope these to the image"
+        assert "VPMicrovmImage" in json.dumps(statement["Resource"])
+
+
+def test_the_pruner_logs_to_a_retained_encrypted_group(template: dict) -> None:
+    """Its log is the only record of what a prune did, or why it did nothing."""
+    resources = template["Resources"]
+    group = resources["VPMicrovmImagePrunerLogGroup"]
+    assert group["Condition"] == "UseMicrovmLaunchType"
+    assert group["Properties"]["RetentionInDays"] == {
+        "Ref": "CloudWatchLogsExpirationInDays"
+    }
+    assert group["Properties"]["KmsKeyId"] == {"Ref": "CustomerManagedEncryptionKeyArn"}
+    function = resources["VPMicrovmImagePrunerFunction"]["Properties"]
+    assert function["LoggingConfig"]["LogGroup"] == {
+        "Ref": "VPMicrovmImagePrunerLogGroup"
+    }, "without this the function logs to an auto-created, unencrypted group"
+    assert "FunctionName" in function
+
+
+def test_every_log_group_in_the_template_has_its_own_name(template: dict) -> None:
+    names = [
+        json.dumps(resource["Properties"]["LogGroupName"])
+        for resource in template["Resources"].values()
+        if resource["Type"] == "AWS::Logs::LogGroup"
+    ]
+    assert len(names) == len(set(names)), f"two log groups share a name: {names}"
+
+
+def test_both_launch_paths_lma_uses_tell_the_container_its_vp_id(raw: str, launcher: str) -> None:
+    """The container reads its own row at start, and the meeting agenda comes
+    from that row, so the VP id is the one thing every launch must carry.
+
+    The two paths LMA's own callers reach: the "start now" state machine's
+    RunTask (and the MICROVM launcher it invokes), and the VPScheduler Lambda
+    the scheduling form drives through the table's stream. The launcher refuses
+    a payload without the id rather than starting a VP that cannot find its row.
+    """
+    assert '"Name": "VIRTUAL_PARTICIPANT_ID",\n              "Value.$": "$.data.virtualParticipantId"' in raw
+    assert "{'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id}," in raw
+    assert '"VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),' in launcher
+    assert '"no virtualParticipantId in payload"' in launcher
+
+
+def test_task_role_grants_only_the_kinesis_action_the_vp_calls(template: dict) -> None:
+    """The VP writes its events one PutRecord at a time (backend/src/kinesis-stream.ts)."""
+    actions: list[str] = []
+    for policy in template["Resources"]["TaskRole"]["Properties"]["Policies"]:
+        for statement in policy.get("PolicyDocument", {}).get("Statement", []):
+            granted = statement.get("Action", [])
+            granted = [granted] if isinstance(granted, str) else granted
+            actions += [a for a in granted if isinstance(a, str) and a.startswith("kinesis:")]
+    assert actions == ["kinesis:PutRecord"]
+
+
+# ----------------------------------------------------------------------
+# What the VP stack's inline Lambdas log
+# ----------------------------------------------------------------------
+
+_ROW_SECRETS = ("secret", "25582977335241", "https://zoom.us/j/1?pwd=abc", "Budget review")
+
+
+def test_the_scheduler_logs_record_ids_not_record_contents(raw: str, caplog) -> None:
+    import logging
+    import types
+    from unittest import mock
+
+    row = {
+        **SCHEDULED_ROW,
+        "agenda": {"S": "Budget review"},
+        "joinLink": {"S": "https://zoom.us/j/1?pwd=abc"},
+    }
+    changed = {**row, "meetingName": {"S": "Renamed"}}
+    records = [
+        {"eventName": "INSERT", "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "NewImage": row}},
+        {
+            "eventName": "MODIFY",
+            "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "OldImage": row, "NewImage": changed},
+        },
+    ]
+    module = types.ModuleType("vpscheduler")
+    env = {**SCHEDULER_ENV, "VP_LAUNCH_TYPE": "FARGATE"}
+    with (
+        mock.patch.dict("os.environ", env, clear=False),
+        mock.patch(
+            "boto3.client",
+            side_effect=lambda service, *a, **k: (
+                _FakeScheduler() if service == "scheduler" else mock.Mock()
+            ),
+        ),
+        caplog.at_level(logging.DEBUG),
+    ):
+        exec(compile(_scheduler_source(raw), "vpscheduler", "exec"), module.__dict__)
+        module.lambda_handler({"Records": records}, None)
+
+    for value in _ROW_SECRETS:
+        assert value not in caplog.text, value
+    assert "vp-1" in caplog.text
+    assert "MODIFY" in caplog.text
+    assert '"changed": ["meetingName"]' in caplog.text
+
+
+def _inline_handler_source(raw: str, marker: str) -> str:
+    """The inline ZipFile body of the resource whose code contains `marker`."""
+    lines = raw.split("\n")
+    for i, line in enumerate(lines):
+        if "ZipFile: |" not in line:
+            continue
+        indent = len(line) - len(line.lstrip()) + 2
+        body = []
+        for candidate in lines[i + 1 :]:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip()) < indent:
+                break
+            body.append(candidate[indent:] if candidate.strip() else "")
+        if any(marker in code for code in body):
+            return "\n".join(body)
+    raise AssertionError(f"no inline code contains {marker!r}")
+
+
+def test_the_task_reaper_logs_the_task_not_its_environment(raw: str) -> None:
+    source = _inline_handler_source(raw, "def _build_error_message")
+    handler = source[source.index("def lambda_handler") :]
+    assert "json.dumps(event" not in handler
+    assert "detail.get('taskArn')" in handler
+
+
+def test_the_asg_deletion_handler_logs_the_request_not_the_event(raw: str) -> None:
+    source = _inline_handler_source(raw, "autoscaling = boto3.client('autoscaling')")
+    assert 'logger.info(f"Event: {event}")' not in source
+    assert "event.get('RequestType')" in source

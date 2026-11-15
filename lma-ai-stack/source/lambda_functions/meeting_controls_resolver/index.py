@@ -1,26 +1,29 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 #
 import json
 import logging
 import re
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from os import environ
+from typing import Any
+from urllib.parse import unquote, urlparse
 
 import boto3
 from appsync_utils import AppsyncRequestsGqlClient
 from boto3.dynamodb.conditions import Attr
+from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
 from gql import gql  # noqa: F401
 from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
 
-# Concurrency tuning.  AppSync + DynamoDB easily absorb dozens of in-flight
-# requests per meeting, but we cap both dials so a huge bulk delete can't
-# saturate the default requests connection pool (~10 connections) or DynamoDB
-# per-partition WCU on-demand limits.
+# Concurrency tuning.  DynamoDB easily absorbs dozens of in-flight deletes per
+# meeting, but we cap both dials so a huge bulk delete can't saturate the
+# connection pools or DynamoDB per-partition WCU on-demand limits.
 MEETING_CONCURRENCY = int(environ.get("DELETE_MEETING_CONCURRENCY", "8"))
 SEGMENT_CONCURRENCY = int(environ.get("DELETE_SEGMENT_CONCURRENCY", "16"))
 # S3 DeleteObjects hard-caps at 1000 keys per request.
@@ -35,12 +38,27 @@ LCA_CALL_EVENTS_TABLE = environ["LCA_CALL_EVENTS_TABLE"]
 S3_BUCKET_NAME = environ["S3_BUCKET_NAME"]
 S3_RECORDINGS_PREFIX = environ["S3_RECORDINGS_PREFIX"]
 S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
+# Key frames of the shared screen (docs/meeting-video.md): images under this
+# prefix, one folder per meeting, and items under PK kf#<CallId>.
+S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
+S3_CONSENT_EVIDENCE_PREFIX = environ.get("S3_CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
+# Meeting video recordings (docs/meeting-video.md): the final .mp4 under the
+# first prefix, and the Virtual Participant's in-progress segments under
+# <chunks prefix><CallId>/ until the .mp4 is assembled.
+S3_VIDEO_RECORDINGS_PREFIX = environ.get("S3_VIDEO_RECORDINGS_PREFIX", "lma-video-recordings/")
+S3_VIDEO_CHUNKS_PREFIX = environ.get("S3_VIDEO_CHUNKS_PREFIX", "lma-video-chunks/")
 VP_TABLE_NAME = environ.get("VP_TABLE_NAME")
 VP_TASK_REGISTRY_TABLE_NAME = environ.get("VP_TASK_REGISTRY_TABLE_NAME")
 KINESIS_STREAM_NAME = environ.get("KINESIS_STREAM_NAME")
 
 logger = logging.getLogger(__name__)
-ddb = boto3.resource("dynamodb")
+# Sized for MEETING_CONCURRENCY meetings each deleting SEGMENT_CONCURRENCY
+# transcript items at once, plus the other steps of a meeting's deletion;
+# botocore's default of 10 connections would serialise them.
+ddb = boto3.resource(
+    "dynamodb",
+    config=BotoCoreConfig(max_pool_connections=MEETING_CONCURRENCY * SEGMENT_CONCURRENCY + 16),
+)
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 s3_client = boto3.client("s3")
 kinesis_client = boto3.client("kinesis")
@@ -59,28 +77,52 @@ def posixify_filename(filename: str) -> str:
     return posix_filename
 
 
-def _batch_delete_prefix(bucket: str, prefix: str) -> int:
-    """List every key under ``prefix`` and delete them in ``DeleteObjects``
-    batches of up to 1000 keys.  Returns the number of keys deleted.
+def _delete_versions(bucket: str, entries: list[dict]) -> None:
+    """Delete the listed object versions; raise if S3 reports any not deleted."""
+    response = s3_client.delete_objects(Bucket=bucket, Delete={"Objects": entries, "Quiet": True})
+    errors = response.get("Errors") or []
+    if errors:
+        raise RuntimeError(
+            f"could not delete {len(errors)} object version(s) in {bucket}: "
+            + "; ".join(f"{e.get('Key')} {e.get('Code')}" for e in errors[:3])
+        )
 
-    This is ~1 round-trip per 1000 keys versus the old 1 request per key,
-    so a meeting with dozens of recording chunks / transcript files goes
-    from dozens of round-trips to one.
+
+def _version_entries(page: Mapping[str, Any], key: str | None = None) -> list[dict]:
+    """The Key and VersionId of every version and delete marker on a listing page.
+
+    With ``key``, only the entries of exactly that key: a listing by prefix also
+    answers keys that merely begin with it.
     """
-    deleted = 0
-    paginator = s3_client.get_paginator("list_objects_v2")
+    return [
+        {"Key": entry["Key"], "VersionId": entry["VersionId"]}
+        for entry in (page.get("Versions") or []) + (page.get("DeleteMarkers") or [])
+        if key is None or entry.get("Key") == key
+    ]
+
+
+def _batch_delete_prefix(bucket: str, prefix: str) -> int:
+    """Delete every version of every object under ``prefix``; the number of keys.
+
+    The recordings bucket is versioned, so deleting only the current version
+    would leave the earlier ones behind as noncurrent versions. Every version
+    and delete marker is listed and deleted in ``DeleteObjects`` batches of up
+    to 1000, as transcript_deletion deletes a transcript's files. A version S3
+    does not delete raises, so the meeting's deletion reports the failure.
+    """
+    keys: set[str] = set()
+    paginator = s3_client.get_paginator("list_object_versions")
     batch: list[dict] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []) or []:
-            batch.append({"Key": obj["Key"]})
+        for entry in _version_entries(page):
+            keys.add(entry["Key"])
+            batch.append(entry)
             if len(batch) >= S3_BATCH_DELETE_LIMIT:
-                s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
-                deleted += len(batch)
+                _delete_versions(bucket, batch)
                 batch = []
     if batch:
-        s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
-        deleted += len(batch)
-    return deleted
+        _delete_versions(bucket, batch)
+    return len(keys)
 
 
 def delete_recordings_transcripts(callid):
@@ -106,6 +148,117 @@ def delete_recordings_transcripts(callid):
                 raise
 
 
+def _recording_key_from_url(url, prefix):
+    """The recordings-bucket key a stored recording URL points at, or None.
+
+    The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, with the
+    key URL-encoded by the Virtual Participant and as-is by the transcriber. Only
+    a key in this deployment's bucket and directly under ``prefix`` is returned,
+    so a deletion stays inside that kind of recording.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if not (parsed.hostname or "").startswith(f"{S3_BUCKET_NAME}.s3."):
+        return None
+    key = unquote(parsed.path.lstrip("/"))
+    name = key[len(prefix) :]
+    if not key.startswith(prefix) or not name or "/" in name:
+        return None
+    return key
+
+
+def _video_key_from_url(url):
+    """The key a stored VideoRecordingUrl points at, under the video prefix."""
+    return _recording_key_from_url(url, S3_VIDEO_RECORDINGS_PREFIX)
+
+
+def _delete_stored_recording(key, callid, kind):
+    """Delete every version of one recording file.
+
+    1 if the file had a version and S3 deleted them all, 0 if it had none left
+    (a transcriber recording named by RecordingUrl has usually been removed
+    already by the CallId-prefix scan, so 0 is common). A version S3 does not
+    delete is logged and raises, as it does for the prefix scan, so the meeting
+    record that names the file is kept and the deletion can be run again.
+    """
+    versions = []
+    paginator = s3_client.get_paginator("list_object_versions")
+    for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=key):
+        versions.extend(_version_entries(page, key))
+    if not versions:
+        return 0
+    errors = []
+    for start in range(0, len(versions), S3_BATCH_DELETE_LIMIT):
+        response = s3_client.delete_objects(
+            Bucket=S3_BUCKET_NAME,
+            Delete={"Objects": versions[start : start + S3_BATCH_DELETE_LIMIT], "Quiet": True},
+        )
+        errors.extend(response.get("Errors") or [])
+    for error in errors:
+        logger.error(
+            "Could not delete %s recording %s of %s: %s",
+            kind,
+            error.get("Key"),
+            callid,
+            error.get("Code"),
+        )
+    if errors:
+        raise RuntimeError(
+            f"could not delete {len(errors)} version(s) of the {kind} recording of {callid}"
+        )
+    return 1
+
+
+def delete_audio_recording(callid, audio_url=None):
+    """Delete the audio recording file the meeting record's RecordingUrl names.
+
+    delete_recordings_transcripts removes the files whose names begin with the
+    meeting's CallId, which is how the transcriber names its recordings. The
+    Virtual Participant names its file from the meeting name and the time the
+    recording was written, so that file is found only through the URL stored on
+    the meeting. Returns 1 when a file was deleted and 0 when there was none;
+    raises when S3 does not delete one of its versions (see
+    _delete_stored_recording).
+    """
+    if not callid:
+        return 0
+    stored = _recording_key_from_url(audio_url, S3_RECORDINGS_PREFIX)
+    if not stored:
+        return 0
+    deleted = _delete_stored_recording(stored, callid, "audio")
+    if deleted:
+        logger.info("Deleted audio recording %s for %s", stored, callid)
+    return deleted
+
+
+def delete_video_recordings(callid, video_url=None):
+    """Delete the meeting's video recording and any leftover recording segments.
+
+    Two keys are known exactly, so only those are deleted: the file the meeting
+    record's VideoRecordingUrl names, and the Virtual Participant's segments
+    under ``<chunks prefix><CallId>/``, a folder named with the CallId as it is
+    (the trailing slash keeps one meeting's folder from matching another whose
+    id merely begins the same way). The video file names themselves are not
+    searched: both producers turn the CallId into a file name by replacing
+    characters, so two meetings can share one, and a name is no proof of whose
+    file it is. Returns the number of recording files deleted (0 or 1); raises
+    when S3 does not delete one of their versions.
+    """
+    if not callid:
+        return 0
+    deleted = 0
+    stored = _video_key_from_url(video_url)
+    if stored:
+        deleted = _delete_stored_recording(stored, callid, "video")
+    segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
+    if deleted or segments:
+        logger.info(
+            "Deleted %d video recording(s) and %d segment(s) for %s", deleted, segments, callid
+        )
+    return deleted
+
+
 def get_call_details(appsync_session, schema, callid):
     try:
         query = dsl_gql(
@@ -118,6 +271,7 @@ def get_call_details(appsync_session, schema, callid):
                     schema.Call.Owner,
                     schema.Call.SharedWith,
                     schema.Call.RecordingUrl,
+                    schema.Call.VideoRecordingUrl,
                 )
             )
         )
@@ -135,37 +289,39 @@ def get_call_details(appsync_session, schema, callid):
 
 
 def get_transcript_segments(appsync_session, schema, callid):
-    try:
+    """Every final segment of the meeting, read a page at a time.
+
+    A long meeting's segments span several pages of the table, and a page can
+    come back empty with a nextToken, so pages are read until there is none.
+    """
+    segments = []
+    next_token = None
+    while True:
         query = dsl_gql(
             DSLQuery(
-                schema.Query.getTranscriptSegments.args(callId=callid).select(
+                schema.Query.getTranscriptSegments.args(callId=callid, nextToken=next_token).select(
                     schema.TranscriptSegmentList.TranscriptSegments.select(
                         schema.TranscriptSegment.PK,
                         schema.TranscriptSegment.SK,
-                        schema.TranscriptSegment.CreatedAt,
-                        schema.TranscriptSegment.CallId,
-                        schema.TranscriptSegment.SegmentId,
-                        schema.TranscriptSegment.StartTime,
-                        schema.TranscriptSegment.EndTime,
-                        schema.TranscriptSegment.Transcript,
-                        schema.TranscriptSegment.IsPartial,
-                        schema.TranscriptSegment.Channel,
-                        schema.TranscriptSegment.Speaker,
-                    )
+                    ),
+                    schema.TranscriptSegmentList.nextToken,
                 )
             )
         )
-
-        result = appsync_session.execute(query)
-    except ClientError as err:
-        logger.error(
-            "Error deleting meetings %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return result
+        try:
+            result = appsync_session.execute(query)
+        except ClientError as err:
+            logger.error(
+                "Error reading transcript segments %s: %s",
+                err.response["Error"]["Code"],
+                err.response["Error"]["Message"],
+            )
+            raise
+        page = result.get("getTranscriptSegments") or {}
+        segments.extend(segment for segment in page.get("TranscriptSegments") or [] if segment)
+        next_token = page.get("nextToken")
+        if not next_token:
+            return segments
 
 
 def get_call_metadata(callid):
@@ -206,9 +362,42 @@ def verify_permissions(event):
 # Share Meetings
 
 
+# One recipient of a share: an email address. "[" and "]" only ever separate
+# SharedWith entries (as "," does, which already separates the recipients), so
+# a recipient containing either is not an address that can be stored.
+RECIPIENT_PATTERN = re.compile(r"[^@\[\]]+@[^@\[\]]+\.[^@\[\]]+")
+
+
+# BEGIN shared_with_entries -- one text in every Lambda that reads SharedWith;
+# lma-ai-stack/test/test_shared_with_access.py holds the copies to it.
+# The entries of a SharedWith value, read as the AppSync resolvers read them
+# (the "SharedWith entries" VTL block and sharedWithEntries in the JS
+# resolvers): a list, tuple or set holds one entry per string element, and a
+# string -- comma-separated or "[a, b]" -- is split at every "[", "]" and ",".
+# Those three characters only ever separate entries, so a list element that
+# contains one is not an entry. Entries are trimmed and empty ones dropped;
+# membership is then a comparison of whole entries.
+def shared_with_entries(value: object) -> list:
+    """The trimmed, non-empty entries of a SharedWith value."""
+    if isinstance(value, str):
+        parts = value.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts = [
+            part
+            for part in value
+            if isinstance(part, str) and not any(separator in part for separator in "[],")
+        ]
+    else:
+        return []
+    return [part.strip() for part in parts if part.strip()]
+
+
+# END shared_with_entries
+
+
 def share_meetings(calls, owner, recipients):
     if recipients and not all(
-        re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(",")
+        RECIPIENT_PATTERN.fullmatch(email.strip()) for email in recipients.split(",")
     ):
         return {"Result": "Invalid email address provided"}
 
@@ -239,8 +428,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         new_recipients = None
 
     try:
-        result = get_transcript_segments(appsync_session, schema, callid)
-        for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
+        for transcript_segment in get_transcript_segments(appsync_session, schema, callid):
             update_transcript_segment(
                 appsync_session,
                 schema,
@@ -248,6 +436,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
                 transcript_segment["SK"],
                 new_recipients,
             )
+        share_keyframes(callid, new_recipients)
 
         input = {
             "CallId": callid,
@@ -260,8 +449,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         result = get_call_details(appsync_session, schema, callid)
         shared_with = result.get("getCall").get("SharedWith")
 
-        if shared_with:
-            shared_with = [recipient.strip() for recipient in shared_with[1:-1].split(",")]
+        shared_with = shared_with_entries(shared_with)
 
         if shared_with and new_recipients:
             unshare_list = list(set(shared_with) - set(new_recipients))
@@ -304,6 +492,78 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         raise
     else:
         return
+
+
+def _keyframe_keys(callid):
+    """The PK/SK of every key frame stored for the meeting."""
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": f"kf#{callid}"},
+        "ProjectionExpression": "PK, SK",
+    }
+    while True:
+        response = ddbTable.query(**kwargs)
+        yield from response.get("Items", [])
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
+def share_keyframes(callid, new_recipients):
+    """Give the meeting's key frames the meeting's new SharedWith.
+
+    Key frames follow the transcript's access rule, so they are shared and
+    unshared with it. Written directly rather than through AppSync: there is no
+    mutation for it, and the function's role already allows UpdateItem on the
+    table.
+    """
+    updated = 0
+    for key in _keyframe_keys(callid):
+        if new_recipients:
+            ddbTable.update_item(
+                Key=key,
+                UpdateExpression="SET SharedWith = :val",
+                ExpressionAttributeValues={":val": new_recipients},
+            )
+        else:
+            ddbTable.update_item(Key=key, UpdateExpression="REMOVE SharedWith")
+        updated += 1
+    return updated
+
+
+def delete_keyframes(callid):
+    """Delete the meeting's key frames: their items and their images.
+
+    The images are found by the meeting's folder, which the producers name with
+    the same posixify rule as posixify_filename. The trailing slash keeps one
+    meeting's prefix from matching another whose id merely begins the same way.
+    """
+    deleted = 0
+    for key in _keyframe_keys(callid):
+        ddbTable.delete_item(Key={"PK": key["PK"], "SK": key["SK"]})
+        deleted += 1
+    images = _batch_delete_prefix(
+        S3_BUCKET_NAME, f"{S3_KEYFRAMES_PREFIX}{posixify_filename(callid)}/"
+    )
+    if deleted or images:
+        logger.info("Deleted %d key frame(s) and %d image(s) for %s", deleted, images, callid)
+    return deleted
+
+
+def delete_consent_evidence(callid):
+    """Delete the meeting's consent evidence images.
+
+    The consent record itself is an attribute of the meeting row and goes with
+    it. The images are found by the meeting's folder, named with the same
+    posixify rule as the key frames' (see docs/meeting-consent.md).
+    """
+    images = _batch_delete_prefix(
+        S3_BUCKET_NAME, f"{S3_CONSENT_EVIDENCE_PREFIX}{posixify_filename(callid)}/"
+    )
+    if images:
+        logger.info("Deleted %d consent evidence image(s) for %s", images, callid)
+    return images
 
 
 def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
@@ -370,10 +630,10 @@ def delete_meetings(calls, owner):
             raise ValueError("invalid AppSync schema")
         schema = DSLSchema(appsync_session.client.schema)
 
-        # Expand the underlying requests pool so MEETING_CONCURRENCY *
-        # SEGMENT_CONCURRENCY concurrent calls don't serialise on the default
-        # 10-connection limit.
-        _tune_requests_pool(appsync_session, MEETING_CONCURRENCY * SEGMENT_CONCURRENCY + 4)
+        # Expand the underlying requests pool so the MEETING_CONCURRENCY
+        # meetings' GraphQL calls don't serialise on the default 10-connection
+        # limit. Each meeting makes them one at a time.
+        _tune_requests_pool(appsync_session, MEETING_CONCURRENCY + 4)
 
         # Single meeting: skip the thread pool so we don't pay the pool
         # overhead for the common delete-one-meeting-from-detail-page path.
@@ -421,29 +681,40 @@ def delete_meetings(calls, owner):
 
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     try:
-        # Run the three independent preparation steps in parallel:
-        #  1. Virtual Participant cleanup (scan + ECS/DDB writes)
-        #  2. Fetch + bulk-delete transcript segments via AppSync
+        # Run the independent preparation steps in parallel:
+        #  1. Virtual Participant cleanup (paginated scan + ECS/DDB writes)
+        #  2. Deletion of every item of the meeting's transcript (PK trs#<CallId>)
         #  3. Fetch call details (needed to preserve SharedWith on deleteCall)
-        # Plus start S3 prefix deletion as soon as we kick off steps 1-3.
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        #  4. S3 prefix deletion
+        #  5. Deletion of the meeting's metering records (PK mtr#<CallId>)
+        #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
+        #  7. Deletion of the meeting's consent evidence images
+        with ThreadPoolExecutor(max_workers=7) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
-            segments_future = pool.submit(
-                _delete_all_transcript_segments, appsync_session, schema, callid
-            )
+            segments_future = pool.submit(delete_transcript_items, callid)
             details_future = pool.submit(get_call_details, appsync_session, schema, callid)
             # S3 cleanup is independent of AppSync/DDB state, so start it now.
             s3_future = pool.submit(delete_recordings_transcripts, callid)
+            metering_future = pool.submit(delete_metering_records, callid)
+            keyframes_future = pool.submit(delete_keyframes, callid)
+            evidence_future = pool.submit(delete_consent_evidence, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
             segments_future.result()
             details_result = details_future.result()
             s3_future.result()
+            metering_future.result()
+            keyframes_future.result()
+            evidence_future.result()
 
-        shared_with = (
-            details_result.get("getCall", {}).get("SharedWith") if details_result else None
-        )
+        call_details = (details_result or {}).get("getCall") or {}
+        shared_with = call_details.get("SharedWith")
+
+        # After the details, because the stored RecordingUrl and VideoRecordingUrl
+        # name the files.
+        delete_audio_recording(callid, call_details.get("RecordingUrl"))
+        delete_video_recordings(callid, call_details.get("VideoRecordingUrl"))
 
         input = {
             "CallId": callid,
@@ -477,77 +748,142 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         return
 
 
-def _delete_all_transcript_segments(appsync_session, schema, callid):
-    """Fetch every transcript segment for the meeting and delete them in
-    parallel via ``deleteTranscriptSegment`` mutations.
-    """
-    result = get_transcript_segments(appsync_session, schema, callid)
-    segments = (result or {}).get("getTranscriptSegments", {}).get("TranscriptSegments") or []
-    if not segments:
-        return
+def delete_metering_records(callid):
+    """Delete the meeting's metering records (PK ``mtr#<CallId>``).
 
-    workers = max(1, min(SEGMENT_CONCURRENCY, len(segments)))
+    They hold the usage behind the meeting's cost estimate and would otherwise
+    outlive a deleted meeting until their TTL. Item by item with DeleteItem,
+    which this function is already granted: a meeting has tens of these, not
+    thousands.
+    """
+    pk = f"mtr#{callid}"
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": pk},
+        "ProjectionExpression": "PK, SK",
+    }
+    deleted = 0
+    while True:
+        response = ddbTable.query(**kwargs)
+        for item in response.get("Items", []):
+            ddbTable.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+            deleted += 1
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+    if deleted:
+        logger.info("Deleted %d metering record(s) for %s", deleted, callid)
+    return deleted
+
+
+def _transcript_item_keys(callid):
+    """The keys of every item under the meeting's transcript partition."""
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": f"trs#{callid}"},
+        "ProjectionExpression": "PK, SK",
+        "ConsistentRead": True,
+    }
+    while True:
+        response = ddbTable.query(**kwargs)
+        for item in response.get("Items", []):
+            yield {"PK": item["PK"], "SK": item["SK"]}
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
+def delete_transcript_items(callid):
+    """Delete every item of the meeting's transcript (PK ``trs#<CallId>``).
+
+    That is every segment whatever its channel, partial or final, read straight
+    from the table rather than through getTranscriptSegments, which answers only
+    the segments it can return. transcript_deletion empties the same partition
+    when it deletes a transcript. Item by item with DeleteItem, which this
+    function is already granted, SEGMENT_CONCURRENCY at a time.
+    """
+    keys = list(_transcript_item_keys(callid))
+    if not keys:
+        return 0
+
+    workers = max(1, min(SEGMENT_CONCURRENCY, len(keys)))
     first_exc = None
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [
-            pool.submit(
-                delete_transcript_segment,
-                appsync_session,
-                schema,
-                seg["PK"],
-                seg["SK"],
-            )
-            for seg in segments
-        ]
+        futures = [pool.submit(ddbTable.delete_item, Key=key) for key in keys]
         for fut in as_completed(futures):
             try:
                 fut.result()
             except Exception as exc:  # noqa: BLE001
-                logger.error("Error deleting a transcript segment for %s: %s", callid, exc)
+                logger.error("Error deleting a transcript item for %s: %s", callid, exc)
                 if first_exc is None:
                     first_exc = exc
     if first_exc is not None:
         raise first_exc
+    logger.info("Deleted %d transcript item(s) for %s", len(keys), callid)
+    return len(keys)
+
+
+def _virtual_participants_of(vp_table, callid):
+    """Every Virtual Participant record whose CallId is the meeting's.
+
+    The table is keyed by the Virtual Participant's id alone, with no index on
+    CallId, so it is scanned, page after page until DynamoDB returns no
+    LastEvaluatedKey: a filtered page can hold none of the matches, or only some.
+    """
+    kwargs = {"FilterExpression": Attr("CallId").eq(callid)}
+    while True:
+        response = vp_table.scan(**kwargs)
+        yield from response.get("Items", [])
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
 
 
 def cleanup_virtual_participants(callid):
-    """Clean up Virtual Participants associated with the meeting being deleted"""
+    """End and delete every Virtual Participant record of the meeting being deleted.
+
+    For each record, a Virtual Participant still in the meeting is sent an END
+    event and its task is stopped (both best effort: one that has already left
+    has nothing to stop), then the record and its task registry entry are
+    deleted. Reading the table or deleting a record that fails raises, after
+    every record has been tried, so the meeting's deletion reports it as it
+    reports any other step's failure, and the meeting record is kept for the
+    deletion to be run again. Returns the number of records deleted.
+    """
     if not VP_TABLE_NAME:
         logger.info("VP_TABLE_NAME not configured, skipping VP cleanup")
-        return
+        return 0
 
-    try:
-        vp_table = ddb.Table(VP_TABLE_NAME)
+    vp_table = ddb.Table(VP_TABLE_NAME)
+    deleted = 0
+    failures = []
+    for vp in _virtual_participants_of(vp_table, callid):
+        vp_id = vp.get("id")
+        if not vp_id:
+            continue
 
-        # Scan for VPs with matching CallId
-        response = vp_table.scan(FilterExpression=Attr("CallId").eq(callid))
-
-        vps_to_cleanup = response.get("Items", [])
-
-        for vp in vps_to_cleanup:
-            vp_id = vp.get("id")
-            if not vp_id:
-                continue
-
-            logger.info(f"Cleaning up VP {vp_id} for meeting {callid}")
-
-            # Send END event to Kinesis
-            send_vp_end_event(callid, vp)
-
-            # Stop ECS task if running
-            stop_vp_ecs_task(vp_id)
-
-            # Delete VP record
+        logger.info("Cleaning up VP %s for meeting %s", vp_id, callid)
+        send_vp_end_event(callid, vp)
+        stop_vp_ecs_task(vp_id)
+        try:
             vp_table.delete_item(Key={"id": vp_id})
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error deleting VP %s of meeting %s: %s", vp_id, callid, exc)
+            failures.append(vp_id)
+            continue
+        delete_vp_registry_entry(vp_id)
+        deleted += 1
 
-            # Delete registry entry
-            delete_vp_registry_entry(vp_id)
-
-        if vps_to_cleanup:
-            logger.info(f"Cleaned up {len(vps_to_cleanup)} VPs for meeting {callid}")
-
-    except Exception as e:
-        logger.error(f"Error cleaning up VPs for meeting {callid}: {e}")
+    if deleted:
+        logger.info("Cleaned up %d VPs for meeting %s", deleted, callid)
+    if failures:
+        raise RuntimeError(
+            f"could not delete {len(failures)} Virtual Participant record(s) of meeting {callid}"
+        )
+    return deleted
 
 
 def send_vp_end_event(callid, vp):
@@ -619,34 +955,6 @@ def delete_vp_registry_entry(vp_id):
 
     except Exception as e:
         logger.error(f"Error deleting registry entry for VP {vp_id}: {e}")
-
-
-def delete_transcript_segment(appsync_session, schema, PK, SK):
-    input = {
-        "PK": PK,
-        "SK": SK,
-    }
-
-    try:
-        mutation = dsl_gql(
-            DSLMutation(
-                schema.Mutation.deleteTranscriptSegment.args(input=input).select(
-                    schema.DeleteTranscriptSegmentOutput.CallId,
-                )
-            )
-        )
-
-        appsync_session.execute(mutation)
-
-    except ClientError as err:
-        logger.error(
-            "Error deleting transcript segment %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return
 
 
 def lambda_handler(event, context):

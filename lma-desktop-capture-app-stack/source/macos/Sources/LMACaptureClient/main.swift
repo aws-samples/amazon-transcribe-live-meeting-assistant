@@ -134,6 +134,53 @@ let socket = TranscriberSocket(config: config, tokens: tokenStore)
 // longer calls exit() itself — see TranscriberSocket.onFatalAuth). Matches the
 // Windows headless CLI, windows/App/Program.cs.
 socket.onFatalAuth = { _ in exit(1) }
+
+// Meeting consent (docs/meeting-consent.md): read the deployment's settings and,
+// when it asks for a consent step, print the notice and send what
+// --consent-method confirms with START. A transcriber that does not answer
+// needs no step.
+var fetchedConsentSettings: Consent.Settings?
+do {
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        fetchedConsentSettings = await ConsentSettingsFetcher.fetch(config: config, tokens: tokenStore)
+        sem.signal()
+    }
+    sem.wait()
+    if let settings = fetchedConsentSettings, settings.required {
+        let notice = Consent.renderNotice(settings.noticeTemplate, lmaUser: config.agentId,
+                                          meeting: config.callId, consentPhrase: settings.consentPhrase,
+                                          objectionPhrase: settings.objectionPhrase)
+        print("  consent  : \(settings.mode.rawValue) — share this notice in the meeting:")
+        print("             \(notice)")
+        var step = Consent.Step()
+        if !config.consentMethod.isEmpty {
+            guard let method = Consent.Method(rawValue: config.consentMethod) else {
+                FileHandle.standardError.write("--consent-method must be verbal, chat or invite_terms.\n".data(using: .utf8)!)
+                exit(2)
+            }
+            step = Consent.Step(confirmed: true, method: method, statement: config.consentNote)
+        }
+        if let why = Consent.startBlockedReason(settings: settings, step: step) {
+            FileHandle.standardError.write(("Not starting: \(why)\n  Share the notice above, then pass "
+                + "--consent-method verbal|chat|invite_terms to confirm how everyone agreed.\n").data(using: .utf8)!)
+            exit(2)
+        }
+        socket.consent = Consent.payload(settings: settings, step: step, lmaUser: config.agentId,
+                                         meetingName: config.callId, noticeText: notice)
+    } else {
+        // No step needed or none could be read: say so, rather than send nothing
+        // (see Consent.Settings.notShown).
+        socket.consent = Consent.payload(settings: .notShown, step: Consent.Step(), lmaUser: config.agentId,
+                                         meetingName: config.callId, noticeText: "")
+    }
+}
+// The transcriber ends a meeting its consent does not allow; so does the CLI.
+socket.onConsentState = { state in
+    guard state.stopsCapture else { return }
+    FileHandle.standardError.write("Recording stopped: \(Consent.describe(state))\n".data(using: .utf8)!)
+    exit(3)
+}
 let mixer = StereoMixer(sampleRate: config.sampleRate) { chunk in
     socket.sendPCM(chunk)
 }

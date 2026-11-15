@@ -18,18 +18,21 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 ### Strengths
 
 - **Infrastructure as Code**: The entire solution is deployed using 11 nested CloudFormation stacks orchestrated by `lma-main.yaml`, enabling consistent, repeatable deployments.
-- **Comprehensive Monitoring**: Integrated CloudWatch metrics across Lambda, ECS, and AppSync services provide visibility into real-time transcription pipelines, agent processing, and WebSocket connectivity.
-- **Distributed Tracing**: AWS X-Ray tracing across Lambda functions and API calls enables end-to-end request correlation.
+- **Operational Alerting**: Each deployment creates an SNS topic for operational alerts and 15 CloudWatch alarms that notify it, covering the transcription pipeline end to end: the Kinesis stream's rejected writes and consumer lag, the Call Event Processor's errors and throttles, the queue of records that could not be processed, transcript deletions that did not complete, transcriber target and task health, AppSync server errors, Amazon Bedrock throttling, Amazon Transcribe concurrent-stream headroom against the account quota, the stale-meeting reaper's schedule, Virtual Participant launch failures, transcript segment writes that did not land, and meetings that streamed audio and produced no transcript. All but the last two read a metric an AWS service publishes on its own, so they depend on no application code; those two read metrics LMA publishes, and watch conditions the code otherwise swallows and nothing else would report. Each alarm carries a description written as the first steps of a runbook. Alarms can be switched off as a group with `EnableOperationalAlarms`. See [Monitoring & Alerting](./monitoring.md).
+- **A Single Operational Dashboard**: One CloudWatch dashboard per deployment, named `<stack-name>-<region>`, consolidates Transcribe concurrency against its quota, Kinesis throughput and rejected writes, consumer lag, queue depth, Call Event Processor concurrency and duration, Bedrock invocations and throttles, ECS task counts for both clusters, Virtual Participant memory use, load-balancer target health, and AppSync errors and latency — alongside four CloudWatch Logs Insights tables surfacing recent errors from the Call Event Processor, the Virtual Participant launch state machine, and both Fargate containers. One band reads the metrics LMA publishes itself: meetings started and ended, live audio sessions opened, time to a meeting's first transcript segment, transcript segment writes and their failures, and meetings that produced no transcript.
+- **Selective X-Ray Tracing**: A small number of Lambda functions across the stacks set `TracingConfig: Mode: Active`, and the Virtual Participant launch state machine enables tracing, giving per-invocation timing for those components. This is per-component instrumentation rather than an end-to-end trace; see the recommendation below.
 - **Real-Time Stream Processing**: Kinesis Data Streams buffer transcription events, decoupling ingestion from processing and enabling observability into pipeline throughput.
-- **Observability**: Detailed logging across all components with configurable retention periods (1 to 3653 days via `CloudWatchLogsExpirationInDays` parameter).
+- **Observability**: Detailed logging across all components with configurable retention periods (1 to 3653 days via `CloudWatchLogsExpirationInDays` parameter), with each Lambda function writing to a dedicated, KMS-encrypted log group.
 - **Operational Tooling**: Includes load testing utilities, local SAM invocation targets, and comprehensive linting (cfn-lint, pylint, bandit, mypy, ESLint).
-- **Configurable Templates**: LLM prompt templates and chat button configurations stored in DynamoDB enable runtime customization without redeployment.
+- **Configurable Templates**: LLM prompt templates, chat button configurations and voice assistant settings stored in a DynamoDB configuration table enable runtime customization without redeployment.
 
 ### Recommendations
 
 - Consider implementing canary deployments for safer updates to production environments.
 - Add automated integration tests to validate end-to-end audio-to-transcript workflows before deployment.
-- Implement structured operational dashboards consolidating Kinesis throughput, Transcribe latency, Lambda concurrency, and ECS task health into a single operational view.
+- **Extend application metrics past the transcription path.** The meeting-lifecycle group is published and alarmed on, but the MicroVM ASR engine and the Meeting Assistant publish nothing, and the Virtual Participant publishes only its Nova Sonic quota refusals. So the fraction of Virtual Participant joins that fail and on which trigger, how often ASR falls back to Amazon Transcribe, and assistant and Bedrock latency and failure rates are all still diagnosable only by reading log groups. The namespace convention and the emitters those need already exist — one in Python in the AI stack's transcript enrichment layer, and TypeScript copies in the transcriber's and the Virtual Participant's own source trees. What remains per component beyond that is choosing the metrics and checking that any dimension's value space is closed before it becomes a billed dimension. See [Monitoring & Alerting](./monitoring.md#what-is-not-published-yet).
+- **Make tracing end-to-end.** X-Ray is enabled on only a minority of the solution's Lambda functions — four of the AI stack's forty, and a handful elsewhere — and the ECS Fargate services (WebSocket transcriber, Virtual Participant) are not instrumented at all, so no single trace spans audio ingestion through to a transcript segment reaching the web UI. Enabling tracing on the functions in the transcription path, and instrumenting the Fargate services, would give the request correlation the architecture is otherwise well suited to.
+- **Subscribe the alerts topic to something the team owns**, rather than leaving the `AdminEmail` subscription as the only route — a distribution list, AWS Chatbot, or an on-call system. Note that an email subscription delivers nothing until it is confirmed, so a pipeline-deployed stack starts with no working subscriber. See [Monitoring & Alerting](./monitoring.md#alerting-a-team-rather-than-one-person).
 
 ## 2. Security
 
@@ -56,10 +59,10 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
   - Implement and document deletion capabilities: meeting-level deletion via AppSync mutations, bulk TTL-based expiration, S3 object lifecycle transitions
   - Consider enabling [Amazon Macie](https://docs.aws.amazon.com/macie/latest/user/what-is-macie.html) on recording S3 buckets to automatically discover PII in stored audio transcripts
 - **Production Logging Security**:
-  - **Set `LogLevel` to WARN or ERROR for production deployments** to prevent sensitive meeting content from being logged
-  - LMA currently has hardcoded INFO-level logging in inline Lambda functions defined in `lma-main.yaml` — these bypass the stack-level `LogLevel` parameter and will log meeting content, transcripts, and potentially PII at INFO level regardless of parameter settings
-  - Refactor inline Lambda functions to respect the `LogLevel` CloudFormation parameter, or externalize them as proper Lambda function resources
-  - INFO level logging in the Call Event Processor can inadvertently capture full transcript segments, meeting summaries, participant names, and discussion content
+  - **Keep `LogLevel` at INFO (the default) or above for production deployments.** At INFO and above, the functions and containers log identifiers, sizes and outcomes rather than transcript text, prompts, model output or chat messages; that content is written only at DEBUG, which is for diagnosing a problem
+  - The three inline Lambda functions in `lma-main.yaml` that configure the Python `logging` module — the KMS key monitor, the S3 bucket cleanup handler and the recordings-bucket notification handler — read their level from the `LOG_LEVEL` environment variable, which the template wires to the stack's `LogLevel` parameter, so setting `LogLevel` applies to them. The remaining inline functions in that template are CloudFormation custom resources that use `print()` rather than a logger, so their output appears regardless of `LogLevel`; what they print is the custom-resource event (stack parameters and resource properties), not meeting content
+  - Secret-valued stack parameters are routed to the nested stacks that need them rather than to these custom resources, whose events carry only structural values — stack and resource names, lengths, language and model selections, LMA settings and S3 notification properties. Keep that separation when adding a custom resource: pass a secret by reference (an SSM parameter name or a Secrets Manager ARN) so the resource reads it at runtime
+  - Log lines at INFO and above carry identifiers such as call IDs, user email addresses and participant names; treat the log groups as holding personal data
   - Implement log filtering and masking for any essential INFO-level logs that must be retained
   - Regularly audit CloudWatch log groups to ensure no meeting content or PII is being captured at production log levels
 - **CloudFront Security Enhancement**:
@@ -172,7 +175,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 
 ### Virtual Participant (ECS Fargate + Playwright)
 
-- **Strengths**: Headless Chromium provides cross-platform meeting support (Zoom, Teams, Chime, WebEx); Step Functions scheduler manages lifecycle.
+- **Strengths**: Headless Chromium provides cross-platform meeting support (Zoom, Teams, Chime, WebEx, Google Meet); Step Functions scheduler manages lifecycle.
 - **Considerations**: Monitor warm pool costs; implement auto-shutdown for idle VP instances; consider Graviton-based tasks for cost reduction.
 
 ### MCP Server Integration (API Gateway)
@@ -186,4 +189,4 @@ The Live Meeting Assistant demonstrates strong alignment with AWS Well-Architect
 
 Key strengths include the real-time streaming pipeline achieving few-second end-to-end latency, the modular nested stack architecture enabling independent component updates, and the built-in data lifecycle management via DynamoDB TTL. The solution's extensibility through MCP server integration, Lambda hooks, and configurable LLM templates allows customization for diverse organizational needs.
 
-Areas for potential enhancement include production logging hardening (particularly for inline Lambda functions), CloudFront security headers, more granular cost controls, and sustainability optimizations. By addressing these recommendations, the solution can further improve its alignment with Well-Architected best practices.
+Areas for potential enhancement include application-level metrics for the Virtual Participant, ASR and assistant components to complement those already published for the transcription path, end-to-end request tracing, CloudFront security headers, more granular cost controls, and sustainability optimizations. By addressing these recommendations, the solution can further improve its alignment with Well-Architected best practices.

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 """
@@ -8,14 +8,19 @@ Upload Meeting Initiator — AppSync Lambda resolver for the `createUploadMeetin
 When a signed-in user requests to upload a pre-recorded meeting file, this Lambda:
 
 1. Validates the request (content-type, diarization args).
-2. Generates a deterministic ``callId`` from the supplied meeting topic + timestamp.
-3. Generates a presigned S3 ``PutObject`` URL scoped to the pending-uploads prefix
+2. Decides the transcription language: the request's ``languageCode`` when set,
+   else the Configuration page's Amazon Transcribe settings, refused here when an
+   upload cannot use them.
+3. Generates a deterministic ``callId`` from the supplied meeting topic + timestamp.
+4. Generates a presigned S3 ``PutObject`` URL scoped to the pending-uploads prefix
    (``lma-uploads-pending/<callId>/<filename>``) on the existing recordings bucket.
-4. Persists an ``UploadJob`` row in the EventSourcing DynamoDB table so downstream
+5. Persists an ``UploadJob`` row in the EventSourcing DynamoDB table so downstream
    Lambdas (upload_meeting_processor / upload_meeting_finalizer, Stage 2 & 3) can
-   look up the caller-supplied metadata when the S3 object notification fires.
-5. Returns the ``callId``, presigned URL, bucket, and key to the UI so the browser
-   can PUT the file directly to S3 (bypassing API Gateway / Lambda payload limits).
+   look up the caller-supplied metadata and the language when the S3 object
+   notification fires.
+6. Returns the ``callId``, presigned URL, bucket, key and language to the UI so the
+   browser can PUT the file directly to S3 (bypassing API Gateway / Lambda payload
+   limits).
 
 The actual transcription / event emission happens in later stages of the pipeline;
 this Lambda only sets up the upload handoff.
@@ -29,8 +34,20 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import boto3
+import botocore.session
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
+from lma_config import (  # configuration layer
+    IDENTIFY_MODES,
+    TRANSCRIPTION,
+    ConfigurationError,
+    ConfigurationStore,
+    ConfigurationTableNotConfigured,
+    offered_settings,
+    shipped_setting_defaults,
+    upload_options_problem,
+)
+from lma_config.transcribe_options import language_options
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -49,6 +66,47 @@ MAX_SPEAKERS = 30
 
 ALLOWED_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 
+# The media formats Amazon Transcribe accepts as StartTranscriptionJob's
+# MediaFormat. An upload whose format is one of these is keyed with it as the
+# extension and the format is stored on the UploadJob row for Stage 2 to pass.
+SUPPORTED_MEDIA_FORMATS = frozenset({"mp3", "mp4", "wav", "flac", "ogg", "amr", "webm", "m4a"})
+
+# The format for a browser-reported content type, used when the file name has no
+# supported extension. Browsers report the same format under several types.
+CONTENT_TYPE_MEDIA_FORMATS = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mpeg3": "mp3",
+    "audio/x-mpeg-3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "video/mp4": "mp4",
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/x-wav": "wav",
+    "audio/vnd.wave": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/ogg": "ogg",
+    "video/ogg": "ogg",
+    "audio/amr": "amr",
+    "audio/webm": "webm",
+    "video/webm": "webm",
+}
+
+# The languages a batch transcription job accepts as LanguageCode: the enum in
+# the Amazon Transcribe service model of the botocore this function runs with.
+# A languageCode outside it would be refused by StartTranscriptionJob after the
+# file is uploaded, so it is refused here instead. The list is only as current as
+# the runtime's botocore (requirements.txt does not pin boto3/botocore): a batch
+# language the service added after that botocore was built is refused for an API
+# caller's languageCode. Languages set on the Configuration page are not checked
+# against it.
+BATCH_LANGUAGE_CODES = frozenset(
+    botocore.session.get_session().get_service_model("transcribe").shape_for("LanguageCode").enum
+)
+
 # ---------------------------------------------------------------------------
 # Logging / clients
 # ---------------------------------------------------------------------------
@@ -56,7 +114,25 @@ logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # signature_version=s3v4 is required for presigned URLs on KMS-encrypted buckets.
-s3_client = boto3.client("s3", config=Config(signature_version="s3v4", region_name=AWS_REGION))
+# The regional endpoint matters for the browser PUT: a URL on the global
+# endpoint (<bucket>.s3.amazonaws.com) gets a 307 redirect to the regional one
+# for a bucket outside us-east-1 until its DNS settles (up to a day after it is
+# created), and a browser does not follow a redirect on a CORS request, so the
+# upload fails as a network error.
+#
+# Without an addressing style botocore presigns on that global endpoint, so the
+# style is set to virtual, and us-east-1 is asked for its regional endpoint too.
+# The host itself is left to botocore's endpoint rules, which give each
+# partition its own DNS suffix (amazonaws.com.cn in China, for one); no
+# endpoint_url is set, since one would fix the suffix for every partition.
+s3_client = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual", "us_east_1_regional_endpoint": "regional"},
+    ),
+)
 ddb = boto3.resource("dynamodb")
 job_table = ddb.Table(EVENT_SOURCING_TABLE)
 
@@ -68,6 +144,92 @@ class ValidationError(Exception):
     """Raised when the mutation input is malformed or fails authorization."""
 
 
+class ConfigurationUnavailableError(Exception):
+    """Raised when the Amazon Transcribe settings cannot be read.
+
+    The upload is refused rather than transcribed in a language the deployment
+    may not have chosen; the caller can try again.
+    """
+
+
+# The setting names an upload reads from the Transcription section.
+_TRANSCRIPTION_SETTINGS = (
+    "languageCode",
+    "languageOptions",
+    "preferredLanguage",
+    "customVocabularyName",
+    "customLanguageModelName",
+)
+_STORE: ConfigurationStore | None = None
+
+
+def _transcription_settings() -> dict:
+    """The active profile's Transcription settings, read now.
+
+    The section's cache tier is immediate, so a change saved on the
+    Configuration page applies to the next upload. A setting the section does
+    not hold, or holds a value no longer offered, is the shipped default.
+    """
+    global _STORE  # noqa: PLW0603 -- one store per process
+    shipped = shipped_setting_defaults()[TRANSCRIPTION.name]
+    try:
+        if _STORE is None:
+            _STORE = ConfigurationStore()
+        values = _STORE.get_section(TRANSCRIPTION.name).values
+    except ConfigurationTableNotConfigured:
+        # A function deployed without the table name; every deployed copy has it.
+        logger.warning(
+            "CONFIGURATION_TABLE_NAME is unset; using the shipped Transcription defaults"
+        )
+        values = {}
+    except (ClientError, BotoCoreError, ConfigurationError) as error:
+        logger.exception("could not read the Transcription settings")
+        raise ConfigurationUnavailableError(
+            "The Amazon Transcribe settings could not be read; try the upload again."
+        ) from error
+    offered = offered_settings(TRANSCRIPTION.name, values)
+    return {
+        setting: offered[setting] if offered.get(setting) is not None else shipped.get(setting)
+        for setting in _TRANSCRIPTION_SETTINGS
+    }
+
+
+def _transcription_language(requested_language_code: str | None) -> dict:
+    """How the upload's language is decided, as the UploadJob row records it.
+
+    - ``LanguageCode``: the language the job runs in, when one is set.
+    - ``LanguageIdentification``: identify-language or identify-multiple-languages,
+      with ``LanguageOptions`` the candidate languages, when it is identified.
+    - ``LanguageSource``: REQUEST when the caller set ``languageCode``, which wins
+      and is not checked against the settings; else CONFIGURATION.
+
+    Raises:
+        ValidationError: the settings combine options an upload cannot use.
+    """
+    if requested_language_code:
+        return {"LanguageCode": requested_language_code, "LanguageSource": "REQUEST"}
+    settings = _transcription_settings()
+    problem = upload_options_problem(settings)
+    if problem:
+        raise ValidationError(
+            "The Amazon Transcribe settings on the Configuration page cannot be used "
+            f"for an upload: {problem}"
+        )
+    language_code = str(settings["languageCode"]).strip()
+    if language_code in IDENTIFY_MODES:
+        return {
+            "LanguageIdentification": language_code,
+            "LanguageOptions": language_options(settings["languageOptions"]),
+            "LanguageSource": "CONFIGURATION",
+        }
+    return {"LanguageCode": language_code, "LanguageSource": "CONFIGURATION"}
+
+
+def _applied_language(language: dict) -> str:
+    """The language the response announces: a language code or an identify mode."""
+    return language.get("LanguageCode") or language["LanguageIdentification"]
+
+
 def _slugify(value: str, fallback: str = "meeting") -> str:
     """Produce an S3-key-safe slug."""
     if not value:
@@ -76,16 +238,38 @@ def _slugify(value: str, fallback: str = "meeting") -> str:
     return slug[:64] or fallback
 
 
-def _sanitize_filename(name: str) -> str:
-    """Strip any path components the browser may have included and restrict to a
-    conservative character set."""
-    base = os.path.basename(name or "")
-    base = re.sub(r"[^a-zA-Z0-9._-]+", "_", base)
-    base = base.strip("._") or "recording"
-    if len(base) > 128:
-        root, ext = os.path.splitext(base)
-        base = (root[: 128 - len(ext)]) + ext
-    return base
+def _split_media_extension(base: str) -> tuple[str, str | None]:
+    """Split ``base`` into a name and a supported media format. Only an extension
+    that is one of SUPPORTED_MEDIA_FORMATS (in any case) counts; anything else
+    after the last dot ("Weekly 1.5 sync", "notes.txt") stays part of the name."""
+    if "." in base:
+        stem, ext = base.rsplit(".", 1)
+        ext = ext.strip().lower()
+        if ext in SUPPORTED_MEDIA_FORMATS:
+            return stem, ext
+    return base, None
+
+
+def _media_format(filename: str, content_type: str) -> str | None:
+    """The upload's media format: the file name's extension when it is a
+    supported one, else the format the content type names, else None (the key
+    then has no extension and Transcribe is left to detect the format)."""
+    _, ext = _split_media_extension(os.path.basename(filename or ""))
+    if ext:
+        return ext
+    return CONTENT_TYPE_MEDIA_FORMATS.get(content_type.split(";", 1)[0].strip())
+
+
+def _sanitize_filename(name: str, media_format: str | None) -> str:
+    """Strip any path components the browser may have included and restrict the
+    name to a conservative character set, then end it with ``media_format`` as
+    the extension. The extension is never derived from what is left of the name
+    after the restriction, so a name the set cannot carry (one in a non-Latin
+    script, say) loses the name, not the format: ``recording.<format>``."""
+    stem, _ = _split_media_extension(os.path.basename(name or ""))
+    ext = f".{media_format}" if media_format else ""
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).lstrip("._").rstrip(".") or "recording"
+    return stem[: 128 - len(ext)] + ext
 
 
 def _get_username(event: dict) -> str:
@@ -112,18 +296,22 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     if len(meeting_topic) > 200:
         raise ValidationError("meetingTopic must be 200 characters or fewer")
 
-    agent_id = (raw.get("agentId") or "").strip()
+    # localSpeakerName and remoteSpeakerName are the documented names; agentId
+    # and fromNumber are their older names, still accepted.
+    agent_id = (raw.get("localSpeakerName") or "").strip() or (raw.get("agentId") or "").strip()
     if not agent_id:
-        raise ValidationError("agentId is required")
+        raise ValidationError("localSpeakerName (or agentId) is required")
     if len(agent_id) > 200:
-        raise ValidationError("agentId must be 200 characters or fewer")
+        raise ValidationError("localSpeakerName (or agentId) must be 200 characters or fewer")
 
-    from_number = (raw.get("fromNumber") or "").strip() or "Customer"
+    # The name the transcript shows for the other participants when none is given:
+    # the placeholder the UI and the WebSocket server use.
+    from_number = (
+        (raw.get("remoteSpeakerName") or "").strip()
+        or (raw.get("fromNumber") or "").strip()
+        or "Other Participant"
+    )
     to_number = (raw.get("toNumber") or "").strip() or "System"
-
-    filename = _sanitize_filename(raw.get("filename") or "")
-    if not filename:
-        raise ValidationError("filename is required")
 
     content_type = (raw.get("contentType") or "").strip().lower()
     if not content_type:
@@ -132,6 +320,11 @@ def _parse_and_validate_input(arguments: dict) -> dict:
         raise ValidationError(
             f"contentType must start with one of: {', '.join(ALLOWED_CONTENT_TYPE_PREFIXES)}"
         )
+
+    media_format = _media_format(raw.get("filename") or "", content_type)
+    filename = _sanitize_filename(raw.get("filename") or "", media_format)
+    if not filename:
+        raise ValidationError("filename is required")
 
     file_size = raw.get("fileSize")
     if file_size is not None:
@@ -163,8 +356,11 @@ def _parse_and_validate_input(arguments: dict) -> dict:
             raise ValidationError("meetingDateTime must be an ISO-8601 timestamp") from err
 
     language_code = (raw.get("languageCode") or "").strip() or None
-    if language_code and not re.match(r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]+)*$", language_code):
-        raise ValidationError("languageCode must look like a BCP-47 tag (e.g. en-US)")
+    if language_code and language_code not in BATCH_LANGUAGE_CODES:
+        raise ValidationError(
+            f"languageCode {language_code[:20]!r} is not a language Amazon Transcribe can "
+            "transcribe a recording in (for example en-US)"
+        )
 
     caller_supplied_call_id = (raw.get("callId") or "").strip() or None
     if caller_supplied_call_id and not re.match(
@@ -179,6 +375,7 @@ def _parse_and_validate_input(arguments: dict) -> dict:
         "toNumber": to_number,
         "filename": filename,
         "contentType": content_type,
+        "mediaFormat": media_format,
         "fileSize": file_size,
         "enableDiarization": enable_diarization,
         "maxSpeakers": max_speakers,
@@ -225,6 +422,7 @@ def _write_upload_job(
     groups: list,
     normalized: dict,
     object_key: str,
+    language: dict,
 ) -> None:
     """Persist the upload-job metadata so downstream Lambdas can look it up.
 
@@ -250,10 +448,18 @@ def _write_upload_job(
         "ToNumber": normalized["toNumber"],
         "Filename": normalized["filename"],
         "ContentType": normalized["contentType"],
+        # Absent when neither the file name nor the content type names a format
+        # Transcribe accepts; Stage 2 then leaves MediaFormat for it to detect.
+        "MediaFormat": normalized.get("mediaFormat"),
         "FileSize": normalized.get("fileSize"),
         "EnableDiarization": normalized["enableDiarization"],
         "MaxSpeakers": normalized["maxSpeakers"],
-        "LanguageCode": normalized.get("languageCode"),
+        # The language as decided when the upload started, so a settings change
+        # saved during the upload does not change it.
+        "LanguageCode": language.get("LanguageCode"),
+        "LanguageIdentification": language.get("LanguageIdentification"),
+        "LanguageOptions": language.get("LanguageOptions"),
+        "LanguageSource": language.get("LanguageSource"),
         "MeetingDateTime": normalized.get("meetingDateTime"),
         "PendingObjectBucket": S3_BUCKET_NAME,
         "PendingObjectKey": object_key,
@@ -303,6 +509,7 @@ def lambda_handler(event, context):  # noqa: ARG001
         owner = _get_username(event)
         groups = _get_user_groups(event)
         normalized = _parse_and_validate_input(event.get("arguments") or {})
+        language = _transcription_language(normalized["languageCode"])
     except ValidationError as err:
         logger.warning("Validation error: %s", err)
         raise
@@ -310,7 +517,7 @@ def lambda_handler(event, context):  # noqa: ARG001
     call_id = _build_call_id(normalized["meetingTopic"], normalized["callerSuppliedCallId"])
     object_key = _build_object_key(call_id, normalized["filename"])
 
-    _write_upload_job(call_id, owner, groups, normalized, object_key)
+    _write_upload_job(call_id, owner, groups, normalized, object_key, language)
     upload_url = _generate_presigned_put_url(object_key, normalized["contentType"])
 
     result = {
@@ -320,13 +527,16 @@ def lambda_handler(event, context):  # noqa: ARG001
         "uploadKey": object_key,
         "contentType": normalized["contentType"],
         "expiresInSeconds": UPLOAD_URL_TTL_SECONDS,
+        "transcriptionLanguage": _applied_language(language),
     }
     logger.info(
-        "Created upload job callId=%s owner=%s key=%s diarize=%s maxSpeakers=%s",
+        "Created upload job callId=%s owner=%s key=%s diarize=%s maxSpeakers=%s language=%s (%s)",
         call_id,
         owner,
         object_key,
         normalized["enableDiarization"],
         normalized["maxSpeakers"],
+        result["transcriptionLanguage"],
+        language["LanguageSource"],
     )
     return result

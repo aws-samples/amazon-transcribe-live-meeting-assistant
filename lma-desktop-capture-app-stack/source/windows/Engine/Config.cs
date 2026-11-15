@@ -32,6 +32,7 @@ public sealed class Config
     /// </summary>
     public string RefreshToken = "";
     public string CallId = "";
+    public string ConfiguredCallId = "";
     public string AgentId = "";
     public string FromNumber = "";
     public string ToNumber = "";
@@ -82,6 +83,16 @@ public sealed class Config
     public string AsrEngine = "";
 
     /// <summary>
+    /// CLI: the meeting consent step, for a deployment whose consent mode is
+    /// Notify or Opt-in (--consent-method / LMA_CONSENT_METHOD). verbal, chat or
+    /// invite_terms confirms that the notice the CLI prints was shared and, in
+    /// opt-in, that everyone agreed that way. The tray app asks instead.
+    /// </summary>
+    public string ConsentMethod = "";
+    /// <summary>CLI: an optional note recorded with that confirmation (--consent-note).</summary>
+    public string ConsentNote = "";
+
+    /// <summary>
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and used to namespace every machine-scoped identifier (registry
     /// key, mutex, pipe, start-at-login entry) so the clients for multiple LMA
@@ -96,6 +107,16 @@ public sealed class Config
         "Important: You are responsible for complying with legal, corporate, and ethical " +
         "restrictions that apply to recording meetings and calls. Do not use this solution " +
         "to stream, record, or transcribe calls if otherwise prohibited.";
+
+    public static string DefaultCallId(DateTime utc) =>
+        "LMA native prototype - " + utc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+
+    public static string SessionCallId(string? requested, string configured, DateTime utcNow)
+    {
+        if (!string.IsNullOrEmpty(requested)) return requested!;
+        if (!string.IsNullOrEmpty(configured)) return configured;
+        return DefaultCallId(utcNow);
+    }
 
     public static Config Parse(string[] argv)
     {
@@ -128,7 +149,7 @@ public sealed class Config
         }
 
         int sr = int.TryParse(Value("sample-rate", "LMA_SAMPLE_RATE", "samplingRate", "48000"), out var p) ? p : 48000;
-        var defaultCallId = "LMA native prototype - " + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var configuredCallId = Value("call-id", "LMA_CALL_ID");
 
         return new Config
         {
@@ -136,7 +157,8 @@ public sealed class Config
             AccessToken = Value("token", "LMA_ACCESS_TOKEN"),
             IdToken = Value("id-token", "LMA_ID_TOKEN"),
             RefreshToken = Value("refresh-token", "LMA_REFRESH_TOKEN"),
-            CallId = Value("call-id", "LMA_CALL_ID", null, defaultCallId),
+            CallId = SessionCallId(null, configuredCallId, DateTime.UtcNow),
+            ConfiguredCallId = configuredCallId,
             AgentId = Value("agent-id", "LMA_AGENT_ID", null, "Me"),
             FromNumber = Value("from", "LMA_FROM", null, "Other participants"),
             ToNumber = Value("to", "LMA_TO", null, "System"),
@@ -157,6 +179,8 @@ public sealed class Config
             DiarizeMicChannel = new[] { "1", "true", "yes" }
                 .Contains(Value("diarize-mic", "LMA_DIARIZE_MIC").ToLowerInvariant()),
             AsrEngine = Value("asr-engine", "LMA_ASR_ENGINE", "asrEngine").ToLowerInvariant(),
+            ConsentMethod = Value("consent-method", "LMA_CONSENT_METHOD").ToLowerInvariant(),
+            ConsentNote = Value("consent-note", "LMA_CONSENT_NOTE"),
             StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
             AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };

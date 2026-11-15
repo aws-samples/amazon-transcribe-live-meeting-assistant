@@ -1,13 +1,15 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 
 /**
- * Who the meeting platform showed as active speaker at each point of the engine's
- * audio clock, so a row is attributed by when it STARTED rather than by whoever is
- * active when it is emitted. The VP's own identities are never recorded.
+ * Who the meeting platform showed as active speaker at each point of the
+ * transcription audio clock (the on-demand engine's, or the audio sent to Amazon
+ * Transcribe), so a row or a word is attributed to whoever was shown for most of
+ * it rather than to whoever is active when it is emitted. The VP's own identities
+ * are never recorded.
  */
 export class RosterTimeline {
     private readonly own: Set<string>;
@@ -42,20 +44,25 @@ export class RosterTimeline {
         return lo === 0 ? 'Unknown' : this.names[lo - 1];
     }
 
+    /** True until a participant has been recorded. */
+    get isEmpty(): boolean {
+        return this.times.length === 0;
+    }
+
+    /**
+     * The participant shown for most of [startSec, endSec], with every change
+     * moved back by `lagSeconds` (how late the platform reports a change). A
+     * span no change overlaps -- a zero-length one, or one before the first
+     * entry -- takes the participant in effect at its start, or the first one.
+     *
+     * Called for every word of every Amazon Transcribe result, partials
+     * included, so it searches rather than scanning or copying the timeline.
+     */
     speakerFor(startSec: number, endSec: number, lagSeconds = 0): string {
         if (this.times.length === 0) {
             return 'Unknown';
         }
-        const end = Math.max(endSec, startSec);
-        const shifted = this.times.map((time) => time - lagSeconds);
-        const covered = new Map<string, number>();
-        for (let i = 0; i < shifted.length; i += 1) {
-            const from = Math.max(shifted[i], startSec);
-            const to = Math.min(i + 1 < shifted.length ? shifted[i + 1] : Infinity, end);
-            if (to > from) {
-                covered.set(this.names[i], (covered.get(this.names[i]) ?? 0) + (to - from));
-            }
-        }
+        const { covered, inEffect } = this.cover(startSec, endSec, lagSeconds);
         let best = '';
         let bestCovered = 0;
         for (const [name, seconds] of covered) {
@@ -67,16 +74,49 @@ export class RosterTimeline {
         if (best) {
             return best;
         }
+        return inEffect < 0 ? this.names[0] : this.names[inEffect];
+    }
+
+    /**
+     * Seconds of [startSec, endSec] each participant was shown for, with the
+     * same lag as speakerFor. Time before the first entry belongs to nobody,
+     * so it is absent rather than credited to the first participant: this is
+     * the evidence a voice label's name vote is built from (speaker-fusion.ts),
+     * and a guess must not count as evidence.
+     */
+    coverage(startSec: number, endSec: number, lagSeconds = 0): Map<string, number> {
+        return this.times.length === 0 ? new Map() : this.cover(startSec, endSec, lagSeconds).covered;
+    }
+
+    private cover(
+        startSec: number,
+        endSec: number,
+        lagSeconds: number,
+    ): { covered: Map<string, number>; inEffect: number } {
+        const count = this.times.length;
+        const end = Math.max(endSec, startSec);
+        const shifted = (i: number): number => this.times[i] - lagSeconds;
+        // Entries up to `inEffect` start at or before the span; only the last
+        // of them can overlap it.
         let lo = 0;
-        let hi = shifted.length;
+        let hi = count;
         while (lo < hi) {
             const mid = (lo + hi) >> 1;
-            if (shifted[mid] <= startSec) {
+            if (shifted(mid) <= startSec) {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
-        return lo === 0 ? this.names[0] : this.names[lo - 1];
+        const inEffect = lo - 1;
+        const covered = new Map<string, number>();
+        for (let i = Math.max(inEffect, 0); i < count && shifted(i) < end; i += 1) {
+            const from = Math.max(shifted(i), startSec);
+            const to = Math.min(i + 1 < count ? shifted(i + 1) : Infinity, end);
+            if (to > from) {
+                covered.set(this.names[i], (covered.get(this.names[i]) ?? 0) + (to - from));
+            }
+        }
+        return { covered, inEffect };
     }
 }

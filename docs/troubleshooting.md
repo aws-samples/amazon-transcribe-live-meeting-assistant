@@ -10,6 +10,7 @@ title: "Troubleshooting"
 - [CloudFormation Deployment Failures](#cloudformation-deployment-failures)
 - [Service Quotas](#service-quotas)
 - [Runtime Monitoring via CloudWatch](#runtime-monitoring-via-cloudwatch)
+  - [Log Format](#log-format)
 - [Common Issues](#common-issues)
   - [Deployment Fails on Nested Stack](#deployment-fails-on-nested-stack)
   - [Meeting Stuck In Progress](#meeting-stuck-in-progress)
@@ -29,6 +30,8 @@ title: "Troubleshooting"
 ## Overview
 
 This guide covers monitoring and troubleshooting for LMA deployments, including common deployment failures, runtime issues, and cost estimation.
+
+For a runtime failure, the [AI Troubleshooting Agent](troubleshooting-agent.md) can do the log reading this guide describes. Admins ask it questions about the whole deployment on the web UI's **Troubleshooting** page, or choose **Diagnose** on a meeting or Virtual Participant page for a diagnosis of that one resource.
 
 ## CloudFormation Deployment Failures
 
@@ -53,12 +56,107 @@ Be aware of the following service quota considerations:
 
 ## Runtime Monitoring via CloudWatch
 
+Before working through the console paths below, check the dashboard the stack
+deploys for you — it is named `<stack-name>-<region>` and the
+`OperationalDashboardConsoleUrl` stack output links straight to it. It collects
+the metrics in this section onto one page, including recent `ERROR` lines from
+the four busiest log groups, and it annotates the thresholds the alarms use.
+[Monitoring & Alerting](monitoring.md) explains every widget and every alarm,
+and — importantly — notes that the SNS email subscription created for
+`AdminEmail` delivers nothing until it is confirmed.
+
 Use the following paths to access logs for each LMA component:
 
 - **WebSocket Fargate task**: ECS console > Clusters > LMA-WEBSOCKETTRANSCRIBERSTACK-xxxx-TranscribingCluster > Tasks > Logs > View in CloudWatch
 - **Call Event Processor Lambda**: Lambda console > AISTACK-CallEventProcessor > Monitor > View logs in CloudWatch
 - **AppSync API**: AppSync console > CallAnalytics-LMA > Monitoring > View logs in CloudWatch
 - **Step Functions**: For VP scheduling issues, check the Step Functions execution history in the Step Functions console
+
+### Log Format
+
+The Virtual Participant writes its log lines to CloudWatch as JSON objects, one
+per line. CloudWatch Logs Insights discovers the fields of a JSON line by
+itself, so a query can filter on them without a `parse` step. A few lines are
+plain text: the output of the container's start-up script and of Chromium, and
+lines written before the participant used this format.
+
+| Field | What it holds |
+|-------|---------------|
+| `ts` | When the line was written, as an ISO 8601 UTC timestamp. |
+| `level` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
+| `component` | The part of the participant that wrote it, such as `main` (start-up, joining and exit), `status-manager` or `keyframe-sampler`. |
+| `msg` | The human-readable message. The bracket markers this guide and the feature guides refer to, such as `[stop-request]` or `VP exit:`, are in this text. |
+| `vpId` | The Virtual Participant's id, from the moment the participant starts. |
+| `callId` | The meeting's call id, from the point the participant has one. |
+| `meetingPlatform` | `CHIME`, `ZOOM`, `TEAMS`, `WEBEX` or `GOOGLE_MEET`. |
+
+A part of the participant may add fields of its own for a narrower scope.
+
+The stack's `LogLevel` parameter sets the threshold through the container's
+`LOG_LEVEL` variable. At `WARN` or `ERROR`, `INFO` lines are not written,
+except for the participant's lifecycle lines: start-up, its status changes, the
+`VP exit:` line that records why it left, and the shutdown-signal lines. Those
+are written at every level. For a local run, `LOG_FORMAT=text` writes
+`<ts> <LEVEL> [<component>] <msg>` lines instead of JSON.
+
+In the JSON records, the values of credential-named fields (passwords, tokens,
+secrets, API keys), JSON Web Tokens and bearer tokens in a message, and the
+meeting password are written as `[REDACTED]`. A numeric passcode is replaced
+only where it stands as a number of its own, so longer numbers, dates and
+times that contain the same digits are left as they are.
+
+Example Logs Insights queries over the Virtual Participant's log group:
+
+```
+# Everything one participant wrote, JSON records and plain-text lines alike.
+# Each participant writes to a log stream of its own: find it from a status
+# line, which spells the id as "VP <id>" in either format...
+fields @logStream
+| filter @message like "VP <virtual-participant-id>"
+| limit 1
+
+# ...then read that stream in order.
+fields @timestamp, level, component, msg, @message
+| filter @logStream = "<log-stream>"
+| sort @timestamp asc
+
+# Only its JSON records
+fields @timestamp, level, component, msg
+| filter vpId = "<virtual-participant-id>"
+| sort @timestamp asc
+
+# Where errors are coming from
+filter level = "ERROR"
+| stats count() by component
+
+# Why participants left, counted. The pattern stops at a space or a quote, so
+# it reads both a JSON line and a plain-text line.
+filter @message like "VP exit:"
+| parse @message /trigger=(?<trigger>[^\s"]+)/
+| stats count() by trigger
+```
+
+The WebSocket transcriber writes JSON records too, with `ts`, `level`,
+`component` (always `websocket-transcriber`) and `msg`. Each record written for
+a connection also has `sessionId`, one per WebSocket connection, and `callId`,
+from the moment the connection's `START` frame names the call; records written
+outside a connection, such as start-up and health-check lines, have neither. Its bracket markers (`[AUTH]`,
+`[TRANSCRIBING]`, `[ASR]`, `[DIARIZATION]`) are in `msg`. The stack's
+`LogLevel` parameter sets its threshold through `WS_LOG_LEVEL`, and
+`LOG_FORMAT=text` gives readable lines for a local run. Because both components
+write `callId`, one query over both log groups reads a meeting end to end:
+
+```
+# One meeting across the Virtual Participant and the transcriber
+fields @timestamp, @log, component, level, msg
+| filter callId = "<call-id>"
+| sort @timestamp asc
+```
+
+A field filter such as `vpId = "…"` matches only JSON lines. To include
+plain-text lines too, add `or @message like "…"`. In a JSON line a double quote
+inside the message is written as `\"`, so search for a part of the message
+that has no quotes in it.
 
 ## Common Issues
 
@@ -83,9 +181,12 @@ its shutdown never runs:
   Fargate task hosting the connection goes away without running its close
   handler, the `StaleMeetingReaper` Lambda ends the meeting instead. It runs
   every 15 minutes and ends meetings that have produced no finalized transcript
-  segment for longer than `MeetingInactivityTimeoutInMinutes` (default 240),
-  so a meeting can show as in progress for up to that long plus one schedule
-  interval before it closes on its own.
+  segment for longer than the inactivity timeout (default 240 minutes), so a
+  meeting can show as in progress for up to that long plus one schedule
+  interval before it closes on its own. The timeout is **Minutes without speech
+  before a meeting is ended** in the Meeting Processing section of the
+  [Configuration page](configuration-guide.md), which an Admin can change
+  with no stack update.
 
 To see what the reaper is doing, look at the
 `/<AISTACK-name>/lambda/StaleMeetingReaperFunction` log group: each run logs a
@@ -96,16 +197,18 @@ inside the timeout, already `ENDED`, or still owned by the upload pipeline (an
 in-flight Transcribe job on a long recording can easily outlast the timeout, so
 those meetings are skipped and closed by the finalizer instead).
 
-Two bounds decide which meetings a run can reach. `MeetingInactivityLookbackInDays`
-(default 2) is how far back it looks: **a meeting that started earlier than that is
+Two bounds decide which meetings a run can reach. **Meeting Processing › Days to
+look back for meetings that were never ended** (default 2) is how far back it looks: **a meeting that started earlier than that is
 never closed automatically**, so if you have a backlog of older meetings stuck in
-progress — for example on the update that first introduces the reaper — raise the
-parameter, let one run complete, and set it back. Each run also stops after reading
+progress — for example on the update that first introduces the reaper — raise it,
+let one run complete, and set it back. It is a setting on the
+[Configuration page](configuration-guide.md), so this needs no stack update. Each run also stops after reading
 500 candidate meetings; they are examined newest-first, so meetings that have just
 become eligible are always covered, and a run that hits the cap says so in its log.
 
-Setting `MeetingInactivityTimeoutInMinutes` to `0` disables the schedule. With
-it disabled, or to end a meeting sooner than the timeout, you can still end a
+The reaper is always deployed. Setting the timeout to `0` on the Configuration
+page keeps the reaper running but ending nothing. With it disabled, or to end a
+meeting sooner than the timeout, you can still end a
 meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
 sourcing DynamoDB table.
 
@@ -248,6 +351,14 @@ Key AWS service pricing pages for detailed cost estimation:
 - [AWS Lambda Pricing](https://aws.amazon.com/lambda/pricing/)
 - [Amazon S3 Pricing](https://aws.amazon.com/s3/pricing/)
 - [Amazon Cognito Pricing](https://aws.amazon.com/cognito/pricing/)
+- [Amazon CloudWatch Pricing](https://aws.amazon.com/cloudwatch/pricing/) — log storage, plus the alarms and the dashboard each deployment creates
+
+The alarms and dashboard add a small fixed monthly cost that does not vary with
+meeting volume: about $0.40 per stack in us-east-1 if the account still has its
+free allowance of ten alarm metrics, rising to $1.40 if it does not, and $3.00
+more for the dashboard in an account that already has three custom dashboards.
+[Monitoring & Alerting](monitoring.md#what-it-costs) breaks that down, including
+why a metric-math alarm bills per metric rather than per alarm.
 
 Use **AWS Cost Explorer** or **Bill Details** in the AWS Billing console for actual spend tracking.
 

@@ -1,7 +1,8 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Unit tests for publish operations."""
 
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,11 +12,13 @@ import pytest
 import subprocess
 
 from lma_sdk._core.publish import (
+    CONFIGURATION_SEED_PATHS,
     _calculate_dir_hash,
     _compare_versions,
     _git_untracked_preflight,
     _has_changed,
     _list_untracked_files,
+    calculate_configuration_seed_hash,
     check_prerequisites,
     STACK_DEFINITIONS,
     STACK_NAMES,
@@ -80,6 +83,23 @@ class TestDirectoryHash:
 
         assert hash_without == hash_with
 
+    def test_hash_excludes_local_tool_caches(self, tmp_path):
+        """A local test run must not change what a publish from that checkout digests.
+
+        The digest decides whether a deploy-time custom resource re-runs, so a
+        `.pytest_cache` left inside a hashed tree would show up as a stack
+        update nobody made.
+        """
+        (tmp_path / "src.py").write_text("code")
+        clean = _calculate_dir_hash(tmp_path)
+
+        for cache in (".pytest_cache", ".ruff_cache"):
+            directory = tmp_path / cache
+            directory.mkdir()
+            (directory / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172")
+
+        assert _calculate_dir_hash(tmp_path) == clean
+
     def test_hash_excludes_checksum_file(self, tmp_path):
         """Hash excludes .checksum files."""
         (tmp_path / "file.txt").write_text("content")
@@ -89,6 +109,70 @@ class TestDirectoryHash:
         hash2 = _calculate_dir_hash(tmp_path)
 
         assert hash1 == hash2
+
+
+class TestConfigurationSeedHash:
+    """Tests for the digest that makes the configuration seeder re-run.
+
+    CloudFormation re-invokes a custom resource only when one of its properties
+    changes. This digest is that property, so if it did not move when a release
+    changed the shipped configuration, the seeder would never run again after a
+    deployment's first create -- and the new prompts would never arrive. The
+    tests therefore assert that it moves for both kinds of change.
+    """
+
+    @staticmethod
+    def _project(tmp_path: Path) -> Path:
+        for relative in CONFIGURATION_SEED_PATHS:
+            directory = tmp_path / relative
+            directory.mkdir(parents=True)
+            (directory / "placeholder.py").write_text("original")
+        return tmp_path
+
+    def test_the_digest_is_deterministic(self, tmp_path):
+        project = self._project(tmp_path)
+        assert calculate_configuration_seed_hash(project) == (
+            calculate_configuration_seed_hash(project)
+        )
+        assert len(calculate_configuration_seed_hash(project)) == 16
+
+    def test_the_digest_moves_when_the_shipped_content_changes(self, tmp_path):
+        project = self._project(tmp_path)
+        before = calculate_configuration_seed_hash(project)
+        content = project / CONFIGURATION_SEED_PATHS[0] / "defaults.json"
+        content.write_text('{"SUMMARY": "a new shipped prompt"}')
+        assert calculate_configuration_seed_hash(project) != before
+
+    def test_the_digest_moves_when_the_processing_code_changes(self, tmp_path):
+        """Hashing the content alone would miss a change to how it is written."""
+        project = self._project(tmp_path)
+        before = calculate_configuration_seed_hash(project)
+        accessor = project / CONFIGURATION_SEED_PATHS[1] / "placeholder.py"
+        accessor.write_text("a different encoding")
+        assert calculate_configuration_seed_hash(project) != before
+
+    def test_a_relocated_directory_changes_the_digest_rather_than_being_skipped(
+        self, tmp_path
+    ):
+        """A silently skipped path would freeze the digest and stop the re-runs."""
+        project = self._project(tmp_path)
+        before = calculate_configuration_seed_hash(project)
+        for item in (project / CONFIGURATION_SEED_PATHS[1]).iterdir():
+            item.unlink()
+        (project / CONFIGURATION_SEED_PATHS[1]).rmdir()
+        assert calculate_configuration_seed_hash(project) != before
+
+    def test_the_paths_the_digest_covers_exist_in_this_repository(self):
+        """A rename elsewhere must not leave the digest hashing nothing."""
+        repo_root = Path(__file__).resolve().parents[3]
+        for relative in CONFIGURATION_SEED_PATHS:
+            assert (repo_root / relative).is_dir(), f"{relative} is not in the repository"
+
+    def test_the_main_template_carries_the_token_the_digest_replaces(self):
+        """Without the token in the template there is nothing to substitute."""
+        repo_root = Path(__file__).resolve().parents[3]
+        main_template = (repo_root / "lma-main.yaml").read_text()
+        assert "<CONFIGURATION_SEED_HASH_TOKEN>" in main_template
 
 
 class TestChangeDetection:
@@ -368,3 +452,119 @@ class TestUntrackedPreflight:
         assert "- ai-new.py" in msg
         assert "lma-websocket-transcriber-stack:" in msg
         assert "- ws-new.py" in msg
+
+
+class TestHashAndPackage:
+    """Tests for the HASH_AND_PACKAGE publish path (config seeding stacks)."""
+
+    TEMPLATE = (
+        "Resources:\n"
+        "  Fn:\n"
+        "    Type: AWS::Lambda::Function\n"
+        "    Properties:\n"
+        "      Code: ../source/lambda_functions\n"
+        "  Seed:\n"
+        "    Type: AWS::CloudFormation::CustomResource\n"
+        "    Properties:\n"
+        "      ServiceToken: !GetAtt Fn.Arn\n"
+        "      # comment mentioning source_hash: not a property\n"
+        "      source_hash: committedvalue\n"
+    )
+
+    @staticmethod
+    def _stack_def() -> StackDefinition:
+        return StackDefinition(
+            name="lma-example-config-stack",
+            package_type=StackPackageType.HASH_AND_PACKAGE,
+            template_file="example.yaml",
+            deployment_subdir="deployment",
+            hash_source_dir="../source",
+            hash_template_field="source_hash",
+        )
+
+    def _project(self, tmp_path: Path, template: str | None = None) -> Path:
+        project = tmp_path / "project"
+        stack = project / "lma-example-config-stack"
+        (stack / "deployment").mkdir(parents=True)
+        (stack / "source" / "lambda_functions").mkdir(parents=True)
+        (stack / "source" / "lambda_functions" / "seed.py").write_text("print('seed')\n")
+        (stack / "deployment" / "example.yaml").write_text(template or self.TEMPLATE)
+        return project
+
+    def _publish(self, client, project: Path, tmp_path: Path):
+        """Run _publish_hash_and_package with `cfn package` simulated as a copy.
+
+        The real `aws cloudformation package` re-serialises the YAML and drops
+        comments; a byte-for-byte copy does not. The injector depends on neither,
+        so the comment-preservation check in
+        test_uploaded_template_carries_the_source_hash is about the injector, not
+        about what real packaged output looks like.
+        """
+        from lma_sdk._core.publish import Publisher
+
+        publisher = Publisher(client)
+        uploaded = {}
+
+        def fake_package(cmd, cwd, desc):
+            src = Path(cwd) / cmd[cmd.index("--template-file") + 1]
+            Path(cmd[cmd.index("--output-template-file") + 1]).write_text(src.read_text())
+
+        def capture_upload(path, bucket, key):
+            uploaded[key] = Path(path).read_text()
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir(parents=True)
+        s3 = MagicMock()
+        s3.upload_file.side_effect = capture_upload
+        with patch.object(Publisher, "_run_command", side_effect=fake_package), \
+                patch.object(Publisher, "_s3", new=s3):
+            result = publisher._publish_hash_and_package(
+                stack_def=self._stack_def(),
+                project_dir=project,
+                bucket="bucket",
+                prefix_and_version="prefix/1.0.0",
+                region="us-east-1",
+                tmpdir=out_dir,
+            )
+        return result, uploaded
+
+    def test_tracked_template_is_left_unmodified(self, client, tmp_path):
+        project = self._project(tmp_path)
+        template = project / "lma-example-config-stack" / "deployment" / "example.yaml"
+        self._publish(client, project, tmp_path)
+        assert template.read_text() == self.TEMPLATE
+
+    def test_uploaded_template_carries_the_source_hash(self, client, tmp_path):
+        project = self._project(tmp_path)
+        expected = _calculate_dir_hash(project / "lma-example-config-stack" / "source")
+        _, uploaded = self._publish(client, project, tmp_path)
+        body = uploaded["prefix/1.0.0/lma-example-config-stack/example.yaml"]
+        assert f'      source_hash: "{expected}"\n' in body
+        assert "committedvalue" not in body
+        assert "# comment mentioning source_hash: not a property" in body
+
+    def test_uploaded_hash_follows_source_changes(self, client, tmp_path):
+        project = self._project(tmp_path)
+        _, first = self._publish(client, project, tmp_path / "a")
+        seed = project / "lma-example-config-stack" / "source" / "lambda_functions" / "seed.py"
+        seed.write_text("print('changed')\n")
+        _, second = self._publish(client, project, tmp_path / "b")
+        key = "prefix/1.0.0/lma-example-config-stack/example.yaml"
+        assert first[key] != second[key]
+
+    def test_template_without_the_hash_field_is_rejected(self, client, tmp_path):
+        project = self._project(tmp_path, template="Resources: {}\n")
+        with pytest.raises(LMAPublishError, match="source_hash"):
+            self._publish(client, project, tmp_path)
+
+    @pytest.mark.parametrize(
+        "stack_name",
+        ["lma-llm-template-setup-stack", "lma-chat-button-config-stack", "lma-nova-sonic-config-stack"],
+    )
+    def test_shipped_templates_carry_the_hash_field(self, stack_name):
+        stack_def = next(s for s in STACK_DEFINITIONS if s.name == stack_name)
+        assert stack_def.package_type == StackPackageType.HASH_AND_PACKAGE
+        repo = Path(__file__).resolve().parents[3]
+        template = repo / stack_name / stack_def.deployment_subdir / stack_def.template_file
+        pattern = rf"^[ \t]+{re.escape(stack_def.hash_template_field)}:"
+        assert re.search(pattern, template.read_text(), re.MULTILINE)

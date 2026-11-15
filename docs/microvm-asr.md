@@ -2,23 +2,42 @@
 title: "On-demand ASR & Speaker Diarization (MicroVM)"
 ---
 
-<!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT-0 License. -->
 <!-- See the LICENSE file in the project root for full license information. -->
 
 # On-demand ASR & Speaker Diarization (MicroVM)
 
-> **Status: EXPERIMENTAL — not production ready.** Opt-in and off by default.
-> **Amazon Transcribe remains the recommended engine for production meetings**;
-> transcript quality here is below it and defaults may change between releases.
-> Deploying it changes nothing on its own: meetings still use Amazon Transcribe until
-> an admin switches streaming meetings or Virtual Participants onto it on the ASR
-> Config page. Accuracy (WER) and diarization error rate have not yet
-> been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
+> **An alternative transcription engine, deployed by default and selected per
+> meeting source.** `EnableMicrovmAsr` defaults to `true`, which deploys the engine,
+> but Amazon Transcribe is the default transcription engine for every meeting source.
+> Where the engine is deployed, an admin moves Stream Audio, Chrome extension and
+> Desktop Capture meetings, Virtual Participants, or both onto it in the
+> Transcription Engine section of the Configuration page. Amazon Transcribe is also
+> the fallback: it is used for every meeting where the engine is not deployed
+> (`EnableMicrovmAsr=false`, or a Region without AWS Lambda MicroVMs, GovCloud
+> included), and for any meeting whose MicroVM cannot start. A
+> meeting whose Amazon Transcribe options use content redaction, a custom vocabulary,
+> a custom language model, language identification or a language the deployed model
+> bundle does not support, which this engine does not offer, stays on Amazon Transcribe
+> whichever engine is selected (see [Feature trade-offs](#feature-trade-offs-versus-amazon-transcribe)).
 >
-> Because it is experimental, nothing about it is tunable at deploy time:
-> `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
-> with its diarization operating point already measured, and the only runtime
-> settings are three switches on the Transcription Engine page.
+> **When to move a source onto it.** Two features need it:
+> [voice enrollment](voice-enrollment.md), whose speaker embeddings only this engine
+> computes, so enrolled voices are matched only in meetings it transcribes; and
+> separating the several voices on one microphone or one attendee tile, which it does
+> better than Amazon Transcribe in the measurement in
+> [Virtual Participant](virtual-participant.md). Its transcripts are not better:
+> transcript quality here is below Amazon Transcribe's, its word error rate (WER) and
+> diarization error rate have not been benchmarked against Amazon Transcribe (see
+> [What is not yet measured](#what-is-not-yet-measured)), and its defaults may change
+> between releases. Measure it in a dev stack, with the meeting features you use
+> (consent modes and the voice assistant included), before moving a production
+> meeting source onto it (see [Choosing the engine](#choosing-the-engine)).
+>
+> Nothing about it is tunable at deploy time: `EnableMicrovmAsr` is the only
+> CloudFormation question, the model bundle ships with its diarization operating
+> point already measured, and the only runtime settings are three switches in the
+> Transcription Engine section of the Configuration page.
 
 ## Table of Contents
 
@@ -75,7 +94,7 @@ weights live inside your account.
 ## Feature trade-offs versus Amazon Transcribe
 
 A meeting transcribed by this engine does **not** go through Amazon Transcribe, so
-these Transcribe features do not apply to it:
+these Transcribe features are not available on it:
 
 | Feature | On this engine |
 |---|---|
@@ -83,26 +102,261 @@ these Transcribe features do not apply to it:
 | Custom vocabulary | Not available |
 | Custom language model | Not available |
 | Language identification / multi-language | Not available |
-| Transcribe Call Analytics | Not available |
-| Languages | The default model is **English only** |
+| Languages | Those the deployed model bundle supports: 20 European languages with the default bundle, English only with some others (see below) |
+| Detected language | Per final row, identified from the row's text, with a multilingual bundle; none on live rows or rows of one or two words (see [Row languages](#row-languages)) |
 | Speaker labels | Per voice, per channel (the reason to use it) |
 
-Meetings that do not opt in are unaffected. The two engines coexist in one
-deployment, chosen per meeting.
+**These options keep a meeting on Amazon Transcribe.** When the effective
+**Amazon Transcribe** section of the Configuration page turns on content redaction
+(the Regulated presets do), names a custom vocabulary or a custom language model,
+sets the language to identify-language or identify-multiple-languages, or sets a
+language the deployed model bundle does not support (see
+[Languages](#languages) below; with the default bundle, for example, `ja-JP` or
+`el-GR`), a meeting that would otherwise use this engine is transcribed by Amazon
+Transcribe instead, so the option is applied rather than silently dropped. Redaction
+counts when its switch is on, whatever the language. The rule is applied each time a meeting starts, by the
+WebSocket transcriber for Stream Audio, Chrome extension and Desktop Capture meetings
+and by the Virtual Participant for its own, and each logs the reason at info level
+(`[ASR] ... Amazon Transcribe options use content redaction, ...`). It also wins over
+an explicit request for this engine (`--asr-engine microvm` from a Desktop Capture
+app, or a Virtual Participant's `ASR_ENGINE=microvm`), which is then logged as a
+warning: those options are the deployment's, and a client's engine request does not
+switch them off. The Transcription Engine section of the Configuration page says
+when the saved Amazon Transcribe options do this. To put meetings on this engine,
+clear those options. The Virtual Participant has no custom language model setting,
+so for it only the other options apply.
+
+### Languages
+
+The engine is given no language. A multilingual model identifies the language being
+spoken on its own, and an English-only model decodes English whatever it hears. So
+which meeting languages a deployment can put on the engine depends on the model
+bundle it was built from, and is decided as follows.
+
+- **A bundle's languages** are the languages every model that writes its text
+  supports: the main model and, in a two-pass bundle, the live preview model. A
+  language only one of them supports would get a wrong live row or a wrong final row.
+  Each model's list is the `languages` entry in
+  `lma-asr-microvm-stack/source/catalog.json`, taken from its model card. A model the
+  catalog lists only as `multilingual`, without its languages, counts as English only,
+  and a model decoded in one baked language (`decodeLanguage`) counts as that language.
+- **The deployed bundle's list is published at deploy time.** The `AsrImageSource`
+  custom resource computes it from the catalog. The ASR stack returns it as its
+  `AsrModelLanguages` output, a comma-separated list of base language codes such as
+  `bg,cs,da,de,en,es,...`. The main stack passes that output to the WebSocket
+  transcriber and the Virtual Participant, which read it as the
+  `ASR_MODEL_LANGUAGES` environment variable, and to the web UI through the
+  `AsrModelLanguages` key of the LMA settings parameter.
+- **A meeting's language is compared by its base language**, the part of the code
+  before the first `-` (`es` from `es-US`, `pt` from `pt-BR`). English is always
+  taken, because every bundle in the catalog supports it
+  (`lma-asr-microvm-stack/source/tests/test_catalog_languages.py` holds the catalog to
+  that). A deployment that publishes no list, such as one deployed from an earlier
+  release, takes English only.
+- **Language identification stays on Amazon Transcribe.** `identify-language` and
+  `identify-multiple-languages` keep a meeting on Amazon Transcribe with every bundle.
+  This engine names the language of each final row (see
+  [Row languages](#row-languages)), but not of live rows or of rows of one or two
+  words, so it is not used in place of Amazon Transcribe's identification.
+
+| Bundle | Languages it takes |
+|---|---|
+| `parakeet-tdt-v3-live-nemotron35-sortformer` (default) and `parakeet-tdt-v3-live-nemotron35-titanet-small` | 20: Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Hungarian, Italian, Polish, Portuguese, Romanian, Russian, Slovak, Spanish, Swedish, Ukrainian |
+| `parakeet-tdt-v3-titanet-small` and `parakeet-tdt-v3-sortformer` | The 25 of Parakeet TDT 0.6B v3's model card: the 20 above and Greek, Latvian, Lithuanian, Maltese and Slovenian |
+| `nemotron35-titanet-small` | The 28 base languages of the 32 locales Nemotron 3.5's model card lists as transcription-ready or broad-coverage, including Arabic, Chinese, Hindi, Japanese, Korean, Turkish and Vietnamese |
+| `parakeet-tdt-v3-live-titanet-small` and `parakeet-tdt-v3-live-sortformer` | English only, because their live preview model (FastConformer) is English only |
+| Every other bundle | English only |
+
+The Transcription Engine section of the Configuration page lists the deployed
+bundle's languages next to its name.
+
+**What has been measured.** On 2026-11-10 the default bundle's engine was run
+in-process on synthetic single-speaker clips (Amazon Polly neural voices, about 50
+words or 20 seconds each), with no language configured:
+
+| Clip | Final text WER | Live preview WER |
+|---|---|---|
+| en-US (baseline) | 0.0% | 16.4% |
+| es-ES | 0.0% | 13.5% |
+| es-US | 0.0% | 23.1% |
+| fr-FR | 1.8% | 12.5% |
+| de-DE | 6.2% | 31.2% |
+| it-IT | 6.0% | 20.0% |
+| pt-BR | 3.9% | 11.8% |
+| nl-NL | 0.0% | 16.7% |
+| English, then Spanish | 0.0% | 29.4–35.3% |
+
+WER is word error rate after lowercasing, stripping punctuation and writing spoken
+numbers as digits. The live preview figure is the last preview text shown for each
+row before its final replaced it, so it counts words the preview had not yet caught
+up with at either end of the row. The final text, from Parakeet TDT 0.6B v3, was
+within 0–6% in all seven non-English locales and followed a switch from English to
+Spanish within one meeting. The live preview, from Nemotron 3.5, is rougher in every
+language, and the final replaces it on every row, so its errors do not reach the
+stored transcript. Forcing a language on the preview model did not improve it and
+dropped the other language's speech in a mixed-language clip, so the engine sets
+none. Neither model reports the language it identified in time to label a row, so
+the server identifies it from the final text (see [Row languages](#row-languages)).
+
+These figures are optimistic. The audio was clean synthetic speech with one speaker
+per clip and one clip per language. With about 50 words per clip, one wrong word
+moves the WER by about 2 points. The run was on x86_64, not on the ARM64 MicroVM
+image. The other 13 languages of the default bundle were not tested, and no real
+meeting audio was. Measure the languages that matter to you on real meetings before
+relying on them.
+
+### Row languages
+
+With a bundle of two or more languages, the engine names the language of each final
+row. The `final` message carries it as `language`, a base ISO 639-1 code such as
+`es`, and the WebSocket transcriber and the Virtual Participant write it on the
+row's `ADD_TRANSCRIPT_SEGMENT` event as `LanguageCode`, the field Amazon Transcribe's
+language identification fills. What the meeting page does with it is described in
+[Detected languages](transcription-and-translation.md#detected-languages).
+
+**Where the language comes from.** None of the bundle's speech models gives the
+server a language for a row. The offline models that write the final text
+(Parakeet TDT, for example) output none. Nemotron 3.5, the default bundle's live
+preview model, does write a locale tag such as `<es-ES>` after each sentence, and
+its vocabulary has 39 of them. sherpa-onnx 1.13.4 removes tokens of that shape from
+every result and has no option to keep them, but renaming them in the model's
+`tokens.txt` does bring them through, and on whole recordings the tags named the
+right base language every time. They are not usable for rows, though: the model
+writes a sentence's tag only once it has heard the next sentence begin or a long
+pause, and the engine has sent the row's final by then. On the engine path, 1 of
+34 final rows had a tag by the time its final was sent. Finishing the preview
+stream when the utterance closes did not produce the missing tags. The region in
+the tags was also wrong on both regional clips (es-US speech tagged `es-ES`, pt-BR
+speech tagged `pt-PT`).
+
+So the server identifies the language of the final text instead, which in a
+multilingual bundle is already written in the spoken language:
+
+- **The classifier** is [py3langid](https://github.com/adbar/py3langid) 0.4.0
+  (BSD-3-Clause), an n-gram model of about 4.5 MB installed into the image. It is
+  loaded when the server starts, so it is in the MicroVM snapshot, and the
+  build-time warmup fails the image build if a multilingual bundle cannot load it.
+- **It chooses only among the bundle's languages.** `AsrImageSource` writes the
+  bundle's list into the image's `model.env` as `ASR_BUNDLE_LANGUAGES`, the same
+  list it reports as `AsrModelLanguages`. A bundle with one language names none.
+- **It names none for a row of one or two words, or below a probability of
+  0.8.** On the evaluation set below, every misidentification was on a row of one
+  or two words.
+- **Only finals are identified.** A live row is the preview model's rougher text
+  and is replaced by its final moments later.
+- **The client chooses the region.** The engine reports `es`, not `es-US`. The
+  transcriber and the Virtual Participant give a row in the meeting's own language
+  the meeting's code, and any other language a fixed region (`microvmRowLanguageCode`
+  in both `configuration-store.ts` files): `en-US`, `es-US`, `fr-FR`, `pt-BR`,
+  `de-DE`, and so on.
+
+**What has been measured.** On 2026-11-10 the classifier was evaluated on 185 rows.
+34 were the final rows the default bundle's engine wrote for the synthetic clips
+described above, run in-process on x86_64 through the same protocol adapter the
+server uses. The other 151 were hand-written meeting utterances: 50 in English,
+many of them short or carrying foreign names and product terms (*"Let's ping Juan
+about the Kubernetes rollout."*), and 101 in Spanish, French, German, Italian,
+Portuguese, Dutch, Polish and Swedish. The classifier was restricted to the default
+bundle's 20 languages.
+
+| Rows | Labelled | Correct | English rows named as another language |
+|---|---|---|---|
+| All 34 engine-path rows, with the rules above | 28 | 28 | 0 |
+| The 143 rows of three or more words, probability 0.8 | 133 | 133 | 0 of 49 |
+| The 143 rows of three or more words, any probability | 143 | 143 | 0 of 49 |
+| All 185 rows, any probability (no word floor) | 185 | 168 | 2 of 61 |
+
+The 6 unlabelled engine-path rows were three of one or two words (*Okay.*,
+*Por favor.*) and three below the threshold (*The vendor contract renewal*, twice,
+and one Portuguese sentence). Both mixed-language clips were labelled English and
+then Spanish, row by row.
+
+Other classifiers were compared on the same rows. lingua-language-detector 2.1.1
+in its low-accuracy mode named 10 of the 49 English rows of three or more words as
+another language, and its high-accuracy mode used about 950 MB of memory and
+labelled 72 of the 143 rows at a probability of 0.8. py3langid 0.2.2, the last
+release that declares support for numpy 1.x, named 4 of those English rows as
+another language. fastText's `lid.176` model was not evaluated, because its licence
+is CC-BY-SA-3.0 and its Python package publishes no official wheels. A spoken
+language-identification model (sherpa-onnx can run Whisper for this) was not
+evaluated either. It would add a Whisper model to the image and an encoder pass per
+row, where the text classifier costs well under a millisecond per row.
+
+**Cost.** The image grows by about 4.5 MB. Loading the classifier takes 0.5–1 s at
+server start and adds about 105 MB of resident memory. Identifying a row took
+0.14 ms on average (0.36 ms at most) on the x86_64 run above. py3langid 0.4.0
+declares numpy 2 or later, while the image pins numpy 1.26.4, so the Dockerfile
+installs it without its dependencies; its output on the 185 rows was identical on
+numpy 1.26.4 and 2.4.6.
+
+**Caveats.** The 151 hand-written rows were written for this test, and the 34
+engine rows come from clean synthetic speech, so real meetings, with recognition
+errors, disfluencies and code-switching inside a sentence, will do worse. A row
+that mixes two languages gets one of them. The region is a convention, not a
+detection. On ARM64 (Python 3.11 with numpy 1.26.4, under emulation) the
+classifier installed without its dependencies, loaded and named sample rows
+correctly, but it has not been run inside a built MicroVM image.
+
+The two engines coexist in one deployment, and which one a meeting uses is chosen
+per meeting source (see [Choosing the engine](#choosing-the-engine)).
 
 ## Deploying it
 
-Set **`EnableMicrovmAsr` = `true`** on the main stack. This creates the
+**`EnableMicrovmAsr`** on the main stack defaults to `true`. It creates the
 `lma-asr-microvm-stack` nested stack: a MicroVM image, a session launcher Lambda,
-the runtime-switch table the Transcription Engine page edits, and the IAM roles they need.
+the table the runtime switches were stored in before they moved into the shared
+[configuration store](configuration-store.md) (kept so a deployment can be rolled
+back), and the IAM roles they need.
 
-**Region requirement.** AWS Lambda MicroVMs must be available in your region. It is
-not available in GovCloud. Deploying with `MicrovmAsr` in an unsupported region
-fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
+**Region requirement.** AWS Lambda MicroVMs must be available in your Region: today
+us-east-1, us-east-2, us-west-2, ap-northeast-1 and eu-west-1, and not GovCloud (the
+same list as the `VPLaunchType` parameter's). The nested stack is created only in
+those Regions, through the `IsMicrovmRegion` condition in `lma-main.yaml`, because
+elsewhere `AWS::Lambda::MicrovmImage` is not a recognised resource type and the
+deployment would fail. In any other Region `EnableMicrovmAsr` has no effect, the
+Transcription Engine section shows no engine choice, and every meeting uses Amazon
+Transcribe. When Lambda MicroVMs reach another Region, add it to that condition.
 
-**First deployment builds the image**, which downloads the models (~150 MB for the
+**Using Amazon Transcribe for every meeting.** That is what a deployment does until
+an admin moves a meeting source onto this engine. Set `EnableMicrovmAsr` to `false`
+to leave the engine undeployed altogether.
+
+**Upgrading.** A stack update keeps the value the stack was deployed with unless you
+change it: the console and `lma deploy` both reuse a parameter's previous value, so a
+deployment created with `EnableMicrovmAsr=false` has no engine until you set it to
+`true`. See [Choosing the engine](#choosing-the-engine) for what happens to the
+engine switches on upgrade.
+
+**First deployment builds the image**, which downloads the models (~3.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
-on any later change of bundle. Build logs land in `/aws/lambda-microvms/<stack-name>-asr`.
+on any later change of bundle. Build logs, and the logs of every ASR session's
+MicroVM, land in `/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack
+declares with the retention you set in `CloudWatchLogsExpirationInDays` and the
+deployment's customer-managed key. The launcher names that group on each
+`RunMicrovm` call, because the image's logging setting covers only the build.
+Releases before v0.4.0 logged to `/aws/lambda-microvms/<stack-name>-asr`; that
+group keeps the logs it already
+holds and is not removed on upgrade, so delete it yourself once you no longer
+need them.
+
+**How the image is warmed.** Every MicroVM starts from a snapshot that Lambda takes
+when the image's `/ready` hook first answers 200, and Lambda prefetches on later
+launches the memory pages that the `/validate` hook touches. The hook therefore
+answers 503 until two things have run in the ASR server. The first is a warm-up
+decode: about 20.6 s of audio (the VAD's 20 s longest segment plus its padding) is
+handed to every model the engine holds. For the offline model it goes straight to the
+decoder as one utterance rather than through the VAD, so the encoder runs and its
+buffers for the longest utterance are allocated even when the warm-up audio would not
+pass as speech. The audio is the bundle's sample clip (`test_wavs/warm.wav`) repeated
+to that length when the bundle has one, and otherwise a deterministic synthetic
+speech-like signal; the Parakeet TDT v3 bundles have no clip. The second is the
+existing exercise, which streams warm audio through the real WebSocket path. `/validate`
+repeats both. The hook asks for the decode over a pipe between its own process and the
+server's, not over the network. In the image build's log the server reports
+`warm-up decode: <n> decode(s) of 20.6s of synthetic speech-like audio in <t>s,
+rss=<m>MB` (two decodes for a two-pass bundle: the offline model and the live
+preview) and the hook reports `warm-up decode complete in <t>s`. `ASR_WARM_DECODE_S` changes the length and
+`ASR_WARM_DECODE_TIMEOUT_S` (default 600) how long the hook waits for it.
 
 That is the whole deploy-time surface. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked, because neither is a question a
@@ -110,7 +364,7 @@ deployer should have to answer:
 
 | Mapping key | Value | Purpose |
 |---|---|---|
-| `ModelBundle` | `parakeet-tdt-v3-titanet-small` | Which models the image is built from, with their measured diarization operating point |
+| `ModelBundle` | `parakeet-tdt-v3-live-nemotron35-sortformer` | Which models the image is built from, with their measured diarization operating point |
 | `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 
 To change either, edit the mapping and update the stack. `scripts/sync_bundles.py
@@ -129,7 +383,7 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
 | `nemotron35-titanet-small` | Nemotron 3.5 ASR streaming 0.6B, 560 ms (punctuated, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | OpenMDW-1.1 + CC-BY-4.0 + MIT |
 | `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
-| `parakeet-tdt-v3-titanet-small` (default) | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
@@ -138,12 +392,18 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
-| `parakeet-tdt-v3-live-nemotron35-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` (default) | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 
-The default is Parakeet TDT 0.6B v3 on the offline engine (CC-BY-4.0): punctuated,
-cased, 25 languages, and in the live runs of 2026-09-22 the most accurate model with the
-only per-turn speaker labels that were right throughout. FastConformer, the previous
-default, is the lightest streaming option: the same cache-aware FastConformer-RNNT
+The default is `parakeet-tdt-v3-live-nemotron35-sortformer`: Parakeet TDT 0.6B v3's finals, a punctuated Nemotron 3.5 preview
+of the utterance still being spoken, and Nemotron 3 Diarization labelling every word. Text
+appears while people speak, and short replies get their own rows and speakers with no
+threshold to tune. It is the heaviest bundle and is `experimental` until vetted; it kept
+up with two sessions in its live runs. Parakeet v3 with TitaNet-small
+(`parakeet-tdt-v3-titanet-small`), the previous default, is the `vetted` choice for
+lighter images: punctuated, cased, 25 languages, and in the live runs of 2026-09-22 the
+most accurate model with the only per-turn speaker labels that were right throughout, but
+rows appear only when an utterance closes. FastConformer, the default before that, is the
+lightest streaming option: the same cache-aware FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, English only, no punctuation,
 at a real-time factor of about 0.26 on a 4-core host.
 
@@ -161,7 +421,7 @@ labels are one per utterance rather than per turn. Every alternative reuses Tita
 so the operating point carries over unchanged; each is `calibrated` until vetted live.
 The `-sortformer` bundles have no threshold to measure and are `experimental` until vetted;
 a bundle with no status in the catalog reports `uncalibrated`.
-Parakeet v3 is `vetted` and the default after the live runs of 2026-09-22: text on a par with
+Parakeet v3 with TitaNet-small is `vetted` after the live runs of 2026-09-22: text on a par with
 Qwen3-ASR, every speaker turn of 2.5 s or more labelled correctly, and rows within about 20 s
 of speech.
 
@@ -198,6 +458,29 @@ the other fails at commit time rather than 20 minutes into a deploy. The memory
 duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-typed
 number and a Mapping cannot be keyed on a value a custom resource resolved.
 
+A model entry pins its weights in one of two forms. Most name one archive (`url`,
+`sha256`, `archive: "tar.bz2"`) and list the file names inside it under `files`. A model
+whose files are served individually at a fixed revision can instead set
+`archive: "files"` and give each `files` entry as `{"path", "url", "sha256"}`, the way the
+diarizer's model and data files are given, with an optional `warmWav` (`url`, `sha256`)
+for the clip the image's warm-up decodes. Use a URL that names a commit (Hugging Face's
+`/resolve/<40-character commit>/<file>`), never a branch, so the bytes behind each
+checksum cannot change. Both forms produce the same files under the same names in the
+image, so the runtime does not know which was used. The Parakeet TDT v3 and v2 entries use
+the per-file form, pinned to the sherpa-onnx maintainer's Hugging Face repositories. A
+Qwen3-ASR model needs its tokenizer directory and so must come from an archive.
+
+A transducer may also give an `encoder_data` file, for an encoder whose weights are
+stored outside its ONNX graph; that file keeps its own name in the image, because the
+graph records it. Every Parakeet v3 bundle uses the full-precision export of Parakeet TDT
+0.6B v3 this way (about 2.5 GB, exported by the sherpa-onnx maintainer), not the int8
+export (0.5 GB). On AMI meeting audio the int8 export left out the rest of some
+utterances after their first sentences; the full-precision export transcribed the same
+audio in full, with word error rates matching NVIDIA's published AMI figure, for about 10%
+more decode time and about 2.8 GB resident instead of 1.2 GB. The offline engine also
+keeps 300 ms of audio either side of each utterance the voice activity detector finds, so
+the first and last words of an utterance are not clipped.
+
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
 Parakeet, Qwen3-ASR and Cohere Transcribe bundles use. It produces no interim text while somebody is speaking: a row
@@ -207,6 +490,12 @@ utterance has run 10 s, or 20 s of speech at the latest, so a row arrives within
 test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
 See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
 offline model offered.
+
+The voice activity detector counts a 32 ms frame as speech at a Silero probability of
+0.35 and opens an utterance after 100 ms of speech, so a short reply such as "okay" or
+"not sure" reaches the model. With the stricter 0.5 and 250 ms it used before, those
+replies were discarded as noise: on clean AMI headset audio about 2% of the microphone
+channel's words were lost that way.
 
 **Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
 `parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
@@ -235,7 +524,7 @@ two sessions and kept up; the plain bundle has not run live.
 ## Choosing the engine
 
 The engine is a **deployment** setting, chosen separately for the two kinds of
-meeting on **Configuration ▸ Transcription Engine** (admin only) and read at the start of
+meeting in the **Transcription Engine** section of **Configuration ▸ Configuration** (admin only) and read at the start of
 each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
@@ -243,8 +532,34 @@ each meeting, so a change needs no redeploy:
 | Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
 | Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
-Deploying the engine changes nothing on its own: both settings start on Amazon
-Transcribe. Diarization stays a per-meeting choice — the Stream Audio form still asks
+Both settings ship on Amazon Transcribe. Choosing **ASR MicroVM speech engine** for a
+setting moves every meeting of that kind onto this engine. Upload Audio always uses
+Amazon Transcribe batch transcription and has no engine setting.
+
+The shipped values are part of the deployment's baseline configuration, which every
+stack update rewrites, so they reach a deployment running on the default profile or
+on a Managed (preset) profile. A Custom profile is a full copy of the configuration:
+it keeps the switches it holds, whatever a later release ships. To keep a meeting
+source on this engine across upgrades, choose it in the Transcription Engine section
+while a Custom profile is active.
+
+On an upgrade from 0.3.x, a choice saved on the Transcription Engine page of that
+release is carried into the deployment's `custom` profile and keeps winning. If
+nobody saved that page, the meeting sources stay on Amazon Transcribe, as they were:
+a `custom` profile holding no settings at all is removed and the deployment runs on
+the default profile, and one holding settings is converted into a full-copy Custom
+profile whose unsaved switches are filled in from this release's baseline.
+
+On an update from a pre-release build of 0.4.0 whose baseline put both meeting
+sources on this engine, a deployment running on the default profile or a Managed
+profile moves onto Amazon Transcribe, and one running on a Custom profile keeps the
+engine that profile holds. Choose the ASR MicroVM engine in the Transcription Engine
+section, in a Custom profile, to keep using it.
+
+On a deployment without the engine (`EnableMicrovmAsr=false`, or a Region without
+AWS Lambda MicroVMs) the settings are not shown and have no effect: the transcriber
+and the Virtual Participant find no ASR launcher configured and use Amazon
+Transcribe, logging that at info level. Diarization stays a per-meeting choice — the Stream Audio form still asks
 which channels to identify speakers on, because only the person in the meeting knows
 whether several people share their microphone. The Desktop Capture apps can force an
 engine for one run with `--asr-engine`, which wins over the deployment setting.
@@ -253,16 +568,97 @@ A meeting that selects this engine and whose MicroVM cannot start falls back to 
 Transcribe by itself, so a failed launch costs a warning in the log rather than a
 transcript.
 
+### While the MicroVM starts
+
+A meeting's MicroVM is launched when its transcription starts: at the meeting's start,
+or, for a meeting that needs a consent record, once consent is recorded. A cold launch
+took 21 seconds on the integration stack on 2026-11-11, and the launcher allows up to
+four minutes before it gives up. There is no warm pool, so every meeting pays that
+launch. The audio the meeting sends meanwhile is kept and transcribed:
+
+- **Stream Audio, the Chrome extension and Desktop Capture.** The transcriber holds the
+  audio twice while the MicroVM launches: in each channel's engine session, which sends it
+  as its first audio when it connects, and in the meeting's audio stream, which Amazon
+  Transcribe reads if the launch fails. Rows are timed from the start of the meeting's
+  audio either way. Each copy is bounded at 60 seconds (`ASR_MAX_PENDING_BYTES`, in
+  bytes of 16 kHz mono audio). If the launch runs past that, the oldest audio is dropped
+  and the transcriber logs `taking longer than 60s to start` or `more than 60s of audio
+  is waiting for the engine`. The dropped audio stays in the recording, and the rows
+  after it keep their place on the recording's timeline.
+- **A meeting that ends while its MicroVM launches**, whether it sent a short stream or
+  its client hung up or disconnected, is not ended until the audio held for it has been
+  transcribed. The transcriber waits up to five minutes for the launch. If the launch
+  succeeds, the held audio is sent to the MicroVM and the sessions are finished at once.
+  If it fails, the held audio goes to Amazon Transcribe in one request. In both cases the
+  rows are written before the meeting's END event, so the end-of-meeting summary
+  includes them. The log line is `Call ended while the MicroVM was being acquired`, or
+  `Call ended while its transcription engine was starting` when Amazon Transcribe took
+  the audio. A task that is shutting down does not wait, because its stop timeout is
+  shorter than a launch.
+- **Virtual Participants.** The VP starts capturing the meeting, and recording it, when
+  it starts acquiring the MicroVM, not when the MicroVM is ready. The audio captured
+  meanwhile is held, up to the same 60 seconds, and sent when the engine sessions
+  connect. A meeting that ends during the launch is waited for for up to two minutes,
+  and the held audio is transcribed before the END event. If no MicroVM can be acquired,
+  Amazon Transcribe takes over and its rows start after the audio captured meanwhile.
+  That audio is in the recording, but on this path it is not transcribed; the
+  transcriber's fallback is the only one that replays it.
+
+### When a stream ends
+
+The last utterance of a meeting is usually still open when its stream ends, because the
+engine closes an utterance on its own only after 1.2 seconds of silence (the bundle's
+endpointing setting). Its only final
+row comes from the end of the stream, when the client sends `eos`. The engine then
+decodes whatever audio it has not yet reached, closes the open utterance and sends its
+`final`, and only then sends `termination`. Both clients, the WebSocket transcriber and
+the Virtual Participant, wait for that `termination` and write the final rows before the
+meeting's END event, because the end-of-meeting summary is made from the transcript when
+END arrives. A row that lands after END is stored but is not in the summary.
+
+How long the client waits grows with the audio the engine has not yet finalised on that
+connection: the five-second grace (`ASR_FINISH_TIMEOUT_MS`), plus two seconds
+(`ASR_FINISH_MS_PER_OPEN_SECOND`) for every second of audio sent since the engine's last
+final, up to a minute (`ASR_FINISH_MAX_WAIT_MS`). An engine that has caught up answered within
+0.6 seconds in the integration runs, so the bound only matters when it has not. The wait ends at once if
+the engine closes the connection. The transcriber logs `engine finished N ms after the
+end of the stream` when the rows arrived, and `the engine had not finished` when the wait
+ran out and the last rows were lost. The engine logs `eos:` with how much audio it had
+received and decoded at that moment. A task that is shutting down, and a capture
+discarded for consent, give each session only the five-second grace.
+
+The wait does not hold the client's connection open. A client that ends a meeting sends
+END and closes its connection itself. When the server ends a meeting because its consent
+no longer allows capture (an objection, for example), it closes the client's connection
+as soon as the meeting is marked ended, and goes on finishing the engine for the audio
+received before then. Those rows are still written before the END event. A capture
+discarded for consent has its connection closed first too, and then its engine and files
+released without waiting for rows.
+
+A fixed five-second wait was not enough. On the integration stack on 2026-11-11, 20-second
+probe streams whose MicroVM had started 10 seconds in ended with their single utterance
+still open, and the engine had not sent its final 5.7 seconds after `eos`. Those meetings
+were stored with one partial row and no final rows, and their summary saw no transcript.
+Why the engine took that long there is not established: in earlier runs the same streams
+finished within half a second.
+
 ## Runtime switches
 
-**Configuration ▸ Transcription Engine** (admin only) has exactly three settings. All are read at
-the start of each meeting, so a change needs no stack update and no image rebuild.
+The **Transcription Engine** section of **Configuration ▸ Configuration** (admin only)
+has exactly three settings; on a deployment without this engine it shows only the
+third, Virtual Participant voice separation. All are read at the start of each meeting,
+so a change needs no stack update and no image rebuild. The
+WebSocket transcriber reuses what it read for up to 30 seconds, so a streaming meeting that
+starts within 30 seconds of a save may still use the previous engine; a Virtual Participant
+reads them fresh each time. They are stored in the shared
+[configuration store](configuration-store.md) as the `asr_engine` section, so they are changed
+on the page rather than in the DynamoDB console.
 
 | Setting | Default | Effect |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
-| Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
-| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off. The voice assistant's own speech is never diarized: it is transcribed on its own channel |
+| Stream Audio, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
+| Virtual Participants: engine | ASR MicroVM engine | Which engine Virtual Participants use |
+| Virtual Participant voice separation | on | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. With it on, the VP also uses each voice to correct the roster name once the voice has been heard long enough alongside one attendee (see [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)); on a measured two-person Zoom meeting that cut wrongly named rows from 10 to 6 of 415, which is one meeting on one platform. A person the engine splits into two voices is still shown as **one person**: a name is shown as several people only when it reads as a room or its voices are given different names (see [One person or several people](transcription-and-translation.md#one-person-or-several-people)). Clear it to name VP rows from the roster alone; what it costs on this engine is under [Cost and sizing](#cost-and-sizing). Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms, and for the voice correction, which acts only on a voice that is at least 70% one attendee. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
@@ -408,10 +804,37 @@ whoever started, until the final corrected it a second or two later — reviewer
 the live transcript reported that the label "transforms" mid-sentence, and read it as
 the diarization being unstable when the final labels were in fact correct.
 
-Partials now carry no speaker at all, so the row shows the plain channel name until the
+Partials now carry no speaker by default, so the row shows the plain channel name until the
 label is actually known, and the `(spk_N)` suffix appears when there is something true
 to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
 partials to begin with (they only arrive on final results).
+
+**Provisional labels from the partial's own audio.** A client can ask for a label on
+partials with `partial_speakers: true` in its `config`, alongside `diarize: true`. The
+Sortformer diarizer labels audio frame by frame as it arrives, so it can say whose voice
+is under the open row without waiting for the row to close. The label is the voice active
+over the most recent labelled second of **this row's own audio**. It is never the last
+speaker identified before the row, which is what made the old provisional label wrong. A
+partial carries no label until at least 0.3 s of its row has been labelled. The diarizer
+is stepped for partials only when its labels have fallen 1 s or more behind the open row,
+with its usual lookahead, so a partial's label is read from the same kind of frames as a
+final's and is at most about 1.3 s behind the audio. The final still carries the
+authoritative labels, and still splits the row where the voice changes.
+
+The bundles that use the TitaNet embedder do not support this: they cannot embed a
+segment until it closes, so their partials stay unlabelled whatever the client asks. An
+engine image from before this field ignores it, and its partials are unlabelled too.
+The Virtual Participant asks for it on its participant session whenever it asks for
+voice separation (see
+[Live rows](virtual-participant.md#live-rows)). The WebSocket transcriber (Stream Audio
+and the browser extension) does not ask for it yet.
+
+What it costs has **not been measured**. Without it the diarizer steps once each time an
+utterance closes and every 10 s through a long one. With it, it also steps about once a
+second while someone is speaking, and each step also re-reads the diarizer's cached
+context (up to about 42 s of speech features), so the diarizer's share of the CPU can be
+several times higher than without it. Watch the `engine load` line, and any
+`engine behind, dropped` lines, on the first meetings that use it.
 A channel that asks for no labels, such as Stream Audio's microphone or the Virtual
 Participant's assistant, gets none: the engine skips voice embedding for it, and its rows
 still close at 20 s.
@@ -521,6 +944,11 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
 
 - **No idle cost.** MicroVMs run per meeting. There is no warm pool and no
   always-on ASR capacity.
+- **What a meeting is billed for depends on its engine.** A meeting on this engine
+  incurs Lambda MicroVM compute for the MicroVM's size and lifetime rather than
+  Amazon Transcribe streaming per-second charges; one that falls back to Amazon
+  Transcribe incurs the latter. The [meeting cost estimate](meeting-cost-estimate.md)
+  itemises whichever applied.
 - **The transcriber task is unchanged** (`256` CPU / `1024` MB, or `1024`/`2048`
   with video recording): inference happens in the MicroVM, not in the task.
 - One MicroVM serves both audio channels of a meeting. An 8 GiB MicroVM exposed 16 CPUs
@@ -528,14 +956,92 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
   `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
-  in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
-  this line is what tells you whether a bundle would fit a smaller size.
+  in `/aws/lambda-microvms/<stack>-asr-logs`. It is what tells you whether a bundle
+  would fit a smaller size, and what its CPU costs (below).
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
+- **Virtual Participant voice separation is on by default, and on this engine it
+  adds work but not billed size.** With it on, a VP's participant session also runs
+  the bundle's speaker diarizer (Sortformer, in the default bundle); with it off the
+  diarizer is not attached to the session. The MicroVM is the same one either way,
+  sized by the bundle (8192 MiB for every bundle in the catalog) and billed for its
+  size and lifetime, so the switch does not change what a meeting is billed. What it
+  does to load has been measured only partly. On one 58-minute, two-person Zoom VP
+  meeting with separation on, the load line read about 32% of 16 CPUs in every minute
+  but one; that meeting was not repeated with separation off, so the diarizer's share
+  of the load is **not measured**. In the one minute that differed, a single diarizer
+  step took 34.1 s, the engine stopped returning text for about 35 s, and it dropped
+  about 1.66 s of audio (see the backlog bullet below). Load that minute fell to 18%,
+  so the engine was blocked rather than short of CPU. The cause is not known, and one
+  occurrence in one meeting says nothing about how often it happens. Whether
+  diarization delays rows reaching the transcript is not measured either. On Amazon
+  Transcribe the switch changes nothing billed: the VP requests speaker labels on
+  every session and the switch only decides whether it reads them. See
+  [Cost of voice separation](virtual-participant.md#cost-of-voice-separation).
+- When the engine falls behind the incoming audio, it holds a bounded backlog
+  (`ASR_MAX_QUEUE` frames, default 64) and waits up to `ASR_MAX_WAIT_MS` (default
+  2000) for room before dropping a frame, so memory stays fixed. Dropped audio is
+  never transcribed, but it still counts on the transcript's timeline: rows after a
+  drop carry the time their audio arrived, so they stay aligned with the client's
+  clock and with the meeting's active-speaker changes. Each drop is logged as
+  `engine behind, dropped 0.128s of audio at ... cumulative dropped ...`, the
+  session's end-of-session line reports `dropped=` and `dropped_seconds=`, and the
+  `termination` message carries `dropped_seconds`. A nonzero total means the engine
+  could not keep up at some point in that meeting, whether from load or from a
+  single slow step (look for `sortformer step ... took` nearby).
+- Every offline (final-text) decode logs one line, as
+  `offline decode: audio=<a>s wall=<w>s cpu=<c>s (<c/w> cores) lock_wait=<l>s
+  first_in_process=False first_in_session=True warm_up=False`. `wall` is how long the
+  decode took, `cpu` the CPU time the whole process used meanwhile (so another
+  session's work in the same interval counts too), and `lock_wait` how long it waited
+  for the other channel's decode, since the two channels' decodes take turns.
+  `first_in_session` marks the session's first decode. `first_in_process` is true only
+  for the first decode since the server process started, which in a MicroVM launched
+  from the snapshot was the image's warm-up (`warm_up=True`), so a meeting's first
+  decode reads `first_in_process=False first_in_session=True`. A two-pass bundle also
+  logs each session's first live-preview decode, as `preview decode: ...`. A decode
+  whose `wall` is much larger than `cpu` over a single call was waiting rather than
+  computing (for memory being paged in, or for the host), not short of cores.
+- **How a MicroVM is billed.** Memory for the whole lifetime at the configured size,
+  and vCPU-seconds at the larger of the baseline and the cores in use. The baseline is
+  one vCPU per 2 GiB, 4 vCPUs at 8 GiB, and a MicroVM can burst to four times it, which
+  is the 16 CPUs the engine sees. Measured against Cost Explorer on a dev stack in
+  October 2026: bundles that stay under 4 cores bill the baseline, while the two-pass
+  bundles ran about 11 cores on two channels and were billed for them. Amazon
+  Transcribe bills a stereo meeting once per streamed second, with a 15-second minimum
+  per request.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
   SIGTERM (deploys, scale-in); the ceiling is the backstop if the task dies
   without doing either.
+
+### Benchmarking model configurations
+
+To compare bundles, or a bundle with Amazon Transcribe, play the same recording through
+each on a dev stack:
+
+```bash
+AWS_PROFILE=default make asr-benchmark STACK=<dev-stack> DATASET=ami/IS1009c \
+    BUNDLES=parakeet-tdt-v3-sortformer,parakeet-tdt-v3-titanet-small TRANSCRIBE=1 DRY_RUN=1
+```
+
+For each bundle the stack is updated with only the `AsrDefaults` bundle changed (the
+image rebuilds, about 20-25 minutes), the WAV is streamed once at real time over the
+transcriber WebSocket, and the run is priced from the engine's measured CPU and the
+MicroVM's lifetime. Each run's transcript is saved and, with a reference, scored for word
+error rate per channel. `DATASET=ami/IS1009c` and `ami/IS1009d` (clean audio) and `ami/ES2004a`
+(low-level, noisier headsets, for noise robustness) are meetings from the AMI
+Meeting Corpus (CC BY 4.0) whose reference transcripts ship with the tool; their audio is
+downloaded and mixed into a stereo recording on first use. Your own recording works with
+`WAV=` and an optional `REFERENCE=` STM file. The original
+bundle is restored at the end; `SWITCH_ONLY=<bundle>` puts a stack back after an
+interrupted run. The switch refuses to run when a nested stack's published template
+differs from the deployed one, so it never deploys a re-published build as a side
+effect. The packaged AMI meetings are close-talk headset audio without crosstalk, so
+every engine hears the same clean speech. See the load simulator's
+[`asr-benchmark`](../utilities/load-simulator/README.md#5-asr-benchmark--compare-model-configurations)
+scenario. This is a lab comparison; the cost of real meetings is
+[estimated per meeting](meeting-cost-estimate.md).
 
 ## Local development
 
@@ -543,7 +1049,8 @@ The transcriber can talk to an ASR server running on your machine, with no AWS
 involved:
 
 ```bash
-# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive;
+# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive
+#    (or, for a model pinned file by file, one URL per file: download each into models/);
 #    the k2-fsa export ships int8 files, so point the server at them explicitly.
 cd lma-asr-microvm-stack/source
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -573,11 +1080,17 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 
 - **Word error rate has not been benchmarked** against Amazon Transcribe on real
   meeting audio.
+- **Languages other than English have been measured only on synthetic clips**, in
+  seven locales (see [Languages](#languages)). The default bundle's other 13
+  languages, and every language on real meeting audio, have not been measured.
 - **Diarization error rate has not been measured** end to end. The *operating point*
   for the shipped speaker model has been measured on real meeting audio (see
   `measured` in `catalog.json`, and
   [Calibrating a new bundle](#calibrating-a-new-bundle-developers) for the tool), but
   that is the threshold, not a DER figure.
+- **The diarizer's share of a meeting's CPU load**, and whether it delays rows, have
+  not been measured: no meeting has been run both with and without Virtual
+  Participant voice separation (see [Cost and sizing](#cost-and-sizing)).
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise
@@ -588,8 +1101,9 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   refuses anything else up front rather than letting the stack fail minutes later at
   `AWS::Lambda::MicrovmImage`.
 
-Measure these in a dev stack before offering the engine to users. Every number
-needed is in the MicroVM log group: per-session summaries carry audio seconds,
+Measure these in a dev stack before relying on the engine for production meetings,
+and keep Amazon Transcribe until you have (see [Choosing the engine](#choosing-the-engine)).
+Every number needed is in the MicroVM log group: per-session summaries carry audio seconds,
 segment counts and resident memory.
 
 ## Speaker names
@@ -611,24 +1125,45 @@ the labels found two voices 0.34 apart, matching the labels one-for-one. A place
 that looks like a bucket gets read as one, by people and by any model summarising the
 transcript.
 
-It also degrades well: a partial has no known speaker yet, so it shows the bare channel
-name and gains the suffix when the label arrives, rather than displaying somebody else's
-name in the meantime.
+It also degrades well: a partial has no known speaker yet (unless the client asked for
+provisional labels, see [Partials name nobody](#partials-name-nobody)), so it shows the
+bare channel name and gains the suffix when the label arrives, rather than displaying
+somebody else's name in the meantime.
 
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
-real names — from the participant list, or by asking a model — is a separate step, and
-it works far better when every label is distinct.
+real names is a separate step, and it works far better when every label is distinct.
+The **Speakers** panel on the meeting page is where that mapping is made: it lists one
+row per voice and applies a name to every segment that voice produced, past and future
+alike. See
+[Naming the Voices](transcription-and-translation.md#naming-the-voices) — it is
+engine-independent, so it reads the same whether these labels came from here or from
+Amazon Transcribe.
 
 **A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
-two channels: meeting audio on `CALLER`, named from the roster by the row's start time
-and suffixed with the voice id when voice separation is on, and the assistant's own voice
-on `AGENT` under the VP's name, never diarized. Wake phrases are detected on meeting rows
+two channels. Meeting audio is on `REMOTE`, and the assistant's own voice is on
+`LOCAL` under the VP's name, never diarized. Wake phrases are detected on meeting rows
 only, so the assistant cannot wake itself.
+
+**A Virtual Participant or Chrome extension meeting-audio row is named from the
+meeting page as well as the voice.** Both read the meeting page's active speaker. A
+row is named after the attendee the page showed for most of the row's audio. With
+voice ids on, once a voice has been heard long enough alongside one attendee, it is
+named after that attendee instead, and its voice id appears only under that
+attendee's name. The rules, their thresholds and what they did on a measured meeting
+are in [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well);
+the extension's version is described in
+[How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named).
+A channel with no page to read, such as Stream Audio's, keeps the format above.
 
 ## Known limitations
 
-- **English only** with the default model; `language`, `punctuate` and
-  `latency_mode` are accepted by the protocol but do not change behaviour.
+- **The meeting languages it takes depend on the deployed bundle** (see
+  [Languages](#languages)), and **a row's language is identified from its final
+  text** (see [Row languages](#row-languages)): live rows and rows of one or two
+  words carry none, and the region is the meeting's or a fixed one, not detected.
+  `identify-language` and `identify-multiple-languages` stay on Amazon Transcribe.
+  `language`, `punctuate` and `latency_mode` are accepted by the protocol but do not
+  change behaviour.
 - **Overlapping speech resolves to one speaker.** The engine detects overlap but
   attributes the span to a single voice rather than emitting both.
 - **A live cut lands slightly late**, because a speaker change is only acted on once
@@ -647,8 +1182,9 @@ only, so the assistant cannot wake itself.
 
 **The "Speakers per channel" field is missing from Stream Audio.** It is shown only
 when speaker identification is ticked for at least one channel and the
-streaming-meetings engine on **Configuration ▸ Transcription Engine** is the on-demand engine. A
-deployment without `EnableMicrovmAsr=true` never shows it.
+streaming-meetings engine in the **Transcription Engine** section of **Configuration ▸ Configuration** is the on-demand engine. A
+deployment without the engine (`EnableMicrovmAsr=false`, or a Region without AWS
+Lambda MicroVMs) never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
 Look for `diarization was requested but this ASR image has no speaker model baked
@@ -673,10 +1209,20 @@ aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
 aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
 
-**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
-mismatch` means the pinned checksum does not match the download; `model file ... is
-not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`
-means the URL is wrong.
+**A meeting's first long utterance falls behind and drops audio.** Look at the
+session's first `offline decode:` lines (`first_in_session=True`) in
+`/aws/lambda-microvms/<stack>-asr-logs`. If `wall` is tens of seconds while `cpu` is
+a small fraction of it, the decode was waiting rather than computing. Check that the
+image's build log shows `warm-up decode complete` before `ready warm=True` and in the
+`validate workloadExercised=True (warm-up decode=True, ...)` line; an image built
+before the warm-up decode existed never ran the offline model before its snapshot when
+the bundle had no sample clip, and rebuilding the image (any change of bundle, or a
+stack update that changes the image source) picks it up.
+
+**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
+mismatch` means the pinned checksum does not match the download (for a model pinned
+file by file, the label names the file); `model file ... is not in the archive` means
+the file names in the catalog entry are wrong; `HTTP 404` means the URL is wrong.
 
 A transient failure from the model host (`503`, `429`, a cut connection) is retried
 five times with backoff before the build gives up — the log line reads
@@ -730,6 +1276,7 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
+| `py3langid` row-language classifier, with its bundled model (every bundle) | BSD-3-Clause |
 | NVIDIA FastConformer streaming EN 480 ms (ASR, FastConformer bundles and the Parakeet v3 live preview) | CC-BY-4.0 |
 | NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small` and the Nemotron 3.5 live preview) | OpenMDW-1.1 |
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
@@ -741,7 +1288,7 @@ complying with their licences.**
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
 
-Each model's licence file is copied into the image alongside its weights, and the
+Where a model's download ships a licence file, it is copied into the image alongside its weights, and the
 resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
 and `AsrRedistributable` outputs. `AsrRedistributable` is `false` only for
 `nemotron-titanet-small`. CC-BY-4.0 requires attribution, which

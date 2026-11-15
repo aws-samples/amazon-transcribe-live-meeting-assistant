@@ -1,0 +1,4 @@
+{
+  "MeetingRecordExpirationInDays": {"section": "retention", "setting": "meetingRecordExpirationInDays", "type": "number"},
+  "TranscriptionExpirationInDays": {"section": "retention", "setting": "transcriptionExpirationInDays", "type": "number"}
+}

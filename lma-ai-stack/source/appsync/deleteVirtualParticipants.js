@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 /**
@@ -15,8 +15,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const { input } = ctx.arguments;
 
-  console.log('=== deleteVirtualParticipants RESOLVER CALLED ===');
-  console.log('Input:', JSON.stringify(input));
+  console.log('deleteVirtualParticipants', JSON.stringify(input.ids));
 
   return {
     operation: 'Invoke',
@@ -38,7 +37,10 @@ export function response(ctx) {
   }
 
   if (result.statusCode !== 200) {
-    util.error(result.body.error || 'Failed to delete Virtual Participants', 'InternalError');
+    util.error(
+      result.body.error || 'Failed to delete Virtual Participants',
+      result.body.errorType || 'InternalError',
+    );
   }
 
   return result.body;

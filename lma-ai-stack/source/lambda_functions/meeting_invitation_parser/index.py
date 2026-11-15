@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
 import json
@@ -9,13 +9,28 @@ import re
 from datetime import datetime, timedelta
 
 import boto3
+from bedrock_compat import INVITATION_PARSER_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
+
+# pylint: disable=import-error
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    read_setting,
+    resolve_model_id,
+)
+
+# pylint: enable=import-error
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+#
+# The model is the summaries' one: the Amazon Bedrock Models section's value on
+# the Configuration page, else the shipped default in setting_defaults.json. The
+# literal below is used when the section cannot be read, and is the same value
+# as that shipped default.
+FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 BEDROCK_REGION = os.environ.get(
     "BEDROCK_REGION_OVERRIDE", os.environ.get("AWS_REGION", "us-east-1")
 )
@@ -33,23 +48,34 @@ bedrock = boto3.client(
 
 
 def get_generated_text(response):
-    """Extract generated text from Bedrock response"""
-    return response["output"]["message"]["content"][0]["text"]
+    """Extract generated text from Bedrock response, excluding any reasoning block"""
+    return extract_text(response)
 
 
 def call_bedrock(prompt_data):
     """Call Bedrock to parse meeting invitation"""
-    modelId = BEDROCK_MODEL_ID
+    # Run within the Amazon Bedrock Models section's Model inference geography.
+    modelId = resolve_model_id(
+        read_setting(
+            LANGUAGE_MODELS.name,
+            "summaryModelId",
+            default=FALLBACK_MODEL_ID,
+        ),
+        region=BEDROCK_REGION,
+    )
     logger.info(f"Bedrock request - ModelId: {modelId}")
 
     message = {"role": "user", "content": [{"text": prompt_data}]}
 
     response = bedrock.converse(
-        modelId=modelId, messages=[message], inferenceConfig={"maxTokens": 1024, "temperature": 0}
+        modelId=modelId,
+        messages=[message],
+        inferenceConfig=build_inference_config(modelId, INVITATION_PARSER_MAX_TOKENS),
     )
 
     generated_text = get_generated_text(response)
-    logger.info(f"Bedrock response: {generated_text}")
+    # The response holds what was parsed from the invitation, so only its size is logged.
+    logger.info("Bedrock response: %d characters", len(generated_text or ""))
     return generated_text
 
 
@@ -65,12 +91,13 @@ You are a meeting invitation parser. Extract the following information from the 
 - meetingName: The title/subject of the meeting
 - meetingPlatform: The platform (ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET) - if not explicitly mentioned, try to infer from URLs or context
 - meetingId: The meeting ID, room number, or join URL
-- meetingPassword: The meeting password or passcode (if provided)
+- meetingPassword: The meeting password or passcode (if provided), without spaces added only for readability (a Zoom passcode shown as "1234 5678" is "12345678")
 - meetingDate: The date in YYYY-MM-DD format (if provided/Optional)
 - meetingTime: The time in HH:MM format (24-hour, if provided/Optional)
 - timezone: The timezone (if provided)
 - isRecurring: Boolean indicating if this is a recurring meeting
 - recurrencePattern: Description of recurrence (e.g., "weekly", "every Wednesday") if recurring
+- agenda: The agenda the invitation lists, as a single string with one item per line, in the order given. Only items the invitation actually lists as an agenda (or as topics, items to discuss, or similar); use null if it lists none. Do NOT make up agenda items from the meeting title or anything else.
 
 CRITICAL MEETING ID AND PASSWORD RULES:
 1. If information is not available or cannot be determined, use null for that field
@@ -94,18 +121,22 @@ CRITICAL MEETING ID AND PASSWORD RULES:
      set meetingId to the COMPLETE, UNMODIFIED join URL (keep the full https://... string), and
      only set meetingPassword if an explicit "password"/"pwd" parameter is present in the URL.
 7. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
+8. For Google Meet (links on meet.google.com), set meetingId to the meeting code, three, four and
+   three letters separated by hyphens (e.g. "abc-defg-hij" from https://meet.google.com/abc-defg-hij).
+   Google Meet meetings have no password: set meetingPassword to null, and do NOT use the dial-in
+   PIN that Meet invitations list under "Join by phone".
 
 DATE AND TIME HANDLING:
-8. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
-9. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
-10. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
-11. Instead, calculate the NEXT occurrence based on the recurrence pattern
-12. For "every Wednesday" meetings, find the next Wednesday from today
-13. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
-14. ALWAYS ensure the final date is today or in the future
-15. If today matches the recurring day, use today's date only if the time is in the future
-16. If you cannot determine a specific date or time with confidence, leave those fields as null
-17. Do NOT guess or make up dates/times - only extract what is clearly stated
+9. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
+10. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
+11. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
+12. Instead, calculate the NEXT occurrence based on the recurrence pattern
+13. For "every Wednesday" meetings, find the next Wednesday from today
+14. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
+15. ALWAYS ensure the final date is today or in the future
+16. If today matches the recurring day, use today's date only if the time is in the future
+17. If you cannot determine a specific date or time with confidence, leave those fields as null
+18. Do NOT guess or make up dates/times - only extract what is clearly stated
 
 CURRENT CONTEXT:
 - Today's date: {current_date}
@@ -217,10 +248,98 @@ def calculate_next_occurrence(data):
     return data
 
 
+# Same bound as the createVirtualParticipant and updateCallAgenda resolvers, so an
+# agenda this fills into the form is one the form can submit.
+MAX_AGENDA_CHARS = 10000
+
+
+def clean_agenda(agenda):
+    """The extracted agenda as text, one item per line, or None.
+
+    Asked for as one string, but a model asked for "the agenda items" will
+    sometimes answer with a list, which is the same thing in another shape.
+    Anything else is dropped rather than filled into the form as its repr.
+
+    Cut to the limit rather than refused, unlike the form and the MCP tools:
+    this only pre-fills a field the user sees and can edit before submitting,
+    and refusing would lose the rest of the parsed invitation with it.
+    """
+    if isinstance(agenda, list):
+        agenda = "\n".join(str(item).strip() for item in agenda if str(item).strip())
+    if not isinstance(agenda, str) or not agenda.strip():
+        return None
+    return agenda.strip()[:MAX_AGENDA_CHARS]
+
+
+_MEET_CODE = re.compile(r"^([a-z]{3})-?([a-z]{4})-?([a-z]{3})$")
+_MEET_LINK = re.compile(
+    r"^(?:https?://)?meet\.google\.com/(?:meet/)?([a-z]{3}-?[a-z]{4}-?[a-z]{3})/?(?:[?#].*)?$"
+)
+# Any link on meet.google.com, whether or not its path is a meeting code.
+_MEET_ANY_LINK = re.compile(r"^(?:https?://)?meet\.google\.com/\S*$")
+
+# Why a Meet invitation's link was not put in the meeting ID field. Shown by the
+# paste-invitation dialog alongside the filled-in form.
+MEET_NICKNAME_NOTE = (
+    "The invitation's Google Meet link (meet.google.com/lookup/...) uses a meeting "
+    "nickname, which only signed-in members of the organiser's Google Workspace can "
+    "open, and the Virtual Participant joins as a guest. Enter the meeting code "
+    "(for example abc-defg-hij) instead."
+)
+MEET_NOT_A_CODE_NOTE = (
+    "The invitation's Google Meet details do not include a meeting code. Enter the "
+    "meeting code (for example abc-defg-hij) or a https://meet.google.com/ link to it."
+)
+
+
+def normalize_google_meet_id(value):
+    """Reduce a Google Meet code or link to its code, or return None if it is neither.
+
+    The same rule as parseGoogleMeetMeeting in the Virtual Participant
+    (google-meet-page.ts), the create form, the SDK and the meeting assistant's
+    tools; each runs the shared table in test-fixtures/google-meet-inputs.json.
+    A bare code in any case, with or without hyphens, or a meet.google.com link
+    to one (including Meet's /meet/<code> redirect form) gives "abc-defg-hij".
+    Any other meet.google.com link, such as a /lookup/ nickname link, gives None.
+    """
+    if not isinstance(value, str):
+        return None
+    text = "".join(value.split()).lower()
+    if not text:
+        return None
+    link = _MEET_LINK.match(text)
+    code = _MEET_CODE.match(link.group(1) if link else text)
+    if code:
+        return f"{code.group(1)}-{code.group(2)}-{code.group(3)}"
+    return None
+
+
+def is_google_meet_link(value):
+    """Whether a value is a link on meet.google.com, whatever its path."""
+    if not isinstance(value, str):
+        return False
+    return bool(_MEET_ANY_LINK.match("".join(value.split()).lower()))
+
+
+def normalize_meeting_password(password, platform):
+    """The password with surrounding whitespace removed, and for a Zoom passcode
+    made only of digits and spaces, with the grouping spaces removed too. Any
+    other password keeps its inner characters: only a numeric Zoom passcode is
+    known to be shown with readability spaces."""
+    if not isinstance(password, str):
+        return password
+    cleaned = password.strip()
+    if platform == "ZOOM" and re.fullmatch(r"[\d\s]+", cleaned):
+        cleaned = re.sub(r"\s+", "", cleaned)
+    return cleaned or None
+
+
 def validate_parsed_data(data):
     """Validate and clean parsed meeting data"""
     if not isinstance(data, dict):
         return data
+
+    data["agenda"] = clean_agenda(data.get("agenda"))
 
     # Remove spaces from meeting ID (common in formatted meeting IDs like "961 8750 1703")
     if data.get("meetingId"):
@@ -228,6 +347,14 @@ def validate_parsed_data(data):
 
     # Validate platform
     valid_platforms = ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"]
+    # A Meet link or code identifies the platform by itself. Checked when the model
+    # gave no platform as well: the UI otherwise falls back to its own ZOOM default
+    # and hands the user a Zoom form holding a Meet link.
+    if data.get("meetingPlatform") not in valid_platforms and (
+        normalize_google_meet_id(data.get("meetingId"))
+        or is_google_meet_link(data.get("meetingId"))
+    ):
+        data["meetingPlatform"] = "GOOGLE_MEET"
     if data.get("meetingPlatform") and data["meetingPlatform"] not in valid_platforms:
         # Try to infer platform from meeting ID or URL
         meeting_id = data.get("meetingId", "").lower()
@@ -251,6 +378,12 @@ def validate_parsed_data(data):
         zoom_id_match = re.search(r"(\d{9,11})", meeting_id)
         if zoom_id_match:
             data["meetingId"] = zoom_id_match.group(1)
+
+    # Zoom shows numeric passcodes in groups for readability ("1234 5678"); the
+    # spaces are not part of the passcode, and Zoom refuses it with them.
+    data["meetingPassword"] = normalize_meeting_password(
+        data.get("meetingPassword"), data.get("meetingPlatform")
+    )
 
     # Clean up meeting ID for Webex.
     # Personal-room URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY and the
@@ -280,6 +413,24 @@ def validate_parsed_data(data):
                 webex_pr_match = re.match(r"^pr(\d+)$", meeting_id, re.IGNORECASE)
                 if webex_pr_match:
                     data["meetingId"] = webex_pr_match.group(1)
+
+    # Google Meet: store the meeting code ("abc-defg-hij") rather than the link, as
+    # the create form does, and no password. A Meet invitation's only number is the
+    # dial-in PIN, which is not a meeting password. A Meet ID that is not a
+    # meeting code is left out, with the reason in meetingIdNote, rather than
+    # filling the form with an ID the form refuses to submit.
+    if data.get("meetingPlatform") == "GOOGLE_MEET":
+        data["meetingPassword"] = None
+        original_id = data.get("meetingId")
+        meet_id = normalize_google_meet_id(original_id)
+        if meet_id:
+            data["meetingId"] = meet_id
+        elif original_id:
+            data["meetingId"] = None
+            lowered = "".join(str(original_id).split()).lower()
+            data["meetingIdNote"] = (
+                MEET_NICKNAME_NOTE if "meet.google.com/lookup/" in lowered else MEET_NOT_A_CODE_NOTE
+            )
 
     # Clean up meeting ID for Teams.
     # New format: https://teams.microsoft.com/meet/243574196567966?p=ixpjsDWNj8cLxyHlQD
@@ -318,37 +469,31 @@ def validate_parsed_data(data):
     return data
 
 
-# Platforms the Virtual Participant has a handler for. GOOGLE_MEET is deliberately
-# absent: the model is still asked to identify it (so a Meet invitation can be
-# rejected with something useful to read), but there is no Meet handler, so letting
-# it through would auto-fill the create form with a platform that fails at launch
-# with "Unsupported meeting platform". Meet meetings are captured with the Chrome
-# extension instead. See GitHub #661.
-VP_SUPPORTED_PLATFORMS = ["ZOOM", "TEAMS", "CHIME", "WEBEX"]
+# Platforms the Virtual Participant has a handler for, kept in step with the
+# platform switch in the Virtual Participant's index.ts. A platform the parser
+# can name but the Virtual Participant cannot join is refused up front, rather
+# than auto-filling the create form with a platform that fails at launch with
+# "Unsupported meeting platform".
+VP_SUPPORTED_PLATFORMS = ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"]
 
-UNSUPPORTED_PLATFORM_MESSAGES = {
-    "GOOGLE_MEET": (
-        "This looks like a Google Meet invitation. The Virtual Participant cannot "
-        "join Google Meet meetings. Use the LMA Chrome extension to capture a Meet "
-        "meeting you are in yourself, or enter a different meeting's details "
-        "manually."
-    ),
-}
+# What to tell the user for a recognised platform that is not supported. Empty
+# while every platform the prompt names has a handler.
+UNSUPPORTED_PLATFORM_MESSAGES: dict = {}
 
 
 def handler(event, context):
     """Lambda handler for parsing meeting invitations"""
-    logger.info(f"Received event: {json.dumps(event)}")
+    invitation_text = (event.get("arguments") or {}).get("invitationText") or ""
+    # The invitation text can carry meeting passcodes, so only its size is logged.
+    logger.info("Received invitation to parse: %d characters", len(invitation_text))
 
     try:
-        # Extract meeting invitation text from the event
-        invitation_text = event.get("arguments", {}).get("invitationText", "")
-
         if not invitation_text or not invitation_text.strip():
             return json.dumps({"success": False, "error": "Meeting invitation text is required"})
 
         # Parse the meeting invitation
         result = parse_meeting_invitation(invitation_text)
+        platform = None
 
         if result["success"]:
             # Validate and clean the parsed data
@@ -359,12 +504,6 @@ def handler(event, context):
             # "Unsupported meeting platform" after the user had filled everything
             # else in. The message reaches the paste-invitation dialog directly.
             platform = result["data"].get("meetingPlatform")
-            # A missing platform would skip the check, and the UI then falls back to
-            # its own default of ZOOM — handing the user a Zoom form holding a Meet
-            # link, which fails for a reason that has nothing to do with Meet. The
-            # link itself is enough to tell.
-            if not platform and "meet.google" in (result["data"].get("meetingId") or "").lower():
-                platform = "GOOGLE_MEET"
             if platform and platform not in VP_SUPPORTED_PLATFORMS:
                 logger.info("Rejecting unsupported meeting platform: %s", platform)
                 return json.dumps(
@@ -377,7 +516,15 @@ def handler(event, context):
                     }
                 )
 
-        logger.info(f"Returning result: {json.dumps(result)}")
+        # The parsed fields can include a meeting passcode, so the result is
+        # logged by outcome, platform and the names of the fields it filled in.
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        logger.info(
+            "Returning result: success=%s, platform=%s, fields=%s",
+            result.get("success"),
+            platform,
+            sorted(k for k, v in data.items() if v),
+        )
         return json.dumps(result)
 
     except Exception as e:

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Deterministic cleanup of everything a load-simulator run created.
 
 Matches synthetic resources by the ``run-id=<runId>`` marker we embed in

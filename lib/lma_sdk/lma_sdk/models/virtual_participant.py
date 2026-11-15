@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Virtual Participant data models."""
 
 from __future__ import annotations
@@ -60,9 +60,29 @@ class VpRow(BaseModel):
     vncEndpoint: str | None = None
     vncPort: int | None = None
     vncReady: bool | None = None
+    # Why the VP left: the prose shown to the user, the machine-readable exit
+    # branch from the container (e.g. "meet-ended-screen"), and the reason an
+    # outside end was asked for.
+    errorMessage: str | None = None
+    endTrigger: str | None = None
+    endReason: str | None = None
 
     # Catch-all for any extra fields returned by the API.
     extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class LmaUser(BaseModel):
+    """An LMA (Cognito) user a Virtual Participant can be launched for.
+
+    ``username`` is the Cognito user name, which is what the AppSync
+    resolvers compare a VP row's ``Owner`` against; ``sub`` is the
+    immutable Cognito user id that keys the user's stored Zoom
+    credentials and saved browser profile.
+    """
+
+    username: str
+    sub: str
+    email: str | None = None
 
 
 class VpLaunchResult(BaseModel):
@@ -78,6 +98,10 @@ class VpLaunchResult(BaseModel):
     waited_for_launch: bool = False
     sfn_execution_arn: str | None = None
     sfn_status: str | None = None
+    # Set when the VP was launched for an LMA user (``as_user=``).
+    owner: str | None = None
+    user_sub: str | None = None
+    zoom_credentials_used: bool = False
 
     @property
     def launched(self) -> bool:

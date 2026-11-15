@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """Build the per-stack ASR MicroVM image source zip.
 
@@ -36,6 +36,9 @@ Returns:
     Redistributable      "true" when every weight in the bundle may be redistributed
     ModelLicense         licence of the resolved model, for the stack outputs
     LicenceSummary       one-line licence summary for the whole bundle
+    Languages            comma-separated base language codes the bundle transcribes
+                         (see bundle_languages), which the transcriber and the Virtual
+                         Participant check a meeting's language against
 
 Every model is a curated catalog entry: there is no parameter for supplying a URL,
 so a new model is added by editing catalog.json (with its checksum pinned and its
@@ -68,11 +71,90 @@ MODEL_KIND_FILE_KEYS = {
     "qwen3_asr": ("conv_frontend", "encoder", "decoder", "tokenizer"),
     "cohere_transcribe": ("encoder", "encoder_data", "decoder", "tokens"),
 }
+OPTIONAL_FILE_KEYS = {"transducer": ("encoder_data",)}
 OFFLINE_ONLY_KINDS = ("qwen3_asr", "cohere_transcribe")
+# A model whose "archive" is "files" is pinned file by file: each entry of its
+# "files" mapping is {"path", "url", "sha256"}, as a diarizer's files are, instead of
+# one archive URL and checksum for the whole model. fetch_model.py lays both forms
+# out under the same names.
+FILES_ARCHIVE = "files"
+# A tokenizer is a directory, which cannot be fetched as one pinned file.
+DIRECTORY_FILE_KEYS = ("tokenizer",)
+
+
+#: The ``languages`` entry of a model the catalog knows to be multilingual without
+#: listing its languages.
+MULTILINGUAL = "multilingual"
+ENGLISH = "en"
 
 
 class ResolutionError(Exception):
     """The model parameters could not be resolved to a complete selection."""
+
+
+def _is_files_model(model: dict) -> bool:
+    return model.get("archive") == FILES_ARCHIVE
+
+
+def _file_name(entry) -> str:
+    """The in-archive name of a model file, whichever form the catalog uses."""
+    if isinstance(entry, dict):
+        return str(entry.get("path", ""))
+    return "" if entry is None else str(entry)
+
+
+def _check_sources(model: dict, keys: tuple, label: str) -> None:
+    """Every model needs pinned bytes: one archive checksum, or one per file."""
+    files = model.get("files") or {}
+    if not _is_files_model(model):
+        if not model.get("url"):
+            raise ResolutionError(f"{label} {model.get('id')!r} has no download URL")
+        if not model.get("sha256"):
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
+                "unverified weights are never baked into an image."
+            )
+        return
+    for key in keys:
+        if key in DIRECTORY_FILE_KEYS:
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} needs its {key} directory, which only an "
+                "archive can carry"
+            )
+        entry = files.get(key)
+        if not isinstance(entry, dict):
+            raise ResolutionError(
+                f"{label} {model.get('id')!r} is pinned file by file, so its {key} entry "
+                "must give path, url and sha256"
+            )
+        missing = [field for field in ("path", "url", "sha256") if not entry.get(field)]
+        if missing:
+            raise ResolutionError(f"{label} {model.get('id')!r} {key} file is missing {missing}")
+    warm = model.get("warmWav")
+    if warm is not None and not (isinstance(warm, dict) and warm.get("url") and warm.get("sha256")):
+        raise ResolutionError(f"{label} {model.get('id')!r} warmWav needs url and sha256")
+
+
+def _file_source_lines(prefix: str, model: dict) -> list[str]:
+    """Per-file URL and checksum lines for a model pinned file by file; none otherwise.
+
+    Archive models render exactly as before, so their ``model.env``, and therefore
+    their contribution to the image source fingerprint, is unchanged.
+    """
+    if not _is_files_model(model):
+        return []
+    lines: list[str] = []
+    for key, entry in (model.get("files") or {}).items():
+        if isinstance(entry, dict):
+            stem = f"{prefix}{key.upper()}"
+            lines += [f"{stem}_URL={entry.get('url', '')}", f"{stem}_SHA256={entry.get('sha256', '')}"]
+    warm = model.get("warmWav") or {}
+    if warm:
+        lines += [
+            f"{prefix}WARM_WAV_URL={warm.get('url', '')}",
+            f"{prefix}WARM_WAV_SHA256={warm.get('sha256', '')}",
+        ]
+    return lines
 
 
 def _prop(properties: dict, name: str, default: str = "") -> str:
@@ -142,13 +224,6 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} uses the {engine!r} engine; this stack supports "
             "'streaming' (frame-synchronous) and 'accurate' (offline, VAD-segmented)"
         )
-    if not model.get("url"):
-        raise ResolutionError(f"model {model.get('id')!r} has no download URL")
-    if not model.get("sha256"):
-        raise ResolutionError(
-            f"model {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
-            "unverified weights are never baked into an image."
-        )
     kind = model.get("modelKind", "transducer")
     if kind not in MODEL_KIND_FILE_KEYS:
         raise ResolutionError(
@@ -162,6 +237,8 @@ def resolve(properties: dict, catalog: dict) -> dict:
     missing = [key for key in MODEL_KIND_FILE_KEYS[kind] if not files.get(key)]
     if missing:
         raise ResolutionError(f"model {model.get('id')!r} is missing file names: {missing}")
+    present_optional = tuple(key for key in OPTIONAL_FILE_KEYS.get(kind, ()) if files.get(key))
+    _check_sources(model, MODEL_KIND_FILE_KEYS[kind] + present_optional, "model")
     if not model.get("sherpaOnnx") or not model.get("onnxruntime"):
         raise ResolutionError(
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"
@@ -205,10 +282,10 @@ def resolve(properties: dict, catalog: dict) -> dict:
             raise ResolutionError(
                 f"preview model {preview.get('id')!r} must be a streaming transducer"
             )
-        for key in ("url", "sha256", "sherpaOnnx", "onnxruntime"):
+        for key in ("sherpaOnnx", "onnxruntime"):
             if not preview.get(key):
                 raise ResolutionError(f"preview model {preview.get('id')!r} has no {key}")
-            if key in ("sherpaOnnx", "onnxruntime") and preview[key] != model.get(key):
+            if preview[key] != model.get(key):
                 raise ResolutionError(
                     f"preview model {preview.get('id')!r} pins {key} {preview[key]}, but the "
                     f"image runs {model.get(key)} for {model.get('id')!r}"
@@ -219,6 +296,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
             raise ResolutionError(
                 f"preview model {preview.get('id')!r} is missing file names: {absent}"
             )
+        _check_sources(preview, FILE_KEYS, "preview model")
     diarizer_id = bundle.get("diarizerModelId", "none")
     diarizer: dict | None = None
     if diarizer_id not in ("none", ""):
@@ -280,6 +358,49 @@ def resolve(properties: dict, catalog: dict) -> dict:
     }
 
 
+def _base_language(code) -> str:
+    """``es`` from ``es-US``: the part of a BCP-47 code a model's language list names."""
+    return str(code).strip().lower().split("-")[0]
+
+
+def model_languages(model: dict) -> list[str] | None:
+    """The base languages a model transcribes, or None when the catalog does not list them.
+
+    A model decoded in one baked language (``decodeLanguage``) transcribes that one
+    language whatever else it covers. A model listed only as ``multilingual`` has no
+    known list, so nothing can be routed to it on the strength of the list.
+    """
+    baked = _base_language(model.get("decodeLanguage") or "")
+    if baked:
+        return [baked]
+    listed = [_base_language(code) for code in model.get("languages") or []]
+    if not listed or MULTILINGUAL in listed:
+        return None
+    return listed
+
+
+def bundle_languages(selection: dict) -> list[str]:
+    """The base languages every model writing a bundle's text transcribes, sorted.
+
+    The intersection of the final model's languages and, in a two-pass bundle, the
+    preview model's, because a meeting in a language only one of them transcribes
+    would get either a wrong live row or a wrong final one. A model without a known
+    list makes the bundle's English only, which is what the readers assume of a
+    deployment that publishes no list at all.
+    """
+    known = [
+        model_languages(model)
+        for model in (selection["model"], selection.get("preview"))
+        if model
+    ]
+    if any(languages is None for languages in known):
+        return [ENGLISH]
+    common = set(known[0])
+    for languages in known[1:]:
+        common &= set(languages)
+    return sorted(common)
+
+
 def render_model_env(selection: dict) -> str:
     model = selection["model"]
     speaker = selection["speaker"]
@@ -303,19 +424,23 @@ def render_model_env(selection: dict) -> str:
         f"ASR_SPEAKER_THRESHOLD={bundle.get('speakerThreshold', '')}",
         f"ASR_MIN_SEGMENT_MS={bundle.get('minSegmentMs', '')}",
         f"ASR_MODEL_ID={model['id']}",
-        f"ASR_MODEL_URL={model['url']}",
-        f"ASR_MODEL_SHA256={model['sha256']}",
+        f"ASR_MODEL_URL={model.get('url', '')}",
+        f"ASR_MODEL_SHA256={model.get('sha256', '')}",
         f"ASR_MODEL_ARCHIVE={model.get('archive', 'tar.bz2')}",
         f"ASR_MODEL_STRIP_COMPONENTS={model.get('stripComponents', 1)}",
         f"ASR_MODEL_KIND={model.get('modelKind', 'transducer')}",
-        f"ASR_MODEL_ENCODER_FILE={files['encoder']}",
-        f"ASR_MODEL_DECODER_FILE={files['decoder']}",
-        f"ASR_MODEL_JOINER_FILE={files.get('joiner', '')}",
-        f"ASR_MODEL_TOKENS_FILE={files.get('tokens', '')}",
-        f"ASR_MODEL_CONV_FRONTEND_FILE={files.get('conv_frontend', '')}",
-        f"ASR_MODEL_TOKENIZER_FILE={files.get('tokenizer', '')}",
-        f"ASR_MODEL_ENCODER_DATA_FILE={files.get('encoder_data', '')}",
+        f"ASR_MODEL_ENCODER_FILE={_file_name(files['encoder'])}",
+        f"ASR_MODEL_DECODER_FILE={_file_name(files['decoder'])}",
+        f"ASR_MODEL_JOINER_FILE={_file_name(files.get('joiner'))}",
+        f"ASR_MODEL_TOKENS_FILE={_file_name(files.get('tokens'))}",
+        f"ASR_MODEL_CONV_FRONTEND_FILE={_file_name(files.get('conv_frontend'))}",
+        f"ASR_MODEL_TOKENIZER_FILE={_file_name(files.get('tokenizer'))}",
+        f"ASR_MODEL_ENCODER_DATA_FILE={_file_name(files.get('encoder_data'))}",
+        *_file_source_lines("ASR_MODEL_", model),
         f"ASR_MODEL_LANGUAGE={model.get('decodeLanguage', '')}",
+        # The languages the bundle transcribes (the AsrModelLanguages output). The
+        # server reports a row's detected language only when it is one of these.
+        f"ASR_BUNDLE_LANGUAGES={','.join(bundle_languages(selection))}",
         # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
         # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
         # descriptive one alone meant an 'accurate' bundle still warmed the STREAMING
@@ -330,10 +455,11 @@ def render_model_env(selection: dict) -> str:
         f"ASR_PREVIEW_MODEL_SHA256={preview.get('sha256', '')}",
         f"ASR_PREVIEW_MODEL_ARCHIVE={preview.get('archive', 'tar.bz2')}",
         f"ASR_PREVIEW_MODEL_STRIP_COMPONENTS={preview.get('stripComponents', 1)}",
-        f"ASR_PREVIEW_MODEL_ENCODER_FILE={preview_files.get('encoder', '')}",
-        f"ASR_PREVIEW_MODEL_DECODER_FILE={preview_files.get('decoder', '')}",
-        f"ASR_PREVIEW_MODEL_JOINER_FILE={preview_files.get('joiner', '')}",
-        f"ASR_PREVIEW_MODEL_TOKENS_FILE={preview_files.get('tokens', '')}",
+        f"ASR_PREVIEW_MODEL_ENCODER_FILE={_file_name(preview_files.get('encoder'))}",
+        f"ASR_PREVIEW_MODEL_DECODER_FILE={_file_name(preview_files.get('decoder'))}",
+        f"ASR_PREVIEW_MODEL_JOINER_FILE={_file_name(preview_files.get('joiner'))}",
+        f"ASR_PREVIEW_MODEL_TOKENS_FILE={_file_name(preview_files.get('tokens'))}",
+        *_file_source_lines("ASR_PREVIEW_MODEL_", preview),
         f"ASR_PREVIEW_MODEL_LICENSE={preview.get('license', '')}",
         f"ASR_DIARIZER_KIND={diarizer.get('kind', '')}",
         f"ASR_DIARIZER_MODEL_ID={diarizer.get('id', '')}",
@@ -440,6 +566,7 @@ def build(properties: dict) -> tuple[str, dict]:
             "two_pass" if selection.get("preview") else selection["model"].get("engine", "streaming")
         ),
         "VadModelId": selection["vad"].get("id", "none"),
+        "Languages": ",".join(bundle_languages(selection)),
     }
 
 

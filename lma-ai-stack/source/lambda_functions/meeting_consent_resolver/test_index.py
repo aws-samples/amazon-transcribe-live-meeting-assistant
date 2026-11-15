@@ -1,0 +1,835 @@
+#!/usr/bin/env python3.12
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT-0 License.
+# See the LICENSE file in the project root for full license information.
+"""Tests for the meeting consent resolver.
+
+The rules themselves are tested in the configuration layer
+(lma_consent/test_rules.py). What is tested here is what a caller depends on:
+who may do each thing, that a meeting's consent cannot be weakened past what
+the deployment allows, that concurrent writes do not lose a reply, that the
+answer carries what the subscription filter needs, and that evidence links
+are signed only inside the meeting's own folder.
+
+No AWS: the module's clients are built at import time and replaced here.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Dict
+
+import pytest
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from botocore.exceptions import ClientError
+
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("EVENT_SOURCING_TABLE", "lma-call-events")
+os.environ.setdefault("RECORDINGS_BUCKET", "lma-recordings")
+
+HERE = Path(__file__).resolve().parent
+
+
+def _load():
+    """Import this directory's index.py under a name of its own."""
+    sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
+    spec = importlib.util.spec_from_file_location(
+        "meeting_consent_resolver_index", HERE / "index.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+index = _load()
+
+CALL_ID = "Weekly sync 2026-11-02"
+OWNER = "owner@example.com"
+SHARED = "shared@example.com"
+OTHER = "other@example.com"
+SER = TypeSerializer()
+DES = TypeDeserializer()
+
+
+def user(name: str, *, admin: bool = False) -> Dict[str, Any]:
+    groups = ["Admin"] if admin else []
+    return {"username": name, "claims": {"sub": f"sub-{name}", "cognito:groups": groups}}
+
+
+# As AppSync passes an IAM identity: the username is the role id and session.
+BACKEND = {
+    "userArn": "arn:aws:sts::123456789012:assumed-role/VPTaskRole/session",
+    "accountId": "1",
+    "username": "AROAEXAMPLE:session",
+}
+
+
+class FakeDynamo:
+    """The meeting row, with the version condition the resolver writes on."""
+
+    def __init__(self) -> None:
+        self.items: Dict[str, Dict[str, Any]] = {}
+        self.conflicts = 0
+        self.updates = 0
+
+    def put_meeting(self, call_id: str = CALL_ID, **fields: Any) -> None:
+        row = {"PK": f"c#{call_id}", "SK": f"c#{call_id}", "CallId": call_id, "Owner": OWNER}
+        row.update(fields)
+        self.items[call_id] = {k: SER.serialize(v) for k, v in row.items()}
+
+    def consent(self, call_id: str = CALL_ID) -> Any:
+        item = self.items[call_id]
+        return index._plain(DES.deserialize(item["Consent"])) if "Consent" in item else None
+
+    def get_item(self, TableName, Key, **_kwargs):  # noqa: N803
+        call_id = Key["PK"]["S"][2:]
+        item = self.items.get(call_id)
+        return {"Item": dict(item)} if item else {}
+
+    def update_item(self, TableName, Key, UpdateExpression, ConditionExpression, **kwargs):  # noqa: N803
+        self.updates += 1
+        call_id = Key["PK"]["S"][2:]
+        item = self.items.get(call_id)
+        failed = item is None
+        if item is not None:
+            if self.conflicts:
+                self.conflicts -= 1
+                failed = True
+            elif "attribute_not_exists(#c)" in ConditionExpression:
+                failed = "Consent" in item
+            else:
+                stored = DES.deserialize(item["Consent"]) if "Consent" in item else {}
+                failed = (
+                    str(stored.get("Version")) != kwargs["ExpressionAttributeValues"][":v"]["N"]
+                )
+        if failed:
+            raise ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
+                "UpdateItem",
+            )
+        assert "ReturnValues" not in kwargs  # the answer is built from the row as read
+        item["Consent"] = kwargs["ExpressionAttributeValues"][":c"]
+        return {}
+
+
+class FakeStore:
+    def __init__(self, values=None, fail=False) -> None:
+        self.values = values or {}
+        self.fail = fail
+
+    def get_section(self, name):
+        assert name == "meeting_consent"
+        if self.fail:
+            raise ClientError({"Error": {"Code": "Throttling", "Message": "slow"}}, "GetItem")
+        return SimpleNamespace(values=self.values)
+
+
+class FakeS3:
+    def generate_presigned_url(self, _operation, Params, ExpiresIn):  # noqa: N803
+        return f"https://signed/{Params['Key']}?e={ExpiresIn}"
+
+
+@pytest.fixture
+def dynamo(monkeypatch):
+    fake = FakeDynamo()
+    fake.put_meeting(SharedWith=[SHARED])
+    monkeypatch.setattr(index, "DYNAMODB", fake)
+    monkeypatch.setattr(index, "S3", FakeS3())
+    monkeypatch.setattr(index, "_STORE", FakeStore())
+    return fake
+
+
+def settings(monkeypatch, **values):
+    monkeypatch.setattr(index, "_STORE", FakeStore(values))
+
+
+def call(field, identity, **arguments):
+    if field != "getMeetingConsent":
+        arguments = {"input": {"CallId": CALL_ID, **arguments}}
+    else:
+        arguments = {"CallId": CALL_ID, **arguments}
+    return index.handler(
+        {"info": {"fieldName": field}, "arguments": arguments, "identity": identity}, None
+    )
+
+
+# ── reading ────────────────────────────────────────────────────────────────
+
+
+def test_a_meeting_without_a_record_is_gated_by_the_deployment_mode(dynamo, monkeypatch) -> None:
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["Consent"] is None and result["CaptureAllowed"] is True
+    settings(monkeypatch, mode="opt_in")
+    result = call("getMeetingConsent", user(SHARED))
+    assert result["CaptureAllowed"] is False
+    assert result["Settings"]["Mode"] == "opt_in"
+    assert result["Settings"]["ConsentPhrases"][0] == "I consent"
+
+
+def test_somebody_without_access_cannot_read_it(dynamo) -> None:
+    with pytest.raises(index.ForbiddenError):
+        call("getMeetingConsent", user(OTHER))
+
+
+def test_an_unknown_meeting_is_refused_like_one_without_access(dynamo) -> None:
+    with pytest.raises(index.ForbiddenError):
+        index.handler(
+            {
+                "info": {"fieldName": "getMeetingConsent"},
+                "arguments": {"CallId": "missing"},
+                "identity": user(OTHER),
+            },
+            None,
+        )
+
+
+def defaults(identity):
+    return index.handler(
+        {"info": {"fieldName": "getMeetingConsentDefaults"}, "arguments": {}, "identity": identity},
+        None,
+    )
+
+
+def test_the_defaults_are_read_by_any_signed_in_user_without_a_meeting(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", consentRule="owner_attests", allowPerMeetingOverride=False)
+    dynamo.items.clear()
+    assert defaults(user(OTHER)) == {
+        "Mode": "notify",
+        "Rule": "owner_attests",
+        "AllowPerMeetingOverride": False,
+    }
+
+
+def test_the_defaults_carry_only_the_mode_rule_and_override(dynamo) -> None:
+    assert defaults(user(OTHER)) == {
+        "Mode": "off",
+        "Rule": "each_participant",
+        "AllowPerMeetingOverride": True,
+    }
+
+
+def test_unreadable_settings_leave_the_defaults_unanswered(dynamo, monkeypatch) -> None:
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    with pytest.raises(index.ConfigurationUnavailableError):
+        defaults(user(OWNER))
+
+
+def test_unreadable_settings_refuse_rather_than_default_to_off(dynamo, monkeypatch) -> None:
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    with pytest.raises(index.ConfigurationUnavailableError):
+        call("startMeetingConsent", BACKEND)
+    assert dynamo.consent() is None
+
+
+def test_a_verifier_model_no_longer_offered_is_read_as_the_default(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, verifierModelId="us.amazon.nova-premier-v1:0")
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["Settings"]["VerifierModelId"] == "amazon.nova-lite-v1:0"
+    settings(monkeypatch, verifierModelId="amazon.nova-pro-v1:0")
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["Settings"]["VerifierModelId"] == "amazon.nova-pro-v1:0"
+
+
+# ── starting ───────────────────────────────────────────────────────────────
+
+
+def test_starting_uses_the_deployment_default_and_renders_the_notice(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="opt_in", consentRule="owner_attests")
+    result = call("startMeetingConsent", BACKEND, LmaUser="Ana", MeetingName="Weekly sync")
+    record = result["Consent"]
+    assert (record["Mode"], record["Rule"], record["Status"]) == (
+        "opt_in",
+        "owner_attests",
+        "pending",
+    )
+    assert record["CaptureAllowed"] is False
+    assert record["NoticeText"].startswith("Ana would like to record")
+    assert record["Version"] == 1 and record["StartedBy"] == "LMA"
+    assert result["Owner"] == OWNER and result["SharedWith"] == [SHARED]
+
+
+def test_a_shared_user_cannot_start_or_change_it(dynamo) -> None:
+    with pytest.raises(index.ForbiddenError):
+        call("startMeetingConsent", user(SHARED), Mode="off")
+
+
+def test_without_overrides_a_meeting_cannot_use_less_consent(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="opt_in", allowPerMeetingOverride=False)
+    with pytest.raises(index.BadRequestError, match="less consent"):
+        call("startMeetingConsent", user(OWNER), Mode="notify")
+    with pytest.raises(index.BadRequestError, match="own notice"):
+        call("startMeetingConsent", user(OWNER), NoticeText="Hello")
+    assert call("startMeetingConsent", user(OWNER))["Consent"]["Mode"] == "opt_in"
+
+
+def test_with_overrides_a_meeting_may_choose_its_mode(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="opt_in")
+    record = call(
+        "startMeetingConsent", user(OWNER), Mode="notify", NoticeText="{LMA_USER} records"
+    )["Consent"]
+    assert (record["Mode"], record["Rule"], record["NoticeText"]) == (
+        "notify",
+        None,
+        "The meeting organizer records",
+    )
+
+
+def test_starting_again_is_idempotent_but_cannot_switch_once_under_way(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
+    assert (
+        call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")["Consent"][
+            "Mode"
+        ]
+        == "opt_in"
+    )
+    call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo",
+        Decision="objection",
+        Source="chat",
+    )
+    with pytest.raises(index.BadRequestError, match="already under way"):
+        call("startMeetingConsent", BACKEND, Mode="off")
+
+
+def test_writes_before_starting_are_refused(dynamo) -> None:
+    with pytest.raises(index.BadRequestError, match="not been started"):
+        call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+
+
+# ── the opt-in flow ────────────────────────────────────────────────────────
+
+
+def test_each_participant_flow_end_to_end(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
+    call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana", " ana ", "Bo"])
+    assert dynamo.consent()["Participants"] == ["Ana", "Bo"]
+    call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Ana",
+        Decision="consent",
+        Source="chat",
+        Text="I consent",
+    )
+    assert dynamo.consent()["CaptureAllowed"] is False
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="BO",
+        Decision="consent",
+        Source="voice",
+    )
+    assert (result["Consent"]["Status"], result["Consent"]["CaptureAllowed"]) == ("granted", True)
+    assert call("getMeetingConsent", user(OWNER))["CaptureAllowed"] is True
+    history = [(h["Status"], h["CaptureAllowed"]) for h in result["Consent"]["StatusHistory"]]
+    assert history == [("pending", False), ("granted", True)]
+    # Somebody who joins later withholds capture again.
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana", "Bo", "Cy"])
+    assert dynamo.consent()["CaptureAllowed"] is False
+    assert dynamo.consent()["ParticipantsSeen"] == ["Ana", "Bo", "Cy"]
+
+
+def test_a_shared_user_cannot_change_who_is_present(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
+    with pytest.raises(index.ForbiddenError):
+        call("setMeetingConsentParticipants", user(SHARED), Participants=[])
+
+
+def test_a_shared_user_may_record_an_objection_but_not_consent(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.ForbiddenError):
+        call("recordMeetingConsentEvent", user(SHARED), ParticipantName="Bo", Decision="consent")
+    result = call(
+        "recordMeetingConsentEvent",
+        user(SHARED),
+        ParticipantName="Bo",
+        Decision="objection",
+        Source="chat",
+    )
+    event = result["Consent"]["Events"][-1]
+    assert (event["Source"], event["RecordedBy"]) == ("ui", SHARED)
+    assert result["Consent"]["Status"] == "objected"
+
+
+def test_a_backend_reply_names_where_it_was_read(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.BadRequestError, match="Source"):
+        call(
+            "recordMeetingConsentEvent",
+            BACKEND,
+            ParticipantName="Bo",
+            Decision="consent",
+            Source="ui",
+        )
+
+
+def test_only_the_owner_or_the_backend_attests(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="owner_attests")
+    for identity in (user(SHARED), user("admin@example.com", admin=True)):
+        with pytest.raises(index.ForbiddenError):
+            call("attestMeetingConsent", identity, Method="verbal")
+    with pytest.raises(index.BadRequestError, match="must name the meeting's owner"):
+        call("attestMeetingConsent", BACKEND, Method="verbal", AttestedBy="Somebody else")
+    result = call(
+        "attestMeetingConsent", user(OWNER), Method="invite_terms", Statement="In the invite"
+    )
+    record = result["Consent"]
+    assert record["Attestation"]["AttestedBy"] == OWNER
+    assert (record["Status"], record["CaptureAllowed"]) == ("granted", True)
+    assert record["Events"][-1]["Source"] == "attestation"
+
+
+def test_an_objection_after_the_attestation_stops_capture(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="owner_attests")
+    relayed = call("attestMeetingConsent", BACKEND, Method="chat")
+    assert relayed["Consent"]["Attestation"]["AttestedBy"] == OWNER
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo",
+        Decision="objection",
+        Source="chat",
+    )
+    assert (result["Consent"]["Status"], result["Consent"]["CaptureAllowed"]) == ("objected", False)
+
+
+# ── concurrency ────────────────────────────────────────────────────────────
+
+
+def test_a_conflicting_write_is_retried_and_nothing_is_lost(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    dynamo.conflicts = 2
+    call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo",
+        Decision="objection",
+        Source="chat",
+    )
+    assert [e["ParticipantName"] for e in dynamo.consent()["Events"]] == ["Bo"]
+    assert dynamo.consent()["Version"] == 2
+
+
+def test_a_write_that_keeps_conflicting_is_reported(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    dynamo.conflicts = index.WRITE_ATTEMPTS
+    with pytest.raises(index.ConflictError):
+        call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+
+
+# ── evidence ───────────────────────────────────────────────────────────────
+
+
+def test_evidence_is_added_by_the_backend_inside_the_meetings_folder(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    folder = "lma-consent-evidence/Weekly_sync_2026_11_02/"
+    with pytest.raises(index.ForbiddenError):
+        call("addMeetingConsentEvidence", user(OWNER), S3Key=f"{folder}a.jpg")
+    for key in ("lma-video-keyframes/x.jpg", f"{folder}../other/a.jpg"):
+        with pytest.raises(index.BadRequestError):
+            call("addMeetingConsentEvidence", BACKEND, S3Key=key)
+    call("addMeetingConsentEvidence", BACKEND, S3Key=f"{folder}chat.jpg", Note="chat panel")
+    evidence = call("getMeetingConsent", user(SHARED))["Consent"]["Evidence"]
+    assert evidence[0]["SignedUrl"] == f"https://signed/{folder}chat.jpg?e=3600"
+    assert evidence[0]["Kind"] == "screenshot"
+
+
+def test_a_stored_key_outside_the_folder_is_not_signed(dynamo) -> None:
+    assert index.sign("lma-video-keyframes/x.jpg", CALL_ID) is None
+    assert index.sign(None, CALL_ID) is None
+
+
+def test_mutation_answers_carry_no_signed_links(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    folder = "lma-consent-evidence/Weekly_sync_2026_11_02/"
+    result = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{folder}chat.jpg")
+    assert result["Consent"]["Evidence"][0]["SignedUrl"] is None
+
+
+def test_an_unsupported_field_is_refused(dynamo) -> None:
+    with pytest.raises(index.BadRequestError):
+        index.handler(
+            {"info": {"fieldName": "deleteCall"}, "arguments": {}, "identity": BACKEND}, None
+        )
+
+
+def test_starting_again_with_the_same_choice_writes_nothing(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    writes = dynamo.updates
+    result = call("startMeetingConsent", BACKEND, Mode="notify")
+    assert dynamo.updates == writes
+    assert result["Consent"]["Version"] == 1
+
+
+def test_evidence_also_holds_the_mode_in_place(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call(
+        "addMeetingConsentEvidence",
+        BACKEND,
+        S3Key="lma-consent-evidence/Weekly_sync_2026_11_02/a.jpg",
+    )
+    with pytest.raises(index.BadRequestError, match="already under way"):
+        call("startMeetingConsent", BACKEND, Mode="off")
+
+
+def test_a_shared_user_cannot_record_a_notice(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.ForbiddenError):
+        call("recordMeetingConsentNotice", user(SHARED), Channel="chat")
+    result = call("recordMeetingConsentNotice", user(OWNER), Channel="chat")
+    assert result["Consent"]["Notices"][0]["PostedBy"] == OWNER
+    assert result["Consent"]["Status"] == "granted"
+
+
+def test_a_restart_keeps_its_mode_after_the_settings_change(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify")
+    call("startMeetingConsent", BACKEND)
+    call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+    writes = dynamo.updates
+    settings(monkeypatch, mode="opt_in", consentRule="owner_attests")
+    result = call("startMeetingConsent", BACKEND)
+    assert result["Consent"]["Mode"] == "notify"
+    assert dynamo.updates == writes
+
+
+def test_changing_the_mode_before_anything_was_posted_keeps_the_history(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana"])
+    result = call("startMeetingConsent", user(OWNER), Mode="opt_in", Rule="each_participant")
+    record = result["Consent"]
+    assert (record["Mode"], record["Status"], record["CaptureAllowed"]) == (
+        "opt_in",
+        "pending",
+        False,
+    )
+    assert record["Participants"] == ["Ana"] and record["StartedBy"] == "LMA"
+    assert record["StatusHistory"][-1]["Reason"] == (
+        f"the mode was changed to opt_in (each_participant) by {OWNER}"
+    )
+    assert [h["Status"] for h in record["StatusHistory"]] == ["pending", "pending"]
+
+
+def test_a_started_record_is_read_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    result = call("getMeetingConsent", user(OWNER))
+    assert result["CaptureAllowed"] is True and result["Settings"] is None
+    dynamo.put_meeting(SharedWith=[SHARED])
+    with pytest.raises(index.ConfigurationUnavailableError):
+        call("getMeetingConsent", user(OWNER))
+
+
+def test_a_backend_write_is_attributed_to_lma_not_its_session(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    result = call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+    assert result["Consent"]["StartedBy"] == "LMA"
+    assert result["Consent"]["Notices"][0]["PostedBy"] == "LMA"
+
+
+def test_a_restart_needs_no_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    assert call("startMeetingConsent", BACKEND)["Consent"]["Mode"] == "notify"
+    with pytest.raises(index.ConfigurationUnavailableError):
+        call("startMeetingConsent", BACKEND, Mode="opt_in")
+
+
+def test_a_record_that_cannot_be_kept_within_its_budget_is_refused(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index.consent, "MAX_RECORD_BYTES", 10)
+    monkeypatch.setattr(index.consent.fit_to_budget, "__defaults__", (10,))
+    with pytest.raises(index.BadRequestError, match="would exceed"):
+        call("recordMeetingConsentNotice", BACKEND, Channel="chat")
+
+
+def test_a_restart_is_judged_alike_with_or_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    writes = dynamo.updates
+    # A rule named with a mode that takes none is ignored, whether or not the
+    # settings can be read.
+    assert call("startMeetingConsent", BACKEND, Mode="notify", Rule="owner_attests")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    assert call("startMeetingConsent", BACKEND, Mode="notify", Rule="owner_attests")
+    assert dynamo.updates == writes
+
+
+# ── checking evidence ──────────────────────────────────────────────────────
+
+FOLDER = "lma-consent-evidence/Weekly_sync_2026_11_02/"
+
+
+class FakeLambda:
+    def __init__(self, answer=None, function_error=False):
+        self.answer = answer
+        self.function_error = function_error
+        self.payloads = []
+
+    def invoke(self, FunctionName, Payload):  # noqa: N803
+        self.payloads.append(json.loads(Payload))
+        response = {"Payload": io.BytesIO(json.dumps(self.answer).encode())}
+        if self.function_error:
+            response["FunctionError"] = "Unhandled"
+        return response
+
+
+class DeletingS3(FakeS3):
+    def __init__(self, fail=False):
+        self.deleted = []
+        self.fail = fail
+
+    def delete_object(self, Bucket, Key):  # noqa: N803
+        if self.fail:
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "DeleteObject")
+        self.deleted.append(Key)
+
+
+VERIFIED = {
+    "Ok": True,
+    "Verification": {
+        "Verdict": "objection_found",
+        "MissingParticipants": [],
+        "Readable": True,
+        "NoticeVisible": True,
+        "NoticeMatches": True,
+        "Replies": [{"Name": "Bo", "Text": "I object", "Decision": "objection"}],
+        "AnyObjection": True,
+        "Confidence": 0.9,
+        "Summary": "Bo objects.",
+        "ModelId": "amazon.nova-lite-v1:0",
+        "VerifiedAt": "2026-11-02T10:02:00.000Z",
+        "InputTokens": 800,
+        "OutputTokens": 120,
+    },
+}
+
+
+def evidence_meeting(monkeypatch, verifier, **settings_values):
+    settings(monkeypatch, **settings_values)
+    monkeypatch.setattr(index, "LAMBDA", verifier)
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Bo"])
+    result = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{FOLDER}chat.jpg")
+    return result["Consent"]["Evidence"][0]["EvidenceId"]
+
+
+def test_a_check_is_stored_on_the_evidence_and_leaves_the_status(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    result = call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["Verification"]["Verdict"] == "objection_found"
+    assert entry["Verification"]["Confidence"] == 0.9
+    assert entry["Verification"]["VerifiedBy"] == OWNER
+    # Supporting evidence only: the replies recorded decide the status.
+    assert result["Consent"]["Status"] == "pending"
+    sent = verifier.payloads[0]
+    assert sent["S3Key"] == f"{FOLDER}chat.jpg"
+    assert sent["Participants"] == ["Bo"]
+    assert sent["ModelId"] == "amazon.nova-lite-v1:0"
+    assert sent["ObjectionPhrases"][0] == "I object"
+    assert sent["LmaMessages"] == []
+    assert sent["ConsentedOutsideChat"] == []
+
+
+def test_a_check_is_sent_the_participants_who_consented_outside_the_chat(
+    dynamo, monkeypatch
+) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    call("setMeetingConsentParticipants", BACKEND, Participants=["Ana", "Bo"])
+    for name, source in (("Ana", "chat"), ("Bo", "voice")):
+        call(
+            "recordMeetingConsentEvent",
+            BACKEND,
+            ParticipantName=name,
+            Decision="consent",
+            Source=source,
+        )
+    call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert verifier.payloads[0]["Participants"] == ["Ana", "Bo"]
+    assert verifier.payloads[0]["ConsentedOutsideChat"] == ["Bo"]
+
+
+def test_a_check_is_sent_the_notices_as_posted(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    posted = "The notice as it went to the chat, with a line LMA added."
+    call("recordMeetingConsentNotice", BACKEND, Channel="chat", Text=posted)
+    call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert verifier.payloads[0]["LmaMessages"] == [posted]
+
+
+@pytest.mark.parametrize(
+    "verifier",
+    [
+        FakeLambda({"Ok": False, "Message": "the evidence image could not be read"}),
+        FakeLambda({"errorMessage": "boom"}, function_error=True),
+    ],
+)
+def test_a_failed_check_is_reported_and_nothing_is_written(dynamo, monkeypatch, verifier) -> None:
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    version = dynamo.consent()["Version"]
+    with pytest.raises(index.VerificationFailedError):
+        call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId=evidence_id)
+    assert dynamo.consent()["Version"] == version
+
+
+def test_somebody_without_access_cannot_run_a_check(dynamo, monkeypatch) -> None:
+    verifier = FakeLambda(VERIFIED)
+    evidence_id = evidence_meeting(monkeypatch, verifier)
+    for identity in (user(OTHER), user(SHARED)):
+        with pytest.raises(index.ForbiddenError):
+            call("verifyMeetingConsentEvidence", identity, EvidenceId=evidence_id)
+    assert verifier.payloads == []
+
+
+def test_an_unknown_evidence_id_is_refused(dynamo, monkeypatch) -> None:
+    evidence_meeting(monkeypatch, FakeLambda(VERIFIED))
+    with pytest.raises(index.BadRequestError, match="no evidence"):
+        call("verifyMeetingConsentEvidence", user(OWNER), EvidenceId="nope")
+
+
+def test_without_keeping_screenshots_the_image_is_deleted_after_its_check(
+    dynamo, monkeypatch
+) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == [f"{FOLDER}chat.jpg"]
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["ImageDeletedAt"] and entry["Verification"]["Verdict"] == "objection_found"
+    assert call("getMeetingConsent", user(OWNER))["Consent"]["Evidence"][0]["SignedUrl"] is None
+    with pytest.raises(index.BadRequestError, match="deleted"):
+        call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+
+
+def test_a_failed_deletion_keeps_the_stored_check(dynamo, monkeypatch) -> None:
+    monkeypatch.setattr(index, "S3", DeletingS3(fail=True))
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    entry = result["Consent"]["Evidence"][0]
+    assert entry["Verification"]["Verdict"] == "objection_found"
+    assert not entry.get("ImageDeletedAt")
+
+
+def test_the_settings_name_the_verifier_model(dynamo) -> None:
+    out = call("getMeetingConsent", user(OWNER))["Settings"]
+    assert out["VerifierModelId"] == "amazon.nova-lite-v1:0"
+    assert out["KeepEvidenceScreenshots"] is True
+
+
+def test_an_invalid_mode_is_refused_alike_without_the_settings(dynamo, monkeypatch) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    monkeypatch.setattr(index, "_STORE", FakeStore(fail=True))
+    with pytest.raises(index.BadRequestError, match="Mode must be one of"):
+        call("startMeetingConsent", BACKEND, Mode="foo")
+
+
+def test_a_deleted_image_whose_mark_cannot_be_written_still_answers(dynamo, monkeypatch) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    evidence_id = evidence_meeting(monkeypatch, FakeLambda(VERIFIED), keepEvidenceScreenshots=False)
+    real = index.write_consent
+    calls = []
+
+    def flaky(caller, call_id, change):
+        calls.append(change.__name__)
+        if change.__name__ == "mark_deleted":
+            raise index.ConflictError("busy")
+        return real(caller, call_id, change)
+
+    monkeypatch.setattr(index, "write_consent", flaky)
+    result = call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert calls == ["store", "mark_deleted"] and s3.deleted
+    assert result["Consent"]["Evidence"][0]["Verification"]["Verdict"] == "objection_found"
+
+
+# ── a meeting name with dots ────────────────────────────────────────────────
+
+# A meeting name with a run of dots: its folder name keeps them.
+DOTTED_CALL_ID = (
+    "Review all the LMA new features and UI changes.. prep to release-2026-11-09-15-58-36-076"
+)
+DOTTED_FOLDER = (
+    "lma-consent-evidence/"
+    "Review_all_the_LMA_new_features_and_UI_changes.._prep_to_release_2026_11_09_15_58_36_076/"
+)
+OUTSIDE_DOTTED_FOLDER = [
+    f"{DOTTED_FOLDER}../Another_meeting/chat.jpg",
+    f"{DOTTED_FOLDER}a/../../lma-audio-recordings/x.wav",
+    f"{DOTTED_FOLDER}./chat.jpg",
+    f"{DOTTED_FOLDER}a//chat.jpg",
+    DOTTED_FOLDER,
+    "lma-consent-evidence/Another_meeting/chat.jpg",
+    DOTTED_FOLDER.rstrip("/") + ".jpg",
+]
+
+
+@pytest.fixture
+def dotted(dynamo, monkeypatch):
+    """The dynamo fixture, with the meeting the calls name being DOTTED_CALL_ID."""
+    dynamo.put_meeting(DOTTED_CALL_ID, SharedWith=[SHARED])
+    monkeypatch.setattr(sys.modules[__name__], "CALL_ID", DOTTED_CALL_ID)
+    return dynamo
+
+
+def test_a_meeting_name_with_dots_has_its_evidence_added_and_signed(dotted) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence = call("getMeetingConsent", user(SHARED))["Consent"]["Evidence"]
+    assert evidence[0]["SignedUrl"] == f"https://signed/{DOTTED_FOLDER}chat.jpg?e=3600"
+    assert index.sign(f"{DOTTED_FOLDER}chat.jpg", DOTTED_CALL_ID) is not None
+
+
+@pytest.mark.parametrize("key", OUTSIDE_DOTTED_FOLDER)
+def test_a_meeting_name_with_dots_still_has_only_keys_inside_its_folder_added(dotted, key) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    with pytest.raises(index.BadRequestError):
+        call("addMeetingConsentEvidence", BACKEND, S3Key=key)
+    assert index.sign(key, DOTTED_CALL_ID) is None
+
+
+def test_a_meeting_name_with_dots_has_its_checked_image_deleted(dotted, monkeypatch) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    settings(monkeypatch, keepEvidenceScreenshots=False)
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda(VERIFIED))
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    added = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence_id = added["Consent"]["Evidence"][0]["EvidenceId"]
+    call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == [f"{DOTTED_FOLDER}chat.jpg"]
+
+
+@pytest.mark.parametrize("key", OUTSIDE_DOTTED_FOLDER)
+def test_a_meeting_name_with_dots_has_no_image_outside_its_folder_deleted(
+    dotted, monkeypatch, key
+) -> None:
+    s3 = DeletingS3()
+    monkeypatch.setattr(index, "S3", s3)
+    settings(monkeypatch, keepEvidenceScreenshots=False)
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda(VERIFIED))
+    monkeypatch.setattr(index, "VERIFIER_FUNCTION", "verifier")
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    added = call("addMeetingConsentEvidence", BACKEND, S3Key=f"{DOTTED_FOLDER}chat.jpg")
+    evidence_id = added["Consent"]["Evidence"][0]["EvidenceId"]
+    # A stored entry whose key is not the one that was accepted when it was added.
+    consent = dotted.consent(DOTTED_CALL_ID)
+    consent["Evidence"][0]["S3Key"] = key
+    dotted.items[DOTTED_CALL_ID]["Consent"] = SER.serialize(index._dynamo(consent))
+    call("verifyMeetingConsentEvidence", BACKEND, EvidenceId=evidence_id)
+    assert s3.deleted == []

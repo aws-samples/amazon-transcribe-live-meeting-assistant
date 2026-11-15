@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Resolve LMA stack outputs & nested-stack resources needed by the drivers.
 
 Wraps the ``lma-sdk`` stack operations but adds discovery for resources that

@@ -1,0 +1,96 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT-0 License.
+# See the LICENSE file in the project root for full license information.
+"""Tests for the transcript knowledge-base query resolver's choice of model.
+
+The model is read per request from the Amazon Bedrock Models section, and is the
+shipped default in ``setting_defaults.json`` when the section does not name one.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("KB_ACCOUNT_ID", "123456789012")
+
+HERE = Path(__file__).resolve().parent
+LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+from lma_config import parameters  # noqa: E402
+
+
+def _load_module():
+    spec = importlib.util.spec_from_file_location("query_kb_index", HERE / "index.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+index = _load_module()
+
+
+class _Store:
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, _name):
+        return SimpleNamespace(values=self.values)
+
+
+@pytest.fixture()
+def store(monkeypatch):
+    def install(values):
+        monkeypatch.setattr(parameters, "_SHARED_STORE", _Store(values))
+
+    return install
+
+
+def test_the_configured_model_is_used(store) -> None:
+    store({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
+    assert index.model_arn() == (
+        f"arn:aws:bedrock:{index.KB_REGION}:123456789012:inference-profile/"
+        "global.anthropic.claude-sonnet-4-6"
+    )
+
+
+def test_without_a_configured_model_the_shipped_default_is_used(store) -> None:
+    store({})
+    shipped = parameters.shipped_setting_defaults()["language_models"]["summaryModelId"]
+    assert index.model_arn().endswith(f"inference-profile/{shipped}")
+
+
+def test_the_model_is_read_for_each_request(store) -> None:
+    store({"summaryModelId": "us.anthropic.claude-opus-4-6-v1"})
+    first = index.model_arn()
+    store({"summaryModelId": "us.anthropic.claude-sonnet-4-6"})
+    assert first != index.model_arn()
+
+
+def test_the_query_sends_generation_and_orchestration_prompts(store, monkeypatch) -> None:
+    """Claude 5.5 models are refused by RetrieveAndGenerate without both prompts."""
+    store({"summaryModelId": "global.anthropic.claude-sonnet-5-5"})
+    sent = {}
+
+    class _KB:
+        def retrieve_and_generate(self, **kwargs):
+            sent.update(kwargs)
+            return {"output": {"text": "ok"}, "citations": []}
+
+    monkeypatch.setattr(index, "KB_CLIENT", _KB())
+    index.get_kb_response("what was decided?", "u1", True, None)
+    kb = sent["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+    assert (
+        "$search_results$" in kb["generationConfiguration"]["promptTemplate"]["textPromptTemplate"]
+    )
+    assert "$query$" in kb["orchestrationConfiguration"]["promptTemplate"]["textPromptTemplate"]

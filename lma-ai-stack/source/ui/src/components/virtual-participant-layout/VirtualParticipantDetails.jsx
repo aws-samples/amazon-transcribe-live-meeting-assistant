@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Amazon.com
- * This file is licensed under the MIT License.
+ * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -22,9 +22,16 @@ import {
   Flashbar,
 } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
+import DiagnoseButton from '../troubleshooting/DiagnoseButton';
+import LaunchSettings from './LaunchSettings';
+import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
+import { canEditScheduled, editWindowOpen } from './scheduled-edit';
+import { canManageVirtualParticipant } from './vp-access';
+import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -53,6 +60,15 @@ const getVirtualParticipant = `
       vncPort
       vncReady
       userAcknowledgedFailure
+      enableVideoRecording
+      agenda
+      agendaSource
+      consentMode
+      consentRule
+      scheduledTimeZone
+      useStoredZoomAccount
+      hasMeetingPassword
+      joinMethod
     }
   }
 `;
@@ -77,6 +93,7 @@ const onUpdateVirtualParticipantDetailed = `
       manualActionTimeoutSeconds
       manualActionStartTime
       userAcknowledgedFailure
+      joinMethod
     }
   }
 `;
@@ -368,6 +385,18 @@ export const ConnectionDetails = ({ vpDetails }) => {
         <div>{vpDetails.meetingPlatform}</div>
       </SpaceBetween>
 
+      {/* Which join got the Virtual Participant in, once it has been
+          admitted: for Teams, Azure Communication Services or the browser,
+          and whether the browser join took over from a refused ACS join. */}
+      {describeJoinMethod(vpDetails.joinMethod) && (
+        <SpaceBetween size="xs">
+          <Box color="text-label" fontWeight="bold">
+            Join method
+          </Box>
+          <div>{describeJoinMethod(vpDetails.joinMethod)}</div>
+        </SpaceBetween>
+      )}
+
       <SpaceBetween size="xs">
         <Box color="text-label" fontWeight="bold">
           Meeting ID
@@ -393,7 +422,7 @@ export const ConnectionDetails = ({ vpDetails }) => {
         <Box color="text-label" fontWeight="bold">
           Owner
         </Box>
-        <div>{vpDetails.owner || 'N/A'}</div>
+        <div>{vpOwner(vpDetails) || 'N/A'}</div>
       </SpaceBetween>
 
       <SpaceBetween size="xs">
@@ -414,6 +443,8 @@ ConnectionDetails.propTypes = {
     meetingPlatform: PropTypes.string,
     meetingId: PropTypes.string,
     owner: PropTypes.string,
+    Owner: PropTypes.string,
+    joinMethod: PropTypes.string,
   }).isRequired,
 };
 
@@ -424,6 +455,7 @@ const ErrorTroubleshooting = ({
   vpId = null,
   vncReady = false,
   userAcknowledgedFailure = false,
+  canAcknowledge = false,
 }) => {
   const [acking, setAcking] = useState(false);
   const [ackError, setAckError] = useState(null);
@@ -432,7 +464,7 @@ const ErrorTroubleshooting = ({
   if (status !== 'FAILED') return null;
 
   const acknowledged = !!userAcknowledgedFailure || ackedLocal;
-  const showAckButton = !!vpId && !!vncReady && !acknowledged;
+  const showLiveBrowserNote = !!vpId && !!vncReady && !acknowledged;
 
   const handleAcknowledge = async () => {
     setAcking(true);
@@ -523,21 +555,29 @@ const ErrorTroubleshooting = ({
             {getErrorSolution()}
           </SpaceBetween>
         </Alert>
-        {showAckButton && (
+        {showLiveBrowserNote && (
           <Alert type="info">
             <SpaceBetween direction="vertical" size="s">
               <div>
                 The live browser above is still available so you can inspect what tripped up the join (e.g. a CAPTCHA,
                 an unexpected dialog, or a stuck page).
               </div>
-              <div>
-                Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
-                will close automatically after 10 minutes.
-              </div>
-              {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
-              <Button onClick={handleAcknowledge} loading={acking} variant="primary">
-                Got it — close Virtual Participant session
-              </Button>
+              {canAcknowledge ? (
+                <>
+                  <div>
+                    Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
+                    will close automatically after 10 minutes.
+                  </div>
+                  {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
+                  <Button onClick={handleAcknowledge} loading={acking} variant="primary">
+                    Got it — close Virtual Participant session
+                  </Button>
+                </>
+              ) : (
+                <div>
+                  The session will close automatically after 10 minutes, or sooner when its owner or an Admin closes it.
+                </div>
+              )}
             </SpaceBetween>
           </Alert>
         )}
@@ -563,11 +603,15 @@ ErrorTroubleshooting.propTypes = {
   vpId: PropTypes.string,
   vncReady: PropTypes.bool,
   userAcknowledgedFailure: PropTypes.bool,
+  // Whether the caller may acknowledge the failure: the Virtual Participant's
+  // owner or an Admin, as the acknowledgeVPFailure mutation requires.
+  canAcknowledge: PropTypes.bool,
 };
 
-const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
-  const canEnd = ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
-  const canCancelSchedule = vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
+export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, canManage = false }) => {
+  // Ending and cancelling are for the owner and Admins.
+  const canEnd = canManage && ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
+  const canCancelSchedule = canManage && vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
 
   return (
     <Container header={<Header variant="h3">Actions</Header>}>
@@ -611,17 +655,21 @@ ActionButtons.propTypes = {
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
   onCancelSchedule: PropTypes.func.isRequired,
+  canManage: PropTypes.bool,
 };
 
 const VirtualParticipantDetails = () => {
   const { vpId } = useParams();
   const navigate = useNavigate();
-  const { authState } = useAppContext();
+  const { authState, user } = useAppContext();
+  const { isAdmin } = useUserGroups();
   // Deployment hosting mode (FARGATE | EC2) so startup status copy matches the
   // actual launch type instead of always describing EC2 host-slot behavior.
   const { settings } = useSettingsContext() || {};
   const launchType = settings?.VPLaunchType;
+  const zoomSdkEnabled = String(settings?.ZoomSdkEnabled ?? '').toLowerCase() === 'true';
   const [vpDetails, setVpDetails] = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -669,25 +717,10 @@ const VirtualParticipantDetails = () => {
     let retryTimer = null;
     let retryAttempt = 0;
 
-    const pickNew = (next, prev) => (next != null ? next : prev);
+    // A partial update keeps what it does not carry (vp-details.js).
     const applyUpdate = (updated) => {
       if (!updated || updated.id !== vpId) return;
-      setVpDetails((prev) => ({
-        ...prev,
-        ...updated,
-        // pickNew so a partial update with status=null doesn't blank it
-        status: pickNew(updated.status, prev?.status),
-        updatedAt: pickNew(updated.updatedAt, prev?.updatedAt),
-        CallId: pickNew(updated.CallId, prev?.CallId),
-        vncEndpoint: pickNew(updated.vncEndpoint, prev?.vncEndpoint),
-        vncPort: pickNew(updated.vncPort, prev?.vncPort),
-        // Latch vncReady=true so a later partial update can't unset it.
-        vncReady: prev?.vncReady === true ? true : pickNew(updated.vncReady, prev?.vncReady),
-        manualActionType: pickNew(updated.manualActionType, prev?.manualActionType),
-        manualActionMessage: pickNew(updated.manualActionMessage, prev?.manualActionMessage),
-        manualActionTimeoutSeconds: pickNew(updated.manualActionTimeoutSeconds, prev?.manualActionTimeoutSeconds),
-        manualActionStartTime: pickNew(updated.manualActionStartTime, prev?.manualActionStartTime),
-      }));
+      setVpDetails((prev) => mergeVpUpdate(prev, updated));
     };
 
     // Quiet poll fallback: only runs while we genuinely need it (status
@@ -780,6 +813,25 @@ const VirtualParticipantDetails = () => {
   }, [vpId, authState]);
 
   const handleRefresh = () => {
+    loadVpDetails();
+  };
+
+  const handleScheduledEditSaved = (updated, movesSchedule) => {
+    setShowEdit(false);
+    if (updated) setVpDetails((prev) => ({ ...prev, ...updated }));
+    setNotifications((prev) => [
+      ...prev,
+      {
+        type: 'success',
+        content: movesSchedule
+          ? 'Launch settings saved. The scheduled launch is updated in a few seconds; ' +
+            'check this page for a note if it could not be.'
+          : 'Launch settings saved. The Virtual Participant reads them when it starts.',
+        dismissible: true,
+        id: `edit-success-${Date.now()}`,
+        onDismiss: () => setNotifications((items) => items.filter((n) => !n.id.startsWith('edit-success-'))),
+      },
+    ]);
     loadVpDetails();
   };
 
@@ -917,6 +969,12 @@ const VirtualParticipantDetails = () => {
                   Call Details (Not Available)
                 </Button>
               )}
+              <DiagnoseButton
+                vpId={vpDetails.id || vpId}
+                resourceLabel={
+                  vpDetails.meetingName ? `the Virtual Participant for ${vpDetails.meetingName}` : undefined
+                }
+              />
             </SpaceBetween>
           }
         >
@@ -953,6 +1011,34 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
+      {/* What the Create Virtual Participant form asked for, editable while
+          the Virtual Participant waits for its scheduled launch. */}
+      <LaunchSettings
+        vp={vpDetails}
+        headerActions={
+          canEditScheduled(vpDetails, { username: user?.username, isAdmin }) ? (
+            <Button
+              iconName="edit"
+              onClick={() => setShowEdit(true)}
+              disabled={!editWindowOpen(vpDetails)}
+              disabledReason="The meeting is less than 5 minutes away"
+            >
+              Edit
+            </Button>
+          ) : null
+        }
+      />
+      {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (
+        <EditScheduledVirtualParticipant
+          vp={vpDetails}
+          visible={showEdit}
+          onDismiss={() => setShowEdit(false)}
+          onSaved={handleScheduledEditSaved}
+          zoomSdkEnabled={zoomSdkEnabled}
+          isOwner={!!user?.username && vpDetails.Owner === user.username}
+        />
+      )}
+
       {/* VNC Live View - Show when VNC is ready and VP is active.
           FAILED is intentionally included: the VP container waits up to
           10 min after FAILED before tearing down the ALB target so the
@@ -973,7 +1059,6 @@ const VirtualParticipantDetails = () => {
           <VNCViewer
             vpId={vpId}
             vncEndpoint={vpDetails.vncEndpoint}
-            websocketUrl={vpDetails.vncEndpoint}
             status={vpDetails.status}
             manualActionType={vpDetails.manualActionType}
             manualActionMessage={vpDetails.manualActionMessage}
@@ -1021,6 +1106,7 @@ const VirtualParticipantDetails = () => {
         vpId={vpId}
         vncReady={vpDetails.vncReady}
         userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}
+        canAcknowledge={isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
       />
 
       {/* Basic Status Timeline for basic schema */}
@@ -1048,6 +1134,7 @@ const VirtualParticipantDetails = () => {
         onRefresh={handleRefresh}
         onEnd={handleEnd}
         onCancelSchedule={handleCancelSchedule}
+        canManage={canManageVirtualParticipant(vpDetails, { username: user?.username, isAdmin })}
       />
     </SpaceBetween>
   );

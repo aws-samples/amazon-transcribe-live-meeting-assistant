@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Generate the default fixture WAV used by the load-simulator drivers.
 
 We avoid shipping binary audio in git — this script generates a small

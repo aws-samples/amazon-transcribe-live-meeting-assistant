@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Amazon.com
-# This file is licensed under the MIT License.
+# This file is licensed under the MIT-0 License.
 """Publish command — build and upload LMA artifacts to S3."""
 
 from __future__ import annotations
