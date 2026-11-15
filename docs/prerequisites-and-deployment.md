@@ -6,8 +6,24 @@ title: "Prerequisites and Deployment Guide"
 
 This guide covers everything you need to deploy the Live Meeting Assistant (LMA) solution, from AWS account requirements through your first login.
 
+## Quick Deploy
+
+Choose a Region and select **Launch Stack**. The AWS CloudFormation console opens with the LMA template loaded. Enter an **Admin Email Address** (your temporary password is sent there), optionally an **Authorized Account Email Domain(s)** to let colleagues sign up, acknowledge the IAM capabilities checkbox, and choose **Create stack**.
+
+| Region | Launch Stack |
+|--------|-------------|
+| US East (N. Virginia) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
+| US West (Oregon) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
+| Asia Pacific (Tokyo) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://ap-northeast-1.console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https://s3.ap-northeast-1.amazonaws.com/aws-bigdata-blog-replica-ap-northeast-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
+| Europe (Ireland) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://eu-west-1.console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://s3.eu-west-1.amazonaws.com/aws-bigdata-blog-replica-eu-west-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
+
+Deployment takes about 35–40 minutes. Before you launch, enable access to the [Amazon Bedrock models](#amazon-bedrock-model-access) LMA uses in that Region. When the stack reaches **CREATE_COMPLETE**, [set your password](#setting-your-password) and continue with the [Quick Start Guide](quick-start-guide.md). If you are updating a stack from 0.3.x, read the [v0.4.0 upgrade notes](stack-updates-and-upgrades.md#v040) first, because several stack parameters moved to the Configuration page.
+
+The rest of this page explains the prerequisites, the [key parameters](#key-parameters-to-configure), deploying with the [LMA CLI](#option-1-using-lma-cli-recommended) instead, and what the stack creates.
+
 ## Table of Contents
 
+- [Quick Deploy](#quick-deploy)
 - [AWS Account Requirements](#aws-account-requirements)
 - [Amazon Bedrock Model Access](#amazon-bedrock-model-access)
 - [Knowledge Base Options](#knowledge-base-options)
@@ -97,16 +113,7 @@ The CLI auto-selects the correct template for your region and streams deployment
 
 ### Option 2: Using AWS Console
 
-Launch the LMA stack in one of the supported AWS regions using the buttons below:
-
-| Region | Launch Stack |
-|--------|-------------|
-| **US East (N. Virginia)** | [Launch Stack](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
-| **US West (Oregon)** | [Launch Stack](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
-| **Asia Pacific (Tokyo)** | [Launch Stack](https://ap-northeast-1.console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https://s3.ap-northeast-1.amazonaws.com/aws-bigdata-blog-replica-ap-northeast-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
-| **Europe (Ireland)** | [Launch Stack](https://eu-west-1.console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://s3.eu-west-1.amazonaws.com/aws-bigdata-blog-replica-eu-west-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
-
-Clicking the link opens the CloudFormation console with the LMA template pre-loaded. Review the parameters, acknowledge the IAM capabilities checkbox, and click **Create stack**.
+Use the **Launch Stack** button for your Region in the [Quick Deploy](#quick-deploy) table at the top of this page. It opens the CloudFormation console with the LMA template pre-loaded. Review the parameters, acknowledge the IAM capabilities checkbox, and choose **Create stack**.
 
 ## Key Parameters to Configure
 

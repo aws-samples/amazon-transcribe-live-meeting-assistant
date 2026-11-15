@@ -6,6 +6,8 @@ title: "Quick Start Guide"
 
 This guide walks you through your first meeting with the Live Meeting Assistant (LMA). You will learn how to stream audio, view transcripts, interact with the meeting assistant, and generate summaries.
 
+If you have not deployed LMA yet, start with [Prerequisites and Deployment](prerequisites-and-deployment.md#quick-deploy), which has a one-click **Launch Stack** button for each supported Region.
+
 ## Table of Contents
 
 - [Streaming Options Overview](#streaming-options-overview)
