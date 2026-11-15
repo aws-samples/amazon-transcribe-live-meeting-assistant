@@ -399,6 +399,15 @@ test('a heading Teams shortened matches its long message, in the same read or ei
     assert.deepEqual(merger.merge([read('A third long message, heading read first by the reader')]), [read('A third long message, heading read first by the reader', 'Bo')]);
 });
 
+test('a shortened heading whose message is never read is passed on once its wait is over', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('A long message whose body never shows u... by Bo', 'Bo')]), []);
+    now += CHAT_COPY_WINDOW_MS + 1;
+    assert.deepEqual(merger.merge([]), [read('A long message whose body never shows u...', 'Bo')]);
+    assert.deepEqual(merger.merge([]), [], 'once');
+});
+
 test('shortenedPrefix', () => {
     assert.equal(shortenedPrefix('Hope you can see me here.. this is my 2nd p...'), 'Hope you can see me here.. this is my 2nd p');
     assert.equal(shortenedPrefix('Hope you can see me here… '.trim()), 'Hope you can see me here');

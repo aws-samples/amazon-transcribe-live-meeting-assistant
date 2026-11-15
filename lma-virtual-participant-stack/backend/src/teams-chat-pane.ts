@@ -301,8 +301,9 @@ export const CHAT_COPY_WINDOW_MS = 15_000;
  * never merged, and a message whose body was read before its heading keeps
  * no sender (it has been passed on by then). Teams shortens a long message in
  * its heading ("Hope you can see me here.. this is my 2nd p... by <sender>"),
- * so a heading ending in "..." matches a body that starts with what is left,
- * and is never passed on as a message itself.
+ * so a heading ending in "..." matches a body that starts with what is left.
+ * It is passed on as a message itself, as Teams showed it, only if no body for
+ * it has been read once CHAT_COPY_WINDOW_MS is over.
  */
 export class ChatCopyMerger {
     /** Bodies passed on with no sender, waiting for their heading. */
@@ -312,7 +313,7 @@ export class ChatCopyMerger {
     private headings: Array<{ text: string; at: number }> = [];
 
     /** Shortened headings, not passed on, whose sender is given to their body when it is read. */
-    private shortened: Array<{ text: string; sender: string; at: number }> = [];
+    private shortened: Array<{ text: string; sender: string; at: number; message: ScrapedChatMessage }> = [];
 
     constructor(private readonly clock: () => number = Date.now) {}
 
@@ -320,6 +321,9 @@ export class ChatCopyMerger {
         const now = this.clock();
         this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
         this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
+        // A shortened heading whose body was never read is still a message:
+        // passed on as Teams showed it, with its sender, once its wait is over.
+        const expired = this.shortened.filter((h) => now - h.at > CHAT_COPY_WINDOW_MS);
         this.shortened = this.shortened.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
         const take = (list: Array<{ text: string; at: number }>, text: string): boolean => {
             const at = list.findIndex((entry) => entry.text === text);
@@ -355,7 +359,12 @@ export class ChatCopyMerger {
             item.done = true;
             if (prefix) {
                 // Not the message as typed: its body, when read, carries the sender.
-                this.shortened.push({ text: prefix, sender: item.heading.sender, at: now });
+                this.shortened.push({
+                    text: prefix,
+                    sender: item.heading.sender,
+                    at: now,
+                    message: { ...item.message, text: item.heading.body, author: item.heading.sender },
+                });
                 return;
             }
             out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender });
@@ -373,6 +382,6 @@ export class ChatCopyMerger {
             if (!item.message.author) this.bodies.push({ text: item.message.text, at: now });
             out.set(index, item.message);
         });
-        return [...out.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message);
+        return [...expired.map((h) => h.message), ...[...out.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message)];
     }
 }
