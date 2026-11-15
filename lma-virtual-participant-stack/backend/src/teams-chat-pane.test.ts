@@ -22,6 +22,7 @@ import {
     isSendButton,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
     CHATLESS_REMOVAL_LINE,
+    TEAMS_FAILED_MARKER_SETTLE_MS,
     introForChatlessClient,
     isLightMeetingsUrl,
 } from './teams-chat-pane.js';
@@ -307,4 +308,14 @@ test('teams.ts posts nothing once the chat is shown as turned off, and submits a
     assert.match(send, /const emptyReadbackPosts = isLightMeetingsUrl\(page\.url\(\)\)/);
     assert.match(source, /if \(!this\.chatTurnedOff && \(await this\.chatShownTurnedOff\(page\)\)\) void meetingConsent\.noteChatTurnedOff\(\);/, 'the chat check looks for a chat turned off');
     assert.match(send, /const pasteUnseen = pasted && afterPaste\.length === 0 && emptyReadbackPosts;\s+if \(pasteUnseen\)/, 'a pasted message is not typed again where it cannot be read back');
+});
+
+test('a Retry button right after a post is given time to go away before the post counts as failed', () => {
+    const source = teamsSource();
+    const send = source.slice(source.indexOf('private async sendMessagesNow('), source.indexOf('private async chatShownTurnedOff('));
+    assert.match(
+        send,
+        /let failedNow = await this\.newFailedMessageCount\(page\);\s+if \(failedNow > 0\) \{[\s\S]*?setTimeout\(resolve, TEAMS_FAILED_MARKER_SETTLE_MS\)\);\s+failedNow = await this\.newFailedMessageCount\(page\);/,
+    );
+    assert.ok(TEAMS_FAILED_MARKER_SETTLE_MS >= 3000);
 });
