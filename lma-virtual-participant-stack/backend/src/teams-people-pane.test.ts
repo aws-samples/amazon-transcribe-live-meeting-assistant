@@ -133,3 +133,8 @@ test('teams.ts leaves out the name the VP joined Teams under, as well as the con
     const source = readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
     assert.match(source, /const ownNames = \[details\.lmaIdentity, details\.scribeIdentity, details\.scribeName, sanitizeTeamsDisplayName\(details\.scribeIdentity\)\];/);
 });
+
+test('teams.ts treats a chat lost after the People pane like a chat turned off', () => {
+    const source = readFileSync(new URL('../src/teams.ts', import.meta.url), 'utf8');
+    assert.match(source, /this\.peopleGuard\.disable\(\);[\s\S]{0,700}this\.chatTurnedOff = true;\s+void meetingConsent\.noteChatTurnedOff\(\);\s+void meetingConsent\.noteParticipantListLost\(\);/);
+});

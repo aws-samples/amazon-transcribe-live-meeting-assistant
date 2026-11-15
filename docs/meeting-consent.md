@@ -763,10 +763,13 @@ the rest of the meeting. So when the compose box is gone after the pane closes
 back, with a toolbar chat button where there is one and otherwise by clicking
 the People button again. If the chat is still not back, the VP does not open
 the People pane again in that meeting, logs that once, and falls back to the
-count and the names it has seen. While each participant's consent is awaited,
-its detail line then adds that it can no longer read the participant list and
-that the owner-attests rule is the way to start recording in a meeting like
-this one.
+count and the names it has seen. It also treats the chat as turned off: it
+posts nothing more, and in every mode its detail line says that it can no
+longer post or read chat messages, so chat commands and typed replies no longer
+reach it (replies said aloud still do). While each participant's consent is
+awaited, the detail line also says that it can no longer read the participant
+list and that the owner-attests rule, where the deployment allows it, is the
+way to start recording in a meeting like this one.
 
 The count is the one each platform handler already reads to leave a meeting it
 is alone in: whenever the count on the page changes on the Chime and Zoom

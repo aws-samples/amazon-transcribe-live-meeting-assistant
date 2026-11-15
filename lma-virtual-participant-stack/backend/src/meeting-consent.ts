@@ -301,7 +301,7 @@ export const CHAT_OFF_DETAIL =
  */
 export const PARTICIPANT_LIST_LOST_DETAIL =
     'The Virtual Participant can no longer read the participant list in this meeting, so it may not be able to confirm that everyone present has consented; ' +
-    'to start recording in a meeting like this, use the owner-attests rule.';
+    'to start recording in a meeting like this, use the owner-attests rule where the deployment allows it.';
 
 /** Posted after every notice where spoken replies are not read. */
 export const CHAT_ONLY_REPLY_LINE = (consentPhrase: string, objectionPhrase: string, lmaUser: string): string =>
