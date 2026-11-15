@@ -9,7 +9,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
-import { captureMeetingPanels } from './consent-evidence.js';
+import { anyVisible, captureMeetingPanels, clickFirstVisible } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
@@ -29,7 +29,6 @@ import {
     ChatCopyMerger,
     ScrapedChatMessage,
     composerHoldsMessage,
-    introForChatlessClient,
     isChatPaneButton,
     isLightMeetingsUrl,
     isComposeBox,
@@ -39,7 +38,18 @@ import {
     TEAMS_CHAT_WATCH_MS,
     TEAMS_FAILED_MARKER_SETTLE_MS,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
+    teamsChatSender,
 } from './teams-chat-pane.js';
+import {
+    parsePeopleTree,
+    PEOPLE_TREE_WAIT_MS,
+    peopleCloseVerdict,
+    PeoplePaneGuard,
+    PeopleTreeRow,
+    TEAMS_PEOPLE_BUTTON_SELECTORS,
+    TEAMS_PEOPLE_ROLE_BADGE_SELECTOR,
+    TEAMS_PEOPLE_TREE_SELECTOR,
+} from './teams-people-pane.js';
 
 const log = createLogger('teams');
 
@@ -466,6 +476,8 @@ interface TeamsChatRow {
     time?: string | null;
     links?: string[];
     history?: boolean;
+    /** The author is the one on the heading Teams shows with the message (ChatCopyMerger). */
+    authorFromHeading?: boolean;
 }
 
 export default class Teams {
@@ -484,6 +496,8 @@ export default class Teams {
     // The legacy `.ck-placeholder` is only the placeholder hint span and is
     // absent once anything is typed, so it's a poor primary — keep it last.
     private static readonly CHAT_INPUT_SELECTORS = [
+        // The light-meetings compose box itself, as measured in live meetings.
+        'div[role="textbox"][contenteditable="true"][data-tid="ckeditor"]',
         '[data-tid="ckeditor"] [contenteditable="true"]',
         'div[role="textbox"][contenteditable="true"][aria-label*="message" i]',
         'div[contenteditable="true"][data-tid="ckeditor-replyBox"]',
@@ -536,6 +550,165 @@ export default class Teams {
      */
     private readonly chatLock = new AsyncLock();
 
+    /** When the People pane may be opened, and whether it may be at all (teams-people-pane.ts). */
+    private readonly peopleGuard = new PeoplePaneGuard();
+
+    /** The People pane is open for a reading or a screenshot; the chat reader skips its turn meanwhile. */
+    private peoplePaneOpen = false;
+
+    /** The People pane's list was found in a shape other than the one measured; logged once. */
+    private peopleShapeReported = false;
+
+    /**
+     * Opens the People pane, unless it is open already. 'open' when its list
+     * is on screen; 'no-tree' when the People button was clicked but no list
+     * showed within PEOPLE_TREE_WAIT_MS (the caller still closes what the
+     * click may have opened); 'no-button' when nothing was clicked. The caller
+     * holds chatLock. Never throws.
+     */
+    private async openPeoplePane(page: Page): Promise<'open' | 'no-tree' | 'no-button'> {
+        try {
+            this.peoplePaneOpen = true;
+            if (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])) return 'open';
+            if (!(await clickFirstVisible(page, TEAMS_PEOPLE_BUTTON_SELECTORS))) {
+                this.peoplePaneOpen = false;
+                return 'no-button';
+            }
+            const until = Date.now() + PEOPLE_TREE_WAIT_MS;
+            while (Date.now() < until) {
+                if (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])) return 'open';
+                await new Promise((r) => setTimeout(r, 250));
+            }
+            return (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])) ? 'open' : 'no-tree';
+        } catch {
+            return 'no-tree';
+        }
+    }
+
+    /**
+     * Closes the People pane with the People button (a toggle) when its list
+     * is on screen, then makes sure the chat compose box is still there: when
+     * it is not, and Teams has not turned the chat off, tries once to bring it
+     * back (the toolbar chat button where there is one, then the People button
+     * again), and when that fails stops opening the People pane for the rest
+     * of the meeting. The caller holds chatLock. Never throws.
+     */
+    private async closePeoplePane(page: Page): Promise<void> {
+        try {
+            if (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])) {
+                await clickFirstVisible(page, TEAMS_PEOPLE_BUTTON_SELECTORS);
+                for (let i = 0; i < 8 && (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])); i += 1) {
+                    await new Promise((r) => setTimeout(r, 250));
+                }
+            }
+            const check = async () => ({
+                composeVisible: await this.waitForChatInput(page, 2000),
+                chatTurnedOff: await this.chatShownTurnedOff(page),
+            });
+            let verdict = peopleCloseVerdict(await check(), false);
+            if (verdict === 'recover') {
+                log.warn('[teams-people] the chat compose box is not on screen after the People pane was closed; trying once to bring it back.');
+                let how: string | null = null;
+                if (await this.restoreChat(page)) {
+                    how = 'the toolbar chat button';
+                } else if (await clickFirstVisible(page, TEAMS_PEOPLE_BUTTON_SELECTORS)) {
+                    await new Promise((r) => setTimeout(r, 1500));
+                    // The click may have opened the People pane again, rather
+                    // than the chat: closed once more, and the chat looked for.
+                    if (await anyVisible(page, [TEAMS_PEOPLE_TREE_SELECTOR])) {
+                        await clickFirstVisible(page, TEAMS_PEOPLE_BUTTON_SELECTORS);
+                    }
+                    how = 'the People button';
+                }
+                verdict = peopleCloseVerdict(await check(), true);
+                if (verdict === 'chat-open') log.always(`[teams-people] the chat compose box is back, after a click on ${how}.`);
+            }
+            if (verdict === 'chat-turned-off') void meetingConsent.noteChatTurnedOff();
+            if (verdict === 'give-up') {
+                this.peopleGuard.disable();
+                log.always(
+                    '[teams-people] the chat compose box did not come back after the People pane was closed; ' +
+                        'the People pane is not opened again in this meeting, so the participant list is not read and not shown in the consent evidence.',
+                );
+                await this.dumpSideRail(page);
+                void meetingConsent.noteParticipantListLost();
+            }
+        } catch (e) {
+            log.warn('[teams-people] closing the People pane failed (non-fatal):', e);
+        } finally {
+            this.peoplePaneOpen = false;
+        }
+    }
+
+    /**
+     * The participant list for the consent flow (consent-runtime.ts,
+     * readRoster), from the People pane on the light-meetings client: opened,
+     * read and closed at once, at most once every PEOPLE_READ_INTERVAL_MS
+     * (the last list read answers the requests in between), only while no
+     * post or screenshot holds the chat pane, and never once PeoplePaneGuard
+     * is disabled. Its "In this meeting (N)" count goes to the consent flow as
+     * the attendee count. Null, and the flow falls back to the attendee badge
+     * and the names it has seen, when no list could be read.
+     */
+    private async readPeopleRoster(page: Page): Promise<string[] | null> {
+        if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
+        const step = this.peopleGuard.next();
+        if (step === 'off') return null;
+        if (step === 'cached') return this.peopleGuard.cached;
+        const ownNames = [details.lmaIdentity, details.scribeIdentity, details.scribeName];
+        return this.chatLock.runIfFree(async () => {
+            const opened = await this.openPeoplePane(page);
+            let rows: PeopleTreeRow[] | null = null;
+            if (opened === 'open') {
+                rows = await page
+                    .evaluate(
+                        ({ tree, badge }) => {
+                            const list = document.querySelector(tree);
+                            if (!list) return null;
+                            return Array.from(list.querySelectorAll('[role="treeitem"]')).slice(0, 300).map((item) => {
+                                // Its own text: nested treeitems (a section's participants) left out.
+                                const parts: string[] = [];
+                                const walk = (node: Node): void => {
+                                    node.childNodes.forEach((child) => {
+                                        if (child.nodeType === Node.TEXT_NODE) parts.push(child.textContent || '');
+                                        else if (child instanceof Element && child.getAttribute('role') !== 'treeitem') walk(child);
+                                    });
+                                };
+                                walk(item);
+                                const nameSpan = Array.from(item.querySelectorAll('span[title]')).find(
+                                    (span) => span.closest('[role="treeitem"]') === item && !span.closest(badge),
+                                );
+                                return {
+                                    level: Number(item.getAttribute('aria-level') || 0),
+                                    text: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+                                    name: nameSpan?.getAttribute('title') || null,
+                                };
+                            });
+                        },
+                        { tree: TEAMS_PEOPLE_TREE_SELECTOR, badge: TEAMS_PEOPLE_ROLE_BADGE_SELECTOR },
+                    )
+                    .catch(() => null);
+            }
+            if (opened !== 'no-button') await this.closePeoplePane(page);
+            const reading = rows ? parsePeopleTree(rows, ownNames) : null;
+            if (reading && !reading.ok && !this.peopleShapeReported) {
+                this.peopleShapeReported = true;
+                const headers = (rows ?? []).filter((row) => row.level === 1).map((row) => row.text.replace(/[^\p{L}\s()]/gu, '').slice(0, 40));
+                log.always(`[teams-people] the People pane's list is not in the shape this VP reads (${reading.why}; section headers: ${headers.join(' | ') || 'none'}); its names are not used.`);
+            }
+            const names = reading?.ok ? reading.names : null;
+            this.peopleGuard.noteRead(names);
+            if (this.peopleGuard.disabled) return null;
+            if (reading?.ok) {
+                log.info(`[teams-people] People pane read: ${reading.count} in the meeting, the VP included; ${reading.names.length} other name(s).`);
+                meetingConsent.noteAttendeeCount(reading.count);
+            } else {
+                log.info(`[teams-people] no participant list read from the People pane (${opened === 'no-button' ? 'no People button' : opened === 'no-tree' ? `no list within ${PEOPLE_TREE_WAIT_MS / 1000} s` : 'list not readable'}).`);
+            }
+            return names;
+        }, this.peopleGuard.cached);
+    }
+
     /** The toolbar DOM has been logged because no way to the chat was found. */
     private toolbarDumped = false;
 
@@ -546,8 +719,9 @@ export default class Teams {
     // light-meetings client has none, and its "More" menu has no chat item
     // (only settings and toggles such as "Show chat bubbles"), so that menu is
     // never opened and there the chat is not brought back once it is closed:
-    // the VP keeps it open by never opening the People pane (see the consent
-    // panels below). A further action belongs here once it has been confirmed
+    // the VP opens the People pane only briefly and checks the chat after it
+    // (closePeoplePane, which also calls this once to bring the chat back).
+    // A further action belongs here once it has been confirmed
     // in a live meeting to open the chat pane. Returns whether the compose box
     // is visible. Never throws.
     private async restoreChat(page: Page): Promise<boolean> {
@@ -1110,10 +1284,12 @@ export default class Teams {
     // MutationObserver — replaced by polling because the anon chat list is
     // virtualized and the v2 message-node shape doesn't exist there). Handles:
     // end command ("LMA leave/end"), pause/resume, and transcript capture.
-    // Teams chat text doesn't expose the sender on the same node, so we use the
-    // lenient matcher and a generic farewell.
+    // The sender is the author Teams shows on the message's heading
+    // (teamsChatSender, light-meetings only). A message without one, and one
+    // already in the chat when the VP got in, has no sender.
     private async handleIncomingMessage(page: Page, rawMessage: string, row: TeamsChatRow = {}): Promise<void> {
         if (!rawMessage) return;
+        const sender = teamsChatSender(row);
         // Which LMA VP the message is for, when there are several
         // (chat-addressing.ts). The row's author is used here, as for the
         // capture: only to tell another VP's messages and name. One for another
@@ -1135,20 +1311,20 @@ export default class Teams {
         }
         // Read with its address reduced to "LMA".
         const message = route.text;
-        // A consent reply, or "LMA start" while consent is withheld. No sender,
-        // for the reason above.
-        if (await meetingConsent.handleChat(null, message)) return;
+        // A consent reply, or "LMA start" while consent is withheld. A consent
+        // with no sender is not recorded (meeting-consent.ts).
+        if (await meetingConsent.handleChat(sender, message)) return;
         // Checked ahead of pause/resume so an assistant-mode toggle lands
         // whether or not transcription is paused; the two vocabularies are
         // disjoint.
         const assistantToggle = parseAssistantChatCommand(message);
-        // Answered in the background, so the next message is not held up. With
-        // no sender on this node, every participant shares one rate limit.
+        // Answered in the background, so the next message is not held up.
+        // Messages with no sender share one rate limit.
         const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
         // Not a branch of the chain below, so the question is still recorded as
         // meeting chat.
         if (chatQuestion) {
-            void startChatAnswer(chatQuestion, null, 'teams', async (messages, answered) => {
+            void startChatAnswer(chatQuestion, sender, 'teams', async (messages, answered) => {
                 await this.sendMessages(page, messages);
                 // The meeting assistant's answer, not a notice, is added to the
                 // transcript when the question was (meeting-chat.ts),
@@ -1162,9 +1338,9 @@ export default class Teams {
             });
         }
         if (matchesEndCommand(message)) {
-            log.info(`LMA Virtual Participant has been asked to leave the meeting (message of ${String(message ?? '').length} characters)`);
+            log.info(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'} (message of ${String(message ?? '').length} characters)`);
             try {
-                await this.sendMessages(page, exitMessagesFor(null));
+                await this.sendMessages(page, exitMessagesFor(sender));
             } catch (e) {
                 // Best effort — fall through to ending the meeting.
                 log.warn('Could not send goodbye message:', e);
@@ -1175,13 +1351,11 @@ export default class Teams {
             this.requestEnd({
                 reason: 'end-command',
                 trigger: 'chat',
+                requestedBy: sender,
                 matchedMessage: message,
             });
         } else if (assistantToggle) {
-            // Teams chat text doesn't expose the sender on the same node, so the
-            // toggle is recorded without a requester — same limitation as the
-            // generic farewell above.
-            await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, null));
+            await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
         } else if (matchesChatCommand(message, details.helpCommand)) {
             // Answered whether or not transcription is paused: the list is how
             // someone finds out how to resume it.
@@ -1189,7 +1363,7 @@ export default class Teams {
             await this.sendMessages(page, chatHelpMessages(voiceAssistant));
         } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
-            void recordTranscriptionPause(true, null);
+            void recordTranscriptionPause(true, sender);
             log.info(details.pauseMessages[0]);
             await this.sendMessages(page, details.pauseMessages);
         } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
@@ -1198,10 +1372,8 @@ export default class Teams {
             log.info(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
         } else {
-            // Meeting chat, for the transcript (meeting-chat.ts decides). The
-            // author read from the message's row is used here only: the
-            // commands and the consent replies above stay unattributed, as
-            // the row's author is not confirmed against a live meeting.
+            // Meeting chat, for the transcript (meeting-chat.ts decides), with
+            // the author read from the message's row.
             meetingChat.offer({
                 platform: 'teams',
                 text: rawMessage,
@@ -1653,33 +1825,42 @@ export default class Teams {
 
         await substep('In the meeting — posting introduction message…');
         log.info("Sending introduction messages.");
-        // On the anonymous light-meetings client the chat can be turned off
-        // for a guest moments after it is admitted, so the introduction gives
-        // no chat commands there.
-        await this.sendMessages(
-            page,
-            isLightMeetingsUrl(page.url()) ? introForChatlessClient(details.introMessages) : details.introMessages,
-        );
-        // Right after the introduction, so the consent notice is posted while
-        // the chat is still open to the VP (see TEAMS_CHAT_TURNED_OFF_SELECTOR).
+        // The configured introduction, as on every other platform.
+        await this.sendMessages(page, details.introMessages);
+        // Right after the introduction, so the consent notice is posted as
+        // soon as the VP is in (see TEAMS_CHAT_TURNED_OFF_SELECTOR).
         // The meeting consent flow, when the meeting runs one (meeting-consent.ts).
-        // The evidence here is the chat screenshot only. Opening the People
-        // pane for a participant-list screenshot would put it in the chat's
-        // place, and on the anonymous client the chat does not come back when
-        // the People pane is closed, so the participant list is not shown. The
-        // participant count the consent flow uses comes from the roster badge,
-        // not from that screenshot.
+        // On the light-meetings client the chat shows each message's sender
+        // (ChatCopyMerger), and the People pane gives the participant list and
+        // its screenshot, under the safeguard in closePeoplePane. Elsewhere the
+        // sender read from a row is not confirmed against a live meeting, so
+        // senders count as hidden there and the People pane is not opened.
+        const lightMeetings = isLightMeetingsUrl(page.url());
+        let peopleClicked = false;
         attachMeetingConsent(page, {
             send: (messages) => this.sendMessages(page, messages),
-            // The chat rows this handler reads carry no sender (see handleIncomingMessage).
-            sendersHidden: true,
-            chatMayClose: isLightMeetingsUrl(page.url()),
+            sendersHidden: !lightMeetings,
             chatTurnedOff: () => this.chatTurnedOff,
+            readRoster: lightMeetings ? () => this.readPeopleRoster(page) : undefined,
             // Taken while no post is being typed, and a post waits for them.
             screenshots: () => this.chatLock.run(() => captureMeetingPanels(page, {
                 showParticipants: async () => {
-                    log.info('[consent] no participant-list screenshot on the Teams browser join: opening the People pane would close the chat, which the VP cannot reopen there.');
-                    return false;
+                    if (!lightMeetings || page.isClosed()) return false;
+                    if (this.peopleGuard.disabled) {
+                        log.info('[consent] no participant-list screenshot: the People pane is not opened again in this meeting.');
+                        return false;
+                    }
+                    const opened = await this.openPeoplePane(page);
+                    peopleClicked = opened !== 'no-button';
+                    if (opened !== 'open') {
+                        log.info(`[consent] no participant-list screenshot: ${opened === 'no-button' ? 'no People button found' : 'the People pane showed no list'}.`);
+                    }
+                    return opened === 'open';
+                },
+                restore: async () => {
+                    if (!peopleClicked) return;
+                    peopleClicked = false;
+                    await this.closePeoplePane(page);
                 },
             })),
             leave: (objector) => {
@@ -2127,6 +2308,12 @@ export default class Teams {
         const chatCopies = new ChatCopyMerger();
         const pollMessages = async (): Promise<void> => {
             if (page.isClosed()) return;
+            // The People pane is open for a moment: what it shows is not chat.
+            // Messages posted meanwhile are read once it has closed.
+            if (this.peoplePaneOpen) {
+                setTimeout(() => { void pollMessages(); }, 1000);
+                return;
+            }
             try {
                 // One message of a body and the heading that repeats it with
                 // its sender (ChatCopyMerger), on the light-meetings client only:
@@ -2177,9 +2364,9 @@ export default class Teams {
 
         // The reader above sees only the rows the chat pane renders, so once
         // the pane closes nothing is read and nothing can be posted. On the
-        // anonymous client there is no way back to it (see restoreChat), so
-        // the VP never opens the People pane, and the chat watch clicks
-        // nothing: every TEAMS_CHAT_WATCH_MS it checks the pane and, when it
+        // anonymous client there is no way back to it from the toolbar (see
+        // restoreChat), so the People pane is opened only under the safeguard
+        // in closePeoplePane, and the chat watch clicks nothing: every TEAMS_CHAT_WATCH_MS it checks the pane and, when it
         // has been closed from the meeting, logs that once with a dump of the
         // side rail (the dump once per meeting); posts made meanwhile report
         // that they were not posted. A reader that a reload of the page

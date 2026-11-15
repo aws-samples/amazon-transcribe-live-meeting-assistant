@@ -143,7 +143,7 @@ To go back to the browser join for every Teams meeting, clear the parameter and 
 
 - The VP joins as an **external user**, under its display name (`LMA - <user>` by default; see [Virtual Participant › More than one LMA in a meeting](virtual-participant.md#more-than-one-lma-in-a-meeting)). Teams clients mark it as external, for example `LMA - Kirk (External)`.
 - Meeting chat works both ways (intro/exit messages and `LMA leave` commands), but only from admission onward — no chat history from before the VP joined.
-- **Chat turned off for guests.** On the browser join, Teams has turned the meeting chat off for the VP 20 to 27 seconds after admission in live meetings, which is why the VP changes its introduction there (see [Meeting consent › When Teams turns the chat off](meeting-consent.md#when-teams-turns-the-chat-off)). Whether a meeting does the same to an ACS participant has not been measured, so the ACS join posts the introduction with its chat commands, as on other platforms.
+- **Chat turned off for guests.** On the browser join, Teams turned the meeting chat off for the VP 20 to 27 seconds after admission in live meetings on 2026-11-14, and kept it open in every live run on 2026-11-15 (see [Meeting consent › When Teams turns the chat off](meeting-consent.md#when-teams-turns-the-chat-off)). Whether a meeting does the same to an ACS participant has not been measured. Both joins post the introduction with its chat commands, as on other platforms.
 - Meetings can be joined by **numeric meeting ID + passcode** or by the invite **URL slug** (`/meet/ht45...` style links) — the VP reconstructs the meeting link automatically when the ID isn't numeric.
 
 ## Local testing

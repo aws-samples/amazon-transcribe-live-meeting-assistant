@@ -87,11 +87,11 @@ const withDeploymentRule = (option, defaults) => {
 
 // What the Virtual Participant can see on each platform decides whether the
 // each-participant rule can be met there (docs/meeting-consent.md, "What each
-// platform supports"). Webex shows no attendee count, so it never can. The
-// Teams browser join shows no chat sender, so there consent is given aloud;
-// the Teams join through Azure Communication Services reads it in the chat
-// too, and which one a VP uses is decided by the deployment, so the option
-// stays available for Teams with a note. On Google Meet the sender of a chat
+// platform supports"). Webex shows no attendee count, so it never can. On the
+// Teams browser join the sender of a chat reply is read from the message's
+// heading and the participant list from the People pane; both were measured
+// in live meetings, but the VP's own use of them has not been run in one yet,
+// so the option carries a caution there, as on Google Meet. On Google Meet the sender of a chat
 // reply and the speaker of a spoken one are read from the page, and neither
 // reading has been confirmed in a live meeting, so the option carries that
 // caution.
@@ -110,8 +110,9 @@ const withPlatformRule = (option, platform) => {
     return {
       ...option,
       description:
-        'On the Teams browser join, which does not show who sent a chat message, ' +
-        'participants consent aloud ("LMA, I consent"); needs Read spoken replies on.',
+        'On the Teams browser join, who sent each chat reply and who is present are read from the ' +
+        'Teams page, which has not yet been confirmed in a live meeting. Where that matters, use ' +
+        '"Opt-in: wait until I confirm that everyone agreed".',
     };
   }
   if (platform === 'GOOGLE_MEET') {

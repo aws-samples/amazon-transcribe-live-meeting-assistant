@@ -44,14 +44,14 @@ describe('meetingConsentInput', () => {
 });
 
 describe('meetingConsentOptionsFor', () => {
-  it('does not offer the each-participant rule on Webex, and notes how Teams browser participants consent', () => {
+  it('does not offer the each-participant rule on Webex, and notes how Teams browser replies are read', () => {
     const webex = meetingConsentOptionsFor('WEBEX').find((o) => o.value === 'opt_in:each_participant');
     expect(webex.disabled).toBe(true);
     expect(meetingConsentChoiceAvailable('opt_in:each_participant', 'WEBEX')).toBe(false);
     expect(meetingConsentChoiceAvailable('opt_in:owner_attests', 'WEBEX')).toBe(true);
     const teams = meetingConsentOptionsFor('TEAMS').find((o) => o.value === 'opt_in:each_participant');
     expect(teams.disabled).toBeUndefined();
-    expect(teams.description).toMatch(/consent aloud/);
+    expect(teams.description).toMatch(/read from the Teams page/);
     expect(meetingConsentOptionsFor('ZOOM')).toEqual(MEETING_CONSENT_OPTIONS);
   });
 
@@ -93,7 +93,7 @@ describe('meetingConsentOptionsFor', () => {
     const defaults = { Mode: 'opt_in', Rule: 'owner_attests', AllowPerMeetingOverride: false };
     const each = meetingConsentOptionsFor('TEAMS', defaults).find((o) => o.value === 'opt_in:each_participant');
     expect(each.disabled).toBeUndefined();
-    expect(each.description).toMatch(/consent aloud/);
+    expect(each.description).toMatch(/read from the Teams page/);
   });
 
   it('offers the each-participant rule on Google Meet, with a note on how replies are attributed', () => {

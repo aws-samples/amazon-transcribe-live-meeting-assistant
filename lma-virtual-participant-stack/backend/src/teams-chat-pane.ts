@@ -8,17 +8,20 @@
  * Keeping the chat pane open on the Teams browser join (teams.ts).
  *
  * The VP reads and posts the chat through Teams' chat pane, which shares the
- * side rail with the People pane. On the anonymous light-meetings client,
- * opening the People pane puts it in the chat's place, and closing it again
- * does not bring the chat back. That client has no chat button in its
- * toolbar, and its "More" menu holds no chat item either (it has Meeting
- * info, Devices, Video effects and settings, Captions, Call me, Show chat
- * bubbles and Accessibility). So the VP keeps the chat open by never opening
- * the People pane (the consent evidence there is the chat screenshot only),
- * never opens the More menu (every item of it is a setting or a toggle), and
- * clicks a toolbar chat button only on a client that has one
- * (isChatPaneButton). A chat pane closed from the meeting is reported, not
- * reopened.
+ * side rail with the People pane. The anonymous light-meetings client has no
+ * chat button in its toolbar, and its "More" menu holds no chat item either
+ * (it has Meeting info, Devices, Video effects and settings, Captions, Call
+ * me, Show chat bubbles and Accessibility), so a chat pane that closes cannot
+ * be reopened from the toolbar there. Live VPs once saw opening the People
+ * pane put it in the chat's place for good; in the live meetings of
+ * 2026-11-15 the chat stayed on screen with the People pane open and after it
+ * closed. So the People pane is opened only briefly, for the participant list
+ * and its screenshot, and every time it closes the VP checks that the chat is
+ * still there, and stops opening it when the chat cannot be brought back
+ * (teams-people-pane.ts). The VP never opens the More menu (every item of it
+ * is a setting or a toggle), and clicks a toolbar chat button only on a
+ * client that has one (isChatPaneButton). A chat pane closed from the
+ * meeting is reported, not reopened.
  */
 
 /** A failed message's "Retry" button in the chat. */
@@ -203,57 +206,16 @@ export class AsyncLock {
 
 /**
  * Shown in place of the compose box once Teams has turned the chat off for
- * the VP ("Chat is turned off for this meeting"). On the anonymous
- * light-meetings client a guest's chat can be turned off shortly after it is
- * admitted, by a setting of the meeting's organization, even when the
- * meeting's own Meeting chat setting is On.
+ * the VP ("Chat is turned off for this meeting"). On 2026-11-14 the anonymous
+ * light-meetings client showed it 20 to 27 s after the VP was admitted; on
+ * 2026-11-15 the chat stayed open in every live run. Why it was turned off is
+ * not known.
  */
 export const TEAMS_CHAT_TURNED_OFF_SELECTOR = '[data-tid="compose-disabled-placeholder-text"]';
 
 /** Whether the page is the anonymous light-meetings client. */
 export function isLightMeetingsUrl(url: string): boolean {
     return /\/light-meetings(\/|\?|$)/i.test(url);
-}
-
-/** Said in the introduction, on the light-meetings client, instead of the chat commands. */
-export const CHATLESS_REMOVAL_LINE = 'A meeting organizer can remove me from the participant list.';
-
-/**
- * A sentence that gives an LMA chat command: one quoting LMA followed by a
- * command ("LMA leave", "@LMA help"). A quoted "LMA" on its own is not a
- * command, nor is a sentence that only mentions the chat.
- */
-const CHAT_COMMAND_SENTENCE = /"@?LMA\b[\s,]+[^"\s][^"]*"/i;
-
-/**
- * The introduction for the light-meetings client: the sentences that give a
- * chat command are left out, as that chat may be turned off moments after
- * the introduction is posted, and the first of them is replaced by
- * CHATLESS_REMOVAL_LINE. Messages that give no chat command are kept as
- * written.
- */
-export function introForChatlessClient(messages: string[]): string[] {
-    let replaced = false;
-    const out: string[] = [];
-    for (const message of messages) {
-        const sentences = squash(message).split(/(?<=[.!?])\s+(?=\S)/);
-        const kept: string[] = [];
-        let dropped = false;
-        for (const sentence of sentences) {
-            if (!CHAT_COMMAND_SENTENCE.test(sentence)) {
-                kept.push(sentence);
-                continue;
-            }
-            dropped = true;
-            if (!replaced) {
-                kept.push(CHATLESS_REMOVAL_LINE);
-                replaced = true;
-            }
-        }
-        if (!dropped) out.push(message);
-        else if (kept.length > 0) out.push(kept.join(' '));
-    }
-    return out;
 }
 
 // ─── Reading the chat ────────────────────────────────────────────────────────
@@ -265,6 +227,24 @@ export interface ScrapedChatMessage {
     author: string | null;
     time: string | null;
     links: string[];
+    /**
+     * Set by ChatCopyMerger: `author` is the one on the heading Teams shows
+     * with the message ("<text> by <author>"), whose row names the same
+     * author. Never set by the page.
+     */
+    authorFromHeading?: boolean;
+}
+
+/**
+ * Who sent a chat message, for the chat commands and the consent replies: the
+ * author on the heading Teams shows with it (ChatCopyMerger, light-meetings),
+ * and nobody for a message without one, or one that was already in the chat
+ * when the VP got in (`history`).
+ */
+export function teamsChatSender(row: { author?: string | null; authorFromHeading?: boolean; history?: boolean }): string | null {
+    if (!row.authorFromHeading || row.history) return null;
+    const author = (row.author ?? '').replace(/\s+/g, ' ').trim();
+    return author || null;
 }
 
 /**
@@ -335,7 +315,9 @@ export class ChatCopyMerger {
         const items = read.map((message) => {
             const suffix = message.author ? ` by ${message.author}` : '';
             const body = suffix && message.text.endsWith(suffix) ? message.text.slice(0, -suffix.length).trim() : '';
-            return { message: { ...message }, heading: body ? { body, sender: message.author as string } : null, done: false };
+            // Only this merger says an author came from a heading.
+            const { authorFromHeading: _fromPage, ...copy } = message;
+            return { message: copy as ScrapedChatMessage, heading: body ? { body, sender: message.author as string } : null, done: false };
         });
         const out = new Map<number, ScrapedChatMessage>();
         items.forEach((item, index) => {
@@ -353,7 +335,7 @@ export class ChatCopyMerger {
             if (body >= 0) {
                 items[body].done = true;
                 item.done = true;
-                out.set(body, { ...items[body].message, author: item.heading.sender });
+                out.set(body, { ...items[body].message, author: item.heading.sender, authorFromHeading: true });
                 return;
             }
             item.done = true;
@@ -363,11 +345,11 @@ export class ChatCopyMerger {
                     text: prefix,
                     sender: item.heading.sender,
                     at: now,
-                    message: { ...item.message, text: item.heading.body, author: item.heading.sender },
+                    message: { ...item.message, text: item.heading.body, author: item.heading.sender, authorFromHeading: true },
                 });
                 return;
             }
-            out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender });
+            out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender, authorFromHeading: true });
             this.headings.push({ text: item.heading.body, at: now });
         });
         items.forEach((item, index) => {
@@ -377,6 +359,7 @@ export class ChatCopyMerger {
             const short = item.message.author ? -1 : this.shortened.findIndex((h) => item.message.text.startsWith(h.text));
             if (short >= 0) {
                 item.message.author = this.shortened[short].sender;
+                item.message.authorFromHeading = true;
                 this.shortened.splice(short, 1);
             }
             if (!item.message.author) this.bodies.push({ text: item.message.text, at: now });

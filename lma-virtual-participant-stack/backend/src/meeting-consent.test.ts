@@ -25,7 +25,10 @@ import {
     MAX_NOTICE_ATTEMPTS,
     MeetingConsentFlow,
     NOTICE_RETRY_MS,
-    NO_REPLY_ROUTE_LINE,
+    CHAT_ONLY_REPLY_LINE,
+    PARTICIPANT_LIST_LOST_DETAIL,
+    REPLY_LINE,
+    SPOKEN_REPLY_LINE,
     describeWaiting,
     effectiveConsentSettings,
     grantEvidenceNote,
@@ -218,7 +221,6 @@ async function harness(options: {
     sendFails?: (messages: string[]) => boolean;
     /** Called as the flow sends the meeting's START event. */
     onCreateMeeting?: () => void;
-    chatMayClose?: boolean;
     chatTurnedOff?: () => boolean;
 } = {}): Promise<Harness> {
     const deployment = effectiveConsentSettings(options.deployment ?? { mode: 'notify' });
@@ -308,7 +310,6 @@ async function harness(options: {
                   ],
         readRoster: options.readRoster,
         sendersHidden: options.sendersHidden,
-        chatMayClose: options.chatMayClose,
         chatTurnedOff: options.chatTurnedOff,
         leave: (name) => left.push(name),
     });
@@ -1388,17 +1389,64 @@ test('a chat that fails without being shown as turned off is still tried again',
     h.flow.stop();
 });
 
-test('where the chat may be turned off and spoken replies are not read, the reply line sends an objection through the LMA user', async () => {
-    const h = await harness({ deployment: { mode: 'notify', readSpokenReplies: false }, chatMayClose: true, sendersHidden: true });
-    assert.ok(h.chat.includes(NO_REPLY_ROUTE_LINE('Ana Silva')), h.chat.join('\n'));
-    assert.ok(!h.chat.some((m) => /in this chat/.test(m)), 'no reply is asked for in the chat');
+test('where senders are shown (the Teams light-meetings client), the reply line is the one Zoom and Meet post', async () => {
+    const spoken = await harness({ deployment: { mode: 'notify' } });
+    assert.ok(spoken.chat.includes(REPLY_LINE('I consent', 'I object')), spoken.chat.join('\n'));
+    spoken.flow.stop();
+    const chatOnly = await harness({ deployment: { mode: 'notify', readSpokenReplies: false } });
+    assert.ok(chatOnly.chat.includes(CHAT_ONLY_REPLY_LINE('I consent', 'I object', 'Ana Silva')), chatOnly.chat.join('\n'));
+    chatOnly.flow.stop();
+    const hidden = await harness({ deployment: { mode: 'notify' }, sendersHidden: true });
+    assert.ok(hidden.chat.includes(SPOKEN_REPLY_LINE('I consent', 'I object')), 'senders hidden: aloud only');
+    hidden.flow.stop();
+});
+
+test('a typed consent with the sender the chat shows is recorded under that sender; one without a sender is not', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(3); // the VP, Strahan, Bob and Test browser
+    assert.equal(await h.flow.handleChat('Strahan, Bob', 'LMA, I consent'), true);
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.ParticipantName, 'Strahan, Bob');
+    assert.equal(event.Decision, 'consent');
+    assert.equal(event.Source, 'chat');
+    const before = h.api.events.length;
+    assert.equal(await h.flow.handleChat(null, 'LMA, I consent'), true);
+    await h.settle();
+    assert.equal(h.api.events.length, before, 'a consent with no sender is not recorded');
+    assert.ok(
+        h.chat.includes('Live Meeting Assistant could not tell who sent that reply, so it was not recorded as consent.'),
+        h.chat.join('\n'),
+    );
+    assert.equal(h.capture.on, false, 'Test browser has not consented');
     h.flow.stop();
 });
 
-test('where the chat may be turned off and spoken replies are read, the reply line asks for them aloud', async () => {
-    const h = await harness({ deployment: { mode: 'notify' }, chatMayClose: true, sendersHidden: true });
-    assert.ok(h.chat.includes('Say "LMA, I consent" or "LMA, I object".'), h.chat.join('\n'));
+test("the VP's own name as a chat sender is never consent", async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2);
+    assert.equal(await h.flow.handleChat('LMA (Ana Silva)', 'LMA, I consent'), false);
+    await h.settle();
+    assert.ok(!h.api.events.some((e) => e.Decision === 'consent'));
     h.flow.stop();
+});
+
+test('once the participant list can no longer be read, the detail line says so while each participant is awaited', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    await h.settle();
+    await h.flow.noteParticipantListLost();
+    await h.flow.pollOnce();
+    await h.settle();
+    const last = h.details[h.details.length - 1];
+    assert.ok(last.startsWith('Waiting for consent'), last);
+    assert.ok(last.includes(PARTICIPANT_LIST_LOST_DETAIL), last);
+    h.flow.stop();
+    const notify = await harness({ deployment: { mode: 'notify' } });
+    await notify.flow.noteParticipantListLost();
+    assert.ok(!notify.details.some((d) => d.includes(PARTICIPANT_LIST_LOST_DETAIL)), 'only where each participant consents');
+    notify.flow.stop();
 });
 
 // ─── Spoken replies ─────────────────────────────────────────────────────────

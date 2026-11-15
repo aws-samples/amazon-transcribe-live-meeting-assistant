@@ -114,7 +114,7 @@ for the each-participant rule:
 | Join | Each participant consents | Notes |
 |---|---|---|
 | Chime, Zoom (browser and Meeting SDK), Google Meet | Supported | The platform shows chat senders and an attendee count. Google Meet's sender and speaker reading has not been confirmed in a live meeting |
-| Teams (browser) | Supported **aloud only** | Teams shows no chat sender, so a typed consent cannot be attributed. With **Read spoken replies** off the rule is never met |
+| Teams (browser) | Supported | On Teams' anonymous light-meetings client the VP reads each chat message's sender from the heading Teams shows with it, and the participant list from the People pane; both were measured in live meetings, but the VP's own reading of them has not yet run in one. When the People pane cannot be read the VP falls back to the attendee count and the names it has seen |
 | Teams (Azure Communication Services) | Supported | The platform gives the participants' names |
 | Webex (browser) | **Not supported** | The page shows no attendee count, so one unidentified participant is always listed. Use the owner-attests rule on Webex |
 
