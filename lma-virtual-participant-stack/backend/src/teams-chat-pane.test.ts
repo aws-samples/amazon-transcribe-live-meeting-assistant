@@ -22,6 +22,9 @@ import {
     isSendButton,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
     CHATLESS_REMOVAL_LINE,
+    CHAT_COPY_WINDOW_MS,
+    ChatCopyMerger,
+    shortenedPrefix,
     TEAMS_FAILED_MARKER_SETTLE_MS,
     introForChatlessClient,
     isLightMeetingsUrl,
@@ -318,4 +321,100 @@ test('a Retry button right after a post is given time to go away before the post
         /let failedNow = await this\.newFailedMessageCount\(page\);\s+if \(failedNow > 0\) \{[\s\S]*?setTimeout\(resolve, TEAMS_FAILED_MARKER_SETTLE_MS\)\);\s+failedNow = await this\.newFailedMessageCount\(page\);/,
     );
     assert.ok(TEAMS_FAILED_MARKER_SETTLE_MS >= 3000);
+});
+
+// ─── Reading the chat ────────────────────────────────────────────────────────
+
+const read = (text: string, author: string | null = null) => ({ text, id: null, author, time: null, links: [] as string[] });
+
+test('a message and the heading that repeats it with its sender are one message, under that sender', () => {
+    const merger = new ChatCopyMerger(() => 1000);
+    assert.deepEqual(merger.merge([read('Great evening!'), read('Great evening! by Strahan, Bob', 'Strahan, Bob')]), [
+        read('Great evening!', 'Strahan, Bob'),
+    ]);
+    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob', 'Strahan, Bob'), read('testing again')]), [read('testing again', 'Strahan, Bob')]);
+});
+
+test('a heading read after its message, or before it, does not make a second message', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('Hello everyone')]), [read('Hello everyone')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Hello everyone by Strahan, Bob', 'Strahan, Bob')]), []);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('See you by Ana Silva', 'Ana Silva')]), [read('See you', 'Ana Silva')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('See you')]), []);
+});
+
+test('a message that only ends in "by" a name, and two people sending the same words, are kept', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('The report is due by Friday')]), [read('The report is due by Friday')]);
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
+    now += 1000;
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
+    now += CHAT_COPY_WINDOW_MS + 1;
+    assert.deepEqual(merger.merge([read('Hello everyone by Bo', 'Bo')]), [read('Hello everyone', 'Bo')], 'outside the window it is a message of its own');
+});
+
+test('a sender is never taken from the text of a message', () => {
+    const merger = new ChatCopyMerger(() => 1000);
+    assert.deepEqual(merger.merge([read('hello'), read('hello by Strahan, Bob')]), [read('hello'), read('hello by Strahan, Bob')]);
+    assert.deepEqual(merger.merge([read('hi by Ana', 'Bo')]), [read('hi by Ana', 'Bo')], 'a row author that the text does not end in is not a heading');
+});
+
+test('each copy pairs once: a repeated short message from two people keeps both, each under its own sender', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    // Alice's heading read before her body; then Bob's body and heading together.
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice')]), [read('ok', 'Alice')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')], "Bob's message is kept");
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok')]), [], "Alice's body, read late, is not a second message");
+});
+
+test("a heading completes its own earlier body, not another person's in the same read", () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')], "Alice's body, before its heading");
+    now += 2000;
+    assert.deepEqual(merger.merge([read('ok by Alice', 'Alice'), read('ok'), read('ok by Bob', 'Bob')]), [read('ok', 'Bob')]);
+});
+
+test('a heading Teams shortened matches its long message, in the same read or either order', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    const long = 'Hope you can see me here.. this is my 2nd post..';
+    const heading = read('Hope you can see me here.. this is my 2nd p... by Strahan, Bob', 'Strahan, Bob');
+    assert.deepEqual(merger.merge([heading, read(long)]), [read(long, 'Strahan, Bob')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Another long message that Teams will shorten')]), [read('Another long message that Teams will shorten')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Another long message that Teams w... by Bo', 'Bo')]), [], 'its body was passed on already');
+    now += 2000;
+    assert.deepEqual(merger.merge([read('A third long message, heading read first by... by Bo', 'Bo')]), [], 'a shortened heading is not passed on');
+    now += 2000;
+    assert.deepEqual(merger.merge([read('A third long message, heading read first by the reader')]), [read('A third long message, heading read first by the reader', 'Bo')]);
+});
+
+test('a shortened heading whose message is never read is passed on once its wait is over', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('A long message whose body never shows u... by Bo', 'Bo')]), []);
+    now += CHAT_COPY_WINDOW_MS + 1;
+    assert.deepEqual(merger.merge([]), [read('A long message whose body never shows u...', 'Bo')]);
+    assert.deepEqual(merger.merge([]), [], 'once');
+});
+
+test('shortenedPrefix', () => {
+    assert.equal(shortenedPrefix('Hope you can see me here.. this is my 2nd p...'), 'Hope you can see me here.. this is my 2nd p');
+    assert.equal(shortenedPrefix('Hope you can see me here… '.trim()), 'Hope you can see me here');
+    assert.equal(shortenedPrefix('ok...'), null, 'too little left');
+    assert.equal(shortenedPrefix('Hope you can see me here'), null);
+});
+
+test('teams.ts reads the chat through ChatCopyMerger on the light-meetings client only', () => {
+    assert.match(teamsSource(), /const fresh = isLightMeetingsUrl\(page\.url\(\)\) \? chatCopies\.merge\(scraped\) : scraped;/);
 });

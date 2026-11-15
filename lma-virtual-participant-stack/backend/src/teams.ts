@@ -26,6 +26,8 @@ import { reportTeamsJoined } from './teams-join-method.js';
 import {
     chatWatchAction,
     AsyncLock,
+    ChatCopyMerger,
+    ScrapedChatMessage,
     composerHoldsMessage,
     introForChatlessClient,
     isChatPaneButton,
@@ -2122,11 +2124,15 @@ export default class Teams {
         // The first read returns what the panel already held when the VP got
         // in; it is still read for commands, but not added to the transcript.
         let firstRead = true;
+        const chatCopies = new ChatCopyMerger();
         const pollMessages = async (): Promise<void> => {
             if (page.isClosed()) return;
             try {
-                const fresh: Array<{ text: string; id: string | null; author: string | null; time: string | null; links: string[] }> =
-                    await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector);
+                // One message of a body and the heading that repeats it with
+                // its sender (ChatCopyMerger), on the light-meetings client only:
+                // elsewhere a message ending in "by <its author>" is as typed.
+                const scraped: ScrapedChatMessage[] = await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector);
+                const fresh = isLightMeetingsUrl(page.url()) ? chatCopies.merge(scraped) : scraped;
                 const history = firstRead;
                 firstRead = false;
                 if (fresh.length) {

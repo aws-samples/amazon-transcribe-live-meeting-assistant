@@ -255,3 +255,133 @@ export function introForChatlessClient(messages: string[]): string[] {
     }
     return out;
 }
+
+// ─── Reading the chat ────────────────────────────────────────────────────────
+
+/** One message as the chat reader (teams.ts, __lmaScrapeMessages) found it. */
+export interface ScrapedChatMessage {
+    text: string;
+    id: string | null;
+    author: string | null;
+    time: string | null;
+    links: string[];
+}
+
+/**
+ * The part of a heading's text before the "..." or "…" Teams puts where it
+ * shortens a long message, or null when the heading is not shortened (or too
+ * little of it is left to tell messages apart).
+ */
+export function shortenedPrefix(text: string): string | null {
+    const m = text.match(/^(.*\S)\s*(?:\.\.\.|…)$/);
+    return m && m[1].length >= 20 ? m[1] : null;
+}
+
+/** How long a message's other copy is looked for in a later read. */
+export const CHAT_COPY_WINDOW_MS = 15_000;
+
+/**
+ * The anonymous light-meetings client renders each chat message twice: its
+ * body ("Great evening!"), and a heading that repeats it with its sender
+ * ("Great evening! by Strahan, Bob"). Seen in a live meeting, where every
+ * message reached the transcript twice, once with no sender. This makes one
+ * message of the two: the body's text, with the sender Teams shows on the
+ * heading's row.
+ *
+ * A reading is a heading only when the reader found its author on the row
+ * and its text ends in " by <author>"; the sender is always that author,
+ * never a name taken from a message's text. A message that only ends in
+ * "by <name>" is kept as it is.
+ *
+ * The two copies of a message can be read in different polls, so each copy
+ * read without its other half is remembered for CHAT_COPY_WINDOW_MS, and is
+ * paired at most once: a heading first completes the oldest body still
+ * waiting for one, then a body in the same read; a body first matches the
+ * oldest heading still waiting for one. Two bodies with the same text are
+ * never merged, and a message whose body was read before its heading keeps
+ * no sender (it has been passed on by then). Teams shortens a long message in
+ * its heading ("Hope you can see me here.. this is my 2nd p... by <sender>"),
+ * so a heading ending in "..." matches a body that starts with what is left.
+ * It is passed on as a message itself, as Teams showed it, only if no body for
+ * it has been read once CHAT_COPY_WINDOW_MS is over.
+ */
+export class ChatCopyMerger {
+    /** Bodies passed on with no sender, waiting for their heading. */
+    private bodies: Array<{ text: string; at: number }> = [];
+
+    /** Headings passed on as messages, waiting for their body. */
+    private headings: Array<{ text: string; at: number }> = [];
+
+    /** Shortened headings, not passed on, whose sender is given to their body when it is read. */
+    private shortened: Array<{ text: string; sender: string; at: number; message: ScrapedChatMessage }> = [];
+
+    constructor(private readonly clock: () => number = Date.now) {}
+
+    merge(read: ScrapedChatMessage[]): ScrapedChatMessage[] {
+        const now = this.clock();
+        this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
+        this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
+        // A shortened heading whose body was never read is still a message:
+        // passed on as Teams showed it, with its sender, once its wait is over.
+        const expired = this.shortened.filter((h) => now - h.at > CHAT_COPY_WINDOW_MS);
+        this.shortened = this.shortened.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
+        const take = (list: Array<{ text: string; at: number }>, text: string): boolean => {
+            const at = list.findIndex((entry) => entry.text === text);
+            if (at < 0) return false;
+            list.splice(at, 1);
+            return true;
+        };
+        // In the order the page lists them, so a copy pairs with its own.
+        const items = read.map((message) => {
+            const suffix = message.author ? ` by ${message.author}` : '';
+            const body = suffix && message.text.endsWith(suffix) ? message.text.slice(0, -suffix.length).trim() : '';
+            return { message: { ...message }, heading: body ? { body, sender: message.author as string } : null, done: false };
+        });
+        const out = new Map<number, ScrapedChatMessage>();
+        items.forEach((item, index) => {
+            if (!item.heading) return;
+            const prefix = shortenedPrefix(item.heading.body);
+            const matches = (text: string) => (prefix ? text.startsWith(prefix) : text === item.heading?.body);
+            // Its body was passed on in an earlier read.
+            const earlier = this.bodies.findIndex((b) => matches(b.text));
+            if (earlier >= 0) {
+                this.bodies.splice(earlier, 1);
+                item.done = true;
+                return;
+            }
+            const body = items.findIndex((other) => !other.heading && !other.done && !other.message.author && matches(other.message.text));
+            if (body >= 0) {
+                items[body].done = true;
+                item.done = true;
+                out.set(body, { ...items[body].message, author: item.heading.sender });
+                return;
+            }
+            item.done = true;
+            if (prefix) {
+                // Not the message as typed: its body, when read, carries the sender.
+                this.shortened.push({
+                    text: prefix,
+                    sender: item.heading.sender,
+                    at: now,
+                    message: { ...item.message, text: item.heading.body, author: item.heading.sender },
+                });
+                return;
+            }
+            out.set(index, { ...item.message, text: item.heading.body, author: item.heading.sender });
+            this.headings.push({ text: item.heading.body, at: now });
+        });
+        items.forEach((item, index) => {
+            if (item.done) return;
+            // Its heading was passed on as the message in an earlier read.
+            if (!item.message.author && take(this.headings, item.message.text)) return;
+            const short = item.message.author ? -1 : this.shortened.findIndex((h) => item.message.text.startsWith(h.text));
+            if (short >= 0) {
+                item.message.author = this.shortened[short].sender;
+                this.shortened.splice(short, 1);
+            }
+            if (!item.message.author) this.bodies.push({ text: item.message.text, at: now });
+            out.set(index, item.message);
+        });
+        return [...expired.map((h) => h.message), ...[...out.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message)];
+    }
+}
