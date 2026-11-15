@@ -26,6 +26,7 @@ import { reportTeamsJoined } from './teams-join-method.js';
 import {
     chatWatchAction,
     AsyncLock,
+    ChatCopyMerger,
     composerHoldsMessage,
     introForChatlessClient,
     isChatPaneButton,
@@ -2122,11 +2123,15 @@ export default class Teams {
         // The first read returns what the panel already held when the VP got
         // in; it is still read for commands, but not added to the transcript.
         let firstRead = true;
+        const chatCopies = new ChatCopyMerger();
         const pollMessages = async (): Promise<void> => {
             if (page.isClosed()) return;
             try {
-                const fresh: Array<{ text: string; id: string | null; author: string | null; time: string | null; links: string[] }> =
-                    await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector);
+                // One message of a body and the heading that repeats it with
+                // its sender (ChatCopyMerger).
+                const fresh = chatCopies.merge(
+                    await page.evaluate((extra) => (window as any).__lmaScrapeMessages(extra), aiMessageSelector),
+                );
                 const history = firstRead;
                 firstRead = false;
                 if (fresh.length) {

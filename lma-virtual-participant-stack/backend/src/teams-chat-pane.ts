@@ -255,3 +255,87 @@ export function introForChatlessClient(messages: string[]): string[] {
     }
     return out;
 }
+
+// ─── Reading the chat ────────────────────────────────────────────────────────
+
+/** One message as the chat reader (teams.ts, __lmaScrapeMessages) found it. */
+export interface ScrapedChatMessage {
+    text: string;
+    id: string | null;
+    author: string | null;
+    time: string | null;
+    links: string[];
+}
+
+/** How long a message's other copy is looked for in a later read. */
+export const CHAT_COPY_WINDOW_MS = 15_000;
+
+/**
+ * The anonymous light-meetings client renders each chat message twice: its
+ * body ("Great evening!"), and a heading that repeats it with its sender
+ * ("Great evening! by Strahan, Bob"), which the reader can find without the
+ * row it belongs to. Seen in a live meeting, where every message reached the
+ * transcript twice, once with no sender. This makes one message of the two:
+ * the body's text, with the sender the heading names.
+ *
+ * A heading is told from a message that happens to end in "by <name>" only by
+ * its body: a reading is taken as a heading when the same read, or one in the
+ * last CHAT_COPY_WINDOW_MS, has a message whose text is the part before
+ * " by ", or when the reader found an author and the text ends in
+ * " by <author>". Two bodies with the same text are never merged.
+ */
+export class ChatCopyMerger {
+    private bodies: Array<{ text: string; at: number }> = [];
+
+    private headings: Array<{ text: string; at: number }> = [];
+
+    constructor(private readonly clock: () => number = Date.now) {}
+
+    merge(read: ScrapedChatMessage[]): ScrapedChatMessage[] {
+        const now = this.clock();
+        this.bodies = this.bodies.filter((b) => now - b.at <= CHAT_COPY_WINDOW_MS);
+        this.headings = this.headings.filter((h) => now - h.at <= CHAT_COPY_WINDOW_MS);
+        const texts = new Set(read.map((m) => m.text));
+        const recentBody = (text: string) => this.bodies.some((b) => b.text === text);
+        const headingOf = (m: ScrapedChatMessage): { body: string; sender: string } | null => {
+            if (m.author && m.text.endsWith(` by ${m.author}`)) {
+                const body = m.text.slice(0, -` by ${m.author}`.length).trim();
+                if (body) return { body, sender: m.author };
+            }
+            for (let at = m.text.indexOf(' by '); at > 0; at = m.text.indexOf(' by ', at + 1)) {
+                const body = m.text.slice(0, at).trim();
+                const sender = m.text.slice(at + 4).trim();
+                if (body && sender && (texts.has(body) || recentBody(body))) return { body, sender };
+            }
+            return null;
+        };
+        const bodies: ScrapedChatMessage[] = [];
+        const headings: Array<{ message: ScrapedChatMessage; body: string; sender: string }> = [];
+        for (const m of read) {
+            const h = headingOf(m);
+            if (h && h.body !== m.text) headings.push({ message: m, ...h });
+            else bodies.push({ ...m });
+        }
+        const kept: ScrapedChatMessage[] = [];
+        for (const m of bodies) {
+            // Its heading was read earlier, and made the message then.
+            if (this.headings.some((h) => h.text === m.text)) continue;
+            this.bodies.push({ text: m.text, at: now });
+            kept.push(m);
+        }
+        for (const h of headings) {
+            const body = kept.find((m) => m.text === h.body && !m.author);
+            if (body) {
+                body.author = h.message.author ?? h.sender;
+                body.id = body.id ?? h.message.id;
+                body.time = body.time ?? h.message.time;
+                continue;
+            }
+            // Its body was read, in this read or an earlier one.
+            if (bodies.some((m) => m.text === h.body) || recentBody(h.body)) continue;
+            kept.push({ ...h.message, text: h.body, author: h.message.author ?? h.sender });
+            this.headings.push({ text: h.body, at: now });
+        }
+        return kept;
+    }
+}

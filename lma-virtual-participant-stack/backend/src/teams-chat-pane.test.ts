@@ -22,6 +22,8 @@ import {
     isSendButton,
     TEAMS_FAILED_MESSAGE_RETRY_SELECTOR,
     CHATLESS_REMOVAL_LINE,
+    CHAT_COPY_WINDOW_MS,
+    ChatCopyMerger,
     TEAMS_FAILED_MARKER_SETTLE_MS,
     introForChatlessClient,
     isLightMeetingsUrl,
@@ -318,4 +320,43 @@ test('a Retry button right after a post is given time to go away before the post
         /let failedNow = await this\.newFailedMessageCount\(page\);\s+if \(failedNow > 0\) \{[\s\S]*?setTimeout\(resolve, TEAMS_FAILED_MARKER_SETTLE_MS\)\);\s+failedNow = await this\.newFailedMessageCount\(page\);/,
     );
     assert.ok(TEAMS_FAILED_MARKER_SETTLE_MS >= 3000);
+});
+
+// ─── Reading the chat ────────────────────────────────────────────────────────
+
+const read = (text: string, author: string | null = null) => ({ text, id: null, author, time: null, links: [] as string[] });
+
+test('a message and the heading that repeats it with its sender are one message, under that sender', () => {
+    const merger = new ChatCopyMerger(() => 1000);
+    assert.deepEqual(merger.merge([read('Great evening!'), read('Great evening! by Strahan, Bob', 'Strahan, Bob')]), [
+        read('Great evening!', 'Strahan, Bob'),
+    ]);
+    assert.deepEqual(merger.merge([read('testing again by Strahan, Bob'), read('testing again')]), [read('testing again', 'Strahan, Bob')]);
+});
+
+test('a heading read after its message, or before it, does not make a second message', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('Hello everyone')]), [read('Hello everyone')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('Hello everyone by Strahan, Bob', 'Strahan, Bob')]), []);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('See you by Ana Silva', 'Ana Silva')]), [read('See you', 'Ana Silva')]);
+    now += 2000;
+    assert.deepEqual(merger.merge([read('See you')]), []);
+});
+
+test('a message that only ends in "by" a name, and two people sending the same words, are kept', () => {
+    let now = 1000;
+    const merger = new ChatCopyMerger(() => now);
+    assert.deepEqual(merger.merge([read('The report is due by Friday')]), [read('The report is due by Friday')]);
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
+    now += 1000;
+    assert.deepEqual(merger.merge([read('ok')]), [read('ok')]);
+    now += CHAT_COPY_WINDOW_MS + 1;
+    assert.deepEqual(merger.merge([read('Hello everyone by Bo', 'Bo')]), [read('Hello everyone', 'Bo')], 'outside the window it is a message of its own');
+});
+
+test('teams.ts reads the chat through ChatCopyMerger', () => {
+    assert.match(teamsSource(), /const fresh = chatCopies\.merge\(\s+await page\.evaluate\(\(extra\) => \(window as any\)\.__lmaScrapeMessages\(extra\), aiMessageSelector\),\s+\);/);
 });
