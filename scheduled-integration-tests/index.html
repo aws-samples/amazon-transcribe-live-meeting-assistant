@@ -544,7 +544,9 @@ licensed host.</li>
 and the meeting option <strong>Who can bypass the lobby?</strong> set to <strong>Everyone</strong> (see
 <a href="../teams-acs-sdk/">Teams ACS SDK</a>). Teams’ web client can challenge an anonymous
 join with a CAPTCHA, which an unattended run cannot answer. The ACS SDK join
-method avoids that, but it needs an Azure Communication Services resource.</li>
+method avoids that, but it needs an Azure Communication Services resource and
+a tenant that lets ACS users join, which a tenant decides separately from
+browser guests; when it does not, the VP falls back to the web client.</li>
 </ul>
 <p>The Zoom and Teams variants have not been run by this test. The secret format
 accepts them, but only the Google Meet setup has been designed against.</p>
