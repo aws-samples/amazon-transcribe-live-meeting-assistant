@@ -140,15 +140,22 @@ export type PeopleCountReading = { count: number; at: number } | null;
  *   present. Showing others, a stale count can only keep the VP in a meeting.
  * - `read` the pane again for a fresh count of one or fewer (others may have
  *   been admitted since; the VP must not leave alone on an old value), or for
- *   no fresh count at all when the caller may open the pane (`mayOpen`, a
- *   silent meeting).
+ *   no fresh count at all when the caller may open the pane (`mayOpen`: no
+ *   participant has spoken within PEOPLE_PANE_QUIET_MS).
+ * - `read` it too when the badge was read on the previous poll and has just
+ *   gone (`badgeJustLost`), whatever the last count showed: Teams has been
+ *   seen to remove the badge when the VP is left alone (#1126), so a count
+ *   from before that says nothing about now. A badge that comes and goes is
+ *   still read at most once a PEOPLE_READ_INTERVAL_MS (PeoplePaneGuard).
  * - `none`: no usable count; the watchdog treats the badge as unreadable.
  */
 export function peopleCountStep(
     last: PeopleCountReading,
     now: number,
     mayOpen: boolean,
+    badgeJustLost: boolean = false,
 ): { action: 'use'; count: number } | { action: 'read' } | { action: 'none' } {
+    if (badgeJustLost) return { action: 'read' };
     const fresh = last !== null && now - last.at <= PEOPLE_COUNT_FRESH_MS;
     if (fresh && last.count > 1) return { action: 'use', count: last.count };
     if (fresh || mayOpen) return { action: 'read' };
@@ -181,6 +188,16 @@ export function peopleCountAfterRead(
 
 /** How late a pane read may be (a skipped turn while the chat is in use) before its count stops holding. */
 export const PEOPLE_READ_SLACK_MS = 30_000;
+
+/**
+ * How long no participant may have spoken before the Teams watchdog opens the
+ * People pane itself for a count when the badge is missing. Shorter than the
+ * activity window (PARTICIPANT_ACTIVITY_WINDOW_MS, 10 min) on purpose: that
+ * window decides whether an unreadable count counts toward leaving, and this
+ * one only whether to look. A meeting whose last participant said goodbye and
+ * left is checked about two minutes later, instead of ten.
+ */
+export const PEOPLE_PANE_QUIET_MS = 2 * 60_000;
 
 /**
  * Defaults for the attendee watchdog.
@@ -736,14 +753,15 @@ export default class Teams {
      *
      * Opening the pane has a cost: a close that cannot restore the chat turns
      * the VP's chat off for the meeting (closePeoplePane). So the pane is opened
-     * here only when no fresh count shows others present, and then either in a
-     * silent meeting (`mayOpen`) or to re-check a count of one or fewer; in
-     * every other case the count last read is used as it is.
+     * here only when the badge has just gone (`badgeJustLost`), or when no fresh
+     * count shows others present and then either after a quiet spell
+     * (`mayOpen`) or to re-check a count of one or fewer; in every other case
+     * the count last read is used as it is.
      */
-    private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | 'hold' | null> {
+    private async peopleCountForWatchdog(page: Page, mayOpen: boolean, badgeJustLost: boolean): Promise<number | 'hold' | null> {
         if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
         const before = Date.now();
-        const step = peopleCountStep(this.lastPeopleCount, before, mayOpen);
+        const step = peopleCountStep(this.lastPeopleCount, before, mayOpen, badgeJustLost);
         if (step.action !== 'read') return step.action === 'use' ? step.count : null;
         await this.readPeopleRoster(page);
         return peopleCountAfterRead(this.lastPeopleCount, before, Date.now());
@@ -2109,6 +2127,8 @@ export default class Teams {
         // default, but three sequential page.evaluate round trips at the 1000ms
         // minimum on a loaded host is a different matter.
         let pollInFlight = false;
+        // The previous poll read the badge itself; on light-meetings its loss is read from the People pane at once (peopleCountStep).
+        let badgeReadLastPoll = false;
         const attendeeWatchdog = setInterval(async () => {
             if (page.isClosed()) {
                 clearInterval(attendeeWatchdog);
@@ -2185,12 +2205,16 @@ export default class Teams {
                 // a minute (readPeopleRoster).
                 // Read once per poll, so the pane decision and the watchdog's agree.
                 const participantsActive = participantsActiveWithin();
+                const badgeWasRead = badgeReadLastPoll;
+                badgeReadLastPoll = reading.state === 'OK';
                 let countFrom = 'badge';
                 if (reading.state === 'BADGE_MISSING') {
-                    // The pane is opened for the watchdog in a silent meeting, and to
+                    // The pane is opened for the watchdog when the badge has just
+                    // gone, after two minutes without participant speech, and to
                     // re-check a count of one or fewer; otherwise the count last read
                     // is used if fresh (peopleCountStep).
-                    const people = await this.peopleCountForWatchdog(page, !participantsActive);
+                    const mayOpen = !participantsActiveWithin(PEOPLE_PANE_QUIET_MS);
+                    const people = await this.peopleCountForWatchdog(page, mayOpen, badgeWasRead);
                     if (people === 'hold') {
                         // A count of one from the last real read, between reads:
                         // neither a new reading of it nor an unreadable poll, so this

@@ -617,55 +617,158 @@ test('a fresh People count showing others is used as it is; a count of one is re
     assert.equal(peopleCountAfterRead(null, now, now + 10), null);
 });
 
-test('on light-meetings a VP left alone leaves, deciding "alone" on consecutive pane reads (20 s polls, 60 s reads)', async () => {
-    const { peopleCountStep, peopleCountAfterRead } = await import('./teams.js');
+/**
+ * The Teams watchdog's poll on light-meetings, at the real cadence (20 s polls,
+ * pane reads at most once a minute): the badge, then the People pane through
+ * peopleCountStep and peopleCountAfterRead, then decideAttendeeAction. The
+ * in-meeting chrome stays on screen throughout, as it did in #540 and #1126.
+ * `badge(now)` and `pane(now)` give null for no badge and for a pane that
+ * gives no count (no People button, or PeoplePaneGuard disabled);
+ * `lastSpeechAt(now)` is when a participant last spoke, or null.
+ */
+type SimulatedEnd = { poll: number; at: number; reason: string; trigger: string; paneReads: number };
+const simulateLightMeetings = async (opts: {
+    badge?: (now: number) => number | null;
+    pane: (now: number) => number | null;
+    lastSpeechAt?: (now: number) => number | null;
+    maxPolls: number;
+}): Promise<SimulatedEnd | { poll: null; paneReads: number }> => {
+    const { PEOPLE_PANE_QUIET_MS, peopleCountStep, peopleCountAfterRead } = await import('./teams.js');
     const { PEOPLE_READ_INTERVAL_MS } = await import('./teams-people-pane.js');
+    const { PARTICIPANT_ACTIVITY_WINDOW_MS } = await import('./meeting-liveness.js');
     const pollMs = DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs;
-    const run = (paneCount: (now: number) => number, activeUntil: number, maxPolls: number) => {
-        const state = fresh();
-        let last: { count: number; at: number } | null = null;
-        let lastRealRead = -Infinity;
-        for (let poll = 0; poll < maxPolls; poll += 1) {
-            const now = poll * pollMs;
-            const participantsActive = now < activeUntil;
-            const step = peopleCountStep(last, now, !participantsActive);
-            let count: number | 'hold' | null;
+    const state = fresh();
+    let last: { count: number; at: number } | null = null;
+    let lastRealRead = -Infinity;
+    let paneReads = 0;
+    let badgeReadLastPoll = false;
+    for (let poll = 0; poll < opts.maxPolls; poll += 1) {
+        const now = poll * pollMs;
+        const spoke = opts.lastSpeechAt?.(now) ?? null;
+        const spokeWithin = (ms: number) => spoke !== null && now - spoke <= ms;
+        const participantsActive = spokeWithin(PARTICIPANT_ACTIVITY_WINDOW_MS);
+        const badge = opts.badge?.(now) ?? null;
+        const badgeWasRead = badgeReadLastPoll;
+        badgeReadLastPoll = badge !== null;
+        let count: number | 'hold' | null = badge;
+        if (badge === null) {
+            const step = peopleCountStep(last, now, !spokeWithin(PEOPLE_PANE_QUIET_MS), badgeWasRead);
             if (step.action === 'use') count = step.count;
             else if (step.action === 'none') count = null;
             else {
                 // readPeopleRoster: a real read at most once a read interval.
                 if (now - lastRealRead >= PEOPLE_READ_INTERVAL_MS) {
-                    last = { count: paneCount(now), at: now };
                     lastRealRead = now;
+                    paneReads += 1;
+                    const read = opts.pane(now);
+                    if (read !== null) last = { count: read, at: now };
                 }
                 count = peopleCountAfterRead(last, now, now);
             }
-            if (count === 'hold') continue;
-            const reading: AttendeeReading = count === null ? MISSING_IN_MEETING : { state: 'OK', count };
-            const decision = decideAttendeeAction(reading, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, participantsActive);
-            if (decision.action === 'end') return { poll, reason: (decision as { reason: string }).reason };
         }
-        return null;
-    };
+        if (count === 'hold') continue;
+        const reading: AttendeeReading = count === null ? MISSING_IN_MEETING : { state: 'OK', count };
+        const decision = decideAttendeeAction(reading, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, participantsActive);
+        if (decision.action === 'end') return { poll, at: now, reason: decision.reason, trigger: decision.trigger, paneReads };
+    }
+    return { poll: null, paneReads };
+};
+
+const ended = (result: SimulatedEnd | { poll: null; paneReads: number }): SimulatedEnd => {
+    assert.notEqual(result.poll, null, 'the VP left');
+    return result as SimulatedEnd;
+};
+
+const MINUTE = 60_000;
+
+test('on light-meetings a VP left alone leaves, deciding "alone" on consecutive pane reads (20 s polls, 60 s reads)', async () => {
+    const { PEOPLE_READ_INTERVAL_MS } = await import('./teams-people-pane.js');
 
     // Alone from the start, silent: leaves as alone after pollsBeforeEnd pane reads (~2 min), not ~35 min.
-    const alone = run(() => 1, 0, 200);
-    assert.ok(alone, 'the VP left');
+    const alone = ended(await simulateLightMeetings({ pane: () => 1, maxPolls: 200 }));
     assert.equal(alone.reason, 'alone-in-meeting');
-    assert.ok(alone.poll * pollMs <= (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS, `left after ${alone.poll * pollMs} ms`);
+    assert.ok(alone.at <= (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS, `left after ${alone.at} ms`);
 
-    // The others talked and then left: while their speech is within the activity
-    // window the meeting counts as live; after it, the VP leaves as alone in a few minutes.
-    const window = 10 * 60_000;
-    const afterTalk = run(() => 1, window, 200);
-    assert.equal(afterTalk?.reason, 'alone-in-meeting');
-    assert.ok((afterTalk as { poll: number }).poll * pollMs <= window + (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS);
+    // Others present the whole time and silent: never leaves.
+    assert.equal((await simulateLightMeetings({ pane: () => 4, maxPolls: 4 * 180 })).poll, null);
 
-    // Others present the whole time: never leaves.
-    assert.equal(run(() => 4, 0, 4 * 180), null);
+    // Others leave after 10 minutes of a silent meeting: leaves as alone within a few minutes of that.
+    const left = ended(await simulateLightMeetings({ pane: (now) => (now < 10 * MINUTE ? 4 : 1), maxPolls: 200 }));
+    assert.equal(left.reason, 'alone-in-meeting');
+    assert.ok(left.at < 10 * MINUTE + (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS);
+});
 
-    // Others leave after 10 minutes: leaves as alone within a few minutes of that.
-    const left = run((now) => (now < 10 * 60_000 ? 4 : 1), 0, 200);
-    assert.equal(left?.reason, 'alone-in-meeting');
-    assert.ok((left as { poll: number }).poll * pollMs < 10 * 60_000 + (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS);
+// ─── a VP left alone after a conversation (#1126) ───────────────────────────
+
+test('a VP left alone right after a conversation leaves a few minutes after the last speech, not after the activity window', async () => {
+    // The others talk until they leave at 20 min; the badge is missing all meeting.
+    const leaveAt = 20 * MINUTE;
+    const result = ended(
+        await simulateLightMeetings({
+            pane: (now) => (now < leaveAt ? 3 : 1),
+            lastSpeechAt: (now) => Math.min(now, leaveAt - 5_000),
+            maxPolls: 400,
+        }),
+    );
+    assert.equal(result.reason, 'alone-in-meeting');
+    // Two quiet minutes, then pollsBeforeEnd pane reads about a minute apart.
+    assert.ok(result.at - leaveAt <= 5 * MINUTE, `left ${(result.at - leaveAt) / 1000} s after the others`);
+    assert.ok(result.at - leaveAt >= 2 * MINUTE, 'not before two quiet minutes and the reads after them');
+});
+
+test('when the badge goes as the others leave, the People pane is read at once and the VP leaves within about three minutes (#1126)', async () => {
+    // The badge shows the others until they leave at 20 min, then is gone; the
+    // last speech is a goodbye just before.
+    const leaveAt = 20 * MINUTE;
+    const result = ended(
+        await simulateLightMeetings({
+            badge: (now) => (now < leaveAt ? 2 : null),
+            pane: (now) => (now < leaveAt ? 2 : 1),
+            lastSpeechAt: (now) => Math.min(now, leaveAt - 5_000),
+            maxPolls: 400,
+        }),
+    );
+    assert.equal(result.reason, 'alone-in-meeting');
+    // Read when the badge went, then pollsBeforeEnd - 1 more reads about a minute apart.
+    assert.ok(result.at - leaveAt <= 3 * MINUTE, `left ${(result.at - leaveAt) / 1000} s after the others`);
+    // While the badge was readable the pane stayed closed.
+    assert.ok(result.paneReads <= ALONE_BOUND + 1, `${result.paneReads} pane reads`);
+});
+
+test('a badge that goes while the others stay keeps the VP in the meeting', async () => {
+    // A content share hides the badge at 20 min; the others stay, and talk with pauses.
+    const result = await simulateLightMeetings({
+        badge: (now) => (now < 20 * MINUTE ? 3 : null),
+        pane: () => 3,
+        lastSpeechAt: (now) => now - (now % (5 * MINUTE)),
+        maxPolls: 4 * 180,
+    });
+    assert.equal(result.poll, null);
+});
+
+test('in a conversation with pauses the VP stays, and the pane is read at most once every three minutes', async () => {
+    // Somebody speaks every 4 minutes for four hours.
+    const result = await simulateLightMeetings({
+        pane: () => 5,
+        lastSpeechAt: (now) => now - (now % (4 * MINUTE)),
+        maxPolls: 4 * 180,
+    });
+    assert.equal(result.poll, null);
+    assert.ok(result.paneReads <= 240 / 3 + 1, `${result.paneReads} pane reads in 240 minutes`);
+});
+
+test('with no People count at all, the VP still leaves a silent meeting on the unreadable bounds (the #540 guard)', async () => {
+    const { PARTICIPANT_ACTIVITY_WINDOW_MS } = await import('./meeting-liveness.js');
+    const { maxSuppressedPolls, pollsBeforeEndMissing, pollMs } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const lastSpeech = 20 * MINUTE;
+    const result = ended(
+        await simulateLightMeetings({
+            pane: () => null,
+            lastSpeechAt: (now) => Math.min(now, lastSpeech),
+            maxPolls: 1000,
+        }),
+    );
+    assert.equal(result.trigger, 'attendee-badge-missing');
+    const bound = lastSpeech + PARTICIPANT_ACTIVITY_WINDOW_MS + (maxSuppressedPolls + pollsBeforeEndMissing) * pollMs;
+    assert.ok(Math.abs(result.at - bound) <= pollMs, `left at ${result.at} ms, bound ${bound} ms`);
 });
