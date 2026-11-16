@@ -1,6 +1,7 @@
 // First, so the Configuration page's values are in the environment before this
 // module reads it at import: see stack-settings.ts.
 import './stack-settings.js';
+import { noteParticipantActivity } from './meeting-liveness.js';
 import {
     TranscribeStreamingClient,
     StartStreamTranscriptionCommand,
@@ -1261,6 +1262,9 @@ export class TranscriptionService {
         
         if (transcript) {
             log.debug(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
+            // Speech on the participants' channel: the meeting is live
+            // (meeting-liveness.ts). The voice assistant's own channel is not.
+            if (!isPartial && result.ChannelId !== 'ch_1') noteParticipantActivity('participant speech');
         }
         
         // Detect wake phrase in partials to pre-warm the voice agent connection
@@ -1767,6 +1771,10 @@ export class TranscriptionService {
         this.rosterTimeline.record(this.rosterClockSeconds(), speaker);
         // Who is present, for the meeting consent flow's participant list.
         noteParticipantSeen(speaker);
+        // Somebody other than the VP is speaking: the meeting is live (meeting-liveness.ts).
+        if (speaker && speaker !== 'none' && !isOwnIdentity(speaker, this.ownIdentities())) {
+            noteParticipantActivity('active speaker');
+        }
         
         const formattedTime = this.formatTimestamp(timestamp);
         log.info(`[${formattedTime}] Speaker changed to: ${speaker}`);
