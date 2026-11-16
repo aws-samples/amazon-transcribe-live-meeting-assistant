@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The consent notice says why it is posted again.** When somebody joins a meeting the Virtual Participant is in, the consent notice it posts again in the chat now starts with a line saying so, so the people already there can tell the notice is for the newcomers and not a second request to them. The line names up to three newcomers where the platform's participant list gives their names (*"Cy Diaz and Dee Evans joined - resending the consent notice."*), and reads *"New participant(s) detected - resending the consent notice."* where it gives only an attendee count. The first notice is unchanged. See [Meeting consent](docs/meeting-consent.md). (#1146)
+
 ## [0.4.0] - 2026-11-15
 
 Upgrading from 0.3.10: read the ⚠️ entries under Changed and the [v0.4.0 migration notes](docs/stack-updates-and-upgrades.md#v040) before updating. Several stack parameters are removed without their values being carried across, and some Amazon Bedrock models need access enabled first.

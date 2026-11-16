@@ -378,7 +378,8 @@ export class MeetingConsentFlow {
     private noticePosted = false;
 
     /** A notice that could not be posted, to be tried again; null when none is waiting. */
-    private noticeRetry: { notice: string; record: boolean; attempts: number; lastAttemptAt: number } | null = null;
+    private noticeRetry: { notice: string; record: boolean; leadIn: string; attempts: number; lastAttemptAt: number } | null =
+        null;
 
     /** A notice is being posted now, so another is not started alongside it. */
     private noticeInFlight = false;
@@ -820,7 +821,7 @@ export class MeetingConsentFlow {
      * the record is granted once it is, so a notice nobody could see must not
      * be. One that was not posted is tried again by retryNoticeIfDue.
      */
-    private async postNotice(notice: string, record: boolean): Promise<void> {
+    private async postNotice(notice: string, record: boolean, leadIn: string = ''): Promise<void> {
         if (this.stopped || this.chatOff) return;
         if (this.noticeInFlight) {
             if (record) this.noticeRecordWanted = true;
@@ -828,14 +829,16 @@ export class MeetingConsentFlow {
         }
         this.noticeInFlight = true;
         try {
-            await this.postNoticeNow(notice, record);
+            await this.postNoticeNow(notice, record, leadIn);
         } finally {
             this.noticeInFlight = false;
         }
     }
 
-    private async postNoticeNow(notice: string, record: boolean): Promise<void> {
-        const messages = noticeChatMessages(notice);
+    private async postNoticeNow(notice: string, record: boolean, leadIn: string = ''): Promise<void> {
+        // A lead-in (why the notice is posted again) starts the notice's first
+        // message, and is split with it, so it does not add a message of its own.
+        const messages = noticeChatMessages(leadIn ? `${leadIn} ${notice}` : notice);
         if (this.plan.mode === 'opt_in' && this.plan.rule === 'owner_attests') {
             messages.push(`Recording starts when ${this.deps.lmaUser} confirms in LMA that everyone has agreed.`);
         }
@@ -865,7 +868,7 @@ export class MeetingConsentFlow {
                 );
                 return;
             }
-            this.noticeRetry = { notice, record: toRecord, attempts, lastAttemptAt: this.clock() };
+            this.noticeRetry = { notice, record: toRecord, leadIn, attempts, lastAttemptAt: this.clock() };
             log.warn(
                 `[consent] the notice could not be posted in the chat (attempt ${attempts}); ` +
                     `it is not recorded as posted, and is tried again in ${Math.round(this.noticeRetryMs / 1000)} s`,
@@ -894,7 +897,7 @@ export class MeetingConsentFlow {
         log.info(`[consent] posting the notice again (attempt ${pending.attempts + 1})`);
         // Recorded only once consent has started: callApi does nothing before,
         // and afterStart records a notice posted before it.
-        await this.postNotice(pending.notice, pending.record);
+        await this.postNotice(pending.notice, pending.record, pending.leadIn);
     }
 
     /** The deployment's first consent and objection phrases, as the reply instructions give them. */
@@ -1456,7 +1459,7 @@ export class MeetingConsentFlow {
         this.noticeRepostTimer = setTimeout(() => {
             this.noticeRepostTimer = null;
             if (this.stopped || !this.record?.NoticeText) return;
-            void this.postNotice(this.record.NoticeText, true);
+            void this.postNotice(this.record.NoticeText, true, repostLeadIn(this.roster.takeJoined()));
         }, Math.max(wait, 3000));
     }
 
@@ -1621,4 +1624,31 @@ export function describeWaiting(names: string[]): string {
     if (unnamed > 0) parts.push(`${unnamed} unidentified participant${unnamed === 1 ? '' : 's'}`);
     if (parts.length <= 1) return parts[0] || 'the participants present';
     return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/** Longest display name a re-posted notice's lead-in repeats. */
+const LEAD_IN_NAME_LENGTH = 60;
+
+/** How many newcomers a re-posted notice's lead-in names before it counts the rest. */
+const LEAD_IN_NAMES = 3;
+
+/**
+ * The line a notice posted again because somebody joined starts with, so the
+ * people already in the meeting can tell it is for the newcomers and not a
+ * second request to them. Names the newcomers where the platform's list gave
+ * their names (`names`, in the order they joined), and says only that somebody
+ * new was detected where it gave a count alone.
+ */
+export function repostLeadIn(names: string[]): string {
+    const cleaned = names
+        .map((name) => name.replace(/\s+/g, ' ').trim().slice(0, LEAD_IN_NAME_LENGTH).trim())
+        .filter((name) => name.length > 0);
+    if (cleaned.length === 0) return 'New participant(s) detected - resending the consent notice.';
+    const shown = cleaned.slice(0, LEAD_IN_NAMES);
+    const others = cleaned.length - shown.length;
+    let who: string;
+    if (others > 0) who = `${shown.join(', ')} and ${others} other${others === 1 ? '' : 's'}`;
+    else if (shown.length === 1) who = shown[0];
+    else who = `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+    return `${who} joined - resending the consent notice.`;
 }
