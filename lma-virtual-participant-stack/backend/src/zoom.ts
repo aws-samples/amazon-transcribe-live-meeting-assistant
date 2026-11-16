@@ -1,5 +1,14 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
+import {
+    decideZoomCounterAction,
+    ZOOM_COUNTER_POLL_MS,
+    ZOOM_END_DIALOG_PHRASES,
+    zoomEndDialogReason,
+    type ZoomCounterReading,
+    type ZoomCounterState,
+} from './end-signals.js';
+import { participantsActiveWithin } from './meeting-liveness.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
@@ -1669,32 +1678,32 @@ export default class Zoom {
         // when the count *number* changes. If Zoom kicks the VP out (host
         // removes, "your account signed in elsewhere", network drop showing
         // an error screen), the counter element disappears entirely and no
-        // mutation event fires. Poll the panel every 30s as a backup —
-        // this is also a more reliable "lonely VP" signal than the original
-        // observer-based one, which sometimes misses the transition.
-        // Decision rules:
-        //   - counter element absent for >=2 consecutive polls (~60s) →
-        //     VP no longer in the meeting → end.
-        //   - counter present but count <= 1 for >=2 consecutive polls →
-        //     VP is alone → end (matches existing behaviour).
-        //   - counter present and count > 1 → reset both counters.
-        // 60s grace absorbs transient React re-renders that briefly remove
-        // the counter while the participants panel updates. Audio silence is
-        // explicitly NOT a signal (long silent doc reviews are real).
+        // mutation event fires. Poll the panel every ZOOM_COUNTER_POLL_MS as a
+        // backup; this is also a more reliable "lonely VP" signal than the
+        // observer-based one, which sometimes misses the transition. The rules
+        // are decideZoomCounterAction (end-signals.ts):
+        //   - counter present, count <= 1 for ZOOM_COUNTER_POLLS_BEFORE_ALONE
+        //     polls: the VP is alone, end.
+        //   - counter gone (or the page unreadable) while a participant has
+        //     been active within the liveness window (meeting-liveness.ts):
+        //     the meeting is live and the toolbar is hidden or re-rendering,
+        //     so the reading is not counted (#1148).
+        //   - counter gone for ZOOM_COUNTER_POLLS_BEFORE_REMOVED polls with no
+        //     participant activity: the VP is no longer in the meeting, end.
+        // Zoom's own end and removal dialogs (below) are the prompt signal for
+        // a removal; this is the backstop for one that shows no dialog.
         if (attendeeCounterSelector) {
             const counterSelector = attendeeCounterSelector;
-            let consecutiveMissingCounter = 0;
-            let consecutiveLonely = 0;
-            const POLL_MS = 30_000;
-            const POLLS_BEFORE_END = 2;
+            const counterState: ZoomCounterState = { consecutiveMissing: 0, consecutiveLonely: 0 };
+            let vetoReported = false;
             const watchdogTimer = setInterval(async () => {
                 if (page.isClosed()) {
                     clearInterval(watchdogTimer);
                     return;
                 }
-                let result: { state: string; count?: number };
+                let result: ZoomCounterReading;
                 try {
-                    result = await page.evaluate((sel: string) => {
+                    result = await page.evaluate((sel: string): ZoomCounterReading => {
                         const counter = document.querySelector(sel);
                         if (!counter) return { state: 'COUNTER_GONE' };
                         const n = parseInt(counter.textContent || '0', 10);
@@ -1704,44 +1713,41 @@ export default class Zoom {
                     // page.evaluate threw — page closed, navigated away, or CDP error.
                     result = { state: 'PAGE_DEAD' };
                 }
-                if (result.state === 'COUNTER_GONE' || result.state === 'PAGE_DEAD') {
-                    consecutiveMissingCounter += 1;
-                    consecutiveLonely = 0;
-                    if (consecutiveMissingCounter >= POLLS_BEFORE_END) {
-                        log.info(
-                            `[participants-watchdog] counter absent for ${consecutiveMissingCounter} polls (state=${result.state}) — VP appears to have been removed from the meeting`,
-                        );
-                        clearInterval(watchdogTimer);
-                        details.start = false;
-                        this.requestEnd({
-                            reason: 'removed-from-meeting',
-                            // The state goes after a colon so that
-                            // normalizeExitTrigger slugs it, as it does every
-                            // other detail a trigger carries.
-                            trigger: `participants-ui:${result.state.toLowerCase()}`,
-                        });
-                    }
-                } else if ((result.count ?? 0) <= 1) {
-                    meetingConsent.noteAttendeeCount(result.count ?? 0);
-                    consecutiveLonely += 1;
-                    consecutiveMissingCounter = 0;
-                    if (consecutiveLonely >= POLLS_BEFORE_END) {
-                        log.info(
-                            `[participants-watchdog] only ${result.count} attendee(s) for ${consecutiveLonely} polls — leaving meeting`,
-                        );
-                        clearInterval(watchdogTimer);
-                        details.start = false;
-                        this.requestEnd({
-                            reason: 'alone-in-meeting',
-                            trigger: 'participants-watchdog',
-                        });
-                    }
-                } else {
-                    meetingConsent.noteAttendeeCount(result.count ?? 0);
-                    consecutiveMissingCounter = 0;
-                    consecutiveLonely = 0;
+                if (result.state === 'OK') {
+                    meetingConsent.noteAttendeeCount(result.count);
+                    vetoReported = false;
                 }
-            }, POLL_MS);
+                const action = decideZoomCounterAction(result, counterState, participantsActiveWithin());
+                if (action === 'vetoed' && !vetoReported) {
+                    vetoReported = true;
+                    log.info(
+                        `[participants-watchdog] counter absent (state=${result.state}) but participants were active recently; the meeting is live, not leaving`,
+                    );
+                } else if (action === 'end-removed') {
+                    log.info(
+                        `[participants-watchdog] counter absent for ${counterState.consecutiveMissing} polls (state=${result.state}) with no participant activity — VP appears to have been removed from the meeting`,
+                    );
+                    clearInterval(watchdogTimer);
+                    details.start = false;
+                    this.requestEnd({
+                        reason: 'removed-from-meeting',
+                        // The state goes after a colon so that
+                        // normalizeExitTrigger slugs it, as it does every
+                        // other detail a trigger carries.
+                        trigger: `participants-ui:${result.state.toLowerCase()}`,
+                    });
+                } else if (action === 'end-alone' && result.state === 'OK') {
+                    log.info(
+                        `[participants-watchdog] only ${result.count} attendee(s) for ${counterState.consecutiveLonely} polls — leaving meeting`,
+                    );
+                    clearInterval(watchdogTimer);
+                    details.start = false;
+                    this.requestEnd({
+                        reason: 'alone-in-meeting',
+                        trigger: 'participants-watchdog',
+                    });
+                }
+            }, ZOOM_COUNTER_POLL_MS);
         }
 
         // Set up speaker change monitoring
@@ -2168,39 +2174,32 @@ export default class Zoom {
         try {
             // Detect Zoom's own meeting-end UI: host ended the meeting, or the
             // VP was kicked. The dialog text differs between the two.
+            // Only a dialog that holds Zoom's primary button and says the
+            // meeting ended or the VP was removed counts; a primary button
+            // anywhere else on the page is not an end (#1148).
             const zoomDialogPromise: Promise<ExitInfo> = page
                 .waitForFunction(
-                    () => {
+                    (phrases: readonly string[]) => {
                         const buttons = document.querySelectorAll('button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue');
                         for (const btn of buttons) {
                             const modal = btn.closest('.zm-modal, .zm-modal-legacy, .ReactModal__Content');
-                            if (modal) {
-                                const text = modal.textContent?.toLowerCase() || '';
-                                if (text.includes('meeting has been ended') ||
-                                    text.includes('meeting has ended') ||
-                                    text.includes('meeting is end') ||
-                                    text.includes('removed from the meeting') ||
-                                    text.includes('have been removed')) {
-                                    // Hand the matched dialog text back so we
-                                    // can distinguish "host ended" from "you
-                                    // were removed" without re-querying the DOM.
-                                    return text;
-                                }
-                                continue;
-                            }
-                            return 'meeting ended';
+                            if (!modal) continue;
+                            const text = modal.textContent?.toLowerCase() || '';
+                            // Hand the matched dialog text back so we can
+                            // distinguish "host ended" from "you were removed"
+                            // without re-querying the DOM.
+                            if (phrases.some((p) => text.includes(p))) return text;
                         }
                         return false;
                     },
                     // Playwright: 2nd positional is the page-function arg, options are 3rd.
-                    undefined,
+                    ZOOM_END_DIALOG_PHRASES,
                     { timeout: details.meetingTimeout, polling: 1000 }
                 )
                 .then(async (handle) => {
                     const dialogText = (await handle.jsonValue()) as string;
-                    const removed = dialogText.includes('removed');
                     return {
-                        reason: removed ? 'removed-from-meeting' : 'host-ended',
+                        reason: zoomEndDialogReason(dialogText) ?? 'host-ended',
                         trigger: 'ZOOM_END_DIALOG',
                     } as ExitInfo;
                 })
