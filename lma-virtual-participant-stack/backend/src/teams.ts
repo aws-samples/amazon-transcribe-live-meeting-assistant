@@ -127,6 +127,43 @@ export interface AttendeeWatchdogConfig {
  */
 export const PEOPLE_COUNT_FRESH_MS = 3 * 60_000;
 
+/** The People pane's last count for the watchdog, and when it was read. */
+export type PeopleCountReading = { count: number; at: number } | null;
+
+/**
+ * What the Teams watchdog does about the People pane's count when the badge is
+ * missing (light-meetings):
+ * - `use` a count read under PEOPLE_COUNT_FRESH_MS ago that shows others
+ *   present. Showing others, a stale count can only keep the VP in a meeting.
+ * - `read` the pane again for a fresh count of one or fewer (others may have
+ *   been admitted since; the VP must not leave alone on an old value), or for
+ *   no fresh count at all when the caller may open the pane (`mayOpen`, a
+ *   silent meeting).
+ * - `none`: no usable count; the watchdog treats the badge as unreadable.
+ */
+export function peopleCountStep(
+    last: PeopleCountReading,
+    now: number,
+    mayOpen: boolean,
+): { action: 'use'; count: number } | { action: 'read' } | { action: 'none' } {
+    const fresh = last !== null && now - last.at <= PEOPLE_COUNT_FRESH_MS;
+    if (fresh && last.count > 1) return { action: 'use', count: last.count };
+    if (fresh || mayOpen) return { action: 'read' };
+    return { action: 'none' };
+}
+
+/**
+ * The count after the pane was asked to read again from `readStartedAt`: a
+ * count read since then counts whatever it shows; one that was not re-read
+ * (the pane's own rate limit answered from its last list) counts only if it is
+ * fresh and shows others present.
+ */
+export function peopleCountAfterRead(last: PeopleCountReading, readStartedAt: number, now: number): number | null {
+    if (last === null) return null;
+    if (last.at >= readStartedAt) return last.count;
+    return now - last.at <= PEOPLE_COUNT_FRESH_MS && last.count > 1 ? last.count : null;
+}
+
 /**
  * Defaults for the attendee watchdog.
  *
@@ -684,13 +721,11 @@ export default class Teams {
      */
     private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | null> {
         if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
-        const fresh = (): number | null => {
-            const last = this.lastPeopleCount;
-            return last && Date.now() - last.at <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
-        };
-        if (fresh() !== null || !mayOpen) return fresh();
+        const before = Date.now();
+        const step = peopleCountStep(this.lastPeopleCount, before, mayOpen);
+        if (step.action !== 'read') return step.action === 'use' ? step.count : null;
         await this.readPeopleRoster(page);
-        return fresh();
+        return peopleCountAfterRead(this.lastPeopleCount, before, Date.now());
     }
 
     /**

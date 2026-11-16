@@ -592,3 +592,24 @@ test('participants speaking do not stop the VP leaving when it is alone by a rea
     assert.equal((decision as { reason: string }).reason, 'alone-in-meeting');
     assert.equal(decideAttendeeAction(busy, fresh(), DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true).action, 'continue');
 });
+
+// ─── the People pane's count on light-meetings (#1148) ─────────────────────
+
+test('a fresh People count showing others is used as it is; a count of one is read again first', async () => {
+    const { PEOPLE_COUNT_FRESH_MS, peopleCountStep, peopleCountAfterRead } = await import('./teams.js');
+    const now = 1_000_000;
+    assert.deepEqual(peopleCountStep({ count: 5, at: now - 1000 }, now, false), { action: 'use', count: 5 });
+    // Read before anybody else was admitted: the VP must not leave alone on it.
+    assert.deepEqual(peopleCountStep({ count: 1, at: now - 1000 }, now, false), { action: 'read' });
+    // No fresh count: read only in a silent meeting.
+    assert.deepEqual(peopleCountStep({ count: 5, at: now - PEOPLE_COUNT_FRESH_MS - 1 }, now, false), { action: 'none' });
+    assert.deepEqual(peopleCountStep(null, now, true), { action: 'read' });
+    assert.deepEqual(peopleCountStep(null, now, false), { action: 'none' });
+
+    // After asking for a read: a count read since then counts, even of one.
+    assert.equal(peopleCountAfterRead({ count: 1, at: now }, now, now + 10), 1);
+    // The pane's rate limit answered from its last list: a cached one is not used.
+    assert.equal(peopleCountAfterRead({ count: 1, at: now - 1000 }, now, now + 10), null);
+    assert.equal(peopleCountAfterRead({ count: 4, at: now - 1000 }, now, now + 10), 4);
+    assert.equal(peopleCountAfterRead(null, now, now + 10), null);
+});

@@ -40,7 +40,8 @@ test('Teams and Meet pass participant activity to the shared watchdog', () => {
 test('the Teams watchdog opens the People pane only in a silent meeting with no fresh count', () => {
     const body = source('teams.ts');
     assert.match(body, /this\.peopleCountForWatchdog\(page, !participantsActiveWithin\(\)\)/);
-    assert.match(body, /if \(fresh\(\) !== null \|\| !mayOpen\) return fresh\(\);\s*await this\.readPeopleRoster\(page\);/);
+    assert.match(body, /const step = peopleCountStep\(this\.lastPeopleCount, before, mayOpen\);/);
+    assert.match(body, /await this\.readPeopleRoster\(page\);\s*return peopleCountAfterRead\(this\.lastPeopleCount, before, Date\.now\(\)\);/);
 });
 
 test('participant activity comes from the participants, never from the voice assistant channel', () => {
