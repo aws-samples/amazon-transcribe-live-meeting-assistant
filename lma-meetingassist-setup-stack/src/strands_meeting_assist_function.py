@@ -2122,8 +2122,45 @@ IN_MEETING_TOOL_SCOPES = ('meeting_chat', 'voice_assistant', 'wake_phrase')
 # setting's shipped default in setting_defaults.json.
 IN_MEETING_TOOLS_CURRENT_MEETING_ONLY = 'current_meeting_only'
 IN_MEETING_TOOLS_UNRESTRICTED = 'unrestricted'
-IN_MEETING_TOOLS_VALUES = (IN_MEETING_TOOLS_CURRENT_MEETING_ONLY, IN_MEETING_TOOLS_UNRESTRICTED)
+IN_MEETING_TOOLS_SELECTED = 'selected'
+IN_MEETING_TOOLS_VALUES = (
+    IN_MEETING_TOOLS_CURRENT_MEETING_ONLY,
+    IN_MEETING_TOOLS_UNRESTRICTED,
+    IN_MEETING_TOOLS_SELECTED,
+)
 DEFAULT_IN_MEETING_TOOLS = IN_MEETING_TOOLS_CURRENT_MEETING_ONLY
+
+# The tool groups beyond the current meeting's own, each with the Meeting
+# Assistant switch that offers it to in-meeting requests under Selected tools.
+# The current meeting's transcript, agenda and shared screen are not a group:
+# every request is offered them.
+TOOL_GROUP_WEB_SEARCH = 'web_search'
+TOOL_GROUP_DOCUMENT_SEARCH = 'document_search'
+TOOL_GROUP_MEETING_HISTORY = 'meeting_history'
+TOOL_GROUP_MCP_SERVERS = 'mcp_servers'
+TOOL_GROUP_VP_CONTROLS = 'vp_controls'
+IN_MEETING_TOOL_GROUP_SETTINGS = {
+    TOOL_GROUP_WEB_SEARCH: 'inMeetingWebSearch',
+    TOOL_GROUP_DOCUMENT_SEARCH: 'inMeetingDocumentSearch',
+    TOOL_GROUP_MEETING_HISTORY: 'inMeetingMeetingHistory',
+    TOOL_GROUP_MCP_SERVERS: 'inMeetingMcpServers',
+    TOOL_GROUP_VP_CONTROLS: 'inMeetingVpControls',
+}
+ALL_TOOL_GROUPS = frozenset(IN_MEETING_TOOL_GROUP_SETTINGS)
+
+# What the assistant is told about a tool group an in-meeting request may use
+# but that this deployment cannot offer, so that it says the tool is not
+# available rather than answering as though it had never had one.
+UNAVAILABLE_TOOL_GROUP_TEXT = {
+    TOOL_GROUP_WEB_SEARCH: 'web search (no web search API key is configured)',
+    TOOL_GROUP_DOCUMENT_SEARCH: 'the document knowledge base (none is configured)',
+    TOOL_GROUP_MEETING_HISTORY: (
+        "the meeting owner's past meetings (no meeting knowledge base is configured, "
+        "or the request names no owner)"
+    ),
+    TOOL_GROUP_MCP_SERVERS: 'MCP servers (none is installed, or none could be loaded)',
+    TOOL_GROUP_VP_CONTROLS: 'the Virtual Participant controls (not configured)',
+}
 
 
 def configured_in_meeting_request_tools() -> str:
@@ -2141,6 +2178,29 @@ def configured_in_meeting_request_tools() -> str:
         return value
     logger.warning("Unrecognised inMeetingRequestTools value; using the current meeting only")
     return DEFAULT_IN_MEETING_TOOLS
+
+
+def configured_in_meeting_tool_groups() -> frozenset:
+    """The tool groups switched on for in-meeting requests under Selected tools.
+
+    One Meeting Assistant switch per group (IN_MEETING_TOOL_GROUP_SETTINGS),
+    each off unless it is saved as true: a switch that cannot be read, or that
+    holds anything but a boolean true, leaves its group out.
+    """
+    # One literal read_setting call per switch, so the settings checks
+    # (lma-ai-stack/test/test_parameter_backed_settings.py) can see each one.
+    switched_on = {
+        TOOL_GROUP_WEB_SEARCH: read_setting('meeting_assist', 'inMeetingWebSearch', default=False),
+        TOOL_GROUP_DOCUMENT_SEARCH: read_setting(
+            'meeting_assist', 'inMeetingDocumentSearch', default=False
+        ),
+        TOOL_GROUP_MEETING_HISTORY: read_setting(
+            'meeting_assist', 'inMeetingMeetingHistory', default=False
+        ),
+        TOOL_GROUP_MCP_SERVERS: read_setting('meeting_assist', 'inMeetingMcpServers', default=False),
+        TOOL_GROUP_VP_CONTROLS: read_setting('meeting_assist', 'inMeetingVpControls', default=False),
+    }
+    return frozenset(group for group, value in switched_on.items() if value is True)
 
 
 # Appended to the system prompt of every question typed in the meeting chat.
@@ -2161,21 +2221,54 @@ CURRENT_MEETING_SCOPE_NOTE = (
     "meetings or documents."
 )
 
+# Appended to the system prompt of an in-meeting request answered with
+# Selected tools that include more than the current meeting.
+SELECTED_TOOLS_SCOPE_NOTE = (
+    "\n\nThis request was made in the meeting by one of its participants, and only some of the "
+    "tools named above are available for it. Use only the tools you are offered; do not try "
+    "any other tool named above."
+)
+
+
+def unavailable_tools_note(groups) -> str:
+    """The system prompt note for allowed tool groups this deployment cannot offer."""
+    if not groups:
+        return ''
+    names = '; '.join(UNAVAILABLE_TOOL_GROUP_TEXT[group] for group in sorted(groups))
+    return (
+        "\n\nThese are allowed for this request but are not available on this deployment: "
+        f"{names}. If the request needs one of them, say that it is not available here, "
+        "rather than that you cannot do it."
+    )
+
 
 class InMeetingScope(NamedTuple):
     """How one request is answered, as decided by ``in_meeting_scope``.
 
     ``tool_scope``: the in-meeting caller ('meeting_chat', 'voice_assistant',
     'wake_phrase'), or '' for a request from the meeting page's own chat.
-    ``current_meeting_only``: only the current meeting's transcript (with its
-    chat), agenda and shared screen are offered.
+    ``tool_groups``: the tool groups (ALL_TOOL_GROUPS) the request may be
+    offered beyond the current meeting's transcript (with its chat), agenda
+    and shared screen, which every request is offered.
     ``user_email``: the user the user-scoped tools (meeting history) act for,
     or '' for none.
+    ``mode``: the In-meeting requests value the scope was decided by, or ''
+    for a request from the meeting page's own chat.
     """
 
     tool_scope: str
-    current_meeting_only: bool
+    tool_groups: frozenset
     user_email: str
+    mode: str = ''
+
+    @property
+    def current_meeting_only(self) -> bool:
+        """Only the current meeting's transcript, agenda and shared screen are offered."""
+        return not self.tool_groups
+
+    def allows(self, group: str) -> bool:
+        """The request may be offered the tool group ``group``."""
+        return group in self.tool_groups
 
     @property
     def from_meeting_chat(self) -> bool:
@@ -2196,6 +2289,9 @@ def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
       whatever the event carries.
     - unrestricted: every configured tool, as the meeting page offers them,
       acting for the user the event names.
+    - selected: the current meeting's tools plus the tool groups switched on
+      (configured_in_meeting_tool_groups), acting for the user the event names
+      only when the owner's past meetings are among them.
 
     Every other request (the meeting page's chat) is offered every configured
     tool.
@@ -2203,10 +2299,15 @@ def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
     user_email = event.get('userEmail', '') or event.get('user_email', '')
     scope = event.get('toolScope')
     if scope not in IN_MEETING_TOOL_SCOPES:
-        return InMeetingScope('', False, user_email)
-    if configured_in_meeting_request_tools() == IN_MEETING_TOOLS_UNRESTRICTED:
-        return InMeetingScope(scope, False, user_email)
-    return InMeetingScope(scope, True, '')
+        return InMeetingScope('', ALL_TOOL_GROUPS, user_email)
+    mode = configured_in_meeting_request_tools()
+    if mode == IN_MEETING_TOOLS_UNRESTRICTED:
+        return InMeetingScope(scope, ALL_TOOL_GROUPS, user_email, mode)
+    if mode == IN_MEETING_TOOLS_SELECTED:
+        groups = configured_in_meeting_tool_groups()
+        acts_for = user_email if TOOL_GROUP_MEETING_HISTORY in groups else ''
+        return InMeetingScope(scope, groups, acts_for, mode)
+    return InMeetingScope(scope, frozenset(), '', mode)
 
 
 def handler(event, context):
@@ -2282,10 +2383,13 @@ def handler(event, context):
         current_meeting_only = request_scope.current_meeting_only
         if request_scope.tool_scope:
             logger.info(
-                "Tool scope: %s (%s)",
+                "Tool scope: %s (%s; allowed: %s)",
                 request_scope.tool_scope,
-                'current meeting only' if current_meeting_only else 'unrestricted',
+                request_scope.mode,
+                ', '.join(sorted(request_scope.tool_groups)) or 'current meeting only',
             )
+        # The tool groups actually offered, to compare with those allowed.
+        offered_groups = set()
         
         if not user_input:
             return {
@@ -2327,11 +2431,13 @@ def handler(event, context):
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE and not current_meeting_only:
+        if MCP_LOADER_AVAILABLE and request_scope.allows(TOOL_GROUP_MCP_SERVERS):
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
                 tools.extend(mcp_clients)
+                if mcp_clients:
+                    offered_groups.add(TOOL_GROUP_MCP_SERVERS)
                 
                 if from_cache:
                     logger.info(f"Using {len(mcp_clients)} cached MCP clients (warm start)")
@@ -2362,9 +2468,9 @@ def handler(event, context):
                         'timestamp': datetime.utcnow().isoformat()
                     }, 0)
         
-        # Add web search tool if an API key is configured (auto-enable). Not
-        # for a chat question answered from the current meeting only.
-        if web_search_configured and not current_meeting_only:
+        # Add web search tool if an API key is configured (auto-enable), for a
+        # request allowed to search the web.
+        if web_search_configured and request_scope.allows(TOOL_GROUP_WEB_SEARCH):
             try:
                 from tavily import TavilyClient
                 from strands import tool
@@ -2464,6 +2570,7 @@ def handler(event, context):
                         return f"Error performing web search: {str(e)}"
                 
                 tools.append(web_search)
+                offered_groups.add(TOOL_GROUP_WEB_SEARCH)
                 logger.info("Web search tool enabled")
             except Exception as e:
                 logger.warning(f"Could not enable web search tool: {str(e)}")
@@ -2471,7 +2578,7 @@ def handler(event, context):
         # Add document retrieval tool if KB configured. The factory returns None
         # when the knowledge-base model cannot generate an answer, in which case
         # the agent is offered no such tool rather than one that cannot answer.
-        if kb_id and not current_meeting_only:
+        if kb_id and request_scope.allows(TOOL_GROUP_DOCUMENT_SEARCH):
             document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
@@ -2482,10 +2589,17 @@ def handler(event, context):
             )
             if document_search_tool is not None:
                 tools.append(document_search_tool)
+                offered_groups.add(TOOL_GROUP_DOCUMENT_SEARCH)
                 logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
-        if dynamodb_table_name and transcript_kb_id and user_email and not current_meeting_only:
+        if (
+            dynamodb_table_name
+            and transcript_kb_id
+            and user_email
+            and request_scope.allows(TOOL_GROUP_MEETING_HISTORY)
+        ):
+            offered_groups.add(TOOL_GROUP_MEETING_HISTORY)
             tools.append(create_recent_meetings_tool(
                 dynamodb_table_name=dynamodb_table_name,
                 user_email=user_email,
@@ -2496,7 +2610,7 @@ def handler(event, context):
         
         # Add meeting history tool if transcript KB configured. As above, the
         # factory returns None when the knowledge-base model cannot generate.
-        if transcript_kb_id and user_email and not current_meeting_only:
+        if transcript_kb_id and user_email and request_scope.allows(TOOL_GROUP_MEETING_HISTORY):
             meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
@@ -2508,6 +2622,7 @@ def handler(event, context):
             )
             if meeting_history_tool is not None:
                 tools.append(meeting_history_tool)
+                offered_groups.add(TOOL_GROUP_MEETING_HISTORY)
                 logger.info(f"Meeting history tool enabled (KB model: {kb_model_id})")
         
         # Add current meeting transcript tool
@@ -2546,7 +2661,8 @@ def handler(event, context):
             logger.info("Meeting frames tool enabled")
 
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL and not current_meeting_only:
+        if APPSYNC_GRAPHQL_URL and request_scope.allows(TOOL_GROUP_VP_CONTROLS):
+            offered_groups.add(TOOL_GROUP_VP_CONTROLS)
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -2555,7 +2671,8 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL and not current_meeting_only:
+        if EVENT_API_HTTP_URL and request_scope.allows(TOOL_GROUP_VP_CONTROLS):
+            offered_groups.add(TOOL_GROUP_VP_CONTROLS)
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,
@@ -2563,6 +2680,25 @@ def handler(event, context):
             ))
             logger.info("VP browser control tool enabled (Event API HTTP)")
         
+        # Allowed tool groups this deployment could not offer. Told to the
+        # assistant only for Selected tools, where an administrator chose them.
+        unavailable_groups = set(request_scope.tool_groups) - offered_groups
+        if request_scope.tool_scope:
+            logger.info(
+                "In-meeting tools: offered=%s unavailable=%s",
+                ', '.join(sorted(offered_groups)) or 'current meeting only',
+                ', '.join(sorted(unavailable_groups)) or 'none',
+            )
+        selected_scope_note = ''
+        # Decided from the groups allowed, not those offered, on purpose: a
+        # request allowed web search on a deployment without a key is told that
+        # web search is not available here, rather than that only the current
+        # meeting is (which would read as a refusal).
+        if request_scope.mode == IN_MEETING_TOOLS_SELECTED and not current_meeting_only:
+            selected_scope_note = SELECTED_TOOLS_SCOPE_NOTE + unavailable_tools_note(
+                unavailable_groups
+            )
+
         # Initialize Strands Agent
         try:
             from strands import Agent
@@ -2611,7 +2747,8 @@ def handler(event, context):
                 model_id,
                 (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
                 + (MEETING_CHAT_NOTE if request_scope.from_meeting_chat else '')
-                + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else ''),
+                + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else '')
+                + selected_scope_note,
                 enabled=prompt_caching_enabled(),
             )
             if cache_config_kwargs is not None:

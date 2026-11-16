@@ -15,7 +15,8 @@
  * (`meeting_assist.inMeetingRequestTools`) what it is answered with: by
  * default the current meeting alone (its transcript and chat, agenda and
  * shared screen), with no user email; with "unrestricted", every tool, acting
- * for the LMA user sent as `userEmail`. The decision is the meeting
+ * for the LMA user sent as `userEmail`; with "selected", the current meeting
+ * plus the tool groups switched on in that section. The decision is the meeting
  * assistant's, read per answer, so a change to the setting reaches a Virtual
  * Participant already in a meeting.
  */
@@ -42,7 +43,8 @@ export function inMeetingRequestPayload(
         text,
         call_id: callId,
         conversation_history: [],
-        // Used only when the In-meeting requests setting is unrestricted.
+        // Acted for only when the In-meeting requests setting is unrestricted, or
+        // selected with the owner's past meetings switched on.
         userEmail: env.LMA_USER || fallbackUser,
         toolScope,
         dynamodb_table_name: env.DYNAMODB_TABLE_NAME || '',

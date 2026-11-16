@@ -48,6 +48,7 @@ A request spoken to the voice assistant that needs a lookup (Nova Sonic's `stran
 
 - **Current meeting only** (`current_meeting_only`, the default): the current meeting's transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, and no other tool.
 - **Unrestricted** (`unrestricted`): every tool the meeting page's assistant has — web search, the document knowledge base, the past meetings of the Virtual Participant's LMA user, MCP servers and the browser controls. This is how lookups behaved before the setting existed.
+- **Selected tools** (`selected`): the current meeting, plus the tools switched on one group at a time (web search, the document knowledge base, the owner's past meetings, MCP servers, and the Virtual Participant controls). For example, switch on only web search to let the assistant answer "Hey Alex, what's the weather this afternoon?" without offering the knowledge base or MCP servers. See [In-meeting requests](meeting-assistant.md#in-meeting-requests).
 
 ## Provider Comparison
 
