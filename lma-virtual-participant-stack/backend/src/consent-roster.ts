@@ -65,6 +65,9 @@ export class ConsentRoster {
     /** The platform's own participant list, VP left out; null where there is none. */
     private roster: string[] | null = null;
 
+    /** Names that came onto the platform's list since takeJoined last answered. */
+    private joined: string[] = [];
+
     constructor(ownIdentities: string[], clock: () => number = Date.now) {
         this.own = new Set(ownIdentities.map(normalizeParticipantName).filter((name) => name.length > 0));
         this.clock = clock;
@@ -141,9 +144,24 @@ export class ConsentRoster {
         this.roster = cleaned;
         for (const name of cleaned) this.noteSeen(name);
         if (!hadRoster) return null;
-        if (cleaned.some((name) => !before.has(normalizeParticipantName(name)))) return 'joined';
+        const added = cleaned.filter((name) => !before.has(normalizeParticipantName(name)));
+        if (added.length > 0) {
+            this.joined = dedupe([...this.joined, ...added]);
+            return 'joined';
+        }
         if (cleaned.length < before.size) return 'left';
         return null;
+    }
+
+    /**
+     * The names that came onto the platform's list since the last call, in the
+     * order they came, and forgets them. Empty where the platform gives only a
+     * count, or where nobody new is named.
+     */
+    takeJoined(): string[] {
+        const names = this.joined;
+        this.joined = [];
+        return names;
     }
 
     /** Seats other than the VP's, when the platform gives a count. */

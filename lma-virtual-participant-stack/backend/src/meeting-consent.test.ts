@@ -33,6 +33,7 @@ import {
     effectiveConsentSettings,
     grantEvidenceNote,
     planConsent,
+    repostLeadIn,
 } from './meeting-consent.js';
 import { normalizeParticipantName, renderNotice } from './consent-matcher.js';
 import { noteParticipantSeen, UNIDENTIFIED_PARTICIPANT } from './consent-roster.js';
@@ -212,6 +213,7 @@ async function harness(options: {
     onSleep?: () => void;
     chat?: string[];
     readRoster?: () => Promise<string[] | null>;
+    noticeRepostMinMs?: number;
     sendersHidden?: boolean;
     /** Called when the flow starts or stops listening for spoken replies. */
     listen?: (on: boolean) => void;
@@ -284,6 +286,7 @@ async function harness(options: {
         },
         startRetryMs: 0,
         noticeRepostMs: 0,
+        noticeRepostMinMs: options.noticeRepostMinMs,
     };
     const flow = new MeetingConsentFlow(deps);
     await flow.prepare(
@@ -929,6 +932,137 @@ test("a platform's own participant list is used where it accounts for everybody"
     await h.settle();
     assert.deepEqual(h.api.record?.Participants, ['Bo Chen', 'Cy Diaz']);
     assert.equal(h.capture.on, false);
+    h.flow.stop();
+});
+
+// ─── The notice posted again when somebody joins ────────────────────────────
+
+const GENERIC_LEAD_IN = 'New participant(s) detected - resending the consent notice.';
+
+test('the notice posted again names the newcomers, and says only that somebody joined where no name is known', () => {
+    assert.equal(repostLeadIn([]), GENERIC_LEAD_IN);
+    assert.equal(repostLeadIn(['  ', '']), GENERIC_LEAD_IN);
+    assert.equal(repostLeadIn(['Dee Evans']), 'Dee Evans joined - resending the consent notice.');
+    assert.equal(repostLeadIn(['Dee Evans', 'Cy Diaz']), 'Dee Evans and Cy Diaz joined - resending the consent notice.');
+    assert.equal(
+        repostLeadIn(['Dee Evans', 'Cy Diaz', 'Bo Chen']),
+        'Dee Evans, Cy Diaz and Bo Chen joined - resending the consent notice.',
+    );
+    assert.equal(
+        repostLeadIn(['A One', 'B Two', 'C Three', 'D Four']),
+        'A One, B Two, C Three and 1 other joined - resending the consent notice.',
+    );
+    assert.equal(
+        repostLeadIn(['A One', 'B Two', 'C Three', 'D Four', 'E Five']),
+        'A One, B Two, C Three and 2 others joined - resending the consent notice.',
+    );
+    assert.equal(repostLeadIn(['  Dee \n  Evans ']), 'Dee Evans joined - resending the consent notice.');
+    assert.equal(repostLeadIn(['x'.repeat(200)]), `${'x'.repeat(60)} joined - resending the consent notice.`);
+});
+
+/** Lets a repost scheduled with no minimum wait run. */
+const repostDue = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+/** The first chat message of each notice posted, in order. */
+function noticeStarts(chat: string[]): string[] {
+    return chat.filter((message) => message.includes('is using Live Meeting Assistant') || message.includes('resending the consent notice'));
+}
+
+test('the first notice has no lead-in; one posted again after a join says that somebody new was detected', async () => {
+    const h = await harness({ noticeRepostMinMs: 0 });
+    const first = noticeStarts(h.chat);
+    assert.equal(first.length, 1);
+    assert.ok(!first[0].includes('resending'), 'the first notice is unchanged');
+    h.flow.noteAttendeeCount(2);
+    h.flow.noteAttendeeCount(3);
+    await repostDue();
+    await h.settle();
+    const starts = noticeStarts(h.chat);
+    assert.equal(starts.length, 2, 'posted once more');
+    assert.ok(starts[1].startsWith(`${GENERIC_LEAD_IN} `), starts[1]);
+    assert.ok(starts[1].includes('is using Live Meeting Assistant'), 'the lead-in starts the notice message, not one of its own');
+    assert.ok(
+        h.api.noticeTexts[h.api.noticeTexts.length - 1].startsWith(GENERIC_LEAD_IN),
+        'the notice is recorded as it was posted, with its lead-in',
+    );
+    h.flow.stop();
+});
+
+test("a notice posted again names who came onto the platform's participant list", async () => {
+    let names = ['Bo Chen'];
+    const h = await harness({ readRoster: async () => names, noticeRepostMinMs: 0 });
+    h.flow.noteAttendeeCount(2);
+    await h.flow.syncRoster();
+    await h.settle();
+    names = ['Bo Chen', 'Cy Diaz', 'Dee Evans'];
+    h.flow.noteAttendeeCount(4);
+    await h.flow.syncRoster();
+    await repostDue();
+    await h.settle();
+    const starts = noticeStarts(h.chat);
+    assert.ok(
+        starts[starts.length - 1].startsWith('Cy Diaz and Dee Evans joined - resending the consent notice. '),
+        starts[starts.length - 1],
+    );
+    // Named once: the next repost names only whoever joins after this one.
+    names = ['Bo Chen', 'Cy Diaz', 'Dee Evans', 'Eli Fox'];
+    h.flow.noteAttendeeCount(5);
+    await h.flow.syncRoster();
+    await repostDue();
+    await h.settle();
+    const later = noticeStarts(h.chat);
+    assert.ok(later[later.length - 1].startsWith('Eli Fox joined - resending the consent notice. '), later[later.length - 1]);
+    h.flow.stop();
+});
+
+test('newcomers whose repost gave way to a notice still being posted are not named again by the next one', async () => {
+    let names = ['Bo Chen'];
+    const h = await harness({ readRoster: async () => names, noticeRepostMinMs: 0 });
+    h.flow.noteAttendeeCount(2);
+    await h.flow.syncRoster();
+    await h.settle();
+    const flow = h.flow as unknown as { noticeInFlight: boolean };
+    names = ['Bo Chen', 'Cy Diaz'];
+    const posted = h.chat.length;
+    flow.noticeInFlight = true; // another notice is still being posted when the repost comes due; Cy Diaz sees it
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    await repostDue();
+    flow.noticeInFlight = false;
+    assert.equal(h.chat.length, posted, 'the repost gave way to the notice being posted');
+    names = ['Bo Chen', 'Cy Diaz', 'Dee Evans'];
+    h.flow.noteAttendeeCount(4);
+    await h.flow.syncRoster();
+    await repostDue();
+    await h.settle();
+    const starts = noticeStarts(h.chat);
+    assert.ok(starts[starts.length - 1].startsWith('Dee Evans joined - resending the consent notice. '), starts[starts.length - 1]);
+    h.flow.stop();
+});
+
+test('the first notice to reach the chat has no lead-in, even when it is posted because somebody joined', async () => {
+    let failing = true;
+    const h = await harness({ noticeRepostMinMs: 0, sendFails: () => failing });
+    assert.equal(noticeStarts(h.chat).length, 0, 'the first notice could not be posted');
+    failing = false;
+    h.flow.noteAttendeeCount(2);
+    h.flow.noteAttendeeCount(3);
+    await repostDue();
+    await h.settle();
+    const starts = noticeStarts(h.chat);
+    assert.ok(starts.length >= 1, 'a notice reached the chat');
+    assert.ok(!starts[0].includes('resending'), starts[0]);
+    h.flow.stop();
+});
+
+test('a lead-in that is posted with the notice is not read back as a reply', async () => {
+    const h = await harness({ noticeRepostMinMs: 0 });
+    h.flow.noteAttendeeCount(2);
+    h.flow.noteAttendeeCount(3);
+    await repostDue();
+    await h.settle();
+    const reposted = noticeStarts(h.chat).pop() as string;
+    assert.equal(h.flow.isOwnMessage(reposted), true);
     h.flow.stop();
 });
 

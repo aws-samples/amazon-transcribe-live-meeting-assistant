@@ -121,3 +121,15 @@ test('a display name that reads as a placeholder is never listed, so it cannot f
     roster.noteSeen('Bo Chen');
     assert.deepEqual(roster.present(true), ['Bo Chen', `${UNIDENTIFIED_PARTICIPANT} 1`]);
 });
+
+test('the names that came onto the platform list are answered once, in the order they came', () => {
+    const roster = new ConsentRoster(['LMA']);
+    roster.noteRoster(['Bo Chen']);
+    assert.deepEqual(roster.takeJoined(), [], 'the first list read is who was there, not who joined');
+    roster.noteRoster(['Bo Chen', 'Cy Diaz', 'LMA']);
+    roster.noteRoster(['Bo Chen', 'Cy Diaz', 'Dee Evans']);
+    assert.deepEqual(roster.takeJoined(), ['Cy Diaz', 'Dee Evans']);
+    assert.deepEqual(roster.takeJoined(), []);
+    roster.noteRoster(['Bo Chen']);
+    assert.deepEqual(roster.takeJoined(), [], 'nobody joins by leaving');
+});

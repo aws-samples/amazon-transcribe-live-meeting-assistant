@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The consent notice says why it is posted again.** When somebody joins a meeting the Virtual Participant is in, the consent notice it posts again in the chat now starts with a line saying so, so the people already there can tell the notice is for the newcomers and not a second request to them. The line names up to three newcomers where the platform's participant list gives their names (*"Cy Diaz and Dee Evans joined - resending the consent notice."*), and reads *"New participant(s) detected - resending the consent notice."* where it gives only an attendee count. The first notice is unchanged. See [Meeting consent](docs/meeting-consent.md). (#1146)
+
 ### Fixed
 
+- **A Virtual Participant on the Teams light-meetings client no longer leaves about 35 minutes into a meeting that is still running.** That client has no attendee-count badge, so the VP's meeting watchdog saw an unreadable count on every check, and once its 30-minute allowance for an unreadable count was spent it left with `endTrigger` `attendee-badge-missing`. The watchdog now reads the attendee count from the People pane on that client, and on Teams and Google Meet an unreadable count no longer counts toward leaving while a participant has spoken within the last 10 minutes. A meeting that ends without an end screen is still left, about 45 minutes after a participant last spoke at the default settings. See [How the VP decides a meeting is over](docs/virtual-participant.md). (#1148)
+- **A Virtual Participant on Zoom (browser join) or Amazon Chime no longer leaves on a single reading of one attendee.** Its attendee counter's change events end the meeting only once the counter has stayed at one or fewer for 60 seconds, as on Teams, and on Chime one failed page check no longer ends the meeting (15 in a row do). (#1148)
 - **A Virtual Participant whose record already has a CallId uses that CallId for its meeting.** A VP reads the CallId on its record when it starts, but sent the meeting's events (START, transcript segments, recording links, END) under a second, newly generated CallId and then wrote that one back to the record. Its video recording, metering and meeting-assistant requests used the first. The meeting's events now use the record's CallId, so everything the VP writes is on one meeting. This is the first step toward rejoining a meeting (#1149).
 
 ## [0.4.0] - 2026-11-15
