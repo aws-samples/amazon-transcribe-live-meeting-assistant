@@ -51,30 +51,35 @@
       }
     },
     "inMeetingWebSearch": {
+      "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 4,
       "type": "boolean",
       "title": "In-meeting requests: web search",
       "description": "With In-meeting requests set to Selected tools, offer web search (Tavily) to requests made in the meeting. The search query is written by the assistant from the request and the meeting, and is sent to Tavily. Needs a Tavily API key on the stack (TavilyApiKey or TavilyApiKeySecretArn); without one, the assistant says that web search is not available."
     },
     "inMeetingDocumentSearch": {
+      "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 5,
       "type": "boolean",
       "title": "In-meeting requests: document knowledge base",
       "description": "With In-meeting requests set to Selected tools, offer the document knowledge base to requests made in the meeting, so anyone in the meeting can hear or read what it returns. Needs a document knowledge base on the stack."
     },
     "inMeetingMeetingHistory": {
+      "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 6,
       "type": "boolean",
       "title": "In-meeting requests: the owner's past meetings",
       "description": "With In-meeting requests set to Selected tools, offer the meeting owner's past meetings (their list, and search of their transcripts) to requests made in the meeting, acting for the owner whoever asked. Needs the transcript knowledge base on the stack."
     },
     "inMeetingMcpServers": {
+      "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 7,
       "type": "boolean",
       "title": "In-meeting requests: MCP servers",
       "description": "With In-meeting requests set to Selected tools, offer every installed MCP server to requests made in the meeting, using each server's own connection whoever asked."
     },
     "inMeetingVpControls": {
+      "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 8,
       "type": "boolean",
       "title": "In-meeting requests: Virtual Participant controls",

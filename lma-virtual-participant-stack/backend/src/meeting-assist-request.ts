@@ -43,7 +43,8 @@ export function inMeetingRequestPayload(
         text,
         call_id: callId,
         conversation_history: [],
-        // Used only when the In-meeting requests setting is unrestricted.
+        // Acted for only when the In-meeting requests setting is unrestricted, or
+        // selected with the owner's past meetings switched on.
         userEmail: env.LMA_USER || fallbackUser,
         toolScope,
         dynamodb_table_name: env.DYNAMODB_TABLE_NAME || '',
