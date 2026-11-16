@@ -85,11 +85,19 @@ export function manualActionMessage(
  *   model says one is needed, and is otherwise left alone. That keeps an
  *   in-meeting notice without a usable button from changing a joined VP's
  *   status.
+ * - Once the VP is in the meeting (`inMeeting`), a dialog the model could not
+ *   classify (OTHER) is left alone even when the model says a human is needed:
+ *   the VP is capturing, and an unclassified panel (a whiteboard loading, a
+ *   feature tip) does not stop it. Escalating it marked a working VP as
+ *   needing manual action. Before the join such a dialog may be what blocks
+ *   it, so it still goes to a human there; the classified blocking types
+ *   (CAPTCHA, sign-in, SSO, blocked) do at any time.
  */
 export function decideDialogAction(
     analysis: DialogAnalysis,
     platform: string,
     actionText: string | null,
+    inMeeting: boolean = false,
 ): DialogDecision {
     const escalate = (): DialogDecision => ({
         kind: 'escalate',
@@ -104,6 +112,7 @@ export function decideDialogAction(
         if (readable && !(media && !actionText)) return { kind: 'click', selector: selector as string };
         if (media) return escalate();
     }
+    if (inMeeting && analysis.type === 'OTHER') return { kind: 'ignore' };
     return analysis.needsHuman ? escalate() : { kind: 'ignore' };
 }
 

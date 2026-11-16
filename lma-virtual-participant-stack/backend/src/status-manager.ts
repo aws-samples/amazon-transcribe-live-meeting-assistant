@@ -13,6 +13,7 @@ import {
   DescribeTargetGroupsCommand
 } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { noteMeetingJoined } from './meeting-phase.js';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
@@ -346,6 +347,8 @@ export class VirtualParticipantStatusManager {
     errorMessage?: string,
     endTrigger?: string,
   ): Promise<boolean> {
+    // Admitted to the meeting, whether or not the write below lands (meeting-phase.ts).
+    if (status === VP_STATUS.JOINED || status === VP_STATUS.ACTIVE) noteMeetingJoined();
     if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
       return false;
     }
