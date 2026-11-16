@@ -207,9 +207,12 @@ export const PEOPLE_READ_SLACK_MS = 30_000;
  * is not a reliable end-of-meeting signal either — see the field docs above. The
  * worst case in either direction is therefore finite: a share is safe for ~30
  * minutes at a stretch, and a meeting whose end Teams announces to nobody is left
- * after ~35 at the default cadence. Both windows are capped at 30 minutes
- * independently, so the ceiling is an hour for any settings at all — reachable at
- * the default cadence with the maximum count as well as at the slowest cadence.
+ * ~35 minutes after the activity window (PARTICIPANT_ACTIVITY_WINDOW_MS, 10 min)
+ * that follows the last participant speech, so ~45 minutes after it at the
+ * default cadence. Both windows are capped at 30 minutes independently, so the
+ * ceiling is about 70 minutes after the last speech for any settings at all —
+ * reachable at the default cadence with the maximum count as well as at the
+ * slowest cadence.
  */
 export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
     pollMs: 20_000,
@@ -2135,12 +2138,14 @@ export default class Teams {
                 // The light-meetings client has no badge; its People pane has the
                 // count ("In this meeting (N)", the VP included), read at most once
                 // a minute (readPeopleRoster).
+                // Read once per poll, so the pane decision and the watchdog's agree.
+                const participantsActive = participantsActiveWithin();
                 let countFrom = 'badge';
                 if (reading.state === 'BADGE_MISSING') {
                     // The pane is opened for the watchdog in a silent meeting, and to
                     // re-check a count of one or fewer; otherwise the count last read
                     // is used if fresh (peopleCountStep).
-                    const people = await this.peopleCountForWatchdog(page, !participantsActiveWithin());
+                    const people = await this.peopleCountForWatchdog(page, !participantsActive);
                     if (people === 'hold') {
                         // A count of one from the last real read, between reads:
                         // neither a new reading of it nor an unreadable poll, so this
@@ -2159,7 +2164,6 @@ export default class Teams {
                     if (inMeetingVia !== null) reading = { state: 'BADGE_MISSING_IN_MEETING' };
                 }
 
-                const participantsActive = participantsActiveWithin();
                 const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActive);
                 if (reading.state === 'OK') {
                     meetingConsent.noteAttendeeCount(reading.count);
