@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ElementHandle, Page } from 'playwright-core';
 import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
+import { decideHangupHidden, HANGUP_HIDDEN_POLL_MS, type HangupHiddenState } from './end-signals.js';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -1585,6 +1586,47 @@ export default class Teams {
             .catch(() => null);
     }
 
+    /**
+     * Resolves when the hang-up button has been hidden and no other in-meeting
+     * control has been visible for HANGUP_HIDDEN_CONFIRM_POLLS checks (#1148).
+     *
+     * Playwright counts a missing element as hidden, so the button alone being
+     * hidden is not an end: a toolbar that collapses or re-renders hides it in a
+     * live meeting. The end screens remove the whole call UI, which is what
+     * the confirmation waits for. Rejects at `deadline`, like the
+     * waitForSelector it replaces, so the race reports the meeting timeout.
+     */
+    private async watchHangupHidden(page: Page, deadline: number): Promise<ExitInfo> {
+        const state: HangupHiddenState = { confirmations: 0 };
+        let chromeReported: string | null = null;
+        for (;;) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0 || page.isClosed() || this.meetingOver) throw new Error('hang-up watch stopped');
+            await page.waitForSelector('#hangup-button', { state: 'hidden', timeout: remaining });
+            for (;;) {
+                if (Date.now() >= deadline || page.isClosed() || this.meetingOver) throw new Error('hang-up watch stopped');
+                const hangupVisible = await page
+                    .locator('#hangup-button')
+                    .first()
+                    .isVisible()
+                    .catch(() => false);
+                const inMeetingSignal = hangupVisible ? null : await this.inMeetingSignal(page);
+                const action = decideHangupHidden({ hangupVisible, inMeetingSignal }, state);
+                if (action === 'end') {
+                    log.info(`[teams-end] the hang-up button and every in-meeting control have been hidden for ${state.confirmations} checks; the meeting has ended.`);
+                    return { reason: 'host-ended', trigger: 'HANGUP_BUTTON_HIDDEN' };
+                }
+                if (action === 'visible') break;
+                if (action === 'chrome-present' && chromeReported !== inMeetingSignal) {
+                    chromeReported = inMeetingSignal;
+                    log.info(`[teams-end] the hang-up button is hidden but ${inMeetingSignal} is visible; the meeting is still on screen, not leaving.`);
+                }
+                await new Promise((resolve) => setTimeout(resolve, HANGUP_HIDDEN_POLL_MS));
+            }
+            chromeReported = null;
+        }
+    }
+
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
         // Forward the speaker/attendee observers' in-page `DEBUG:` logs (and the
         // speakerChange signal) to CloudWatch — they otherwise go nowhere, and
@@ -2602,9 +2644,7 @@ export default class Teams {
             // multiple Teams meeting-end UI indicators. Each UI branch maps
             // to a structured ExitInfo so the orchestrator can persist and
             // log a single canonical reason.
-            const hangupHidden: Promise<ExitInfo> = page
-                .waitForSelector("#hangup-button", { state: 'hidden', timeout: details.meetingTimeout })
-                .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'HANGUP_BUTTON_HIDDEN' }));
+            const hangupHidden: Promise<ExitInfo> = this.watchHangupHidden(page, Date.now() + details.meetingTimeout);
             const rejoinAppeared: Promise<ExitInfo> = page
                 .waitForSelector('button[data-tid="anon-meeting-end-screen-rejoin-button"]', { timeout: details.meetingTimeout })
                 .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'REJOIN_BUTTON_APPEARED' }));

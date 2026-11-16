@@ -53,3 +53,36 @@ test('participant activity comes from the participants, never from the voice ass
     assert.match(body, /if \(!isPartial && result\.ChannelId !== 'ch_1'\) noteParticipantActivity\('participant speech'\);/);
     assert.match(body, /!isOwnIdentity\(speaker, this\.ownIdentities\(\)\)\) \{\s*noteParticipantActivity\('active speaker'\);/);
 });
+
+test('Teams ends on the hidden hang-up button only after confirming the call UI is gone', () => {
+    const body = source('teams.ts');
+    assert.match(body, /const hangupHidden: Promise<ExitInfo> = this\.watchHangupHidden\(page, Date\.now\(\) \+ details\.meetingTimeout\);/);
+    assert.doesNotMatch(body, /waitForSelector\("#hangup-button", \{ state: 'hidden', timeout: details\.meetingTimeout \}\)\s*\.then/);
+    const watch = body.slice(body.indexOf('private async watchHangupHidden('), body.indexOf('public async initialize('));
+    assert.match(watch, /await this\.inMeetingSignal\(page\)/);
+    assert.match(watch, /decideHangupHidden\(\{ hangupVisible, inMeetingSignal \}, state\)/);
+    assert.match(watch, /if \(action === 'end'\) \{[\s\S]{0,300}trigger: 'HANGUP_BUTTON_HIDDEN'/);
+});
+
+test("Zoom's participants watchdog decides through decideZoomCounterAction with participant activity", () => {
+    const body = source('zoom.ts');
+    assert.match(body, /decideZoomCounterAction\(result, counterState, participantsActiveWithin\(\)\)/);
+    assert.match(body, /action === 'end-removed'[\s\S]{0,800}trigger: `participants-ui:\$\{result\.state\.toLowerCase\(\)\}`/);
+});
+
+test("Zoom's end-dialog check matches only dialogs, by their text", () => {
+    const body = source('zoom.ts');
+    const watch = body.slice(body.indexOf('const zoomDialogPromise'), body.indexOf("trigger: 'ZOOM_END_DIALOG'"));
+    assert.match(watch, /if \(!modal\) continue;/);
+    assert.doesNotMatch(watch, /return 'meeting ended'/);
+    assert.match(watch, /ZOOM_END_DIALOG_PHRASES,/);
+    assert.match(watch, /zoomEndDialogReason\(dialogText\)/);
+});
+
+test('Webex reads its end text outside chat and captions, and decides through decideWebexEnd', () => {
+    const body = source('webex.ts');
+    assert.doesNotMatch(body, /document\.body\?\.textContent\?\.toLowerCase\(\)/);
+    assert.match(body, /participantText: \[\.\.\.WEBEX_PARTICIPANT_TEXT_SELECTORS\]/);
+    assert.match(body, /controls: \[\.\.\.WEBEX_IN_MEETING_CONTROLS\]/);
+    assert.match(body, /decideWebexEnd\(result, endState, participantsActiveWithin\(\)\)/);
+});
