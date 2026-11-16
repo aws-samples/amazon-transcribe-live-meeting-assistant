@@ -436,9 +436,10 @@ people already in the meeting can tell it is for the newcomers: it names up to
 three of them where the platform's participant list gives their names (*"Cy Diaz
 and Dee Evans joined - resending the consent notice."*, with *"and 2 others"*
 beyond three), and reads *"New participant(s) detected - resending the consent
-notice."* where the platform gives only an attendee count. The line starts the
-notice's first message rather than adding one, and is part of the notice as it
-is recorded. The notice posted when the VP is admitted has no such line.
+notice."* where the platform gives only an attendee count. The line is joined to
+the start of the notice's first message and split with the notice, so it adds a
+message only when the notice is already close to the chat message length limit;
+it is part of the notice as it is recorded. The notice posted when the VP is admitted has no such line.
 
 The VP records the notice as posted only once the platform reports that every
 message of it, the reply line included, is in the chat. When it is not (the

@@ -268,6 +268,8 @@ export interface ConsentFlowDeps {
     startAttempts?: number;
     startRetryMs?: number;
     noticeRepostMs?: number;
+    /** Shortest wait after a join before the notice is posted again (3 s); tests shorten it. */
+    noticeRepostMinMs?: number;
     /** How long after a notice that could not be posted it is tried again; 30 s by default. */
     noticeRetryMs?: number;
 }
@@ -1459,8 +1461,11 @@ export class MeetingConsentFlow {
         this.noticeRepostTimer = setTimeout(() => {
             this.noticeRepostTimer = null;
             if (this.stopped || !this.record?.NoticeText) return;
-            void this.postNotice(this.record.NoticeText, true, repostLeadIn(this.roster.takeJoined()));
-        }, Math.max(wait, 3000));
+            // A notice still being posted takes the place of this one
+            // (postNotice skips it), so the newcomers stay to be named by the next.
+            const leadIn = this.noticeInFlight ? '' : repostLeadIn(this.roster.takeJoined());
+            void this.postNotice(this.record.NoticeText, true, leadIn);
+        }, Math.max(wait, this.deps.noticeRepostMinMs ?? 3000));
     }
 
     /** One read of the record, for what changed elsewhere (an attestation, an objection on the page). */
