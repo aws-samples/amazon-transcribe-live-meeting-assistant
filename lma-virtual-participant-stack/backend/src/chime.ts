@@ -1,4 +1,5 @@
 import { Page } from 'playwright-core';
+import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -15,6 +16,12 @@ import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('chime');
+
+/**
+ * Consecutive failed end-of-meeting checks (2 s apart) before the page counts
+ * as gone: about 30 s. One failure used to end the meeting (#1148).
+ */
+export const CHIME_POLL_ERRORS_BEFORE_END = 15;
 
 export default class Chime {
     private prevSender: string = '';
@@ -170,13 +177,18 @@ export default class Chime {
         if (attendeesPanelElement) await clickWithDomFallback(attendeesPanelElement, 'Open attendees panel');
 
         // Set up attendee change monitoring
+        // Leaves only once the count has stayed at one or fewer for
+        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts).
+        const aloneDebounce = new AloneDebounce(() => {
+            log.info(`LMA Virtual Participant got lonely and left (one attendee or fewer for ${ALONE_HOLD_MS / 1000} s).`);
+            details.start = false;
+            this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
+        });
+        page.once('close', () => aloneDebounce.cancel());
         await page.exposeFunction('attendeeChange', async (number: number) => {
             meetingConsent.noteAttendeeCount(number);
-            if (number <= 1) {
-                log.info('LMA Virtual Participant got lonely and left.');
-                details.start = false;
-                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
-            }
+            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${ALONE_HOLD_MS / 1000} s unless somebody is still here`);
+            aloneDebounce.note(number);
         });
 
         log.info('Listening for attendee changes.');
@@ -371,6 +383,9 @@ export default class Chime {
         // or for navigation away from the meeting page. The poll resolves with
         // a structured ExitInfo so it composes with the in-process end signal.
         const chimeEndDetected = new Promise<ExitInfo>((resolve) => {
+            // A page evaluation can fail for a moment (a navigation inside the
+            // app, a CDP hiccup); only a run of failures means the page is gone.
+            let pollErrors = 0;
             const handle = setInterval(async () => {
                 try {
                     const meetingEndedElement = await page.$('text/Your meeting has ended');
@@ -385,7 +400,10 @@ export default class Chime {
                         resolve({ reason: 'page-closed', trigger: 'navigated-away' });
                         return;
                     }
+                    pollErrors = 0;
                 } catch (error) {
+                    pollErrors += 1;
+                    if (pollErrors < CHIME_POLL_ERRORS_BEFORE_END && !page.isClosed()) return;
                     clearInterval(handle);
                     resolve({
                         reason: 'page-closed',

@@ -531,3 +531,141 @@ test('a sub-second poll interval is rejected', () => {
     );
     assert.equal(resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: '1000' }).pollMs, 1000);
 });
+
+// ─── participants speaking keep an unreadable meeting live (#1148) ─────────
+
+test('an unreadable count never ends a meeting while participants are speaking', () => {
+    // The Teams light-meetings client has no attendee badge at all, so every poll
+    // is unreadable; before #1148 that ended every such meeting after
+    // maxSuppressedPolls + pollsBeforeEndMissing polls (~35 min) however live it was.
+    const state = fresh();
+    const { maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const fourHours = (4 * 60 * 60 * 1000) / DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs;
+    assert.ok(fourHours > maxSuppressedPolls + pollsBeforeEndMissing);
+    for (let i = 0; i < fourHours; i += 1) {
+        const reading: AttendeeReading = i % 2 === 0 ? MISSING_IN_MEETING : MISSING;
+        assert.equal(
+            decideAttendeeAction(reading, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true).action,
+            'continue',
+            `poll ${i}: participants are speaking, so the meeting is live`,
+        );
+    }
+    assert.equal(state.unreadableRun, 0);
+});
+
+test('once participants fall silent, an unreadable meeting ends on the usual bounds (the #540 guard still holds)', () => {
+    const state = fresh();
+    for (let i = 0; i < 200; i += 1) decideAttendeeAction(MISSING_IN_MEETING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    const { maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    let ended = -1;
+    for (let i = 1; i <= maxSuppressedPolls + pollsBeforeEndMissing + 5; i += 1) {
+        if (decideAttendeeAction(MISSING_IN_MEETING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, false).action === 'end') {
+            ended = i;
+            break;
+        }
+    }
+    assert.equal(ended, maxSuppressedPolls + pollsBeforeEndMissing, 'the silent run is counted from when the speaking stopped');
+});
+
+test('with an uncorroborated miss, silence ends the meeting after the missing bound, as before', () => {
+    const state = fresh();
+    decideAttendeeAction(MISSING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    let ended = -1;
+    for (let i = 1; i <= MISSING_BOUND + 1; i += 1) {
+        if (decideAttendeeAction(MISSING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, false).action === 'end') {
+            ended = i;
+            break;
+        }
+    }
+    assert.equal(ended, MISSING_BOUND);
+});
+
+test('participants speaking do not stop the VP leaving when it is alone by a readable count', () => {
+    // A readable count is decided as before: the people who spoke may have left.
+    const state = fresh();
+    let decision = decideAttendeeAction(alone, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    for (let i = 1; i < ALONE_BOUND; i += 1) {
+        assert.equal(decision.action, 'continue');
+        decision = decideAttendeeAction(alone, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    }
+    assert.equal(decision.action, 'end');
+    assert.equal((decision as { reason: string }).reason, 'alone-in-meeting');
+    assert.equal(decideAttendeeAction(busy, fresh(), DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true).action, 'continue');
+});
+
+// ─── the People pane's count on light-meetings (#1148) ─────────────────────
+
+test('a fresh People count showing others is used as it is; a count of one is read again first', async () => {
+    const { PEOPLE_COUNT_FRESH_MS, peopleCountStep, peopleCountAfterRead } = await import('./teams.js');
+    const now = 1_000_000;
+    assert.deepEqual(peopleCountStep({ count: 5, at: now - 1000 }, now, false), { action: 'use', count: 5 });
+    // Read before anybody else was admitted: the VP must not leave alone on it.
+    assert.deepEqual(peopleCountStep({ count: 1, at: now - 1000 }, now, false), { action: 'read' });
+    // No fresh count: read only in a silent meeting.
+    assert.deepEqual(peopleCountStep({ count: 5, at: now - PEOPLE_COUNT_FRESH_MS - 1 }, now, false), { action: 'none' });
+    assert.deepEqual(peopleCountStep(null, now, true), { action: 'read' });
+    assert.deepEqual(peopleCountStep(null, now, false), { action: 'none' });
+
+    // After asking for a read: a count read since then counts, even of one.
+    assert.equal(peopleCountAfterRead({ count: 1, at: now }, now, now + 10), 1);
+    // The pane's rate limit answered from its last list: a cached one is held, not
+    // repeated (one read must not decide "alone") and not unreadable (which would
+    // reset the lonely run); an old one is no count at all.
+    assert.equal(peopleCountAfterRead({ count: 1, at: now - 1000 }, now, now + 10), 'hold');
+    assert.equal(peopleCountAfterRead({ count: 1, at: now - 10 * 60_000 }, now, now + 10), null);
+    assert.equal(peopleCountAfterRead({ count: 4, at: now - 1000 }, now, now + 10), 4);
+    assert.equal(peopleCountAfterRead(null, now, now + 10), null);
+});
+
+test('on light-meetings a VP left alone leaves, deciding "alone" on consecutive pane reads (20 s polls, 60 s reads)', async () => {
+    const { peopleCountStep, peopleCountAfterRead } = await import('./teams.js');
+    const { PEOPLE_READ_INTERVAL_MS } = await import('./teams-people-pane.js');
+    const pollMs = DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs;
+    const run = (paneCount: (now: number) => number, activeUntil: number, maxPolls: number) => {
+        const state = fresh();
+        let last: { count: number; at: number } | null = null;
+        let lastRealRead = -Infinity;
+        for (let poll = 0; poll < maxPolls; poll += 1) {
+            const now = poll * pollMs;
+            const participantsActive = now < activeUntil;
+            const step = peopleCountStep(last, now, !participantsActive);
+            let count: number | 'hold' | null;
+            if (step.action === 'use') count = step.count;
+            else if (step.action === 'none') count = null;
+            else {
+                // readPeopleRoster: a real read at most once a read interval.
+                if (now - lastRealRead >= PEOPLE_READ_INTERVAL_MS) {
+                    last = { count: paneCount(now), at: now };
+                    lastRealRead = now;
+                }
+                count = peopleCountAfterRead(last, now, now);
+            }
+            if (count === 'hold') continue;
+            const reading: AttendeeReading = count === null ? MISSING_IN_MEETING : { state: 'OK', count };
+            const decision = decideAttendeeAction(reading, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, participantsActive);
+            if (decision.action === 'end') return { poll, reason: (decision as { reason: string }).reason };
+        }
+        return null;
+    };
+
+    // Alone from the start, silent: leaves as alone after pollsBeforeEnd pane reads (~2 min), not ~35 min.
+    const alone = run(() => 1, 0, 200);
+    assert.ok(alone, 'the VP left');
+    assert.equal(alone.reason, 'alone-in-meeting');
+    assert.ok(alone.poll * pollMs <= (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS, `left after ${alone.poll * pollMs} ms`);
+
+    // The others talked and then left: while their speech is within the activity
+    // window the meeting counts as live; after it, the VP leaves as alone in a few minutes.
+    const window = 10 * 60_000;
+    const afterTalk = run(() => 1, window, 200);
+    assert.equal(afterTalk?.reason, 'alone-in-meeting');
+    assert.ok((afterTalk as { poll: number }).poll * pollMs <= window + (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS);
+
+    // Others present the whole time: never leaves.
+    assert.equal(run(() => 4, 0, 4 * 180), null);
+
+    // Others leave after 10 minutes: leaves as alone within a few minutes of that.
+    const left = run((now) => (now < 10 * 60_000 ? 4 : 1), 0, 200);
+    assert.equal(left?.reason, 'alone-in-meeting');
+    assert.ok((left as { poll: number }).poll * pollMs < 10 * 60_000 + (ALONE_BOUND + 1) * PEOPLE_READ_INTERVAL_MS);
+});

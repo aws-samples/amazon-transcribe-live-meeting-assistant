@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ElementHandle, Page } from 'playwright-core';
+import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -42,6 +43,7 @@ import {
 } from './teams-chat-pane.js';
 import {
     parsePeopleTree,
+    PEOPLE_READ_INTERVAL_MS,
     PEOPLE_TREE_WAIT_MS,
     peopleCloseVerdict,
     PeoplePaneGuard,
@@ -120,6 +122,65 @@ export interface AttendeeWatchdogConfig {
 }
 
 /**
+ * How old the People pane's count may be and still stand in for a missing
+ * attendee badge: three of its one-a-minute reads, so one read skipped while
+ * the chat pane is in use does not lose it.
+ */
+export const PEOPLE_COUNT_FRESH_MS = 3 * 60_000;
+
+/** The People pane's last count for the watchdog, and when it was read. */
+export type PeopleCountReading = { count: number; at: number } | null;
+
+/**
+ * What the Teams watchdog does about the People pane's count when the badge is
+ * missing (light-meetings):
+ * - `use` a count read under PEOPLE_COUNT_FRESH_MS ago that shows others
+ *   present. Showing others, a stale count can only keep the VP in a meeting.
+ * - `read` the pane again for a fresh count of one or fewer (others may have
+ *   been admitted since; the VP must not leave alone on an old value), or for
+ *   no fresh count at all when the caller may open the pane (`mayOpen`, a
+ *   silent meeting).
+ * - `none`: no usable count; the watchdog treats the badge as unreadable.
+ */
+export function peopleCountStep(
+    last: PeopleCountReading,
+    now: number,
+    mayOpen: boolean,
+): { action: 'use'; count: number } | { action: 'read' } | { action: 'none' } {
+    const fresh = last !== null && now - last.at <= PEOPLE_COUNT_FRESH_MS;
+    if (fresh && last.count > 1) return { action: 'use', count: last.count };
+    if (fresh || mayOpen) return { action: 'read' };
+    return { action: 'none' };
+}
+
+/**
+ * The count after the pane was asked to read again from `readStartedAt`:
+ * - a count read since then counts whatever it shows;
+ * - one that was not re-read (the pane's own rate limit, PEOPLE_READ_INTERVAL_MS,
+ *   answered from its last list) counts if it is fresh and shows others present;
+ * - a count of one or fewer from a real read within the last read interval is
+ *   `hold`: the watchdog skips the poll, so the polls between two pane reads
+ *   neither repeat that reading (which would let one read decide "alone") nor
+ *   count as unreadable (which would reset the lonely run, so a VP left alone
+ *   would never leave). "Alone" is then decided on consecutive pane reads.
+ * - otherwise null: no usable count.
+ */
+export function peopleCountAfterRead(
+    last: PeopleCountReading,
+    readStartedAt: number,
+    now: number,
+): number | 'hold' | null {
+    if (last === null) return null;
+    if (last.at >= readStartedAt) return last.count;
+    const age = now - last.at;
+    if (last.count > 1) return age <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
+    return age <= PEOPLE_READ_INTERVAL_MS + PEOPLE_READ_SLACK_MS ? 'hold' : null;
+}
+
+/** How late a pane read may be (a skipped turn while the chat is in use) before its count stops holding. */
+export const PEOPLE_READ_SLACK_MS = 30_000;
+
+/**
  * Defaults for the attendee watchdog.
  *
  * The two bounds are deliberately different sizes, and the asymmetry is the
@@ -146,9 +207,12 @@ export interface AttendeeWatchdogConfig {
  * is not a reliable end-of-meeting signal either — see the field docs above. The
  * worst case in either direction is therefore finite: a share is safe for ~30
  * minutes at a stretch, and a meeting whose end Teams announces to nobody is left
- * after ~35 at the default cadence. Both windows are capped at 30 minutes
- * independently, so the ceiling is an hour for any settings at all — reachable at
- * the default cadence with the maximum count as well as at the slowest cadence.
+ * ~35 minutes after the activity window (PARTICIPANT_ACTIVITY_WINDOW_MS, 10 min)
+ * that follows the last participant speech, so ~45 minutes after it at the
+ * default cadence. Both windows are capped at 30 minutes independently, so the
+ * ceiling is about 70 minutes after the last speech for any settings at all —
+ * reachable at the default cadence with the maximum count as well as at the
+ * slowest cadence.
  */
 export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
     pollMs: 20_000,
@@ -379,7 +443,22 @@ export function decideAttendeeAction(
     reading: AttendeeReading,
     state: AttendeeWatchdogState,
     config: AttendeeWatchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG,
+    participantsActive: boolean = false,
 ): AttendeeDecision {
+    // A participant spoke recently (meeting-liveness.ts): the meeting is live
+    // whatever the page shows, so an unreadable count says nothing and starts no
+    // run toward leaving. The bounds below then apply only to a meeting that is
+    // unreadable AND silent, which is the shape of one that ended without an end
+    // screen (#540). A readable count is decided as before, so the lonely exit
+    // still works while people talk.
+    if (reading.state !== 'OK' && participantsActive) {
+        state.consecutiveMissing = 0;
+        state.suppressedMissing = 0;
+        state.unreadableRun = 0;
+        state.consecutiveLonely = 0;
+        return { action: 'continue' };
+    }
+
     if (reading.state !== 'OK') {
         state.unreadableRun += 1;
         // Ceiling on the whole unreadable run, regardless of how it was classified
@@ -644,6 +723,30 @@ export default class Teams {
         }
     }
 
+    /** The People pane's last "In this meeting (N)" count, and when it was read. */
+    private lastPeopleCount: { count: number; at: number } | null = null;
+
+    /**
+     * The attendee count for the attendee watchdog when the badge is missing:
+     * the People pane's, on the light-meetings client, while its last reading
+     * is under PEOPLE_COUNT_FRESH_MS old. Null elsewhere, and when no list could
+     * be read, so the watchdog falls back to its unreadable-count handling.
+     *
+     * Opening the pane has a cost: a close that cannot restore the chat turns
+     * the VP's chat off for the meeting (closePeoplePane). So the pane is opened
+     * here only when no fresh count shows others present, and then either in a
+     * silent meeting (`mayOpen`) or to re-check a count of one or fewer; in
+     * every other case the count last read is used as it is.
+     */
+    private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | 'hold' | null> {
+        if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
+        const before = Date.now();
+        const step = peopleCountStep(this.lastPeopleCount, before, mayOpen);
+        if (step.action !== 'read') return step.action === 'use' ? step.count : null;
+        await this.readPeopleRoster(page);
+        return peopleCountAfterRead(this.lastPeopleCount, before, Date.now());
+    }
+
     /**
      * The participant list for the consent flow (consent-runtime.ts,
      * readRoster), from the People pane on the light-meetings client: opened,
@@ -707,6 +810,7 @@ export default class Teams {
             if (this.peopleGuard.disabled) return null;
             if (reading?.ok) {
                 log.info(`[teams-people] People pane read: ${reading.count} in the meeting, the VP included; ${reading.names.length} other name(s).`);
+                this.lastPeopleCount = { count: reading.count, at: Date.now() };
                 meetingConsent.noteAttendeeCount(reading.count);
             } else {
                 log.info(`[teams-people] no participant list read from the People pane (${opened === 'no-button' ? 'no People button' : opened === 'no-tree' ? `no list within ${PEOPLE_TREE_WAIT_MS / 1000} s` : 'list not readable'}).`);
@@ -2031,19 +2135,48 @@ export default class Teams {
                 // the two without depending on the toolbar being expanded or on the
                 // client's UI language. Only a miss with NO in-meeting chrome behind
                 // it is allowed to count toward leaving.
+                // The light-meetings client has no badge; its People pane has the
+                // count ("In this meeting (N)", the VP included), read at most once
+                // a minute (readPeopleRoster).
+                // Read once per poll, so the pane decision and the watchdog's agree.
+                const participantsActive = participantsActiveWithin();
+                let countFrom = 'badge';
+                if (reading.state === 'BADGE_MISSING') {
+                    // The pane is opened for the watchdog in a silent meeting, and to
+                    // re-check a count of one or fewer; otherwise the count last read
+                    // is used if fresh (peopleCountStep).
+                    const people = await this.peopleCountForWatchdog(page, !participantsActive);
+                    if (people === 'hold') {
+                        // A count of one from the last real read, between reads:
+                        // neither a new reading of it nor an unreadable poll, so this
+                        // poll is not decided and "alone" is counted in pane reads.
+                        return;
+                    }
+                    if (people !== null) {
+                        reading = { state: 'OK', count: people };
+                        countFrom = 'People pane';
+                    }
+                }
+
                 let inMeetingVia: string | null = null;
                 if (reading.state === 'BADGE_MISSING') {
                     inMeetingVia = await this.inMeetingSignal(page);
                     if (inMeetingVia !== null) reading = { state: 'BADGE_MISSING_IN_MEETING' };
                 }
 
-                const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
+                const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActive);
                 if (reading.state === 'OK') {
                     meetingConsent.noteAttendeeCount(reading.count);
                     log.info(
-                        `DEBUG: Teams attendee count: ${reading.count}, ` +
+                        `DEBUG: Teams attendee count (${countFrom}): ${reading.count}, ` +
                             `hasOthers: ${reading.count > 1}, ` +
                             `consecutiveLonely: ${watchdogState.consecutiveLonely}/${watchdogConfig.pollsBeforeEnd}`,
+                    );
+                } else if (participantsActive) {
+                    const ago = Math.round((Date.now() - (lastParticipantActivity().at ?? Date.now())) / 1000);
+                    log.info(
+                        'DEBUG: Teams attendee count unreadable, but a participant was active ' +
+                            `${ago} s ago (${lastParticipantActivity().source}) — the meeting is live; not counting toward leaving.`,
                     );
                 } else if (reading.state === 'BADGE_MISSING_IN_MEETING') {
                     const spent = watchdogState.suppressedMissing > watchdogConfig.maxSuppressedPolls;
