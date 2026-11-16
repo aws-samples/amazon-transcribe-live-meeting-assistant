@@ -60,6 +60,7 @@ Parameters:
       - parakeet-tdt-v3-sortformer
       - parakeet-tdt-v3-live-sortformer
       - parakeet-tdt-v3-live-nemotron35-sortformer
+      - parakeet-tdt-v3-live-kroko-sortformer
     Description: >-
       Which model bundle the MicroVM ASR engine is built from. A bundle names the
       ASR model, the speaker-embedding model and the turn-detection model TOGETHER
@@ -175,6 +176,8 @@ Mappings:
     parakeet-tdt-v3-live-sortformer:
       MiB: 8192
     parakeet-tdt-v3-live-nemotron35-sortformer:
+      MiB: 8192
+    parakeet-tdt-v3-live-kroko-sortformer:
       MiB: 8192
 
 Resources:

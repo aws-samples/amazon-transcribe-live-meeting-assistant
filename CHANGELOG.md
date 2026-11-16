@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A lighter live preview for the on-demand ASR engine, as an option.** The new `parakeet-tdt-v3-live-kroko-sortformer` bundle is the default bundle with Kroko, an English streaming model, as its live preview. On three clean AMI headset meetings the preview's word error rate was 7.9-14.3% against 20.2-33.1% for the default's Nemotron 3.5 preview, at about a sixth of its CPU per session; finals still come from Parakeet v3. It is English only and is not the default: Kroko is published under CC-BY-SA, so the catalog marks the bundle not redistributable. Its weights are downloaded when the image is built, like every model's. Select it by setting `ModelBundle` in the `AsrDefaults` mapping of `lma-main.yaml`. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
+
 ### Fixed
 
 - **The on-demand ASR engine transcribes quiet asides it used to skip.** Speech too quiet for the voice activity detector, such as a remark said under the breath or a short "and now I can full screen", never became an utterance and was missing from the transcript. The offline engine now also decodes any stretch between utterances that stands clearly above the channel's noise floor. On a clean AMI headset meeting held out from tuning, the microphone channel's word error rate fell from 7.1% to 5.9% with Parakeet v2, and from 8.3% to 7.2% with the default bundle; it ran live on a dev stack with results matching the local measurements. `ASR_VAD_RESCUE=0` turns it off. On update the MicroVM image is rebuilt.

@@ -575,6 +575,13 @@ Speech recognition:
     NVIDIA Open Model License -- NOT redistributable
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
+  * Kroko ASR streaming zipformer, English, 2025-08-06 (streaming; the preview in
+    parakeet-tdt-v3-live-kroko-sortformer). The ONNX export is the sherpa-onnx project's,
+    fetched at a fixed commit from
+    https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06.
+    CC-BY-SA (the publisher does not state a version) -- NOT redistributable
+    https://huggingface.co/Banafo/Kroko-ASR
+
   * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
     every other bundle whose id starts with parakeet-tdt-v3). The ONNX exports are the
     sherpa-onnx project's, fetched at a fixed commit: v3 at full precision from
