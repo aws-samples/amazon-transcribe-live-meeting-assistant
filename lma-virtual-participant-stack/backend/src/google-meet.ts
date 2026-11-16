@@ -27,8 +27,8 @@
  * The selectors and the text this relies on are in google-meet-page.ts, with
  * every assumption about Meet's page that still needs a live check marked there.
  */
-import { participantsActiveWithin } from './meeting-liveness.js';
 import { ElementHandle, Page } from 'playwright-core';
+import { participantsActiveWithin } from './meeting-liveness.js';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';

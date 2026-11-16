@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 import { ElementHandle, Page } from 'playwright-core';
+import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -675,12 +675,22 @@ export default class Teams {
      * the People pane's, on the light-meetings client, while its last reading
      * is under PEOPLE_COUNT_FRESH_MS old. Null elsewhere, and when no list could
      * be read, so the watchdog falls back to its unreadable-count handling.
+     *
+     * Opening the pane has a cost: a close that cannot restore the chat turns
+     * the VP's chat off for the meeting (closePeoplePane). So the pane is opened
+     * here only with `mayOpen` (the caller passes it in a silent meeting) and
+     * only when no fresh count exists; otherwise the count the consent flow last
+     * read is used as it is.
      */
-    private async peopleCountForWatchdog(page: Page): Promise<number | null> {
+    private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | null> {
         if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
+        const fresh = (): number | null => {
+            const last = this.lastPeopleCount;
+            return last && Date.now() - last.at <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
+        };
+        if (fresh() !== null || !mayOpen) return fresh();
         await this.readPeopleRoster(page);
-        const last = this.lastPeopleCount;
-        return last && Date.now() - last.at <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
+        return fresh();
     }
 
     /**
@@ -2076,7 +2086,10 @@ export default class Teams {
                 // a minute (readPeopleRoster).
                 let countFrom = 'badge';
                 if (reading.state === 'BADGE_MISSING') {
-                    const people = await this.peopleCountForWatchdog(page);
+                    // The pane is opened for the watchdog only in a silent meeting:
+                    // while participants speak the meeting counts as live anyway,
+                    // and the count the consent flow last read is used if fresh.
+                    const people = await this.peopleCountForWatchdog(page, !participantsActiveWithin());
                     if (people !== null) {
                         reading = { state: 'OK', count: people };
                         countFrom = 'People pane';
