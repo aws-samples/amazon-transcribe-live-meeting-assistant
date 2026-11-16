@@ -22,6 +22,16 @@ import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js'
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { clickWithDomFallback, humanClick, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { createLogger } from './logger.js';
+import {
+    decideWebexEnd,
+    WEBEX_END_PHRASES,
+    WEBEX_END_POLL_MS,
+    WEBEX_IN_MEETING_CONTROLS,
+    WEBEX_PARTICIPANT_TEXT_SELECTORS,
+    webexEndReason,
+    type WebexEndState,
+} from './end-signals.js';
+import { participantsActiveWithin } from './meeting-liveness.js';
 
 const log = createLogger('webex');
 
@@ -1195,49 +1205,78 @@ export default class Webex {
         log.info('Waiting for meeting end.');
         let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
-            // Detect Webex's own meeting-end UI by watching the iframe text.
-            // The detected substring distinguishes "meeting ended" (host) from
-            // "you have left the meeting" / "disconnected" (page-closed-ish).
-            const meetingEndDetected = new Promise<ExitInfo>(async (resolve) => {
-                await page.exposeFunction('meetingEndDetected', (matched: string) => {
-                    const text = matched.toLowerCase();
-                    const reason: ExitInfo['reason'] =
-                        text.includes('disconnected') || text.includes('left the meeting')
-                            ? 'page-closed'
-                            : 'host-ended';
-                    resolve({ reason, trigger: `webex-text:${matched}` });
-                });
-                await frame.evaluate(() => {
-                    const PHRASES = [
-                        'meeting has ended',
-                        'this meeting has ended',
-                        'meeting ended',
-                        'you have left the meeting',
-                        'meeting disconnected',
-                    ];
-                    const matchPhrase = (text: string) => PHRASES.find((p) => text.includes(p)) || null;
-                    const observer = new MutationObserver(() => {
-                        const bodyText = document.body?.textContent?.toLowerCase() || '';
-                        const hit = matchPhrase(bodyText);
-                        if (hit) {
-                            (window as any).meetingEndDetected(hit);
-                            observer.disconnect();
-                        }
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-                    const initial = matchPhrase((document.body?.textContent || '').toLowerCase());
-                    if (initial) {
-                        (window as any).meetingEndDetected(initial);
-                        observer.disconnect();
+            // Detect Webex's own meeting-end UI from the iframe text. The
+            // detected phrase distinguishes "meeting ended" (host) from "you
+            // have left the meeting" / "disconnected" (page-closed-ish).
+            //
+            // Text in chat messages, captions and transcripts is not read, and
+            // the phrase ends the meeting only once the in-meeting controls are
+            // gone, so a participant writing or saying "meeting ended" does not
+            // end it (#1148). decideWebexEnd (end-signals.ts) also ends it when
+            // the phrase stays with a control still visible and no participant
+            // has been active within the liveness window.
+            const endState: WebexEndState = { phraseSince: null };
+            let endPoll: ReturnType<typeof setInterval> | null = null;
+            const meetingEndDetected = new Promise<ExitInfo>((resolve) => {
+                let reading = false;
+                endPoll = setInterval(async () => {
+                    if (reading) return;
+                    if (page.isClosed()) {
+                        if (endPoll) clearInterval(endPoll);
+                        return;
                     }
-                });
+                    reading = true;
+                    try {
+                        const result = await frame
+                            .evaluate(
+                                ({ phrases, participantText, controls }: { phrases: string[]; participantText: string[]; controls: string[] }) => {
+                                    const excluded = participantText.join(', ');
+                                    let text = '';
+                                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                                    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                                        const parent = node.parentElement;
+                                        if (parent && parent.closest(excluded)) continue;
+                                        text += ` ${node.textContent || ''}`;
+                                    }
+                                    const lower = text.toLowerCase();
+                                    const phrase = phrases.find((p) => lower.includes(p)) || null;
+                                    const controlsVisible = controls.some((sel) =>
+                                        Array.from(document.querySelectorAll(sel)).some((el) => {
+                                            const r = (el as HTMLElement).getBoundingClientRect();
+                                            return r.width > 0 && r.height > 0;
+                                        }),
+                                    );
+                                    return { phrase, controlsVisible };
+                                },
+                                {
+                                    phrases: [...WEBEX_END_PHRASES],
+                                    participantText: [...WEBEX_PARTICIPANT_TEXT_SELECTORS],
+                                    controls: [...WEBEX_IN_MEETING_CONTROLS],
+                                },
+                            )
+                            .catch(() => null);
+                        if (!result) return;
+                        const matched = decideWebexEnd(result, endState, participantsActiveWithin());
+                        if (matched) {
+                            if (endPoll) clearInterval(endPoll);
+                            log.info(`[webex-end] end text "${matched}" (in-meeting controls visible: ${result.controlsVisible}); the meeting has ended.`);
+                            resolve({ reason: webexEndReason(matched), trigger: `webex-text:${matched}` });
+                        }
+                    } finally {
+                        reading = false;
+                    }
+                }, WEBEX_END_POLL_MS);
             });
 
             const meetingTimeout = new Promise<ExitInfo>((resolve) =>
                 setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
             );
 
-            exitInfo = await Promise.race([this.endRequested, meetingEndDetected, meetingTimeout]);
+            try {
+                exitInfo = await Promise.race([this.endRequested, meetingEndDetected, meetingTimeout]);
+            } finally {
+                if (endPoll) clearInterval(endPoll);
+            }
         } catch (error) {
             log.error('Meeting ended with error:', error);
             exitInfo = { reason: 'unknown', trigger: `error:${error instanceof Error ? error.message : String(error)}` };
