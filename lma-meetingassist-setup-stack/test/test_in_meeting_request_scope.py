@@ -12,8 +12,10 @@ phrase, from the agent assist orchestrator). The Meeting Assistant section's
 ``inMeetingRequestTools`` setting decides what it is answered with: by default
 the current meeting only (its transcript with its chat, agenda and shared
 screen), with no user email whatever the event carries; ``unrestricted``
-offers every tool. The meeting page's own chat sends no scope and is offered
-every tool whatever the setting.
+offers every tool; ``selected`` offers the current meeting plus each tool group
+whose Meeting Assistant switch is on (``inMeetingWebSearch`` and the others).
+The meeting page's own chat sends no scope and is offered every tool whatever
+the setting.
 
 The handler is driven end to end with every tool group's precondition met --
 an MCP server installed, both knowledge bases, web search, AppSync and the
@@ -422,3 +424,18 @@ def test_frames_are_shown_inline_only_in_the_meeting_pages_chat(built, monkeypat
     monkeypatch.setattr(handler_module, "create_meeting_frames_tool", factory)
     built({"userEmail": "owner@example.com", **event})
     assert seen == [inline]
+
+
+def test_each_switch_is_read_by_its_own_literal_call():
+    # configured_in_meeting_tool_groups names each switch literally (the settings
+    # checks need literals); this keeps those calls and the switch map in step.
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(handler_module.configured_in_meeting_tool_groups))
+    read = {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "read_setting"
+    }
+    assert read == set(handler_module.IN_MEETING_TOOL_GROUP_SETTINGS.values())

@@ -2690,6 +2690,10 @@ def handler(event, context):
                 ', '.join(sorted(unavailable_groups)) or 'none',
             )
         selected_scope_note = ''
+        # Decided from the groups allowed, not those offered, on purpose: a
+        # request allowed web search on a deployment without a key is told that
+        # web search is not available here, rather than that only the current
+        # meeting is (which would read as a refusal).
         if request_scope.mode == IN_MEETING_TOOLS_SELECTED and not current_meeting_only:
             selected_scope_note = SELECTED_TOOLS_SCOPE_NOTE + unavailable_tools_note(
                 unavailable_groups
