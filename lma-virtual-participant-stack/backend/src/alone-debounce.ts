@@ -13,8 +13,9 @@
  * counter that re-renders, or reads empty for a moment while the panel
  * redraws, then ends a meeting that is still running. The VP now leaves only
  * when the count has stayed at one or fewer (the VP alone) for
- * ALONE_HOLD_MS; any reading above one in that time cancels it. That is the
- * same tolerance as the Teams watchdog's default (3 checks 20 s apart).
+ * ALONE_HOLD_MS; any reading above one in that time cancels it. That is a
+ * little longer than the Teams watchdog's default (3 checks 20 s apart, about
+ * 40 s from the first low reading).
  */
 
 /** How long the count must stay at one or fewer before the VP leaves. */

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A Virtual Participant on the Teams light-meetings client no longer leaves about 35 minutes into a meeting that is still running.** That client has no attendee-count badge, so the VP's meeting watchdog saw an unreadable count on every check, and once its 30-minute allowance for an unreadable count was spent it left with `endTrigger` `attendee-badge-missing`. The watchdog now reads the attendee count from the People pane on that client, and on Teams and Google Meet an unreadable count no longer counts toward leaving while a participant has spoken within the last 10 minutes. A meeting that ends without an end screen is still left, about 45 minutes after a participant last spoke at the default settings. See [How the VP decides a meeting is over](docs/virtual-participant.md). (#1148)
-- **A Virtual Participant on Zoom (browser join) or Amazon Chime no longer leaves on a single reading of one attendee.** It leaves as alone only once the attendee counter has stayed at one or fewer for 60 seconds, as on Teams, and on Chime one failed page check no longer ends the meeting (15 in a row do). (#1148)
+- **A Virtual Participant on Zoom (browser join) or Amazon Chime no longer leaves on a single reading of one attendee.** Its attendee counter's change events end the meeting only once the counter has stayed at one or fewer for 60 seconds, as on Teams, and on Chime one failed page check no longer ends the meeting (15 in a row do). (#1148)
 
 ## [0.4.0] - 2026-11-15
 

@@ -37,7 +37,7 @@ test('Teams and Meet pass participant activity to the shared watchdog', () => {
     assert.match(source('google-meet.ts'), /decideAttendeeAction\(reading, watchdogState, watchdogConfig, participantsActiveWithin\(\)\)/);
 });
 
-test('the Teams watchdog opens the People pane only in a silent meeting with no fresh count', () => {
+test('the Teams watchdog decides the People pane count through peopleCountStep and peopleCountAfterRead', () => {
     const body = source('teams.ts');
     assert.match(body, /this\.peopleCountForWatchdog\(page, !participantsActiveWithin\(\)\)/);
     assert.match(body, /const step = peopleCountStep\(this\.lastPeopleCount, before, mayOpen\);/);

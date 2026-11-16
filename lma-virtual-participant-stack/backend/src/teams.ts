@@ -43,6 +43,7 @@ import {
 } from './teams-chat-pane.js';
 import {
     parsePeopleTree,
+    PEOPLE_READ_INTERVAL_MS,
     PEOPLE_TREE_WAIT_MS,
     peopleCloseVerdict,
     PeoplePaneGuard,
@@ -153,16 +154,31 @@ export function peopleCountStep(
 }
 
 /**
- * The count after the pane was asked to read again from `readStartedAt`: a
- * count read since then counts whatever it shows; one that was not re-read
- * (the pane's own rate limit answered from its last list) counts only if it is
- * fresh and shows others present.
+ * The count after the pane was asked to read again from `readStartedAt`:
+ * - a count read since then counts whatever it shows;
+ * - one that was not re-read (the pane's own rate limit, PEOPLE_READ_INTERVAL_MS,
+ *   answered from its last list) counts if it is fresh and shows others present;
+ * - a count of one or fewer from a real read within the last read interval is
+ *   `hold`: the watchdog skips the poll, so the polls between two pane reads
+ *   neither repeat that reading (which would let one read decide "alone") nor
+ *   count as unreadable (which would reset the lonely run, so a VP left alone
+ *   would never leave). "Alone" is then decided on consecutive pane reads.
+ * - otherwise null: no usable count.
  */
-export function peopleCountAfterRead(last: PeopleCountReading, readStartedAt: number, now: number): number | null {
+export function peopleCountAfterRead(
+    last: PeopleCountReading,
+    readStartedAt: number,
+    now: number,
+): number | 'hold' | null {
     if (last === null) return null;
     if (last.at >= readStartedAt) return last.count;
-    return now - last.at <= PEOPLE_COUNT_FRESH_MS && last.count > 1 ? last.count : null;
+    const age = now - last.at;
+    if (last.count > 1) return age <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
+    return age <= PEOPLE_READ_INTERVAL_MS + PEOPLE_READ_SLACK_MS ? 'hold' : null;
 }
+
+/** How late a pane read may be (a skipped turn while the chat is in use) before its count stops holding. */
+export const PEOPLE_READ_SLACK_MS = 30_000;
 
 /**
  * Defaults for the attendee watchdog.
@@ -715,11 +731,11 @@ export default class Teams {
      *
      * Opening the pane has a cost: a close that cannot restore the chat turns
      * the VP's chat off for the meeting (closePeoplePane). So the pane is opened
-     * here only with `mayOpen` (the caller passes it in a silent meeting) and
-     * only when no fresh count exists; otherwise the count the consent flow last
-     * read is used as it is.
+     * here only when no fresh count shows others present, and then either in a
+     * silent meeting (`mayOpen`) or to re-check a count of one or fewer; in
+     * every other case the count last read is used as it is.
      */
-    private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | null> {
+    private async peopleCountForWatchdog(page: Page, mayOpen: boolean): Promise<number | 'hold' | null> {
         if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
         const before = Date.now();
         const step = peopleCountStep(this.lastPeopleCount, before, mayOpen);
@@ -2121,10 +2137,16 @@ export default class Teams {
                 // a minute (readPeopleRoster).
                 let countFrom = 'badge';
                 if (reading.state === 'BADGE_MISSING') {
-                    // The pane is opened for the watchdog only in a silent meeting:
-                    // while participants speak the meeting counts as live anyway,
-                    // and the count the consent flow last read is used if fresh.
+                    // The pane is opened for the watchdog in a silent meeting, and to
+                    // re-check a count of one or fewer; otherwise the count last read
+                    // is used if fresh (peopleCountStep).
                     const people = await this.peopleCountForWatchdog(page, !participantsActiveWithin());
+                    if (people === 'hold') {
+                        // A count of one from the last real read, between reads:
+                        // neither a new reading of it nor an unreadable poll, so this
+                        // poll is not decided and "alone" is counted in pane reads.
+                        return;
+                    }
                     if (people !== null) {
                         reading = { state: 'OK', count: people };
                         countFrom = 'People pane';
