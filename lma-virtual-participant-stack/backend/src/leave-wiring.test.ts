@@ -39,8 +39,12 @@ test('Teams and Meet pass participant activity to the shared watchdog', () => {
 
 test('the Teams watchdog decides the People pane count through peopleCountStep and peopleCountAfterRead', () => {
     const body = source('teams.ts');
-    assert.match(body, /this\.peopleCountForWatchdog\(page, !participantsActive\)/);
-    assert.match(body, /const step = peopleCountStep\(this\.lastPeopleCount, before, mayOpen\);/);
+    // The pane may be opened after PEOPLE_PANE_QUIET_MS without participant
+    // speech (not the 10-minute activity window), and at once when the badge
+    // read on the previous poll has gone (#1126).
+    assert.match(body, /const badgeWasRead = badgeReadLastPoll;\s*badgeReadLastPoll = reading\.state === 'OK';/);
+    assert.match(body, /const mayOpen = !participantsActiveWithin\(PEOPLE_PANE_QUIET_MS\);\s*const people = await this\.peopleCountForWatchdog\(page, mayOpen, badgeWasRead\);/);
+    assert.match(body, /const step = peopleCountStep\(this\.lastPeopleCount, before, mayOpen, badgeJustLost\);/);
     assert.match(body, /await this\.readPeopleRoster\(page\);\s*return peopleCountAfterRead\(this\.lastPeopleCount, before, Date\.now\(\)\);/);
 });
 
