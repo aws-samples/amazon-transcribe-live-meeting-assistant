@@ -2127,7 +2127,7 @@ export default class Teams {
         // default, but three sequential page.evaluate round trips at the 1000ms
         // minimum on a loaded host is a different matter.
         let pollInFlight = false;
-        // The previous poll read the badge itself; its loss is read from the People pane at once (peopleCountStep).
+        // The previous poll read the badge itself; on light-meetings its loss is read from the People pane at once (peopleCountStep).
         let badgeReadLastPoll = false;
         const attendeeWatchdog = setInterval(async () => {
             if (page.isClosed()) {
