@@ -89,6 +89,17 @@ None of these can tell who in the meeting asked: a chat sender is known only by 
 
 - **Current meeting only** (`current_meeting_only`, the default). The answer comes from the current meeting alone, through three tools: `current_meeting_transcript` (what was said, and the messages typed in the meeting chat, each as a line `[chat] <sender>: <message>`), `get_meeting_agenda`, and `get_meeting_frames` (what was shown on the shared screen: each frame's title, its text, when it was on screen and what was said meanwhile). No other tool is offered, and no user is acted for, so past meetings are not searched.
 - **Unrestricted** (`unrestricted`). Every tool above, acting for the meeting's LMA user (the Virtual Participant's user for the chat and the voice assistant; the user the transcript was streamed for, for the wake phrase). This is how in-meeting requests were answered before the setting existed. Choose it only where everyone who can join a meeting may read or hear what those tools return.
+- **Selected tools** (`selected`). The current meeting's three tools, plus each group of tools switched on in the Meeting Assistant section. Every switch is off until it is switched on, and the switches have no effect with the other two choices:
+
+  | Switch | Tools it offers |
+  |---|---|
+  | **In-meeting requests: web search** (`inMeetingWebSearch`) | `web_search` (Tavily). The query is written by the assistant from the request and the meeting, and is sent to Tavily. |
+  | **In-meeting requests: document knowledge base** (`inMeetingDocumentSearch`) | `document_search` |
+  | **In-meeting requests: the owner's past meetings** (`inMeetingMeetingHistory`) | `recent_meetings_list` and `meeting_history`, acting for the meeting's LMA user as **Unrestricted** does. With this switch off, no user is acted for. |
+  | **In-meeting requests: MCP servers** (`inMeetingMcpServers`) | Every installed MCP server |
+  | **In-meeting requests: Virtual Participant controls** (`inMeetingVpControls`) | `control_vnc_preview` and `control_vp_browser` |
+
+  A tool that is switched on but that the deployment cannot offer (web search with no Tavily API key, a knowledge base that is not deployed, MCP servers when none is installed or none could be loaded) is named to the assistant as not available, so that it says so when a request needs it. The meeting assistant function's log records, for every in-meeting request, the tool groups allowed, offered and unavailable.
 
 ## Knowledge Base Configuration
 

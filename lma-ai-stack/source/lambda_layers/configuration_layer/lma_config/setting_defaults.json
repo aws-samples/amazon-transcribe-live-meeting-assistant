@@ -89,6 +89,26 @@
     "inMeetingRequestTools": {
       "type": "string",
       "default": "current_meeting_only"
+    },
+    "inMeetingWebSearch": {
+      "type": "boolean",
+      "default": false
+    },
+    "inMeetingDocumentSearch": {
+      "type": "boolean",
+      "default": false
+    },
+    "inMeetingMeetingHistory": {
+      "type": "boolean",
+      "default": false
+    },
+    "inMeetingMcpServers": {
+      "type": "boolean",
+      "default": false
+    },
+    "inMeetingVpControls": {
+      "type": "boolean",
+      "default": false
     }
   },
   "meeting_processing": {

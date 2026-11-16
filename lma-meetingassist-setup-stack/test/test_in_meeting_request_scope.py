@@ -270,7 +270,7 @@ def test_an_unrestricted_chat_question_is_still_told_its_answer_is_posted_in_the
 # ── the meeting page's own chat ────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("value", ["current_meeting_only", "unrestricted"])
+@pytest.mark.parametrize("value", ["current_meeting_only", "unrestricted", "selected"])
 def test_the_meeting_pages_assistant_is_given_every_configured_tool_whatever_the_setting(
     built, configured, value
 ):
@@ -287,16 +287,114 @@ def test_the_meeting_pages_assistant_is_given_every_configured_tool_whatever_the
 def test_an_unknown_tool_scope_is_answered_as_the_meeting_page_is():
     # Only the named in-meeting callers are restricted; the in-app chat sends
     # no scope at all.
-    assert handler_module.in_meeting_scope({"userEmail": "owner@example.com"}) == (
-        "",
-        False,
-        "owner@example.com",
-    )
-    assert handler_module.in_meeting_scope({"user_email": "owner@example.com"}) == (
-        "",
-        False,
-        "owner@example.com",
-    )
+    for event in ({"userEmail": "owner@example.com"}, {"user_email": "owner@example.com"}):
+        scope = handler_module.in_meeting_scope(event)
+        assert scope.tool_scope == ""
+        assert scope.tool_groups == handler_module.ALL_TOOL_GROUPS
+        assert scope.current_meeting_only is False
+        assert scope.user_email == "owner@example.com"
+
+
+# ── selected tools ─────────────────────────────────────────────────────────
+
+# Each switch, and the tools it offers beyond the current meeting's.
+GROUP_SWITCHES = {
+    "inMeetingWebSearch": {"web_search"},
+    "inMeetingDocumentSearch": {"document_search"},
+    "inMeetingMeetingHistory": {"recent_meetings_list", "meeting_history"},
+    "inMeetingMcpServers": {"mcp_server"},
+    "inMeetingVpControls": {"control_vnc_preview", "control_vp_browser"},
+}
+
+
+def _selected(**switches):
+    return {"inMeetingRequestTools": "selected", **switches}
+
+
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_selected_tools_with_no_switch_on_offers_the_current_meeting_only(built, configured, event):
+    configured(_selected())
+    agent = built(event)
+    assert agent["tools"] == CURRENT_MEETING_TOOLS
+    assert agent["system_prompt"].endswith(handler_module.CURRENT_MEETING_SCOPE_NOTE)
+
+
+@pytest.mark.parametrize("switch", sorted(GROUP_SWITCHES))
+@pytest.mark.parametrize("event", IN_MEETING, ids=["chat", "voice", "wake-phrase"])
+def test_each_switch_offers_exactly_its_own_tools(built, configured, event, switch):
+    configured(_selected(**{switch: True}))
+    assert built(event)["tools"] == CURRENT_MEETING_TOOLS | GROUP_SWITCHES[switch]
+
+
+def test_every_switch_on_offers_every_tool(built, configured):
+    configured(_selected(**{switch: True for switch in GROUP_SWITCHES}))
+    assert built(VOICE)["tools"] == ALL_TOOLS
+
+
+def test_web_search_can_be_offered_without_the_knowledge_base_or_mcp_servers(built, configured):
+    configured(_selected(inMeetingWebSearch=True))
+    tools = built(VOICE)["tools"]
+    assert "web_search" in tools
+    assert not tools & {"document_search", "mcp_server", "meeting_history", "control_vp_browser"}
+
+
+@pytest.mark.parametrize("value", [False, 1, None, "yes"])
+def test_a_switch_saved_as_anything_but_true_is_off(built, configured, value):
+    configured(_selected(inMeetingWebSearch=value))
+    assert built(VOICE)["tools"] == CURRENT_MEETING_TOOLS
+
+
+@pytest.mark.parametrize("value", ["current_meeting_only", "unrestricted"])
+def test_the_switches_apply_only_with_selected_tools(built, configured, value):
+    configured({"inMeetingRequestTools": value, "inMeetingWebSearch": True})
+    expected = CURRENT_MEETING_TOOLS if value == "current_meeting_only" else ALL_TOOLS
+    assert built(VOICE)["tools"] == expected
+
+
+def test_selected_tools_act_for_the_owner_only_with_past_meetings_on(configured):
+    configured(_selected(inMeetingWebSearch=True, inMeetingMcpServers=True))
+    assert handler_module.in_meeting_scope(VOICE).user_email == ""
+    configured(_selected(inMeetingMeetingHistory=True))
+    assert handler_module.in_meeting_scope(VOICE).user_email == "owner@example.com"
+
+
+def test_a_selected_tools_request_is_told_to_use_only_the_tools_it_is_offered(built, configured):
+    configured(_selected(inMeetingWebSearch=True))
+    prompt = built(VOICE)["system_prompt"]
+    assert handler_module.SELECTED_TOOLS_SCOPE_NOTE in prompt
+    assert handler_module.CURRENT_MEETING_SCOPE_NOTE not in prompt
+    assert "not available on this deployment" not in prompt
+
+
+def test_an_allowed_tool_the_deployment_cannot_offer_is_named_to_the_assistant(
+    built, configured, monkeypatch
+):
+    monkeypatch.setattr(handler_module.tavily_secret, "is_configured", lambda: False)
+    configured(_selected(inMeetingWebSearch=True, inMeetingDocumentSearch=True))
+    agent = built(VOICE)
+    assert agent["tools"] == CURRENT_MEETING_TOOLS | {"document_search"}
+    prompt = agent["system_prompt"]
+    assert handler_module.UNAVAILABLE_TOOL_GROUP_TEXT["web_search"] in prompt
+    assert handler_module.UNAVAILABLE_TOOL_GROUP_TEXT["document_search"] not in prompt
+    assert "say that it is not available here" in prompt
+
+
+def test_mcp_servers_allowed_with_none_installed_are_named_unavailable(
+    built, configured, monkeypatch
+):
+    monkeypatch.setattr(handler_module, "load_account_mcp_servers", lambda: ([], False))
+    configured(_selected(inMeetingMcpServers=True))
+    assert handler_module.UNAVAILABLE_TOOL_GROUP_TEXT["mcp_servers"] in built(CHAT)["system_prompt"]
+
+
+def test_every_tool_group_has_a_switch_and_unavailable_text():
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"]
+    shipped = parameters.shipped_setting_defaults()["meeting_assist"]
+    assert set(handler_module.IN_MEETING_TOOL_GROUP_SETTINGS.values()) == set(GROUP_SWITCHES)
+    assert set(handler_module.UNAVAILABLE_TOOL_GROUP_TEXT) == handler_module.ALL_TOOL_GROUPS
+    for switch in GROUP_SWITCHES:
+        assert schema[switch]["type"] == "boolean"
+        assert shipped[switch] is False
 
 
 def test_every_offered_choice_is_one_the_assistant_recognises():

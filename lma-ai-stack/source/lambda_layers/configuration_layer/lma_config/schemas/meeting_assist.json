@@ -42,12 +42,43 @@
       "order": 3,
       "type": "string",
       "title": "In-meeting requests",
-      "description": "What the meeting assistant may use to answer a request made in the meeting by whoever is in it: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant, and a request spoken with the wake phrase. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers and the Virtual Participant browser controls. The meeting page's own assistant chat is always unrestricted.",
-      "enum": ["current_meeting_only", "unrestricted"],
+      "description": "What the meeting assistant may use to answer a request made in the meeting by whoever is in it: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant, and a request spoken with the wake phrase. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers and the Virtual Participant browser controls. Selected tools answers from the current meeting plus the tools switched on in the In-meeting requests settings below, each of which is off until it is switched on; the switches apply only with Selected tools. The meeting page's own assistant chat is always unrestricted.",
+      "enum": ["current_meeting_only", "unrestricted", "selected"],
       "enumLabels": {
         "current_meeting_only": "Current meeting only (default)",
-        "unrestricted": "Unrestricted: every tool, acting for the meeting's owner"
+        "unrestricted": "Unrestricted: every tool, acting for the meeting's owner",
+        "selected": "Selected tools: the current meeting, plus the tools switched on below"
       }
+    },
+    "inMeetingWebSearch": {
+      "order": 4,
+      "type": "boolean",
+      "title": "In-meeting requests: web search",
+      "description": "With In-meeting requests set to Selected tools, offer web search (Tavily) to requests made in the meeting. The search query is written by the assistant from the request and the meeting, and is sent to Tavily. Needs a Tavily API key on the stack (TavilyApiKey or TavilyApiKeySecretArn); without one, the assistant says that web search is not available."
+    },
+    "inMeetingDocumentSearch": {
+      "order": 5,
+      "type": "boolean",
+      "title": "In-meeting requests: document knowledge base",
+      "description": "With In-meeting requests set to Selected tools, offer the document knowledge base to requests made in the meeting, so anyone in the meeting can hear or read what it returns. Needs a document knowledge base on the stack."
+    },
+    "inMeetingMeetingHistory": {
+      "order": 6,
+      "type": "boolean",
+      "title": "In-meeting requests: the owner's past meetings",
+      "description": "With In-meeting requests set to Selected tools, offer the meeting owner's past meetings (their list, and search of their transcripts) to requests made in the meeting, acting for the owner whoever asked. Needs the transcript knowledge base on the stack."
+    },
+    "inMeetingMcpServers": {
+      "order": 7,
+      "type": "boolean",
+      "title": "In-meeting requests: MCP servers",
+      "description": "With In-meeting requests set to Selected tools, offer every installed MCP server to requests made in the meeting, using each server's own connection whoever asked."
+    },
+    "inMeetingVpControls": {
+      "order": 8,
+      "type": "boolean",
+      "title": "In-meeting requests: Virtual Participant controls",
+      "description": "With In-meeting requests set to Selected tools, offer the Virtual Participant's VNC preview and browser controls to requests made in the meeting."
     }
   },
   "additionalProperties": false

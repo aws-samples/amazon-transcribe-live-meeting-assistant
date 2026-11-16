@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Selected tools for in-meeting requests.** **Meeting Assistant › In-meeting requests** on the Configuration page has a third choice, **Selected tools**, which answers requests made in the meeting (`LMA ask` in the meeting chat, the voice assistant's lookups, and the wake phrase) from the current meeting plus the groups of tools an Admin switches on one at a time: web search, the document knowledge base, the owner's past meetings, MCP servers, and the Virtual Participant controls. For example, web search can be offered without the knowledge base or the MCP servers. Every switch is off until it is switched on, and **Current meeting only** remains the default. When a switched-on tool is not available on the deployment, such as web search with no Tavily API key, the assistant says that it is not available. See [In-meeting requests](docs/meeting-assistant.md#in-meeting-requests). (#1144)
+
 ## [0.4.0] - 2026-11-15
 
 Upgrading from 0.3.10: read the ⚠️ entries under Changed and the [v0.4.0 migration notes](docs/stack-updates-and-upgrades.md#v040) before updating. Several stack parameters are removed without their values being carried across, and some Amazon Bedrock models need access enabled first.
