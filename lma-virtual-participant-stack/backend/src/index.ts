@@ -252,7 +252,10 @@ const main = async (): Promise<void> => {
             const existingCallId = await statusManager.getCallId();
             
             if (existingCallId) {
-                // Use existing CallId from VP record
+                // Use existing CallId from VP record, for the meeting's events too
+                // (kinesis-stream.ts useCallId), so it is the one CallId throughout.
+                const { kinesisStreamManager } = await import('./kinesis-stream.js');
+                kinesisStreamManager.useCallId(existingCallId);
                 process.env.VP_CALL_ID = existingCallId;
                 bindLogContext({ callId: existingCallId });
                 log.info(`Using existing VP CallId: ${existingCallId}`);

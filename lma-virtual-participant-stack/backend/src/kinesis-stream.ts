@@ -643,6 +643,28 @@ class KinesisStreamManager {
   getCallId(): string {
     return this.callId;
   }
+
+  /**
+   * Use `callId` for every event of this meeting instead of the one generated
+   * at construction: the CallId already on the VP's record (index.ts), so the
+   * meeting record, its events and everything else the VP keys on the CallId
+   * (recordings, metering, consent, the MCP tools) agree. Before this, a VP
+   * whose record had a CallId sent its events under a second, generated one and
+   * then wrote that one back to the record (#1149).
+   *
+   * Only before the meeting's START event: after it, the events already sent
+   * name the other CallId, so the change is refused and false is returned.
+   */
+  useCallId(callId: string): boolean {
+    const trimmed = (callId || '').trim();
+    if (!trimmed) return false;
+    if (this.startSent && trimmed !== this.callId) {
+      log.warn(`[kinesis] CallId not changed to ${trimmed}: the meeting's START was already sent as ${this.callId}`);
+      return false;
+    }
+    this.callId = trimmed;
+    return true;
+  }
 }
 
 // Export singleton instance

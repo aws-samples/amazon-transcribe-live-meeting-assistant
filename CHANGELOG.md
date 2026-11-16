@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Virtual Participant whose record already has a CallId uses that CallId for its meeting.** A VP reads the CallId on its record when it starts, but sent the meeting's events (START, transcript segments, recording links, END) under a second, newly generated CallId and then wrote that one back to the record. Its video recording, metering and meeting-assistant requests used the first. The meeting's events now use the record's CallId, so everything the VP writes is on one meeting. This is the first step toward rejoining a meeting (#1149).
+
 ## [0.4.0] - 2026-11-15
 
 Upgrading from 0.3.10: read the ⚠️ entries under Changed and the [v0.4.0 migration notes](docs/stack-updates-and-upgrades.md#v040) before updating. Several stack parameters are removed without their values being carried across, and some Amazon Bedrock models need access enabled first.
