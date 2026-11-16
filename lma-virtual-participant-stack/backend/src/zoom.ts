@@ -1,4 +1,5 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
+import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
@@ -1607,13 +1608,18 @@ export default class Zoom {
         this.startCameraWatchdog(page);
 
         // Set up attendee change monitoring
+        // Leaves only once the count has stayed at one or fewer for
+        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts).
+        const aloneDebounce = new AloneDebounce(() => {
+            log.info(`LMA Virtual Participant got lonely and left (one attendee or fewer for ${ALONE_HOLD_MS / 1000} s).`);
+            details.start = false;
+            this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
+        });
+        page.once('close', () => aloneDebounce.cancel());
         await page.exposeFunction('attendeeChange', async (number: number) => {
             meetingConsent.noteAttendeeCount(number);
-            if (number <= 1) {
-                log.info('LMA Virtual Participant got lonely and left.');
-                details.start = false;
-                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
-            }
+            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${ALONE_HOLD_MS / 1000} s unless somebody is still here`);
+            aloneDebounce.note(number);
         });
 
         // Resolve attendee-counter selector node-side first so we can fall back to AI if Zoom changes the class.
