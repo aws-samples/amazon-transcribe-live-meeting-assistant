@@ -17,9 +17,16 @@ test('the VP counts as in the meeting from when it is admitted', () => {
     resetMeetingPhase();
 });
 
-test('admission is noted on the JOINED and ACTIVE statuses, and the watchdog reads it', () => {
-    const status = readFileSync(new URL('../src/status-manager.ts', import.meta.url), 'utf8');
-    assert.match(status, /if \(status === VP_STATUS\.JOINED \|\| status === VP_STATUS\.ACTIVE\) noteMeetingJoined\(\);/);
+test('the dialog watchdog decides with the admission flag', () => {
+    // The one wiring that cannot be driven without a page: the watchdog's call.
     const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
-    assert.match(watchdog, /decideDialogAction\(analysis, opts\.platform, actionText, meetingJoined\(\)\)/);
+    assert.match(watchdog, /decideDialogAction\([^)]*meetingJoined\(\)\)/);
+});
+
+test('a handler attaching the meeting consent flow marks the VP as in the meeting, consent or not', async () => {
+    const { attachMeetingConsent } = await import('./consent-runtime.js');
+    resetMeetingPhase();
+    attachMeetingConsent({} as never, { send: async () => true, leave: () => undefined });
+    assert.equal(meetingJoined(), true);
+    resetMeetingPhase();
 });

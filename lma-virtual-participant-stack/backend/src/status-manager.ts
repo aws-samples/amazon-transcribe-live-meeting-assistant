@@ -1,5 +1,4 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { noteMeetingJoined } from './meeting-phase.js';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { 
   ElasticLoadBalancingV2Client, 
@@ -14,6 +13,7 @@ import {
   DescribeTargetGroupsCommand
 } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { noteMeetingJoined } from './meeting-phase.js';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';

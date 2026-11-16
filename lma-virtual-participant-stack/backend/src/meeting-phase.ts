@@ -6,10 +6,17 @@
 
 /**
  * Whether the VP has been admitted to its meeting, for code that decides
- * differently before and after the join (the dialog watchdog). Set when the
- * VP reports JOINED or ACTIVE (status-manager.ts updateStatus), whether or not
- * that status write lands: the VP is in the meeting either way. A VP process
- * handles one meeting, so nothing clears it except the tests.
+ * differently before and after the join (the dialog watchdog). Set as soon as
+ * a platform handler is in the meeting (consent-runtime.ts
+ * attachMeetingConsent, which every handler calls once it is reading the
+ * chat, consent or not), and again when the VP reports JOINED or ACTIVE
+ * (status-manager.ts updateStatus), whether or not that status write lands.
+ *
+ * A VP process handles one meeting, so nothing clears it except the tests. A
+ * VP that a platform sends back to its lobby after admission therefore keeps
+ * treating unclassified dialogs as in-meeting, on purpose: it has already been
+ * admitted once, and the handlers' own lobby and removal detection decide what
+ * happens next, not the dialog watchdog.
  */
 
 let joined = false;

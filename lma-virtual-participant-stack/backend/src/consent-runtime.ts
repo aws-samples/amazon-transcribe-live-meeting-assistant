@@ -12,6 +12,7 @@
  * Kept apart from the flow itself so the flow's tests do not load the
  * transcription service and the recorders.
  */
+import { noteMeetingJoined } from './meeting-phase.js';
 import type { Page } from 'playwright-core';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -176,6 +177,10 @@ export function attachMeetingConsent(
         chatTurnedOff?: () => boolean;
     },
 ): void {
+    // The handler is in the meeting (meeting-phase.ts): noted here as well as
+    // on the JOINED / ACTIVE status, which on some paths comes only once
+    // transcription has started.
+    noteMeetingJoined();
     meetingConsent.attach({
         sendersHidden: options.sendersHidden,
         chatTurnedOff: options.chatTurnedOff,
