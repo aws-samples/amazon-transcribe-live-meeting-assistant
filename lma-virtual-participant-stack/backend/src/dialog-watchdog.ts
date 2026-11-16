@@ -17,8 +17,10 @@
  *   - CAPTCHA / LOGIN_REQUIRED / SSO_REDIRECT / BLOCKED → escalate via
  *                                  setManualActionRequired so the React UI
  *                                  shows the VNC takeover banner.
- *   - OTHER                       → leave alone (we don't auto-click
- *                                  anything we can't classify).
+ *   - OTHER                       → never clicked. Escalated only before
+ *                                  the VP is in the meeting, and only when
+ *                                  the model says a human is needed; once it
+ *                                  has joined, left alone (dialog-decision.ts).
  *
  * Used by every platform handler (Zoom, Teams, Webex, Chime, Google Meet). The
  * platform-specific dialog selectors are passed in so we cover platform-
@@ -26,6 +28,7 @@
  * for Teams, etc.).
  */
 import { Page } from 'playwright-core';
+import { meetingJoined } from './meeting-phase.js';
 import {
     analyzeUnknownDialog,
     isResolverEnabled,
@@ -151,7 +154,7 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         const actionText = analysis.primaryActionSelector
             ? await readActionText(page, analysis.primaryActionSelector)
             : null;
-        const decision = decideDialogAction(analysis, opts.platform, actionText);
+        const decision = decideDialogAction(analysis, opts.platform, actionText, meetingJoined());
         if (decision.kind === 'click') {
             const ok = await scrollIntoViewAndClick(page, decision.selector);
             if (ok) {

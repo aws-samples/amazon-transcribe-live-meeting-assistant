@@ -286,7 +286,7 @@ the sequence numbers involved.
 
 ### VP Stuck at MANUAL_ACTION_REQUIRED
 
-This status means the VP hit a CAPTCHA, 2FA prompt, SSO redirect, an unknown consent dialog, or another Zoom verification step that needs human input. To resolve:
+This status means the VP hit a CAPTCHA, 2FA prompt, SSO redirect, an unknown consent dialog, or another Zoom verification step that needs human input. Once the VP is in the meeting, a dialog the watchdog cannot classify (a panel loading, a feature tip) does not set this status; a CAPTCHA, sign-in, SSO or blocked dialog still does. To resolve:
 
 1. Open the meeting detail page for the affected VP (the Flashbar alert at the top of the LMA UI links directly to it).
 2. Open the **Live Virtual Participant View** panel and toggle **View Only** off so the noVNC viewer accepts your input.

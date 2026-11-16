@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ElementHandle, Page } from 'playwright-core';
+import { noteMeetingJoined } from './meeting-phase.js';
 import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 import { decideHangupHidden, HANGUP_HIDDEN_POLL_MS, type HangupHiddenState } from './end-signals.js';
 
@@ -1972,6 +1973,8 @@ export default class Teams {
             log.info("Your scribe was not admitted into the meeting.");
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
+        // Admitted: from here the dialog watchdog treats unclassified dialogs as in-meeting (meeting-phase.ts).
+        noteMeetingJoined();
 
         // Admitted — we are in the meeting and about to start transcribing.
         // Mark JOINED FIRST, before any chat/intro work. Everything below

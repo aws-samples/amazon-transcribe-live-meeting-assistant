@@ -489,3 +489,18 @@ test('resumedStatus never returns MANUAL_ACTION_REQUIRED', () => {
     assert.notEqual(resumedStatus(status), VP_STATUS.MANUAL_ACTION_REQUIRED, status);
   }
 });
+
+test('reporting JOINED or ACTIVE marks the VP as in the meeting, before the status write', async () => {
+  const { meetingJoined, resetMeetingPhase } = await import('./meeting-phase.js');
+  for (const report of ['setJoined', 'setActive']) {
+    resetMeetingPhase();
+    const { manager } = harness();
+    manager.signAndSendGraphQLRequest = async () => { throw new Error('the write did not land'); };
+    await manager[report]().catch(() => undefined);
+    assert.equal(meetingJoined(), true, report);
+  }
+  resetMeetingPhase();
+  const { manager } = harness();
+  await manager.updateStatus(VP_STATUS.JOINING);
+  assert.equal(meetingJoined(), false, 'JOINING is not yet in the meeting');
+});
