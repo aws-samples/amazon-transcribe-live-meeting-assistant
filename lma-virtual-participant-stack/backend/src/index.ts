@@ -57,6 +57,7 @@ import {
 } from './lib/profile.js';
 import { bindLogContext, createLogger, logMeetingPlatform } from './logger.js';
 import { meetingConsent, prepareMeetingConsent } from './consent-runtime.js';
+import { leaveWithinBudget, shouldLeaveAfterExit } from './meeting-leave.js';
 
 const log = createLogger('main');
 
@@ -135,6 +136,21 @@ let strandsWarmupTimer: NodeJS.Timeout | null = null;
 let browserContext: any = null;
 let activeProfileHandle: import('./profile-store.js').ProfileHandle | null = null;
 let profilePersisted = false;
+
+// The platform handler's leave for the meeting being joined, set once main()
+// has chosen the handler, so the signal path can leave the meeting before it
+// closes the browser (meeting-leave.ts).
+let leaveActiveMeeting: (() => Promise<boolean>) | null = null;
+
+// Leave the meeting on the platform within the leave budget. Never throws.
+const leaveMeetingBeforeClose = async (why: string): Promise<void> => {
+    const leave = leaveActiveMeeting;
+    if (!leave) return;
+    leaveActiveMeeting = null;
+    log.always(`Leaving the meeting (${why})...`);
+    const outcome = await leaveWithinBudget(leave);
+    log.always(`Leave the meeting: ${outcome}`);
+};
 
 // When main() began: the start of this Virtual Participant's own compute as the
 // meeting cost estimate counts it. Set in main() rather than at module load so
@@ -779,6 +795,9 @@ const main = async (): Promise<void> => {
             default:
                 throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);
         }
+        // Reads `meeting` when called, so it follows the hand-over from an ACS
+        // join to the browser join below.
+        leaveActiveMeeting = () => meeting.leaveMeeting(page);
 
         // The meeting's consent mode (docs/meeting-consent.md). An opt-in
         // meeting starts with capture withheld (details.start off) and its
@@ -890,8 +909,10 @@ const main = async (): Promise<void> => {
 
     } catch (error: any) {
         log.error('Meeting failed:', error.message);
-        
-        if (statusManager) {
+
+        // After a stop signal the join fails because the signal path closed
+        // the browser; that path records how the participant ended.
+        if (statusManager && !shutdownRequested) {
             // A thrown error carries no ExitInfo, so the prose shown to the
             // user is still derived by matching on the message. Each branch
             // also records which branch it took, so these rows are countable
@@ -913,6 +934,15 @@ const main = async (): Promise<void> => {
         }
         
     } finally {
+        // A stop signal has its own shutdown (signalHandler below), which
+        // leaves the meeting, sends END, records the status and exits. The
+        // handler's wait for the meeting to end can return during it (the
+        // leave makes the meeting end on the page), and running this cleanup
+        // as well would repeat that work and overwrite the recorded status.
+        if (shutdownRequested) {
+            log.info('Stop requested: the signal handler is shutting down.');
+            return;
+        }
         // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
         cleanupInProgress = true;
         log.info('Cleaning up...');
@@ -936,6 +966,15 @@ const main = async (): Promise<void> => {
             await meetingConsent.videoSettled();
         } catch (consentError) {
             log.error('Error stopping the consent flow:', consentError);
+        }
+
+        // Ended while still in the meeting (asked to leave, left alone, at its
+        // maximum duration): leave on the platform, so the meeting stops
+        // listing the VP now rather than when the platform times out the
+        // closed browser's connection. After the consent flow, whose evidence
+        // may still be a screenshot of the meeting page.
+        if (exitInfo && shouldLeaveAfterExit(exitInfo)) {
+            await leaveMeetingBeforeClose(`ended: ${exitInfo.reason}`);
         }
 
         // Stop key frame sampling before transcription, which sends the END
@@ -1100,12 +1139,22 @@ const main = async (): Promise<void> => {
 
 // Handle process signals for graceful shutdown 
 const signalHandler = async (signal: string) => {
+    if (shutdownRequested) {
+        log.always(`Received ${signal} while already shutting down; ignored`);
+        return;
+    }
     log.always(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
     beginShutdown();
-    
+
+    // Leave the meeting on the platform first, while the browser is still
+    // open and before the work below uses up the stop grace period. Without
+    // it the meeting keeps listing the VP until the platform times out its
+    // connection (#1127). Bounded by LEAVE_BUDGET_MS.
+    await leaveMeetingBeforeClose(`stopped by ${signal}`);
+
     // Deregister from ALB target group
     if (statusManager) {
         try {

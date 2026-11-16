@@ -329,6 +329,10 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-ai-stack/deployment/lma-ai-stack.yaml", ("vp", "lambdas", "vp_template")),
     ("lma-llm-template-setup-stack/**", "vp"),
     ("docs/virtual-participant.md", "vp"),
+    # ...and the VP stack's own template: the IntroMessage default
+    # (chat-commands.test.ts) and the MicroVM terminate-hook timeout
+    # (microvm-supervisor.test.ts).
+    (f"{VP}/template.yaml", "vp"),
     # The Lambda and layer tests read the UI's GraphQL subscriptions and its shared
     # helpers (speaker modes, channels, summary state) to keep the two sides equal.
     (f"{UI}/src/graphql/**", "lambdas"),

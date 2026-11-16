@@ -172,8 +172,21 @@ export default class TeamsSdk {
         };
     }
 
+    /**
+     * Leave the call, for a VP stopped from LMA while it is still in the
+     * meeting (index.ts). Shares leaveCall's once-only guard, so the leave
+     * this handler makes on its own way out is not repeated.
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        await this.leaveCall(page);
+        return true;
+    }
+
+    private leftCall = false;
+
     private async leaveCall(page: Page): Promise<void> {
-        if (page.isClosed()) return;
+        if (page.isClosed() || this.leftCall) return;
+        this.leftCall = true;
         try {
             const result = await Promise.race([
                 page.evaluate(() => (window as any).__lmaLeave?.()),

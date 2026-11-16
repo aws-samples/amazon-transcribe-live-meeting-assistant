@@ -246,6 +246,23 @@ export default class ZoomSdk {
         }, 10_000);
     }
 
+    private leftMeeting = false;
+
+    /**
+     * Leave the meeting through the Meeting SDK. Called on this handler's own
+     * way out and for a VP stopped from LMA (index.ts); runs once.
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        if (page.isClosed() || this.leftMeeting) return false;
+        this.leftMeeting = true;
+        try {
+            await page.evaluate(() => (window as any).__lmaLeave());
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
         const prepareAvatar = opts.prepareAvatar ?? (async () => {});
 
@@ -551,9 +568,7 @@ export default class ZoomSdk {
         clearInterval(monitorTimer);
         details.start = false;
 
-        try {
-            if (!page.isClosed()) await page.evaluate(() => (window as any).__lmaLeave());
-        } catch { /* noop */ }
+        await this.leaveMeeting(page);
         try {
             await this.server?.close();
         } catch { /* noop */ }

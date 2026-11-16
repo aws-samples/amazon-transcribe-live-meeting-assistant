@@ -77,7 +77,19 @@ export interface SupervisorState {
     appStarted: boolean;
     microvmId?: string;
     hooksSeen: string[];
+    /** Set once `/terminate` has asked the app to exit. */
+    terminating?: boolean;
+    /** The app's exit code once it has exited (1 when it ended on a signal). */
+    appExitCode?: number;
 }
+
+/**
+ * How long `/terminate` waits for the app to finish its shutdown before
+ * answering. Below the image's TerminateTimeoutInSeconds (30, template.yaml),
+ * so the hook answers in time even when the app does not exit. The app's
+ * shutdown leaves the meeting first, within LEAVE_BUDGET_MS (meeting-leave.ts).
+ */
+export const TERMINATE_WAIT_MS = 25_000;
 
 /**
  * Core hook-handling logic, separated from the HTTP server so it can be unit
@@ -86,10 +98,12 @@ export interface SupervisorState {
 export class Supervisor {
     readonly state: SupervisorState = { booted: false, appStarted: false, hooksSeen: [] };
     private app?: ChildProcess;
+    private appExited?: Promise<void>;
 
     constructor(
         private deps: SupervisorDeps,
         private env: Record<string, string | undefined>,
+        private terminateWaitMs: number = TERMINATE_WAIT_MS,
     ) {}
 
     /**
@@ -195,7 +209,14 @@ export class Supervisor {
             this.deps.log('[run] WARNING: no per-meeting config in payload');
         }
 
-        this.app = this.deps.spawnApp(this.env);
+        const app = this.deps.spawnApp(this.env);
+        this.app = app;
+        this.appExited = new Promise<void>((resolve) => {
+            app.once('exit', (code: number | null) => {
+                this.state.appExitCode = code === null ? 1 : code;
+                resolve();
+            });
+        });
         this.state.appStarted = true;
         return 200;
     }
@@ -211,14 +232,32 @@ export class Supervisor {
         return 200;
     }
 
-    /** `/terminate` — flush and stop the app before the VM goes away. */
+    /**
+     * `/terminate` — stop the app before the VM goes away, and answer once it
+     * has exited (or after terminateWaitMs), so its shutdown is not cut short
+     * by the VM being torn down as soon as the hook answers.
+     */
     async onTerminate(): Promise<number> {
         this.state.hooksSeen.push('terminate');
-        if (this.app && !this.app.killed) {
+        if (this.app && !this.app.killed && this.state.appExitCode === undefined) {
+            this.state.terminating = true;
             this.deps.log('[terminate] signalling app to exit');
-            // SIGTERM so the app's own shutdown path runs (recording flush,
-            // Kinesis end-meeting event, status update).
+            // SIGTERM so the app's own shutdown path runs (leaving the meeting,
+            // recording flush, Kinesis end-meeting event, status update).
             this.app.kill('SIGTERM');
+            let timer: NodeJS.Timeout | undefined;
+            const exited = await Promise.race([
+                (this.appExited ?? Promise.resolve()).then(() => true),
+                new Promise<boolean>((resolve) => {
+                    timer = setTimeout(() => resolve(false), this.terminateWaitMs);
+                }),
+            ]);
+            if (timer) clearTimeout(timer);
+            this.deps.log(
+                exited
+                    ? `[terminate] app exited code=${this.state.appExitCode}`
+                    : `[terminate] app still running after ${this.terminateWaitMs}ms; answering anyway`,
+            );
         }
         return 200;
     }
@@ -381,7 +420,7 @@ async function defaultWarmWorkload(): Promise<boolean> {
     }
 }
 
-function defaultSpawnApp(env: Record<string, string | undefined>): ChildProcess {
+function defaultSpawnApp(env: Record<string, string | undefined>, terminating: () => boolean): ChildProcess {
     const child = spawn('node', [APP_ENTRY], {
         env: env as NodeJS.ProcessEnv,
         stdio: 'inherit',
@@ -390,18 +429,25 @@ function defaultSpawnApp(env: Record<string, string | undefined>): ChildProcess 
     child.on('exit', (code, signal) => {
         log.info(`[supervisor] VP app exited code=${code} signal=${signal}`);
         // Mirror the app's exit status so MicroVM logs/metrics reflect reality.
-        process.exit(code === null ? 1 : code);
+        // During /terminate, a moment later, so the hook's answer (which waits
+        // for this exit) is written before the process goes.
+        const exitCode = code === null ? 1 : code;
+        if (terminating()) {
+            setTimeout(() => process.exit(exitCode), 1_000);
+            return;
+        }
+        process.exit(exitCode);
     });
     return child;
 }
 
 async function main(): Promise<void> {
     const { bootStack, stackHealthy } = await import('./microvm-stack.js');
-    const supervisor = new Supervisor(
+    const supervisor: Supervisor = new Supervisor(
         {
             bootStack,
             stackHealthy,
-            spawnApp: defaultSpawnApp,
+            spawnApp: (env) => defaultSpawnApp(env, () => supervisor.state.terminating === true),
             warmWorkload: defaultWarmWorkload,
             fetchConfig: defaultFetchConfig,
             // Few lines, and they are how a MicroVM's start and stop are

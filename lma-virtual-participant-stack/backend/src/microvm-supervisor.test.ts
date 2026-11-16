@@ -6,28 +6,45 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import type { ChildProcess } from 'child_process';
+import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import {
     Supervisor,
     hookNameFromPath,
     sanitizeForLog,
+    TERMINATE_WAIT_MS,
     type SupervisorDeps,
 } from './microvm-supervisor.js';
+import { LEAVE_BUDGET_MS } from './meeting-leave.js';
 import { getLogContext, logMeetingPlatform } from './logger.js';
 
-/** Minimal ChildProcess stand-in: records kill signals, never spawns anything. */
-function fakeChild(): ChildProcess & { killed: boolean; signals: string[] } {
+/**
+ * Minimal ChildProcess stand-in: records kill signals, never spawns anything.
+ * On SIGTERM it exits after `exitDelayMs`, or never when `exitDelayMs` is null
+ * (an app that does not finish its shutdown).
+ */
+function fakeChild(exitDelayMs: number | null = 0): ChildProcess & { killed: boolean; signals: string[] } {
     const signals: string[] = [];
-    return {
+    const emitter = new EventEmitter();
+    const child = {
         killed: false,
         signals,
         kill(sig?: string) {
             signals.push(sig || 'SIGTERM');
+            child.killed = true;
+            if (exitDelayMs !== null) setTimeout(() => emitter.emit('exit', 0, null), exitDelayMs);
             return true;
         },
-        on() {
-            return this;
+        on(event: string, listener: (...args: unknown[]) => void) {
+            emitter.on(event, listener);
+            return child;
         },
-    } as unknown as ChildProcess & { killed: boolean; signals: string[] };
+        once(event: string, listener: (...args: unknown[]) => void) {
+            emitter.once(event, listener);
+            return child;
+        },
+    };
+    return child as unknown as ChildProcess & { killed: boolean; signals: string[] };
 }
 
 interface Harness {
@@ -48,6 +65,8 @@ function harness(
         staged?: Record<string, string>;
         fetchThrows?: boolean;
         warmFails?: boolean;
+        exitDelayMs?: number | null;
+        terminateWaitMs?: number;
     } = {},
 ): Harness {
     const logs: string[] = [];
@@ -55,7 +74,7 @@ function harness(
     const fetchCalls: string[] = [];
     const warmCalls: number[] = [];
     const env: Record<string, string | undefined> = {};
-    const child = fakeChild();
+    const child = fakeChild(opts.exitDelayMs === undefined ? 0 : opts.exitDelayMs);
     let bootCalls = 0;
     const healthSeq = Array.isArray(opts.healthy) ? [...opts.healthy] : undefined;
 
@@ -84,7 +103,7 @@ function harness(
         log: (m) => logs.push(m),
     };
     return {
-        sup: new Supervisor(deps, env),
+        sup: new Supervisor(deps, env, opts.terminateWaitMs),
         env,
         logs,
         spawned,
@@ -231,6 +250,43 @@ test('/terminate signals the app with SIGTERM so its shutdown path runs', async 
     await h.sup.onRun(JSON.stringify({ microvmId: 'm', runHookPayload: '{"MEETING_ID":"1"}' }));
     assert.equal(await h.sup.onTerminate(), 200);
     assert.deepEqual(h.child.signals, ['SIGTERM']);
+});
+
+test('/terminate answers once the app has finished its shutdown', async () => {
+    // The VM can be torn down as soon as the hook answers, so the answer waits
+    // for the app's shutdown (which leaves the meeting first).
+    const h = harness({ exitDelayMs: 50 });
+    await h.sup.onRun(JSON.stringify({ microvmId: 'm', runHookPayload: '{"MEETING_ID":"1"}' }));
+    const started = Date.now();
+    assert.equal(await h.sup.onTerminate(), 200);
+    assert.ok(Date.now() - started >= 40, 'the answer waited for the exit');
+    assert.equal(h.sup.state.appExitCode, 0);
+    assert.equal(h.sup.state.terminating, true);
+    assert.ok(h.logs.some((l) => l.includes('[terminate] app exited code=0')));
+});
+
+test('/terminate answers after its wait when the app does not exit', async () => {
+    const h = harness({ exitDelayMs: null, terminateWaitMs: 30 });
+    await h.sup.onRun(JSON.stringify({ microvmId: 'm', runHookPayload: '{"MEETING_ID":"1"}' }));
+    assert.equal(await h.sup.onTerminate(), 200);
+    assert.equal(h.sup.state.appExitCode, undefined);
+    assert.ok(h.logs.some((l) => l.includes('app still running after 30ms')));
+});
+
+test('/terminate does not signal an app that has already exited', async () => {
+    const h = harness();
+    await h.sup.onRun(JSON.stringify({ microvmId: 'm', runHookPayload: '{"MEETING_ID":"1"}' }));
+    await h.sup.onTerminate();
+    assert.equal(await h.sup.onTerminate(), 200);
+    assert.deepEqual(h.child.signals, ['SIGTERM']);
+});
+
+test('the terminate wait fits the image terminate hook timeout, and the leave fits the wait', () => {
+    const template = readFileSync(new URL('../../template.yaml', import.meta.url), 'utf8');
+    const timeoutSeconds = Number(/TerminateTimeoutInSeconds:\s*(\d+)/.exec(template)?.[1]);
+    assert.ok(timeoutSeconds > 0, 'TerminateTimeoutInSeconds is set');
+    assert.ok(TERMINATE_WAIT_MS < timeoutSeconds * 1000);
+    assert.ok(LEAVE_BUDGET_MS < TERMINATE_WAIT_MS);
 });
 
 test('/terminate is safe when the app was never started', async () => {

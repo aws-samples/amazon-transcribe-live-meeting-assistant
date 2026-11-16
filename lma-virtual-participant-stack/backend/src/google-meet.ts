@@ -28,6 +28,7 @@
  * every assumption about Meet's page that still needs a live check marked there.
  */
 import { ElementHandle, Page } from 'playwright-core';
+import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { participantsActiveWithin } from './meeting-liveness.js';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
@@ -877,6 +878,14 @@ export default class GoogleMeet {
     }
 
     // ------------------------------------------------------------ the join
+
+    /**
+     * Leave the meeting with the platform's own Leave control, so the meeting
+     * stops listing the VP before the browser closes (meeting-leave.ts).
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return leaveByClicking(page, LEAVE_PLANS.GOOGLE_MEET);
+    }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
         // Meet has no credentialled sign-in phase, so the Simli avatar comes up now.
