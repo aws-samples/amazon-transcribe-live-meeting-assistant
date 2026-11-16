@@ -1461,9 +1461,13 @@ export class MeetingConsentFlow {
         this.noticeRepostTimer = setTimeout(() => {
             this.noticeRepostTimer = null;
             if (this.stopped || !this.record?.NoticeText) return;
-            // A notice still being posted takes the place of this one
-            // (postNotice skips it), so the newcomers stay to be named by the next.
-            const leadIn = this.noticeInFlight ? '' : repostLeadIn(this.roster.takeJoined());
+            // The newcomers are accounted for either way: by this repost, or by a
+            // notice that is still being posted (postNotice skips this one then),
+            // which reaches the chat while they are in the meeting. Without a
+            // notice in the chat yet, this is the first one to reach it, and
+            // says nothing about being resent.
+            const joined = this.roster.takeJoined();
+            const leadIn = this.noticeInFlight || !this.noticePosted ? '' : repostLeadIn(joined);
             void this.postNotice(this.record.NoticeText, true, leadIn);
         }, Math.max(wait, this.deps.noticeRepostMinMs ?? 3000));
     }

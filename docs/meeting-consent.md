@@ -439,7 +439,8 @@ beyond three), and reads *"New participant(s) detected - resending the consent
 notice."* where the platform gives only an attendee count. The line is joined to
 the start of the notice's first message and split with the notice, so it adds a
 message only when the notice is already close to the chat message length limit;
-it is part of the notice as it is recorded. The notice posted when the VP is admitted has no such line.
+it is part of the notice as it is recorded. The first notice to reach the chat,
+whether posted on admission or because somebody joined, has no such line.
 
 The VP records the notice as posted only once the platform reports that every
 message of it, the reply line included, is in the chat. When it is not (the

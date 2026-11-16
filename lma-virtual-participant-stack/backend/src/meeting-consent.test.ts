@@ -1015,7 +1015,7 @@ test("a notice posted again names who came onto the platform's participant list"
     h.flow.stop();
 });
 
-test('newcomers whose repost gave way to a notice still being posted are named by the next one', async () => {
+test('newcomers whose repost gave way to a notice still being posted are not named again by the next one', async () => {
     let names = ['Bo Chen'];
     const h = await harness({ readRoster: async () => names, noticeRepostMinMs: 0 });
     h.flow.noteAttendeeCount(2);
@@ -1024,7 +1024,7 @@ test('newcomers whose repost gave way to a notice still being posted are named b
     const flow = h.flow as unknown as { noticeInFlight: boolean };
     names = ['Bo Chen', 'Cy Diaz'];
     const posted = h.chat.length;
-    flow.noticeInFlight = true; // another notice is still being posted when the repost comes due
+    flow.noticeInFlight = true; // another notice is still being posted when the repost comes due; Cy Diaz sees it
     h.flow.noteAttendeeCount(3);
     await h.flow.syncRoster();
     await repostDue();
@@ -1036,10 +1036,22 @@ test('newcomers whose repost gave way to a notice still being posted are named b
     await repostDue();
     await h.settle();
     const starts = noticeStarts(h.chat);
-    assert.ok(
-        starts[starts.length - 1].startsWith('Cy Diaz and Dee Evans joined - resending the consent notice. '),
-        starts[starts.length - 1],
-    );
+    assert.ok(starts[starts.length - 1].startsWith('Dee Evans joined - resending the consent notice. '), starts[starts.length - 1]);
+    h.flow.stop();
+});
+
+test('the first notice to reach the chat has no lead-in, even when it is posted because somebody joined', async () => {
+    let failing = true;
+    const h = await harness({ noticeRepostMinMs: 0, sendFails: () => failing });
+    assert.equal(noticeStarts(h.chat).length, 0, 'the first notice could not be posted');
+    failing = false;
+    h.flow.noteAttendeeCount(2);
+    h.flow.noteAttendeeCount(3);
+    await repostDue();
+    await h.settle();
+    const starts = noticeStarts(h.chat);
+    assert.ok(starts.length >= 1, 'a notice reached the chat');
+    assert.ok(!starts[0].includes('resending'), starts[0]);
     h.flow.stop();
 });
 
