@@ -1,4 +1,5 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
+import { noteMeetingJoined } from './meeting-phase.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -1445,6 +1446,8 @@ export default class Zoom {
             log.info('LMA Virtual Participant was not admitted into the meeting.');
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
+        // Admitted: from here the dialog watchdog treats unclassified dialogs as in-meeting (meeting-phase.ts).
+        noteMeetingJoined();
 
         // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
         // Wrapped in safeEvaluate: this install observed hanging post-join

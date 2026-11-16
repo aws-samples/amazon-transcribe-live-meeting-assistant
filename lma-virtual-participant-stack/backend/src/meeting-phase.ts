@@ -6,10 +6,12 @@
 
 /**
  * Whether the VP has been admitted to its meeting, for code that decides
- * differently before and after the join (the dialog watchdog). Set as soon as
- * a platform handler is in the meeting (consent-runtime.ts
- * attachMeetingConsent, which every handler calls once it is reading the
- * chat, consent or not), and again when the VP reports JOINED or ACTIVE
+ * differently before and after the join (the dialog watchdog). Set at the
+ * first of: the handler's own admission check (zoom.ts and teams.ts, right
+ * after the VP is let in); the handler attaching the consent flow
+ * (consent-runtime.ts attachMeetingConsent, which every handler calls, consent
+ * or not, once it is reading the chat, so it covers the handlers without a
+ * separate admission check); and the VP reporting JOINED or ACTIVE
  * (status-manager.ts updateStatus), whether or not that status write lands.
  *
  * A VP process handles one meeting, so nothing clears it except the tests. A

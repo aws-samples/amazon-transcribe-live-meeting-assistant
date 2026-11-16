@@ -30,3 +30,10 @@ test('a handler attaching the meeting consent flow marks the VP as in the meetin
     assert.equal(meetingJoined(), true);
     resetMeetingPhase();
 });
+
+test('Zoom and Teams note admission right after their admission check', () => {
+    for (const file of ['zoom.ts', 'teams.ts']) {
+        const body = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+        assert.match(body, /if \(!admitted\) \{[\s\S]{0,300}?\n {8}\}\n[^\n]*\n {8}noteMeetingJoined\(\);/, file);
+    }
+});
