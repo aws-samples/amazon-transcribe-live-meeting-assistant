@@ -2187,11 +2187,20 @@ def configured_in_meeting_tool_groups() -> frozenset:
     each off unless it is saved as true: a switch that cannot be read, or that
     holds anything but a boolean true, leaves its group out.
     """
-    return frozenset(
-        group
-        for group, setting in IN_MEETING_TOOL_GROUP_SETTINGS.items()
-        if read_setting('meeting_assist', setting, default=False) is True
-    )
+    # One literal read_setting call per switch, so the settings checks
+    # (lma-ai-stack/test/test_parameter_backed_settings.py) can see each one.
+    switched_on = {
+        TOOL_GROUP_WEB_SEARCH: read_setting('meeting_assist', 'inMeetingWebSearch', default=False),
+        TOOL_GROUP_DOCUMENT_SEARCH: read_setting(
+            'meeting_assist', 'inMeetingDocumentSearch', default=False
+        ),
+        TOOL_GROUP_MEETING_HISTORY: read_setting(
+            'meeting_assist', 'inMeetingMeetingHistory', default=False
+        ),
+        TOOL_GROUP_MCP_SERVERS: read_setting('meeting_assist', 'inMeetingMcpServers', default=False),
+        TOOL_GROUP_VP_CONTROLS: read_setting('meeting_assist', 'inMeetingVpControls', default=False),
+    }
+    return frozenset(group for group, value in switched_on.items() if value is True)
 
 
 # Appended to the system prompt of every question typed in the meeting chat.
