@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 import { ElementHandle, Page } from 'playwright-core';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
@@ -118,6 +119,13 @@ export interface AttendeeWatchdogConfig {
      */
     maxSuppressedPolls: number;
 }
+
+/**
+ * How old the People pane's count may be and still stand in for a missing
+ * attendee badge: three of its one-a-minute reads, so one read skipped while
+ * the chat pane is in use does not lose it.
+ */
+export const PEOPLE_COUNT_FRESH_MS = 3 * 60_000;
 
 /**
  * Defaults for the attendee watchdog.
@@ -379,7 +387,22 @@ export function decideAttendeeAction(
     reading: AttendeeReading,
     state: AttendeeWatchdogState,
     config: AttendeeWatchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG,
+    participantsActive: boolean = false,
 ): AttendeeDecision {
+    // A participant spoke recently (meeting-liveness.ts): the meeting is live
+    // whatever the page shows, so an unreadable count says nothing and starts no
+    // run toward leaving. The bounds below then apply only to a meeting that is
+    // unreadable AND silent, which is the shape of one that ended without an end
+    // screen (#540). A readable count is decided as before, so the lonely exit
+    // still works while people talk.
+    if (reading.state !== 'OK' && participantsActive) {
+        state.consecutiveMissing = 0;
+        state.suppressedMissing = 0;
+        state.unreadableRun = 0;
+        state.consecutiveLonely = 0;
+        return { action: 'continue' };
+    }
+
     if (reading.state !== 'OK') {
         state.unreadableRun += 1;
         // Ceiling on the whole unreadable run, regardless of how it was classified
@@ -644,6 +667,22 @@ export default class Teams {
         }
     }
 
+    /** The People pane's last "In this meeting (N)" count, and when it was read. */
+    private lastPeopleCount: { count: number; at: number } | null = null;
+
+    /**
+     * The attendee count for the attendee watchdog when the badge is missing:
+     * the People pane's, on the light-meetings client, while its last reading
+     * is under PEOPLE_COUNT_FRESH_MS old. Null elsewhere, and when no list could
+     * be read, so the watchdog falls back to its unreadable-count handling.
+     */
+    private async peopleCountForWatchdog(page: Page): Promise<number | null> {
+        if (page.isClosed() || this.meetingOver || !isLightMeetingsUrl(page.url())) return null;
+        await this.readPeopleRoster(page);
+        const last = this.lastPeopleCount;
+        return last && Date.now() - last.at <= PEOPLE_COUNT_FRESH_MS ? last.count : null;
+    }
+
     /**
      * The participant list for the consent flow (consent-runtime.ts,
      * readRoster), from the People pane on the light-meetings client: opened,
@@ -707,6 +746,7 @@ export default class Teams {
             if (this.peopleGuard.disabled) return null;
             if (reading?.ok) {
                 log.info(`[teams-people] People pane read: ${reading.count} in the meeting, the VP included; ${reading.names.length} other name(s).`);
+                this.lastPeopleCount = { count: reading.count, at: Date.now() };
                 meetingConsent.noteAttendeeCount(reading.count);
             } else {
                 log.info(`[teams-people] no participant list read from the People pane (${opened === 'no-button' ? 'no People button' : opened === 'no-tree' ? `no list within ${PEOPLE_TREE_WAIT_MS / 1000} s` : 'list not readable'}).`);
@@ -2031,19 +2071,38 @@ export default class Teams {
                 // the two without depending on the toolbar being expanded or on the
                 // client's UI language. Only a miss with NO in-meeting chrome behind
                 // it is allowed to count toward leaving.
+                // The light-meetings client has no badge; its People pane has the
+                // count ("In this meeting (N)", the VP included), read at most once
+                // a minute (readPeopleRoster).
+                let countFrom = 'badge';
+                if (reading.state === 'BADGE_MISSING') {
+                    const people = await this.peopleCountForWatchdog(page);
+                    if (people !== null) {
+                        reading = { state: 'OK', count: people };
+                        countFrom = 'People pane';
+                    }
+                }
+
                 let inMeetingVia: string | null = null;
                 if (reading.state === 'BADGE_MISSING') {
                     inMeetingVia = await this.inMeetingSignal(page);
                     if (inMeetingVia !== null) reading = { state: 'BADGE_MISSING_IN_MEETING' };
                 }
 
-                const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
+                const participantsActive = participantsActiveWithin();
+                const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActive);
                 if (reading.state === 'OK') {
                     meetingConsent.noteAttendeeCount(reading.count);
                     log.info(
-                        `DEBUG: Teams attendee count: ${reading.count}, ` +
+                        `DEBUG: Teams attendee count (${countFrom}): ${reading.count}, ` +
                             `hasOthers: ${reading.count > 1}, ` +
                             `consecutiveLonely: ${watchdogState.consecutiveLonely}/${watchdogConfig.pollsBeforeEnd}`,
+                    );
+                } else if (participantsActive) {
+                    const ago = Math.round((Date.now() - (lastParticipantActivity().at ?? Date.now())) / 1000);
+                    log.info(
+                        'DEBUG: Teams attendee count unreadable, but a participant was active ' +
+                            `${ago} s ago (${lastParticipantActivity().source}) — the meeting is live; not counting toward leaving.`,
                     );
                 } else if (reading.state === 'BADGE_MISSING_IN_MEETING') {
                     const spent = watchdogState.suppressedMissing > watchdogConfig.maxSuppressedPolls;

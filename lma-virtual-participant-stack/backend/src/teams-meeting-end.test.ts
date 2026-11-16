@@ -531,3 +531,64 @@ test('a sub-second poll interval is rejected', () => {
     );
     assert.equal(resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: '1000' }).pollMs, 1000);
 });
+
+// ─── participants speaking keep an unreadable meeting live (#1148) ─────────
+
+test('an unreadable count never ends a meeting while participants are speaking', () => {
+    // The Teams light-meetings client has no attendee badge at all, so every poll
+    // is unreadable; before #1148 that ended every such meeting after
+    // maxSuppressedPolls + pollsBeforeEndMissing polls (~35 min) however live it was.
+    const state = fresh();
+    const { maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const fourHours = (4 * 60 * 60 * 1000) / DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs;
+    assert.ok(fourHours > maxSuppressedPolls + pollsBeforeEndMissing);
+    for (let i = 0; i < fourHours; i += 1) {
+        const reading: AttendeeReading = i % 2 === 0 ? MISSING_IN_MEETING : MISSING;
+        assert.equal(
+            decideAttendeeAction(reading, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true).action,
+            'continue',
+            `poll ${i}: participants are speaking, so the meeting is live`,
+        );
+    }
+    assert.equal(state.unreadableRun, 0);
+});
+
+test('once participants fall silent, an unreadable meeting ends on the usual bounds (the #540 guard still holds)', () => {
+    const state = fresh();
+    for (let i = 0; i < 200; i += 1) decideAttendeeAction(MISSING_IN_MEETING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    const { maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    let ended = -1;
+    for (let i = 1; i <= maxSuppressedPolls + pollsBeforeEndMissing + 5; i += 1) {
+        if (decideAttendeeAction(MISSING_IN_MEETING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, false).action === 'end') {
+            ended = i;
+            break;
+        }
+    }
+    assert.equal(ended, maxSuppressedPolls + pollsBeforeEndMissing, 'the silent run is counted from when the speaking stopped');
+});
+
+test('with an uncorroborated miss, silence ends the meeting after the missing bound, as before', () => {
+    const state = fresh();
+    decideAttendeeAction(MISSING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    let ended = -1;
+    for (let i = 1; i <= MISSING_BOUND + 1; i += 1) {
+        if (decideAttendeeAction(MISSING, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, false).action === 'end') {
+            ended = i;
+            break;
+        }
+    }
+    assert.equal(ended, MISSING_BOUND);
+});
+
+test('participants speaking do not stop the VP leaving when it is alone by a readable count', () => {
+    // A readable count is decided as before: the people who spoke may have left.
+    const state = fresh();
+    let decision = decideAttendeeAction(alone, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    for (let i = 1; i < ALONE_BOUND; i += 1) {
+        assert.equal(decision.action, 'continue');
+        decision = decideAttendeeAction(alone, state, DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true);
+    }
+    assert.equal(decision.action, 'end');
+    assert.equal((decision as { reason: string }).reason, 'alone-in-meeting');
+    assert.equal(decideAttendeeAction(busy, fresh(), DEFAULT_ATTENDEE_WATCHDOG_CONFIG, true).action, 'continue');
+});

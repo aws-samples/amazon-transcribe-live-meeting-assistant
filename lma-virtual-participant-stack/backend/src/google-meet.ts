@@ -27,6 +27,7 @@
  * The selectors and the text this relies on are in google-meet-page.ts, with
  * every assumption about Meet's page that still needs a live check marked there.
  */
+import { participantsActiveWithin } from './meeting-liveness.js';
 import { ElementHandle, Page } from 'playwright-core';
 
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
@@ -1203,7 +1204,7 @@ export default class GoogleMeet {
                 try {
                     const reading = await this.readAttendees(page);
                     if (reading.state === 'OK') meetingConsent.noteAttendeeCount(reading.count);
-                    const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
+                    const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActiveWithin());
                     // At debug level, and only when the reading or the watchdog's
                     // counters change: this runs on every poll for the whole meeting.
                     const attendeeLine = `${JSON.stringify(reading)} lonely=${watchdogState.consecutiveLonely} missing=${watchdogState.consecutiveMissing}`;
