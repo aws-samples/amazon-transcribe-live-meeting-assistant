@@ -1,4 +1,5 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { noteMeetingJoined } from './meeting-phase.js';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { 
   ElasticLoadBalancingV2Client, 
@@ -346,6 +347,8 @@ export class VirtualParticipantStatusManager {
     errorMessage?: string,
     endTrigger?: string,
   ): Promise<boolean> {
+    // Admitted to the meeting, whether or not the write below lands (meeting-phase.ts).
+    if (status === VP_STATUS.JOINED || status === VP_STATUS.ACTIVE) noteMeetingJoined();
     if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
       return false;
     }

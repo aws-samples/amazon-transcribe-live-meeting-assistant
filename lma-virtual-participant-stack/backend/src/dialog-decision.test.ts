@@ -173,3 +173,44 @@ test('manual action message falls back to a platform message', () => {
         'Manual action required in the WEBEX web client.',
     );
 });
+
+// ─── once the VP is in the meeting ────────────────────────────────────────
+
+const unclassified = (needsHuman: boolean): DialogAnalysis => ({
+    type: 'OTHER',
+    message: 'Whiteboard dashboard is loading in a modal window during meeting join.',
+    needsHuman,
+});
+
+test('an unclassified dialog the model says needs a human goes to one before the join', () => {
+    assert.deepEqual(decideDialogAction(unclassified(true), 'ZOOM', null), {
+        kind: 'escalate',
+        message: 'Whiteboard dashboard is loading in a modal window during meeting join.',
+    });
+    assert.deepEqual(decideDialogAction(unclassified(true), 'ZOOM', null, false), {
+        kind: 'escalate',
+        message: 'Whiteboard dashboard is loading in a modal window during meeting join.',
+    });
+});
+
+test('once the VP is in the meeting an unclassified dialog never marks it as needing manual action', () => {
+    assert.deepEqual(decideDialogAction(unclassified(true), 'ZOOM', null, true), { kind: 'ignore' });
+    assert.deepEqual(decideDialogAction(unclassified(false), 'ZOOM', null, true), { kind: 'ignore' });
+});
+
+test('a CAPTCHA or sign-in dialog still goes to a human in the meeting', () => {
+    for (const type of ['CAPTCHA', 'LOGIN_REQUIRED', 'SSO_REDIRECT', 'BLOCKED'] as const) {
+        const d = decideDialogAction({ type, message: `${type} shown`, needsHuman: true }, 'ZOOM', null, true);
+        assert.equal(d.kind, 'escalate', type);
+    }
+});
+
+test('in the meeting, a consent or recording notice is still clicked', () => {
+    const d = decideDialogAction(
+        { type: 'RECORDING_NOTICE', primaryActionSelector: '#ok', message: 'This meeting is being recorded.', needsHuman: false },
+        'ZOOM',
+        'Got it',
+        true,
+    );
+    assert.deepEqual(d, { kind: 'click', selector: '#ok' });
+});

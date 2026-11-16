@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Virtual Participant that is in the meeting is no longer marked as needing manual action because of a dialog the AI watchdog could not classify.** On Zoom, a whiteboard panel loading just after the join set the VP to **MANUAL_ACTION_REQUIRED** while it was capturing normally, and the LMA UI showed it as waiting for a human. Once the VP is in the meeting, an unclassified dialog is now left alone; a CAPTCHA, sign-in, SSO or blocked dialog still asks for a human, and an unclassified dialog before the join still does when the model says one is needed. (#1154)
+
 ### Added
 
 - **Selected tools for in-meeting requests.** **Meeting Assistant › In-meeting requests** on the Configuration page has a third choice, **Selected tools**, which answers requests made in the meeting (`LMA ask` in the meeting chat, the voice assistant's lookups, and the wake phrase) from the current meeting plus the groups of tools an Admin switches on one at a time: web search, the document knowledge base, the owner's past meetings, MCP servers, and the Virtual Participant controls. For example, web search can be offered without the knowledge base or the MCP servers. Every switch is off until it is switched on, and **Current meeting only** remains the default. When a switched-on tool is not available on the deployment, such as web search with no Tavily API key, the assistant says that it is not available. See [In-meeting requests](docs/meeting-assistant.md#in-meeting-requests). (#1144)
