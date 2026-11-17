@@ -2500,6 +2500,17 @@ Resources:
             ExposedHeaders:
               - ETag
             MaxAge: 3000
+          # The meeting page's Word and PDF summary downloads read the key
+          # frames they embed through the same presigned GET links the Summary
+          # tab shows them with; a script can read such a response only when
+          # the bucket answers the browser's CORS check. Every object still
+          # needs a presigned link to be read.
+          - Id: LmaKeyframeGetFromBrowser
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - "*"
+            MaxAge: 3000
 
   RecordingsBucketPolicy:
     Type: AWS::S3::BucketPolicy
