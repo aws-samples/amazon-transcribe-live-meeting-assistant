@@ -421,10 +421,12 @@ Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
 License; the catalog marks it `redistributable: false` and it is never the default.
 `parakeet-tdt-v2-sortformer` is for English-only deployments that want the most accurate
 transcript: full-precision Parakeet TDT 0.6B v2 finals with every word labelled by
-Nemotron 3 Diarization. On three clean AMI headset meetings it scored 4.7-5.9% word error
-rate on the microphone channel, against 6.2-7.2% for the default bundle and 5.2-5.9% for
-Amazon Transcribe, and 6.6-7.6% on the meeting channel, level with the default. It has no
-live preview, so a row appears only when its utterance ends.
+Nemotron 3 Diarization. Live on a dev stack with three clean AMI headset meetings it scored
+5.4-6.1% word error rate on the microphone channel, against 6.2-7.2% for the default bundle
+and 5.2-5.9% for Amazon Transcribe, and 6.1-8.0% on the meeting channel, against 6.7-7.5%
+and 5.1-6.8%. It averaged 3.0 cores, under the 4-vCPU baseline, so it costs the MicroVM's
+baseline (about $0.50 per audio hour in us-east-1), where the default bundle ran at about
+6.5 cores. It has no live preview, so a row appears only when its utterance ends.
 
 `parakeet-tdt-v3-live-kroko-sortformer` is the default bundle with Kroko, a lighter
 English streaming model, as its live preview. On three clean AMI headset meetings the
