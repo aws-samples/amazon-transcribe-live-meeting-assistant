@@ -97,6 +97,14 @@ updates:
       # makes tsc fail "Cannot find type definition file for 'uuid'" (TS2688).
       - dependency-name: "@types/uuid"
         versions: [">=10"]
+      # cloakbrowser >=0.7 downloads its patched Chromium only with a CloakBrowser
+      # license key, and a free key is always served the latest build, so the
+      # image would lose its pinned browser (the fingerprint the VP Dockerfile
+      # keeps fixed) and the keyless Docker build step would stop. Held at 0.6.x
+      # until a key and its storage are decided; the Dockerfile's
+      # CLOAKBROWSER_PIP_VERSION must move with it.
+      - dependency-name: cloakbrowser
+        versions: [">=0.7"]
       # react/react-dom track whatever @zoom/meetingsdk peers exactly, because
       # the Zoom participant uses it and the SDK declares *exact* react and
       # react-dom peers rather than a range (verified in its package.json).
