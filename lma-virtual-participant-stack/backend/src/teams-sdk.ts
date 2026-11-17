@@ -178,14 +178,14 @@ export default class TeamsSdk {
      * this handler makes on its own way out is not repeated.
      */
     public async leaveMeeting(page: Page): Promise<boolean> {
-        await this.leaveCall(page);
-        return true;
+        return this.leaveCall(page);
     }
 
     private leftCall = false;
 
-    private async leaveCall(page: Page): Promise<void> {
-        if (page.isClosed() || this.leftCall) return;
+    /** Leaves the call once. True only when this call made the leave and it completed in time. */
+    private async leaveCall(page: Page): Promise<boolean> {
+        if (page.isClosed() || this.leftCall) return false;
         this.leftCall = true;
         try {
             const result = await Promise.race([
@@ -193,8 +193,10 @@ export default class TeamsSdk {
                 new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
             ]);
             log.info(`[teams-sdk] left call (${result})`);
+            return result !== 'leave-timeout';
         } catch (err) {
             log.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
+            return false;
         }
     }
 
