@@ -165,6 +165,7 @@ bundle it was built from, and is decided as follows.
 | `parakeet-tdt-v3-titanet-small` and `parakeet-tdt-v3-sortformer` | The 25 of Parakeet TDT 0.6B v3's model card: the 20 above and Greek, Latvian, Lithuanian, Maltese and Slovenian |
 | `nemotron35-titanet-small` | The 28 base languages of the 32 locales Nemotron 3.5's model card lists as transcription-ready or broad-coverage, including Arabic, Chinese, Hindi, Japanese, Korean, Turkish and Vietnamese |
 | `parakeet-tdt-v3-live-titanet-small` and `parakeet-tdt-v3-live-sortformer` | English only, because their live preview model (FastConformer) is English only |
+| `parakeet-tdt-v3-live-kroko-sortformer` | English only, because its live preview model (Kroko) is English only |
 | Every other bundle | English only |
 
 The Transcription Engine section of the Configuration page lists the deployed
@@ -393,6 +394,7 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-nemotron35-sortformer` (default) | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-kroko-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Kroko live preview (English) | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-SA (not redistributable) + OpenMDW-1.1 + MIT (VAD) |
 
 The default is `parakeet-tdt-v3-live-nemotron35-sortformer`: Parakeet TDT 0.6B v3's finals, a punctuated Nemotron 3.5 preview
 of the utterance still being spoken, and Nemotron 3 Diarization labelling every word. Text
@@ -414,6 +416,15 @@ channels in the live runs, but it drops or merges more words than any other mode
 catalog. The earlier
 Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
 License; the catalog marks it `redistributable: false` and it is never the default.
+`parakeet-tdt-v3-live-kroko-sortformer` is the default bundle with Kroko, a lighter
+English streaming model, as its live preview. On three clean AMI headset meetings the
+Kroko preview's word error rate was 7.9-14.3%, against 20.2-33.1% for the default's
+Nemotron 3.5 preview and 16-21% for the FastConformer preview, at about a sixth of
+Nemotron 3.5's CPU per session; the finals still come from Parakeet v3. It lowers the MicroVM's bill only when the default would run above the
+4-vCPU baseline. Its preview is published under CC-BY-SA, a share-alike licence whose
+version the publisher does not state, so the catalog marks it `redistributable: false`
+and it is never the default. Like every model, it is downloaded when the image is built;
+no weights are kept in this repository.
 The Parakeet and Qwen3-ASR bundles run the offline engine described below. Qwen3-ASR
 gave the best transcript of everything measured (real-time factor 0.38, punctuated,
 "WACC" where every other model wrote "whack") but returns no word timings, so its speaker
@@ -496,6 +507,15 @@ The voice activity detector counts a 32 ms frame as speech at a Silero probabili
 "not sure" reaches the model. With the stricter 0.5 and 250 ms it used before, those
 replies were discarded as noise: on clean AMI headset audio about 2% of the microphone
 channel's words were lost that way.
+
+Some speech never reaches that threshold: a quiet aside, a word said under the breath.
+Between utterances the engine therefore also tracks each 20 ms frame's level against the
+channel's own noise floor. A stretch of 120 ms to 4 s that stands at least 15 dB above
+the floor (and above -55 dBFS) and that no utterance covers is decoded like one. Text it
+yields becomes an ordinary row; an empty decode adds nothing, so steady background noise
+at the floor costs nothing. On a clean AMI headset meeting held out from tuning this cut
+the microphone channel's word error rate from 7.1% to 5.9%. Set `ASR_VAD_RESCUE=0` in the
+image's environment to turn it off.
 
 **Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
 `parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
@@ -1280,6 +1300,7 @@ complying with their licences.**
 | NVIDIA FastConformer streaming EN 480 ms (ASR, FastConformer bundles and the Parakeet v3 live preview) | CC-BY-4.0 |
 | NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small` and the Nemotron 3.5 live preview) | OpenMDW-1.1 |
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
+| Kroko ASR streaming zipformer, English (live preview in `parakeet-tdt-v3-live-kroko-sortformer`; ONNX export by the sherpa-onnx maintainer) | CC-BY-SA (version not stated by the publisher), not redistributable |
 | NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
 | Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |
 | Cohere Transcribe 03-2026 2B (ASR, `cohere-transcribe-titanet-small`) | Apache-2.0 |

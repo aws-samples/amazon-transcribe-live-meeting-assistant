@@ -27,6 +27,7 @@ from asr_server.offline_recognizer import (
     OfflineDecoderBackend,
     OfflineModelConfig,
     OfflineResult,
+    RescueConfig,
     SherpaOfflineEngine,
     SherpaOfflineRecognizer,
     _require_offline_model_files,
@@ -678,3 +679,97 @@ def test_cohere_transcribe_is_built_through_its_own_constructor_with_its_languag
     assert calls["language"] == "de"
     assert calls["tokens"] == str(tmp_path / "tokens.txt")
     assert "joiner" not in calls
+
+
+def _rescue_rec(
+    backend: ScriptedOfflineBackend, rescue: RescueConfig | None = None
+) -> SherpaOfflineRecognizer:
+    return SherpaOfflineRecognizer(
+        _clean_gate([0.0]),
+        backend,
+        sample_rate=SAMPLE_RATE,
+        emit_segment_partial=False,
+        rescue=rescue if rescue is not None else RescueConfig(),
+    )
+
+
+def _feed(rec: SherpaOfflineRecognizer, *chunks: tuple[int, int]) -> list[Event]:
+    events: list[Event] = []
+    for frames, fill in chunks:
+        for _ in range(frames):
+            events.extend(rec.accept_pcm(_frames(1, fill=fill)))
+    return events
+
+
+def test_rescue_decodes_speech_level_audio_the_vad_did_not_open() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="okay")])
+    rec = _rescue_rec(backend)
+
+    events = _feed(rec, (10, 0), (8, 3000), (15, 0))
+
+    finals = [e for e in events if e.kind == "final"]
+    assert [e.text for e in finals] == ["okay"]
+    assert len(backend.calls) == 1
+    assert finals[0].start <= 10 * FRAME_MS / 1000.0
+    assert finals[0].end >= 18 * FRAME_MS / 1000.0
+
+
+def test_rescue_ignores_a_burst_shorter_than_its_minimum() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="click")])
+    rec = _rescue_rec(backend)
+
+    events = _feed(rec, (10, 0), (2, 3000), (15, 0))
+
+    assert events == []
+    assert backend.calls == []
+
+
+def test_rescue_ignores_steady_noise_at_the_channel_floor() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="noise")])
+    rec = _rescue_rec(backend)
+
+    events = _feed(rec, (200, 300))
+
+    assert events == []
+    assert backend.calls == []
+
+
+def test_rescue_is_off_without_a_rescue_config() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="okay")])
+    rec = SherpaOfflineRecognizer(
+        _clean_gate([0.0]), backend, sample_rate=SAMPLE_RATE, emit_segment_partial=False
+    )
+
+    events = _feed(rec, (10, 0), (8, 3000), (15, 0))
+
+    assert events == []
+    assert backend.calls == []
+
+
+def test_rescue_that_decodes_nothing_emits_nothing() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="")])
+    rec = _rescue_rec(backend)
+
+    events = _feed(rec, (10, 0), (8, 3000), (15, 0))
+
+    assert events == []
+    assert len(backend.calls) == 1
+
+
+def test_rescue_closes_an_open_candidate_at_end_of_audio() -> None:
+    backend = ScriptedOfflineBackend([OfflineResult(text="bye")])
+    rec = _rescue_rec(backend)
+
+    events = _feed(rec, (10, 0), (8, 3000))
+    events += rec.flush()
+
+    assert [e.text for e in events if e.kind == "final"] == ["bye"]
+
+
+def test_build_offline_config_enables_rescue_unless_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_model_env(monkeypatch)
+    assert build_offline_model_config(model_dir="/opt/models").rescue == RescueConfig()
+    monkeypatch.setenv("ASR_VAD_RESCUE", "0")
+    assert build_offline_model_config(model_dir="/opt/models").rescue is None
