@@ -157,8 +157,8 @@ assistant is a panel beside the tabs, on every tab; see
   means an answer finished while the panel was closed.
 - **Share**, **Download** and the **⋮** menu — **Download** is the one place a
   meeting is taken away from. It offers the summary and, once the meeting has
-  ended, the transcript, each as **Markdown (.md)**, **Word (.docx)** and
-  **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
+  ended, the transcript, each as **Markdown (.md)**, **Word (.docx)**, **PDF
+  (.pdf)** and **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
   be copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
   header confirms the copy). The summary can also be sent with **Email summary
   (beta)**. See [Transcript Downloads](#transcript-downloads). **Delete
@@ -559,13 +559,26 @@ page's header once the meeting has ended:
 - **Markdown (.md)** — a paragraph per segment, `**Speaker** [time]: text`, under
   the meeting's name, ID, date and duration
 - **Word (.docx)** — Word document format
+- **PDF (.pdf)** — the Word transcript's content, with the meeting's ID, date
+  and duration at the top and its consent record at the end when it has one
 - **Plain text (.txt)** — Plain text format
 - **Excel (.xlsx)** — Spreadsheet format with structured columns
 - **Copy to clipboard (Markdown)** — the Markdown document, copied
 
-The summary is offered in the same formats (Excel aside): Markdown and Word keep
-its sections as headings, with each picture of the shared screen written as its
-caption, and the consent record at the end when the meeting has one.
+The summary is offered in the same formats (Excel aside): Markdown, Word and PDF
+keep its sections as headings, and the consent record is at the end when the
+meeting has one. In the Word and PDF files each picture of the shared screen is
+a thumbnail, under its title and time; in Markdown and plain text it is written
+as its caption. At most 40 thumbnails are embedded, and a picture that cannot be
+fetched (its meeting's retention has removed it, for example) is written as its
+caption, so the download still completes. See
+[Meeting Video](meeting-video.md).
+
+The PDF files are built in the browser, and their text can be selected and
+searched. They are set in the standard PDF fonts, which cover Western European
+characters: other characters lose their accents or are written as `?`, so a
+meeting in another script reads better in the Word download. A long transcript
+is laid out in steps, so the page keeps responding while the PDF is built.
 
 All export formats include speaker attribution and timestamps for each segment,
 and every channel the meeting has. A meeting chat message is under its sender

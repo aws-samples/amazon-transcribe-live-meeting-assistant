@@ -11,6 +11,8 @@ import { detectedLanguagesText, meetingLanguages, showsLanguageMarks } from './d
 import { keyframeImagesAsText, summarySections } from './summary';
 import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
+import { fetchKeyframeThumbnails } from './keyframe-thumbnails';
+import { buildPdf } from './pdf-export';
 
 // eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file) =>
@@ -359,15 +361,18 @@ export const consentAsMarkdown = (consent) => {
 /**
  * The summary as a Markdown document: the meeting's name and facts, a section
  * per summary section (a `##` heading each), and the consent record when the
- * meeting has one. A key frame cannot travel with the file, so its picture is
- * written as its alt text.
+ * meeting has one. A key frame cannot travel with a Markdown file, so its
+ * picture is written as its alt text; with `keyframes: 'reference'` the
+ * picture's `![alt](keyframe:<FrameId>)` reference is kept, for the Word and
+ * PDF downloads, which embed the frame (summaryDocBlocks).
  */
-export const summaryDownloadMarkdown = (meeting, consent = null) => {
+export const summaryDownloadMarkdown = (meeting, consent = null, { keyframes = 'text' } = {}) => {
   const parts = [`# ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
   const sections = summarySections(meeting.callSummaryText);
   if (!sections.length) parts.push('## Summary\n\nNot available');
   sections.forEach(({ title, markdown }) => {
-    parts.push(`## ${title}\n\n${keyframeImagesAsText(markdown).trim()}`.trim());
+    const body = keyframes === 'reference' ? markdown : keyframeImagesAsText(markdown);
+    parts.push(`## ${title}\n\n${body.trim()}`.trim());
   });
   if (consent) parts.push(consentAsMarkdown(consent));
   return `${parts.join('\n\n')}\n`;
@@ -417,48 +422,176 @@ const inlineRuns = (text) => {
     });
 };
 
+// A line that is only pictures of key frames, `![alt](keyframe:<FrameId>)`, as
+// the screen share summary writes each one.
+const KEYFRAME_REFERENCE = /!\[([^\]\n]*)\]\(keyframe:([A-Za-z0-9_-]{1,64})\)/g;
+const keyframeLine = (line) => {
+  const references = [...line.matchAll(KEYFRAME_REFERENCE)];
+  if (!references.length || line.replace(KEYFRAME_REFERENCE, '').trim()) return null;
+  return references.map(([, alt, id]) => ({ kind: 'keyframe', id, alt }));
+};
+
 /**
  * A Markdown document as the blocks of a Word document: headings (`#` to
  * `###`, deeper ones as `###`), bullets (their indent as the level, up to 3)
- * and paragraphs, each as runs of text. Kept apart from the docx library so it
- * can be tested directly.
+ * and paragraphs, each as runs of text. A line that is only a picture of a key
+ * frame is a { kind: 'keyframe', id, alt } block, which summaryDocBlocks turns
+ * into the picture or its text; a picture within other text is its alt text.
+ * Kept apart from the docx library so it can be tested directly.
  */
 export const markdownToDocBlocks = (markdown) =>
   String(markdown ?? '')
     .split(/\r?\n/)
-    .map((line) => {
-      if (!line.trim()) return null;
-      const heading = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
-      if (heading) return { kind: 'heading', level: Math.min(heading[1].length, 3), runs: inlineRuns(heading[2]) };
-      const bullet = line.match(/^(\s*)[-*+]\s+(.*)$/);
+    .flatMap((line) => {
+      if (!line.trim()) return [];
+      const frames = keyframeLine(line);
+      if (frames) return frames;
+      const text = keyframeImagesAsText(line);
+      const heading = text.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (heading) return [{ kind: 'heading', level: Math.min(heading[1].length, 3), runs: inlineRuns(heading[2]) }];
+      const bullet = text.match(/^(\s*)[-*+]\s+(.*)$/);
       if (bullet) {
-        return { kind: 'bullet', level: Math.min(Math.floor(bullet[1].length / 2), 3), runs: inlineRuns(bullet[2]) };
+        return [{ kind: 'bullet', level: Math.min(Math.floor(bullet[1].length / 2), 3), runs: inlineRuns(bullet[2]) }];
       }
-      return { kind: 'paragraph', runs: inlineRuns(line.trim()) };
-    })
-    .filter(Boolean);
+      return [{ kind: 'paragraph', runs: inlineRuns(text.trim()) }];
+    });
 
-/** A Markdown document (the summary's) as a Word document, with its headings and bullets. */
-export const exportMarkdownToDocxFile = async (markdown, nameFile) => {
+// A key frame that is not embedded, written as today's text description.
+const keyframeAsText = (block) => ({ kind: 'paragraph', runs: inlineRuns(`(${block.alt})`) });
+
+/**
+ * The summary download (summaryDownloadMarkdown) as the blocks of a Word or
+ * PDF document, with each key frame as a picture: { kind: 'image', id, alt,
+ * image: { data, width, height } }, the thumbnail fetchKeyframeThumbnails
+ * fetched. Up to MAX_EMBEDDED_KEYFRAMES frames are embedded; a frame past that,
+ * or one that could not be fetched, is its alt text in brackets, as in the
+ * other downloads.
+ */
+export const summaryDocBlocks = async (meeting, consent = null, { loadThumbnails = fetchKeyframeThumbnails } = {}) => {
+  const blocks = markdownToDocBlocks(summaryDownloadMarkdown(meeting, consent, { keyframes: 'reference' }));
+  const frameIds = blocks.filter((block) => block.kind === 'keyframe').map((block) => block.id);
+  const thumbnails = frameIds.length && meeting.callId ? (await loadThumbnails(meeting.callId, frameIds)) || {} : {};
+  return blocks.map((block) => {
+    if (block.kind !== 'keyframe') return block;
+    const image = thumbnails[block.id];
+    return image ? { kind: 'image', id: block.id, alt: block.alt, image } : keyframeAsText(block);
+  });
+};
+
+/** Blocks (markdownToDocBlocks, summaryDocBlocks) as the content of a Word document. */
+export const docxChildren = (docx, blocks) => {
+  const headingLevels = [docx.HeadingLevel.HEADING_1, docx.HeadingLevel.HEADING_2, docx.HeadingLevel.HEADING_3];
+  return blocks.map((block) => {
+    if (block.kind === 'image') {
+      return new docx.Paragraph({
+        children: [
+          new docx.ImageRun({
+            type: 'jpg',
+            data: block.image.data,
+            transformation: { width: block.image.width, height: block.image.height },
+            altText: { name: block.alt || 'Shared screen', description: block.alt || 'Shared screen' },
+          }),
+        ],
+        spacing: { after: 120 },
+      });
+    }
+    if (block.kind === 'keyframe') return docxChildren(docx, [keyframeAsText(block)])[0];
+    const runs = block.runs.map((run) => new docx.TextRun({ text: run.text, bold: run.bold, color: run.color }));
+    if (block.kind === 'heading') {
+      return new docx.Paragraph({ children: runs, heading: headingLevels[block.level - 1], spacing: { after: 160 } });
+    }
+    if (block.kind === 'bullet') {
+      return new docx.Paragraph({ children: runs, bullet: { level: block.level }, spacing: { after: 60 } });
+    }
+    return new docx.Paragraph({ children: runs, spacing: { after: 120 } });
+  });
+};
+
+/** Blocks as a Word document, saved as `<nameFile>.docx`. */
+export const exportDocBlocksToDocxFile = async (blocks, nameFile) => {
   try {
     const docx = await import('docx');
-    const headingLevels = [docx.HeadingLevel.HEADING_1, docx.HeadingLevel.HEADING_2, docx.HeadingLevel.HEADING_3];
-    const children = markdownToDocBlocks(markdown).map((block) => {
-      const runs = block.runs.map((run) => new docx.TextRun({ text: run.text, bold: run.bold }));
-      if (block.kind === 'heading') {
-        return new docx.Paragraph({ children: runs, heading: headingLevels[block.level - 1], spacing: { after: 160 } });
-      }
-      if (block.kind === 'bullet') {
-        return new docx.Paragraph({ children: runs, bullet: { level: block.level }, spacing: { after: 60 } });
-      }
-      return new docx.Paragraph({ children: runs, spacing: { after: 120 } });
-    });
-    const doc = new docx.Document({ sections: [{ properties: {}, children }] });
+    const doc = new docx.Document({ sections: [{ properties: {}, children: docxChildren(docx, blocks) }] });
     saveBlob(await docx.Packer.toBlob(doc), `${nameFile}.docx`);
   } catch (error) {
     console.error('Error exporting to DOCX:', error);
     alert('Could not generate DOCX file. Please make sure you have an internet connection and try again.');
   }
+};
+
+/**
+ * Blocks as a PDF, saved as `<nameFile>.pdf` (see pdf-export.js). jsPDF is
+ * loaded here, the first time a PDF is asked for, so it is not in the page's
+ * bundle. `loadPdfLibrary` is for tests.
+ */
+export const exportBlocksToPdfFile = async (
+  blocks,
+  nameFile,
+  title,
+  { loadPdfLibrary = () => import('jspdf') } = {},
+) => {
+  try {
+    const { jsPDF } = await loadPdfLibrary();
+    const doc = await buildPdf(blocks, { jsPDF, title });
+    saveBlob(doc.output('blob'), `${nameFile}.pdf`);
+  } catch (error) {
+    console.error('Error exporting to PDF:', error);
+    alert('Could not generate PDF file. Please make sure you have an internet connection and try again.');
+  }
+};
+
+/** The summary as a Word document, with thumbnails of its key frames. */
+export const downloadSummaryAsDocx = async (meeting, consent = null, options = {}) => {
+  await exportDocBlocksToDocxFile(await summaryDocBlocks(meeting, consent, options), `Summary-${meeting.callId}`);
+};
+
+/** The summary as a PDF: the Word document's content, thumbnails included. */
+export const downloadSummaryAsPdf = async (meeting, consent = null, options = {}) => {
+  await exportBlocksToPdfFile(
+    await summaryDocBlocks(meeting, consent, options),
+    `Summary-${meeting.callId}`,
+    meetingTitle(meeting.callId),
+    options,
+  );
+};
+
+/**
+ * The transcript as the blocks of a PDF: the Word transcript's title and its
+ * segments, each "Speaker [start]: text" with the speaker in bold and the time
+ * in grey, after the meeting's facts as the Markdown download lists them, and
+ * the consent record at the end when the meeting has one.
+ */
+export const transcriptDocBlocks = (callTranscriptPerCallId, meeting, consent = null) => {
+  const rows = transcriptDownloadRows(callTranscriptPerCallId, meeting);
+  const head = markdownToDocBlocks(
+    [
+      `# Meeting Transcript: ${escapeMarkdown(meetingTitle(meeting.callId))}`,
+      markdownMeetingFacts(
+        meeting,
+        rows.map((row) => ({ languageCode: row.language })),
+      ),
+    ].join('\n\n'),
+  );
+  const segments = rows.map((row) => ({
+    kind: 'paragraph',
+    runs: [
+      { text: row.speaker, bold: true },
+      { text: ` [${rowStamp(row)}]: `, color: '666666' },
+      { text: String(row.transcript ?? '').trim() },
+    ],
+  }));
+  const tail = consent ? markdownToDocBlocks(consentAsMarkdown(consent)) : [];
+  return [...head, ...segments, ...tail];
+};
+
+/** The transcript as a PDF (transcriptDocBlocks). */
+export const downloadTranscriptAsPdf = async (callTranscriptPerCallId, meeting, consent = null, options = {}) => {
+  await exportBlocksToPdfFile(
+    transcriptDocBlocks(callTranscriptPerCallId, meeting, consent),
+    `Transcript-${meeting.callId}`,
+    `Meeting Transcript: ${meetingTitle(meeting.callId)}`,
+    options,
+  );
 };
 
 export const downloadTranscriptAsMarkdown = async (callTranscriptPerCallId, meeting) => {

@@ -1070,11 +1070,13 @@ describe('the Download menu', () => {
     expect(menuItems()).toEqual([
       'Markdown (.md)',
       'Word (.docx)',
+      'PDF (.pdf)',
       'Plain text (.txt)',
       'Copy to clipboard (Markdown)',
       'Email summary (beta)',
       'Markdown (.md)',
       'Word (.docx)',
+      'PDF (.pdf)',
       'Plain text (.txt)',
       'Excel (.xlsx)',
       'Copy to clipboard (Markdown)',

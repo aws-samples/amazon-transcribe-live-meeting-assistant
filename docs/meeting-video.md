@@ -218,10 +218,16 @@ How it is built:
   frame the summary names; selecting it opens the full picture. A picture whose
   signed link has lapsed (links last an hour) is read again by itself. A frame
   that cannot be read, because the meeting's retention has removed it, shows as
-  its alt text. Copy, download, Word, email, the meetings
-  list's summary preview and the MCP `get_meeting_summary` tool show the alt
-  text too, and so does the summary document for the meeting-history knowledge
-  base.
+  its alt text. The Word and PDF summary downloads embed a thumbnail of each
+  frame the summary names: the browser reads the frames through
+  `getVideoKeyframes`, as the Summary tab does, fetches each picture through
+  its signed link, and scales it to 480 pixels wide. At most 40 frames are
+  embedded; a frame past that, or one that cannot be fetched, is written as
+  its alt text. The fetch needs the recordings bucket's CORS rule for `GET`,
+  which the stack adds. Copy, the Markdown and plain-text downloads, email,
+  the meetings list's summary preview and the MCP `get_meeting_summary` tool
+  show the alt text too, and so does the summary document for the
+  meeting-history knowledge base.
 - A key frame of the meeting is the only picture a summary shows, in this
   section or any other. Any other image a summary names, by any address, is
   shown as its alt text and is not fetched.

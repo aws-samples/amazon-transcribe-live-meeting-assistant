@@ -7,19 +7,22 @@
 /**
  * What a meeting can be taken away as, for the page header's Download menu.
  * The summary and the transcript are offered in the same formats -- Markdown,
- * Word and plain text, and Excel for the transcript, which is a table -- and
- * each can be copied to the clipboard as Markdown. The summary can also be
- * sent as an email.
+ * Word, PDF and plain text, and Excel for the transcript, which is a table --
+ * and each can be copied to the clipboard as Markdown. The summary's Word and
+ * PDF files hold thumbnails of the key frames it names. The summary can also
+ * be sent as an email.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { getEmailFormattedSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import {
+  downloadSummaryAsDocx,
+  downloadSummaryAsPdf,
   downloadTranscriptAsDocx,
   downloadTranscriptAsExcel,
   downloadTranscriptAsMarkdown,
+  downloadTranscriptAsPdf,
   downloadTranscriptAsText,
-  exportMarkdownToDocxFile,
   exportToMarkdownFile,
   exportToTextFile,
   summaryDownloadMarkdown,
@@ -31,6 +34,7 @@ const logger = new ConsoleLogger('MeetingDownloads');
 const FORMAT_ITEMS = [
   { text: 'Markdown (.md)', id: 'markdown', iconName: 'file' },
   { text: 'Word (.docx)', id: 'docx', iconName: 'file' },
+  { text: 'PDF (.pdf)', id: 'pdf', iconName: 'file' },
   { text: 'Plain text (.txt)', id: 'text', iconName: 'file' },
 ];
 const COPY_ITEM = { text: 'Copy to clipboard (Markdown)', id: 'copy', iconName: 'copy' };
@@ -80,7 +84,9 @@ export const runSummaryAction = async (id, item, consent = null) => {
   if (id === 'markdown') {
     await exportToMarkdownFile(summaryDownloadMarkdown(item, consent), name);
   } else if (id === 'docx') {
-    await exportMarkdownToDocxFile(summaryDownloadMarkdown(item, consent), name);
+    await downloadSummaryAsDocx(item, consent);
+  } else if (id === 'pdf') {
+    await downloadSummaryAsPdf(item, consent);
   } else if (id === 'text') {
     await exportToTextFile(getTextFileFormattedMeetingDetails(item, consent), name);
   } else if (id === 'copy') {
@@ -94,12 +100,18 @@ export const runSummaryAction = async (id, item, consent = null) => {
   return true;
 };
 
-/** Runs one of TRANSCRIPT_DOWNLOAD_ITEMS for a meeting; resolves as runSummaryAction does. */
-export const runTranscriptDownload = async (id, callTranscriptPerCallId, item) => {
+/**
+ * Runs one of TRANSCRIPT_DOWNLOAD_ITEMS for a meeting; resolves as
+ * runSummaryAction does. `consent` is the meeting's consent record, which the
+ * PDF carries at its end.
+ */
+export const runTranscriptDownload = async (id, callTranscriptPerCallId, item, consent = null) => {
   if (id === 'markdown') {
     await downloadTranscriptAsMarkdown(callTranscriptPerCallId, item);
   } else if (id === 'docx') {
     await downloadTranscriptAsDocx(callTranscriptPerCallId, item);
+  } else if (id === 'pdf') {
+    await downloadTranscriptAsPdf(callTranscriptPerCallId, item, consent);
   } else if (id === 'text') {
     await downloadTranscriptAsText(callTranscriptPerCallId, item);
   } else if (id === 'excel') {
