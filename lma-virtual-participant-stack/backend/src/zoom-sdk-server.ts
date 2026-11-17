@@ -265,8 +265,11 @@ export function buildZoomSdkPageHtml(version: string): string {
         try { w.ZoomMtg.sendChat({ message: message }); return true; } catch (e) { log('sendChat error: ' + e); return false; }
       };
 
+      // Answers false when there is no SDK to leave with or it threw. The SDK
+      // does not wait for the leave to complete; true means it was asked.
       w.__lmaLeave = function () {
-        try { if (w.ZoomMtg) w.ZoomMtg.leaveMeeting({}); } catch (e) { log('leave error: ' + e); }
+        if (!w.ZoomMtg) return false;
+        try { w.ZoomMtg.leaveMeeting({}); return true; } catch (e) { log('leave error: ' + e); return false; }
       };
 
       function init() {

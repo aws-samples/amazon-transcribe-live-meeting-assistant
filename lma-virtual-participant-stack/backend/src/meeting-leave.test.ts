@@ -183,7 +183,7 @@ test('every platform handler has a leave', () => {
     assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', '__lmaLeave').includes('this.leftCall = true;'));
     assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', '__lmaLeave').includes('if (this.leftCall) return this.leaveOutcome ?? false;'));
     // It reports whether it left, so a timed-out or failed leave is not logged as left.
-    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', 'startCameraWatchdog').includes("this.leaveOutcome = result !== 'leave-timeout' && result !== 'no-leave-function';"));
+    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', 'startCameraWatchdog').includes("this.leaveOutcome = result === 'disconnected';"));
 });
 
 test('a stop signal runs the shared teardown, leaving first, then records the status and closes the browser', () => {

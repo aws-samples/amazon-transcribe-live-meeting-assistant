@@ -201,7 +201,9 @@ export default class TeamsSdk {
                 new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
             ]);
             log.info(`[teams-sdk] left call (${result})`);
-            this.leaveOutcome = result !== 'leave-timeout' && result !== 'no-leave-function';
+            // Only the page's own 'disconnected' is a completed leave: it also answers
+            // 'no-adapter', and 'timeout' when the call never reached Disconnected.
+            this.leaveOutcome = result === 'disconnected';
         } catch (err) {
             log.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
             this.leaveOutcome = false;
