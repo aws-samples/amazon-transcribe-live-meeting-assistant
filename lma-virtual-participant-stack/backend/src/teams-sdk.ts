@@ -183,21 +183,30 @@ export default class TeamsSdk {
 
     private leftCall = false;
 
-    /** Leaves the call once. True only when this call made the leave and it completed in time. */
+    /** The outcome of the one leave this handler makes; asked again, it answers the same. */
+    private leaveOutcome: boolean | null = null;
+
+    /**
+     * Leaves the call once. True when the leave was made and completed in time;
+     * a later call (the teardown after this handler's own exit left) answers the
+     * first call's outcome, so a leave that happened is not reported as not left.
+     */
     private async leaveCall(page: Page): Promise<boolean> {
-        if (page.isClosed() || this.leftCall) return false;
+        if (this.leftCall) return this.leaveOutcome ?? false;
+        if (page.isClosed()) return false;
         this.leftCall = true;
         try {
             const result = await Promise.race([
-                page.evaluate(() => (window as any).__lmaLeave?.()),
+                page.evaluate(() => (typeof (window as any).__lmaLeave === 'function' ? (window as any).__lmaLeave() : 'no-leave-function')),
                 new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
             ]);
             log.info(`[teams-sdk] left call (${result})`);
-            return result !== 'leave-timeout';
+            this.leaveOutcome = result !== 'leave-timeout' && result !== 'no-leave-function';
         } catch (err) {
             log.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
-            return false;
+            this.leaveOutcome = false;
         }
+        return this.leaveOutcome;
     }
 
     private startCameraWatchdog(page: Page): void {

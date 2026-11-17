@@ -252,15 +252,20 @@ export default class ZoomSdk {
      * Leave the meeting through the Meeting SDK. Called on this handler's own
      * way out and for a VP stopped from LMA (index.ts); runs once.
      */
+    /** The outcome of the one leave this handler makes; asked again, it answers the same. */
+    private leaveOutcome: boolean | null = null;
+
     public async leaveMeeting(page: Page): Promise<boolean> {
-        if (page.isClosed() || this.leftMeeting) return false;
+        if (this.leftMeeting) return this.leaveOutcome ?? false;
+        if (page.isClosed()) return false;
         this.leftMeeting = true;
         try {
             await page.evaluate(() => (window as any).__lmaLeave());
-            return true;
+            this.leaveOutcome = true;
         } catch {
-            return false;
+            this.leaveOutcome = false;
         }
+        return this.leaveOutcome;
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

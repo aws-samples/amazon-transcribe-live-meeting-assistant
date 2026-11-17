@@ -175,12 +175,15 @@ test('every platform handler has a leave', () => {
     // The SDK joins leave through the SDK, once, and on their own way out too.
     const zoomSdk = source('zoom-sdk.ts');
     assert.ok(between(zoomSdk, 'public async leaveMeeting(page: Page)', '__lmaLeave').includes('this.leftMeeting'));
+    // Asked again after its own exit left, each SDK handler answers the first leave's outcome.
+    assert.ok(between(zoomSdk, 'public async leaveMeeting(page: Page)', '__lmaLeave').includes('if (this.leftMeeting) return this.leaveOutcome ?? false;'));
     inOrder(zoomSdk, ['await Promise.race([this.endRequested, timeoutPromise])', 'await this.leaveMeeting(page);']);
     const teamsSdk = source('teams-sdk.ts');
     assert.ok(between(teamsSdk, 'public async leaveMeeting(page: Page)', '}').includes('return this.leaveCall(page);'));
     assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', '__lmaLeave').includes('this.leftCall = true;'));
+    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', '__lmaLeave').includes('if (this.leftCall) return this.leaveOutcome ?? false;'));
     // It reports whether it left, so a timed-out or failed leave is not logged as left.
-    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', 'startCameraWatchdog').includes("return result !== 'leave-timeout';"));
+    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', 'startCameraWatchdog').includes("this.leaveOutcome = result !== 'leave-timeout' && result !== 'no-leave-function';"));
 });
 
 test('a stop signal runs the shared teardown, leaving first, then records the status and closes the browser', () => {

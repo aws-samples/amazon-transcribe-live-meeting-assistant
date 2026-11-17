@@ -1112,6 +1112,10 @@ const signalHandler = async (signal: string) => {
     }
     log.always(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
+    // The teardown below runs the whole end of the meeting; a stray rejection in
+    // it is logged rather than turned into an emergency FAILED exit, as during
+    // main()'s own cleanup.
+    cleanupInProgress = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
     beginShutdown();
