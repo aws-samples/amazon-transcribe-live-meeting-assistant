@@ -593,6 +593,14 @@ Inside the container the three values are the `VP_ATTENDEE_POLL_MS`, `VP_POLLS_B
 
 Every decision the watchdog makes is logged. The resolved values appear once per meeting next to `Listening for attendee changes`; each poll logs its running counter against the bound that applies to it; and a poll held back by the in-meeting interface reports which element it matched, along with how much of the 30-minute allowance is left. If a Virtual Participant ever leaves a meeting that was still running, or lingers after one ended, those lines are what to look at first.
 
+### How the VP leaves the meeting
+
+When the VP ends while it is still in the meeting, it leaves through the platform's own controls before it closes its browser, so the meeting stops listing it straight away. Closing the browser alone leaves the VP on the participant list until the platform times out the connection, which took several minutes on Zoom. This applies when the VP is ended from LMA (the **End** button, `endVirtualParticipant`, `lma vp end` or the SDK), and when it leaves on its own after a chat command, an objection, being left alone, or reaching its maximum meeting duration. It does not apply when the host ended the meeting or removed the VP.
+
+The VP clicks **Leave** and, where the client asks, confirms (on Zoom, **Leave Meeting**; it never chooses **End Meeting for All**). The Zoom and Teams SDK joins leave through the SDK. The leave has 8 seconds; if the VP cannot find the control or the click does not finish in that time, it carries on with its shutdown and the platform removes it when the connection times out, as before.
+
+Ending a VP from LMA stops its ECS task or terminates its MicroVM. ECS sends the container `SIGTERM` and stops it 30 seconds later, and the MicroVM's terminate hook allows 30 seconds, waiting up to 25 for the VP to finish. The VP leaves the meeting first, then does the same end-of-meeting work as when a meeting ends on its own: it stops the consent flow (waiting at most 3 seconds for its evidence, rather than 15), stops key-frame sampling and transcription, uploads the audio and video recordings and sends their links to the meeting, and sends the meeting's END event. It then records its status and saves its browser profile. The leave and the consent waits take at most 16 seconds together; the uploads take as long as the recordings need, and one still running when the grace period ends is cut off. Its log has `Received SIGTERM`, then `Leaving the meeting (stopped by SIGTERM)` and `Leave the meeting: left` (or `not-left`, `timeout` or `failed`).
+
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 
 When the VP can't proceed without a human (Zoom 2FA passcode, CAPTCHA, SSO redirect, an unknown consent dialog the auto-dismiss handler can't classify), it sets status to `MANUAL_ACTION_REQUIRED` and surfaces:

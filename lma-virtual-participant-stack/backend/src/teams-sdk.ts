@@ -172,17 +172,43 @@ export default class TeamsSdk {
         };
     }
 
-    private async leaveCall(page: Page): Promise<void> {
-        if (page.isClosed()) return;
+    /**
+     * Leave the call, for a VP stopped from LMA while it is still in the
+     * meeting (index.ts). Shares leaveCall's once-only guard, so the leave
+     * this handler makes on its own way out is not repeated.
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return this.leaveCall(page);
+    }
+
+    private leftCall = false;
+
+    /** The outcome of the one leave this handler makes; asked again, it answers the same. */
+    private leaveOutcome: boolean | null = null;
+
+    /**
+     * Leaves the call once. True when the leave was made and completed in time;
+     * a later call (the teardown after this handler's own exit left) answers the
+     * first call's outcome, so a leave that happened is not reported as not left.
+     */
+    private async leaveCall(page: Page): Promise<boolean> {
+        if (this.leftCall) return this.leaveOutcome ?? false;
+        if (page.isClosed()) return false;
+        this.leftCall = true;
         try {
             const result = await Promise.race([
-                page.evaluate(() => (window as any).__lmaLeave?.()),
+                page.evaluate(() => (typeof (window as any).__lmaLeave === 'function' ? (window as any).__lmaLeave() : 'no-leave-function')),
                 new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
             ]);
             log.info(`[teams-sdk] left call (${result})`);
+            // Only the page's own 'disconnected' is a completed leave: it also answers
+            // 'no-adapter', and 'timeout' when the call never reached Disconnected.
+            this.leaveOutcome = result === 'disconnected';
         } catch (err) {
             log.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
+            this.leaveOutcome = false;
         }
+        return this.leaveOutcome;
     }
 
     private startCameraWatchdog(page: Page): void {

@@ -389,5 +389,29 @@ if [ "$DEV_MODE" = "true" ]; then
     echo "   To manually rebuild: docker exec -it lma-vp-local-test npm run build"
     npm run dev:watch
 else
-    node dist/index.js
+    # Under ECS this script is PID 1, and the kernel does not deliver a signal
+    # to PID 1 that it has no handler for. Run as a plain foreground child,
+    # the app never saw ECS's stop SIGTERM, so it could not leave the meeting
+    # or run its shutdown before the SIGKILL that follows. So run it in the
+    # background and pass SIGTERM/SIGINT on. `wait` returns as soon as a
+    # trapped signal arrives, so keep waiting until the app has exited.
+    node dist/index.js &
+    APP_PID=$!
+    trap 'kill -TERM "$APP_PID" 2>/dev/null' TERM
+    trap 'kill -INT "$APP_PID" 2>/dev/null' INT
+    wait "$APP_PID"
+    APP_STATUS=$?
+    while kill -0 "$APP_PID" 2>/dev/null; do
+        wait "$APP_PID"
+        APP_STATUS=$?
+    done
+    # A wait cut short by a trapped signal returns 128+n. If the app exited
+    # just then, bash still holds its status, and one more wait reads it
+    # (127 means it was already read).
+    if [ "$APP_STATUS" -gt 128 ]; then
+        wait "$APP_PID" 2>/dev/null
+        LAST_STATUS=$?
+        [ "$LAST_STATUS" -ne 127 ] && APP_STATUS=$LAST_STATUS
+    fi
+    exit "$APP_STATUS"
 fi

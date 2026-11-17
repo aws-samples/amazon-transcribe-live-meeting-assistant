@@ -44,6 +44,8 @@ const MARKERS: Marker[] = [
     { marker: 'Received SIGTERM', source: 'Received ${signal}', readers: 'troubleshooting agent' },
     { marker: 'due to external termination', readers: 'troubleshooting agent' },
     { marker: '[terminate] signalling app to exit', readers: 'troubleshooting agent (MicroVM supervisor)' },
+    { marker: 'Leaving the meeting (', readers: 'docs/virtual-participant.md (How the VP leaves the meeting)' },
+    { marker: 'Leave the meeting: ', source: 'Leave the meeting: ${outcome}', readers: 'docs/virtual-participant.md (How the VP leaves the meeting)' },
     { marker: '[stop-request]', readers: 'docs/voice-assistant.md' },
     { marker: '[tool-ack]', readers: 'docs/nova-sonic-setup.md' },
     { marker: '[translator-turn]', readers: 'docs/voice-assistant.md' },

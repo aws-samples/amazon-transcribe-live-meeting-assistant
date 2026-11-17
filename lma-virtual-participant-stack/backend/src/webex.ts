@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { Page, Frame } from 'playwright-core';
+import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
 import { transcriptionService } from './scribe.js';
@@ -276,6 +277,14 @@ export default class Webex {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
             return false;
         }
+    }
+
+    /**
+     * Leave the meeting with the platform's own Leave control, so the meeting
+     * stops listing the VP before the browser closes (meeting-leave.ts).
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return leaveByClicking(page, LEAVE_PLANS.WEBEX);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

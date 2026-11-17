@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ElementHandle, Page } from 'playwright-core';
 import { noteMeetingJoined } from './meeting-phase.js';
+import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { lastParticipantActivity, participantsActiveWithin } from './meeting-liveness.js';
 import { decideHangupHidden, HANGUP_HIDDEN_POLL_MS, type HangupHiddenState } from './end-signals.js';
 
@@ -1626,6 +1627,14 @@ export default class Teams {
             }
             chromeReported = null;
         }
+    }
+
+    /**
+     * Leave the meeting with the platform's own Leave control, so the meeting
+     * stops listing the VP before the browser closes (meeting-leave.ts).
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return leaveByClicking(page, LEAVE_PLANS.TEAMS);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

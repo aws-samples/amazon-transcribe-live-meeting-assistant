@@ -57,6 +57,8 @@ import {
 } from './lib/profile.js';
 import { bindLogContext, createLogger, logMeetingPlatform } from './logger.js';
 import { meetingConsent, prepareMeetingConsent } from './consent-runtime.js';
+import { leaveWithinBudget, shouldLeaveAfterExit } from './meeting-leave.js';
+import { MeetingTeardown } from './meeting-teardown.js';
 
 const log = createLogger('main');
 
@@ -135,6 +137,79 @@ let strandsWarmupTimer: NodeJS.Timeout | null = null;
 let browserContext: any = null;
 let activeProfileHandle: import('./profile-store.js').ProfileHandle | null = null;
 let profilePersisted = false;
+
+// The platform handler's leave for the meeting being joined, set once main()
+// has chosen the handler, so the signal path can leave the meeting before it
+// closes the browser (meeting-leave.ts).
+let leaveActiveMeeting: (() => Promise<boolean>) | null = null;
+
+// Leave the meeting on the platform within the leave budget. Never throws.
+const leaveMeetingBeforeClose = async (why: string): Promise<void> => {
+    const leave = leaveActiveMeeting;
+    if (!leave) return;
+    leaveActiveMeeting = null;
+    log.always(`Leaving the meeting (${why})...`);
+    const outcome = await leaveWithinBudget(leave);
+    log.always(`Leave the meeting: ${outcome}`);
+};
+
+// Stops the page's polling timers; set in main() once they are running. An
+// un-cleared interval holding a page reference would keep the process alive.
+let stopPageMonitors: () => void = () => {};
+
+// The end-of-meeting work, run once by whichever shutdown path gets there
+// first: main()'s cleanup or the stop-signal handler (meeting-teardown.ts).
+const meetingTeardown = new MeetingTeardown({
+    stopPageMonitors: () => stopPageMonitors(),
+    stopConsent: () => meetingConsent.stop(),
+    consentEvidenceSettled: () => meetingConsent.evidenceSettled(),
+    consentVideoSettled: () => meetingConsent.videoSettled(),
+    leaveMeeting: (why) => leaveMeetingBeforeClose(why),
+    stopKeyframes: () => keyframeSampler.stop(),
+    stopTranscription: () => transcriptionService.stopTranscription(),
+    finishAudioRecording: () => recordingService.cleanup(),
+    // Separate recording URL event (matching Python)
+    sendRecordingUrl: async (url) => {
+        const { kinesisStreamManager } = await import('./kinesis-stream.js');
+        await kinesisStreamManager.sendCallRecording(url);
+    },
+    finishVideoRecording: () => videoRecorder.stop(),
+    sendVideoRecordingUrl: async (url) => {
+        const { kinesisStreamManager } = await import('./kinesis-stream.js');
+        await kinesisStreamManager.sendCallVideoRecording(url);
+    },
+    sendEnd: () => sendEndMeeting(),
+});
+
+// Stop the services that outlive the meeting page: the Strands warmup timer,
+// the MCP handler, the Simli avatar and the agent speaking detector. Shared
+// by both shutdown paths. Never throws.
+const releaseServices = async (): Promise<void> => {
+    if (strandsWarmupTimer) {
+        clearInterval(strandsWarmupTimer);
+        strandsWarmupTimer = null;
+        log.info('✓ Strands warmup timer stopped');
+    }
+    if (mcpHandler) {
+        try {
+            await mcpHandler.stop();
+            log.info('✓ MCP handler stopped');
+        } catch (error) {
+            log.error('Error stopping MCP handler:', error);
+        }
+    }
+    try {
+        await simliAvatar.stop();
+        log.info('✓ Simli Avatar stopped');
+    } catch (error) {
+        log.error('Error stopping Simli Avatar:', error);
+    }
+    try {
+        agentSpeakingDetector.stop();
+    } catch (error) {
+        log.error('Error stopping AgentSpeakingDetector:', error);
+    }
+};
 
 // When main() began: the start of this Virtual Participant's own compute as the
 // meeting cost estimate counts it. Set in main() rather than at module load so
@@ -560,6 +635,11 @@ const main = async (): Promise<void> => {
     // avoid-resampling that can make PulseAudio re-negotiate the device
     // repeatedly, which glitches audio without dropping any RTP packet (#543).
     const stopDeviceSpecs = startAudioDeviceSpecPolling();
+    stopPageMonitors = () => {
+        stopAudioDiagnostics();
+        stopSenderBypass();
+        stopDeviceSpecs();
+    };
 
     // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
     // hanging on "Target crashed", so meeting.initialize() never returns and
@@ -779,6 +859,9 @@ const main = async (): Promise<void> => {
             default:
                 throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);
         }
+        // Reads `meeting` when called, so it follows the hand-over from an ACS
+        // join to the browser join below.
+        leaveActiveMeeting = () => meeting.leaveMeeting(page);
 
         // The meeting's consent mode (docs/meeting-consent.md). An opt-in
         // meeting starts with capture withheld (details.start off) and its
@@ -890,8 +973,10 @@ const main = async (): Promise<void> => {
 
     } catch (error: any) {
         log.error('Meeting failed:', error.message);
-        
-        if (statusManager) {
+
+        // After a stop signal the join fails because the signal path closed
+        // the browser; that path records how the participant ended.
+        if (statusManager && !shutdownRequested) {
             // A thrown error carries no ExitInfo, so the prose shown to the
             // user is still derived by matching on the message. Each branch
             // also records which branch it took, so these rows are countable
@@ -913,76 +998,27 @@ const main = async (): Promise<void> => {
         }
         
     } finally {
+        // A stop signal has its own shutdown (signalHandler below), which runs
+        // the same end-of-meeting work (meetingTeardown), records the status
+        // and exits. The handler's wait for the meeting to end can return
+        // during it (the leave makes the meeting end on the page), and running
+        // this cleanup as well would overwrite the recorded status.
+        if (shutdownRequested) {
+            log.info('Stop requested: the signal handler is shutting down.');
+            return;
+        }
         // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
         cleanupInProgress = true;
         log.info('Cleaning up...');
 
-        // Stop the diagnostics timer first: an un-cleared interval holding a page
-        // reference would keep the Node process alive past teardown.
-        try {
-            stopAudioDiagnostics();
-            stopSenderBypass();
-            stopDeviceSpecs();
-        } catch { /* never block cleanup */ }
-
-        // The consent flow's timers stop, and the evidence it is still storing
-        // is given a moment to land before the page closes.
-        try {
-            meetingConsent.stop();
-            await Promise.race([meetingConsent.evidenceSettled(), new Promise((r) => setTimeout(r, 15_000))]);
-            // Waited for in full: a stop the flow began (after an objection)
-            // must finish before the stop below, which would otherwise run
-            // over the same recording at the same time.
-            await meetingConsent.videoSettled();
-        } catch (consentError) {
-            log.error('Error stopping the consent flow:', consentError);
-        }
-
-        // Stop key frame sampling before transcription, which sends the END
-        // event, so a frame being captured is announced while the meeting is
-        // still open; in its own try so a failure cannot leave its FFmpeg
-        // process and share poll running.
-        try {
-            await keyframeSampler.stop();
-        } catch (keyframeError) {
-            log.error('Error stopping key frame sampling:', keyframeError);
-        }
-
-        try {
-            // Stop transcription service
-            await transcriptionService.stopTranscription();
-        } catch (error) {
-            log.error('Error stopping transcription:', error);
-        }
-
-        try {
-            // Stop recording and upload to S3
-            const recordingUrl = await recordingService.cleanup();
-            if (recordingUrl) {
-                log.info(`Recording uploaded: ${recordingUrl}`);
-                // Send separate recording URL event (matching Python)
-                const { kinesisStreamManager } = await import('./kinesis-stream.js');
-                await kinesisStreamManager.sendCallRecording(recordingUrl);
-            }
-
-            // Stop screen (video) recording and upload to S3. Independent of
-            // audio: a video failure must not block the END event below.
-            try {
-                const videoRecordingUrl = await videoRecorder.stop();
-                if (videoRecordingUrl) {
-                    log.info(`Video recording uploaded: ${videoRecordingUrl}`);
-                    const { kinesisStreamManager } = await import('./kinesis-stream.js');
-                    await kinesisStreamManager.sendCallVideoRecording(videoRecordingUrl);
-                }
-            } catch (videoError) {
-                log.error('Error handling video recording cleanup:', videoError);
-            }
-
-            // Always send END event
-            await sendEndMeeting();
-        } catch (error) {
-            log.error('Error handling recording cleanup:', error);
-        }
+        // The end-of-meeting work shared with the stop-signal path
+        // (meeting-teardown.ts): the consent flow, the leave when the VP is
+        // still in the meeting, key frames, transcription, the recordings and
+        // their links, and END.
+        await meetingTeardown.run({
+            stopping: false,
+            leaveReason: exitInfo && shouldLeaveAfterExit(exitInfo) ? `ended: ${exitInfo.reason}` : null,
+        });
 
         // On the FAILED path, wait for the user to click "Got it" on the
         // failure banner before tearing down the ALB/VNC mapping. Otherwise
@@ -1017,37 +1053,7 @@ const main = async (): Promise<void> => {
             }
         }
 
-        // Stop Strands warmup timer
-        if (strandsWarmupTimer) {
-            clearInterval(strandsWarmupTimer);
-            strandsWarmupTimer = null;
-            log.info('✓ Strands warmup timer stopped');
-        }
-
-        // Stop MCP handler
-        if (mcpHandler) {
-            try {
-                await mcpHandler.stop();
-                log.info('✓ MCP handler stopped');
-            } catch (error) {
-                log.error('Error stopping MCP handler:', error);
-            }
-        }
-
-        // Stop Simli Avatar
-        try {
-            await simliAvatar.stop();
-            log.info('✓ Simli Avatar stopped');
-        } catch (error) {
-            log.error('Error stopping Simli Avatar:', error);
-        }
-
-        // Stop agent speaking detector
-        try {
-            agentSpeakingDetector.stop();
-        } catch (error) {
-            log.error('Error stopping AgentSpeakingDetector:', error);
-        }
+        await releaseServices();
 
         // Close the browser context (persistent context owns the browser) and
         // sync the profile back to S3 so the next launch resumes the session.
@@ -1100,31 +1106,29 @@ const main = async (): Promise<void> => {
 
 // Handle process signals for graceful shutdown 
 const signalHandler = async (signal: string) => {
+    if (shutdownRequested) {
+        log.always(`Received ${signal} while already shutting down; ignored`);
+        return;
+    }
     log.always(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
+    // The teardown below runs the whole end of the meeting; a stray rejection in
+    // it is logged rather than turned into an emergency FAILED exit, as during
+    // main()'s own cleanup.
+    cleanupInProgress = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
     beginShutdown();
-    
-    // Deregister from ALB target group
-    if (statusManager) {
-        try {
-            await statusManager.deregisterFromTargetGroup();
-            log.info('✓ Deregistered from ALB target group');
-        } catch (error) {
-            log.error('Error deregistering from ALB:', error);
-        }
-    }
-    
-    // Send END event to Kinesis when externally terminated
-    try {
-        log.always('Sending END meeting event due to external termination...');
-        await sendEndMeeting();
-        log.info('END meeting event sent successfully');
-    } catch (error) {
-        log.error(`Failed to send END meeting event: ${error}`);
-    }
-    
+
+    // The same end-of-meeting work as main()'s cleanup (meeting-teardown.ts),
+    // ordered for the stop grace period: leave the meeting on the platform
+    // first, while the browser is still open (bounded by LEAVE_BUDGET_MS;
+    // without it the meeting keeps listing the VP until the platform times
+    // out its connection, #1127), then key frames, transcription, the
+    // recordings and their links, and END. If main()'s cleanup has already
+    // started it, this waits for that run instead of repeating it.
+    await meetingTeardown.run({ stopping: true, leaveReason: `stopped by ${signal}` });
+
     // Update status to COMPLETED when externally terminated
     if (statusManager && vpId) {
         try {
@@ -1134,39 +1138,18 @@ const signalHandler = async (signal: string) => {
             log.error(`Failed to update status during shutdown: ${error}`);
         }
     }
-    
-    // Stop Strands warmup timer
-    if (strandsWarmupTimer) {
-        clearInterval(strandsWarmupTimer);
-        strandsWarmupTimer = null;
-    }
 
-    // Stop MCP handler
-    if (mcpHandler) {
+    // Deregister from ALB target group
+    if (statusManager) {
         try {
-            await mcpHandler.stop();
+            await statusManager.deregisterFromTargetGroup();
+            log.info('✓ Deregistered from ALB target group');
         } catch (error) {
-            log.error('Error stopping MCP handler:', error);
+            log.error('Error deregistering from ALB:', error);
         }
-    }
-    
-    // Stop Simli Avatar
-    try {
-        await simliAvatar.stop();
-    } catch (error) {
-        log.error('Error stopping Simli Avatar:', error);
     }
 
-    // Stop services
-    try {
-        await transcriptionService.stopTranscription();
-        const recordingUrl = await recordingService.cleanup();
-        if (recordingUrl) {
-            log.info(`Final recording uploaded: ${recordingUrl}`);
-        }
-    } catch (error) {
-        log.error('Error during service cleanup:', error);
-    }
+    await releaseServices();
 
     // Close the browser and flush the profile to S3 so the session is
     // remembered next launch. nodemon/Ctrl-C deliver SIGTERM/SIGINT here, so

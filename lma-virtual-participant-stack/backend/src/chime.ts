@@ -1,4 +1,5 @@
 import { Page } from 'playwright-core';
+import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
@@ -61,6 +62,14 @@ export default class Chime {
             log.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
             return false;
         }
+    }
+
+    /**
+     * Leave the meeting with the platform's own Leave control, so the meeting
+     * stops listing the VP before the browser closes (meeting-leave.ts).
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return leaveByClicking(page, LEAVE_PLANS.CHIME);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {

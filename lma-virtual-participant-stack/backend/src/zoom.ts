@@ -1,5 +1,6 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { noteMeetingJoined } from './meeting-phase.js';
+import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
 import {
     decideZoomCounterAction,
@@ -708,6 +709,14 @@ export default class Zoom {
             await new Promise((r) => setTimeout(r, 50));
         }
         return true;
+    }
+
+    /**
+     * Leave the meeting with the platform's own Leave control, so the meeting
+     * stops listing the VP before the browser closes (meeting-leave.ts).
+     */
+    public async leaveMeeting(page: Page): Promise<boolean> {
+        return leaveByClicking(page, LEAVE_PLANS.ZOOM);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
