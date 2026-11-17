@@ -133,7 +133,32 @@ test('leaves on every exit that finds the VP still in the meeting, and on none t
     }
 });
 
-const source = (file: string): string => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+// Read from source, with comments dropped and whitespace collapsed, so a
+// reformat or a reworded comment does not fail these checks.
+const source = (file: string): string =>
+    readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/^\s*\/\/.*$/gm, ' ')
+        .replace(/\s+/g, ' ');
+
+/** The text from `start` up to `end` (both literal), failing when either is missing. */
+const between = (body: string, start: string, end: string): string => {
+    const from = body.indexOf(start);
+    assert.ok(from >= 0, `missing: ${start}`);
+    const to = body.indexOf(end, from + start.length);
+    assert.ok(to > from, `missing after ${start}: ${end}`);
+    return body.slice(from, to);
+};
+
+/** Asserts that each needle appears in `body`, in this order. */
+const inOrder = (body: string, needles: string[]): void => {
+    let at = -1;
+    for (const needle of needles) {
+        const next = body.indexOf(needle, at + 1);
+        assert.ok(next > at, `"${needle}" is not after the previous step`);
+        at = next;
+    }
+};
 
 test('every platform handler has a leave', () => {
     const plans: Record<string, string> = {
@@ -144,49 +169,82 @@ test('every platform handler has a leave', () => {
         'chime.ts': 'CHIME',
     };
     for (const [file, plan] of Object.entries(plans)) {
-        assert.match(
-            source(file),
-            new RegExp(`public async leaveMeeting\\(page: Page\\): Promise<boolean> \\{\\s*return leaveByClicking\\(page, LEAVE_PLANS\\.${plan}\\);`),
-            file,
-        );
+        const method = between(source(file), 'public async leaveMeeting(page: Page)', '}');
+        assert.ok(method.includes(`leaveByClicking(page, LEAVE_PLANS.${plan})`), file);
     }
-    // The SDK joins leave through the SDK, once, on their own way out too.
+    // The SDK joins leave through the SDK, once, and on their own way out too.
     const zoomSdk = source('zoom-sdk.ts');
-    assert.match(zoomSdk, /public async leaveMeeting\(page: Page\)[\s\S]{0,200}if \(page\.isClosed\(\) \|\| this\.leftMeeting\) return false;/);
-    assert.match(zoomSdk, /const exitInfo = await Promise\.race\(\[this\.endRequested, timeoutPromise\]\);[\s\S]{0,200}await this\.leaveMeeting\(page\);/);
+    assert.ok(between(zoomSdk, 'public async leaveMeeting(page: Page)', '__lmaLeave').includes('this.leftMeeting'));
+    inOrder(zoomSdk, ['await Promise.race([this.endRequested, timeoutPromise])', 'await this.leaveMeeting(page);']);
     const teamsSdk = source('teams-sdk.ts');
-    assert.match(teamsSdk, /public async leaveMeeting\(page: Page\): Promise<boolean> \{\s*await this\.leaveCall\(page\);/);
-    assert.match(teamsSdk, /if \(page\.isClosed\(\) \|\| this\.leftCall\) return;\s*this\.leftCall = true;/);
+    assert.ok(between(teamsSdk, 'public async leaveMeeting(page: Page)', '}').includes('await this.leaveCall(page);'));
+    assert.ok(between(teamsSdk, 'private async leaveCall(page: Page)', '__lmaLeave').includes('this.leftCall = true;'));
 });
 
-test('a stop signal leaves the meeting before anything else in its shutdown', () => {
+test('a stop signal runs the shared teardown, leaving first, then records the status and closes the browser', () => {
     const body = source('index.ts');
-    const handler = body.slice(body.indexOf('const signalHandler = async'), body.indexOf("process.on('SIGTERM'"));
-    const leave = handler.indexOf('await leaveMeetingBeforeClose(');
-    assert.ok(leave > 0, 'the signal handler leaves the meeting');
-    for (const later of ['deregisterFromTargetGroup', 'sendEndMeeting', 'setCompleted', 'stopTranscription', 'closeAndPersistProfile']) {
-        assert.ok(handler.indexOf(later) > leave, `${later} comes after the leave`);
+    const handler = between(body, 'const signalHandler = async', "process.on('SIGTERM'");
+    inOrder(handler, [
+        'if (shutdownRequested) {',
+        'return;',
+        'shutdownRequested = true;',
+        'meetingTeardown.run({ stopping: true, leaveReason:',
+        'setCompleted(',
+        'deregisterFromTargetGroup',
+        'releaseServices()',
+        'closeAndPersistProfile()',
+        'process.exit(0)',
+    ]);
+    // Nothing the teardown does is done again here.
+    for (const step of ['sendEndMeeting', 'stopTranscription', 'recordingService', 'videoRecorder', 'keyframeSampler']) {
+        assert.ok(!handler.includes(step), `${step} belongs to the shared teardown`);
     }
-    assert.match(handler, /if \(shutdownRequested\) \{[\s\S]{0,120}return;/, 'a second signal does not start a second shutdown');
-    assert.match(body, /leaveActiveMeeting = \(\) => meeting\.leaveMeeting\(page\);/);
+    assert.ok(body.includes('leaveActiveMeeting = () => meeting.leaveMeeting(page);'));
 });
 
-test("main()'s own cleanup leaves the meeting before closing the browser, and stands aside after a stop signal", () => {
+test('the shared teardown is given every end-of-meeting step', () => {
+    const wiring = between(source('index.ts'), 'const meetingTeardown = new MeetingTeardown({', ' }); ');
+    for (const step of [
+        'stopPageMonitors()',
+        'meetingConsent.stop()',
+        'meetingConsent.evidenceSettled()',
+        'meetingConsent.videoSettled()',
+        'leaveMeetingBeforeClose(why)',
+        'keyframeSampler.stop()',
+        'transcriptionService.stopTranscription()',
+        'recordingService.cleanup()',
+        'sendCallRecording(url)',
+        'videoRecorder.stop()',
+        'sendCallVideoRecording(url)',
+        'sendEndMeeting()',
+    ]) {
+        assert.ok(wiring.includes(step), step);
+    }
+});
+
+test("main()'s cleanup stands aside after a stop signal, and otherwise runs the shared teardown before closing the browser", () => {
     const body = source('index.ts');
-    const cleanup = body.slice(body.indexOf("    } finally {\n        // A stop signal has its own shutdown"));
-    assert.match(cleanup, /^ {4}\} finally \{[\s\S]{0,600}if \(shutdownRequested\) \{[\s\S]{0,120}return;/);
-    const leave = cleanup.indexOf('if (exitInfo && shouldLeaveAfterExit(exitInfo)) {');
-    assert.ok(leave > 0);
-    assert.ok(cleanup.indexOf('await closeAndPersistProfile();') > leave);
-    assert.ok(cleanup.indexOf('meetingConsent.stop();') < leave, 'after the consent flow has its evidence');
-    assert.match(body, /if \(statusManager && !shutdownRequested\) \{\s*\/\/ A thrown error carries no ExitInfo/);
+    const cleanup = body.slice(body.lastIndexOf('} finally {', body.indexOf('const signalHandler = async')));
+    inOrder(cleanup, [
+        '} finally {',
+        'if (shutdownRequested) {',
+        'return;',
+        'meetingTeardown.run({ stopping: false, leaveReason: exitInfo && shouldLeaveAfterExit(exitInfo)',
+        'releaseServices()',
+        'closeAndPersistProfile()',
+    ]);
+    assert.ok(body.includes('if (statusManager && !shutdownRequested) {'), 'a join failing after a stop signal records no FAILED');
 });
 
-test('the ECS entrypoint passes the stop signal to the app', () => {
-    const script = readFileSync(new URL('../entrypoint.sh', import.meta.url), 'utf8');
-    const start = script.slice(script.lastIndexOf('else\n'));
-    assert.match(start, /node dist\/index\.js &\n\s*APP_PID=\$!/);
-    assert.match(start, /trap 'kill -TERM "\$APP_PID" 2>\/dev\/null' TERM/);
-    assert.match(start, /trap 'kill -INT "\$APP_PID" 2>\/dev\/null' INT/);
-    assert.match(start, /while kill -0 "\$APP_PID" 2>\/dev\/null; do\s*wait "\$APP_PID"/);
+test('the ECS entrypoint passes the stop signal to the app and exits with its status', () => {
+    const script = readFileSync(new URL('../entrypoint.sh', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    inOrder(script, [
+        'node dist/index.js & APP_PID=$!',
+        `trap 'kill -TERM "$APP_PID" 2>/dev/null' TERM`,
+        `trap 'kill -INT "$APP_PID" 2>/dev/null' INT`,
+        'wait "$APP_PID" APP_STATUS=$?',
+        'while kill -0 "$APP_PID" 2>/dev/null; do wait "$APP_PID"',
+        'if [ "$APP_STATUS" -gt 128 ]; then wait "$APP_PID"',
+        'exit "$APP_STATUS"',
+    ]);
 });

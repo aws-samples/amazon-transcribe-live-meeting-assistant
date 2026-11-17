@@ -399,10 +399,19 @@ else
     APP_PID=$!
     trap 'kill -TERM "$APP_PID" 2>/dev/null' TERM
     trap 'kill -INT "$APP_PID" 2>/dev/null' INT
-    APP_STATUS=0
+    wait "$APP_PID"
+    APP_STATUS=$?
     while kill -0 "$APP_PID" 2>/dev/null; do
         wait "$APP_PID"
         APP_STATUS=$?
     done
+    # A wait cut short by a trapped signal returns 128+n. If the app exited
+    # just then, bash still holds its status, and one more wait reads it
+    # (127 means it was already read).
+    if [ "$APP_STATUS" -gt 128 ]; then
+        wait "$APP_PID" 2>/dev/null
+        LAST_STATUS=$?
+        [ "$LAST_STATUS" -ne 127 ] && APP_STATUS=$LAST_STATUS
+    fi
     exit "$APP_STATUS"
 fi
