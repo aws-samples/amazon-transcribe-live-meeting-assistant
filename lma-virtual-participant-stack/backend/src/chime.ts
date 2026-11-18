@@ -1,6 +1,7 @@
 import { Page } from 'playwright-core';
 import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { recordTranscriptionPause } from './transcription-pause.js';
@@ -188,15 +189,18 @@ export default class Chime {
         // Set up attendee change monitoring
         // Leaves only once the count has stayed at one or fewer for
         // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts).
+        // Until somebody else has been counted, also not before the
+        // first-attendee wait is over (first-attendee-wait.ts).
+        const firstAttendee = new FirstAttendeeWait();
         const aloneDebounce = new AloneDebounce(() => {
             log.info(`LMA Virtual Participant got lonely and left (one attendee or fewer for ${ALONE_HOLD_MS / 1000} s).`);
             details.start = false;
             this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
-        });
+        }, ALONE_HOLD_MS, firstAttendee);
         page.once('close', () => aloneDebounce.cancel());
         await page.exposeFunction('attendeeChange', async (number: number) => {
             meetingConsent.noteAttendeeCount(number);
-            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${ALONE_HOLD_MS / 1000} s unless somebody is still here`);
+            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${Math.round(Math.max(ALONE_HOLD_MS, firstAttendee.remainingMs()) / 1000)} s unless somebody is still here`);
             aloneDebounce.note(number);
         });
 

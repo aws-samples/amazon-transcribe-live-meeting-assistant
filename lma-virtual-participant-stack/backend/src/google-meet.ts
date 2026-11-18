@@ -78,6 +78,7 @@ import {
     timeFromMeetGroupHeader,
 } from './google-meet-page.js';
 import { createLogger } from './logger.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 
 /** Fresh page loads tried after Meet refuses the guest, before or just after the join click. */
 export const MEET_REFUSAL_RETRIES = 4;
@@ -1204,6 +1205,10 @@ export default class GoogleMeet {
             // count with the Leave call button on screen is not a strike.
             const watchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
             const watchdogState: AttendeeWatchdogState = { consecutiveLonely: 0, consecutiveMissing: 0, suppressedMissing: 0, unreadableRun: 0 };
+            // Until somebody else has been counted, a lonely count does not end
+            // the meeting before the first-attendee wait is over (first-attendee-wait.ts).
+            const firstAttendee = new FirstAttendeeWait();
+            let firstAttendeeWaitReported = false;
             let attendeePollInFlight = false;
             let lastAttendeeLine = '';
             log.info(`Listening for attendee changes (poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}).`);
@@ -1212,7 +1217,10 @@ export default class GoogleMeet {
                 attendeePollInFlight = true;
                 try {
                     const reading = await this.readAttendees(page);
-                    if (reading.state === 'OK') meetingConsent.noteAttendeeCount(reading.count);
+                    if (reading.state === 'OK') {
+                        meetingConsent.noteAttendeeCount(reading.count);
+                        firstAttendee.note(reading.count);
+                    }
                     const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActiveWithin());
                     // At debug level, and only when the reading or the watchdog's
                     // counters change: this runs on every poll for the whole meeting.
@@ -1221,7 +1229,15 @@ export default class GoogleMeet {
                         lastAttendeeLine = attendeeLine;
                         log.debug(`[meet] attendee reading ${attendeeLine}`);
                     }
-                    if (decision.action === 'end') {
+                    if (decision.action === 'end' && decision.reason === 'alone-in-meeting' && !firstAttendee.mayLeaveAlone()) {
+                        if (!firstAttendeeWaitReported) {
+                            firstAttendeeWaitReported = true;
+                            log.info(
+                                `Nobody else has joined yet (${decision.detail}) — waiting up to ` +
+                                    `${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee before leaving.`,
+                            );
+                        }
+                    } else if (decision.action === 'end') {
                         log.info(`LMA Virtual Participant is leaving: ${decision.detail}`);
                         details.start = false;
                         this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
