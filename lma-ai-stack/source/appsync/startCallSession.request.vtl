@@ -1,0 +1,55 @@
+## startCallSession: the START event of a session that a rejoin allowed
+## (rejoinVirtualParticipant writes Call.SessionNumber) makes the meeting live
+## again under the same CallId. Only that session number is accepted, and only
+## once: a redelivered START, or one naming any other session, fails the
+## condition, which dDbPutCondition.response.vtl reports as
+## "item put condition failure" and the call event processor drops.
+##
+## The meeting's transcript, recordings, consent record and summary text are
+## kept. CallSummaryState is removed, because it describes the summary of the
+## earlier session; the END of this session queues the summary again, over the
+## whole transcript. ExpiresAfter is left as createCall wrote it, which is also
+## the expiry of the meeting's row in the meeting list: a rejoined meeting keeps
+## the date and the retention it was created with.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+#set( $now = $util.time.nowISO8601() )
+#set( $expression = "SET #Status = :Status, #SessionStartedNumber = :SessionNumber, #SessionStartedAt = :now, #UpdatedAt = :now" )
+#set( $expNames = {
+  "#Status": "Status",
+  "#SessionStartedNumber": "SessionStartedNumber",
+  "#SessionStartedAt": "SessionStartedAt",
+  "#UpdatedAt": "UpdatedAt",
+  "#CallSummaryState": "CallSummaryState"
+} )
+#set( $expValues = {
+  ":Status": $util.dynamodb.toDynamoDB("STARTED"),
+  ":SessionNumber": $util.dynamodb.toDynamoDB($ctx.args.input.SessionNumber),
+  ":now": $util.dynamodb.toDynamoDB($now)
+} )
+#set( $expression = "${expression} REMOVE #CallSummaryState" )
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK)
+  },
+  "update" : {
+    "expression": "$expression",
+    "expressionNames": $utils.toJson($expNames),
+    "expressionValues": $utils.toJson($expValues)
+  },
+  ## The condition keeps its own names and values, apart from the update's.
+  "condition": {
+    "expression": "attribute_exists(#cPK) AND #cAllowed = :cSession AND (attribute_not_exists(#cStarted) OR #cStarted < :cSession) AND attribute_not_exists(#cDeleted)",
+    "expressionNames": {
+      "#cPK": "PK",
+      "#cAllowed": "SessionNumber",
+      "#cStarted": "SessionStartedNumber",
+      "#cDeleted": "TranscriptDeletedAt"
+    },
+    "expressionValues": {
+      ":cSession": $util.dynamodb.toDynamoDBJson($ctx.args.input.SessionNumber)
+    }
+  }
+}

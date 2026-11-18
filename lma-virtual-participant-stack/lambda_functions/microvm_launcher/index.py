@@ -298,6 +298,20 @@ def _extract(payload):
     return config
 
 
+def _client_token(payload, vp_id: str) -> str:
+    """RunMicrovm's idempotency token for this launch.
+
+    The VP's id, so a retried invocation of one launch cannot start a second
+    MicroVM. A rejoin (docs/virtual-participant.md#rejoin) is a further launch of
+    the same VP, and passes a `launchToken` of its own; with the VP's id again,
+    RunMicrovm would answer with the first launch's MicroVM.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    data = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    token = data.get("launchToken")
+    return token if isinstance(token, str) and token.strip() else vp_id
+
+
 def _write_config_to_registry(vp_id: str, config: dict) -> bool:
     """Stage the VP's full configuration in the task registry.
 
@@ -390,7 +404,7 @@ def lambda_handler(event, context):
             maximumDurationInSeconds=MAX_DURATION_SECONDS,
             logging=_logging_config(),
             runHookPayload=run_hook_payload,
-            clientToken=vp_id,
+            clientToken=_client_token(event, vp_id),
         )
     except MicrovmError as exc:
         # Quota exhaustion arrives as a 402/429 from the API; surface whatever

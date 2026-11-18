@@ -225,6 +225,7 @@ OTHER_FIELDS = [
     ("Mutation", "updateCaptureContext"),
     ("Mutation", "updateTranscriptionPause"),
     ("Mutation", "addCallDetectedLanguage"),
+    ("Mutation", "startCallSession"),
     ("Mutation", "updateAgent"),
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),
@@ -269,6 +270,9 @@ OTHER_FIELDS = [
     ("Mutation", "updateVirtualParticipant"),
     ("Mutation", "updateScheduledVirtualParticipant"),
     ("Mutation", "endVirtualParticipant"),
+    # Lambda resolver: the Virtual Participant's owner or an Admin, who must also
+    # be the meeting's owner or an Admin (rejoin.py).
+    ("Mutation", "rejoinVirtualParticipant"),
     ("Mutation", "deleteVirtualParticipants"),
     ("Mutation", "shareVirtualParticipant"),
     ("Mutation", "unshareVirtualParticipant"),

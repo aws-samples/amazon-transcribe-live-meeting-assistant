@@ -127,6 +127,13 @@ class KinesisStreamManager {
    */
   private startSent = false;
 
+  /**
+   * The meeting's capture session this VP runs, and where the session starts
+   * on the meeting's transcript timeline (see useSession). Session 1, at 0, for
+   * every VP that was not rejoined.
+   */
+  private session = { number: 1, offsetSeconds: 0 };
+
   get meetingStarted(): boolean {
     return this.startSent;
   }
@@ -237,6 +244,7 @@ class KinesisStreamManager {
       ...agendaStartFields(this.agenda, details.lmaUser),
       CaptureSource: 'VIRTUAL_PARTICIPANT',
       ...(this.transcriptionContext ?? {}),
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);
@@ -330,6 +338,7 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);
@@ -427,7 +436,7 @@ class KinesisStreamManager {
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
         };
 
-        await this.sendRecord(record);
+        await this.sendRecord(this.onMeetingTimeline(record));
         log.info(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
       } catch (error) {
         log.error(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
@@ -463,7 +472,7 @@ class KinesisStreamManager {
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
     };
-    await this.sendRecord(record);
+    await this.sendRecord(this.onMeetingTimeline(record));
   }
 
   /**
@@ -642,6 +651,55 @@ class KinesisStreamManager {
 
   getCallId(): string {
     return this.callId;
+  }
+
+  /**
+   * Run as capture session `number` of a rejoined meeting, which starts at
+   * `offsetSeconds` on its transcript timeline (both read from the VP's row,
+   * written by rejoinVirtualParticipant; docs/virtual-participant.md#rejoin).
+   *
+   * Everything inside the VP keeps its own clock, which starts at 0 as in any
+   * meeting. The difference is made here, on the way out: every transcript
+   * segment is moved by the offset, so it follows the earlier sessions' instead
+   * of overlapping them, and its SegmentId is prefixed with the session, because
+   * the ids the engines give restart with each run and a repeated id would
+   * replace an earlier session's segment. START and END name the session, which
+   * is what lets the call event processor reopen the meeting and tell this
+   * session's END from an earlier one's.
+   *
+   * Only before START, like useCallId; refused, and false returned, after it.
+   */
+  useSession(number: number, offsetSeconds: number): boolean {
+    if (!Number.isInteger(number) || number < 1) return false;
+    const offset = Number.isFinite(offsetSeconds) && offsetSeconds > 0 ? offsetSeconds : 0;
+    if (this.startSent && (number !== this.session.number || offset !== this.session.offsetSeconds)) {
+      log.warn(`[kinesis] Session not changed to ${number}: the meeting's START was already sent`);
+      return false;
+    }
+    this.session = { number, offsetSeconds: offset };
+    return true;
+  }
+
+  /** Where this VP's session starts on the meeting's transcript timeline, in seconds. */
+  get sessionOffsetSeconds(): number {
+    return this.session.offsetSeconds;
+  }
+
+  /** SessionNumber, for the START and END of a later session; nothing for the first. */
+  private sessionField(): { SessionNumber?: number } {
+    return this.session.number > 1 ? { SessionNumber: this.session.number } : {};
+  }
+
+  /** A transcript segment record moved onto the meeting's timeline (see useSession). */
+  private onMeetingTimeline(record: any): any {
+    if (this.session.number <= 1) return record;
+    const offset = this.session.offsetSeconds;
+    return {
+      ...record,
+      SegmentId: `s${this.session.number}-${record.SegmentId}`,
+      StartTime: (Number(record.StartTime) || 0) + offset,
+      EndTime: (Number(record.EndTime) || 0) + offset,
+    };
   }
 
   /**

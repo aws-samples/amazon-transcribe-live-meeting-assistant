@@ -323,17 +323,25 @@ const main = async (): Promise<void> => {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
             
-            // Get existing CallId from VP record first
-            const existingCallId = await statusManager.getCallId();
-            
-            if (existingCallId) {
+            // Get existing CallId from VP record first, with the capture session
+            // a rejoined VP runs (docs/virtual-participant.md#rejoin).
+            const existing = await statusManager.getCallSession();
+            const existingCallId = existing?.callId;
+
+            if (existing && existingCallId) {
                 // Use existing CallId from VP record, for the meeting's events too
                 // (kinesis-stream.ts useCallId), so it is the one CallId throughout.
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 kinesisStreamManager.useCallId(existingCallId);
+                kinesisStreamManager.useSession(existing.sessionNumber, existing.sessionTimeOffset);
                 process.env.VP_CALL_ID = existingCallId;
                 bindLogContext({ callId: existingCallId });
-                log.info(`Using existing VP CallId: ${existingCallId}`);
+                log.info(
+                    existing.sessionNumber > 1
+                        ? `Rejoining meeting ${existingCallId} as capture session ${existing.sessionNumber}, ` +
+                              `at ${existing.sessionTimeOffset}s on its transcript timeline`
+                        : `Using existing VP CallId: ${existingCallId}`,
+                );
             } else {
                 // Generate new CallId and set it in VP record
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
@@ -899,7 +907,10 @@ const main = async (): Promise<void> => {
                     callId: kinesisStreamManager.currentCallId,
                     bucket: details.recordingsBucketName,
                     isLive: () => transcriptionService.transcribingLive,
-                    timelineSeconds: () => transcriptionService.timelineSeconds(),
+                    // On the meeting's transcript timeline, like the segments: a
+                    // rejoined VP's session starts at its offset, not at 0.
+                    timelineSeconds: () =>
+                        kinesisStreamManager.sessionOffsetSeconds + transcriptionService.timelineSeconds(),
                     recordingStartedAtMs: () => videoRecorder.startedAtMs,
                     shareActive: hasShareProbe
                         ? () => {

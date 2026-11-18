@@ -21,6 +21,13 @@ the meeting's ``CallId`` and a ``Trigger``:
 ``scheduled``
     By the one-time EventBridge Scheduler schedule either of the above made.
     Deletes.
+``meeting-reopened``
+    By the Virtual Participant manager, synchronously, when the meeting's owner
+    or an Admin rejoins it (docs/virtual-participant.md#rejoin). Cancels the
+    pending deletion, whatever the setting says, because the meeting is about to
+    be captured again; its next END schedules one afresh. Answers
+    ``{"action": "deleted"}`` without cancelling anything when the transcript is
+    already gone, which the rejoin is refused for.
 
 A schedule is only ever moved earlier, so a redelivered END cannot postpone a
 deletion. After a deletion made on the spot, one more is scheduled
@@ -94,7 +101,8 @@ SWEEP_MINUTES = 10
 MEETING_ENDED = "meeting-ended"
 SUMMARY_WRITTEN = "summary-written"
 SCHEDULED = "scheduled"
-TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED)
+MEETING_REOPENED = "meeting-reopened"
+TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED, MEETING_REOPENED)
 
 _clients: Dict[str, Any] = {}
 
@@ -427,6 +435,39 @@ def schedule_deletion(call_id: str, moment: datetime, context: Any) -> Dict[str,
     return {"action": "scheduled", "scheduledFor": _iso(moment)}
 
 
+def cancel_deletion(call_id: str) -> Dict[str, Any]:
+    """Cancel the meeting's pending deletion, unless its transcript is already deleted.
+
+    The schedule is deleted first and the recorded time second, and the second
+    write is conditional on the transcript still being there, so a deletion
+    that runs in between is reported as one rather than hidden.
+    """
+    meeting = read_meeting(call_id)
+    if meeting is None:
+        return {"action": "none"}
+    if meeting.get("TranscriptDeletedAt"):
+        return {"action": "deleted", "transcriptDeletedAt": meeting["TranscriptDeletedAt"]}
+    try:
+        _client("scheduler").delete_schedule(
+            Name=schedule_name(call_id), GroupName=SCHEDULE_GROUP_NAME
+        )
+    except ClientError as error:
+        if _error_code(error) != "ResourceNotFoundException":
+            raise
+    try:
+        _table().update_item(
+            Key=meeting_key(call_id),
+            UpdateExpression="REMOVE TranscriptDeletionScheduledFor",
+            ConditionExpression="attribute_exists(PK) AND attribute_not_exists(TranscriptDeletedAt)",
+        )
+    except ClientError as error:
+        if _error_code(error) != "ConditionalCheckFailedException":
+            raise
+        return {"action": "deleted"}
+    LOGGER.info(json.dumps({"msg": "cancelled the transcript deletion", "callId": call_id}))
+    return {"action": "cancelled"}
+
+
 def delete_now(call_id: str, trigger: str, context: Any) -> Dict[str, Any]:
     outcome = delete_transcript(call_id, trigger)
     outcome["sweep"] = schedule_deletion(
@@ -445,6 +486,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # have been told the transcript would be deleted at that time.
     if trigger == SCHEDULED:
         return delete_transcript(call_id, trigger)
+    if trigger == MEETING_REOPENED:
+        return cancel_deletion(call_id)
 
     delay = current_delay()
     if delay is None:

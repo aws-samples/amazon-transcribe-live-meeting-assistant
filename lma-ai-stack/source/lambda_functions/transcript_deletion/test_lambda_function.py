@@ -62,11 +62,16 @@ class FakeTable:
         item = self.items.get((Key["PK"], Key["SK"]))
         return {"Item": dict(item)} if item else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, **_):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **_):
         item = self.items.get((Key["PK"], Key["SK"]))
         if item is None:
             raise _conflict("ConditionalCheckFailedException")
         values = ExpressionAttributeValues
+        if UpdateExpression == "REMOVE TranscriptDeletionScheduledFor":
+            if "TranscriptDeletedAt" in item:
+                raise _conflict("ConditionalCheckFailedException")
+            item.pop("TranscriptDeletionScheduledFor", None)
+            return
         if UpdateExpression.startswith("SET TranscriptDeletionScheduledFor"):
             item["TranscriptDeletionScheduledFor"] = values[":at"]
             return
@@ -146,6 +151,11 @@ class FakeScheduler:
 
     def update_schedule(self, **definition):
         self.schedules[definition["Name"]] = definition
+
+    def delete_schedule(self, Name, GroupName):
+        if Name not in self.schedules:
+            raise _conflict("ResourceNotFoundException")
+        del self.schedules[Name]
 
 
 class FakeKnowledgeBase:
@@ -404,3 +414,58 @@ def test_the_setting_is_read_past_the_cache(monkeypatch):
     monkeypatch.setattr(lf, "deletion_delay_minutes", lambda store=None: calls.append("read") or 15)
     assert lf.current_delay() == 15
     assert calls == ["invalidate", "read"]
+
+
+# ── a rejoined meeting ──────────────────────────────────────────────────────
+
+
+def test_a_reopened_meeting_has_its_pending_deletion_cancelled(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    lf.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, CONTEXT)
+    assert aws.scheduler.schedules
+
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "meeting-reopened"}, CONTEXT)
+
+    assert outcome == {"action": "cancelled"}
+    assert aws.scheduler.schedules == {}
+    assert "TranscriptDeletionScheduledFor" not in _meeting(aws)
+    assert len([k for k in aws.table.items if k[0] == f"trs#{CALL_ID}"]) == 7
+
+
+def test_a_reopen_cancels_the_deletion_even_with_the_setting_off(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+    _set_delay(monkeypatch, None)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "meeting-reopened"}, CONTEXT)
+    assert outcome == {"action": "cancelled"}
+    assert aws.scheduler.schedules == {}
+
+
+def test_a_reopen_with_nothing_pending_succeeds(aws):
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "meeting-reopened"}, CONTEXT)
+    assert outcome == {"action": "cancelled"}
+
+
+def test_a_reopen_after_the_transcript_was_deleted_reports_the_deletion(aws):
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "meeting-reopened"}, CONTEXT)
+    assert outcome["action"] == "deleted"
+    assert outcome["transcriptDeletedAt"] == _meeting(aws)["TranscriptDeletedAt"]
+
+
+def test_a_deletion_between_the_read_and_the_cancel_is_reported(aws, monkeypatch):
+    real_read = lf.read_meeting
+
+    def read_then_delete(call_id):
+        meeting = real_read(call_id)
+        _meeting(aws)["TranscriptDeletedAt"] = "2026-11-18T00:00:00+00:00"
+        return meeting
+
+    monkeypatch.setattr(lf, "read_meeting", read_then_delete)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "meeting-reopened"}, CONTEXT)
+    assert outcome == {"action": "deleted"}
+
+
+def test_a_reopen_of_a_meeting_with_no_record_does_nothing(aws):
+    outcome = lf.handler({"CallId": "not-a-meeting", "Trigger": "meeting-reopened"}, CONTEXT)
+    assert outcome == {"action": "none"}

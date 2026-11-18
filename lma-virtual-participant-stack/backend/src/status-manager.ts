@@ -242,6 +242,32 @@ let processShuttingDown = false;
  * a row whose end has been recorded (see the updateVirtualParticipant
  * resolver).
  */
+/** The CallId on a VP's row, and the capture session of that meeting it runs. */
+export interface VpCallSession {
+  callId: string;
+  /** 1 for a VP that was not rejoined; 2 and up, one per rejoin. */
+  sessionNumber: number;
+  /** Where the session starts on the meeting's transcript timeline, in seconds. */
+  sessionTimeOffset: number;
+}
+
+/**
+ * Read a VpCallSession from a getVirtualParticipant answer: null without a
+ * CallId; a session number or offset that is absent or not usable is session 1,
+ * at 0, which is every VP that was not rejoined.
+ */
+export const callSessionFromVpRow = (row: any): VpCallSession | null => {
+  const callId = typeof row?.CallId === 'string' ? row.CallId.trim() : '';
+  if (!callId) return null;
+  const number = Number(row?.sessionNumber);
+  const offset = Number(row?.sessionTimeOffset);
+  return {
+    callId,
+    sessionNumber: Number.isInteger(number) && number > 1 ? number : 1,
+    sessionTimeOffset: Number.isFinite(offset) && offset > 0 ? offset : 0,
+  };
+};
+
 export const beginShutdown = (): void => {
   processShuttingDown = true;
 };
@@ -648,6 +674,40 @@ export class VirtualParticipantStatusManager {
         return null;
       }
 
+    } catch (error) {
+      log.error('Error getting CallId:', error);
+      return null;
+    }
+  }
+
+  /**
+   * The CallId on this VP's row and the capture session it runs, read together.
+   *
+   * One read, so a VP that knows its CallId also knows its session: a rejoined
+   * VP (docs/virtual-participant.md#rejoin) that started its meeting's events as
+   * session 1 would send segments over the earlier session's. Null when the row
+   * has no CallId or cannot be read, as getCallId.
+   */
+  async getCallSession(): Promise<VpCallSession | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            CallId
+            sessionNumber
+            sessionTimeOffset
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      const session = callSessionFromVpRow(result?.getVirtualParticipant);
+      log.info(
+        session
+          ? `Retrieved CallId ${session.callId} (session ${session.sessionNumber}) for VP ${this.participantId}`
+          : `No CallId found for VP ${this.participantId}`,
+      );
+      return session;
     } catch (error) {
       log.error('Error getting CallId:', error);
       return null;

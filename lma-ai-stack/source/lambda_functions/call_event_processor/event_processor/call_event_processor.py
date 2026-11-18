@@ -85,6 +85,7 @@ from pure import (  # noqa: E402
     language_to_record,
     merge_dicts,
     segment_analyses,
+    session_number_of,
     transcription_pause_state,
 )
 
@@ -242,6 +243,11 @@ PUT_CONDITION_FAILURE_MESSAGES = frozenset(
 # it is module state that ends up in the batch's results.
 CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
 
+# Stands in for a startCallSession result when the resolver refused the session:
+# a redelivered START of a session that has already started, or a START naming
+# a session no rejoin allowed. Read-only for the same reason as CALL_ALREADY_CREATED.
+SESSION_NOT_STARTED: Mapping[str, Any] = MappingProxyType({"ok": True, "SessionNotStarted": True})
+
 # Stands in for an addCallSummaryText result when the resolver rejected the
 # write, so the ADD_SUMMARY branch can drop the event without reporting the
 # summary as stored. Read-only for the same reason as CALL_ALREADY_CREATED.
@@ -275,6 +281,11 @@ def is_put_condition_failure(error: Any) -> bool:
       different reason -- ``get_call_details`` reads the meeting earlier in the
       same record and has already failed it on a null ``getCall``, so the
       aggregation write is not reached.
+    * ``startCallSession`` writes only for the session a rejoin allowed and only
+      once, so a rejection is a redelivered START of a session that has started,
+      or a START naming a session nobody allowed; neither may reopen the
+      meeting. ``execute_start_call_session_mutation`` answers with
+      :data:`SESSION_NOT_STARTED`.
     * ``addCallSummaryText`` writes through the same template, with no
       ``UpdatedAt`` of its own, so the template stamps it with the resolver's
       clock and a rejection is, in practice, a meeting deleted before its summary
@@ -545,6 +556,46 @@ def summary_outcome_state(text: Any) -> str:
     )
 
 
+async def execute_start_call_session_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Any:
+    """Make the meeting live again for the session the START event names.
+
+    Called for a START whose meeting already exists and which names a later
+    capture session (a rejoin, docs/virtual-participant.md#rejoin). Answers
+    :data:`SESSION_NOT_STARTED` when the resolver refuses it: the session has
+    started already, or no rejoin allowed it.
+    """
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+    session_input: Dict[str, Any] = {
+        "CallId": message.get("CallId"),
+        "SessionNumber": session_number_of(message),
+    }
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.startCallSession.args(input=session_input).select(*call_fields(schema))
+        )
+    )
+    return await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=SESSION_NOT_STARTED,
+    )
+
+
+def was_session_started(start_call_session_result: Any) -> bool:
+    """Whether a startCallSession result is the session starting, rather than
+    :data:`SESSION_NOT_STARTED`."""
+    return isinstance(start_call_session_result, Mapping) and not start_call_session_result.get(
+        "SessionNotStarted"
+    )
+
+
 def was_already_created(create_call_result: Any) -> bool:
     """Whether a createCall result came from a meeting that already existed.
 
@@ -602,9 +653,21 @@ async def get_call_status(
     meeting were still open, because doing the end-of-meeting work twice is
     better than not doing it at all.
     """
+    status, _started_session = await get_call_state(message, appsync_session)
+    return status
+
+
+async def get_call_state(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Tuple[Optional[str], int]:
+    """The meeting's current Status, as :func:`get_call_status` reads it, and the
+    capture session that last started (``SessionStartedNumber``; 1 when the
+    meeting was never rejoined, or could not be read).
+    """
     call_id = message.get("CallId")
     if not call_id or not appsync_session.client.schema:
-        return None
+        return None, 1
 
     schema = DSLSchema(appsync_session.client.schema)
     query = dsl_gql(
@@ -612,6 +675,7 @@ async def get_call_status(
             schema.Query.getCall.args(CallId=call_id).select(
                 schema.Call.CallId,
                 schema.Call.Status,
+                schema.Call.SessionStartedNumber,
             )
         )
     )
@@ -632,14 +696,21 @@ async def get_call_status(
             describe_exception(error),
             extra=dict(frames=traceback_frames(error)),
         )
-        return None
+        return None, 1
 
     # Optional, not required: a null getCall or a response without one leaves the
     # status unknown, and an unknown status is what the fail-open contract above
     # is for. The shape that came back is logged by the helper.
     status = optional_graphql_field(result, "getCall", "Status", logger=LOGGER)
-    LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
-    return status
+    # Read without the helper: a meeting that was never rejoined has no session
+    # number, which is not a response shape worth a warning.
+    call = result.get("getCall") if isinstance(result, dict) else None
+    started_session = session_number_of(call, "SessionStartedNumber")
+    LOGGER.debug(
+        "current call status",
+        extra=dict(call_id=call_id, status=status, started_session=started_session),
+    )
+    return status, started_session
 
 
 async def execute_get_transcript_segments_query(
@@ -1613,6 +1684,26 @@ async def execute_process_event_api_mutation(
             if not was_already_created(response):
                 METRICS.count(metric_names.MEETINGS_STARTED)
 
+        # A later capture session of a meeting that already exists: its owner or
+        # an Admin rejoined it (docs/virtual-participant.md#rejoin), which allowed
+        # this session number on the meeting record. startCallSession makes the
+        # meeting live again, once; a redelivered START, or a START of the first
+        # session, finds the meeting already created and changes nothing. Not
+        # counted as a meeting started: it is the same meeting.
+        session_started = False
+        if was_already_created(response) and session_number_of(message) > 1:
+            session_started = was_session_started(
+                await execute_start_call_session_mutation(
+                    message=message, appsync_session=appsync_session
+                )
+            )
+            LOGGER.info(
+                "START event for capture session %s of a meeting that already exists: %s",
+                session_number_of(message),
+                "the meeting is live again" if session_started else "the session was not started",
+                extra=dict(call_id=message.get("CallId")),
+            )
+
         # At most once per meeting. Redelivery is routine on this stream -- the
         # END branch below explains why -- and a deployment's own start-of-call
         # hook would read a second invocation as a second meeting starting.
@@ -1625,12 +1716,19 @@ async def execute_process_event_api_mutation(
         # needs a durable record of having delivered it, which this does not
         # have; skipping it is the safer of the two mistakes, because invoking it
         # twice is visible in whatever the hook does.
-        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
+        #
+        # A rejoined meeting's new session invokes it once more, with the
+        # session number, on the same once-only condition: the session started.
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and (
+            not was_already_created(response) or session_started
+        ):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
                 CallDataStream=CALL_DATA_STREAM_NAME,
             )
+            if session_started:
+                payload["SessionNumber"] = session_number_of(message)
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
                 InvocationType="Event",
@@ -1653,9 +1751,26 @@ async def execute_process_event_api_mutation(
         # onwards is redelivered; the summary orchestrator is not idempotent, so
         # invoking it again would produce a second summary and a second
         # ADD_SUMMARY write for the same meeting.
-        was_already_ended = (
-            await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
+        current_status, started_session = await get_call_state(
+            message=message, appsync_session=appsync_session
         )
+        was_already_ended = current_status == "ENDED"
+
+        # The END of an earlier capture session, arriving after a rejoin has
+        # started a later one (a redelivery, or the earlier participant still
+        # shutting down), must not end the live session. Only an END that names
+        # its session can be told apart. One that names none is taken to be the
+        # current session's: the first session's END names none, and neither do
+        # the ENDs of the streaming clients or of the stale meeting reaper.
+        if "SessionNumber" in message and session_number_of(message) < started_session:
+            LOGGER.info(
+                "END event for capture session %s of a meeting now in session %s; ignored",
+                session_number_of(message),
+                started_session,
+                extra=dict(call_id=message.get("CallId")),
+            )
+            return_value["successes"].append({"ok": True, "StaleSession": True})
+            return return_value
 
         # Name the separated voices once at the end of the meeting.
         #
@@ -1742,7 +1857,9 @@ async def execute_process_event_api_mutation(
             # is not counted at all -- it raises rather than reaching here, the
             # batch processor attributes it to this record's sequence number,
             # and the record is redelivered with the meeting still open.
-            if not was_already_ended:
+            # A rejoined meeting's later sessions end it again, but it is still
+            # one meeting, counted once as it was once as started.
+            if not was_already_ended and started_session == 1:
                 METRICS.count(metric_names.MEETINGS_ENDED)
 
     elif event_type == "ADD_SUMMARY":

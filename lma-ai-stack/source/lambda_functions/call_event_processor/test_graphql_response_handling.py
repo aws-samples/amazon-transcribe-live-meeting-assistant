@@ -2138,3 +2138,141 @@ def test_get_call_details_returns_the_meetings_detected_languages(schema):
     details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
     assert details["DetectedLanguages"] == ["en-US"]
     assert "DetectedLanguages" in print_ast(session.queries[0])
+
+
+# ── a rejoined meeting: a later capture session reopens it ──────────────────
+#
+# A rejoin (docs/virtual-participant.md#rejoin) allows a later session number on
+# the meeting record. That session's START finds the meeting already created,
+# and startCallSession makes it live again -- once. The END of the session then
+# finds the meeting open, so the end-of-meeting work runs again over the whole
+# transcript.
+
+ALREADY_EXISTS = TransportQueryError(
+    "Item already exists",
+    errors=[{"message": "Item already exists", "errorType": "DynamoDB"}],
+)
+SESSION_REFUSED = TransportQueryError(
+    "item put condition failure",
+    errors=[{"message": "item put condition failure", "errorType": "DynamoDB"}],
+)
+REOPENED = {"startCallSession": {"CallId": "call-1", "Status": "STARTED"}}
+
+REJOINED_START = {
+    "EventType": "START",
+    "CallId": "call-1",
+    "AgentId": "someone@example.com",
+    "SessionNumber": 2,
+}
+
+
+def process_start_with_hook(session: Any, message: Dict[str, Any], monkeypatch) -> RecordingLambda:
+    """Runs a START event with a start-of-call hook configured; returns the hook."""
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message=message,
+            appsync_session=session,
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+    return hook
+
+
+def test_the_start_of_an_allowed_session_reopens_the_meeting_and_runs_the_hook_once(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, [ALREADY_EXISTS, REOPENED])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    (sent,) = mutation_inputs(session, "startCallSession")
+    assert sent == {"CallId": "call-1", "SessionNumber": "2"}
+    assert [json.loads(i["Payload"])["SessionNumber"] for i in hook.invocations] == [2]
+    assert metric_names.MEETINGS_STARTED not in emitted.counts, "it is the same meeting"
+
+
+def test_a_redelivered_start_of_a_session_does_not_run_the_hook_again(schema, emitted, monkeypatch):
+    session = QueuedSession(schema, [ALREADY_EXISTS, SESSION_REFUSED])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    assert len(mutation_inputs(session, "startCallSession")) == 1
+    assert hook.invocations == []
+    assert any("not started" in m for m in cep.LOGGER.at_level("INFO"))
+
+
+def test_a_start_naming_no_later_session_never_tries_to_reopen_the_meeting(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, [ALREADY_EXISTS])
+    message = {key: value for key, value in REJOINED_START.items() if key != "SessionNumber"}
+    hook = process_start_with_hook(session, message, monkeypatch)
+
+    assert mutation_inputs(session, "startCallSession") == []
+    assert hook.invocations == []
+
+
+def test_a_new_meeting_naming_a_session_is_created_without_a_reopen(schema, emitted, monkeypatch):
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = QueuedSession(schema, [created])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    assert mutation_inputs(session, "startCallSession") == []
+    assert len(hook.invocations) == 1
+
+
+def test_the_end_of_a_reopened_session_runs_the_end_of_meeting_work_again(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert _deletion_payloads(deletion_function) == [
+        {"CallId": "call-1", "Trigger": "meeting-ended"}
+    ]
+    assert [i["Status"] for i in mutation_inputs(session, "updateCallStatus")] == ["ENDED"]
+    assert metric_names.MEETINGS_ENDED not in emitted.counts, "the meeting ended once already"
+
+
+def test_the_end_of_an_earlier_session_leaves_a_reopened_meeting_live(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [{"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 3}}],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert mutation_inputs(session, "updateCallStatus") == []
+    assert _deletion_payloads(deletion_function) == []
+
+
+def test_an_end_naming_no_session_still_ends_a_reopened_meeting(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert [i["Status"] for i in mutation_inputs(session, "updateCallStatus")] == ["ENDED"]
+
+
+def test_only_the_not_started_marker_counts_as_a_session_not_started():
+    assert cep.was_session_started(cep.SESSION_NOT_STARTED) is False
+    assert cep.was_session_started(REOPENED) is True
+    assert cep.was_session_started(None) is False
