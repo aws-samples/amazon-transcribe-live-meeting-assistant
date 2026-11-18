@@ -29,6 +29,7 @@ import VNCViewer from './VNCViewer';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import LaunchSettings from './LaunchSettings';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
+import RejoinVirtualParticipant from './RejoinVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
 import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
@@ -816,6 +817,29 @@ const VirtualParticipantDetails = () => {
     loadVpDetails();
   };
 
+  const handleRejoined = (updated) => {
+    // A new run: the earlier one's live view and outcome do not carry over (the
+    // live view's readiness otherwise latches; see mergeVpUpdate).
+    setVpDetails((prev) => ({
+      ...prev,
+      ...(updated || {}),
+      vncReady: false,
+      vncEndpoint: null,
+      errorMessage: null,
+      userAcknowledgedFailure: false,
+    }));
+    setNotifications((prev) => [
+      ...prev,
+      {
+        type: 'success',
+        content: 'The Virtual Participant is rejoining the meeting. Its transcript continues on the same meeting.',
+        dismissible: true,
+        id: `rejoin-${Date.now()}`,
+        onDismiss: () => setNotifications((items) => items.filter((n) => !n.id.startsWith('rejoin-'))),
+      },
+    ]);
+  };
+
   const handleScheduledEditSaved = (updated, movesSchedule) => {
     setShowEdit(false);
     if (updated) setVpDetails((prev) => ({ ...prev, ...updated }));
@@ -969,6 +993,11 @@ const VirtualParticipantDetails = () => {
                   Call Details (Not Available)
                 </Button>
               )}
+              <RejoinVirtualParticipant
+                vp={vpDetails}
+                canManage={canManageVirtualParticipant(vpDetails, { username: user?.username, isAdmin })}
+                onRejoined={handleRejoined}
+              />
               <DiagnoseButton
                 vpId={vpDetails.id || vpId}
                 resourceLabel={
