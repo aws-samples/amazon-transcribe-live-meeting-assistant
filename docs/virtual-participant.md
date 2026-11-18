@@ -18,6 +18,7 @@ title: "Virtual Participant"
   - [Zoom passcodes and join links](#zoom-passcodes-and-join-links)
 - [Joining a Meeting](#joining-a-meeting)
   - [Reviewing the launch settings](#reviewing-the-launch-settings)
+  - [Joining the same meeting again](#joining-the-same-meeting-again)
 - [Status Lifecycle](#status-lifecycle)
   - [The status detail line](#the-status-detail-line)
   - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
@@ -493,6 +494,18 @@ The Virtual Participant page has a **Launch settings** section (collapsed by def
 - **Consent**: the meeting consent choice for this meeting, or **Not set (deployment default)** when the deployment's [Meeting Consent](#meeting-consent) setting applies.
 
 A setting the form did not send, such as on a Virtual Participant started from an MCP client or created before the setting was recorded, reads **Not set (deployment default)** or **Not recorded**.
+
+### Joining the same meeting again
+
+To send a Virtual Participant to a meeting that an earlier one attended, such as a recurring meeting link or a meeting the earlier one left early, open the earlier Virtual Participant's page and choose **Join again** in its **Actions** section. The button is shown once the Virtual Participant is no longer waiting for a scheduled launch, to everyone who can open the page.
+
+**Join again** opens the **Create Virtual Participant** form on the Virtual Participants list, filled in from the earlier Virtual Participant:
+
+- **Copied:** the meeting name, platform, meeting ID or link, agenda, meeting consent choice and video recording setting.
+- **Not copied:** the meeting password, which LMA stores but never returns to the browser. When the earlier Virtual Participant had a password, the password field says so; enter it again if the meeting still needs one. A meeting link carries its own password and is copied with it.
+- **As for any new Virtual Participant:** the meeting time (choose **Join Now**, or a date and time to schedule it), the Zoom account choice and the stored browser profile, which belong to the user who starts the new Virtual Participant, and the acknowledgement checkbox, which has to be ticked again.
+
+Any field can be changed before joining. The new Virtual Participant belongs to the user who starts it and records a new LMA meeting with its own transcript and summary; nothing is added to the earlier meeting. The copied meeting consent choice is checked as on any new Virtual Participant: when the deployment's current [Meeting Consent](#meeting-consent) setting no longer allows it, the form goes back to the deployment's setting.
 
 ## Status Lifecycle
 

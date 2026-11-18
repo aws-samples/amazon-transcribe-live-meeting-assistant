@@ -32,6 +32,8 @@ import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
 import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
+import { JOIN_AGAIN_STATE_KEY, canJoinAgain, joinAgainFormFrom } from './join-again';
+import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -608,7 +610,14 @@ ErrorTroubleshooting.propTypes = {
   canAcknowledge: PropTypes.bool,
 };
 
-export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, canManage = false }) => {
+export const ActionButtons = ({
+  vpDetails,
+  onRefresh,
+  onEnd,
+  onCancelSchedule,
+  onJoinAgain = undefined,
+  canManage = false,
+}) => {
   // Ending and cancelling are for the owner and Admins.
   const canEnd = canManage && ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
   const canCancelSchedule = canManage && vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
@@ -623,6 +632,15 @@ export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, c
         {canEnd && (
           <Button variant="normal" iconName="close" onClick={onEnd}>
             End Virtual Participant
+          </Button>
+        )}
+
+        {/* A new Virtual Participant, and a new meeting, from this one's
+            meeting details; open to every viewer of the page, since the new
+            one belongs to whoever starts it. */}
+        {onJoinAgain && canJoinAgain(vpDetails) && (
+          <Button variant="normal" iconName="add-plus" onClick={onJoinAgain}>
+            Join again
           </Button>
         )}
 
@@ -651,10 +669,12 @@ ActionButtons.propTypes = {
     status: PropTypes.string.isRequired,
     CallId: PropTypes.string,
     isScheduled: PropTypes.bool,
+    meetingId: PropTypes.string,
   }).isRequired,
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
   onCancelSchedule: PropTypes.func.isRequired,
+  onJoinAgain: PropTypes.func,
   canManage: PropTypes.bool,
 };
 
@@ -873,6 +893,12 @@ const VirtualParticipantDetails = () => {
       };
       setNotifications((prev) => [...prev, notification]);
     }
+  };
+
+  // Opens the Create Virtual Participant form on the list page, filled in from
+  // this Virtual Participant's meeting details (join-again.js).
+  const handleJoinAgain = () => {
+    navigate(VIRTUAL_PARTICIPANT_PATH, { state: { [JOIN_AGAIN_STATE_KEY]: joinAgainFormFrom(vpDetails) } });
   };
 
   const handleCancelSchedule = async () => {
@@ -1134,6 +1160,7 @@ const VirtualParticipantDetails = () => {
         onRefresh={handleRefresh}
         onEnd={handleEnd}
         onCancelSchedule={handleCancelSchedule}
+        onJoinAgain={handleJoinAgain}
         canManage={canManageVirtualParticipant(vpDetails, { username: user?.username, isAdmin })}
       />
     </SpaceBetween>

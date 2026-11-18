@@ -98,6 +98,7 @@ Click a VP from the list to open its detail page. The page shows:
 - **Troubleshooting** card — when a VP fails, the human-readable `errorMessage` written by the VP backend is displayed here, along with common solutions for that error class.
 - **Status history** with timestamps for each state transition.
 - **Diagnose** in the page header — runs the AI troubleshooting agent's diagnosis of this Virtual Participant: whether it joined, and if it failed or ended early, why. Shown to Admins only; see [AI Troubleshooting Agent › The Diagnose button](troubleshooting-agent.md#the-diagnose-button).
+- **Join again** in the **Actions** section — opens the Create Virtual Participant modal filled in from this VP's meeting details, to start a new VP, and a new meeting, in the same meeting. The meeting password is not copied; see [Virtual Participant › Joining the same meeting again](virtual-participant.md#joining-the-same-meeting-again).
 
 ## Meeting Detail Page
 

@@ -45,6 +45,7 @@ const VirtualParticipantFormFields = ({
   meetingTimeDescription = 'Choose a date and time that is at least two minutes from now to schedule the participant.',
   passwordLabel = 'Meeting Password (Optional)',
   passwordPlaceholder = 'Enter meeting password if required',
+  passwordDescription = '',
   consentChoice,
   onConsentChoiceChange,
   consentDefaults = null,
@@ -116,7 +117,7 @@ const VirtualParticipantFormFields = ({
       </FormField>
 
       {!meetingIdIsUrl && !isGoogleMeetForm && (
-        <FormField label={passwordLabel} stretch>
+        <FormField label={passwordLabel} description={passwordDescription || undefined} stretch>
           <Input
             value={form.meetingPassword}
             onChange={({ detail }) => onChange({ meetingPassword: detail.value })}
@@ -237,6 +238,7 @@ VirtualParticipantFormFields.propTypes = {
   meetingTimeDescription: PropTypes.string,
   passwordLabel: PropTypes.string,
   passwordPlaceholder: PropTypes.string,
+  passwordDescription: PropTypes.string,
   consentChoice: PropTypes.string.isRequired,
   onConsentChoiceChange: PropTypes.func.isRequired,
   consentDefaults: PropTypes.shape({

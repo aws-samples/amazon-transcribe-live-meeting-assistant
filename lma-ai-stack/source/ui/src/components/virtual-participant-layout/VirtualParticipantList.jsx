@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Table,
   Box,
@@ -49,6 +50,7 @@ import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
+import { PASSWORD_NOT_COPIED_HINT, joinAgainFromState } from './join-again';
 import {
   CREATE_MIN_LEAD_MINUTES,
   EMPTY_VP_FORM,
@@ -114,21 +116,38 @@ const VirtualParticipantList = () => {
   const [participants, setParticipants] = useState([]);
   const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  // Join again on a Virtual Participant's page opens this page with the
+  // create form's values in the router state (join-again.js). They are read
+  // once, when the page mounts, and the state is then cleared so that a reload
+  // or Back does not open the form again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [joinAgain] = useState(() => joinAgainFromState(location.state));
+  useEffect(() => {
+    if (joinAgain) navigate(location.pathname, { replace: true, state: null });
+  }, []);
+  const [showCreateModal, setShowCreateModal] = useState(!!joinAgain);
+  // Whether the form was filled in by Join again from a Virtual Participant
+  // that had a meeting password, which is not copied; the password field then
+  // asks for it. It goes when the form closes.
+  const [passwordNotCopied, setPasswordNotCopied] = useState(!!joinAgain?.passwordNotCopied);
   // Why a parsed invitation left the meeting ID empty, shown on the field itself.
   const [meetingIdNote, setMeetingIdNote] = useState('');
   // The note belongs to the invitation just parsed: it goes when the form
   // closes (cancel, dismiss or create), and when another platform is chosen.
   useEffect(() => {
-    if (!showCreateModal) setMeetingIdNote('');
+    if (!showCreateModal) {
+      setMeetingIdNote('');
+      setPasswordNotCopied(false);
+    }
   }, [showCreateModal]);
-  const [createForm, setCreateForm] = useState(EMPTY_VP_FORM);
+  const [createForm, setCreateForm] = useState(joinAgain?.form || EMPTY_VP_FORM);
   const [consentChecked, setConsentChecked] = useState(false);
   // Per-VP screen-recording toggle. Default ON (matches the ENABLE_VIDEO_RECORDING
   // task-definition default); users untick to launch a VP that records audio +
   // transcript only.
-  const [enableVideoRecording, setEnableVideoRecording] = useState(true);
-  const [meetingConsentChoice, setMeetingConsentChoice] = useState('default');
+  const [enableVideoRecording, setEnableVideoRecording] = useState(joinAgain ? joinAgain.enableVideoRecording : true);
+  const [meetingConsentChoice, setMeetingConsentChoice] = useState(joinAgain?.consentChoice || 'default');
   // Read each time the form opens. Null until read, or when it cannot be:
   // every choice is then offered, and the VP still applies the deployment's rule.
   const consentDefaults = useMeetingConsentDefaults(showCreateModal);
@@ -858,6 +877,7 @@ const VirtualParticipantList = () => {
               meetingIdNote={meetingIdNote}
               onMeetingIdNoteClear={() => setMeetingIdNote('')}
               meetingTimeError={meetingTimeErrorText}
+              passwordDescription={passwordNotCopied ? PASSWORD_NOT_COPIED_HINT : ''}
               consentChoice={meetingConsentChoice}
               onConsentChoiceChange={setMeetingConsentChoice}
               consentDefaults={consentDefaults}
