@@ -490,9 +490,10 @@ utterances after their first sentences; the full-precision export transcribed th
 audio in full, with word error rates matching NVIDIA's published AMI figure, for about 10%
 more decode time and about 2.8 GB resident instead of 1.2 GB. The offline engine also
 keeps up to 300 ms of audio before each utterance the voice activity detector finds (less
-when the previous utterance ended closer than that) and the pause that ends it, so the
-first and last words of an utterance are not clipped. A row's start and end are those of
-the audio decoded for it, so consecutive rows do not overlap.
+when the previous utterance ended closer than that) and up to 300 ms of the pause that
+ends it, so the first and last words of an utterance are not clipped. A row's start and
+end are those of the audio decoded for it, so consecutive utterances the detector finds
+do not overlap.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the
