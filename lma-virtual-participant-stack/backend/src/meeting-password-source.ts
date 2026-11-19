@@ -46,15 +46,23 @@ export type MeetingPasswordResult =
  * The meeting password, as given (not yet normalized: details.ts applies
  * normalizeMeetingPassword once the platform is known).
  *
- * - MEETING_PASSWORD set and not empty in the environment: that value. Only a
- *   launch request queued by an earlier release sets it, which can still reach
- *   a container during a stack update (an EventBridge schedule created before
- *   the update, for example), and a local run (local-test.sh). It can be
- *   removed, with this branch, once no such request can remain.
- * - No VP id or no table name, or a local run: no row to read, so no password.
- * - Otherwise the row's meetingPassword; absent or empty is no password. A read
- *   that fails, or finds no row, is tried again, and after `attempts` reads the
- *   result says why, so the caller can fail the launch with that reason.
+ * The row is the source whenever there is one to read: a VP id and a table
+ * name, outside a local run. Its meetingPassword wins over anything in the
+ * environment, so a password changed on the row after the launch request was
+ * queued is the one used. A read that fails, or finds no row, is tried again.
+ *
+ * MEETING_PASSWORD in the environment is used only where the row gives no
+ * password: there is no row to read, the row has none, or every read failed.
+ * Two things set it:
+ * - local-test.sh, which runs the VP with no row. This use stays.
+ * - a launch request queued by an earlier release, which can still reach an
+ *   ECS container during a stack update (an EventBridge schedule created
+ *   before the update, for example). This use can be removed once no such
+ *   request can remain; the local-run use above still needs the variable.
+ *
+ * With no password from either, the result is no password, except that reads
+ * which all failed with nothing in the environment fail the launch with the
+ * reason.
  */
 export async function resolveMeetingPassword({
   env,
@@ -64,15 +72,14 @@ export async function resolveMeetingPassword({
   sleep,
   onRetry,
 }: ResolveMeetingPasswordOptions): Promise<MeetingPasswordResult> {
-  const fromEnvironment = env.MEETING_PASSWORD;
-  if (fromEnvironment !== undefined && fromEnvironment.trim() !== '') {
-    return { ok: true, password: fromEnvironment, origin: 'environment' };
-  }
+  const fromEnvironment = (env.MEETING_PASSWORD ?? '').trim() !== '' ? (env.MEETING_PASSWORD as string) : '';
+  const environmentOr = (fallback: MeetingPasswordResult): MeetingPasswordResult =>
+    fromEnvironment ? { ok: true, password: fromEnvironment, origin: 'environment' } : fallback;
 
   const vpId = (env.VIRTUAL_PARTICIPANT_ID || '').trim();
   const tableName = (env.VP_TABLE_NAME || '').trim();
   if (!vpId || !tableName || env.LOCAL_TEST === 'true') {
-    return { ok: true, password: '', origin: 'none' };
+    return environmentOr({ ok: true, password: '', origin: 'none' });
   }
 
   const wait = sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -82,7 +89,8 @@ export async function resolveMeetingPassword({
       const row = await readRow(tableName, vpId);
       if (row) {
         const password = typeof row.meetingPassword === 'string' ? row.meetingPassword : '';
-        return { ok: true, password, origin: password ? 'record' : 'none' };
+        if (password.trim() !== '') return { ok: true, password, origin: 'record' };
+        return environmentOr({ ok: true, password: '', origin: 'none' });
       }
       lastError = new Error(`no Virtual Participant record has the id ${vpId}`);
     } catch (error) {
@@ -94,5 +102,5 @@ export async function resolveMeetingPassword({
     }
   }
   const reason = lastError instanceof Error ? lastError.message : String(lastError);
-  return { ok: false, error: reason };
+  return environmentOr({ ok: false, error: reason });
 }

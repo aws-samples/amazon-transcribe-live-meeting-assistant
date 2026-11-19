@@ -537,7 +537,8 @@ def test_scheduled_ecs_target_is_unchanged(template: dict) -> None:
     )
     env = parsed["Input"]["containerOverrides"][0]["environment"]
     # Note the mixed key casing: the LMA_USER entry uses Name/Value while the
-    # others use name/value. Preserved verbatim from the original template.
+    # others use name/value. The meeting password is not among them: the VP
+    # reads it from its record at startup.
     assert env[0] == {"name": "MEETING_PLATFORM", "value.$": "$.data.meetingPlatform"}
     assert env[1] == {"name": "MEETING_ID", "value.$": "$.data.meetingID"}
     assert env[2] == {"name": "MEETING_NAME", "value.$": "$.data.meetingName"}

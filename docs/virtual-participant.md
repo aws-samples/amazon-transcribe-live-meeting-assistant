@@ -498,7 +498,7 @@ The meeting password is saved on the Virtual Participant's record when it is cre
 
 If the record cannot be read, the Virtual Participant reads it again, four times in all over about seven seconds. If it still cannot, the Virtual Participant does not join: it is marked `FAILED` with the status detail *"Could not read the meeting password from this Virtual Participant's record, so it did not start. Try again."* (`endTrigger` `startup:meeting-password-unreadable`).
 
-A launch request queued by an earlier release can still carry the password while a stack is being updated, for example an EventBridge schedule created before the update. A password given that way is used, and the record is not read.
+The record is read whenever there is one, on every launch type, and its password is the one used. On the ECS launch types (`EC2` and `FARGATE`), a launch request queued by an earlier release, such as an EventBridge schedule created before a stack update, can still put the password in the container's environment. That value is used only when the record has no password or cannot be read, so a password changed on a scheduled Virtual Participant after the update still applies. Under `MICROVM` the launcher does not pass such a password on, and the record is read as for any launch.
 
 ### Reviewing the launch settings
 

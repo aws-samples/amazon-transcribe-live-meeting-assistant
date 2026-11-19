@@ -5,8 +5,9 @@
  */
 
 /**
- * The meeting password the VP reads at startup: from its own record, or from
- * MEETING_PASSWORD when a launch request queued by an earlier release set it.
+ * The meeting password the VP reads at startup: from its own record, and from
+ * MEETING_PASSWORD (a local run, or a launch request queued by an earlier
+ * release) only where the record gives none.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -34,14 +35,49 @@ test('the password is read from the VP record by its id', async () => {
   assert.deepEqual(calls, [['stack-VirtualParticipant', 'vp-1']]);
 });
 
-test('a password in the environment is used without reading the record', async () => {
-  const { calls, readRow } = reader(new Error('not reached'));
+test('the record wins over a password in the environment', async () => {
+  // A schedule queued by an earlier release carries the password it was created
+  // with; a password changed on the record since is the one to use.
+  const { calls, readRow } = reader({ meetingPassword: 'edited-on-the-row' });
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: 'queued-before-the-update' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'edited-on-the-row', origin: 'record' });
+  assert.equal(calls.length, 1);
+});
+
+test('the environment is used when the record has no password', async () => {
+  const { readRow } = reader({});
   const result = await resolveMeetingPassword({
     env: { ...LAUNCHED, MEETING_PASSWORD: 'from-env' },
     readRow,
     sleep: noSleep,
   });
   assert.deepEqual(result, { ok: true, password: 'from-env', origin: 'environment' });
+});
+
+test('the environment is used when every read of the record fails', async () => {
+  const { calls, readRow } = reader(new Error('AccessDeniedException'));
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: 'from-env' },
+    readRow,
+    attempts: 3,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'from-env', origin: 'environment' });
+  assert.equal(calls.length, 3, 'the record is tried first, with its retries');
+});
+
+test('a local run uses the environment without reading a record', async () => {
+  const { calls, readRow } = reader(new Error('not reached'));
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, LOCAL_TEST: 'true', MEETING_PASSWORD: 'local-pw' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'local-pw', origin: 'environment' });
   assert.equal(calls.length, 0);
 });
 
