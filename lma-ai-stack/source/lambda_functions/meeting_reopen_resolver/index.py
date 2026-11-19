@@ -32,7 +32,9 @@ client can tell the refusals apart:
 * ``MeetingNotFound`` -- no meeting has this CallId.
 * ``Unauthorized`` -- the caller is not the meeting's owner or an Admin.
 * ``TranscriptDeleted`` -- the meeting's transcript has been deleted.
-* ``MeetingInProgress`` -- the meeting is still being captured.
+* ``MeetingInProgress`` -- the meeting is still being captured, or a session
+  allowed on it in the last PENDING_SESSION_SECONDS (a Virtual Participant
+  rejoin that is still joining, for example) has not started yet.
 * ``MeetingChanged`` -- the record changed during the call; try again.
 * ``BadRequest`` -- the CallId is missing or not usable.
 """
@@ -41,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
 import boto3
@@ -51,6 +54,29 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 #: Statuses of a meeting that is still being captured.
 LIVE_STATUSES = ("STARTED", "TRANSCRIBING")
+
+#: How long a session allowed on the meeting (by a rejoin or an earlier
+#: reopenMeeting) is waited for before another may be allowed: long enough for
+#: a Virtual Participant to launch and be admitted. A session that has not
+#: started by then is taken to have been abandoned.
+PENDING_SESSION_SECONDS = 15 * 60
+
+
+def pending_session(meeting: Mapping[str, Any], now: Optional[datetime] = None) -> bool:
+    """Whether a session allowed on the meeting recently has not started yet."""
+    allowed = lma_sessions.session_number(meeting.get("SessionNumber"))
+    started = lma_sessions.session_number(meeting.get("SessionStartedNumber"))
+    if allowed <= started:
+        return False
+    try:
+        reopened_at = datetime.fromisoformat(str(meeting.get("ReopenedAt")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if reopened_at.tzinfo is None:
+        reopened_at = reopened_at.replace(tzinfo=timezone.utc)
+    elapsed = ((now or datetime.now(timezone.utc)) - reopened_at).total_seconds()
+    return 0 <= elapsed < PENDING_SESSION_SECONDS
+
 
 #: The longest CallId accepted; LMA's own are a meeting name and a timestamp.
 MAX_CALL_ID_LENGTH = 1024
@@ -112,6 +138,12 @@ def reopen_meeting(identity: Mapping[str, Any], call_id: Any) -> Dict[str, Any]:
         return refusal(
             "MeetingInProgress",
             "This meeting is still being captured. Continue it once it shows as Done in LMA.",
+        )
+    if pending_session(meeting):
+        return refusal(
+            "MeetingInProgress",
+            "This meeting was reopened a few minutes ago and that capture has not started yet. "
+            "Try again once it has started and ended, or in a few minutes.",
         )
 
     session = lma_sessions.next_session_number(

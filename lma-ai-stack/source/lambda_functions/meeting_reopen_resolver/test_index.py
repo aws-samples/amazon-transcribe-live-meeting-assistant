@@ -197,3 +197,26 @@ def test_only_the_reopen_field_is_answered(table) -> None:
     table()
     answer = index.handler({"info": {"fieldName": "getCall"}, "identity": OWNER}, None)
     assert answer["errorType"] == "BadRequest"
+
+
+def _minutes_ago(minutes: float) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+
+
+def test_a_session_allowed_moments_ago_that_has_not_started_is_not_overtaken(table) -> None:
+    # A Virtual Participant rejoin, still joining: session 2 allowed, not started.
+    fake = table(ended_meeting(SessionNumber=2, ReopenedAt=_minutes_ago(2)))
+    assert call(OWNER)["errorType"] == "MeetingInProgress"
+    assert fake.updates == []
+
+
+def test_a_session_allowed_long_ago_that_never_started_is_taken_as_abandoned(table) -> None:
+    table(ended_meeting(SessionNumber=2, ReopenedAt=_minutes_ago(16)))
+    assert call(OWNER)["SessionNumber"] == 3
+
+
+def test_a_session_that_started_does_not_hold_the_next_reopen(table) -> None:
+    table(ended_meeting(SessionNumber=2, SessionStartedNumber=2, ReopenedAt=_minutes_ago(1)))
+    assert call(OWNER)["SessionNumber"] == 3

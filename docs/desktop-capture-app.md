@@ -587,6 +587,10 @@ Who can continue a meeting, and when:
 - Not while the meeting is still being captured. After a dropped connection the
   server holds a meeting for 60 seconds for the app to reconnect, so a meeting
   whose recording stopped unexpectedly may take a minute to show as **Done**.
+- Not within 15 minutes of another reopen of the meeting whose capture has not
+  started yet, such as a Virtual Participant [rejoin](virtual-participant.md#rejoin)
+  that is still joining. After 15 minutes that reopen is taken to have been
+  abandoned.
 - Not once the meeting's transcript has been deleted by the Retention settings.
 
 If the meeting cannot be continued, the panel says why under the field and

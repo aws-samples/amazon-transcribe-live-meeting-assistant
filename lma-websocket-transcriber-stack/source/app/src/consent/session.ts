@@ -50,7 +50,8 @@ export interface ConsentSessionDeps {
     readonly api: ConsentApi | undefined;
     /**
      * The Cognito username of the verified caller who started the meeting on
-     * this connection. The step is recorded only on a meeting that user owns.
+     * this connection. The step is recorded only on a meeting that user owns,
+     * or on any meeting for an Admin (callerIsAdmin).
      */
     readonly callerUsername: string | undefined;
     /**
