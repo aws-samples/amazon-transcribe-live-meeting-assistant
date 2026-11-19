@@ -193,7 +193,9 @@ a meeting uses, so **enrolling requires the ASR MicroVM engine to be deployed**
 (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs): the
 embedding model lives in that image and Amazon Transcribe exposes no speaker
 embedding. In a deployment with enrollment on but that engine absent, the portal
-says so rather than telling somebody their recordings were unusable.
+says so as soon as it opens, before any consent is given or anything is
+recorded: it shows the terms with the reason, and both agreeing and recording
+are refused.
 
 ### Which model bundles support enrollment
 
@@ -359,12 +361,14 @@ Both enrolling and matching need the
 [ASR MicroVM engine](microvm-asr.md) (`EnableMicrovmAsr=true`, the default, in a
 Region with AWS Lambda MicroVMs), because that is
 the engine that computes speaker embeddings — one to build a voiceprint, the
-other to compare against it. Amazon Transcribe exposes none, so with enrollment
-on and that engine off the tables, the portal and the consent log all exist and
-work, and the step that would create a voiceprint reports that the engine is
-missing. The engine's model bundle also has to carry a speaker model, which the
-default bundle does not: see
+other to compare against it. Amazon Transcribe exposes none. The engine's model
+bundle also has to carry a speaker model, which the default bundle does not: see
 [which model bundles support enrollment](#which-model-bundles-support-enrollment).
+With enrollment on and either of those missing, the tables and the portal exist,
+but the portal shows the terms with the reason enrollment is unavailable, and
+`grantVoiceConsent` and `enrolMyVoice` both refuse with that reason, so no
+consent row is written and no voiceprint is created. An existing voiceprint can
+still be deleted.
 With the engine deployed, matching still applies only to the meeting
 sources an admin has moved onto it in the **Transcription Engine** section of
 the Configuration page; every source ships on Amazon Transcribe.

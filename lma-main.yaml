@@ -239,9 +239,11 @@ Parameters:
       are yours -- biometric data is separately regulated in many jurisdictions
       and typically requires informed consent before collection, a published
       retention schedule and deletion on request. See docs/voice-enrollment.md.
-      Matching also needs the ASR MicroVM engine (EnableMicrovmAsr, deployed in
-      Regions with AWS Lambda MicroVMs), since Amazon Transcribe exposes no
-      speaker embedding.
+      Enrolling and matching also need the ASR MicroVM engine (EnableMicrovmAsr,
+      deployed in Regions with AWS Lambda MicroVMs), since Amazon Transcribe
+      exposes no speaker embedding, built from a model bundle with a speaker
+      model. The default bundle has none; without one, the portal says so and
+      takes no consent.
 
   VoiceEnrollmentRetentionDays:
     Type: Number

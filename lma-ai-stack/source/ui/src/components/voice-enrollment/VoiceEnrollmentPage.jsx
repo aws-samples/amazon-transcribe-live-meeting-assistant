@@ -162,8 +162,9 @@ const VoiceEnrollmentPage = () => {
   const lapsed = Boolean(state?.ConsentExpiresAt) && new Date(state.ConsentExpiresAt) <= new Date();
   // Why this deployment cannot compute a voiceprint at all (no on-demand
   // engine, or a model bundle with no speaker model), or null when it can.
-  // Only an explicit false counts: a backend that predates the field leaves it
-  // null, and the enrollment call still reports the reason if there is one.
+  // Only an explicit false counts, so a missing value fails open to the
+  // ordinary flow; the backend refuses consent and enrollment with the reason
+  // regardless of what the page shows.
   const unavailableReason =
     state?.EnrollmentAvailable === false
       ? state?.EnrollmentUnavailableReason || 'Voice enrollment is not available in this deployment.'

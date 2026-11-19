@@ -146,8 +146,8 @@ describe('when this deployment cannot compute a voiceprint', () => {
   });
 
   it('treats a backend that does not report availability as available', async () => {
-    // An older backend leaves the field null; the enrollment call still
-    // reports the reason, so the recorder stays usable.
+    // A missing value fails open to the ordinary flow; the backend still
+    // refuses with the reason, so the page need not guess.
     renderWith(state({ Status: 'pending' }));
     await waitFor(() => expect(screen.getByText('Record a line')).toBeTruthy());
     expect(screen.getByText('Record a line').closest('button').disabled).toBe(false);
