@@ -242,6 +242,28 @@ def _skill_from_input(data: Any, source_format: str = skill_formats.SOURCE_MANUA
     )
 
 
+def unchanged(skill: skill_formats.Skill, existing: Optional[Dict[str, Any]]) -> bool:
+    """The stored skill already holds what ``skill`` would store (its source aside)."""
+    if not existing:
+        return False
+    stored = {
+        "Name": existing.get("Name"),
+        "DisplayName": existing.get("DisplayName") or "",
+        "Description": existing.get("Description"),
+        "Instructions": existing.get("Instructions") or "",
+        "Files": [
+            {"Path": f.get("Path"), "Content": f.get("Content") or ""}
+            for f in existing.get("Files") or []
+        ],
+        "Metadata": dict(existing.get("Metadata") or {}),
+    }
+    wanted = skill.to_item_fields()
+    wanted.pop("SourceFormat")
+    return json.dumps(stored, sort_keys=True, default=str) == json.dumps(
+        wanted, sort_keys=True, default=str
+    )
+
+
 def _name_taken(name: str, other_than: str = "") -> bool:
     return any(s.get("Name") == name and s.get("SkillId") != other_than for s in _stored(True))
 
@@ -284,7 +306,9 @@ def export_skill(event: Dict[str, Any]) -> str:
 def export_skill_library(_event: Dict[str, Any]) -> str:
     document = skill_formats.export_library(_stored())
     LOGGER.info("Exported a skill library of %s skills", len(document["skills"]))
-    return json.dumps(document, default=str)
+    # Non-ASCII text unescaped, so a library in any script stays near its text's
+    # size (see the sizes in skill_formats.py).
+    return json.dumps(document, default=str, ensure_ascii=False)
 
 
 def create_skill(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -298,7 +322,13 @@ def create_skill(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(stored) >= skill_formats.MAX_SKILLS:
         return _output(False, f"At most {skill_formats.MAX_SKILLS} skills can be stored.")
     skill_id = skill_formats.new_skill_id(skill.name, {str(s.get("SkillId")) for s in stored})
-    _put(skill_id, skill, _caller(event)["who"], None)
+    try:
+        _put(skill_id, skill, _caller(event)["who"], None)
+    except ClientError as exc:
+        # Another create of the same name stored its skill first.
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return _output(False, f"A skill named {skill.name} already exists.")
+        raise
     LOGGER.info("Created skill %s", skill_id)
     return _output(True, "Skill created", skill_id, _get(skill_id))
 
@@ -409,7 +439,11 @@ def import_skill(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def import_skill_library(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Create or update the skills a library document lists, matched by name."""
+    """Create or update the skills a library document lists, matched by name.
+
+    An entry that matches its stored skill exactly is reported as unchanged and
+    not written, so re-importing a deployment's own export changes nothing.
+    """
     library = (event.get("arguments") or {}).get("library")
     try:
         steps = skill_formats.plan_import(library, _stored())
@@ -424,6 +458,10 @@ def import_skill_library(event: Dict[str, Any]) -> Dict[str, Any]:
             continue
         try:
             existing = _get(step.skill_id) if step.action == "update" else None
+            if step.action == "update" and unchanged(step.skill, existing):
+                # Nothing to write: the skill, its source and its audit fields stay.
+                results.append({**result, "Action": "unchanged"})
+                continue
             _put(step.skill_id, step.skill, who, existing)
         except ClientError as exc:
             LOGGER.error("Skill %s of the library could not be stored", step.skill_id)

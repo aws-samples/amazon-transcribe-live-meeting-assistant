@@ -146,9 +146,9 @@ An import is refused, and stores nothing, when a reference file is larger than 3
 
 `kind` and `version` name the document's type and format version, as the [MCP server library](mcp-servers.md#exporting-and-importing-the-server-library)'s do.
 
-**An import matches skills by name.** A skill whose name is stored replaces the stored one and keeps its id. Any other skill is created, under the id the file gives when this deployment has no skill of that id, so that a configuration profile exported with the library still names it; otherwise under an id made from its name. An entry that cannot be read (no name, a name that does not fit the rule, no description) is skipped with the reason, and the others are still imported. A reference file that is not text is left out of its skill and listed. The result lists each skill as `created`, `updated`, `skipped` or `failed`.
+**An import matches skills by name.** A skill whose name is stored replaces the stored one and keeps its id. Any other skill is created, under the id the file gives when this deployment has no skill of that id, so that a configuration profile exported with the library still names it; otherwise under an id made from its name. An entry that cannot be read (no name, a name that does not fit the rule, no description) is skipped with the reason, and the others are still imported. A reference file that is not text is left out of its skill and listed. An entry that matches its stored skill exactly is not written, so re-importing a deployment's own export changes nothing, not even who last changed a skill. The result lists each skill as `created`, `updated`, `unchanged`, `skipped` or `failed`.
 
-A library of up to 40 skills is read. The pages and the SDK send a large library in parts of whole skills, which an import by name makes the same as sending it whole.
+A library of up to 40 skills is read. The pages and the SDK send a large library in parts of whole skills, keeping only the first entry of a name listed more than once (and saying so), which an import by name then makes the same as sending it whole.
 
 ## Choosing Skills in the Profile
 

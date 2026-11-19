@@ -123,6 +123,27 @@ def check_library(library: Union[Dict[str, Any], str]) -> Dict[str, Any]:
     return document
 
 
+def unique_skills(document: Dict[str, Any]) -> tuple:
+    """The library's entries with each name's first only, and the names left out.
+
+    The stack skips a name listed twice in one document; across the parts of a
+    large library it would update instead, so the copies are removed before the
+    split.
+    """
+    seen: set = set()
+    kept: List[Any] = []
+    duplicates: List[str] = []
+    for skill in document["skills"]:
+        name = skill.get("name") if isinstance(skill, dict) else None
+        if isinstance(name, str) and name in seen:
+            duplicates.append(name)
+            continue
+        if isinstance(name, str):
+            seen.add(name)
+        kept.append(skill)
+    return kept, duplicates
+
+
 def library_parts(document: Dict[str, Any], max_bytes: Optional[int] = None) -> List[Dict[str, Any]]:
     """``document`` split into libraries of whole skills, each at most ``max_bytes`` of JSON.
 
@@ -134,7 +155,7 @@ def library_parts(document: Dict[str, Any], max_bytes: Optional[int] = None) -> 
     parts: List[Dict[str, Any]] = []
     current: List[Any] = []
     size = len(json.dumps({**header, "skills": []}))
-    for skill in document["skills"]:
+    for skill in unique_skills(document)[0]:
         entry = len(json.dumps(skill)) + 2
         if current and size + entry > max_bytes:
             parts.append({**header, "skills": current})
@@ -331,6 +352,10 @@ class SkillOperations:
             if not answer.get("Success") and not answer.get("Skills"):
                 combined["Message"] = answer.get("Message") or "The import failed"
                 return combined
+        for name in unique_skills(document)[1]:
+            combined["Skills"].append(
+                {"Name": name, "SkillId": None, "Action": "skipped", "Message": "listed more than once"}
+            )
         processed = sum(1 for s in combined["Skills"] if s.get("Action") != "failed")
         combined["Message"] = f"{processed} of {len(combined['Skills'])} skills processed"
         return combined

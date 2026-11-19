@@ -60,7 +60,10 @@ MAX_DESCRIPTION = 1024
 
 #: Sizes, in bytes of UTF-8. A skill is stored as one DynamoDB item (at most
 #: 400 KB), and the library export of every skill is one AppSync response (at
-#: most 5 MB): MAX_SKILLS skills of MAX_SKILL_BYTES fit in it with room to spare.
+#: most 5 MB). MAX_SKILLS skills of MAX_SKILL_BYTES are 2.5 MB of text; the
+#: export writes it without escaping non-ASCII characters (ensure_ascii=False),
+#: so text in any script stays near that size, and the AWSJSON string escapes
+#: only quotes, backslashes and control characters.
 MAX_INSTRUCTIONS_BYTES = 48 * 1024
 MAX_FILE_BYTES = 32 * 1024
 MAX_SKILL_BYTES = 64 * 1024
@@ -462,6 +465,14 @@ def parse_zip_skill(data: bytes) -> ParsedSkill:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
         raise SkillError("The file is not a zip archive.") from None
+    try:
+        return _read_zip(archive)
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, EOFError, OSError):
+        # A damaged entry, an unsupported compression method or an encrypted file.
+        raise SkillError("The zip could not be read.") from None
+
+
+def _read_zip(archive: zipfile.ZipFile) -> ParsedSkill:
     with archive:
         infos = [i for i in archive.infolist() if not i.is_dir()]
         if len(infos) > MAX_ZIP_ENTRIES:

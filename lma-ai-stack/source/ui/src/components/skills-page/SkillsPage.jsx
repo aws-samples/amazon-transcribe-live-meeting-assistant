@@ -262,11 +262,12 @@ const SkillsPage = () => {
       setResult(null);
       try {
         const document = parseLibraryFile(await file.text());
+        const { parts, duplicates } = libraryParts(document);
         const combined = { Success: true, Skills: [] };
         // Sent in parts of whole skills when large; matched by name, so the
         // parts together do what the whole would.
         // eslint-disable-next-line no-restricted-syntax
-        for (const part of libraryParts(document)) {
+        for (const part of parts) {
           // eslint-disable-next-line no-await-in-loop
           const response = await client.graphql({
             query: importSkillLibraryMutation,
@@ -277,6 +278,9 @@ const SkillsPage = () => {
           combined.Skills.push(...(answer.Skills || []));
           if (!answer.Success && !(answer.Skills || []).length) combined.Message = answer.Message;
         }
+        duplicates.forEach((name) =>
+          combined.Skills.push({ Name: name, SkillId: null, Action: 'skipped', Message: 'listed more than once' }),
+        );
         if (!combined.Message) {
           const done = combined.Skills.filter((s) => s.Action !== 'failed').length;
           combined.Message = `${done} of ${combined.Skills.length} skills processed`;

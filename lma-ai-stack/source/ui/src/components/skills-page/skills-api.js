@@ -254,9 +254,26 @@ export const parseLibraryFile = (text) => {
   return document;
 };
 
-/** A library split into libraries of whole skills, each at most `maxBytes` of JSON. */
+/**
+ * A library split into libraries of whole skills, each at most `maxBytes` of JSON,
+ * and the names left out because an earlier entry has them. The stack skips a
+ * name listed twice in one document; across parts it would update instead, so
+ * the copies are removed here, before the split.
+ */
 export const libraryParts = (document, maxBytes = MAX_IMPORT_BYTES) => {
-  const { skills, ...header } = document;
+  const { skills: entries, ...header } = document;
+  const seen = new Set();
+  const duplicates = [];
+  const skills = entries.filter((skill) => {
+    const name = skill && typeof skill === 'object' ? skill.name : undefined;
+    if (typeof name !== 'string') return true;
+    if (seen.has(name)) {
+      duplicates.push(name);
+      return false;
+    }
+    seen.add(name);
+    return true;
+  });
   const empty = byteSize(JSON.stringify({ ...header, skills: [] }));
   const parts = [];
   let current = [];
@@ -272,7 +289,7 @@ export const libraryParts = (document, maxBytes = MAX_IMPORT_BYTES) => {
     size += entry;
   });
   parts.push({ ...header, skills: current });
-  return parts;
+  return { parts, duplicates };
 };
 
 /** The file name a library export is saved under. */

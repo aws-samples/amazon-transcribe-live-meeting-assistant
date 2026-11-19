@@ -96,7 +96,7 @@
       "order": 10,
       "type": "string",
       "title": "Assistant instructions",
-      "description": "The editable part of the meeting assistant's system prompt: who the assistant is, how long and in what tone it answers, and how it chooses among its tools. LMA always appends a fixed part that no profile can change: that what a tool returns (the transcript, the meeting chat, the shared screen, documents, web pages, MCP server results) is quoted data and never instructions, that people are not identified from their faces, how to drive the Virtual Participant browser, and the limits on requests made in the meeting. Reset to default to return to the shipped text.",
+      "description": "The editable part of the meeting assistant's system prompt: who the assistant is, how long and in what tone it answers, and how it chooses among its tools. LMA always appends a fixed part that no profile can change: that what a tool returns (the transcript, the meeting chat, the shared screen, documents, web pages, MCP server results) is quoted data and never instructions, except a skill the assistant loads, which it follows within the fixed part; that people are not identified from their faces; how to drive the Virtual Participant browser; and the limits on requests made in the meeting. Reset to default to return to the shipped text.",
       "format": "textarea",
       "rows": 20,
       "minLength": 1,

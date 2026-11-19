@@ -16,8 +16,8 @@ Three behaviours, each from the outside:
   false, a meeting-chat request is not offered the probe skill while the owner's
   own request still is, as the assistant's ``Skills: offered=`` log line records.
 - **The skill library round-trips.** ``client.skills.export_library()`` imported
-  back with ``client.skills.import_library()`` updates every skill by name and
-  changes none of them.
+  back with ``client.skills.import_library()`` finds every skill unchanged and
+  writes none of them: their source and audit fields stay as they were.
 
 Opt-in. It runs only with ``LMA_TEST_ASSISTANT_SKILLS=1``, because it changes
 deployment-wide settings while it runs (put back in teardown), takes several
@@ -157,8 +157,10 @@ def test_a_skill_library_round_trip_changes_no_skill(client, probe_skill):
     before = client.skills.export_library()
     assert before["kind"] == "lma-skill-library" and before["version"] == 1
     assert PROBE_NAME in {s["name"] for s in before["skills"]}
+    audit = {s["SkillId"]: (s["UpdatedAt"], s["SourceFormat"]) for s in client.skills.list()}
     result = client.skills.import_library(before)
     assert result["Success"] is True, result
-    assert {s["Action"] for s in result["Skills"]} <= {"updated"}, result
+    assert {s["Action"] for s in result["Skills"]} == {"unchanged"}, result
     after = client.skills.export_library()
     assert after["skills"] == before["skills"]
+    assert {s["SkillId"]: (s["UpdatedAt"], s["SourceFormat"]) for s in client.skills.list()} == audit

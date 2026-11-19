@@ -2376,7 +2376,7 @@ type ImportSkillOutput @aws_cognito_user_pools @aws_iam {
 }
 
 # What a skill library import did with each skill it lists. Action is created,
-# updated, skipped or failed.
+# updated, unchanged (already stored as listed, so not written), skipped or failed.
 type ImportSkillLibrarySkill @aws_cognito_user_pools @aws_iam {
 	Name: String!
 	SkillId: ID

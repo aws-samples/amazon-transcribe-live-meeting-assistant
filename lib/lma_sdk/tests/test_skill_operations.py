@@ -169,6 +169,26 @@ def test_a_large_library_is_sent_in_parts_of_whole_skills(client, appsync, monke
         assert part["kind"] == "lma-skill-library" and part["version"] == 1
 
 
+def test_a_name_listed_twice_is_sent_once_and_reported_skipped(client, appsync, monkeypatch):
+    monkeypatch.setattr(skill_ops, "MAX_IMPORT_BYTES", 200)
+    skills = [{"name": "a", "instructions": "x" * 120}, {"name": "a", "instructions": "y" * 120}]
+    appsync.graphql.side_effect = lambda *_a, **kw: {
+        "importSkillLibrary": {
+            "Success": True,
+            "Skills": [
+                {"Name": s["name"], "Action": "created"}
+                for s in json.loads(kw["variables"]["library"])["skills"]
+            ],
+        }
+    }
+    result = client.skills.import_library({**LIBRARY, "skills": skills})
+    assert appsync.graphql.call_count == 1
+    assert [(s["Name"], s["Action"]) for s in result["Skills"]] == [
+        ("a", "created"),
+        ("a", "skipped"),
+    ]
+
+
 def test_a_library_refused_as_a_whole_reports_the_stacks_message(client, appsync):
     appsync.graphql.return_value = {
         "importSkillLibrary": {"Success": False, "Message": "too many", "Skills": []}

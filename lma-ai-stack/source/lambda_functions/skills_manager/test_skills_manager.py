@@ -277,14 +277,50 @@ def test_a_library_round_trip_updates_every_skill_and_changes_none(table):
     call("createSkill", input=SKILL)
     call("createSkill", input={**SKILL, "Name": "second", "Files": []})
     before = json.loads(call("exportSkillLibrary", IAM))
+    stored = {k: dict(v) for k, v in table.items.items()}
     result = call("importSkillLibrary", IAM, library=json.dumps(before))
     assert result["Success"] is True
     assert {(s["Name"], s["Action"]) for s in result["Skills"]} == {
-        ("launch-review", "updated"),
-        ("second", "updated"),
+        ("launch-review", "unchanged"),
+        ("second", "unchanged"),
     }
     after = json.loads(call("exportSkillLibrary", IAM))
     assert after["skills"] == before["skills"]
+    # Not written at all: the source and audit fields are those of before.
+    assert table.items == stored
+
+
+def test_a_library_entry_that_differs_updates_its_skill(table):
+    call("createSkill", input=SKILL)
+    document = json.loads(call("exportSkillLibrary"))
+    document["skills"][0]["description"] = "A new description."
+    result = call("importSkillLibrary", IAM, library=json.dumps(document))
+    assert [s["Action"] for s in result["Skills"]] == ["updated"]
+    stored = table.items[("111122223333", "launch-review")]
+    assert stored["Description"] == "A new description."
+    assert stored["UpdatedBy"] == IAM["userArn"] and stored["SourceFormat"] == "library"
+
+
+def test_the_library_export_keeps_non_ascii_text_unescaped(table):
+    call("createSkill", input={**SKILL, "Instructions": "Résumé — 会议纪要"})
+    assert "会议纪要" in call("exportSkillLibrary")
+
+
+def test_a_create_that_loses_a_race_for_its_id_says_the_name_is_taken(table, monkeypatch):
+    original = table.put_item
+
+    def racing(Item, ConditionExpression):
+        table.items[(Item["AccountId"], Item["SkillId"])] = {"SkillId": Item["SkillId"]}
+        return original(Item=Item, ConditionExpression=ConditionExpression)
+
+    monkeypatch.setattr(table, "put_item", racing)
+    result = call("createSkill", input=SKILL)
+    assert result == {
+        "SkillId": None,
+        "Success": False,
+        "Message": "A skill named launch-review already exists.",
+        "Skill": None,
+    }
 
 
 def test_a_library_import_into_another_deployment_creates_the_skills(table):

@@ -210,6 +210,15 @@ def test_a_file_that_is_neither_markdown_nor_zip_is_refused():
         sf.parse_skill_file("skill.py", b"print(1)")
 
 
+def test_a_zip_whose_entries_cannot_be_read_is_refused_with_a_reason():
+    data = bytearray(_zip({"s/SKILL.md": SKILL_MD, "s/notes.md": "some notes here"}))
+    # Corrupt the stored bytes of the second entry, so its CRC no longer matches.
+    at = bytes(data).index(b"some notes here")
+    data[at : at + 4] = b"XXXX"
+    with pytest.raises(sf.SkillError, match="could not be read"):
+        sf.parse_skill_file("s.zip", bytes(data))
+
+
 def test_a_corrupt_zip_is_refused():
     with pytest.raises(sf.SkillError, match="not a zip"):
         sf.parse_skill_file("s.zip", b"not a zip")

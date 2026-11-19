@@ -21,8 +21,8 @@ Both tools answer only for the skills they were built with, which are the ones
 the request may use, so a skill the profile does not allow cannot be loaded by
 naming it. What they return is marked as an administrator's guidance, to be
 followed within LMA's fixed rules (``SKILL_RULES``), which the meeting
-assistant appends after its fixed instructions so that those rules come last
-and hold whatever a skill says.
+assistant appends at the end of its fixed instructions, so that the rule is
+part of what holds whatever a skill says.
 
 The list of skills is cached for CATALOG_TTL_SECONDS, as the MCP server list
 is; a skill's instructions and files are cached by the skill's UpdatedAt, so an

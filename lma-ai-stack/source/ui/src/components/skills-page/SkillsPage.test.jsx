@@ -231,7 +231,8 @@ describe('the skill helpers', () => {
     expect(() => parseLibraryFile('nope')).toThrow(/not valid JSON/);
     expect(() => parseLibraryFile(JSON.stringify({ ...LIBRARY, version: 2 }))).toThrow(/format version 2/);
     const skills = [0, 1, 2, 3].map((n) => ({ name: `s${n}`, instructions: 'x'.repeat(150) }));
-    const parts = libraryParts({ ...LIBRARY, skills }, 400);
+    const { parts, duplicates } = libraryParts({ ...LIBRARY, skills: [...skills, { name: 's1' }] }, 400);
+    expect(duplicates).toEqual(['s1']);
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.flatMap((part) => part.skills.map((s) => s.name))).toEqual(['s0', 's1', 's2', 's3']);
     parts.forEach((part) => expect(part.kind).toBe('lma-skill-library'));
