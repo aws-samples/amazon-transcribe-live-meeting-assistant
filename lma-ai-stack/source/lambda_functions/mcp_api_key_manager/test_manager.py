@@ -249,7 +249,7 @@ class TestKeyScope(unittest.TestCase):
         mock_dynamo.Table.return_value.put_item.assert_not_called()
 
     @patch.object(index, "dynamodb")
-    def test_listed_keys_show_their_scope_and_an_older_key_is_read(self, mock_dynamo):
+    def test_listed_keys_show_their_scope_and_an_older_key_is_legacy(self, mock_dynamo):
         mock_table = MagicMock()
         mock_table.query.return_value = {
             "Items": [
@@ -259,7 +259,7 @@ class TestKeyScope(unittest.TestCase):
         }
         mock_dynamo.Table.return_value = mock_table
         result = index.handler(make_event("listMCPApiKeys", username="alice"), None)
-        self.assertEqual([key["scope"] for key in result], ["read", "read-write"])
+        self.assertEqual([key["scope"] for key in result], ["legacy", "read-write"])
 
 
 if __name__ == "__main__":

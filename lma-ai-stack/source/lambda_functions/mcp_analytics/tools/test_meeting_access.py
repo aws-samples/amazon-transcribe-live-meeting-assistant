@@ -70,12 +70,12 @@ def test_list_keys_are_the_ones_create_call_wrote():
     [
         ("read-write", "read-write"),
         ("read", "read"),
-        (None, "read"),
+        (None, "legacy"),
         ("admin", "read"),
-        ("", "read"),
+        ("", "legacy"),
     ],
 )
-def test_a_key_scope_other_than_read_write_is_read(stored, expected):
+def test_a_key_without_a_scope_is_legacy_and_an_unknown_one_read(stored, expected):
     assert access.normalize_scope(stored) == expected
 
 

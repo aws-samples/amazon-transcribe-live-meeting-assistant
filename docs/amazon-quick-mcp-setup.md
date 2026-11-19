@@ -80,7 +80,9 @@ agents) classify them correctly.
 
 On the API key path (Quick Desktop) a key with the **Read only** scope is
 offered, and answered for, the read-only tools only; `schedule_meeting` and
-`start_meeting_now` need a **Read and write** key. The API key endpoint also
+`start_meeting_now` need a **Read and write** key. A key created before keys had
+scopes is listed as **Legacy (original tools)** and keeps every tool in the table
+above. The API key endpoint also
 serves the meeting tools listed in
 [MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed),
 such as the live transcript, meeting guidance and the full meeting record.

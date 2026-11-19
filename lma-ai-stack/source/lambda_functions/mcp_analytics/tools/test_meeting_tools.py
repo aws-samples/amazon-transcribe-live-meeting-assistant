@@ -197,6 +197,28 @@ def test_a_meeting_streamed_without_a_vp_is_not_ended_here(calls_table, vp_table
     assert appsync.calls == []
 
 
+def test_an_incomplete_vp_lookup_is_reported_rather_than_read_as_no_vp(
+    calls_table, vp_table, appsync, monkeypatch
+):
+    """A table larger than the scan bound is said to be, in both tools that scan it."""
+    calls_table.put(meeting_row())
+    vp_table.put(vp_row("vp1", createdAt="2026-11-19T10:00:00Z"))
+    unbounded = vp_table.scan
+    monkeypatch.setattr(
+        vp_table, "scan", lambda **kw: {**unbounded(**kw), "LastEvaluatedKey": {"id": "more"}}
+    )
+    with pytest.raises(ValueError, match="larger than one lookup covers"):
+        meeting_actions.end_meeting(caller(), "m1")
+    listed = virtual_participants.list_vps(caller())
+    assert listed["truncated"] is True and "note" in listed
+    assert appsync.calls == []
+
+
+def test_a_complete_vp_list_is_not_marked_truncated(vp_table):
+    vp_table.put(vp_row("vp1"))
+    assert virtual_participants.list_vps(caller())["truncated"] is False
+
+
 def test_a_scheduled_vp_is_cancelled(vp_table, appsync):
     vp_table.put(vp_row())
     virtual_participants.end_by_id(caller(), "vp1")

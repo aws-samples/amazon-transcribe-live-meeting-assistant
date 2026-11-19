@@ -21,7 +21,7 @@ signed with this function's IAM role is not.
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -66,7 +66,8 @@ def get_vp(vp_id: Any) -> Optional[Dict[str, Any]]:
     return vp_table().get_item(Key={"id": vp_id.strip()}).get("Item")
 
 
-def _scan(filter_expression=None) -> List[Dict[str, Any]]:
+def _scan(filter_expression=None) -> Tuple[List[Dict[str, Any]], bool]:
+    """The rows read, and whether the whole table was read (False at MAX_SCAN_PAGES)."""
     kwargs: Dict[str, Any] = {}
     if filter_expression is not None:
         kwargs["FilterExpression"] = filter_expression
@@ -76,15 +77,15 @@ def _scan(filter_expression=None) -> List[Dict[str, Any]]:
         rows.extend(response.get("Items", []))
         last = response.get("LastEvaluatedKey")
         if not last:
-            break
+            return rows, True
         kwargs["ExclusiveStartKey"] = last
-    return rows
+    return rows, False
 
 
-def active_vps_of_meeting(call_id: str) -> List[Dict[str, Any]]:
-    """The meeting's Virtual Participants that have not finished."""
-    rows = _scan(Attr("CallId").eq(call_id))
-    return [row for row in rows if row.get("status") not in VP_FINISHED_STATUSES]
+def active_vps_of_meeting(call_id: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """The meeting's Virtual Participants that have not finished, and whether all were read."""
+    rows, complete = _scan(Attr("CallId").eq(call_id))
+    return [row for row in rows if row.get("status") not in VP_FINISHED_STATUSES], complete
 
 
 def summary(vp: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,14 +114,22 @@ def list_vps(caller: Caller, status: Optional[str] = None, limit: Any = None) ->
         count = DEFAULT_LIMIT if limit is None else max(1, min(int(limit), MAX_LIMIT))
     except (TypeError, ValueError) as error:
         raise ValueError("limit must be a whole number") from error
-    rows = [row for row in _scan() if can_read(row, caller)]
+    scanned, complete = _scan()
+    rows = [row for row in scanned if can_read(row, caller)]
     if status:
         rows = [row for row in rows if str(row.get("status", "")).upper() == status.upper()]
     rows.sort(key=lambda row: str(row.get("createdAt") or ""), reverse=True)
-    return {
+    answer: Dict[str, Any] = {
         "virtualParticipants": [summary(row) for row in rows[:count]],
         "count": len(rows[:count]),
+        "truncated": not complete,
     }
+    if not complete:
+        answer["note"] = (
+            "The Virtual Participant table is larger than one read covers, so this list may "
+            "leave some out, and is ordered newest first among those read."
+        )
+    return answer
 
 
 def end_vp(caller: Caller, vp: Dict[str, Any], reason: Optional[str] = None) -> Dict[str, Any]:

@@ -75,8 +75,14 @@ def end_meeting(caller: Caller, meeting_id: str, reason: Any = None) -> Dict[str
     """End the meeting's Virtual Participants, which ends the meeting."""
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or meeting_id.strip()
-    vps = active_vps_of_meeting(call_id)
+    vps, complete = active_vps_of_meeting(call_id)
     if not vps:
+        if not complete:
+            raise ValueError(
+                f"No unfinished Virtual Participant of meeting {call_id} was found, but the "
+                "Virtual Participant table is larger than one lookup covers, so one may exist. "
+                "Find it with list_virtual_participants and end it with end_virtual_participant."
+            )
         if is_live(meeting):
             raise ValueError(
                 f"Meeting {call_id} is not being captured by a Virtual Participant. It is "

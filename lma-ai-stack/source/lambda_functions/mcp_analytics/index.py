@@ -10,9 +10,10 @@ Implements MCP protocol tools for LMA meeting data access.
 The BedrockAgentCore Gateway path serves the seven original tools, inferred from
 their arguments. The API key path speaks MCP JSON-RPC and serves those and the
 meeting tools in tool_definitions.py. On that path every API key carries a
-scope: a key with the read scope is answered only by the tools whose
-annotations declare readOnlyHint, and a read-write key by every tool
-(execute_tool_call). Access to each meeting is decided in tools/access.py.
+scope (execute_tool_call): a read key is answered only by the tools whose
+annotations declare readOnlyHint, a read-write key by every tool, and a legacy
+key -- one stored before keys had scopes -- by the seven original tools and the
+read-only meeting tools. Access to each meeting is decided in tools/access.py.
 """
 
 import json
@@ -46,15 +47,22 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 
-# The two scopes of an MCP API key (tools/access.py). The authorizer passes the
-# key's scope; a key stored before keys had scopes has none, and is read.
+# The scopes of an MCP API key (tools/access.py). A new key is generated with
+# READ or READ_WRITE. A key stored before keys had scopes is LEGACY: it keeps
+# every tool in MCP_TOOLS, the tools the server offered such keys, and of the
+# meeting tools it gets the read-only ones. An authorizer context with no scope
+# is a key of that kind too.
 READ_SCOPE = "read"
 READ_WRITE_SCOPE = "read-write"
+LEGACY_SCOPE = "legacy"
 
 
 def key_scope(authorizer: Dict[str, Any]) -> str:
-    """The scope the API key authorizer resolved, as one of the two scopes."""
-    return READ_WRITE_SCOPE if authorizer.get("scope") == READ_WRITE_SCOPE else READ_SCOPE
+    """The scope the API key authorizer resolved; any unknown value is read."""
+    scope = authorizer.get("scope")
+    if scope in (None, "", LEGACY_SCOPE):
+        return LEGACY_SCOPE
+    return READ_WRITE_SCOPE if scope == READ_WRITE_SCOPE else READ_SCOPE
 
 
 # Invariant: every tool scopes its results to the calling user and widens that
@@ -111,6 +119,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return error_response(403, NO_IDENTITY_MESSAGE)
 
             logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}, Scope: {scope}")
+            key_scope_to_apply = scope
 
             # Handle MCP JSON-RPC protocol messages
             if "jsonrpc" in tool_input and "method" in tool_input:
@@ -139,6 +148,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return error_response(403, NO_IDENTITY_MESSAGE)
 
             tool_input = event
+            # The gateway authenticates the user with OAuth; no API key, so no scope.
+            key_scope_to_apply = None
 
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
 
@@ -170,6 +181,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # On the gateway path `tool_input` is the event itself, which carries the
         # caller's claims, so the argument names are logged rather than the values.
         logger.info(f"Inferred tool: {tool_name}, Input keys: {sorted(tool_input.keys())}")
+
+        # A request on the API key endpoint is held to its key's scope whatever
+        # the shape of its body, as execute_tool_call holds a JSON-RPC call.
+        if key_scope_to_apply is not None and not scope_allows(key_scope_to_apply, tool_name):
+            logger.warning(f"Refused {tool_name} for a key with the {key_scope_to_apply} scope")
+            return error_response(403, scope_refusal(tool_name, key_scope_to_apply))
 
         # Route to appropriate tool
         if tool_name == "search_lma_meetings":
@@ -462,19 +479,32 @@ def is_read_only(tool_name: str) -> bool:
     return bool(tool and (tool.get("annotations") or {}).get("readOnlyHint") is True)
 
 
+ORIGINAL_TOOL_NAMES = frozenset(tool["name"] for tool in MCP_TOOLS)
+
+
+def scope_allows(scope: str, tool_name: str) -> bool:
+    """Whether a key with `scope` may call the tool."""
+    if scope == READ_WRITE_SCOPE or is_read_only(tool_name):
+        return True
+    return scope == LEGACY_SCOPE and tool_name in ORIGINAL_TOOL_NAMES
+
+
 def tools_for_scope(scope: str) -> list:
     """The tools a key with `scope` may call, which are the tools it is offered."""
-    if scope == READ_WRITE_SCOPE:
-        return TOOLS
-    return [tool for tool in TOOLS if is_read_only(tool["name"])]
+    return [tool for tool in TOOLS if scope_allows(scope, tool["name"])]
 
 
-def scope_refusal(tool_name: str) -> str:
-    """Why a read key cannot call a tool that changes something."""
+def scope_refusal(tool_name: str, scope: str) -> str:
+    """Why a key cannot call a tool that changes something."""
+    held = (
+        "this key was created before keys had scopes, and keeps the original tools only"
+        if scope == LEGACY_SCOPE
+        else "this key has the read scope"
+    )
     return (
         f"{tool_name} changes LMA data, so it needs an MCP API key with the read-write "
-        "scope; this key has the read scope. Generate a read-write key on the MCP Servers "
-        "page (Hosted MCP Access) to use it."
+        f"scope; {held}. Generate a read-write key on the MCP Servers page (Hosted MCP "
+        "Access) to use it."
     )
 
 
@@ -571,11 +601,14 @@ def execute_tool_call(  # pylint: disable=too-many-arguments
 ):
     """Execute a tool call and return MCP JSON-RPC response."""
     known = any(tool["name"] == tool_name for tool in TOOLS)
-    if known and not is_read_only(tool_name) and scope != READ_WRITE_SCOPE:
+    if known and not scope_allows(scope, tool_name):
         logger.warning(f"Refused {tool_name} for a key with the {scope} scope")
         return jsonrpc_response(
             msg_id,
-            {"content": [{"type": "text", "text": scope_refusal(tool_name)}], "isError": True},
+            {
+                "content": [{"type": "text", "text": scope_refusal(tool_name, scope)}],
+                "isError": True,
+            },
         )
     if not isinstance(arguments, dict):
         return jsonrpc_error(msg_id, -32602, "arguments must be an object")

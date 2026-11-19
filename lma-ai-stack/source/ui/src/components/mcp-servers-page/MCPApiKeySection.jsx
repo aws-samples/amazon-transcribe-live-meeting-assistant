@@ -28,8 +28,10 @@ const client = generateClient();
 const logger = new ConsoleLogger('MCPApiKeySection');
 
 /**
- * The two scopes a key can have. A read key reaches only the hosted MCP server's
- * tools that change nothing; a key created before keys had a scope is read.
+ * The two scopes a new key can have. A read key reaches only the hosted MCP
+ * server's tools that change nothing. A key created before keys had a scope is
+ * listed as legacy: it keeps the server's original tools, including starting and
+ * scheduling Virtual Participants, and the read tools added since.
  */
 export const SCOPE_OPTIONS = [
   {
@@ -45,7 +47,18 @@ export const SCOPE_OPTIONS = [
   },
 ];
 
-export const scopeLabel = (scope) => (scope === 'read-write' ? 'Read and write' : 'Read only');
+export const isLegacyScope = (scope) => scope !== 'read' && scope !== 'read-write';
+
+export const LEGACY_HINT =
+  'This key was created before keys had scopes. It keeps the original MCP tools, including starting and ' +
+  'scheduling Virtual Participants. To use the newer tools that change meetings, revoke it and generate a ' +
+  'key with the Read and write scope.';
+
+export const scopeLabel = (scope) => {
+  if (scope === 'read-write') return 'Read and write';
+  if (scope === 'read') return 'Read only';
+  return 'Legacy (original tools)';
+};
 
 const ScopeBadge = ({ scope = null }) => (
   <Badge color={scope === 'read-write' ? 'blue' : 'grey'}>{scopeLabel(scope)}</Badge>
@@ -137,6 +150,11 @@ const MCPApiKeySection = () => {
             Revoke
           </Button>
         </SpaceBetween>
+        {isLegacyScope(key.scope) && (
+          <Box color="text-body-secondary" fontSize="body-s" margin={{ top: 'xxs' }}>
+            {LEGACY_HINT}
+          </Box>
+        )}
       </Box>
     ));
 

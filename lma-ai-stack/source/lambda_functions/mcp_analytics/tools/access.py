@@ -33,11 +33,13 @@ from botocore.config import Config as BotoCoreConfig
 
 from tools.get_virtual_participant_status import shared_with_entries
 
-# The two scopes an MCP API key carries. A key created before scopes existed
-# has none and is read as READ (mcp_api_key_authorizer).
+# The scopes an MCP API key carries (mcp_api_key_authorizer). A new key is READ
+# or READ_WRITE; which tools each scope reaches is decided in index.scope_allows.
 READ = "read"
 READ_WRITE = "read-write"
-SCOPES = (READ, READ_WRITE)
+# A key stored before keys had scopes: the original tools and the read tools.
+LEGACY = "legacy"
+SCOPES = (READ, READ_WRITE, LEGACY)
 
 # The statuses of a meeting that is still being captured.
 LIVE_STATUSES = ("STARTED", "TRANSCRIBING")
@@ -64,8 +66,10 @@ class Caller:
 
 
 def normalize_scope(value: Any) -> str:
-    """A stored or presented scope as one of SCOPES; anything else is READ."""
-    return READ_WRITE if isinstance(value, str) and value.strip() == READ_WRITE else READ
+    """A stored or presented scope as one of SCOPES: none is LEGACY, anything unknown READ."""
+    if value in (None, "", LEGACY):
+        return LEGACY
+    return READ_WRITE if value == READ_WRITE else READ
 
 
 def _table(name_variable: str):

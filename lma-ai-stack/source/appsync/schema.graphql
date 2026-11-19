@@ -2305,8 +2305,9 @@ type MCPApiKey @aws_cognito_user_pools {
 	createdAt: String!
 	enabled: Boolean!
 	# "read": the hosted MCP server answers the key only for the tools that
-	# change nothing. "read-write": every tool. A key created before keys had a
-	# scope is "read".
+	# change nothing. "read-write": every tool. "legacy": a key created before
+	# keys had a scope, answered for the server's original tools and the tools
+	# that change nothing.
 	scope: String
 }
 

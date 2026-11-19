@@ -96,14 +96,15 @@ User chooses a scope and clicks "Generate API Key" on the MCP Servers Configurat
 
 ## Key Scopes
 
-Every API key has one of two scopes, chosen when it is generated:
+A new API key is generated with one of two scopes. A key created before keys had scopes has the third, `legacy`:
 
 | Scope | UI label | What a client using the key may call |
 |-------|----------|--------------------------------------|
-| `read` (the default) | **Read only** | The tools whose MCP annotations declare `readOnlyHint: true`: searching and reading meetings, transcripts, summaries, guidance, costs and Virtual Participant status |
+| `read` (the default for a new key) | **Read only** | The tools whose MCP annotations declare `readOnlyHint: true`: searching and reading meetings, transcripts, summaries, guidance, costs and Virtual Participant status |
 | `read-write` | **Read and write** | Every tool, including those that start, end, share, delete or otherwise change something |
+| `legacy` (keys created before scopes; never assigned to a new key) | **Legacy (original tools)** | The seven original tools, including `schedule_meeting` and `start_meeting_now`, as before, and the read-only meeting tools. Not the meeting tools that change something |
 
-A key created before keys had scopes has no `Scope` attribute and works as a `read` key, so after updating, a client that calls `schedule_meeting` or `start_meeting_now` with such a key needs a new key generated with the **Read and write** scope. A key's scope cannot be changed: revoke the key and generate a new one. The API key path offers a client only the tools its key may call in `tools/list`, and answers a call to any other tool with an MCP tool error that names the scope it needs; the tool does not run. Being in the **Admin** group does not widen what a `read` key may do.
+A key created before keys had scopes has no `Scope` attribute and keeps working as it did. To use the meeting tools that change something, generate a key with the **Read and write** scope; the MCP Servers page says so beside a legacy key. A key's scope cannot be changed: revoke the key and generate a new one. The API key path offers a client only the tools its key may call in `tools/list`, and answers a call to any other tool with an MCP tool error that names the scope it needs; the tool does not run. A request whose body is a tool's arguments rather than a JSON-RPC message is held to the key's scope in the same way, and refused with HTTP `403`. Being in the **Admin** group does not widen what a `read` or `legacy` key may do.
 
 The scope applies to the API key endpoint. The OAuth (3LO) gateway path carries no key and is unchanged: it serves the seven original tools.
 
@@ -156,8 +157,8 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `get_meeting_summary` | read | owner, shared, Admin | Get AI summary with action items and topics |
 | `list_meetings` | read | owner, shared, Admin | List meetings with date/participant/status filters |
 | `get_virtual_participant_status` | read | VP owner, shared, Admin | Poll a Virtual Participant's status |
-| `schedule_meeting` | read-write | caller | Schedule a future meeting with virtual participant |
-| `start_meeting_now` | read-write | caller | Start a meeting immediately with virtual participant |
+| `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant |
+| `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant |
 | `get_live_transcript` | read | owner, shared, Admin | The lines added to a meeting's transcript since a cursor; see [Following a Meeting Live](#following-a-meeting-live) |
 | `get_meeting_record` | read | owner, shared, Admin; `consent` owner and Admin only | The sections named in `include`: `details`, `summary`, `transcript`, `chat_links`, `key_frames`, `chat_attachments`, `recordings`, `consent` (default `details` and `summary`); see [Meeting Record Links](#meeting-record-links) |
 | `get_meeting_cost` | read | owner, shared, Admin | The meeting's itemised cost estimate, as on its Cost panel |
@@ -211,7 +212,7 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 | `KeyPrefix` | S | First 12 chars of key (e.g. `lma_a1b2c3d4`) for UI display |
 | `CreatedAt` | S | ISO 8601 timestamp |
 | `Enabled` | S | `"true"` or `"false"` |
-| `Scope` | S | `"read"` or `"read-write"`; absent on a key created before keys had scopes, which is read as `"read"` |
+| `Scope` | S | `"read"` or `"read-write"`; absent on a key created before keys had scopes, which is listed and authorized as `"legacy"` |
 
 **GSI: `UserIdIndex`** — Partition key: `UserId`, projects all attributes. Used for listing a user's keys and enforcing one-key-per-user.
 
@@ -228,7 +229,7 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`):
 
 - **MCP API Key** container at the top of the page
-- Shows key prefix with masked suffix, its scope (**Read only** or **Read and write**) and creation date if a key exists
+- Shows key prefix with masked suffix, its scope (**Read only**, **Read and write**, or **Legacy (original tools)** with a note that a new key gives the new scopes) and creation date if a key exists
 - Before a key exists, a **Scope** choice (**Read only** by default, or **Read and write**) and the "Generate API Key" button (disabled when a key already exists)
 - Generated key shown in a modal with its scope, CopyToClipboard and a warning it won't be shown again
 - "Revoke" button with confirmation modal

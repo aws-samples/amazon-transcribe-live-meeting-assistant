@@ -206,7 +206,7 @@ class TestAllowPolicy(unittest.TestCase):
 
     @patch.object(index, "dynamodb")
     def test_the_context_carries_the_key_scope(self, mock_dynamo):
-        """read-write is passed as such; an older key, or any other value, as read."""
+        """read-write is passed as such, a key stored without a scope as legacy, any other value as read."""
         token = "lma_scope-test"
         mock_table = MagicMock()
         mock_dynamo.Table.return_value = mock_table
@@ -214,7 +214,7 @@ class TestAllowPolicy(unittest.TestCase):
         for stored, expected in (
             ("read-write", "read-write"),
             ("read", "read"),
-            (None, "read"),
+            (None, "legacy"),
             ("admin", "read"),
         ):
             item = make_valid_item(token)

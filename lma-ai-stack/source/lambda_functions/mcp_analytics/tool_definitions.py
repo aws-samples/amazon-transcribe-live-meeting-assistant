@@ -5,9 +5,9 @@
 """The MCP definitions of the meeting tools served on the API key endpoint.
 
 A tool whose annotations carry ``readOnlyHint: true`` changes nothing and is
-answered for any key. Every other tool changes something and is answered only
-for a key with the read-write scope (index.execute_tool_call); a key without
-it is not offered them in tools/list either. ``destructiveHint`` marks the
+answered for any key. Every other tool here changes something and is answered
+only for a key with the read-write scope (index.scope_allows); a key without it
+is not offered them in tools/list either. ``destructiveHint`` marks the
 tools whose change cannot be taken back or takes something away from people.
 """
 

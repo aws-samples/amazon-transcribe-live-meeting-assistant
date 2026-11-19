@@ -5,7 +5,8 @@ Handles generate/list/revoke of per-user MCP API keys via AppSync.
 Each key carries a scope, chosen when it is generated: "read" (the default),
 for the MCP tools that change nothing, or "read-write", for every tool. A key
 stored before keys had scopes has no Scope attribute and is listed, and
-authorized, as "read".
+authorized, as "legacy": the tools the server offered such keys, and the read
+tools added since.
 """
 
 import hashlib
@@ -26,11 +27,16 @@ TABLE_NAME = os.environ.get("MCP_API_KEYS_TABLE", "")
 READ = "read"
 READ_WRITE = "read-write"
 SCOPES = (READ, READ_WRITE)
+# A key stored without a scope; never assigned to a new key.
+LEGACY = "legacy"
 
 
 def stored_scope(item):
-    """A stored key's scope; a key without one is read."""
-    return READ_WRITE if item.get("Scope") == READ_WRITE else READ
+    """A stored key's scope, as the authorizer reads it."""
+    scope = item.get("Scope")
+    if scope in (None, ""):
+        return LEGACY
+    return READ_WRITE if scope == READ_WRITE else READ
 
 
 def handler(event, context):

@@ -52,7 +52,9 @@ agents — no `allow_unscoped_write_tools` required for read-only flows):
 - **Write:** `schedule_meeting`, `start_meeting_now`
 
 The write tools need an API key generated with the **Read and write** scope; a
-**Read only** key (the default) is offered the read-only tools only. The API key
+**Read only** key (the default) is offered the read-only tools only. A key
+created before keys had scopes is listed as **Legacy (original tools)** and keeps
+all seven tools above. The API key
 endpoint serves further meeting tools too, listed in
 [MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed).
 

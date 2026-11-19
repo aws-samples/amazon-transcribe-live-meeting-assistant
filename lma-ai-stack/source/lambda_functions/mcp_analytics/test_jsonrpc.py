@@ -105,10 +105,23 @@ class TestMCPToolsList(unittest.TestCase):
         ):
             self.assertIn(name, tool_names)
 
-    def test_tools_list_offers_a_read_key_only_the_read_only_tools(self):
-        """A key with the read scope, or none, is offered the tools it may call."""
+    def test_tools_list_offers_a_legacy_key_the_original_tools_and_the_read_tools(self):
+        """A key stored before keys had scopes keeps every tool it was offered."""
         body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-        for scope in ("read", None, "admin"):
+        for scope in (None, "", "legacy"):
+            result = index.lambda_handler(api_gw_event(body, scope=scope), None)
+            names = {t["name"] for t in json.loads(result["body"])["result"]["tools"]}
+            for tool in index.MCP_TOOLS:
+                self.assertIn(tool["name"], names, scope)
+            self.assertIn("get_live_transcript", names)
+            self.assertIn("get_meeting_record", names)
+            for name in ("push_meeting_guidance", "delete_meeting", "ask_meeting_assistant"):
+                self.assertNotIn(name, names, scope)
+
+    def test_tools_list_offers_a_read_key_only_the_read_only_tools(self):
+        """A key with the read scope, or an unknown one, is offered the tools it may call."""
+        body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        for scope in ("read", "admin", "READ-WRITE"):
             result = index.lambda_handler(api_gw_event(body, scope=scope), None)
             tools = json.loads(result["body"])["result"]["tools"]
             self.assertTrue(tools, scope)
@@ -268,7 +281,7 @@ class TestKeyScopes(unittest.TestCase):
 
         meeting_actions.delete_meeting = MagicMock()
         schedule_meeting.execute = MagicMock()
-        for scope in ("read", None, "READ-WRITE"):
+        for scope in ("read", "admin", "READ-WRITE"):
             for name in self.WRITE_TOOLS:
                 with self.subTest(scope=scope, tool=name):
                     resp = self._call(name, scope=scope)
@@ -278,9 +291,93 @@ class TestKeyScopes(unittest.TestCase):
         schedule_meeting.execute.assert_not_called()
 
     def test_an_admin_read_key_is_refused_too(self):
-        """Being an Admin does not widen what a read key may do."""
-        resp = self._call("delete_meeting", {"meeting_id": "m1", "confirm": True}, is_admin="true")
-        self.assertTrue(resp["result"]["isError"])
+        """Being an Admin does not widen what a read or legacy key may do."""
+        for scope in ("read", None):
+            resp = self._call(
+                "delete_meeting",
+                {"meeting_id": "m1", "confirm": True},
+                scope=scope,
+                is_admin="true",
+            )
+            self.assertTrue(resp["result"]["isError"], scope)
+
+    NEW_WRITE_TOOLS = [
+        name for name in WRITE_TOOLS if name not in ("schedule_meeting", "start_meeting_now")
+    ]
+
+    def test_a_read_key_is_held_to_its_scope_on_a_body_that_is_not_json_rpc(self):
+        """The API key endpoint applies the scope to an argument-shaped body too."""
+        from tools import list_meetings, schedule_meeting, start_meeting_now
+
+        schedule_meeting.execute = MagicMock()
+        start_meeting_now.execute = MagicMock()
+        bodies = [
+            {"meetingName": "W", "meetingPlatform": "ZOOM", "meetingId": "1"},
+            {
+                "meetingName": "W",
+                "meetingPlatform": "ZOOM",
+                "meetingId": "1",
+                "scheduledTime": "2099-01-01T10:00:00Z",
+            },
+        ]
+        for body in bodies:
+            result = index.lambda_handler(api_gw_event(body, scope="read"), None)
+            self.assertEqual(result["statusCode"], 403)
+            self.assertIn("read-write", json.loads(result["body"])["error"]["message"])
+        schedule_meeting.execute.assert_not_called()
+        start_meeting_now.execute.assert_not_called()
+        # A read tool in that shape is still answered.
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+        result = index.lambda_handler(api_gw_event({"limit": 5}, scope="read"), None)
+        self.assertEqual(result["statusCode"], 200)
+        # A legacy key keeps the original tools in that shape, as before.
+        start_meeting_now.execute = MagicMock(return_value={"virtualParticipantId": "vp1"})
+        result = index.lambda_handler(api_gw_event(bodies[0]), None)
+        self.assertEqual(result["statusCode"], 200)
+        start_meeting_now.execute.assert_called_once()
+
+    def test_a_legacy_key_keeps_schedule_meeting_and_start_meeting_now(self):
+        from tools import schedule_meeting, start_meeting_now
+
+        schedule_meeting.execute = MagicMock(return_value={"virtualParticipantId": "vp1"})
+        start_meeting_now.execute = MagicMock(return_value={"virtualParticipantId": "vp2"})
+        for scope in (None, "legacy"):
+            for name, module in (
+                ("schedule_meeting", schedule_meeting),
+                ("start_meeting_now", start_meeting_now),
+            ):
+                with self.subTest(scope=scope, tool=name):
+                    module.execute.reset_mock()
+                    resp = self._call(
+                        name,
+                        {"meetingName": "W", "meetingPlatform": "ZOOM", "meetingId": "1"},
+                        scope=scope,
+                    )
+                    self.assertNotIn("isError", resp["result"])
+                    module.execute.assert_called_once()
+
+    def test_a_legacy_key_is_refused_the_new_write_tools_before_they_run(self):
+        from tools import meeting_actions
+
+        meeting_actions.delete_meeting = MagicMock()
+        for scope in (None, "legacy"):
+            for name in self.NEW_WRITE_TOOLS:
+                with self.subTest(scope=scope, tool=name):
+                    resp = self._call(name, scope=scope)
+                    self.assertTrue(resp["result"]["isError"])
+                    text = resp["result"]["content"][0]["text"]
+                    self.assertIn("read-write", text)
+                    self.assertIn("before keys had scopes", text)
+        meeting_actions.delete_meeting.assert_not_called()
+
+    def test_a_legacy_key_calls_the_new_read_tools(self):
+        from tools import access, meeting_record
+
+        access.Caller = MagicMock(side_effect=lambda **kw: kw)
+        meeting_record.execute = MagicMock(return_value={"meetingId": "m1"})
+        resp = self._call("get_meeting_record", {"meeting_id": "m1"}, scope=None)
+        self.assertNotIn("isError", resp["result"])
+        self.assertEqual(meeting_record.execute.call_args[0][0]["scope"], "legacy")
 
     def test_a_read_write_key_reaches_the_tool_with_its_caller(self):
         from tools import access, meeting_actions
