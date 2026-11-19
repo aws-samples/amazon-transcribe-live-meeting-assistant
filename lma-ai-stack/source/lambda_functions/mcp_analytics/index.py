@@ -6,7 +6,8 @@
 """
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access
-Provides 6 tools: search, get transcript, get summary, list meetings, schedule meeting, start meeting
+Provides 7 tools: search, get transcript, get summary, list meetings, schedule meeting, start
+meeting, get virtual participant status
 """
 
 import json
@@ -285,7 +286,14 @@ MCP_TOOLS = [
                 "startDate": {"type": "string", "description": "ISO 8601 start date"},
                 "endDate": {"type": "string", "description": "ISO 8601 end date"},
                 "participant": {"type": "string", "description": "Filter by participant name"},
-                "status": {"type": "string", "description": "Meeting status filter"},
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Meeting status filter: ALL (default), IN_PROGRESS (started or "
+                        "transcribing), STARTED, TRANSCRIBING, ERRORED or ENDED. Not case "
+                        "sensitive."
+                    ),
+                },
                 "limit": {"type": "number", "description": "Maximum number of meetings to return"},
             },
         },

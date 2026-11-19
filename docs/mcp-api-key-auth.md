@@ -74,7 +74,7 @@ MCP client connects to REST API Gateway endpoint
     → Routes to MCP protocol handler:
       - initialize → returns server capabilities + protocolVersion
       - notifications/initialized → empty 200 acknowledgment
-      - tools/list → returns 6 tool definitions with inputSchema
+      - tools/list → returns 7 tool definitions with inputSchema
       - tools/call → routes to tool implementation, returns MCP result
       - ping → returns empty result
     → User context from authorizer enforces UBAC on tool calls
@@ -117,7 +117,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 |--------|-------------|
 | `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
 | `notifications/initialized` | Client acknowledgment, returns empty 200 |
-| `tools/list` | Returns all 6 tool definitions with inputSchema |
+| `tools/list` | Returns all 7 tool definitions with inputSchema |
 | `tools/call` | Executes a tool by name with arguments, returns MCP content result |
 | `ping` | Health check, returns empty result |
 
@@ -128,9 +128,10 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 | `search_lma_meetings` | Search transcripts/summaries with natural language |
 | `get_meeting_transcript` | Get full transcript (json, text, or srt format) |
 | `get_meeting_summary` | Get AI summary with action items and topics |
-| `list_meetings` | List meetings with date/participant/status filters |
+| `list_meetings` | List meetings with date and status filters |
 | `schedule_meeting` | Schedule a future meeting with virtual participant |
 | `start_meeting_now` | Start a meeting immediately with virtual participant |
+| `get_virtual_participant_status` | Poll the status of a virtual participant launched by `start_meeting_now` |
 
 ## DynamoDB Table Schema
 
