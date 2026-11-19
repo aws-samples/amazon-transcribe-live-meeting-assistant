@@ -1,6 +1,11 @@
 """
 MCP API Key Manager Lambda
 Handles generate/list/revoke of per-user MCP API keys via AppSync.
+
+Each key carries a scope, chosen when it is generated: "read" (the default),
+for the MCP tools that change nothing, or "read-write", for every tool. A key
+stored before keys had scopes has no Scope attribute and is listed, and
+authorized, as "read".
 """
 
 import hashlib
@@ -18,6 +23,15 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 dynamodb = boto3.resource("dynamodb")
 TABLE_NAME = os.environ.get("MCP_API_KEYS_TABLE", "")
 
+READ = "read"
+READ_WRITE = "read-write"
+SCOPES = (READ, READ_WRITE)
+
+
+def stored_scope(item):
+    """A stored key's scope; a key without one is read."""
+    return READ_WRITE if item.get("Scope") == READ_WRITE else READ
+
 
 def handler(event, context):
     field = event.get("info", {}).get("fieldName", "")
@@ -32,7 +46,12 @@ def handler(event, context):
         return error("Not authenticated")
 
     if field == "generateMCPApiKey":
-        return generate_key(username, is_admin)
+        scope = (event.get("arguments") or {}).get("scope")
+        if scope in (None, ""):
+            scope = READ
+        if scope not in SCOPES:
+            return error(f"scope must be one of: {', '.join(SCOPES)}")
+        return generate_key(username, is_admin, scope)
     elif field == "revokeMCPApiKey":
         prefix = event.get("arguments", {}).get("keyPrefix", "")
         return revoke_key(username, prefix)
@@ -42,7 +61,7 @@ def handler(event, context):
         return error(f"Unknown operation: {field}")
 
 
-def generate_key(username, is_admin):
+def generate_key(username, is_admin, scope=READ):
     table = dynamodb.Table(TABLE_NAME)
 
     # Check if user already has a key
@@ -69,15 +88,17 @@ def generate_key(username, is_admin):
             "KeyPrefix": prefix,
             "CreatedAt": now,
             "Enabled": "true",
+            "Scope": scope,
         }
     )
 
-    logger.info(f"Generated API key for {username}, prefix={prefix}")
+    logger.info(f"Generated API key for {username}, prefix={prefix}, scope={scope}")
 
     return {
         "keyValue": raw_key,
         "keyPrefix": prefix,
         "createdAt": now,
+        "scope": scope,
     }
 
 
@@ -111,6 +132,7 @@ def list_keys(username):
             "keyPrefix": i.get("KeyPrefix", ""),
             "createdAt": i.get("CreatedAt", ""),
             "enabled": i.get("Enabled") == "true",
+            "scope": stored_scope(i),
         }
         for i in items
     ]

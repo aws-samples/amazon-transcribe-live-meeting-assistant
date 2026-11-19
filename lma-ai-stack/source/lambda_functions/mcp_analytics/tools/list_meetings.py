@@ -63,11 +63,13 @@ def execute(
             end = today.strftime("%Y-%m-%d")
             meetings = query_by_date_range(table, start, end, limit)
 
-        # Apply UBAC filter
+        # Apply UBAC filter: getCall's rule -- the caller's own meetings and the
+        # ones shared with them (tools/access.py).
         if not is_admin:
-            meetings = [
-                m for m in meetings if m.get("Owner") == user_id or m.get("AgentId") == user_id
-            ]
+            from tools.access import Caller, can_read  # pylint: disable=import-outside-toplevel
+
+            caller = Caller(user_id=user_id or "")
+            meetings = [m for m in meetings if can_read(m, caller)]
 
         # Filter by participant if specified
         if participant:

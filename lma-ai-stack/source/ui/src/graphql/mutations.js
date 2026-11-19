@@ -404,11 +404,12 @@ export const updateMCPServer = /* GraphQL */ `
 `;
 
 export const generateMCPApiKey = /* GraphQL */ `
-  mutation GenerateMCPApiKey {
-    generateMCPApiKey {
+  mutation GenerateMCPApiKey($scope: String) {
+    generateMCPApiKey(scope: $scope) {
       keyValue
       keyPrefix
       createdAt
+      scope
     }
   }
 `;
@@ -425,6 +426,7 @@ export const listMCPApiKeys = /* GraphQL */ `
       keyPrefix
       createdAt
       enabled
+      scope
     }
   }
 `;

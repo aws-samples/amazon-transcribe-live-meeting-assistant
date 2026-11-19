@@ -5,30 +5,57 @@
 
 """
 MCP Analytics Lambda Function
-Implements MCP protocol tools for LMA meeting data access
-Provides 6 tools: search, get transcript, get summary, list meetings, schedule meeting, start meeting
+Implements MCP protocol tools for LMA meeting data access.
+
+The BedrockAgentCore Gateway path serves the seven original tools, inferred from
+their arguments. The API key path speaks MCP JSON-RPC and serves those and the
+meeting tools in tool_definitions.py. On that path every API key carries a
+scope: a key with the read scope is answered only by the tools whose
+annotations declare readOnlyHint, and a read-write key by every tool
+(execute_tool_call). Access to each meeting is decided in tools/access.py.
 """
 
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
+
+from tool_definitions import MEETING_TOOLS
 
 # Import tool implementations
 from tools import (
+    access,
+    ask_assistant,
     get_summary,
     get_transcript,
     get_virtual_participant_status,
+    guidance,
     list_meetings,
+    live_transcript,
+    meeting_actions,
+    meeting_agenda,
+    meeting_record,
     schedule_meeting,
     search_meetings,
     start_meeting_now,
+    virtual_participants,
 )
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+
+# The two scopes of an MCP API key (tools/access.py). The authorizer passes the
+# key's scope; a key stored before keys had scopes has none, and is read.
+READ_SCOPE = "read"
+READ_WRITE_SCOPE = "read-write"
+
+
+def key_scope(authorizer: Dict[str, Any]) -> str:
+    """The scope the API key authorizer resolved, as one of the two scopes."""
+    return READ_WRITE_SCOPE if authorizer.get("scope") == READ_WRITE_SCOPE else READ_SCOPE
+
 
 # Invariant: every tool scopes its results to the calling user and widens that
 # scope only for members of the admin group, so a request that does not resolve
@@ -75,6 +102,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             user_id = authorizer.get("userId")
             username = authorizer.get("username") or user_id
             is_admin = authorizer.get("isAdmin", "false") == "true"
+            scope = key_scope(authorizer)
 
             # The API key authorizer resolves the key to a user before this
             # function runs, so a request without that context has no caller.
@@ -82,11 +110,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 logger.warning("Request carries no caller identity - rejecting")
                 return error_response(403, NO_IDENTITY_MESSAGE)
 
-            logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}")
+            logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}, Scope: {scope}")
 
             # Handle MCP JSON-RPC protocol messages
             if "jsonrpc" in tool_input and "method" in tool_input:
-                return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin)
+                return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin, scope)
         else:
             # BedrockAgentCore Gateway path: the function is invoked with the raw
             # tool input, so the only identity available is whatever the event
@@ -333,6 +361,7 @@ MCP_TOOLS = [
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
     },
     {
         "name": "start_meeting_now",
@@ -393,6 +422,7 @@ MCP_TOOLS = [
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
     },
     {
         "name": "get_virtual_participant_status",
@@ -421,8 +451,86 @@ MCP_TOOLS = [
     },
 ]
 
+# Every tool the API key endpoint serves: the seven above, which the gateway
+# path serves too, and the meeting tools.
+TOOLS: List[Dict[str, Any]] = [*MCP_TOOLS, *MEETING_TOOLS]
 
-def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
+
+def is_read_only(tool_name: str) -> bool:
+    """Whether a tool changes nothing: its annotations declare readOnlyHint."""
+    tool = next((tool for tool in TOOLS if tool["name"] == tool_name), None)
+    return bool(tool and (tool.get("annotations") or {}).get("readOnlyHint") is True)
+
+
+def tools_for_scope(scope: str) -> list:
+    """The tools a key with `scope` may call, which are the tools it is offered."""
+    if scope == READ_WRITE_SCOPE:
+        return TOOLS
+    return [tool for tool in TOOLS if is_read_only(tool["name"])]
+
+
+def scope_refusal(tool_name: str) -> str:
+    """Why a read key cannot call a tool that changes something."""
+    return (
+        f"{tool_name} changes LMA data, so it needs an MCP API key with the read-write "
+        "scope; this key has the read scope. Generate a read-write key on the MCP Servers "
+        "page (Hosted MCP Access) to use it."
+    )
+
+
+# The meeting tools, called with the MCP caller and the tool's arguments.
+MEETING_TOOL_HANDLERS = {
+    "get_live_transcript": lambda caller, a: live_transcript.execute(
+        caller,
+        a.get("meeting_id"),
+        since=a.get("since"),
+        limit=a.get("limit"),
+        include_assistant=a.get("include_assistant") is True,
+    ),
+    "push_meeting_guidance": lambda caller, a: guidance.push(
+        caller, a.get("meeting_id"), a.get("text"), title=a.get("title"), level=a.get("level")
+    ),
+    "list_meeting_guidance": lambda caller, a: guidance.list_items(
+        caller, a.get("meeting_id"), limit=a.get("limit")
+    ),
+    "update_meeting_agenda": lambda caller, a: meeting_agenda.execute(
+        caller,
+        a.get("agenda"),
+        meeting_id=a.get("meeting_id"),
+        virtual_participant_id=a.get("virtual_participant_id"),
+    ),
+    "end_meeting": lambda caller, a: meeting_actions.end_meeting(
+        caller, a.get("meeting_id"), reason=a.get("reason")
+    ),
+    "delete_meeting": lambda caller, a: meeting_actions.delete_meeting(
+        caller, a.get("meeting_id"), confirm=a.get("confirm")
+    ),
+    "ask_meeting_assistant": lambda caller, a: ask_assistant.execute(
+        caller, a.get("meeting_id"), a.get("question")
+    ),
+    "get_meeting_record": lambda caller, a: meeting_record.execute(
+        caller, a.get("meeting_id"), include=a.get("include")
+    ),
+    "share_meeting": lambda caller, a: meeting_actions.change_sharing(
+        caller, a.get("meeting_id"), a.get("recipients"), share=True
+    ),
+    "unshare_meeting": lambda caller, a: meeting_actions.change_sharing(
+        caller, a.get("meeting_id"), a.get("recipients"), share=False
+    ),
+    "regenerate_meeting_summary": lambda caller, a: meeting_actions.regenerate_summary(
+        caller, a.get("meeting_id")
+    ),
+    "get_meeting_cost": lambda caller, a: meeting_actions.meeting_cost(caller, a.get("meeting_id")),
+    "list_virtual_participants": lambda caller, a: virtual_participants.list_vps(
+        caller, status=a.get("status"), limit=a.get("limit")
+    ),
+    "end_virtual_participant": lambda caller, a: virtual_participants.end_by_id(
+        caller, a.get("virtual_participant_id"), reason=a.get("reason")
+    ),
+}
+
+
+def handle_mcp_jsonrpc(msg, user_id, username, is_admin, scope=READ_SCOPE):
     """Handle MCP JSON-RPC 2.0 protocol messages."""
     method = msg.get("method")
     msg_id = msg.get("id")
@@ -445,12 +553,12 @@ def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
         return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
 
     if method == "tools/list":
-        return jsonrpc_response(msg_id, {"tools": MCP_TOOLS})
+        return jsonrpc_response(msg_id, {"tools": tools_for_scope(scope)})
 
     if method == "tools/call":
         tool_name = params.get("name")
-        arguments = params.get("arguments", {})
-        return execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
+        arguments = params.get("arguments") or {}
+        return execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin, scope)
 
     if method == "ping":
         return jsonrpc_response(msg_id, {})
@@ -458,10 +566,24 @@ def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
     return jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
 
 
-def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin):
+def execute_tool_call(  # pylint: disable=too-many-arguments
+    msg_id, tool_name, arguments, user_id, username, is_admin, scope=READ_SCOPE
+):
     """Execute a tool call and return MCP JSON-RPC response."""
+    known = any(tool["name"] == tool_name for tool in TOOLS)
+    if known and not is_read_only(tool_name) and scope != READ_WRITE_SCOPE:
+        logger.warning(f"Refused {tool_name} for a key with the {scope} scope")
+        return jsonrpc_response(
+            msg_id,
+            {"content": [{"type": "text", "text": scope_refusal(tool_name)}], "isError": True},
+        )
+    if not isinstance(arguments, dict):
+        return jsonrpc_error(msg_id, -32602, "arguments must be an object")
     try:
-        if tool_name == "search_lma_meetings":
+        if tool_name in MEETING_TOOL_HANDLERS:
+            caller = access.Caller(user_id=user_id, is_admin=is_admin, scope=scope)
+            result = MEETING_TOOL_HANDLERS[tool_name](caller, arguments)
+        elif tool_name == "search_lma_meetings":
             result = search_meetings.execute(
                 query=arguments.get("query"),
                 start_date=arguments.get("startDate"),

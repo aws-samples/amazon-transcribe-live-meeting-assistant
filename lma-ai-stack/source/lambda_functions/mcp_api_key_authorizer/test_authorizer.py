@@ -204,6 +204,26 @@ class TestAllowPolicy(unittest.TestCase):
         self.assertEqual(result["context"]["username"], "testuser@example.com")
         self.assertEqual(result["context"]["isAdmin"], "true")
 
+    @patch.object(index, "dynamodb")
+    def test_the_context_carries_the_key_scope(self, mock_dynamo):
+        """read-write is passed as such; an older key, or any other value, as read."""
+        token = "lma_scope-test"
+        mock_table = MagicMock()
+        mock_dynamo.Table.return_value = mock_table
+        event = {"methodArn": METHOD_ARN, "authorizationToken": token}
+        for stored, expected in (
+            ("read-write", "read-write"),
+            ("read", "read"),
+            (None, "read"),
+            ("admin", "read"),
+        ):
+            item = make_valid_item(token)
+            if stored is not None:
+                item["Scope"] = stored
+            mock_table.get_item.return_value = {"Item": item}
+            result = index.handler(event, None)
+            self.assertEqual(result["context"]["scope"], expected, stored)
+
     def test_deny_policy_with_empty_arn(self):
         """Deny policy should use '*' when methodArn is empty."""
         result = index.deny_policy("")

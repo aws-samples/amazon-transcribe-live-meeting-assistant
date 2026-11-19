@@ -78,6 +78,13 @@ agents) classify them correctly.
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
 
+On the API key path (Quick Desktop) a key with the **Read only** scope is
+offered, and answered for, the read-only tools only; `schedule_meeting` and
+`start_meeting_now` need a **Read and write** key. The API key endpoint also
+serves the meeting tools listed in
+[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed),
+such as the live transcript, meeting guidance and the full meeting record.
+
 All tool responses include a `meetingUrl` and (where applicable) a
 `virtualParticipantUrl` deep-link back into the LMA web UI for quick drill-down
 into the full transcript, recording, or VP viewer.
@@ -245,7 +252,11 @@ architecture.
 
 1. Open your LMA web UI
 2. Navigate to **Settings → MCP Servers Configuration**
-3. In the **Hosted MCP Access** section at the top, click **Generate API Key**
+3. In the **Hosted MCP Access** section at the top, choose the key's **Scope**:
+   **Read only** (the default) for agents that only read meetings, or **Read and
+   write** if Quick Desktop should also start, schedule or end Virtual
+   Participants and use the other tools that change something (see
+   [Key scopes](mcp-api-key-auth.md#key-scopes)). Then click **Generate API Key**
 4. Copy the key (format `lma_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) —
    **it's shown once only**
 5. Note the **MCP API Endpoint URL** displayed on the same page (this maps

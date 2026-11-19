@@ -2,6 +2,10 @@
 MCP API Key Authorizer Lambda
 Validates per-user API keys for the REST API Gateway MCP endpoint.
 Hashes incoming key, looks up in DynamoDB, returns IAM policy with user context.
+
+The context carries the key's scope, "read" or "read-write", which the MCP
+server applies to each tool call. A key stored before keys had scopes has no
+Scope attribute and is passed as "read".
 """
 
 import hashlib
@@ -16,6 +20,13 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 dynamodb = boto3.resource("dynamodb")
 TABLE_NAME = os.environ.get("MCP_API_KEYS_TABLE", "")
+
+READ_WRITE = "read-write"
+
+
+def key_scope(item):
+    """A stored key's scope; anything other than read-write is read."""
+    return READ_WRITE if item.get("Scope") == READ_WRITE else "read"
 
 
 def request_summary(event):
@@ -70,9 +81,10 @@ def handler(event, context):
             return deny_policy(method_arn)
 
         logger.info(
-            "Authorized user: %s, keyPrefix=%s: %s",
+            "Authorized user: %s, keyPrefix=%s, scope=%s: %s",
             item.get("Username"),
             item.get("KeyPrefix", ""),
+            key_scope(item),
             json.dumps(summary),
         )
         return allow_policy(
@@ -81,6 +93,7 @@ def handler(event, context):
                 "userId": item.get("UserId", ""),
                 "username": item.get("Username", ""),
                 "isAdmin": item.get("IsAdmin", "false"),
+                "scope": key_scope(item),
             },
         )
 

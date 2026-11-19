@@ -32,18 +32,19 @@ for mod_name in [
 import index  # noqa: E402
 
 
-def api_gw_event(body_dict, user_id="testuser", username="Test User", is_admin="false"):
-    """Create an API Gateway proxy event with MCP JSON-RPC body."""
+def api_gw_event(body_dict, user_id="testuser", username="Test User", is_admin="false", scope=None):
+    """Create an API Gateway proxy event with MCP JSON-RPC body.
+
+    `scope` is the key's scope as the authorizer passes it; None is a key
+    stored before keys had scopes, which the authorizer passes without one.
+    """
+    authorizer = {"userId": user_id, "username": username, "isAdmin": is_admin}
+    if scope is not None:
+        authorizer["scope"] = scope
     return {
         "httpMethod": "POST",
         "body": json.dumps(body_dict),
-        "requestContext": {
-            "authorizer": {
-                "userId": user_id,
-                "username": username,
-                "isAdmin": is_admin,
-            }
-        },
+        "requestContext": {"authorizer": authorizer},
     }
 
 
@@ -82,22 +83,41 @@ class TestMCPInitialize(unittest.TestCase):
 class TestMCPToolsList(unittest.TestCase):
     """Test MCP tools/list method."""
 
-    def test_tools_list_returns_all_tools(self):
-        """tools/list returns all 7 tools."""
+    def test_tools_list_returns_all_tools_to_a_read_write_key(self):
+        """tools/list offers a read-write key every tool."""
         body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-        result = index.lambda_handler(api_gw_event(body), None)
+        result = index.lambda_handler(api_gw_event(body, scope="read-write"), None)
 
         resp = json.loads(result["body"])
-        tools = resp["result"]["tools"]
-        self.assertEqual(len(tools), 7)
-        tool_names = [t["name"] for t in tools]
-        self.assertIn("search_lma_meetings", tool_names)
-        self.assertIn("get_meeting_transcript", tool_names)
-        self.assertIn("get_meeting_summary", tool_names)
-        self.assertIn("list_meetings", tool_names)
-        self.assertIn("schedule_meeting", tool_names)
-        self.assertIn("start_meeting_now", tool_names)
-        self.assertIn("get_virtual_participant_status", tool_names)
+        tool_names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertEqual(tool_names, {tool["name"] for tool in index.TOOLS})
+        for name in (
+            "search_lma_meetings",
+            "get_meeting_transcript",
+            "get_meeting_summary",
+            "list_meetings",
+            "schedule_meeting",
+            "start_meeting_now",
+            "get_virtual_participant_status",
+            "get_live_transcript",
+            "push_meeting_guidance",
+            "delete_meeting",
+        ):
+            self.assertIn(name, tool_names)
+
+    def test_tools_list_offers_a_read_key_only_the_read_only_tools(self):
+        """A key with the read scope, or none, is offered the tools it may call."""
+        body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        for scope in ("read", None, "admin"):
+            result = index.lambda_handler(api_gw_event(body, scope=scope), None)
+            tools = json.loads(result["body"])["result"]["tools"]
+            self.assertTrue(tools, scope)
+            for tool in tools:
+                self.assertIs(tool["annotations"]["readOnlyHint"], True, (scope, tool["name"]))
+            names = {t["name"] for t in tools}
+            self.assertIn("get_live_transcript", names)
+            self.assertNotIn("start_meeting_now", names)
+            self.assertNotIn("delete_meeting", names)
 
     def test_tools_have_input_schema(self):
         """Each tool has an inputSchema."""
@@ -207,6 +227,86 @@ class TestMCPToolCall(unittest.TestCase):
         resp = json.loads(result["body"])
         self.assertTrue(resp["result"].get("isError"))
         self.assertIn("Error", resp["result"]["content"][0]["text"])
+
+
+class TestKeyScopes(unittest.TestCase):
+    """Only a read-write key calls a tool that changes something."""
+
+    WRITE_TOOLS = [
+        "schedule_meeting",
+        "start_meeting_now",
+        "push_meeting_guidance",
+        "update_meeting_agenda",
+        "end_meeting",
+        "delete_meeting",
+        "ask_meeting_assistant",
+        "share_meeting",
+        "unshare_meeting",
+        "regenerate_meeting_summary",
+        "end_virtual_participant",
+    ]
+
+    def _call(self, name, arguments=None, scope=None, is_admin="false"):
+        body = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {"meeting_id": "m1"}},
+        }
+        event = api_gw_event(body, user_id="alice@example.com", is_admin=is_admin, scope=scope)
+        return json.loads(index.lambda_handler(event, None)["body"])
+
+    def test_every_tool_is_classified_by_its_annotation(self):
+        """Each tool says whether it is read-only; the write list here is complete."""
+        writes = sorted(t["name"] for t in index.TOOLS if not index.is_read_only(t["name"]))
+        self.assertEqual(writes, sorted(self.WRITE_TOOLS))
+        for tool in index.TOOLS:
+            self.assertIn("readOnlyHint", tool.get("annotations", {}), tool["name"])
+
+    def test_a_read_key_is_refused_every_write_tool_before_it_runs(self):
+        from tools import meeting_actions, schedule_meeting
+
+        meeting_actions.delete_meeting = MagicMock()
+        schedule_meeting.execute = MagicMock()
+        for scope in ("read", None, "READ-WRITE"):
+            for name in self.WRITE_TOOLS:
+                with self.subTest(scope=scope, tool=name):
+                    resp = self._call(name, scope=scope)
+                    self.assertTrue(resp["result"]["isError"])
+                    self.assertIn("read-write", resp["result"]["content"][0]["text"])
+        meeting_actions.delete_meeting.assert_not_called()
+        schedule_meeting.execute.assert_not_called()
+
+    def test_an_admin_read_key_is_refused_too(self):
+        """Being an Admin does not widen what a read key may do."""
+        resp = self._call("delete_meeting", {"meeting_id": "m1", "confirm": True}, is_admin="true")
+        self.assertTrue(resp["result"]["isError"])
+
+    def test_a_read_write_key_reaches_the_tool_with_its_caller(self):
+        from tools import access, meeting_actions
+
+        access.Caller = MagicMock(side_effect=lambda **kw: kw)
+        meeting_actions.delete_meeting = MagicMock(return_value={"deleted": True})
+        resp = self._call(
+            "delete_meeting", {"meeting_id": "m1", "confirm": True}, scope="read-write"
+        )
+        self.assertNotIn("isError", resp["result"])
+        caller, meeting_id = meeting_actions.delete_meeting.call_args[0]
+        self.assertEqual(meeting_id, "m1")
+        self.assertEqual(meeting_actions.delete_meeting.call_args[1], {"confirm": True})
+        self.assertEqual(
+            caller, {"user_id": "alice@example.com", "is_admin": False, "scope": "read-write"}
+        )
+
+    def test_a_read_key_calls_a_read_tool(self):
+        from tools import access, live_transcript
+
+        access.Caller = MagicMock(side_effect=lambda **kw: kw)
+        live_transcript.execute = MagicMock(return_value={"lines": []})
+        resp = self._call("get_live_transcript", {"meeting_id": "m1", "since": "c"}, scope="read")
+        self.assertNotIn("isError", resp["result"])
+        live_transcript.execute.assert_called_once()
+        self.assertEqual(live_transcript.execute.call_args[1]["since"], "c")
 
 
 class TestUnknownMethod(unittest.TestCase):
@@ -379,7 +479,7 @@ class TestReadOnlyHintAnnotations(unittest.TestCase):
 
     def _get_tools(self):
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-        result = index.lambda_handler(api_gw_event(body), None)
+        result = index.lambda_handler(api_gw_event(body, scope="read-write"), None)
         return json.loads(result["body"])["result"]["tools"]
 
     def test_read_only_tools_have_annotation(self):

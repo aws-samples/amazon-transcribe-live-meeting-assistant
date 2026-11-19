@@ -67,6 +67,7 @@ import AgendaPanel from './AgendaPanel';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
+import MeetingGuidanceBanner from './MeetingGuidanceBanner';
 import CaptureContextPanel, { CONSENT_SETTING_ID } from './CaptureContextPanel';
 import { consentEnforced } from '../common/meeting-context';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
@@ -2651,6 +2652,7 @@ export const CallPanel = ({
           onShowRecord={showConsentRecordPanel ? showConsent : undefined}
         />
         <TranscriptionPauseAlert isLive={isLive} transcriptionPause={item.transcriptionPause} />
+        <MeetingGuidanceBanner callId={item.callId} />
         <div ref={bodyRef} className={bodyClass}>
           <div className="meeting-main">
             <Tabs
