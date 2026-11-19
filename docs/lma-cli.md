@@ -202,6 +202,9 @@ lma vp get --id <vp-id>
 # End a running VP
 lma vp end --id <vp-id> --reason "Manual cleanup"
 
+# Send a VP that has left back into the same meeting (a further capture session)
+lma vp rejoin --id <vp-id>
+
 # List all VPs visible to the calling IAM principal
 lma vp list
 lma vp list --json
@@ -229,6 +232,17 @@ lma vp list --json
 | `--wait / --no-wait` | Poll until the VP leaves `INITIALIZING` (default: `--wait`) |
 | `--timeout FLOAT` | Max seconds to wait for launch (default: 120) |
 
+**`lma vp rejoin`** sends a Virtual Participant that has left (`ENDED`,
+`COMPLETED` or `FAILED`) back into the same online meeting, adding to the same
+LMA meeting as a further capture session, as **Join again → Continue meeting**
+does on the Virtual Participant page (see
+[Rejoin](virtual-participant.md#rejoin)). It prints the row's new status, the
+meeting ID, the session number and where the session starts on the transcript
+timeline. The launch joins as a guest, without its owner's saved browser
+profile. The server's refusal (the Virtual Participant has not left, never
+started a meeting, or the meeting's transcript was deleted) is printed, and the
+command exits with status 1.
+
 #### Launching a VP for an LMA user (`--as-user`)
 
 Without `--as-user`, a VP launched from the CLI belongs to no LMA user. Its row is owned by your IAM principal, so in the Web UI only members of the Admin group see it, and the VP starts with a fresh browser profile and joins Zoom meetings as a guest. Meetings that only admit signed-in Zoom users therefore stop at Zoom's sign-in prompt.
@@ -250,6 +264,31 @@ lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890 \
 If the Secrets Manager check is not permitted, the CLI logs a warning and the VP joins without signing in to Zoom; with `--zoom-credentials` it fails instead. These permissions let the caller launch a VP for any user in the pool, so grant them to principals that administer LMA.
 
 > The underlying SDK methods are documented under [`client.vp`](lma-sdk.md#clientvp--virtual-participant-operations).
+
+### `lma meetings` — Meeting Operations
+
+```bash
+# Allow one more capture session on an existing meeting
+lma meetings reopen --id "Weekly sync - 2026-11-19-10:00:00.000"
+lma meetings reopen --id "https://<web UI>/#/calls/Weekly%20sync%20-%202026-11-19-10%3A00%3A00.000" --json
+```
+
+**`lma meetings reopen`** calls the `reopenMeeting` mutation, which allows one
+more capture session on a meeting that exists and is not being captured, even
+one shown as **Done**. `--id` is the meeting ID or the link to the meeting's
+page. It prints the session number and where the session starts on the
+transcript timeline; a streaming client then continues the meeting by streaming
+with the meeting ID as its `callId` and that number as `sessionNumber` in its
+START frame (see
+[Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)).
+The meeting stays as it is until that session's START arrives; a session that
+never starts leaves it as it was, and the next reopen allows the next number.
+A refusal is printed with its type (`MeetingNotFound`, `Unauthorized`,
+`TranscriptDeleted`, `MeetingInProgress`, `MeetingChanged` or `BadRequest`),
+and the command exits with status 1. Options: `--stack-name`, `--region`,
+`--json`.
+
+`lma vp rejoin` and `lma meetings reopen` call mutations that accept IAM callers only when they sign with an **assumed role** (an SSO or role profile, or a role on an instance or in CI); with an IAM user's access keys the server refuses them. A role is accepted as a backend role, which may rejoin any Virtual Participant and reopen any meeting, as it may end any Virtual Participant; the meeting records the role's ARN as who reopened it.
 
 ### `lma load` — Load Simulator (plugin)
 

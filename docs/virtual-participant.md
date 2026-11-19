@@ -647,7 +647,9 @@ Because the copied password never reaches the browser, the server also launches 
 
 **Continue meeting** relaunches the Virtual Participant into the same online meeting, and it adds to the same LMA meeting as before: the same CallId, the same meeting page and transcript, under the meeting's original date in the meeting list. A meeting already shown as **Done** is reopened.
 
-A rejoin is refused for a Virtual Participant that was never admitted to its meeting, because no LMA meeting was created to reopen, and when the meeting's transcript has already been deleted by the Retention settings (see [Transcript deletion](transcript-deletion.md)); a deployment that deletes transcripts **Immediately** after the summary therefore cannot reopen a meeting once its summary is written. The server holds the rule on who may: the caller must be the Virtual Participant's owner or an Admin, and also the meeting's owner or an Admin. Being one of the people a meeting is shared with is not enough. The same operation is available to API clients as the `rejoinVirtualParticipant` mutation.
+A rejoin is refused for a Virtual Participant that was never admitted to its meeting, because no LMA meeting was created to reopen, and when the meeting's transcript has already been deleted by the Retention settings (see [Transcript deletion](transcript-deletion.md)); a deployment that deletes transcripts **Immediately** after the summary therefore cannot reopen a meeting once its summary is written. The server holds the rule on who may: the caller must be the Virtual Participant's owner or an Admin, and also the meeting's owner or an Admin. Being one of the people a meeting is shared with is not enough. The same operation is available to API clients as the `rejoinVirtualParticipant` mutation, and from the `lma` CLI and the SDK as `lma vp rejoin --id <vpId>` and `client.vp.rejoin(vp_id)` (see [LMA CLI](lma-cli.md#lma-vp--virtual-participant-operations)).
+
+The streaming clients continue an existing meeting through the same sessions, with the `reopenMeeting` mutation: the Desktop Capture App, the Stream Audio page and the browser extension each have **Continue an existing meeting…** (see [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)), and `lma meetings reopen` and `client.meetings.reopen` call it for any other client.
 
 #### What a rejoin does
 
@@ -680,8 +682,7 @@ The consent record belongs to the meeting, so it carries over: the mode and rule
 - **Voice labels.** With speaker separation on, the speech engine numbers the voices it hears afresh in each session (`spk_0`, `spk_1`, …), and a name given to a voice on the meeting page applies to that label throughout the meeting. A voice named in one session can therefore carry its name onto a different person's voice in the next; check the names after a rejoin. Rows named from the meeting platform's roster are not affected.
 - **Retention.** A rejoined meeting keeps the expiry it was created with, which is also when it leaves the meeting list.
 - **Browser profile.** When an Admin rejoins someone else's Virtual Participant that was started immediately (not scheduled), the launch has no owner's browser profile and joins as a guest.
-- **Streaming clients.** The Desktop Capture App continues an existing meeting through the same sessions, with the `reopenMeeting` mutation (see [Continue an existing meeting](desktop-capture-app.md#continue-an-existing-meeting) and [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)). Stream Audio and the browser extension cannot yet.
-- **CLI.** The `lma` CLI has no rejoin or join-again command yet; use the Virtual Participant page, or the `rejoinVirtualParticipant` and `joinAgainVirtualParticipant` mutations.
+- **Join again from the CLI.** The `lma` CLI rejoins (`lma vp rejoin`) but has no join-again command; use the Virtual Participant page, or the `joinAgainVirtualParticipant` mutation.
 
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 

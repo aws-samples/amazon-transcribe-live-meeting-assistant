@@ -9,6 +9,7 @@ title: "Stream Audio"
 - [Overview](#overview)
 - [Use Cases](#use-cases)
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
+- [Continue an existing meeting](#continue-an-existing-meeting)
 - [Meeting Consent](#meeting-consent)
 - [Speaker Identification](#speaker-identification)
 - [If the Connection Drops](#if-the-connection-drops)
@@ -72,6 +73,29 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 13. A link to the recorded meeting appears at the bottom of the Stream Audio page.
 
 ![Open Recorded Meeting](../images/readme-stream-audio-open-recorded.png)
+
+## Continue an existing meeting
+
+To add to a meeting that already exists, even one shown as **Done**, select
+**Continue an existing meeting…** before you start and paste the meeting's ID,
+or the link to its page in LMA (copy it from the browser's address bar on the
+meeting page; the Meeting ID is also on the page's **Details** tab). The
+**Meeting Topic** is not used: the stream goes into that meeting.
+
+When you click **Start Streaming**, the page asks LMA to reopen the meeting for
+one more capture session, then streams into it under the same meeting ID. The
+session follows the earlier ones on the meeting's transcript timeline, the
+meeting is shown as in progress again, and when you stop, the summary is
+generated again over the whole transcript. While streaming, the page says which
+session it is and where on the transcript it starts.
+
+Only the meeting's owner or an Admin can continue a meeting; being one of the
+people it is shared with is not enough. LMA does not reopen a meeting that is
+still being captured, one whose transcript has been deleted, or a meeting ID it
+does not know, and the page shows LMA's reason under the Start button without
+starting. Each time you continue, the meeting is reopened again for a new
+session; a dropped connection reconnects to the same session (see below). See
+[Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 
 ## Meeting Consent
 

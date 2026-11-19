@@ -148,6 +148,7 @@ Python SDK (no Cognito login required). The lifecycle is:
 | `has_zoom_credentials(user_sub, required=False)` | Whether the user has stored Zoom credentials | `bool` |
 | `get(vp_id)` | Fetch a VP row by id | `VpRow` |
 | `end(vp_id, reason="SDK requested termination", ended_by="SDK")` | End (stop) a running VP | `VpRow` |
+| `rejoin(vp_id)` | Send a VP that has left back into the same meeting, as a further capture session ([Rejoin](virtual-participant.md#rejoin)); the launch joins as a guest | `VpRow` (with `sessionNumber`, `sessionTimeOffset`) |
 | `list()` | List VPs visible to the calling IAM principal | `list[VpRow]` |
 | `wait_for_launch(vp_id, timeout_s=120.0, poll_interval_s=2.0)` | Poll until status leaves `INITIALIZING` | `VpRow` |
 | `scheduler_state_machine_arn` (property) | Resolved ARN of the VP scheduler state machine (auto-derived from the stack) | `str` |
@@ -197,6 +198,34 @@ result = client.vp.create(
 print(result.owner, result.zoom_credentials_used)
 ```
 
+### `client.meetings` — Meeting Operations
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `reopen(call_id)` | Allow one more capture session on an existing meeting (`reopenMeeting`). `call_id` is the meeting ID or a link to the meeting's page | `MeetingSession` (`call_id`, `session_number`, `session_offset_seconds`, `reopened_at`) |
+
+```python
+from lma_sdk.exceptions import LMAAppSyncError
+
+try:
+    session = client.meetings.reopen("Weekly sync - 2026-11-19-10:00:00.000")
+except LMAAppSyncError as err:
+    print(err.error_type, err)   # e.g. MeetingInProgress, and the server's message
+else:
+    # Stream with callId=session.call_id and "sessionNumber": session.session_number
+    print(session.session_number, session.session_offset_seconds)
+```
+
+A streaming client continues the meeting by streaming with the meeting ID as
+its `callId` and `session_number` as `sessionNumber` in its START frame (see
+[Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)).
+A refusal is raised as `LMAAppSyncError` with the server's message; its
+`error_type` is `MeetingNotFound`, `Unauthorized`, `TranscriptDeleted`,
+`MeetingInProgress`, `MeetingChanged` or `BadRequest`. `client.vp.rejoin`
+raises the server's refusal as `LMAAppSyncError` too.
+
+`client.vp.rejoin` and `client.meetings.reopen` call mutations that accept IAM callers only when they sign with an **assumed role** (an SSO or role profile, or a role on an instance or in CI); with an IAM user's access keys the server refuses them. A role is accepted as a backend role, which may rejoin any Virtual Participant and reopen any meeting, as it may end any Virtual Participant; the meeting records the role's ARN as who reopened it.
+
 ### Data Models
 
 All models are Pydantic `BaseModel` subclasses defined in `lma_sdk.models`:
@@ -212,6 +241,7 @@ All models are Pydantic `BaseModel` subclasses defined in `lma_sdk.models`:
 - **`PublishConfig`** — bucket, prefix, region, stacks, force
 - **`VpRow`** — Virtual Participant row from AppSync (id, meeting fields, status, CallId, owner, VNC info)
 - **`VpLaunchResult`** — Result of `client.vp.create(...)` (id, status, call_id, elapsed_ms, sfn_execution_arn, …)
+- **`MeetingSession`** — Result of `client.meetings.reopen(...)` (call_id, session_number, session_offset_seconds, reopened_at)
 - **`VpStatus`** — Enum of VP lifecycle states (`INITIALIZING`, `JOINING`, `JOINED`, `ACTIVE`, `COMPLETED`, `ENDED`, `FAILED`, …)
 
 

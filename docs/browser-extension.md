@@ -52,6 +52,23 @@ Choose `Allow` on the popup asking you to share the browser tab.
 
 Choose `Open in LMA` to see your live transcript, select language, and to interact with the meeting assistant.
 
+### Continue an existing meeting
+
+To add to a meeting that already exists, even one shown as **Done**, select
+**Continue an existing meeting…** in the panel and paste the meeting's ID, or the
+link to its page in LMA, in place of the meeting topic. When you start
+listening, the extension asks LMA to reopen the meeting for one more capture
+session, then streams into it under the same meeting ID, on the same transcript
+timeline. While listening, the panel shows the meeting and its session number.
+
+Only the meeting's owner or an Admin can continue a meeting. LMA does not
+reopen a meeting that is still being captured, one whose transcript has been
+deleted, or a meeting ID it does not know; the panel shows LMA's reason, and
+does not start. The option needs an extension package downloaded from a
+deployment that includes it, because the package carries the address of LMA's
+API; an older package says so. See
+[Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
+
 ## How meeting speakers are named
 
 Your microphone's lines carry your name. The meeting tab's lines are named from

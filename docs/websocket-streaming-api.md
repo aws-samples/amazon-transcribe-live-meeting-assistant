@@ -303,13 +303,19 @@ transcriber task's role.
 A meeting's owner or an Admin can add a further capture **session** to a
 meeting that already exists, even one that has ended (shown as **Done**), so
 that it continues under the same `callId` on one transcript timeline. This is
-what the Desktop Capture App's **Continue an existing meeting…** does (see
-[Desktop Capture App](desktop-capture-app.md#continue-an-existing-meeting)),
-and the same mechanism a Virtual Participant
-[rejoin](virtual-participant.md#rejoin) uses.
+what **Continue an existing meeting…** does in the Desktop Capture App (see
+[Desktop Capture App](desktop-capture-app.md#continue-an-existing-meeting)), on
+the [Stream Audio](stream-audio.md#continue-an-existing-meeting) page and in the
+[browser extension](browser-extension.md#continue-an-existing-meeting), and the
+same mechanism a Virtual Participant [rejoin](virtual-participant.md#rejoin)
+uses. From a script, `lma meetings reopen --id <callId>` or
+`client.meetings.reopen(call_id)` makes the call in step 1 and prints or
+answers the session (see [LMA CLI](lma-cli.md#lma-meetings--meeting-operations)).
 
 1. Call the `reopenMeeting` mutation on LMA's AppSync API, authorized with the
-   user's Cognito token (ID or access token) in the `Authorization` header:
+   user's Cognito token (ID or access token) in the `Authorization` header, or
+   signed with IAM by an assumed role (the CLI and SDK), which is accepted as a
+   backend role:
 
    ```graphql
    mutation ReopenMeeting($input: ReopenMeetingInput!) {
@@ -325,7 +331,7 @@ and the same mechanism a Virtual Participant
    | `errorType` | Meaning |
    |---|---|
    | `MeetingNotFound` | No meeting has this `callId`. |
-   | `Unauthorized` | The caller is not the meeting's owner or an Admin. Being one of the users the meeting is shared with is not enough. |
+   | `Unauthorized` | The caller is not the meeting's owner, an Admin or a backend role. Being one of the users the meeting is shared with is not enough. |
    | `TranscriptDeleted` | The meeting's transcript has been deleted by the Retention settings. |
    | `MeetingInProgress` | The meeting is still being captured (status `STARTED` or `TRANSCRIBING`), or a session allowed on it in the last 15 minutes (by a Virtual Participant rejoin or another `reopenMeeting`) has not started yet. |
    | `MeetingChanged` | The meeting record changed during the call. Try again. |
