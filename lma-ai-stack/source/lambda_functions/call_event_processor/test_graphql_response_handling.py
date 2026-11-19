@@ -2299,7 +2299,7 @@ def _start_with_deletion(schema, responses, monkeypatch) -> List[Dict[str, Any]]
 
 def test_a_started_session_cancels_the_pending_transcript_deletion(schema, emitted, monkeypatch):
     payloads = _start_with_deletion(schema, [ALREADY_EXISTS, REOPENED], monkeypatch)
-    assert payloads == [{"CallId": "call-1", "Trigger": "meeting-reopened"}]
+    assert payloads == [{"CallId": "call-1", "Trigger": "meeting-reopened", "SessionNumber": 2}]
 
 
 def test_a_session_that_was_not_started_leaves_the_deletion_alone(schema, emitted, monkeypatch):

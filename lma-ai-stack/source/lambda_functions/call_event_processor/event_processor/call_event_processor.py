@@ -1826,8 +1826,14 @@ async def execute_process_event_api_mutation(
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
                     InvocationType="Event",
+                    # The session, so a cancel handled after the session's own
+                    # END has rescheduled the deletion leaves it alone.
                     Payload=json.dumps(
-                        {"CallId": message.get("CallId"), "Trigger": "meeting-reopened"}
+                        {
+                            "CallId": message.get("CallId"),
+                            "Trigger": "meeting-reopened",
+                            "SessionNumber": session_number_of(message),
+                        }
                     ),
                 )
             except Exception:  # pylint: disable=broad-except
