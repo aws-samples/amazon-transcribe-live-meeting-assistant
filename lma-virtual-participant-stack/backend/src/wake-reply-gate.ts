@@ -143,6 +143,9 @@ export class WakeReplyGate {
     now: number = Date.now(),
   ): ReplyGateDecision {
     let reason: ReplyGateReason | null = null;
+    // The gap is from the end of the previous turn to the end of this one
+    // (Nova reports a user turn only when it ends), so a second turn that
+    // takes longer than the gap to say is not joined to the first.
     if (addresses(text)) {
       reason = 'addressed';
     } else if (
@@ -167,6 +170,11 @@ export class WakeReplyGate {
    *   refused yet. When something has, the reply stays withheld: half an answer,
    *   or an answer after a refused lookup, is worse than none.
    */
+  // Time alone ties the two transcripts together: neither carries anything
+  // that identifies the speech. So a short unaddressed remark ending just
+  // before an addressed utterance can have its reply released too. That reply
+  // is to the latest thing Nova heard, which, with the addressed utterance
+  // arriving within the gap, is normally that utterance or its first part.
   noteAddressedTranscript(releasable: boolean, now: number = Date.now()): boolean {
     this.transcriptAddressedAt = now;
     const turn = this.lastTurn;

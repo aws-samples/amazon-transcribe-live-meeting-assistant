@@ -220,6 +220,16 @@ test('nova: an addressed set_mode is confirmed, then switched once the confirmat
     assert.ok(logs.some((l) => l === '[voice-mode] action=switch after=confirmed'));
 });
 
+test('nova: in wake-phrase assistant mode a set_mode asked for by name is acted on', async () => {
+    const { a } = nova('normal', 'wake_phrase');
+    // Activated long enough ago that the wake phrase no longer counts.
+    a.lastAddressedAt = Date.now() - 60_000;
+    a.replyGate.noteActivated(Date.now() - 60_000);
+    await stream(a, [...userTurn('alex switch to translator mode'), ...setMode('translator')]);
+    assert.equal(toolResults(a)[0].status, 'applied');
+    assert.notEqual(a.session.dropTurn, true, 'the confirmation would not be heard');
+});
+
 test('nova: the switch is made anyway if no confirmation is spoken', async () => {
     const { a, requests } = nova();
     a.VOICE_MODE_SWITCH_MAX_WAIT_MS = 10;

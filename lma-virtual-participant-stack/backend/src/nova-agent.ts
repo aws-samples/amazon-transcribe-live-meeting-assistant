@@ -1215,6 +1215,11 @@ export class NovaAgent implements VoiceAssistantProvider {
         `✓ Tools configured in promptStart: ${tools.map((t: any) => t.toolSpec.name).join(', ')}`,
       );
     }
+    if (this.replyGateMode()) {
+      // Read from free text, so worth seeing: what "addressed by name" matches.
+      const names = this.assistantNames();
+      log.info(`[wake-gate] assistant_names=${names.length > 0 ? names.join(',') : 'none'}`);
+    }
 
     this.addEventToQueue(promptStartEvent);
     this.session.isPromptStartSent = true;
@@ -1792,8 +1797,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (decision.audible) {
       if (decision.reason === 'addressed' || decision.reason === 'split-utterance'
         || decision.reason === 'transcript-addressed') {
-        // Addressed by name re-arms the window as the wake phrase does
-        // (handleUserTurnWakePhrase); a second re-arm for a wake phrase is harmless.
+        // Addressed by name re-arms the window and counts for set_mode as the
+        // wake phrase does (handleUserTurnWakePhrase); doing both again for a
+        // wake phrase is harmless.
+        this.lastAddressedAt = Date.now();
         this.activationWindow.rearm(`addressed (${decision.reason})`);
       }
       if (decision.reason !== 'addressed') {
@@ -1839,6 +1846,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     } else if (session?.dropTurn && !releasable) {
       log.info('[wake-gate] action=kept-withheld reason=reply-already-withheld');
     }
+    this.lastAddressedAt = Date.now();
     this.activationWindow.rearm('addressed (transcript)');
   }
 
@@ -4942,8 +4950,9 @@ export class NovaAgent implements VoiceAssistantProvider {
   // Changing mode by voice (voice-mode-switch.ts)
   // -------------------------------------------------------------------------
 
-  /** How recently the assistant must have been addressed by wake phrase for a
-   *  `set_mode` call to count as asked for. Nova splits one utterance into
+  /** How recently the assistant must have been addressed (by wake phrase, or
+   *  by name in wake-phrase assistant mode) for a `set_mode` call to count as
+   *  asked for. Nova splits one utterance into
    *  several turns, so the turn just before the call need not hold the phrase. */
   private readonly VOICE_MODE_ADDRESSED_WINDOW_MS = 15000;
 
@@ -4966,7 +4975,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     } catch {
       mode = undefined;
     }
-    const addressed = addressesAssistant(this.lastUserTurnText, configuredWakePhrases())
+    // In wake-phrase assistant mode the name addresses the assistant as the
+    // reply gate reads it (voice-addressing.ts), so a mode change asked for by
+    // name is not answered and then refused here. Elsewhere only the wake
+    // phrase does, as before.
+    const lastTurnAddressed = this.replyGateMode()
+      ? this.addressedToAssistant(this.lastUserTurnText)
+      : addressesAssistant(this.lastUserTurnText, configuredWakePhrases());
+    const addressed = lastTurnAddressed
       || Date.now() - this.lastAddressedAt < this.VOICE_MODE_ADDRESSED_WINDOW_MS;
 
     const reply = async (result: object): Promise<void> => {

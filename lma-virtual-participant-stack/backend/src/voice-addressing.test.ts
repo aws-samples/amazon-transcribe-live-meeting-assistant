@@ -41,10 +41,10 @@ test('a name that opens the utterance addresses the assistant', () => {
     for (const said of [
         'Alex, what is next on the agenda?',
         'alex what is next on the agenda',
-        'Alex the weather in Herndon',
         'um alex summarize the last ten minutes',
         'So, Alex, any action items?',
         'Alex?',
+        'alex',
     ]) {
         assert.equal(addressedByName(said, NAMES), true, said);
     }
@@ -85,11 +85,22 @@ test('a mention of the name is not addressed to the assistant', () => {
         'I was talking to Alex, and he agreed.',
         'Let me check with alex can you hear me Sam',
         'Alex will present the roadmap.',
+        // Nova Sonic's unpunctuated turns: a name opening a statement.
+        'alex presented the roadmap',
+        'alex sent the deck this morning',
+        'alex the weather in herndon',
         'can you check the weather alex',
         'nothing to do with anyone named here',
     ]) {
         assert.equal(addressedByName(said, NAMES), false, said);
     }
+});
+
+test('a hyphenated name from the prompt is matched as one word', () => {
+    const names = assistantNames('You are Mary-Kate, an AI meeting assistant.', []);
+    assert.deepEqual(names, ['mary-kate']);
+    assert.equal(addressedByName('Mary-Kate, what is next?', names), true);
+    assert.equal(addressedByName('mary kate what is next', names), false);
 });
 
 test('a wake phrase addresses the assistant as before, and no name means only the wake phrase does', () => {

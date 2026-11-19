@@ -25,10 +25,10 @@
  *
  * The rule. An utterance addresses the assistant by name when the name
  *
- * 1. opens the utterance ("Alex, what's next?", "Alex what's next", "um alex
- *    summarize this"), unless the word after it makes the name the subject of
- *    a statement about someone ("Alex is presenting", "Alex said", "Alex's
- *    slides");
+ * 1. opens the utterance, perhaps after filler, and is followed by a comma, a
+ *    request word, or nothing ("Alex, what's next?", "alex what's next", "um
+ *    alex summarize this", "Alex?"). A name opening a statement about someone
+ *    ("Alex is presenting", "alex sent the deck", "Alex's slides") is not;
  * 2. is followed by a comma ("Awesome. Alex, the weather?"), or by a request
  *    word ("... alex can you tell me", "alex what is", "alex please"),
  *    unless the word before it makes it the object of a sentence about
@@ -58,14 +58,6 @@ import { assistantNameFromWakePhrases, foldWakeSpellings } from './stop-request.
  */
 export const UTTERANCE_GAP_MS = 3000;
 
-/** Words that start a sentence about someone, after a name at its start. */
-const STATEMENT_AFTER_NAME = new Set([
-    'and', 'or', 'is', 'was', 'isn\'t', 'wasn\'t', 'has', 'had', 'hasn\'t', 'said', 'says', 'thinks',
-    'thought', 'will', 'won\'t', 'would', 'wouldn\'t', 'did', 'didn\'t', 'does', 'doesn\'t', 'can\'t',
-    'couldn\'t', 'should', 'shouldn\'t', 'might', 'must', 'mentioned', 'asked', 'told', 'wants',
-    'wanted', 'needs', 'needed', 'went', 'got', 'gets', 'who', 'too', 'also',
-]);
-
 /** Words that, before the name, make it the object of a sentence about someone. */
 const MENTION_BEFORE_NAME = new Set([
     'to', 'told', 'tell', 'telling', 'ask', 'asked', 'asking', 'with', 'and', 'or', 'for', 'from',
@@ -81,7 +73,8 @@ const REQUEST_AFTER_NAME = [
     'is there', 'are there', 'please', 'what', 'what\'s', 'whats', 'how', 'how\'s', 'when', 'where',
     'where\'s', 'who', 'who\'s', 'why', 'which', 'tell', 'give', 'find', 'search', 'look', 'check',
     'show', 'list', 'summarize', 'summarise', 'explain', 'remind', 'read', 'help', 'repeat',
-    'translate', 'stop', 'mute', 'go ahead',
+    'translate', 'stop', 'mute', 'go ahead', 'go', 'switch', 'turn', 'change', 'set', 'start', 'take',
+    'make', 'add', 'note', 'write', 'draft', 'send', 'pull', 'compare', 'recap',
 ];
 
 /** Fillers that may come before a name that opens the utterance. */
@@ -128,7 +121,9 @@ function tokenize(text: string): string[] {
             .toLowerCase()
             .replace(/[‘’]/g, '\'')
             .replace(/([,.?!;:])/g, ' $1 ')
-            .replace(/[^a-z0-9',.?!;:]+/g, ' ')
+            // Hyphens inside a word are kept ("mary-kate"), as the prompt's name keeps them.
+            .replace(/[^a-z0-9',.?!;:-]+/g, ' ')
+            .replace(/(^|[^a-z0-9])-+|-+(?=[^a-z0-9]|$)/g, '$1 ')
             .replace(/\s+/g, ' ')
             .trim(),
     )
@@ -161,16 +156,17 @@ export function addressedByName(text: string, names: string[]): boolean {
     for (let i = 0; i < tokens.length; i++) {
         if (!wanted.has(tokens[i])) continue;
         const next = tokens[i + 1];
-        // Rule 1: the name opens the utterance, after nothing but filler.
+        const followedByRequest = next === ',' || (isWord(next) && startsRequest(tokens, i + 1));
+        // Rule 1: the name opens the utterance, after nothing but filler, and
+        // is followed by a comma, a request word, or nothing at all.
         const opens = tokens.slice(0, i).every((t) => LEADING_FILLER.has(t) || t === ',');
         if (opens) {
-            if (!isWord(next) || !STATEMENT_AFTER_NAME.has(next)) return true;
+            if (followedByRequest || !isWord(next)) return true;
             continue;
         }
         if (mentionBefore(tokens, i)) continue;
         // Rule 2: a comma or a request word after the name.
-        if (next === ',') return true;
-        if (isWord(next) && startsRequest(tokens, i + 1)) return true;
+        if (followedByRequest) return true;
         // Rule 3: ", Alex" closing a sentence or the utterance.
         if (tokens[i - 1] === ',' && (next === undefined || SENTENCE_END.has(next))) return true;
     }
