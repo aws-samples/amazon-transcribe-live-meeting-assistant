@@ -30,7 +30,8 @@ resolver's response template raises as a GraphQL error of that type, so a
 client can tell the refusals apart:
 
 * ``MeetingNotFound`` -- no meeting has this CallId.
-* ``Unauthorized`` -- the caller is not the meeting's owner or an Admin.
+* ``Unauthorized`` -- the caller is not the meeting's owner, an Admin or a
+  backend role.
 * ``TranscriptDeleted`` -- the meeting's transcript has been deleted.
 * ``MeetingInProgress`` -- the meeting is still being captured, or a session
   allowed on it in the last PENDING_SESSION_SECONDS (a Virtual Participant
@@ -96,12 +97,18 @@ def refusal(error_type: str, message: str) -> Dict[str, str]:
 
 
 def caller_identity(event: Mapping[str, Any]) -> Dict[str, Any]:
-    """The signed-in caller, or an empty identity for anything else.
+    """The caller: a signed-in user, or a backend role; an empty identity for
+    anything else.
 
-    The field is for Cognito users only (the schema says so); a request without
-    a user-pool username is treated as a caller who owns nothing.
+    A Cognito user is the meeting's owner or an Admin, or owns nothing here. A
+    caller signing with an IAM role (the lma CLI and SDK, ``lma meetings
+    reopen``) is a backend role, which may reopen any meeting, as it may end
+    or rejoin any Virtual Participant (lma_sessions.is_backend_role). Any other
+    IAM caller, an IAM user for example, owns nothing.
     """
     identity = event.get("identity") or {}
+    if lma_sessions.is_backend_role(identity):
+        return {"userArn": identity.get("userArn")}
     if not identity.get("username") or not (identity.get("claims") or identity.get("sub")):
         return {}
     return dict(identity)

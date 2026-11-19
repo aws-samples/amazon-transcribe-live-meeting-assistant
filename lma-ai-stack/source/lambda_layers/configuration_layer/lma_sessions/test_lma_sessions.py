@@ -133,6 +133,10 @@ def test_an_other_write_failure_is_raised_as_it_is() -> None:
         ({"username": "bob@example.com", "groups": []}, False),
         ({"groups": []}, False),
         (None, False),
+        # A backend role (the lma CLI and SDK) may reopen any meeting.
+        ({"userArn": "arn:aws:sts::123456789012:assumed-role/Operator/session"}, True),
+        # An IAM user is not a backend role.
+        ({"userArn": "arn:aws:iam::123456789012:user/someone", "username": "AIDAEXAMPLE"}, False),
     ],
 )
 def test_only_the_meetings_owner_or_an_admin_may_reopen_it(identity, allowed) -> None:
@@ -144,3 +148,5 @@ def test_the_reopener_is_recorded_by_email_then_username() -> None:
     assert sessions.who({"username": "u", "claims": {"email": "e@example.com"}}) == "e@example.com"
     assert sessions.who({"username": "u"}) == "u"
     assert sessions.who(None) == "unknown"
+    role = "arn:aws:sts::123456789012:assumed-role/Operator/session"
+    assert sessions.who({"userArn": role, "username": "AROAEXAMPLE:session"}) == role

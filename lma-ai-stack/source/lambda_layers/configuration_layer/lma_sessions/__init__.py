@@ -166,23 +166,39 @@ def caller_groups(identity: Optional[Mapping[str, Any]]) -> List[str]:
     return list(groups)
 
 
+def is_backend_role(identity: Optional[Mapping[str, Any]]) -> bool:
+    """Whether the caller signed with an IAM role's credentials.
+
+    Detected as the AppSync templates and the Virtual Participant manager
+    detect a backend role: by an assumed-role ARN. Signed-in users reach the
+    API with Cognito user pool tokens; the identity pool's role carries no
+    appsync:GraphQL permission, so an assumed role here is one granted access
+    to the API (the stack's Lambdas, the lma CLI and SDK run by an operator).
+    """
+    caller: Mapping[str, Any] = identity or {}
+    return ":assumed-role/" in str(caller.get("userArn") or "")
+
+
 def caller_owns_meeting(
     identity: Optional[Mapping[str, Any]], meeting: Optional[Mapping[str, Any]]
 ) -> bool:
-    """Whether the caller is an Admin or the meeting's Owner.
+    """Whether the caller is an Admin, a backend role, or the meeting's Owner.
 
     The rule for reopening a meeting. Narrower than reading one: a user the
     meeting is shared with may read it but not reopen it.
     """
     caller: Mapping[str, Any] = identity or {}
-    if "Admin" in caller_groups(caller):
+    if "Admin" in caller_groups(caller) or is_backend_role(caller):
         return True
     username = caller.get("username")
     return bool(username) and meeting is not None and meeting.get("Owner") == username
 
 
 def who(identity: Optional[Mapping[str, Any]]) -> str:
-    """How the caller is recorded on the meeting: their email, else their username."""
+    """How the caller is recorded on the meeting: their email, else their
+    username; a backend role by its ARN."""
     caller: Mapping[str, Any] = identity or {}
     claims = caller.get("claims") or {}
+    if not claims and is_backend_role(caller):
+        return str(caller["userArn"])
     return str(claims.get("email") or caller.get("username") or "unknown")

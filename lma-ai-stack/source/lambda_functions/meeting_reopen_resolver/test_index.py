@@ -138,10 +138,29 @@ def test_a_user_the_meeting_is_shared_with_may_not_reopen_it(table) -> None:
     assert fake.updates == []
 
 
-def test_a_caller_without_a_user_pool_identity_may_not_reopen_a_meeting(table) -> None:
+def test_a_backend_role_reopens_any_meeting_and_is_recorded_by_its_arn(table) -> None:
+    """The lma CLI and SDK sign with IAM (`lma meetings reopen`)."""
     fake = table()
-    backend = {"userArn": "assumed-role/LMA-Role/session", "username": "AROAEXAMPLE:session"}
-    assert call(backend)["errorType"] == "Unauthorized"
+    role = "arn:aws:sts::123456789012:assumed-role/LMA-Operator/session"
+    answer = call({"userArn": role, "username": "AROAEXAMPLE:session", "accountId": "123456789012"})
+    assert answer["SessionNumber"] == 2
+    assert fake.meeting["ReopenedBy"] == role
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"userArn": "arn:aws:iam::123456789012:user/someone", "username": "AIDAEXAMPLE"},
+        {"username": "AROAEXAMPLE:session"},
+        {},
+    ],
+    ids=["iam-user", "no-arn", "none"],
+)
+def test_a_caller_that_is_neither_a_user_nor_a_backend_role_may_not_reopen_a_meeting(
+    table, identity
+) -> None:
+    fake = table()
+    assert call(identity)["errorType"] == "Unauthorized"
     assert fake.updates == []
 
 

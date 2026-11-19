@@ -295,6 +295,30 @@ def test_only_the_meetings_owner_or_an_admin_may_reopen_it(world):
     assert len(w.state_machine.executions) == 1
 
 
+def test_a_backend_role_rejoins_any_virtual_participant_as_a_guest(world):
+    """The lma CLI and SDK sign with IAM (`lma vp rejoin`)."""
+    w = world(meeting={"Owner": "carol@example.com", "Status": "ENDED"})
+    role = "arn:aws:sts::123456789012:assumed-role/LMA-Operator/session"
+    answer = rejoin.rejoin_virtual_participant(
+        w.manager, "vp-1", {"userArn": role, "username": "AROAEXAMPLE:session"}
+    )
+    assert answer["sessionNumber"] == 2
+    assert w.vp_table.row["rejoinedBy"] == role
+    data = w.state_machine.executions[0]["input"]["data"]
+    assert data["userSub"] == "", "no user's browser profile"
+
+
+def test_an_iam_user_may_not_rejoin_a_virtual_participant(world):
+    w = world()
+    with pytest.raises(NotAuthorizedError):
+        rejoin.rejoin_virtual_participant(
+            w.manager,
+            "vp-1",
+            {"userArn": "arn:aws:iam::123456789012:user/someone", "username": "AIDAEXAMPLE"},
+        )
+    assert w.state_machine.executions == []
+
+
 @pytest.mark.parametrize("status", ["ACTIVE", "JOINING", "INITIALIZING", "SCHEDULED", "CANCELLED"])
 def test_a_virtual_participant_that_has_not_left_is_not_rejoined(world, status):
     w = world(vp=ended_vp(status=status))

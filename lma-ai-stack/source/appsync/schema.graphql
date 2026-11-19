@@ -393,9 +393,10 @@ type Mutation @aws_iam {
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	# Relaunch a Virtual Participant that has left its meeting into the same
 	# online meeting, appending to the same LMA meeting (the CallId on its row),
-	# which is reopened if it has ended. For the meeting's owner and Admins. See
+	# which is reopened if it has ended. For the meeting's owner and Admins, and
+	# with IAM for a backend role (the lma CLI and SDK). See
 	# docs/virtual-participant.md#rejoin.
-	rejoinVirtualParticipant(input: RejoinVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
+	rejoinVirtualParticipant(input: RejoinVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	# Join again as a new meeting: create and launch a new Virtual Participant,
 	# owned by the caller, from an existing one's meeting details as the form
 	# gives them. When the platform and meeting ID are the source's and no
@@ -409,8 +410,9 @@ type Mutation @aws_iam {
 	# client names in its START frame (sessionNumber) and where the session
 	# starts on the transcript timeline. The meeting is reopened when that
 	# session's START event arrives. See
-	# docs/desktop-capture-app.md#continue-an-existing-meeting.
-	reopenMeeting(input: ReopenMeetingInput!): ReopenMeetingOutput @aws_cognito_user_pools
+	# docs/desktop-capture-app.md#continue-an-existing-meeting. With IAM, for a
+	# backend role (the lma CLI and SDK), as rejoinVirtualParticipant.
+	reopenMeeting(input: ReopenMeetingInput!): ReopenMeetingOutput @aws_cognito_user_pools @aws_iam
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
@@ -810,7 +812,7 @@ input ReopenMeetingInput {
 	CallId: ID!
 }
 
-type ReopenMeetingOutput @aws_cognito_user_pools {
+type ReopenMeetingOutput @aws_cognito_user_pools @aws_iam {
 	CallId: ID!
 	SessionNumber: Int!
 	SessionOffsetSeconds: Float!
