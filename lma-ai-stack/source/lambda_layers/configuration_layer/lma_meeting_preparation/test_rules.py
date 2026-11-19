@@ -243,6 +243,27 @@ def test_a_reset_starts_every_item_again_as_open():
     assert a["UpdatedAt"] == LATER
 
 
+def test_an_assistant_replace_may_not_undo_what_a_user_set():
+    items = progressed()  # item "a" was set covered by a user
+    same = rules.normalize_definitions(
+        [definition("a"), definition("b", "Confirm the date", "confirm")]
+    )
+    rules.check_replace_keeps_user_statuses(items, same, reset_statuses=False)
+    with pytest.raises(rules.StatusSetByUser, match="starts it again"):
+        rules.check_replace_keeps_user_statuses(items, same, reset_statuses=True)
+    with pytest.raises(rules.StatusSetByUser, match="leaves it out"):
+        rules.check_replace_keeps_user_statuses(items, same[1:], reset_statuses=False)
+    changed = rules.normalize_definitions([definition("a", "Another question")])
+    with pytest.raises(rules.StatusSetByUser, match="changes it"):
+        rules.check_replace_keeps_user_statuses(items, changed, reset_statuses=False)
+
+
+def test_an_assistant_replace_may_change_items_no_user_set():
+    items = progressed()
+    kept = rules.normalize_definitions([definition("a"), definition("c", "New", "topic")])
+    rules.check_replace_keeps_user_statuses(items, kept, reset_statuses=False)
+
+
 # ── item updates and precedence ──────────────────────────────────────────────
 
 

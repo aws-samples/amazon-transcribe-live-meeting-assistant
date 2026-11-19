@@ -371,6 +371,47 @@ def test_the_assistant_never_overwrites_a_status_a_user_set(table):
     assert row["Checklist"][0]["Status"] == "covered"
 
 
+def test_an_assistant_replace_that_would_undo_a_user_s_status_is_refused(table):
+    call("updateCallChecklist", user(OWNER), Checklist=ITEMS)
+    call("updateCallChecklistItem", user(OWNER), ItemId="q1", Status="deferred")
+    before = [dict(item) for item in table.row["Checklist"]]
+    for change in (
+        {"Checklist": ITEMS, "ResetStatuses": True},
+        {"Checklist": [ITEMS[1]]},
+        {"Checklist": [{**ITEMS[0], "Text": "Reworded"}, ITEMS[1]]},
+    ):
+        with pytest.raises(index.StatusSetByUserError):
+            call("updateCallChecklist", BACKEND, StatusSource="assistant", **change)
+    assert table.row["Checklist"] == before, "nothing was written"
+    # Items no user set may still be changed, and the user's item is kept.
+    row = call(
+        "updateCallChecklist",
+        BACKEND,
+        StatusSource="assistant",
+        Checklist=[ITEMS[0], {"ItemId": "n1", "Text": "New", "Kind": "topic"}],
+    )
+    assert [item["ItemId"] for item in row["Checklist"]] == ["q1", "n1"]
+    assert row["Checklist"][0]["Status"] == "deferred"
+
+
+def test_a_user_and_a_backend_acting_for_one_keep_full_control_of_a_replace(table):
+    call("updateCallChecklist", user(OWNER), Checklist=ITEMS)
+    call("updateCallChecklistItem", user(OWNER), ItemId="q1", Status="deferred")
+    row = call(
+        "updateCallChecklist", BACKEND, StatusSource="user", Checklist=ITEMS, ResetStatuses=True
+    )
+    assert row["Checklist"][0]["Status"] == "open"
+    call("updateCallChecklistItem", user(OWNER), ItemId="q1", Status="covered")
+    # A signed-in user's replace is a user's whatever the request says.
+    row = call("updateCallChecklist", user(SHARED), StatusSource="assistant", Checklist=[ITEMS[1]])
+    assert [item["ItemId"] for item in row["Checklist"]] == ["t1"]
+
+
+def test_a_backend_replace_must_name_its_source(table):
+    with pytest.raises(index.BadRequestError, match="StatusSource"):
+        call("updateCallChecklist", BACKEND, Checklist=ITEMS)
+
+
 def test_the_assistant_sets_a_status_with_evidence(table):
     call("updateCallChecklist", user(OWNER), Checklist=ITEMS)
     row = call(

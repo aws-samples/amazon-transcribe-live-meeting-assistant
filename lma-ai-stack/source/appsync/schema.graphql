@@ -1565,6 +1565,10 @@ input UpdateCallChecklistInput {
 	Checklist: [ChecklistItemInput!]!
 	# Start every item again as open, with no evidence or note.
 	ResetStatuses: Boolean
+	# Backend roles only, which must supply it, as on updateCallChecklistItem.
+	# An "assistant" replace that would reset, leave out or change an item
+	# whose status a user set is refused (StatusSetByUser).
+	StatusSource: String
 	# Backend roles only, as in UpdateCallMeetingContextInput.
 	UpdatedBy: String
 }

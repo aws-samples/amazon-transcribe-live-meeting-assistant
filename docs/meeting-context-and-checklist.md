@@ -140,10 +140,18 @@ the page. A change made by a signed-in user is always recorded under their own
 username, and a status they set is always recorded as `StatusSource: user`.
 
 **A status a user set is never changed by the assistant.** Only a user changes
-it again. A backend role that updates an item names who the change is from: an
-`assistant` change to an item whose status a user set is refused as a whole,
-and a client acting for a user (an MCP client, for example) records its change
-as the user's. This is enforced by the server.
+it again. A backend role that changes the checklist names who the change is
+from, as `StatusSource`: `user` when it acts for a person, who then has the
+same control as a signed-in user, or `assistant`. The server refuses, as a
+whole and with nothing written, an `assistant` change that would undo what a
+user set:
+
+- an item update to an item whose status a user set;
+- a replace of the checklist that starts such an item again as open
+  (`ResetStatuses`), leaves it out, or changes its text, kind, priority or
+  source.
+
+A signed-in user's changes are always a user's, and are never refused this way.
 
 ## The meeting assistant
 
@@ -212,7 +220,7 @@ to `onUpdateCall`:
 | Mutation | Input | What it does |
 |---|---|---|
 | `updateCallMeetingContext` | `CallId`, `MeetingContext` | Replaces the meeting context (empty clears it), and records who changed it and when. |
-| `updateCallChecklist` | `CallId`, `Checklist` (each item's `ItemId`, `Text`, `Kind`, `Priority`, `Source`), `ResetStatuses` | Replaces the whole checklist, in the order given. An item whose `ItemId` was already present keeps its `Status`, `StatusSource`, `Evidence` and `Note`, unless `ResetStatuses` is true. |
+| `updateCallChecklist` | `CallId`, `Checklist` (each item's `ItemId`, `Text`, `Kind`, `Priority`, `Source`), `ResetStatuses`, `StatusSource` | Replaces the whole checklist, in the order given. An item whose `ItemId` was already present keeps its `Status`, `StatusSource`, `Evidence` and `Note`, unless `ResetStatuses` is true. |
 | `updateCallChecklistItem` | `CallId`, `ItemId`, and any of `Status`, `Note` (empty clears it), `Evidence` (replaces the item's), `AddEvidence` (added after it), `StatusSource` | Changes one item. |
 | `updateCallLabels` | `CallId`, `Labels` | Replaces the labels; an empty list clears them. |
 | `updateCallAudience` | `CallId`, `Audience` | Sets the audience; null or empty clears it. |
@@ -222,7 +230,7 @@ to `onUpdateCall`:
 `Text`, `Kind`, `Priority` and `Source`).
 
 A backend role calling with IAM credentials must name a `StatusSource` (`user`
-or `assistant`) on `updateCallChecklistItem`, and may name an `UpdatedBy` label
+or `assistant`) on `updateCallChecklist` and `updateCallChecklistItem`, and may name an `UpdatedBy` label
 on the meeting context, checklist and item mutations; a signed-in user's change
 is always their own. A client that subscribes to `onUpdateCall` should select
 `Owner` and `SharedWith`, as the subscription requires them for every caller

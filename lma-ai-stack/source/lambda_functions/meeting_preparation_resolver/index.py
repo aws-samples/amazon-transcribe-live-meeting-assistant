@@ -416,12 +416,26 @@ def update_audience(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     )
 
 
+def change_source(caller: Mapping[str, Any], data: Mapping[str, Any]) -> str:
+    """Who a checklist change is from: a signed-in user's is always ``user``; a
+    backend role names it (``user`` when it acts for a person)."""
+    if not caller["is_backend"]:
+        return rules.STATUS_SOURCE_USER
+    source = data.get("StatusSource")
+    if source not in rules.STATUS_SOURCES:
+        raise BadRequestError("StatusSource must be user or assistant")
+    return source
+
+
 def update_checklist(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     definitions = _checked(rules.normalize_definitions, data.get("Checklist"))
+    source = change_source(caller, data)
     by = attribution(caller, data)
     reset = data.get("ResetStatuses") is True
 
     def change(items, _meeting, now):
+        if source != rules.STATUS_SOURCE_USER:
+            rules.check_replace_keeps_user_statuses(items, definitions, reset_statuses=reset)
         return rules.merge_checklist(
             items, definitions, reset_statuses=reset, updated_by=by, now=now
         )
@@ -430,13 +444,8 @@ def update_checklist(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict
 
 
 def update_checklist_item(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
-    if caller["is_backend"]:
-        source = data.get("StatusSource")
-        if source not in rules.STATUS_SOURCES:
-            raise BadRequestError("StatusSource must be user or assistant")
-    else:
-        # A signed-in user acts for themselves, whatever the request says.
-        source = rules.STATUS_SOURCE_USER
+    # A signed-in user acts for themselves, whatever the request says.
+    source = change_source(caller, data)
     by = attribution(caller, data)
 
     def change(items, meeting, now):

@@ -288,7 +288,8 @@ def test_a_replace_keeps_progress_and_the_assistant_never_overrides_a_user(
                                     "StatusSource": "user", "UpdatedBy": OWNER}})
     replaced = graphql(
         REPLACE_CHECKLIST,
-        {"input": {"CallId": call_id, "Checklist": [CHECKLIST[1], CHECKLIST[0], {"ItemId": "c1", "Text": "Confirm the date", "Kind": "confirm"}]}},
+        {"input": {"CallId": call_id, "StatusSource": "user",
+                   "Checklist": [CHECKLIST[1], CHECKLIST[0], {"ItemId": "c1", "Text": "Confirm the date", "Kind": "confirm"}]}},
     )["updateCallChecklist"]
     by_id = {item["ItemId"]: item for item in replaced["Checklist"]}
     assert [item["ItemId"] for item in replaced["Checklist"]] == ["r1", "q1", "c1"]

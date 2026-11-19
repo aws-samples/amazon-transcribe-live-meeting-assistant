@@ -234,6 +234,39 @@ def _definition_of(item: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: item.get(key) for key in DEFINITION_FIELDS}
 
 
+def check_replace_keeps_user_statuses(
+    existing: Optional[Iterable[Mapping[str, Any]]],
+    definitions: Sequence[Mapping[str, Any]],
+    *,
+    reset_statuses: bool,
+) -> None:
+    """Refuse an assistant's replace that would undo what a user set.
+
+    A status a user set is changed by a user alone, so an ``assistant`` replace
+    of the checklist may not start such an item again (``reset_statuses``),
+    leave it out, or change what it is (its text, kind, priority or source).
+    The whole replace is refused, with nothing written, rather than applied
+    with some items quietly kept. A user's replace is not checked.
+    """
+    wanted = {definition["ItemId"]: definition for definition in definitions}
+    for item in existing or []:
+        if not isinstance(item, Mapping) or item.get("StatusSource") != STATUS_SOURCE_USER:
+            continue
+        item_id = item.get("ItemId")
+        if reset_statuses:
+            reason = "starts it again as open"
+        elif item_id not in wanted:
+            reason = "leaves it out"
+        elif _definition_of(item) != _definition_of(new_item(wanted[item_id], "", "")):
+            reason = "changes it"
+        else:
+            continue
+        raise StatusSetByUser(
+            f"The status of checklist item {item_id} was set by a user, and this replace {reason}; "
+            "only a user can do that"
+        )
+
+
 def merge_checklist(
     existing: Optional[Iterable[Mapping[str, Any]]],
     definitions: Sequence[Mapping[str, Any]],
