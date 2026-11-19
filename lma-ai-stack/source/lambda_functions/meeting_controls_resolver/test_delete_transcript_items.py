@@ -93,6 +93,7 @@ def test_deleting_a_meeting_empties_its_transcript_partition(monkeypatch) -> Non
     monkeypatch.setattr(index, "delete_recordings_transcripts", lambda callid: None)
     monkeypatch.setattr(index, "delete_metering_records", lambda callid: 0)
     monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
     monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
     monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: 0)
     monkeypatch.setattr(index, "dsl_gql", lambda *a: None)

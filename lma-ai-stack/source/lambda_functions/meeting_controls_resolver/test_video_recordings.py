@@ -167,6 +167,7 @@ def test_deleting_a_meeting_deletes_the_video_named_on_its_record(monkeypatch) -
     monkeypatch.setattr(index, "delete_metering_records", lambda callid: 0)
     monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
     monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
     monkeypatch.setattr(
         index, "delete_video_recordings", lambda callid, url, _earlier: calls.append((callid, url))
     )

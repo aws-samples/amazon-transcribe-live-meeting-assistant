@@ -18,6 +18,8 @@
  * 40 s from the first low reading).
  */
 
+import { FirstAttendeeWait } from './first-attendee-wait.js';
+
 /** How long the count must stay at one or fewer before the VP leaves. */
 export const ALONE_HOLD_MS = 60_000;
 
@@ -27,20 +29,33 @@ export class AloneDebounce {
     constructor(
         private readonly onAlone: () => void,
         private readonly holdMs: number = ALONE_HOLD_MS,
+        // Until somebody else has been counted, the hold also lasts until the
+        // first-attendee wait is over (first-attendee-wait.ts).
+        private readonly firstAttendee: FirstAttendeeWait | null = null,
     ) {}
 
     /** One attendee-count reading, the VP included. */
     note(count: number): void {
         if (!Number.isFinite(count)) return;
+        this.firstAttendee?.note(count);
         if (count > 1) {
             this.cancel();
             return;
         }
         if (this.timer) return;
+        this.arm(this.holdMs);
+    }
+
+    private arm(ms: number): void {
         this.timer = setTimeout(() => {
             this.timer = null;
+            const waiting = this.firstAttendee?.remainingMs() ?? 0;
+            if (waiting > 0) {
+                this.arm(waiting);
+                return;
+            }
             this.onAlone();
-        }, this.holdMs);
+        }, ms);
     }
 
     /** Whether a reading of one or fewer is waiting out the hold. */

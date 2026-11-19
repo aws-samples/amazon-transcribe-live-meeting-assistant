@@ -52,14 +52,21 @@ ALL_TOOLS = {
     "current_meeting_transcript",
     "get_meeting_agenda",
     "get_meeting_frames",
+    "get_chat_attachments",
     "control_vnc_preview",
     "control_vp_browser",
 }
 
-# The current meeting: its transcript, its agenda and its shared screen. Guests
-# in the meeting may read the agenda of the meeting they are in, and see again
-# what was shared with them, as they read its transcript.
-CURRENT_MEETING_TOOLS = {"current_meeting_transcript", "get_meeting_agenda", "get_meeting_frames"}
+# The current meeting: its transcript, its agenda, its shared screen and the
+# attachments shared in its chat. Guests in the meeting may read the agenda of
+# the meeting they are in, and see again what was shared with them, as they
+# read its transcript.
+CURRENT_MEETING_TOOLS = {
+    "current_meeting_transcript",
+    "get_meeting_agenda",
+    "get_meeting_frames",
+    "get_chat_attachments",
+}
 
 CHAT = {"toolScope": "meeting_chat", "userEmail": "owner@example.com"}
 VOICE = {"toolScope": "voice_assistant", "userEmail": "owner@example.com"}
@@ -152,6 +159,7 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         ("create_current_meeting_transcript_tool", "current_meeting_transcript"),
         ("create_meeting_agenda_tool", "get_meeting_agenda"),
         ("create_meeting_frames_tool", "get_meeting_frames"),
+        ("create_chat_attachments_tool", "get_chat_attachments"),
         ("create_vnc_preview_control_tool", "control_vnc_preview"),
         ("create_vp_browser_control_tool", "control_vp_browser"),
     ):
