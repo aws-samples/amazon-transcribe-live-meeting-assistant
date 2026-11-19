@@ -39,6 +39,7 @@ title: "Virtual Participant"
 - [Chat Introduction Message](#chat-introduction-message)
 - [In-meeting Chat Commands](#in-meeting-chat-commands)
 - [Meeting Chat in the Transcript](#meeting-chat-in-the-transcript)
+- [Chat Attachments](#chat-attachments)
 - [Meeting Consent](#meeting-consent)
 - [Troubleshooting](#troubleshooting)
 - [Developer Testing](#developer-testing)
@@ -536,7 +537,7 @@ Most values are one of these fixed strings:
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `pre-join:passcode-not-entered`, `pre-join:zoom-link-unresolved`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
-| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| The meeting ended | `post-meeting-screen`, `dialog-watchdog` (also for a removal), `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
 | Everyone else left, or the VP was removed | `meet-removed-screen`, `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
 | Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `meet-left-screen`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
 | The join threw, and the message matched one of the container's six classes | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
@@ -565,9 +566,11 @@ The VP leaves on its own so an abandoned meeting is not recorded (or billed) ind
 3. **A sustained empty roster** — the participant count is present and reads one or fewer for several consecutive polls.
 4. **A sustained absence of the whole meeting UI** — neither a readable participant count nor any in-meeting controls. This is the backstop for the case where none of the above fires.
 
+A VP that joins before anybody else waits for the first attendee. Until the attendee count has shown somebody other than the VP, a count of one or fewer ends the meeting only once five minutes have passed since the VP joined, on every platform and join path (Zoom, Chime, Teams, Google Meet, the Zoom SDK and the Teams ACS join). The VP's log says when it is waiting (*"Nobody else has joined yet … waiting up to N s more for the first attendee"*). Once somebody else has been in the meeting, the rules below apply as before, and a VP still alone when the five minutes are over leaves then, so one sent to a meeting that never starts does not stay until its maximum duration.
+
 On Zoom (browser join) and Amazon Chime, the VP no longer leaves as alone on a single reading of the attendee counter: the counter's change events leave only once it has stayed at one or fewer — the VP by itself — for 60 seconds (Zoom's separate participants check, two samples 30 seconds apart, still applies); any higher reading in that time cancels it, so a counter that redraws for a moment does not end the meeting. On Chime, the page counts as gone only after 15 failed checks in a row (about 30 seconds), not after one.
 
-Zoom's participants check, every 30 seconds, also ends the meeting as a removal (`participants-ui:counter-gone` or `participants-ui:page-dead`) when the attendee counter is missing from the page, or the page cannot be read. That now needs four checks in a row (about 2 minutes) with no participant activity in the last 10 minutes (the activity described below for Teams); while participants are speaking, a missing counter is not counted, because a hidden or redrawn toolbar takes the counter with it in a meeting that is still running. Zoom's own end and removal dialogs are the prompt signal: the VP leaves on the dialog that says the meeting has ended or that it was removed (`ZOOM_END_DIALOG`). Only those dialogs count, recognised by their text; a primary button elsewhere on the page does not.
+Zoom's participants check, every 30 seconds, also ends the meeting as a removal (`participants-ui:counter-gone` or `participants-ui:page-dead`) when the attendee counter is missing from the page, or the page cannot be read. That now needs four checks in a row (about 2 minutes) with no participant activity in the last 10 minutes (the activity described below for Teams); while participants are speaking, a missing counter is not counted, because a hidden or redrawn toolbar takes the counter with it in a meeting that is still running. Zoom's own end and removal dialogs are the prompt signal: the VP leaves on the dialog that says the meeting has ended or that it was removed (`ZOOM_END_DIALOG`). Only those dialogs count, recognised by their text; a primary button elsewhere on the page does not. When the AI dialog watchdog reads a removal or meeting-ended notice first, the VP ends the meeting as removed or ended by the host (`dialog-watchdog`) rather than asking for manual action; on the other platforms such a notice is left to the handler's own end detection.
 
 On Webex the end signal is the text of Webex's end screen (*"This meeting has ended"*, *"You have left the meeting"*, *"Meeting disconnected"*), checked every 2 seconds. Text in chat messages, captions and transcripts is not read, and the phrase ends the meeting only once Webex's in-meeting controls (the microphone, camera, participants and leave buttons) are gone. If the phrase stays on the page for 2 minutes with a control still visible and no participant has spoken in the last 10 minutes, the VP leaves as well, so an end screen that leaves a control behind does not keep it until the meeting timeout.
 
@@ -612,6 +615,8 @@ When the VP can't proceed without a human (Zoom 2FA passcode, CAPTCHA, SSO redir
 Open the live VNC viewer for the affected VP, complete the challenge (type the passcode, solve the CAPTCHA, sign in via SSO, click the consent button — whatever the banner says), and the VP picks up automatically. The default timeout is 3 minutes; if no human response arrives, the VP fails the meeting cleanly.
 
 The banner is dismissible — dismissed alerts are remembered in `localStorage` (per VP id) so the banner doesn't reappear on every page refresh after you've dealt with it.
+
+Being removed from the meeting, or the meeting ending, is never a manual action: a dialog that says so ends the meeting as that exit. Once the VP's meeting has ended, or its end-of-meeting work has begun, the dialog watchdog stops reading dialogs, so nothing during the VP's teardown sets `MANUAL_ACTION_REQUIRED`.
 
 ## AI-driven self-healing
 
@@ -1115,8 +1120,140 @@ measured in a live meeting yet:
 With the stack's `LogLevel` at `DEBUG`, the VP writes one line per chat message
 it reads, `[meeting-chat] platform=<platform> outcome=<what happened>
 sender=yes|no id=yes|no time=yes|no recipient=everyone|direct|unknown
-links=<n> chars=<n>`, with no message text and no sender name, so a live
-meeting shows what each platform actually gives. The VP never logs chat text.
+links=<n> attachments=<n> chars=<n>`, with no message text and no sender name,
+so a live meeting shows what each platform actually gives. The VP never logs
+chat text.
+
+## Chat Attachments
+
+With **Virtual Participant › Capture chat attachments** on, the images and
+files participants share in the meeting chat are stored with the meeting,
+beside the chat line of the message that carried them, and each stored one is
+given a short AI title and a one or two sentence summary. The setting is off by
+default. **AI titles and summaries for chat attachments**, in the same
+section, is on by default and turns the titles and summaries off on its own.
+Like the section's other settings, a change applies to the next Virtual
+Participant to start.
+
+Attachments are taken only from a message that is
+[added to the transcript](#meeting-chat-in-the-transcript), so every rule
+there applies to them: nothing is taken while **Add the meeting chat to the
+transcript** is off, while **Amazon Transcribe › Redact personal information**
+is on, while the transcript is paused, before consent allows capture, from a
+private message, or from what the chat held before the VP joined. The VP
+checks again, after it has fetched an attachment and before storing it, that
+the meeting is still being captured; an attachment fetched while the meeting
+was paused or consent was withdrawn is dropped.
+
+Each message with attachments names them in its transcript line,
+`(attachment: <file name>)` for each, so the summary and the meeting assistant
+know what was shared even without the content. A message of attachments alone
+becomes a line of its own.
+
+An attachment can appear after its message's text: a pasted screenshot is
+shown while it is still uploading, and its image arrives a few seconds later.
+So the VP keeps watching each message it added for 60 seconds, and an
+attachment that appears on it in that time is added to the same line (the line
+is written again with the attachment named) and stored like the others. An
+image is taken only once the platform has loaded it; on Zoom, one that has not
+loaded when the 60 seconds are up is recorded by name. On Teams a message's
+attachments have a line of their own, so a late image joins that line.
+
+### What is stored
+
+- **Images and files up to 25 MB, of these types only:** PNG, JPEG, GIF and
+  WebP images; PDF; Word, Excel and PowerPoint files (current and legacy
+  formats); plain text, CSV and Markdown. The type is read from the file's
+  leading bytes, not from its name, and a file whose bytes are not one of
+  these types is not stored. HTML, SVG, archives and programs are never
+  stored.
+- **The file is never opened in the Virtual Participant.** Its bytes are read,
+  checked for their type and uploaded; nothing renders or runs it.
+- **Where:** the recordings bucket, under
+  `lma-chat-attachments/<meeting>/<attachment id>/<file name>`, with the
+  bucket's default encryption (the stack's customer-managed key), as the
+  recordings are. Each attachment's record (file name, kind, type, size, the
+  chat line it belongs to, its title and summary) is stored with the meeting
+  in the event-sourcing table, with the meeting's owner and sharing.
+- **Named only:** an attachment the platform does not let the VP download, one
+  over the size limit, one of a type not stored, or one whose fetch failed is
+  recorded with its file name and the reason, and nothing else. The meeting
+  page shows it as *not stored*.
+
+### Titles and summaries
+
+After an attachment is stored, the call event processor queues the chat
+attachment summarizer, which reads it once with the
+**Meeting assistant model** of the Amazon Bedrock Models section, through
+Amazon Bedrock Converse: an image as an image, and a PDF, Word, Excel, text,
+CSV or Markdown file as a document. It runs in the background, so capture is
+never held up by it, and is metered in the meeting's cost estimate under
+*Chat attachments* (see
+[Meeting Cost Estimate](meeting-cost-estimate.md)). A PowerPoint file, which
+Converse has no document format for, an image over 3.75 MB and a document over
+4.5 MB are not read, and are shown by their file name. The model is asked for a
+low reasoning effort where it takes one, and is given room for its reasoning as
+well as the answer (2,048 output tokens); an answer cut off at that ceiling, or
+one with no text, is asked for once more with 8,192, and both calls are
+metered. Each call may take up to 45 seconds to answer. A model that reads no
+images or documents (Amazon Nova Micro) gives no title, and the attachment is
+shown by its file name. The model is told that
+the file name and the content are material to describe, not instructions; the
+title and summary are stored and shown as plain text.
+
+Content redaction applies to text that is transcribed. It does not apply to
+images or files, nor to the titles and summaries the model writes about them.
+Since attachments are captured only while the chat is added to the transcript,
+and the chat is not added while redaction is on, no attachment is captured in a
+meeting that redacts.
+
+### On the meeting page
+
+A chat line with attachments shows each under the message: an image as a
+thumbnail, a file as a file chip with its size, each with its AI title and
+summary marked *AI-generated from the attachment*. Clicking one reads it again
+through the `getChatAttachments` query, which answers the same people who can
+see the meeting (its owner, the people it is shared with, and Admins), and
+opens a link valid for an hour that serves the file as a download
+(`Content-Disposition: attachment`). Only PNG, JPEG, GIF and WebP images are
+ever shown in the page, as thumbnails; nothing else is rendered inline. The
+embedded transcript does not show attachments.
+
+The meeting assistant's `get_chat_attachments` tool lists the meeting's
+attachments with their times, file names, titles and summaries, in every tool
+scope, as the shared screen's key frames are. It does not hand the assistant
+the files themselves.
+
+### Retention and deletion
+
+Attachments belong to the transcript's chat lines. Their records take the
+transcript's expiry (**Days to keep transcript segments**), the files are kept
+for the same number of days by the recordings bucket's
+`ChatAttachmentRetention` lifecycle rule, and both are deleted, every version
+of every file, when the meeting is deleted and when the transcript is deleted
+([Delete the transcript after the summary](transcript-deletion.md)). Sharing a
+meeting shares its attachments. In a deployment that brings its own recordings
+bucket, the lifecycle rule is not created, as for the other prefixes.
+
+### Platform support
+
+| Platform | Images | Files |
+| --- | --- | --- |
+| Zoom (browser, VP signed in) | Stored: the image's `blob:` address is fetched in the page, which returns the original image. Zoom's emoji reaction icons, which every message row also holds as images, are not attachments | Stored: Zoom's file card is clicked and the download Zoom starts is read back. Measured for a 204 KB PDF and a 16 KB Office file |
+| Microsoft Teams (browser, anonymous light-meetings client) | Stored: the pasted image's `blob:` address is fetched in the page | Named only: a guest sees only the file card, and cannot download the file |
+| Zoom Meeting SDK, Teams Azure Communication Services | Not captured | Not captured |
+| Google Meet, Webex, Amazon Chime | Not captured: not yet probed in a live meeting | Not captured |
+
+On Zoom the measurements were made with the VP signed in to Zoom as its
+owner; an anonymous guest join was not measured. A Teams guest that joins late
+does not receive the chat posted before it joined, so attachments shared
+earlier are not captured. A Teams message with text and attachments becomes two
+lines: the text as before, and the attachments on a line of their own.
+
+The VP logs one line per attachment with its kind, type, size and outcome
+(`[chat-attachments] stored an attachment (kind=image type=image/png
+bytes=12345)`, or `recorded an attachment without its content (kind=document
+reason=NOT_DOWNLOADABLE)`), never its file name, sender or content.
 
 ## Meeting Consent
 

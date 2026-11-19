@@ -17,6 +17,14 @@ import { anyVisible, captureMeetingPanels, clickFirstVisible } from './consent-e
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import type { IncomingChat } from './meeting-chat.js';
+import { captureChatAttachmentsSetting } from './chat-attachments.js';
+import {
+    pageBlobFetcher,
+    readTeamsChatAttachmentsInPage,
+    TEAMS_ATTACHMENT_SELECTORS,
+    teamsAttachmentChats,
+} from './chat-attachments-page.js';
 import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
@@ -55,6 +63,7 @@ import {
     TEAMS_PEOPLE_ROLE_BADGE_SELECTOR,
     TEAMS_PEOPLE_TREE_SELECTOR,
 } from './teams-people-pane.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 
 const log = createLogger('teams');
 
@@ -2123,6 +2132,10 @@ export default class Teams {
                 `(poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}, ` +
                 `badge-missing-and-not-in-meeting x${watchdogConfig.pollsBeforeEndMissing}).`,
         );
+        // Until somebody else has been counted, a lonely count does not end the
+        // meeting before the first-attendee wait is over (first-attendee-wait.ts).
+        const firstAttendee = new FirstAttendeeWait();
+        let firstAttendeeWaitReported = false;
         const watchdogState: AttendeeWatchdogState = {
             consecutiveLonely: 0,
             consecutiveMissing: 0,
@@ -2245,6 +2258,7 @@ export default class Teams {
                 const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig, participantsActive);
                 if (reading.state === 'OK') {
                     meetingConsent.noteAttendeeCount(reading.count);
+                    firstAttendee.note(reading.count);
                     log.info(
                         `DEBUG: Teams attendee count (${countFrom}): ${reading.count}, ` +
                             `hasOthers: ${reading.count > 1}, ` +
@@ -2276,7 +2290,15 @@ export default class Teams {
                     );
                 }
 
-                if (decision.action === 'end') {
+                if (decision.action === 'end' && decision.reason === 'alone-in-meeting' && !firstAttendee.mayLeaveAlone()) {
+                    if (!firstAttendeeWaitReported) {
+                        firstAttendeeWaitReported = true;
+                        log.info(
+                            `Nobody else has joined yet (${decision.detail}) — waiting up to ` +
+                                `${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee before leaving.`,
+                        );
+                    }
+                } else if (decision.action === 'end') {
                     log.info(`LMA Virtual Participant is leaving: ${decision.detail}`);
                     clearInterval(attendeeWatchdog);
                     details.start = false;
@@ -2539,6 +2561,20 @@ export default class Teams {
                 const fresh = isLightMeetingsUrl(page.url()) ? chatCopies.merge(scraped) : scraped;
                 const history = firstRead;
                 firstRead = false;
+                // The images and file cards of the messages, while "Capture chat
+                // attachments" is on (chat-attachments.ts). Each message's
+                // attachments are offered as a line of their own, beside the
+                // line the message's text is added as.
+                const attachmentChats: IncomingChat[] = [];
+                if (captureChatAttachmentsSetting()) {
+                    const attachmentRows = await page
+                        .evaluate(readTeamsChatAttachmentsInPage, TEAMS_ATTACHMENT_SELECTORS)
+                        .catch(() => []);
+                    attachmentChats.push(...teamsAttachmentChats(attachmentRows, history, (src) => pageBlobFetcher(page, src)));
+                }
+                // An attachment Teams draws on a message already offered (a pasted
+                // image still loading then) is added to that message's line.
+                for (const chat of attachmentChats) meetingChat.offerLateAttachments(chat);
                 if (fresh.length) {
                     emptyStreak = 0;
                     for (const { text, ...row } of fresh) {

@@ -2,6 +2,7 @@ import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { noteMeetingJoined } from './meeting-phase.js';
 import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 import {
     decideZoomCounterAction,
     ZOOM_COUNTER_POLL_MS,
@@ -20,16 +21,20 @@ import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
-import { noteSentChat } from './meeting-chat.js';
+import { LATE_ATTACHMENT_WINDOW_MS, noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
 import { chatAddressing } from './chat-addressing.js';
 import {
     readZoomChatInPage,
     ZOOM_CHAT_SELECTORS,
     ZoomChatPanelKeeper,
+    zoomChatAttachments,
     zoomChatPanelStateInPage,
     type ZoomChatPanelState,
+    type ZoomChatRaw,
 } from './zoom-chat-page.js';
+import { captureChatAttachmentsSetting, type IncomingChatAttachment } from './chat-attachments.js';
+import { downloadFetcher, pageBlobFetcher } from './chat-attachments-page.js';
 import { dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC, zoomOverlayCheckDelayMs } from './zoom-overlays.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
@@ -215,7 +220,14 @@ export default class Zoom {
     // before the join completes (so verification / consent dialogs that
     // block the prejoin/waiting-room are caught and escalated to MANUAL).
     private startUnknownDialogWatchdog(page: Page): void {
-        startDialogWatchdog(page, { platform: 'ZOOM' });
+        startDialogWatchdog(page, {
+            platform: 'ZOOM',
+            // A removal or end notice the watchdog read is this meeting's end.
+            onMeetingOver: (reason) => {
+                details.start = false;
+                this.requestEnd({ reason, trigger: 'dialog-watchdog' });
+            },
+        });
     }
 
     /**
@@ -1630,16 +1642,19 @@ export default class Zoom {
 
         // Set up attendee change monitoring
         // Leaves only once the count has stayed at one or fewer for
-        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts).
+        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts),
+        // and, until somebody else has been counted, not before the
+        // first-attendee wait is over (first-attendee-wait.ts).
+        const firstAttendee = new FirstAttendeeWait();
         const aloneDebounce = new AloneDebounce(() => {
             log.info(`LMA Virtual Participant got lonely and left (one attendee or fewer for ${ALONE_HOLD_MS / 1000} s).`);
             details.start = false;
             this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
-        });
+        }, ALONE_HOLD_MS, firstAttendee);
         page.once('close', () => aloneDebounce.cancel());
         await page.exposeFunction('attendeeChange', async (number: number) => {
             meetingConsent.noteAttendeeCount(number);
-            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${ALONE_HOLD_MS / 1000} s unless somebody is still here`);
+            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${Math.round(Math.max(ALONE_HOLD_MS, firstAttendee.remainingMs()) / 1000)} s unless somebody is still here`);
             aloneDebounce.note(number);
         });
 
@@ -1708,6 +1723,7 @@ export default class Zoom {
             const counterSelector = attendeeCounterSelector;
             const counterState: ZoomCounterState = { consecutiveMissing: 0, consecutiveLonely: 0 };
             let vetoReported = false;
+            let firstAttendeeWaitReported = false;
             const watchdogTimer = setInterval(async () => {
                 if (page.isClosed()) {
                     clearInterval(watchdogTimer);
@@ -1727,9 +1743,19 @@ export default class Zoom {
                 }
                 if (result.state === 'OK') {
                     meetingConsent.noteAttendeeCount(result.count);
+                    firstAttendee.note(result.count);
                     vetoReported = false;
                 }
                 const action = decideZoomCounterAction(result, counterState, participantsActiveWithin());
+                if (action === 'end-alone' && !firstAttendee.mayLeaveAlone()) {
+                    if (!firstAttendeeWaitReported) {
+                        firstAttendeeWaitReported = true;
+                        log.info(
+                            `[participants-watchdog] only ${result.state === 'OK' ? result.count : '?'} attendee(s) and nobody else has joined yet — waiting up to ${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee`,
+                        );
+                    }
+                    return;
+                }
                 if (action === 'vetoed' && !vetoReported) {
                     vetoReported = true;
                     log.info(
@@ -1955,7 +1981,33 @@ export default class Zoom {
         }
 
         // Set up message monitoring with LMA features
-        const onChatRow = async (message: string, messageId?: string | null, links?: string[]): Promise<void> => {
+        // A row's images and file cards, for the chat capture, while "Capture
+        // chat attachments" is on (chat-attachments.ts). An image is fetched
+        // in the page; a file card is clicked, and the download Zoom starts is
+        // read back (measured with the VP signed in to Zoom). Nothing is
+        // fetched until the message has been added to the transcript.
+        const attachmentsOf = (row: ZoomChatRaw): IncomingChatAttachment[] | undefined => {
+            if (!row.attachments?.length || !captureChatAttachmentsSetting()) return undefined;
+            return zoomChatAttachments(row, {
+                blob: (src) => pageBlobFetcher(page, src),
+                fileCard: (messageId, index) =>
+                    downloadFetcher(async () => {
+                        const card = page.locator(`[data-id="${messageId}"] ${ZOOM_CHAT_SELECTORS.fileCard}`).nth(index);
+                        const [download] = await Promise.all([
+                            page.waitForEvent('download', { timeout: 20_000 }),
+                            card.click({ timeout: 5_000 }),
+                        ]);
+                        return download;
+                    }),
+            });
+        };
+
+        const onChatRow = async (
+            message: string,
+            messageId?: string | null,
+            links?: string[],
+            attachments?: IncomingChatAttachment[],
+        ): Promise<void> => {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
             const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
@@ -1973,6 +2025,7 @@ export default class Zoom {
                     platformTime: time,
                     audience: zoomChatAudience(recipient),
                     links,
+                    attachments,
                 });
                 return;
             }
@@ -2042,6 +2095,7 @@ export default class Zoom {
                     platformTime: time,
                     audience: zoomChatAudience(recipient),
                     links,
+                    attachments,
                 });
             }
         };
@@ -2057,6 +2111,11 @@ export default class Zoom {
             lists: [...ZOOM_CHAT_SELECTORS.lists] as string[],
             rows: [...ZOOM_CHAT_SELECTORS.rows],
             container: ZOOM_CHAT_SELECTORS.container,
+            imagePreview: ZOOM_CHAT_SELECTORS.imagePreview,
+            fileCard: ZOOM_CHAT_SELECTORS.fileCard,
+            fileName: ZOOM_CHAT_SELECTORS.fileName,
+            fileSize: ZOOM_CHAT_SELECTORS.fileSize,
+            watchMs: LATE_ATTACHMENT_WINDOW_MS,
             settleMs: ZOOM_CHAT_BASELINE_SETTLE_MS,
         };
         const listOnPage = async (): Promise<boolean> =>
@@ -2132,7 +2191,23 @@ export default class Zoom {
                 // slow reply (help, the exit messages) delays the next row and
                 // the panel keeper, and keeps the replies in order.
                 for (const row of reading.rows) {
-                    await onChatRow(row.label, row.id, row.links);
+                    await onChatRow(row.label, row.id, row.links, attachmentsOf(row));
+                }
+                // Attachments that appeared on a row after it was read (a pasted
+                // image still uploading then), added to the line it became.
+                for (const row of reading.late ?? []) {
+                    const attachments = attachmentsOf(row);
+                    if (!attachments?.length) continue;
+                    const { sender, recipient, body, time } = parseZoomChatLabel(row.label);
+                    meetingChat.offerLateAttachments({
+                        platform: 'zoom',
+                        text: body,
+                        sender,
+                        id: row.id,
+                        platformTime: time,
+                        audience: zoomChatAudience(recipient),
+                        attachments,
+                    });
                 }
             } catch {
                 /* the page is navigating or closing; read again next tick */

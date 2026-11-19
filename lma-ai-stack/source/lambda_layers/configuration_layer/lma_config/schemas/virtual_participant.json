@@ -107,6 +107,18 @@
       "type": "boolean",
       "title": "Add the meeting chat to the transcript",
       "description": "On: the messages participants send to everyone in the meeting chat are added to the meeting's transcript, each under its sender's name, at the time the Virtual Participant read it. Not added: LMA chat commands (an \"LMA ask\" question is added), consent replies, the Virtual Participant's own messages, private messages, and anything sent while the transcript is paused or consent is withheld. Nothing is added while Redact personal information in the Amazon Transcribe section is on, in any language, whatever this says. Zoom, Microsoft Teams and Google Meet meetings are covered; Webex and Amazon Chime meetings are not. Chat messages expire with the transcript and are deleted with it."
+    },
+    "captureChatAttachments": {
+      "order": 11,
+      "type": "boolean",
+      "title": "Capture chat attachments",
+      "description": "On: the images and files shared in the meeting chat are stored with the meeting, beside the chat message that carried them, and shown on the meeting page. Only for a message that is added to the transcript (see Add the meeting chat to the transcript), so never while that setting is off, while redaction is on, while the transcript is paused or before consent allows capture. Up to 25 MB each, of these types only: PNG, JPEG, GIF and WebP images, PDF, Word, Excel and PowerPoint files, and plain text, CSV and Markdown. Anything else, and anything the platform does not let the Virtual Participant download, is recorded by name only. Images are captured on Zoom and Microsoft Teams; files on Zoom, and by name only on Microsoft Teams. Attachments expire with the transcript and are deleted with it."
+    },
+    "chatAttachmentSummaries": {
+      "order": 12,
+      "type": "boolean",
+      "title": "AI titles and summaries for chat attachments",
+      "description": "On: each stored chat attachment is read once by the Meeting assistant model in the Amazon Bedrock Models section, which gives it a short title and a one or two sentence summary, shown on its chat line. Read in the background after the attachment is stored, and metered in the meeting's cost estimate. Has no effect while Capture chat attachments is off."
     }
   },
   "additionalProperties": false

@@ -20,6 +20,7 @@ import PropTypes from 'prop-types';
 import { Button, CopyToClipboard, Icon } from '@cloudscape-design/components';
 import { splitChatText } from '../common/chat-links';
 import { matchRanges, splitByRanges } from '../common/transcript-search';
+import ChatAttachments from './ChatAttachments';
 import './ChatSegment.css';
 
 /** Who a chat message is shown under when the meeting's chat named nobody. */
@@ -85,6 +86,8 @@ ChatSegmentContent.propTypes = {
  * time on the transcript's clock at which it was read from the meeting, and
  * the message. With `onSeek`, the time plays the recording from there.
  * `translation`, when there is one, is shown under the message the same way.
+ * The message's attachments, when the page provides them, are shown under its
+ * text (ChatAttachments.jsx).
  */
 const ChatSegment = ({ segment, time, onSeek = null, query = '', translation = '' }) => {
   const sender = chatSender(segment);
@@ -107,6 +110,7 @@ const ChatSegment = ({ segment, time, onSeek = null, query = '', translation = '
         )}
       </div>
       <ChatSegmentContent text={segment.transcript} query={query} />
+      <ChatAttachments segmentId={segment.segmentId} />
       {translation ? (
         <div className="translated-text">
           <ChatSegmentContent text={translation} />
@@ -118,6 +122,7 @@ const ChatSegment = ({ segment, time, onSeek = null, query = '', translation = '
 
 ChatSegment.propTypes = {
   segment: PropTypes.shape({
+    segmentId: PropTypes.string,
     speaker: PropTypes.string,
     transcript: PropTypes.string,
     startTime: PropTypes.number,

@@ -12,6 +12,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import type { DialogAnalysis } from './ai-dom-resolver.js';
 import {
     decideAfterClickFailure,
@@ -19,6 +20,7 @@ import {
     isMediaPermissionDialog,
     isNoAudioAction,
     manualActionMessage,
+    meetingOverReason,
     NO_AUDIO_WARNING,
 } from './dialog-decision.js';
 
@@ -213,4 +215,84 @@ test('in the meeting, a consent or recording notice is still clicked', () => {
         true,
     );
     assert.deepEqual(d, { kind: 'click', selector: '#ok' });
+});
+
+// ── the end of the meeting is an exit, not a manual action ───────────────────
+
+const removed = (overrides: Partial<DialogAnalysis> = {}): DialogAnalysis => ({
+    type: 'BLOCKED',
+    message: 'User has been removed from the meeting by the host',
+    needsHuman: true,
+    ...overrides,
+});
+
+test('a dialog saying the VP was removed by the host ends the meeting as a removal, never as a manual action', () => {
+    for (const inMeeting of [true, false]) {
+        assert.deepEqual(decideDialogAction(removed(), 'ZOOM', null, inMeeting), {
+            kind: 'meeting-over',
+            reason: 'removed-from-meeting',
+        });
+    }
+    assert.deepEqual(decideDialogAction(removed({ type: 'OTHER', message: 'The host removed you from this meeting.' }), 'ZOOM', 'OK', true), {
+        kind: 'meeting-over',
+        reason: 'removed-from-meeting',
+    });
+});
+
+test('a dialog saying the meeting has ended ends it as ended by the host, never as a manual action', () => {
+    for (const message of ['This meeting has been ended by host', 'The host has ended this meeting', 'The meeting has ended']) {
+        assert.deepEqual(decideDialogAction(removed({ message }), 'ZOOM', null, true), { kind: 'meeting-over', reason: 'host-ended' }, message);
+    }
+});
+
+test('a blocking dialog that is not an end notice still goes to a human', () => {
+    const d = decideDialogAction(removed({ message: 'The browser was blocked by bot detection' }), 'ZOOM', null, true);
+    assert.equal(d.kind, 'escalate');
+    assert.equal(meetingOverReason({ type: 'CAPTCHA', message: 'removed from the meeting' }), null, 'a CAPTCHA is never read as an end notice');
+});
+
+test('no dialog is escalated or clicked once the meeting is over for the VP', () => {
+    const blocking = removed({ type: 'CAPTCHA', message: 'Solve the puzzle to continue' });
+    assert.deepEqual(decideDialogAction(blocking, 'ZOOM', null, true, true), { kind: 'ignore' });
+    assert.deepEqual(decideDialogAction(removed(), 'ZOOM', null, true, true), { kind: 'ignore' });
+    assert.deepEqual(decideDialogAction(consent(), 'TEAMS', 'Allow', true, true), { kind: 'ignore' });
+});
+
+test('an in-meeting notice about something else ending, or someone else removed, does not end the VP’s meeting', () => {
+    for (const message of [
+        'The host has ended screen sharing',
+        'The host has ended the poll',
+        'Breakout rooms have ended',
+        'The host ended the breakout rooms',
+        'Alice has been removed from the meeting',
+        'A participant was removed from the meeting by the host',
+        'A user has been removed from the meeting by the host',
+        'Another user was removed from the call',
+    ]) {
+        for (const type of ['OTHER', 'BLOCKED'] as const) {
+            assert.equal(meetingOverReason({ type, message }), null, `${type}: ${message}`);
+            assert.notEqual(decideDialogAction(removed({ type, message, needsHuman: false }), 'ZOOM', null, true).kind, 'meeting-over', message);
+        }
+    }
+});
+
+test('before the join a removal notice is neither escalated nor handed to the handler', () => {
+    assert.equal(decideDialogAction(removed(), 'ZOOM', null, false).kind, 'meeting-over');
+    // The handler is told only after the join: the join paths have their own
+    // error-screen detection.
+    const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
+    assert.match(watchdog, /if \(meetingJoined\(\)\) opts\.onMeetingOver\?\.\(decision\.reason\)/);
+});
+
+test('a removal notice naming the VP as you, the user or this user is read as its own removal', () => {
+    for (const message of [
+        'User has been removed from the meeting by the host',
+        'Dialog shown. User has been removed from the meeting.',
+        'The user was removed from this meeting',
+        'This user has been removed by the host',
+        'You have been removed from the meeting',
+        'The host removed you from the meeting',
+    ]) {
+        assert.equal(meetingOverReason({ type: 'BLOCKED', message }), 'removed-from-meeting', message);
+    }
 });

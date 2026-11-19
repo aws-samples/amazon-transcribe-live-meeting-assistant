@@ -465,6 +465,53 @@ def slides_for_prompt(keyframes):
     return "\n".join(entries)
 
 
+#: A frame's picture reference as slides_for_prompt lists it after "Image: ".
+LISTED_PICTURE = re.compile(r"^Image: (!\[[^\]\n]*\]\(keyframe:([A-Za-z0-9_-]{1,64})\))$", re.M)
+
+#: A line holding nothing but a frame's id, written in place of its picture
+#: reference: the bare id, "keyframe:<id>", either in parentheses or
+#: backticks, or the reference without its leading "!".
+FRAME_ID_LINE = re.compile(
+    r"^[ \t]*(?:"
+    r"\[[^\]\n]*\]\(keyframe:(?P<linked>[A-Za-z0-9_-]{1,64})\)"
+    r"|(?P<open>[(`]?)(?:keyframe:)?(?P<bare>[A-Za-z0-9_-]{1,64})(?P<close>[)`]?)"
+    r")[ \t]*$",
+    re.M,
+)
+
+
+def restore_picture_references(text, slides_text):
+    """A screen-share section with each frame id written alone on a line made its picture again.
+
+    The prompt asks the model to copy each frame's picture reference exactly,
+    and the meeting page shows only that form as a thumbnail. A model
+    occasionally writes the frame's id on its own instead; such a line is
+    replaced with the reference listed for that frame. Only ids the prompt
+    listed are replaced, and only where the id is all the line holds, so prose
+    is never changed.
+    """
+    if not isinstance(text, str) or not slides_text:
+        return text
+    listed = {match.group(2): match.group(1) for match in LISTED_PICTURE.finditer(slides_text)}
+    restored = 0
+
+    def replace(match):
+        nonlocal restored
+        frame_id = match.group("linked") or match.group("bare")
+        pairs = {"": "", "(": ")", "`": "`"}
+        if match.group("bare") and pairs.get(match.group("open")) != match.group("close"):
+            return match.group(0)
+        if frame_id not in listed:
+            return match.group(0)
+        restored += 1
+        return listed[frame_id]
+
+    result = FRAME_ID_LINE.sub(replace, text)
+    if restored:
+        print(f"Screen share: restored {restored} picture reference(s) written as a frame id")
+    return result
+
+
 # Markdown punctuation in a sender's name, escaped so a name cannot make a link,
 # a picture or emphasis of the line it is listed on.
 MARKDOWN_PUNCTUATION = re.compile(r"([\\`*_{}\[\]()<>#+!|~])")
@@ -689,6 +736,8 @@ def generate_summary(
         logger.debug("Prompt: %s", prompt)
         response = call_bedrock(prompt, call_id, model_id)
         logger.debug("API Response: %s", response)
+        if SLIDES_PLACEHOLDER in template or SCREEN_SHARE_PLACEHOLDER in template:
+            response = restore_picture_references(response, slides_text)
         if from_chat:
             result[key] = chat_section(response, links_text)
         elif chat_text:

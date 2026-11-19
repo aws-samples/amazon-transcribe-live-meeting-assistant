@@ -404,3 +404,36 @@ def test_the_setting_is_read_past_the_cache(monkeypatch):
     monkeypatch.setattr(lf, "deletion_delay_minutes", lambda store=None: calls.append("read") or 15)
     assert lf.current_delay() == 15
     assert calls == ["invalidate", "read"]
+
+
+# ── chat attachments ────────────────────────────────────────────────────────
+
+
+def _with_attachments(aws):
+    name = lf.posixify_filename(CALL_ID)
+    for n in range(3):
+        aws.table.put(PK=f"att#{CALL_ID}", SK=f"a#000000000{n}-ab", FileName=f"f{n}.png")
+    aws.table.put(PK="att#another-meeting", SK="a#0000000000-ab", FileName="kept.png")
+    aws.s3.put(f"lma-chat-attachments/{name}/0000000000-ab/f0.png", count=2)
+    aws.s3.put(f"lma-chat-attachments/{name}/0000000001-ab/f1.pdf")
+    # A meeting whose id begins the same way keeps its files.
+    aws.s3.put(f"lma-chat-attachments/{name}0/0000000000-ab/other.png")
+    return name
+
+
+def test_deleting_the_transcript_deletes_the_chat_attachments_and_every_version(aws):
+    name = _with_attachments(aws)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert [k for k in aws.table.items if k[0] == f"att#{CALL_ID}"] == []
+    assert ("att#another-meeting", "a#0000000000-ab") in aws.table.items
+    assert not [k for k in aws.s3.versions if k.startswith(f"lma-chat-attachments/{name}/")]
+    assert f"lma-chat-attachments/{name}0/0000000000-ab/other.png" in aws.s3.versions
+    # The fixture's three transcript files, and the meeting's two attachment files.
+    assert outcome["filesDeleted"] == 5
+
+
+def test_an_attachment_file_that_cannot_be_deleted_fails_the_invocation_for_a_retry(aws):
+    _with_attachments(aws)
+    aws.s3.fail_deletes = True
+    with pytest.raises(RuntimeError):
+        lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)

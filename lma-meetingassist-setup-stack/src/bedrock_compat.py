@@ -53,7 +53,7 @@ at each call site:
     to be accepted.
 
 This file is duplicated **verbatim** into every deployment package that needs it:
-five Lambda directories under ``lma-ai-stack/source/lambda_functions/`` and the
+six Lambda directories under ``lma-ai-stack/source/lambda_functions/`` and the
 meeting-assist function's ``src`` directory in ``lma-meetingassist-setup-stack``.
 Each of those is zipped on its own and they belong to different CloudFormation
 stacks, so there is no layer they can share. ``lma-ai-stack/test/

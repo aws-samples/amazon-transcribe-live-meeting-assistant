@@ -20,7 +20,18 @@ test('the VP counts as in the meeting from when it is admitted', () => {
 test('the dialog watchdog decides with the admission flag', () => {
     // The one wiring that cannot be driven without a page: the watchdog's call.
     const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
-    assert.match(watchdog, /decideDialogAction\([^)]*meetingJoined\(\)\)/);
+    assert.match(watchdog, /decideDialogAction\([^;]*meetingJoined\(\)/);
+});
+
+test('the dialog watchdog decides, and escalates, with the meeting-over flag', () => {
+    const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
+    assert.match(watchdog, /decideDialogAction\([^;]*meetingOver\(\)\)/);
+    assert.match(watchdog, /const escalate = async[\s\S]{0,200}?if \(meetingOver\(\)\)/);
+});
+
+test('the meeting is over for the VP once its wait for the end returns', () => {
+    const index = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    assert.match(index, /exitInfo = await Promise\.race\(\[joinMeeting\(\), pageCrashLatch\]\);[\s\S]{0,200}?noteMeetingOver\(\);/);
 });
 
 test('a handler attaching the meeting consent flow marks the VP as in the meeting, consent or not', async () => {

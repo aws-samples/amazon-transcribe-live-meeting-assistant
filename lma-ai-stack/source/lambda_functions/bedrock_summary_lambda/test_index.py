@@ -1498,6 +1498,61 @@ def test_the_knowledge_base_summary_names_its_pictures_in_words(monkeypatch):
     assert body["SCREEN SHARE SUMMARY"] == "**[00:30] Budget**\n\n(Slide at 00:30)"
 
 
+def test_a_frame_id_written_alone_on_a_line_becomes_its_picture_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    written = "\n\n".join(
+        [
+            "**[00:30] Budget**",
+            "0000030000-ab12cd",
+            "Bob presented the budget; frame 0000030000-ab12cd stays prose.",
+            "**[1:02:05] Hiring**",
+            "(keyframe:0003725000-ab12cd)",
+            "**[1:03:20] Close**",
+            "[Slide at 1:03:20](keyframe:0003800000-ab12cd)",
+            "`0000095000-ab12cd`",
+            # Not a frame the prompt listed, and an unbalanced wrapper: left alone.
+            "00000030000-ab12cd",
+            "(0000095000-ab12cd`",
+        ]
+    )
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=[written]),
+        templates=ddb_item(**{"1#Screen": "Screen:<br>{screen_share}"}),
+        custom=ddb_item(),
+    )
+    section = index.generate_summary("T", None, keyframes=KEYFRAMES)
+    assert section.split("\n\n") == [
+        "**[00:30] Budget**",
+        "![Slide at 00:30](keyframe:0000030000-ab12cd)",
+        "Bob presented the budget; frame 0000030000-ab12cd stays prose.",
+        "**[1:02:05] Hiring**",
+        "![Slide at 1:02:05](keyframe:0003725000-ab12cd)",
+        "**[1:03:20] Close**",
+        "![Slide at 1:03:20](keyframe:0003800000-ab12cd)",
+        "![Slide at 01:35](keyframe:0000095000-ab12cd)",
+        "00000030000-ab12cd",
+        "(0000095000-ab12cd`",
+    ]
+
+
+def test_picture_references_are_restored_only_in_the_screen_share_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["0000030000-ab12cd", "0000030000-ab12cd"]),
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Slides": SLIDES_PROMPT}),
+        custom=ddb_item(),
+    )
+    summary = json.loads(index.generate_summary("T", None, keyframes=KEYFRAMES))
+    assert summary == {
+        "Summary": "0000030000-ab12cd",
+        "Slides": "![Slide at 00:30](keyframe:0000030000-ab12cd)",
+    }
+
+
 def test_the_shipped_screen_share_section_asks_for_the_pictures_unchanged() -> None:
     shipped = json.loads(
         (

@@ -18,6 +18,8 @@ import {
   speakerFilterOptions,
   splitByRanges,
   stepMatch,
+  TRANSCRIPT_VIEW_OPTIONS,
+  TRANSCRIPT_VIEWS,
   textMatches,
 } from './transcript-search';
 
@@ -115,13 +117,38 @@ describe('the chat messages under the filter', () => {
     expect(shown(undefined)).toEqual(segments);
   });
 
-  it('hides the chat messages and nothing else when chat is off', () => {
-    expect(shown({ showChat: false })).toEqual([segments[0], segments[2], segments[4]]);
+  it('shows everything in the speech-and-chat view, and reads an unknown view as it', () => {
+    expect(shown({ view: TRANSCRIPT_VIEWS.ALL })).toEqual(segments);
+    expect(shown({ view: 'something else' })).toEqual(segments);
   });
 
-  it("keeps the chat beside the chosen speakers' lines, and only it when chat is on", () => {
-    expect(shown({ speakers: ['Sarah Lee'], showChat: true })).toEqual([segments[0], segments[1], segments[3]]);
-    expect(shown({ speakers: ['Sarah Lee'], showChat: false })).toEqual([segments[0]]);
+  it('hides the chat messages and nothing else in the speech-only view', () => {
+    expect(shown({ view: TRANSCRIPT_VIEWS.SPEECH })).toEqual([segments[0], segments[2], segments[4]]);
+  });
+
+  it("shows the chat messages and nothing else in the chat-only view, not even the assistant's lines", () => {
+    expect(shown({ view: TRANSCRIPT_VIEWS.CHAT })).toEqual([segments[1], segments[3]]);
+  });
+
+  it('shows every chat message in the chat-only view whichever speakers are chosen', () => {
+    expect(shown({ speakers: ['Bob Chen'], view: TRANSCRIPT_VIEWS.CHAT })).toEqual([segments[1], segments[3]]);
+  });
+
+  it("keeps the chat beside the chosen speakers' lines, and only it in the speech-only view", () => {
+    expect(shown({ speakers: ['Sarah Lee'], view: TRANSCRIPT_VIEWS.ALL })).toEqual([
+      segments[0],
+      segments[1],
+      segments[3],
+    ]);
+    expect(shown({ speakers: ['Sarah Lee'], view: TRANSCRIPT_VIEWS.SPEECH })).toEqual([segments[0]]);
+  });
+
+  it('offers the three views in order, starting with the default', () => {
+    expect(TRANSCRIPT_VIEW_OPTIONS.map((o) => [o.id, o.text])).toEqual([
+      ['all', 'Speech and chat'],
+      ['speech', 'Speech only'],
+      ['chat', 'Chat only'],
+    ]);
   });
 
   it('finds the search in a chat message like in a spoken line', () => {
