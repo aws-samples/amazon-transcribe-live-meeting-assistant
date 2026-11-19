@@ -7,8 +7,9 @@ One probe run (mcp_meeting_tools_probe.py) creates a synthetic meeting owned by
 the Cognito test user, generates a read key and then a read-write key, and
 exercises the tools against that meeting only: a write tool refused to the read
 key, get_live_transcript polled with its cursor, guidance pushed and listed, a
-recording link from get_meeting_record, and delete_meeting with and without
-confirm. Each test asserts one property of what it observed.
+recording link from get_meeting_record, delete_meeting with and without
+confirm, and schedule_meeting called again for a meeting it already scheduled.
+Each test asserts one property of what it observed.
 
 Runs whenever a Cognito test user is configured, like test_mcp_api_key_logging,
 and skips without one. A stack deployed with EnableMCP=false has nothing to
@@ -112,3 +113,14 @@ def test_delete_meeting_with_confirm_deletes_the_meeting(observed) -> None:
     assert observed["guidance_after_delete"] == 0, (
         f"{observed['guidance_after_delete']} guidance row(s) left after delete_meeting"
     )
+
+
+# ── schedule_meeting called again for the same meeting ──────────────────────
+
+
+def test_scheduling_the_same_meeting_again_updates_its_virtual_participant(observed) -> None:
+    assert observed.get("schedule_error") is None, observed.get("schedule_error")
+    assert observed["schedule_actions"] == ["created", "updated", "created"], observed["schedule_actions"]
+    assert observed["schedule_second_kept_id"], "the second call scheduled a second Virtual Participant"
+    assert observed["schedule_updated_meeting_id"] == "89876543210", observed["schedule_updated_meeting_id"]
+    assert observed["schedule_duplicate_new_id"], "allowDuplicate did not schedule a new Virtual Participant"

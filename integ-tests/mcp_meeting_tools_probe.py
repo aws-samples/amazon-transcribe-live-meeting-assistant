@@ -18,7 +18,11 @@ holds one key:
    with its cursor while segments are added, pushes guidance and reads it back,
    reads the recording link from get_meeting_record, and deletes the meeting
    with delete_meeting, first without confirm (nothing may be deleted) and then
-   with it.
+   with it; and schedules a meeting two days ahead with schedule_meeting twice,
+   the second time with a new meeting ID (the scheduled Virtual Participant must
+   be updated, not duplicated), then once more with allowDuplicate. Every
+   Virtual Participant it scheduled is cancelled with end_virtual_participant
+   before the key is revoked, so none is ever launched.
 
 Each key is revoked in a ``finally``, and whatever is left of the meeting is
 removed at the end, by its CallId only. The result is a dict of observations;
@@ -31,7 +35,7 @@ import base64
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -259,6 +263,7 @@ class Probe:
             self._guidance(key)
             self._record(key)
             self._delete(key)
+            self._schedule_twice(key)
         finally:
             self.revoke(prefix)
 
@@ -313,6 +318,41 @@ class Probe:
         self.observed["meeting_after_delete"] = self.meeting_row() is not None
         # Read before cleanup() runs, which removes gd# rows itself.
         self.observed["guidance_after_delete"] = self._guidance_rows()
+
+    def _schedule_twice(self, key: str) -> None:
+        when = (datetime.now(timezone.utc) + timedelta(days=2)).replace(second=0, microsecond=0)
+        arguments = {
+            "meetingName": f"Integ schedule {self.call_id}",
+            "meetingPlatform": "Zoom",
+            "meetingId": "81234567890",
+            "scheduledTime": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        scheduled: list[str] = []
+        try:
+            answers = []
+            for extra in (
+                {},
+                {"meetingName": arguments["meetingName"].upper(), "meetingId": "89876543210"},
+                {"allowDuplicate": True},
+            ):
+                error, answer = self.call(key, "schedule_meeting", {**arguments, **extra})
+                if error:
+                    self.observed["schedule_error"] = answer
+                    return
+                answers.append(answer)
+                if answer["virtualParticipantId"] not in scheduled:
+                    scheduled.append(answer["virtualParticipantId"])
+            self.observed["schedule_actions"] = [answer.get("action") for answer in answers]
+            self.observed["schedule_second_kept_id"] = (
+                answers[1]["virtualParticipantId"] == answers[0]["virtualParticipantId"]
+            )
+            self.observed["schedule_duplicate_new_id"] = (
+                answers[2]["virtualParticipantId"] != answers[0]["virtualParticipantId"]
+            )
+            self.observed["schedule_updated_meeting_id"] = answers[1].get("meetingId")
+        finally:
+            for vp_id in scheduled:
+                self.call(key, "end_virtual_participant", {"virtual_participant_id": vp_id, "reason": "integ test"})
 
 
 def _fetch_status(url: str) -> int | None:

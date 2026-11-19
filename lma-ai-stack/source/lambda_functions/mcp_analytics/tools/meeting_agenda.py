@@ -29,7 +29,7 @@ from tools.access import (
 from tools.agenda_helper import normalize_agenda
 from tools.appsync_client import graphql
 from tools.url_helper import get_meeting_url
-from tools.virtual_participants import get_vp
+from tools.virtual_participants import get_vp, update_scheduled_vp
 
 UPDATE_CALL_AGENDA = """
 mutation UpdateCallAgenda($input: UpdateCallAgendaInput!) {
@@ -39,18 +39,6 @@ mutation UpdateCallAgenda($input: UpdateCallAgendaInput!) {
     AgendaSource
     AgendaUpdatedBy
     AgendaUpdatedAt
-    Owner
-    SharedWith
-  }
-}
-"""
-
-UPDATE_SCHEDULED_VP = """
-mutation UpdateScheduledVirtualParticipant($input: UpdateScheduledVirtualParticipantInput!) {
-  updateScheduledVirtualParticipant(input: $input) {
-    id
-    agenda
-    status
     Owner
     SharedWith
   }
@@ -89,12 +77,7 @@ def execute(
                 f"Virtual Participant {virtual_participant_id} is not waiting for a scheduled "
                 "launch; once it has started, change the agenda on its meeting (meeting_id)"
             )
-        updated = (
-            graphql(
-                UPDATE_SCHEDULED_VP, {"input": {"id": virtual_participant_id, "agenda": text}}
-            ).get("updateScheduledVirtualParticipant")
-            or {}
-        )
+        updated = update_scheduled_vp(virtual_participant_id, {"agenda": text})
         return {
             "virtualParticipantId": virtual_participant_id,
             "agenda": updated.get("agenda", text) or "",
