@@ -389,7 +389,15 @@ const VoiceEnrollmentPage = () => {
                 I have read the above and I agree to my voiceprint being stored and used as described.
               </Checkbox>
               <SpaceBetween direction="horizontal" size="xs">
-                <Button variant="primary" disabled={!agreed} loading={busy} onClick={giveConsent}>
+                {/* Not offered when no voiceprint can be computed: a consent row
+                    for an enrollment that cannot finish records nothing useful
+                    and starts a retention clock for nothing. */}
+                <Button
+                  variant="primary"
+                  disabled={!agreed || Boolean(unavailableReason)}
+                  loading={busy}
+                  onClick={giveConsent}
+                >
                   I agree
                 </Button>
                 {/* Declining is an ordinary outcome, not an error, and says so. */}

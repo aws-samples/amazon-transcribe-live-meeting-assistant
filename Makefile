@@ -236,9 +236,9 @@ setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
 	@echo "Installing the Strands Agents SDK at the version the Strands layer pins..."
 	$(CURDIR)/$(VENV_DIR)/bin/pip install "$$(grep -E '^strands-agents==' $(STRANDS_LAYER_REQUIREMENTS))"
 	@# The voice-enrollment client's tests run an embedding session against a
-	@# local WebSocket server, and skip without the library. Same pin as the
-	@# function's own requirements.
-	@echo "Installing websockets at the version the voice-enrollment function pins..."
+	@# local WebSocket server, and skip without the library. Installs the same
+	@# requirement line as the function (a minimum version, not a pin).
+	@echo "Installing websockets to the voice-enrollment function's requirement..."
 	$(CURDIR)/$(VENV_DIR)/bin/pip install "$$(grep -E '^websockets' $(LAMBDA_FUNCTIONS_DIR)/voice_enrollment_manager/requirements.txt)"
 	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
 

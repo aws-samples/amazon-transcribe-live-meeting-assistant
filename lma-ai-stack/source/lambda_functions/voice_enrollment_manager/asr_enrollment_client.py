@@ -144,6 +144,7 @@ def _invoke_launcher(payload):
 EMBED_UNSUPPORTED_CLOSE_REASON = "embed_unsupported"
 EMBED_UNSUPPORTED_ERROR_CODE = "BAD_CONFIG"
 EMBED_UNSUPPORTED_ERROR_TEXT = "speaker-embedding model"
+EMBED_UNSUPPORTED_MESSAGE = "the ASR image has no speaker-embedding model"
 
 
 def _is_embed_unsupported_error(payload):
@@ -218,9 +219,7 @@ async def _embed(frames, endpoint, auth_token):
             await socket.send(json.dumps({"type": "eos"}))
         except ConnectionClosed as closed:
             if await _unsupported_after_close(socket, closed):
-                raise EmbeddingUnsupportedError(
-                    "the ASR image has no speaker-embedding model"
-                ) from closed
+                raise EmbeddingUnsupportedError(EMBED_UNSUPPORTED_MESSAGE) from closed
             raise
 
         while len(vectors) < len(frames):
@@ -228,9 +227,7 @@ async def _embed(frames, endpoint, auth_token):
                 message = await socket.recv()
             except ConnectionClosed as closed:
                 if _closed_as_unsupported(closed):
-                    raise EmbeddingUnsupportedError(
-                        "the ASR image has no speaker-embedding model"
-                    ) from closed
+                    raise EmbeddingUnsupportedError(EMBED_UNSUPPORTED_MESSAGE) from closed
                 raise
             if isinstance(message, bytes):
                 continue
@@ -240,7 +237,7 @@ async def _embed(frames, endpoint, auth_token):
                 vectors.append([float(value) for value in payload.get("vector") or []])
             elif kind == "error":
                 if _is_embed_unsupported_error(payload):
-                    raise EmbeddingUnsupportedError("the ASR image has no speaker-embedding model")
+                    raise EmbeddingUnsupportedError(EMBED_UNSUPPORTED_MESSAGE)
                 raise RuntimeError(f"embedding failed: {payload.get('message')}")
             elif kind == "termination":
                 break

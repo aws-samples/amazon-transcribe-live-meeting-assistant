@@ -120,6 +120,18 @@ describe('when this deployment cannot compute a voiceprint', () => {
     expect(screen.getByText(REASON)).toBeTruthy();
   });
 
+  it('shows the terms but does not take a consent that could never be used', async () => {
+    renderWith(unavailable());
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeTruthy());
+    expect(screen.getByText(/recognise your voice/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox'));
+    const agree = screen.getByText('I agree').closest('button');
+    expect(agree.disabled).toBe(true);
+    fireEvent.click(agree);
+    // Only the initial load: no grantVoiceConsent call was made.
+    expect(graphql).toHaveBeenCalledTimes(1);
+  });
+
   it('still lets an enrolled person delete their voiceprint', async () => {
     renderWith(unavailable({ Status: 'active', DisplayName: 'Sarah Lee', ConsentExpiresAt: '2099-01-01T00:00:00Z' }));
     await waitFor(() => expect(screen.getByText('Delete my voiceprint')).toBeTruthy());

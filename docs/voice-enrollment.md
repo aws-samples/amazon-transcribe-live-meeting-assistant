@@ -228,13 +228,16 @@ rebuilds the MicroVM image (about 20 minutes) and changes how every meeting on
 the ASR MicroVM engine is diarized, not only enrollment; see
 [Model bundles](microvm-asr.md#model-bundles).
 
-On a bundle without a speaker model, **Enroll My Voice** still shows the terms
-and still lets an enrolled person delete their voiceprint, but it shows
+On a bundle without a speaker model, **Enroll My Voice** shows
 *"Voice enrollment needs an ASR model bundle with a speaker model; the active
-bundle `<id>` has none"* and does not offer to record. The backend reads the
-bundle from the stack, so the check happens before any audio is recorded. If the
-bundle is not known to it (a stack built before this check existed), the ASR
-MicroVM's own refusal to compute embeddings is reported with the same message.
+bundle `<id>` has none"*. It still displays the terms and still lets an enrolled
+person delete their voiceprint, but it does not accept a new consent or offer to
+record, so no consent row is written for an enrollment that cannot finish. The
+backend reads the bundle from the stack, so the check happens before any audio
+is recorded. Where the speaker model is not known to it (a direct development
+endpoint, or an AI stack deployed without the `AsrSpeakerModelId` parameter),
+the ASR MicroVM's own refusal to compute embeddings is reported with the same
+message.
 
 **The sample audio is not kept.** It is held in memory for the length of the
 request and never written to S3 or to a table. What persists is the centroid,
