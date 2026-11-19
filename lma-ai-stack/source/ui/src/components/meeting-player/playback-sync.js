@@ -286,3 +286,159 @@ export const playerShortcut = (event) => {
   if (event.key === 'ArrowRight') return 'forward';
   return null;
 };
+
+/*
+ * Capture sessions. A meeting is captured in one session unless it is
+ * continued (a Virtual Participant rejoin, or a streaming client's "Continue
+ * an existing meeting"), which adds another. The transcript holds every
+ * session on one timeline -- each later session starts at its offset, after
+ * the earlier ones -- while each session is recorded in a file of its own that
+ * starts at 0. A session's recording is therefore on a clock offset by where
+ * its session starts: one anchor, { transcript: offset, recording: 0 }, or the
+ * session's own key frames for a video that has them.
+ *
+ * A `session` is { number, offset, end, recordingUrl, videoRecordingUrl }: its
+ * session number, where it starts and where the next one starts (Infinity for
+ * the last) on the transcript's clock, and its recordings.
+ */
+
+const sessionNumberOf = (value) => {
+  const n = finite(value);
+  return n !== null && Number.isInteger(n) && n >= 1 ? n : null;
+};
+
+// Where each session starts: the first at 0, each later one as Call.Sessions
+// lists it. A session that started before Sessions was kept is known only when
+// it is the latest (Call.SessionOffsetSeconds).
+const sessionOffsets = (meeting) => {
+  const offsets = new Map([[1, 0]]);
+  (Array.isArray(meeting?.sessions) ? meeting.sessions : []).forEach((entry) => {
+    const number = sessionNumberOf(entry?.SessionNumber);
+    const offset = finite(entry?.OffsetSeconds);
+    if (number && number > 1 && offset !== null && offset >= 0) offsets.set(number, offset);
+  });
+  const latest = sessionNumberOf(meeting?.sessionStartedNumber);
+  const latestOffset = finite(meeting?.sessionOffsetSeconds);
+  if (
+    latest &&
+    latest > 1 &&
+    !offsets.has(latest) &&
+    sessionNumberOf(meeting?.sessionNumber) === latest &&
+    latestOffset !== null &&
+    latestOffset >= 0
+  ) {
+    offsets.set(latest, latestOffset);
+  }
+  return offsets;
+};
+
+// Each session's link of one kind: the links paired with the sessions stored
+// beside them, the last link of a session winning (a redelivered write repeats
+// one). Links stored without their sessions -- a meeting recorded before they
+// were kept -- are paired in order when there is exactly one per session.
+const linksBySession = (urls, tags, numbers) => {
+  const links = new Map();
+  if (!Array.isArray(urls) || !urls.length) return links;
+  if (Array.isArray(tags) && tags.length === urls.length) {
+    urls.forEach((url, i) => {
+      const number = sessionNumberOf(tags[i]);
+      if (url && number) links.set(number, url);
+    });
+    return links;
+  }
+  const distinct = [...new Set(urls.filter(Boolean))];
+  if (distinct.length === numbers.length) distinct.forEach((url, i) => links.set(numbers[i], url));
+  return links;
+};
+
+/**
+ * The meeting's sessions that have a recording, in order, for the player. A
+ * meeting that was never continued -- or whose sessions cannot be told apart
+ * -- is one session at 0 with the meeting's RecordingUrl and VideoRecordingUrl,
+ * which is how the player has always played it.
+ *
+ * `meeting` is the mapped meeting: recordingUrl, videoRecordingUrl,
+ * recordingUrls, recordingUrlSessions, videoRecordingUrls,
+ * videoRecordingUrlSessions, sessions, sessionNumber, sessionOffsetSeconds and
+ * sessionStartedNumber.
+ */
+export const playbackSessions = (meeting) => {
+  const offsets = sessionOffsets(meeting);
+  const latest = sessionNumberOf(meeting?.sessionStartedNumber) || 1;
+  const single = [
+    {
+      number: latest,
+      offset: offsets.get(latest) ?? 0,
+      end: Infinity,
+      recordingUrl: meeting?.recordingUrl || null,
+      videoRecordingUrl: meeting?.videoRecordingUrl || null,
+    },
+  ];
+  if (offsets.size < 2) return single;
+  const numbers = [...offsets.keys()].sort((a, b) => a - b);
+  const audio = linksBySession(meeting?.recordingUrls, meeting?.recordingUrlSessions, numbers);
+  const video = linksBySession(meeting?.videoRecordingUrls, meeting?.videoRecordingUrlSessions, numbers);
+  const recorded = numbers
+    .filter((number) => audio.has(number) || video.has(number))
+    .map((number) => ({
+      number,
+      offset: offsets.get(number),
+      recordingUrl: audio.get(number) || null,
+      videoRecordingUrl: video.get(number) || null,
+    }));
+  if (!recorded.length) return single;
+  return recorded.map((session, i) => ({ ...session, end: recorded[i + 1]?.offset ?? Infinity }));
+};
+
+/** The session playing at a time on the transcript's clock: the last that started by then, else the first. */
+export const sessionAtTranscript = (sessions, transcriptSeconds) => {
+  if (!sessions?.length) return null;
+  const t = finite(transcriptSeconds) ?? 0;
+  return sessions.reduce((found, session) => (session.offset <= t ? session : found), sessions[0]);
+};
+
+/** The session after `session`, or null. */
+export const nextSession = (sessions, session) => {
+  const i = (sessions || []).findIndex((s) => s.number === session?.number);
+  return i >= 0 && i + 1 < sessions.length ? sessions[i + 1] : null;
+};
+
+/** Whether a time on the transcript's clock falls within the session. */
+export const inSession = (session, transcriptSeconds) => {
+  const t = finite(transcriptSeconds);
+  if (!session || t === null) return false;
+  return t >= session.offset && t < session.end;
+};
+
+// A session that is the meeting's whole timeline: nothing to filter or move.
+const wholeTimeline = (session) => !session || (session.offset === 0 && session.end === Infinity);
+
+/**
+ * The items of `items` within the session, by the transcript time `secondsOf`
+ * gives each: the chapters and screen shares the seek bar of that session's
+ * recording marks. All of them for a meeting of one session.
+ */
+export const withinSession = (items, session, secondsOf) =>
+  wholeTimeline(session) ? items || [] : (items || []).filter((item) => inSession(session, secondsOf(item)));
+
+/**
+ * The clock of the recording a player plays for a session: the video's key
+ * frames within that session when it has some, and otherwise the session's
+ * start, where its file starts. For a meeting of one session it is clockFor's.
+ */
+export const sessionClock = (kind, session, anchors) => {
+  if (wholeTimeline(session)) return clockFor(kind, anchors);
+  const own = (anchors || []).filter((anchor) => inSession(session, anchor.transcript));
+  if (kind === 'video' && own.length) return { anchors: own };
+  return { anchors: [{ transcript: session.offset, recording: 0 }] };
+};
+
+/** The key frame anchors within a session, for deciding which of its recordings to play first. */
+export const sessionAnchors = (session, anchors) =>
+  wholeTimeline(session) ? anchors || [] : (anchors || []).filter((anchor) => inSession(session, anchor.transcript));
+
+/** How the session selector names a session: in order, with where it starts on the transcript. */
+export const sessionLabel = (sessions, session) => {
+  const i = (sessions || []).findIndex((s) => s.number === session?.number);
+  return `Session ${i + 1} (from ${formatClock(session?.offset)})`;
+};

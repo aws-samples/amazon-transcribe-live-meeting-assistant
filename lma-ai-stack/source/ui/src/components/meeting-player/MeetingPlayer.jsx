@@ -18,6 +18,11 @@
  * mute and (for video) full screen. Each has an accessible name; the seek bar
  * is a native range input, so it is operable from the keyboard as it is.
  *
+ * A meeting continued in more than one capture session has a recording per
+ * session; the page passes the one to play, its clock, and `sessions` for a
+ * selector between them (with `sessionId` and `onSessionChange`), and is told
+ * through `onEnded` when a recording plays to its end, to go on to the next.
+ *
  * The page drives it through `controllerRef`: `seek(recordingSeconds, { play })`,
  * `toggle()`, `pause()` and `nudge(seconds)`. A request made before the
  * recording's metadata has loaded is kept and applied once it has. Where it
@@ -62,6 +67,10 @@ const MeetingPlayer = ({
   alternative = null,
   onSwitch = undefined,
   hint = null,
+  sessions = [],
+  sessionId = null,
+  onSessionChange = undefined,
+  onEnded = undefined,
   sign = generateS3PresignedUrl,
 }) => {
   const { currentCredentials } = useAppContext();
@@ -230,6 +239,11 @@ const MeetingPlayer = ({
     publish();
   };
 
+  const onMediaEnded = () => {
+    onPlayState();
+    if (onEnded) onEnded();
+  };
+
   // Sticky below the application's top navigation, which is sticky itself;
   // measured as it changes (its height settles once its fonts have loaded).
   useEffect(() => {
@@ -300,7 +314,7 @@ const MeetingPlayer = ({
     onSeeked: onTimeUpdate,
     onPlay: onPlayState,
     onPause: onPlayState,
-    onEnded: onPlayState,
+    onEnded: onMediaEnded,
     onError,
     'aria-label': label,
   };
@@ -410,6 +424,17 @@ const MeetingPlayer = ({
         )}
       </div>
       <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+        {sessions.length > 1 && onSessionChange && (
+          // One recording per capture session; the transcript holds them all.
+          <span data-testid="meeting-player-sessions">
+            <SegmentedControl
+              label="Capture session to play"
+              selectedId={sessionId}
+              onChange={({ detail }) => onSessionChange(detail.selectedId)}
+              options={sessions.map((session) => ({ id: session.id, text: session.label }))}
+            />
+          </span>
+        )}
         {alternative && onSwitch && (
           <SegmentedControl
             label="Recording to play"
@@ -480,6 +505,12 @@ MeetingPlayer.propTypes = {
   // Why this recording is the one playing, when that is not the obvious one.
   hint: PropTypes.string,
   onSwitch: PropTypes.func,
+  /** The meeting's capture sessions that have a recording: { id, label }, in order. */
+  sessions: PropTypes.arrayOf(PropTypes.shape({ id: PropTypes.string, label: PropTypes.string })),
+  sessionId: PropTypes.string,
+  onSessionChange: PropTypes.func,
+  /** The recording has played to its end. */
+  onEnded: PropTypes.func,
   sign: PropTypes.func,
 };
 

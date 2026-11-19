@@ -38,6 +38,17 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
+      // Every capture session's recording links with the session of each, and
+      // where each session starts on the transcript: what the player reads to
+      // play a continued meeting's sessions in turn (playbackSessions).
+      RecordingUrls: recordingUrls,
+      RecordingUrlSessions: recordingUrlSessions,
+      VideoRecordingUrls: videoRecordingUrls,
+      VideoRecordingUrlSessions: videoRecordingUrlSessions,
+      Sessions: sessions,
+      SessionNumber: sessionNumber,
+      SessionOffsetSeconds: sessionOffsetSeconds,
+      SessionStartedNumber: sessionStartedNumber,
       // How the meeting was captured and transcribed, as its START recorded it;
       // absent on a meeting started before these were stored (meeting-context.js).
       CaptureSource: captureSource,
@@ -97,6 +108,14 @@ const mapCallsAttributes = (calls) => {
       updatedAt,
       recordingUrl,
       videoRecordingUrl,
+      recordingUrls,
+      recordingUrlSessions,
+      videoRecordingUrls,
+      videoRecordingUrlSessions,
+      sessions,
+      sessionNumber,
+      sessionOffsetSeconds,
+      sessionStartedNumber,
       captureSource,
       transcriptionEngine,
       transcriptionLanguage,
@@ -162,6 +181,16 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
     transcriptionPause: keep('transcriptionPause'),
+    // Only the pipeline's writes carry these; a write from the page (the
+    // agenda, speaker names, the summary text) publishes them empty.
+    recordingUrls: keep('recordingUrls'),
+    recordingUrlSessions: keep('recordingUrlSessions'),
+    videoRecordingUrls: keep('videoRecordingUrls'),
+    videoRecordingUrlSessions: keep('videoRecordingUrlSessions'),
+    sessions: keep('sessions'),
+    sessionNumber: keep('sessionNumber'),
+    sessionOffsetSeconds: keep('sessionOffsetSeconds'),
+    sessionStartedNumber: keep('sessionStartedNumber'),
   };
 };
 

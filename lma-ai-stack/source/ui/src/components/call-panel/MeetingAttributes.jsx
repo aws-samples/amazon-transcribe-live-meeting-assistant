@@ -12,6 +12,8 @@
  * The recordings are played by the one player on the Transcript tab, kept in
  * step with the transcript; here each has a Play that opens that tab, and a
  * link to the file itself. No second player, so only one thing ever plays.
+ * A meeting continued in more than one capture session lists each session's
+ * recordings, named by session.
  */
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
@@ -56,7 +58,8 @@ const logger = new ConsoleLogger('MeetingAttributes');
  * the click, before the link is signed, because a browser blocks one opened
  * after an await; the signed link lasts minutes, so it is signed on demand.
  */
-const RecordingActions = ({ url, kind, onPlay = undefined, sign = generateS3PresignedUrl }) => {
+const RecordingActions = ({ url, kind, name = '', onPlay = undefined, sign = generateS3PresignedUrl }) => {
+  const which = name ? `${name} ${kind}` : kind;
   const { currentCredentials } = useAppContext();
   const [error, setError] = useState(false);
   const open = async () => {
@@ -75,7 +78,7 @@ const RecordingActions = ({ url, kind, onPlay = undefined, sign = generateS3Pres
   return (
     <SpaceBetween direction="horizontal" size="xs" alignItems="center">
       {onPlay && (
-        <Button variant="inline-link" iconName="play" onClick={onPlay} ariaLabel={`Play the ${kind} recording`}>
+        <Button variant="inline-link" iconName="play" onClick={onPlay} ariaLabel={`Play the ${which} recording`}>
           Play
         </Button>
       )}
@@ -84,7 +87,7 @@ const RecordingActions = ({ url, kind, onPlay = undefined, sign = generateS3Pres
         iconName="external"
         iconAlign="right"
         onClick={open}
-        ariaLabel={`Open the ${kind} recording file in a new tab`}
+        ariaLabel={`Open the ${which} recording file in a new tab`}
       >
         Open file
       </Button>
@@ -96,11 +99,20 @@ const RecordingActions = ({ url, kind, onPlay = undefined, sign = generateS3Pres
 RecordingActions.propTypes = {
   url: PropTypes.string.isRequired,
   kind: PropTypes.string.isRequired,
+  // The capture session's name, for a meeting with more than one.
+  name: PropTypes.string,
   onPlay: PropTypes.func,
   sign: PropTypes.func,
 };
 
-const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undefined, audioDefaultReason = null }) => {
+const MeetingAttributes = ({
+  item,
+  durationMillis,
+  platform = '',
+  onPlay = undefined,
+  audioDefaultReason = null,
+  sessions = [],
+}) => {
   const recordingsReady = item.recordingStatusLabel !== IN_PROGRESS_STATUS;
   const storedMillis = Number(item.totalConversationDurationMillis) || 0;
   const sharedWith = sharedWithEntries(item.sharedWith);
@@ -136,7 +148,28 @@ const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undef
     { label: 'Shared with', value: sharedWith.length ? sharedWith.join(', ') : '—' },
   ];
 
-  if (item.videoRecordingUrl && recordingsReady) {
+  if (sessions.length > 1 && recordingsReady) {
+    // A recording per capture session: each played from its session's start.
+    sessions.forEach((session) => {
+      [
+        ['video', 'Video recording', session.videoRecordingUrl],
+        ['audio', 'Audio recording', session.recordingUrl],
+      ].forEach(([kind, label, url]) => {
+        if (!url) return;
+        items.push({
+          label: `${label}, ${session.label}`,
+          value: (
+            <RecordingActions
+              url={url}
+              kind={kind}
+              name={session.name}
+              onPlay={onPlay && (() => onPlay(kind, session.number))}
+            />
+          ),
+        });
+      });
+    });
+  } else if (item.videoRecordingUrl && recordingsReady) {
     items.push({
       label: 'Video recording',
       value: (
@@ -152,7 +185,7 @@ const MeetingAttributes = ({ item, durationMillis, platform = '', onPlay = undef
       ),
     });
   }
-  if (item.recordingUrl && recordingsReady) {
+  if (sessions.length <= 1 && item.recordingUrl && recordingsReady) {
     items.push({
       label: 'Audio recording',
       value: <RecordingActions url={item.recordingUrl} kind="audio" onPlay={onPlay && (() => onPlay('audio'))} />,
@@ -173,6 +206,16 @@ MeetingAttributes.propTypes = {
   platform: PropTypes.string,
   onPlay: PropTypes.func,
   audioDefaultReason: PropTypes.string,
+  /** The capture sessions with a recording, for a continued meeting: number, label, name and the links. */
+  sessions: PropTypes.arrayOf(
+    PropTypes.shape({
+      number: PropTypes.number,
+      label: PropTypes.string,
+      name: PropTypes.string,
+      recordingUrl: PropTypes.string,
+      videoRecordingUrl: PropTypes.string,
+    }),
+  ),
 };
 
 export default MeetingAttributes;
