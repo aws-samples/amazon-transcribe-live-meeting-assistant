@@ -29,7 +29,8 @@
  *    request word, or nothing ("Alex, what's next?", "alex what's next", "um
  *    alex summarize this", "Alex?"). A name opening a statement about someone
  *    ("Alex is presenting", "alex sent the deck", "Alex's slides") is not;
- * 2. is followed by a comma ("Awesome. Alex, the weather?"), or by a request
+ * 2. is followed by a comma that does not start a list of people ("Awesome.
+ *    Alex, the weather?", but not "Alex, Sam and I met"), or by a request
  *    word ("... alex can you tell me", "alex what is", "alex please"),
  *    unless the word before it makes it the object of a sentence about
  *    someone ("I told Alex, ...", "ask alex what ...", "thanks to alex");
@@ -77,6 +78,9 @@ const REQUEST_AFTER_NAME = [
     'make', 'add', 'note', 'write', 'draft', 'send', 'pull', 'compare', 'recap',
 ];
 
+/** Words that join a list of people ("Alex, Sam and I"). */
+const LIST_JOINER = new Set(['and', 'or', 'nor']);
+
 /** Fillers that may come before a name that opens the utterance. */
 const LEADING_FILLER = new Set(['um', 'uh', 'er', 'erm', 'hmm', 'oh', 'so', 'well', 'ok', 'yo', 'now', 'right']);
 
@@ -96,7 +100,10 @@ export function assistantNameFromPrompt(systemPrompt: string | undefined | null)
     if (!systemPrompt) return null;
     const named = /\byour name is\s+([A-Za-z][A-Za-z'-]*)/i.exec(systemPrompt);
     // "You are Alex": capitalised, so "you are going to" is not a name.
-    const youAre = /\b[Yy]ou(?: are|'re)\s+([A-Z][A-Za-z'-]*)/.exec(systemPrompt);
+    // The word must end the clause ("You are Alex, ...", "You are Alex.") or be
+    // followed by an article ("You are Alex the meeting assistant"), so that
+    // "You are Expected to ..." or "You are Precise and ..." name nobody.
+    const youAre = /\b[Yy]ou(?: are|'re)\s+([A-Z][A-Za-z'-]*)(?=\s*(?:[,.;:!?]|$)|\s+(?:a|an|the)\b)/.exec(systemPrompt);
     for (const match of [named, youAre]) {
         const word = match?.[1]?.toLowerCase().replace(/'s$/, '');
         if (word && word.length > 1 && !NOT_A_NAME.has(word)) return word;
@@ -156,12 +163,20 @@ export function addressedByName(text: string, names: string[]): boolean {
     for (let i = 0; i < tokens.length; i++) {
         if (!wanted.has(tokens[i])) continue;
         const next = tokens[i + 1];
-        const followedByRequest = next === ',' || (isWord(next) && startsRequest(tokens, i + 1));
+        // "Alex, Sam and I met" or "Sam, Alex, and Priya": a comma that lists
+        // people, not one that sets off a vocative. A request straight after
+        // the comma ("Alex, can you and Sam ...") is still a vocative.
+        const afterComma = tokens[i + 2];
+        const isList = next === ','
+            && !(isWord(afterComma) && startsRequest(tokens, i + 2))
+            && (LIST_JOINER.has(afterComma) || (isWord(afterComma)
+                && (LIST_JOINER.has(tokens[i + 3]) || tokens[i + 3] === ',')));
+        const followedByRequest = (next === ',' && !isList) || (isWord(next) && startsRequest(tokens, i + 1));
         // Rule 1: the name opens the utterance, after nothing but filler, and
         // is followed by a comma, a request word, or nothing at all.
         const opens = tokens.slice(0, i).every((t) => LEADING_FILLER.has(t) || t === ',');
         if (opens) {
-            if (followedByRequest || !isWord(next)) return true;
+            if (followedByRequest || next === undefined || SENTENCE_END.has(next)) return true;
             continue;
         }
         if (mentionBefore(tokens, i)) continue;

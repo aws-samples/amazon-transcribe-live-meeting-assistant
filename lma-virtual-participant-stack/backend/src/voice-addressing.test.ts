@@ -28,6 +28,9 @@ test('the name is read from the system prompt that tells the model who it is', (
     assert.equal(assistantNameFromPrompt("You're Sam, the team's assistant."), 'sam');
     assert.equal(assistantNameFromPrompt('You are an AI meeting assistant.'), null);
     assert.equal(assistantNameFromPrompt('You are going to help.'), null);
+    assert.equal(assistantNameFromPrompt('You are Alex the meeting assistant.'), 'alex');
+    assert.equal(assistantNameFromPrompt('You are Expected to answer briefly.'), null);
+    assert.equal(assistantNameFromPrompt('You are Precise and concise.'), null);
     assert.equal(assistantNameFromPrompt(''), null);
 });
 
@@ -89,6 +92,9 @@ test('a mention of the name is not addressed to the assistant', () => {
         'alex presented the roadmap',
         'alex sent the deck this morning',
         'alex the weather in herndon',
+        // A comma that lists people is not a vocative.
+        'Alex, Sam and I met yesterday.',
+        'Sam, Alex, and Priya are on the call.',
         'can you check the weather alex',
         'nothing to do with anyone named here',
     ]) {

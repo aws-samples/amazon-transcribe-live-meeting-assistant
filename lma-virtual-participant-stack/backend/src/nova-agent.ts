@@ -2495,14 +2495,17 @@ export class NovaAgent implements VoiceAssistantProvider {
                     this.replyGate.noteAnswerHeard(this._isProcessingTool);
                   }
                   session.audioTurnOpen = false;
-                  // dropTurn is NOT cleared here. A withheld reply goes on
-                  // after its first audio block ends: the model answers the
-                  // tool result of a refused lookup with a second response of
-                  // its own ("Sorry, I can't provide real-time weather
-                  // updates"), and on a live meeting that second response was
-                  // played because the flag had been cleared at the first
-                  // block's END_TURN. It is cleared at the next participant
-                  // turn, and when an activation starts.
+                  // In wake-phrase assistant mode dropTurn is NOT cleared
+                  // here. A withheld reply goes on after its first audio block
+                  // ends: the model answers the tool result of a refused lookup
+                  // with a second response of its own ("Sorry, I can't provide
+                  // real-time weather updates"), and on a live meeting that
+                  // second response was played because the flag had been
+                  // cleared at the first block's END_TURN. There it is cleared
+                  // at the next participant turn, and when an activation
+                  // starts. In every other mode only an unaddressed set_mode
+                  // sets it, and it covers that audio turn alone.
+                  if (!this.replyGateMode()) session.dropTurn = false;
                   if (this.heldPlayback.size > 0) {
                     this.releaseHeldPlayback();
                   }
@@ -5000,10 +5003,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       // The model calls the tool for talk about modes that was not addressed to
       // it, and told to stay silent it still answered out loud after the call
       // in 8 runs of 8 (amazon.nova-2-sonic-v1:0, October 2026), so whatever it
-      // says for the rest of this turn is dropped.
+      // says for the rest of its reply is dropped: in wake-phrase assistant
+      // mode until the next participant turn, elsewhere until its audio turn
+      // ends (see the AUDIO contentEnd handler). The call has been refused, so
+      // the reply is never released part-way either (gateParticipantUtterance).
       if (issuingSession) {
         issuingSession.dropTurn = true;
         issuingSession.dropReplyText = true;
+        issuingSession.withheldOutput = true;
       }
       await reply(SET_MODE_NOT_ADDRESSED_RESULT);
       return;

@@ -123,9 +123,11 @@ export class WakeReplyGate {
 
   /**
    * A participant's turn, as the model transcribed it, has ended. Decides
-   * whether the reply to it is heard.
+   * whether the reply to it is heard. The boolean entry point, for callers
+   * that have already decided whether the turn was addressed; the agent uses
+   * noteUserUtterance, which also joins a split utterance.
    *
-   * @param addressed The turn contains the wake phrase.
+   * @param addressed The turn addresses the assistant.
    */
   noteUserTurn(addressed: boolean, now: number = Date.now()): ReplyGateDecision {
     return this.decideTurn(addressed ? 'addressed' : null, '', now);
