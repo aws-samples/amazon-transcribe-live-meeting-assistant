@@ -2251,6 +2251,8 @@ SESSION_REFUSED = TransportQueryError(
     errors=[{"message": "item put condition failure", "errorType": "DynamoDB"}],
 )
 REOPENED = {"startCallSession": {"CallId": "call-1", "Status": "STARTED"}}
+# The meeting record as the rejoin left it: session 2 allowed, at 317 s.
+ALLOWED = {"getCall": {"CallId": "call-1", "SessionNumber": 2, "SessionOffsetSeconds": 317}}
 
 REJOINED_START = {
     "EventType": "START",
@@ -2280,17 +2282,153 @@ def process_start_with_hook(session: Any, message: Dict[str, Any], monkeypatch) 
 def test_the_start_of_an_allowed_session_reopens_the_meeting_and_runs_the_hook_once(
     schema, emitted, monkeypatch
 ):
-    session = QueuedSession(schema, [ALREADY_EXISTS, REOPENED])
+    session = QueuedSession(schema, [ALREADY_EXISTS, ALLOWED, REOPENED])
     hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
 
     (sent,) = mutation_inputs(session, "startCallSession")
-    assert sent == {"CallId": "call-1", "SessionNumber": "2"}
+    # With where the session starts, so it is listed in Call.Sessions.
+    assert sent == {"CallId": "call-1", "SessionNumber": "2", "SessionOffsetSeconds": "317"}
     assert [json.loads(i["Payload"])["SessionNumber"] for i in hook.invocations] == [2]
     assert metric_names.MEETINGS_STARTED not in emitted.counts, "it is the same meeting"
 
 
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"getCall": {"CallId": "call-1", "SessionNumber": 3, "SessionOffsetSeconds": 900}},
+        {"getCall": {"CallId": "call-1", "SessionNumber": 2, "SessionOffsetSeconds": None}},
+        {"getCall": {"CallId": "call-1", "SessionNumber": 2, "SessionOffsetSeconds": "x"}},
+        {"getCall": None},
+    ],
+    ids=["another-session", "no-offset", "unusable-offset", "no-record"],
+)
+def test_a_session_starts_without_an_offset_the_record_does_not_give_for_it(
+    schema, emitted, record, monkeypatch
+):
+    """Another session's offset would put the session's recording at the wrong
+    place; without one the session still starts, only unlisted."""
+    session = QueuedSession(schema, [ALREADY_EXISTS, record, REOPENED])
+    process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+    assert mutation_inputs(session, "startCallSession") == [
+        {"CallId": "call-1", "SessionNumber": "2"}
+    ]
+
+
+def test_a_session_starts_when_its_offset_cannot_be_read(schema, emitted, monkeypatch):
+    unreadable = TransportQueryError("boom", errors=[{"message": "boom", "errorType": "Unknown"}])
+    monkeypatch.setattr(
+        cep, "execute_gql_query_with_retries", _without_retries(cep.execute_gql_query_with_retries)
+    )
+    session = QueuedSession(schema, [ALREADY_EXISTS, unreadable, REOPENED])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+    assert mutation_inputs(session, "startCallSession") == [
+        {"CallId": "call-1", "SessionNumber": "2"}
+    ]
+    assert len(hook.invocations) == 1, "the session started"
+
+
+def test_a_session_start_against_an_older_schema_sends_no_offset(schema, emitted, monkeypatch):
+    """During a stack update the API can run a schema without the field."""
+    older = _schema_without(schema, "StartCallSessionInput", "SessionOffsetSeconds")
+    session = QueuedSession(older, [ALREADY_EXISTS, REOPENED])
+    process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+    assert mutation_inputs(session, "startCallSession") == [
+        {"CallId": "call-1", "SessionNumber": "2"}
+    ]
+    assert len(session.queries) == 2, "no read of the offset"
+
+
+# ── each recording link is stored with its capture session ──────────────────
+#
+# The meeting page's player plays each session's recording at the session's
+# place on the transcript timeline, so each link is stored beside its session.
+
+
+def _without_retries(execute: Any) -> Any:
+    async def once(*args: Any, **kwargs: Any) -> Any:
+        return await execute(*args, **{**kwargs, "max_retries": 0})
+
+    return once
+
+
+def _schema_without(schema: Any, type_name: str, field: str) -> Any:
+    text = SCHEMA_FILE.read_text(encoding="utf-8")
+    start = text.index(f"input {type_name} {{")
+    end = text.index("}", start)
+    block = text[start:end]
+    lines = [line for line in block.split("\n") if not line.strip().startswith(f"{field}:")]
+    older = text[:start] + "\n".join(lines) + text[end:]
+    assert older != text
+    return build_ast_schema(parse(APPSYNC_PRELUDE + older), assume_valid_sdl=True)
+
+
+RECORDING_EVENTS = {
+    "audio": ("ADD_S3_RECORDING_URL", "RecordingUrl", "updateRecordingUrl"),
+    "video": ("ADD_S3_VIDEO_RECORDING_URL", "VideoRecordingUrl", "updateVideoRecordingUrl"),
+}
+
+
+def _recording_event(kind: str, **extra: Any) -> Dict[str, Any]:
+    event_type, field, _ = RECORDING_EVENTS[kind]
+    return {"EventType": event_type, "CallId": "call-1", field: f"https://b/{kind}", **extra}
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+def test_a_recording_link_is_stored_with_the_session_its_event_names(
+    schema, emitted, kind, monkeypatch
+):
+    _, field, mutation = RECORDING_EVENTS[kind]
+    session = QueuedSession(schema, [{mutation: {"CallId": "call-1"}}])
+    process_event(session, _recording_event(kind, SessionNumber=3), monkeypatch)
+    (sent,) = mutation_inputs(session, mutation)
+    assert sent[f"{field}Session"] == "3"
+    assert "SessionNumber" not in sent, "the meeting's SessionNumber is not the link's"
+    assert sent[field] == f"https://b/{kind}"
+    assert len(session.queries) == 1, "the event named its session; nothing was read"
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+@pytest.mark.parametrize(
+    ("started", "expected"), [(None, "1"), (2, "2")], ids=["never-rejoined", "in-session-2"]
+)
+def test_a_recording_link_without_a_session_takes_the_meetings_current_one(
+    schema, emitted, kind, started, expected, monkeypatch
+):
+    _, field, mutation = RECORDING_EVENTS[kind]
+    meeting = {"getCall": {"CallId": "call-1", "Status": "ENDED", "SessionStartedNumber": started}}
+    session = QueuedSession(schema, [meeting, {mutation: {"CallId": "call-1"}}])
+    process_event(session, _recording_event(kind), monkeypatch)
+    (sent,) = mutation_inputs(session, mutation)
+    assert sent[f"{field}Session"] == expected
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+def test_a_recording_link_of_a_meeting_that_cannot_be_read_is_stored_without_a_session(
+    schema, emitted, kind, monkeypatch
+):
+    _, field, mutation = RECORDING_EVENTS[kind]
+    session = QueuedSession(schema, [{"getCall": None}, {mutation: {"CallId": "call-1"}}])
+    process_event(session, _recording_event(kind), monkeypatch)
+    (sent,) = mutation_inputs(session, mutation)
+    assert f"{field}Session" not in sent
+    assert sent[field] == f"https://b/{kind}"
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+def test_a_recording_link_against_an_older_schema_names_no_session(
+    schema, emitted, kind, monkeypatch
+):
+    _, field, mutation = RECORDING_EVENTS[kind]
+    input_type = "UpdateRecordingUrlInput" if kind == "audio" else "UpdateVideoRecordingUrlInput"
+    older = _schema_without(schema, input_type, f"{field}Session")
+    session = QueuedSession(older, [{mutation: {"CallId": "call-1"}}])
+    process_event(session, _recording_event(kind, SessionNumber=2), monkeypatch)
+    (sent,) = mutation_inputs(session, mutation)
+    assert f"{field}Session" not in sent
+
+
 def test_a_redelivered_start_of_a_session_does_not_run_the_hook_again(schema, emitted, monkeypatch):
-    session = QueuedSession(schema, [ALREADY_EXISTS, SESSION_REFUSED])
+    session = QueuedSession(schema, [ALREADY_EXISTS, ALLOWED, SESSION_REFUSED])
     hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
 
     assert len(mutation_inputs(session, "startCallSession")) == 1
@@ -2391,12 +2529,12 @@ def _start_with_deletion(schema, responses, monkeypatch) -> List[Dict[str, Any]]
 
 
 def test_a_started_session_cancels_the_pending_transcript_deletion(schema, emitted, monkeypatch):
-    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, REOPENED], monkeypatch)
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, ALLOWED, REOPENED], monkeypatch)
     assert payloads == [{"CallId": "call-1", "Trigger": "meeting-reopened", "SessionNumber": 2}]
 
 
 def test_a_session_that_was_not_started_leaves_the_deletion_alone(schema, emitted, monkeypatch):
-    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, SESSION_REFUSED], monkeypatch)
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, ALLOWED, SESSION_REFUSED], monkeypatch)
     assert payloads == []
 
 
@@ -2415,7 +2553,7 @@ def test_a_failure_to_queue_the_cancel_does_not_fail_the_start(schema, emitted, 
     run(
         cep.execute_process_event_api_mutation(
             message=dict(REJOINED_START),
-            appsync_session=QueuedSession(schema, [ALREADY_EXISTS, REOPENED]),
+            appsync_session=QueuedSession(schema, [ALREADY_EXISTS, ALLOWED, REOPENED]),
             agent_assist_args={},
             sentiment_analysis_args={},
         )
@@ -2460,6 +2598,7 @@ def _refused_start(schema, meeting, vp_row, monkeypatch) -> QueuedSession:
         schema,
         [
             ALREADY_EXISTS,
+            ALLOWED,
             SESSION_REFUSED,
             {"getCall": {"CallId": "call-1", **meeting}},
             {"getVirtualParticipant": vp_row},

@@ -60,6 +60,18 @@ export default /* GraphQL */ `
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
+      RecordingUrls
+      RecordingUrlSessions
+      VideoRecordingUrls
+      VideoRecordingUrlSessions
+      SessionNumber
+      SessionOffsetSeconds
+      SessionStartedNumber
+      Sessions {
+        SessionNumber
+        OffsetSeconds
+        StartedAt
+      }
       Owner
       SharedWith
       TotalConversationDurationMillis

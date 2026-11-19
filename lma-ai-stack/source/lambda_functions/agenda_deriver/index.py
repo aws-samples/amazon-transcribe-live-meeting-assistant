@@ -123,6 +123,14 @@ _CALL_FIELDS = """
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
+      RecordingUrls
+      RecordingUrlSessions
+      VideoRecordingUrls
+      VideoRecordingUrlSessions
+      SessionNumber
+      SessionOffsetSeconds
+      SessionStartedNumber
+      Sessions { SessionNumber OffsetSeconds StartedAt }
       Owner
       SharedWith
       TotalConversationDurationMillis

@@ -330,9 +330,25 @@ MCP_TOOLS = [
             "properties": {
                 "startDate": {"type": "string", "description": "ISO 8601 start date"},
                 "endDate": {"type": "string", "description": "ISO 8601 end date"},
-                "participant": {"type": "string", "description": "Filter by participant name"},
-                "status": {"type": "string", "description": "Meeting status filter"},
-                "limit": {"type": "number", "description": "Maximum number of meetings to return"},
+                "participant": {
+                    "type": "string",
+                    "description": (
+                        "Matches a name in a participant list stored on the meeting record; "
+                        "LMA does not record one today, so this usually matches nothing."
+                    ),
+                },
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Meeting status filter: ALL (default), IN_PROGRESS (started or "
+                        "transcribing), STARTED, TRANSCRIBING, ERRORED or ENDED. Not case "
+                        "sensitive."
+                    ),
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)",
+                },
             },
         },
         "annotations": {"readOnlyHint": True},

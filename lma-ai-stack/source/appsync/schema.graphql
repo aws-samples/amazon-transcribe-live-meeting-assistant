@@ -55,6 +55,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# recorded before they were kept.
 	RecordingUrls: [String]
 	VideoRecordingUrls: [String]
+	# The capture session each link in RecordingUrls and VideoRecordingUrls was
+	# recorded in, at the same index; null where the writer did not know it.
+	# Written with the link, in the same update. Absent, or shorter than the
+	# link list, on a meeting recorded by a pre-release build of the rejoin
+	# feature; the meeting page then pairs them only where it can.
+	RecordingUrlSessions: [Int]
+	VideoRecordingUrlSessions: [Int]
 	TotalConversationDurationMillis: Float
 	AgentId: String
 	Metadatajson: String
@@ -179,8 +186,23 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	ReopenedBy: String
 	SessionStartedNumber: Int
 	SessionStartedAt: AWSDateTime
+	# Every capture session after the first that has started, oldest first, with
+	# where it starts on the transcript timeline: appended by startCallSession.
+	# The first session starts at 0 and is not listed. The meeting page's player
+	# reads it, with the recording lists above, to play each session's recording
+	# at its place on the timeline.
+	Sessions: [CallSession]
 	Owner: String
 	SharedWith: String
+}
+
+# One capture session of a meeting (Call.Sessions).
+type CallSession @aws_cognito_user_pools
+@aws_iam {
+	SessionNumber: Int!
+	# Where the session starts on the meeting's transcript timeline, in seconds.
+	OffsetSeconds: Float
+	StartedAt: AWSDateTime
 }
 
 type CallList @aws_cognito_user_pools
@@ -1309,6 +1331,9 @@ input UpdateRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The capture session the recording belongs to, appended to
+	# Call.RecordingUrlSessions beside the link.
+	RecordingUrlSession: Int
 }
 
 input UpdateVideoRecordingUrlInput {
@@ -1317,6 +1342,9 @@ input UpdateVideoRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The capture session the recording belongs to, appended to
+	# Call.VideoRecordingUrlSessions beside the link.
+	VideoRecordingUrlSession: Int
 }
 
 input AddCallDetectedLanguageInput {
@@ -1327,6 +1355,10 @@ input AddCallDetectedLanguageInput {
 input StartCallSessionInput {
 	CallId: ID!
 	SessionNumber: Int!
+	# Where the session starts on the transcript timeline, as the rejoin that
+	# allowed it recorded (Call.SessionOffsetSeconds). Given, the
+	# session is appended to Call.Sessions.
+	SessionOffsetSeconds: Float
 }
 
 input UpdateTranscriptionPauseInput {
@@ -1371,6 +1403,11 @@ type VoiceEnrollmentState @aws_cognito_user_pools {
 	# The exact text the enrollee is shown and whose hash is stored with their
 	# consent, so a stored consent proves what it was given to.
 	Terms: String
+	# False when this deployment cannot compute a voiceprint: no on-demand
+	# speech engine, or an ASR model bundle with no speaker model. The reason
+	# says which, and the portal shows it instead of offering to record.
+	EnrollmentAvailable: Boolean
+	EnrollmentUnavailableReason: String
 }
 
 type VoiceEnrollmentResult @aws_cognito_user_pools {

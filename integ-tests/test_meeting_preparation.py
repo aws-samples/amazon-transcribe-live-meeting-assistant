@@ -128,15 +128,33 @@ def _definitions(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     ]
 
 
+END_ATTEMPTS = 3
+
+
 def _end(client: LMAClient, vp_id: str | None, reason: str) -> None:
-    """End a VP the test started. A reason naming "cancelled" records a VP that
-    never launched as CANCELLED (end_virtual_participant's rule)."""
+    """End a VP the test started, retrying, and fail the test if it cannot.
+
+    A reason naming "cancelled" records a VP that never launched as CANCELLED
+    (end_virtual_participant's rule), which also deletes its launch schedule. A
+    VP left behind would launch on its schedule, so a cleanup that keeps failing
+    is a test failure, not a printed note.
+    """
     if not vp_id:
         return
-    try:
-        client.vp.end(vp_id, reason=reason)
-    except LMAError as err:
-        print(f"could not end Virtual Participant {vp_id}: {err}")
+    last_error: Exception | None = None
+    for attempt in range(1, END_ATTEMPTS + 1):
+        try:
+            client.vp.end(vp_id, reason=reason)
+            return
+        except LMAError as err:
+            last_error = err
+            print(f"ending Virtual Participant {vp_id} failed (attempt {attempt}): {err}")
+            time.sleep(5)
+    pytest.fail(
+        f"could not end Virtual Participant {vp_id} after {END_ATTEMPTS} attempts ({last_error}); "
+        "end or delete it on the Virtual Participants page, or it will launch at its scheduled time",
+        pytrace=False,
+    )
 
 
 @pytest.fixture(scope="module")

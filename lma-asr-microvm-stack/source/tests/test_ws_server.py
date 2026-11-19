@@ -109,6 +109,7 @@ class FakeConnection:
     async def close(self, code: int = 1000, reason: str = "") -> None:
         self.closed = True
         self.close_code = code
+        self.close_reason = reason
 
     # --- assertions helpers ---
     def messages(self) -> list[dict[str, Any]]:
@@ -1640,6 +1641,9 @@ async def test_embed_mode_is_refused_without_a_speaker_model() -> None:
     assert error["code"] == "BAD_CONFIG"
     assert "speaker-embedding model" in error["message"]
     assert conn.closed
+    # The reason travels on the close frame too: voice enrollment sends every
+    # utterance before it reads anything, so the close can reach it first.
+    assert conn.close_reason == "embed_unsupported"
 
 
 async def test_embed_mode_reports_an_embedding_failure_and_closes() -> None:

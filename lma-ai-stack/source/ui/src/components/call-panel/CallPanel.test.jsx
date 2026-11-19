@@ -74,6 +74,8 @@ import { CallPanel } from './CallPanel';
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 // eslint-disable-next-line import/first
 import { installMediaElementStub, loadMedia } from '../meeting-player/media-element-stub';
+// eslint-disable-next-line import/first
+import sign from '../common/generate-s3-presigned-url';
 
 /* eslint-disable react/prop-types */
 
@@ -278,6 +280,33 @@ describe('the Summary tab', () => {
     const toc = screen.getByRole('navigation', { name: 'Summary sections' });
     fireEvent.click(within(toc).getByRole('button', { name: 'SCREEN SHARE SUMMARY' }));
     expect(screen.getByText('Sarah covered Q3.')).toBeTruthy();
+  });
+
+  it('lists its sections in the reading order the downloads use, custom ones last in their configured order', () => {
+    const stored = JSON.stringify({
+      'CHAT & SHARED LINKS': 'Chat.',
+      RISKS: 'Risks.',
+      DETAILS: 'Details.',
+      'SCREEN SHARE SUMMARY': 'Shared.',
+      ACTIONS: 'Actions.',
+      SUMMARY: 'Sarah walked through the plan.',
+      'CUSTOMER QUOTES': 'Quotes.',
+    });
+    renderPage({ item: { ...ITEM, callSummaryText: stored }, url: '/calls/m?tab=summary' });
+    const toc = screen.getByRole('navigation', { name: 'Summary sections' });
+    expect(
+      within(toc)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([
+      'SUMMARY',
+      'ACTIONS',
+      'DETAILS',
+      'SCREEN SHARE SUMMARY',
+      'CHAT & SHARED LINKS',
+      'RISKS',
+      'CUSTOMER QUOTES',
+    ]);
   });
 
   it('opens and closes every section at once, and remembers the choice', () => {
@@ -888,6 +917,137 @@ describe('the player kept in step with the transcript', () => {
     fireEvent.click(within(filter).getByRole('button', { name: 'All speakers' }));
     expect(screen.getByText('Welcome to the budget review.')).toBeTruthy();
   });
+
+  it('has no session selector for a meeting captured in one session', async () => {
+    await openRecording();
+    expect(screen.queryByTestId('meeting-player-sessions')).toBeNull();
+  });
+});
+
+describe('the player of a meeting continued in a second session', () => {
+  // Session 2 starts at 317 s on the transcript's clock; each session has an
+  // audio recording of its own, which starts at 0.
+  const AUDIO_1 = 'https://bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/m.wav';
+  const AUDIO_2 = 'https://bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/m_s2.wav';
+  const CONTINUED = {
+    ...ITEM,
+    recordingUrl: AUDIO_2,
+    recordingUrls: [AUDIO_1, AUDIO_2],
+    recordingUrlSessions: [1, 2],
+    sessions: [{ SessionNumber: 2, OffsetSeconds: 317, StartedAt: '2026-11-03T15:00:00.000Z' }],
+    sessionNumber: 2,
+    sessionOffsetSeconds: 317,
+    sessionStartedNumber: 2,
+  };
+  const line = (id, speaker, transcript, startTime, endTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime % 60).padStart(2, '0')}.000Z`,
+    channel: 'REMOTE',
+    speaker,
+    transcript,
+    startTime,
+    endTime,
+    isPartial: false,
+  });
+  const LINES = {
+    [ITEM.callId]: {
+      REMOTE: {
+        segments: [
+          line('s1', 'Sarah Lee', 'Thanks for joining.', 20, 24),
+          line('s2-s1', 'Sarah Lee', 'We are back after the break.', 330, 340),
+        ],
+      },
+    },
+  };
+  const media = () => document.querySelector('[data-testid="meeting-player"] audio');
+  const rowOf = (text) => [...document.querySelectorAll('[data-row-id]')].find((row) => row.textContent.includes(text));
+  // Each file signed under a link of its own, so the test can tell them apart.
+  const signedOf = (url) => `${url}?signed`;
+  const playing = async (url, duration) => {
+    await waitFor(() => expect(media()?.getAttribute('src')).toBe(signedOf(url)));
+    loadMedia(media(), duration);
+  };
+
+  beforeEach(() => {
+    sign.mockImplementation((url) => Promise.resolve(signedOf(url)));
+  });
+  afterEach(() => {
+    sign.mockResolvedValue('https://signed.example/x');
+  });
+
+  it("starts on the first session's recording and offers both sessions", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    const selector = screen.getByTestId('meeting-player-sessions');
+    expect(within(selector).getByRole('button', { name: 'Session 1 (from 0:00)' })).toBeTruthy();
+    expect(within(selector).getByRole('button', { name: 'Session 2 (from 5:17)' })).toBeTruthy();
+  });
+
+  it("plays a second-session line from its own file at the line's time less the session's start", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(13);
+    expect(media().paused).toBe(false);
+    expect(rowOf('We are back after the break.').getAttribute('aria-current')).toBe('true');
+    // And back: a first-session line plays the first session's file.
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 00:20.0' }));
+    await playing(AUDIO_1, 300);
+    expect(media().currentTime).toBe(20);
+    expect(rowOf('Thanks for joining.').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('follows the second session on the transcript timeline as it plays', async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(within(screen.getByTestId('meeting-player-sessions')).getByRole('button', { name: /^Session 2/ }));
+    await playing(AUDIO_2, 120);
+    act(() => {
+      media().play();
+      media().currentTime = 15;
+      fireEvent(media(), new Event('timeupdate'));
+    });
+    expect(rowOf('We are back after the break.').getAttribute('aria-current')).toBe('true');
+    expect(rowOf('Thanks for joining.').getAttribute('aria-current')).toBeNull();
+  });
+
+  it("plays on into the second session's recording when the first ends", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    act(() => {
+      media().play();
+      media().currentTime = 300;
+      fireEvent(media(), new Event('ended'));
+    });
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
+
+  it("lists each session's recording on the Details tab, and plays one from its session's start", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES, url: '/calls/m?tab=details' });
+    expect(await screen.findByText('Audio recording, Session 1 (from 0:00)')).toBeTruthy();
+    expect(screen.getByText('Audio recording, Session 2 (from 5:17)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Play the session 2 audio recording' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
+
+  it("plays the loaded session's recording from its start from the Details tab, not from where it was", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(13);
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play the session 2 audio recording' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
 });
 
 describe('the meeting assistant panel', () => {
@@ -1170,12 +1330,14 @@ describe('the Download menu', () => {
       'Markdown (.md)',
       'Word (.docx)',
       'PDF (.pdf)',
+      'Web page (.html)',
       'Plain text (.txt)',
       'Copy to clipboard (Markdown)',
       'Email summary (beta)',
       'Markdown (.md)',
       'Word (.docx)',
       'PDF (.pdf)',
+      'Web page (.html)',
       'Plain text (.txt)',
       'Excel (.xlsx)',
       'Copy to clipboard (Markdown)',

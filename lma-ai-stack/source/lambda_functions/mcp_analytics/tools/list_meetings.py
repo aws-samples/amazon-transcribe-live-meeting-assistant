@@ -9,14 +9,117 @@ List meetings from DynamoDB with filters
 
 import logging
 import os
+import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, Tuple
 
 import boto3
 
+from tools.access import Caller, can_read
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 
 logger = logging.getLogger()
+
+# The status filter's accepted values. IN_PROGRESS is the pair of statuses a
+# meeting has while it is running; every other value is a status as stored.
+IN_PROGRESS_STATUSES = frozenset({"STARTED", "TRANSCRIBING"})
+STATUS_FILTERS: Dict[str, Optional[FrozenSet[str]]] = {
+    "ALL": None,
+    "IN_PROGRESS": IN_PROGRESS_STATUSES,
+    "STARTED": frozenset({"STARTED"}),
+    "TRANSCRIBING": frozenset({"TRANSCRIBING"}),
+    "ERRORED": frozenset({"ERRORED"}),
+    "ENDED": frozenset({"ENDED"}),
+}
+
+# The index is walked at most this many pages, whatever the filters leave.
+MAX_PAGES = 10
+DEFAULT_LIMIT = 20
+# The most meetings a call can return: a walk reads at most MAX_PAGES pages of
+# 100 index rows, so a larger ``limit`` could never be filled.
+MAX_LIMIT = 1000
+# A walk that filters rows reads index pages this large; one that does not
+# keeps asking for as many rows as the caller wants.
+FILTERED_PAGE_SIZE = 100
+
+# Whole meeting rows are read in batches. A walk without a filter reads batches
+# as large as the rows still needed, but never below BATCH_GET_MIN and never
+# above BATCH_GET_MAX (the most keys one BatchGetItem accepts). A filtered walk
+# decides on a whole index page per request, asking for only a few attributes
+# (this keeps each response small; DynamoDB still reads, and bills, whole
+# items), then reads the whole rows of the matches, no more than still needed.
+# A call that filters therefore reads at least one index page (100 rows) and, if
+# few rows match, up to MAX_PAGES pages (1,000 rows); a non-admin caller's call
+# always filters.
+BATCH_GET_MIN = 25
+BATCH_GET_MAX = 100
+# Keys DynamoDB hands back unprocessed are asked for again this many times in
+# all, pausing 0.05 * 2**attempt seconds between the requests.
+BATCH_GET_ATTEMPTS = 4
+
+UNREADABLE_NOTE = "Some meetings could not be read; try again."
+# How many index rows a walk checks depends on its page size, so the note names
+# no number.
+TRUNCATED_NOTE = (
+    "Only the most recent meetings in the date range were checked, so older "
+    "meetings that match may not be listed."
+)
+SEARCH_FAILED_NOTE = "The search could not be completed; try again."
+
+# A filtered walk first asks for only the attributes its filters look at (and the
+# key, to match each row to its meeting), which keeps the response small; full
+# rows are asked for the matches only. The access rule reads Owner and
+# SharedWith. Owner and Status are reserved words, hence the names.
+DECISION_PROJECTION: Dict[str, Any] = {
+    "ProjectionExpression": "#pk, #id, #owner, #shared, #status, #participants",
+    "ExpressionAttributeNames": {
+        "#pk": "PK",
+        "#id": "CallId",
+        "#owner": "Owner",
+        "#shared": "SharedWith",
+        "#status": "Status",
+        "#participants": "Participants",
+    },
+}
+
+
+def limit_from(limit: Any) -> int:
+    """The number of meetings a ``limit`` argument asks for, from 1 to MAX_LIMIT.
+
+    The tool schema says ``number``, so a client may send ``20.0`` or ``"20"``.
+    None (or no value) means the default. A boolean, a fraction, text that is
+    not a whole number, or any other type is refused.
+    """
+    if limit is None:
+        return DEFAULT_LIMIT
+    value = None
+    if isinstance(limit, int) and not isinstance(limit, bool):
+        value = limit
+    elif isinstance(limit, float):
+        value = int(limit) if limit.is_integer() else None
+    elif isinstance(limit, str):
+        try:
+            number = float(limit.strip())
+        except ValueError:
+            number = None
+        if number is not None and number.is_integer():
+            value = int(number)
+    if value is None:
+        raise ValueError("limit must be an integer")
+    return max(1, min(value, MAX_LIMIT))
+
+
+class WalkResult(NamedTuple):
+    """What ``walk_date_range`` found."""
+
+    # The meeting rows, newest first.
+    rows: List[Dict]
+    # How many rows could not be read.
+    unreadable: int
+    # Whether the page cap ended the walk with index rows still left.
+    truncated: bool
+    # Whether an index page could not be read (the walk then ended early).
+    failed: bool
 
 
 def execute(
@@ -36,51 +139,48 @@ def execute(
         start_date: Optional ISO 8601 start date
         end_date: Optional ISO 8601 end date
         participant: Optional participant name filter
-        status: Meeting status filter ('STARTED', 'ENDED', 'ALL')
-        limit: Maximum number of meetings to return
+        status: Meeting status filter: 'ALL' (or None), 'IN_PROGRESS' (started or
+            transcribing), 'STARTED', 'TRANSCRIBING', 'ERRORED' or 'ENDED'; not
+            case sensitive
+        limit: Maximum number of meetings to return: a whole number from 1 to
+            1,000 (more is read as 1,000); None means 20
         user_id: User ID for access control
         is_admin: Whether user is admin
 
     Returns:
         Dict with list of meetings and metadata
     """
+    statuses = statuses_for(status)
+    limit = limit_from(limit)
+
     dynamodb = boto3.resource("dynamodb")
     table_name = os.environ.get("CALLS_TABLE")
     table = dynamodb.Table(table_name)
 
     try:
+        # Owner, participant and status are decided while the rows are read, so
+        # that only meetings the caller can see count toward the limit.
+        include = build_filter(user_id, is_admin, participant, statuses)
+
         # Query strategy depends on filters
         if start_date and end_date:
             # Use date-based query for efficiency
-            meetings = query_by_date_range(table, start_date, end_date, limit)
+            start, end = start_date, end_date
         else:
             # Query recent meetings using today's date shards
-            from datetime import datetime, timedelta
+            from datetime import timedelta
 
             today = datetime.utcnow()
             # Query last 7 days to ensure we find meetings
             start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
             end = today.strftime("%Y-%m-%d")
-            meetings = query_by_date_range(table, start, end, limit)
-
-        # Apply UBAC filter: getCall's rule -- the caller's own meetings and the
-        # ones shared with them (tools/access.py).
-        if not is_admin:
-            from tools.access import Caller, can_read  # pylint: disable=import-outside-toplevel
-
-            caller = Caller(user_id=user_id or "")
-            meetings = [m for m in meetings if can_read(m, caller)]
-
-        # Filter by participant if specified
-        if participant:
-            meetings = [m for m in meetings if participant_in_meeting(m, participant)]
-
-        # Filter by status
-        if status != "ALL":
-            meetings = [m for m in meetings if m.get("Status") == status]
-
-        # Limit results
-        meetings = meetings[:limit]
+        found = walk_date_range(table, start, end, limit, include)
+        meetings, unreadable, truncated, failed = (
+            found.rows,
+            found.unreadable,
+            found.truncated,
+            found.failed,
+        )
 
         # Format response
         result = {
@@ -93,6 +193,16 @@ def execute(
                 "status": status,
             },
         }
+        notes = []
+        if truncated:
+            result["truncated"] = True
+            notes.append(TRUNCATED_NOTE)
+        if unreadable:
+            notes.append(UNREADABLE_NOTE)
+        if failed:
+            notes.append(SEARCH_FAILED_NOTE)
+        if notes:
+            result["note"] = " ".join(notes)
 
         logger.info(f"Listed {len(meetings)} meetings for user {user_id}")
         return result
@@ -102,13 +212,93 @@ def execute(
         raise ValueError(f"Failed to list meetings: {str(e)}")
 
 
+def statuses_for(status: Optional[str]) -> Optional[FrozenSet[str]]:
+    """The stored statuses a ``status`` argument stands for; None means every status.
+
+    Not case sensitive, surrounding spaces are ignored, and a blank value is the
+    same as ALL (clients often send an empty string for an argument they do not
+    set). Anything else that is not an accepted value is refused, naming the
+    accepted ones.
+    """
+    if status is None:
+        return None
+    if isinstance(status, str):
+        key = status.strip().upper()
+        if not key:
+            return None
+        if key in STATUS_FILTERS:
+            return STATUS_FILTERS[key]
+    raise ValueError("status must be one of: " + ", ".join(STATUS_FILTERS))
+
+
+def build_filter(
+    user_id: Optional[str],
+    is_admin: bool,
+    participant: Optional[str],
+    statuses: Optional[FrozenSet[str]],
+) -> Optional[Callable[[Dict[str, Any]], bool]]:
+    """The test a meeting row has to pass to be listed, or None when every row is.
+
+    Access is the rule of the meeting page (tools/access.py can_read): an Admin
+    sees every meeting; anyone else sees the meetings they own and the ones
+    shared with them. A caller with no identity sees none.
+    """
+    if is_admin and not participant and statuses is None:
+        return None
+    caller = Caller(user_id=user_id or "", is_admin=bool(is_admin))
+
+    def include(meeting: Dict[str, Any]) -> bool:
+        if not can_read(meeting, caller):
+            return False
+        if participant and not participant_in_meeting(meeting, participant):
+            return False
+        if statuses is None:
+            return True
+        # A Status that is not a string (a corrupt row) matches no status and
+        # must not fail the whole call.
+        status = meeting.get("Status")
+        return isinstance(status, str) and status in statuses
+
+    return include
+
+
 def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> List[Dict]:
     """
     Query meetings by date range using the TypeDateIndex GSI.
 
     The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
     "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
-    and paginates via LastEvaluatedKey — no shard fan-out.
+    and paginates via LastEvaluatedKey — no shard fan-out.  ``execute`` calls
+    ``walk_date_range``, which does the work and takes a row filter.
+    """
+    return walk_date_range(table, start_date, end_date, limit).rows
+
+
+def walk_date_range(
+    table,
+    start_date: str,
+    end_date: str,
+    limit: int,
+    include: Optional[Callable[[Dict[str, Any]], bool]] = None,
+) -> WalkResult:
+    """
+    Walk the TypeDateIndex GSI, newest first, and collect up to ``limit`` meetings.
+
+    Returns a ``WalkResult``: the meeting rows, how many rows could not be read,
+    whether the page cap ended the walk with index rows still left, and whether
+    an index page could not be read (the walk then ends early).
+
+    The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
+    "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
+    and paginates via LastEvaluatedKey — no shard fan-out.  An index row is
+    not the meeting's own row and carries only a few of its attributes (not
+    Status), so every meeting row is read before ``include`` decides on it:
+    first only the attributes in DECISION_PROJECTION (a smaller response;
+    DynamoDB still reads and bills whole items), one request per index page,
+    then, in full and in index order, the rows that match, no more than still
+    needed.  Access is decided on the meeting's own row, in both steps, and not
+    on the index row's copy of Owner and SharedWith.  Without ``include`` the
+    rows are read in full at once.  At most ``limit`` rows are returned.
     """
     from datetime import timedelta
 
@@ -116,6 +306,7 @@ def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> Li
 
     meetings: List[Dict] = []
     meeting_ids = set()
+    unreadable = 0
 
     # Parse dates — fall back to "last 7 days" / "now" when unset.
     start_iso = (
@@ -141,63 +332,219 @@ def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> Li
     sk_lo = f"ts#{start_iso}"
     sk_hi = f"ts#{end_iso}~"
 
+    page_size = FILTERED_PAGE_SIZE if include is not None else min(limit, 100)
     query_kwargs = {
         "IndexName": "TypeDateIndex",
         "KeyConditionExpression": (Key("ItemType").eq("call") & Key("SK").between(sk_lo, sk_hi)),
         "ScanIndexForward": False,  # newest first
-        "Limit": min(limit, 100),
+        "Limit": page_size,
     }
+
+    # Matches of a filtered walk whose whole rows are not read yet, newest first.
+    pending: List[str] = []
+    # Index rows a filtered walk could not decide on, as positions in the walk.
+    undecided: List[int] = []
+    order: Dict[str, int] = {}
+    last_listed = -1
+
+    def take_pending(final: bool) -> None:
+        """Read the whole rows of pending matches, at most as many as still needed.
+
+        Waits until enough matches are pending to fill the limit, unless the walk
+        is over, so that the whole rows of a call take as few requests as they
+        can. A row that changed or went away since it was decided is decided again.
+        """
+        nonlocal unreadable, last_listed
+        while pending and len(meetings) < limit:
+            needed = limit - len(meetings)
+            if not final and len(pending) < needed:
+                return
+            wanted = pending[: min(BATCH_GET_MAX, needed)]
+            del pending[: len(wanted)]
+            rows, failed = read_meetings(table, wanted)
+            unreadable += failed
+            for call_id in wanted:
+                meeting = rows.get(call_id)
+                if meeting is not None and include(meeting):
+                    meetings.append(meeting)
+                    last_listed = order[call_id]
 
     # Bound pagination so a very sparse / restrictive caller filter can't
     # force an unbounded scan of the GSI.  Matches the resolver's MAX_PAGES.
-    max_pages = 10
     pages = 0
     last_key = None
-    while len(meetings) < limit and pages < max_pages:
+    page_failed = False
+    while len(meetings) < limit and pages < MAX_PAGES:
         if last_key:
             query_kwargs["ExclusiveStartKey"] = last_key
         try:
             response = table.query(**query_kwargs)
         except Exception as e:
-            logger.warning("GSI query failed: %s", e)
+            logger.warning("GSI query failed (%s)", failure_class(e))
+            page_failed = True
             break
 
+        page_ids = []
         for item in response.get("Items", []):
             call_id = item.get("CallId")
             if not call_id or call_id in meeting_ids:
                 continue
             meeting_ids.add(call_id)
-            meeting = get_meeting_by_id(table, call_id)
-            if meeting:
-                meetings.append(meeting)
-            if len(meetings) >= limit:
-                break
+            order[call_id] = len(order)
+            page_ids.append(call_id)
+
+        if include is None:
+            position = 0
+            while position < len(page_ids) and len(meetings) < limit:
+                size = min(BATCH_GET_MAX, max(BATCH_GET_MIN, limit - len(meetings)))
+                batch = page_ids[position : position + size]
+                position += len(batch)
+                rows, failed = read_meeting_rows(table, batch)
+                # The batch can hold rows beyond the answer; a failed read counts
+                # only when the row would have been listed.
+                for call_id in batch:
+                    meeting = rows.get(call_id)
+                    if meeting is None:
+                        unreadable += call_id in failed
+                        continue
+                    meetings.append(meeting)
+                    if len(meetings) >= limit:
+                        break
+        else:
+            # The response holds only the few attributes the filters read, so
+            # one request decides a whole page (up to 100 rows).
+            for position in range(0, len(page_ids), BATCH_GET_MAX):
+                batch = page_ids[position : position + BATCH_GET_MAX]
+                decided, failed = read_meeting_rows(table, batch, DECISION_PROJECTION)
+                undecided.extend(order[call_id] for call_id in failed)
+                pending.extend(
+                    call_id for call_id in batch if call_id in decided and include(decided[call_id])
+                )
+            take_pending(final=False)
 
         last_key = response.get("LastEvaluatedKey")
         pages += 1
         if not last_key:
             break
 
-    if last_key and pages >= max_pages:
+    if include is not None:
+        take_pending(final=True)
+        # A row that could not be read counts when it could have been listed:
+        # always while the list is short, otherwise only when it is newer than
+        # the last meeting listed.
+        full = len(meetings) >= limit
+        unreadable += sum(1 for at in undecided if not full or at < last_listed)
+
+    truncated = False
+    if last_key and pages >= MAX_PAGES and len(meetings) < limit:
         logger.info(
-            "query_by_date_range: hit MAX_PAGES=%d cap (collected=%d)", max_pages, len(meetings)
+            "walk_date_range: hit MAX_PAGES=%d cap (collected=%d)", MAX_PAGES, len(meetings)
         )
-    return meetings[:limit]
+        truncated = rows_left(table, query_kwargs, last_key)
+    return WalkResult(meetings[:limit], unreadable, truncated, page_failed)
 
 
-def get_meeting_by_id(table, call_id: str) -> Optional[Dict]:
-    """Get full meeting data by CallId"""
+def rows_left(table, query_kwargs: Dict[str, Any], last_key: Dict[str, Any]) -> bool:
+    """Whether the index has a row after ``last_key``.
+
+    DynamoDB returns a key after a page that ends exactly at the end of the
+    range, so the key alone does not say. When the check itself fails the answer
+    is yes: the list may be incomplete.
+    """
     try:
-        response = table.get_item(Key={"PK": f"c#{call_id}", "SK": f"c#{call_id}"})
-        return response.get("Item")
+        probe = dict(query_kwargs, Limit=1, ExclusiveStartKey=last_key)
+        return bool(table.query(**probe).get("Items"))
     except Exception as e:
-        logger.warning(f"Error getting meeting {call_id}: {e}")
-        return None
+        logger.warning("Could not check for more index rows (%s)", failure_class(e))
+        return True
+
+
+def failure_class(error: Exception) -> str:
+    """The class of a failure, with the AWS error code when there is one.
+
+    The message of an AWS error can name the table or the account, so it is not
+    logged.
+    """
+    code = getattr(error, "response", None)
+    code = code.get("Error", {}).get("Code") if isinstance(code, dict) else None
+    return f"{type(error).__name__}: {code}" if code else type(error).__name__
+
+
+def get_meetings_by_ids(
+    table, call_ids: List[str], projection: Optional[Dict[str, Any]] = None
+) -> Dict[str, Dict]:
+    """Read the meeting rows of up to 100 CallIds with BatchGetItem.
+
+    Returns the rows DynamoDB returned, by CallId. Keys it left unprocessed are
+    asked for again, up to BATCH_GET_ATTEMPTS requests in all. A request that
+    fails is logged, not raised: the caller gets what was read so far.
+    ``projection`` (``ProjectionExpression`` and ``ExpressionAttributeNames``)
+    limits the attributes read; it must include ``PK``.
+    """
+    if len(call_ids) > BATCH_GET_MAX:
+        raise ValueError(f"at most {BATCH_GET_MAX} meetings can be read at once")
+    found: Dict[str, Dict] = {}
+    if not call_ids:
+        return found
+    keys = [{"PK": f"c#{call_id}", "SK": f"c#{call_id}"} for call_id in call_ids]
+    for attempt in range(BATCH_GET_ATTEMPTS):
+        try:
+            request = {"Keys": keys, **(projection or {})}
+            response = table.meta.client.batch_get_item(RequestItems={table.name: request})
+        except Exception as e:
+            logger.warning("Batch read of %d meetings failed (%s)", len(keys), failure_class(e))
+            break
+        for item in response.get("Responses", {}).get(table.name, []):
+            pk = item.get("PK")
+            if isinstance(pk, str) and pk.startswith("c#"):
+                found[pk[2:]] = item
+        keys = (response.get("UnprocessedKeys") or {}).get(table.name, {}).get("Keys") or []
+        if not keys:
+            break
+        if attempt + 1 < BATCH_GET_ATTEMPTS:
+            time.sleep(0.05 * 2**attempt)
+    return found
+
+
+def read_meetings(
+    table, call_ids: List[str], projection: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, Dict], int]:
+    """Read the meeting rows of up to 100 CallIds, or the attributes ``projection`` names.
+
+    Returns the rows by CallId and the number of meetings that could not be
+    read. A batch read comes first; every id it did not return (a batch that
+    failed, keys left unprocessed, a row that does not exist) is then read on
+    its own. A row that is not there is skipped without being counted; a read
+    that fails is counted.
+    """
+    rows, failed = read_meeting_rows(table, call_ids, projection)
+    return rows, len(failed)
+
+
+def read_meeting_rows(
+    table, call_ids: List[str], projection: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, Dict], List[str]]:
+    """``read_meetings``, naming the ids that could not be read instead of counting them."""
+    rows = get_meetings_by_ids(table, call_ids, projection)
+    unreadable: List[str] = []
+    for call_id in call_ids:
+        if call_id in rows:
+            continue
+        try:
+            key = {"PK": f"c#{call_id}", "SK": f"c#{call_id}"}
+            item = table.get_item(Key=key, **(projection or {})).get("Item")
+        except Exception as e:
+            logger.warning("Error getting meeting %r (%s)", call_id, failure_class(e))
+            unreadable.append(call_id)
+            continue
+        if item:
+            rows[call_id] = item
+    return rows, unreadable
 
 
 # NOTE: `scan_recent_meetings` was removed.  The callers that used it now go
-# through `query_by_date_range` (GSI-backed, O(matched items)); direct scans
-# don't scale and are no longer acceptable once the tracking table grows.
+# through `walk_date_range` (GSI-backed); direct scans don't scale and are no
+# longer acceptable once the tracking table grows.
 
 
 def participant_in_meeting(meeting: Dict[str, Any], participant_name: str) -> bool:

@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import math
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -591,6 +592,50 @@ def summary_outcome_state(text: Any) -> str:
     )
 
 
+async def read_allowed_session_offset(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Optional[float]:
+    """Where the session the START event names starts on the transcript timeline.
+
+    The rejoin that allowed the session wrote it on the meeting record
+    (SessionOffsetSeconds, beside SessionNumber), and it is fixed for that
+    session number: a later rejoin allows a higher number. None when the record
+    names another session, has no usable offset, or cannot be read; the session
+    then starts without being added to Call.Sessions, and the meeting page's
+    player falls back to the record's latest session and offset.
+    """
+    schema = DSLSchema(appsync_session.client.schema)
+    try:
+        result = await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLQuery(
+                    schema.Query.getCall.args(CallId=message.get("CallId")).select(
+                        schema.Call.CallId,
+                        schema.Call.SessionNumber,
+                        schema.Call.SessionOffsetSeconds,
+                    )
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "START: could not read where the session starts; it is not added to Sessions",
+            extra=dict(call_id=message.get("CallId")),
+        )
+        return None
+    call = (result or {}).get("getCall") if isinstance(result, dict) else None
+    if session_number_of(call) != session_number_of(message):
+        return None
+    try:
+        offset = float((call or {}).get("SessionOffsetSeconds"))
+    except (TypeError, ValueError):
+        return None
+    return offset if math.isfinite(offset) and offset >= 0 else None
+
+
 async def execute_start_call_session_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -609,6 +654,10 @@ async def execute_start_call_session_mutation(
         "CallId": message.get("CallId"),
         "SessionNumber": session_number_of(message),
     }
+    if input_declares(appsync_session, "StartCallSessionInput", "SessionOffsetSeconds"):
+        offset = await read_allowed_session_offset(message, appsync_session)
+        if offset is not None:
+            session_input["SessionOffsetSeconds"] = offset
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.startCallSession.args(input=session_input).select(*call_fields(schema))
@@ -1177,6 +1226,45 @@ async def execute_update_call_aggregation_mutation(
     return result
 
 
+def input_declares(appsync_session: AppsyncAsyncClientSession, input_type: str, field: str) -> bool:
+    """Whether the schema the API is running declares ``field`` on ``input_type``.
+
+    During a stack update the API can run an older schema than this function's,
+    and a field it does not declare would fail the write.
+    """
+    graphql_type = appsync_session.client.schema.get_type(input_type)
+    return field in (getattr(graphql_type, "fields", None) or {})
+
+
+async def recording_session_field(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+    link_field: str,
+) -> Dict[str, int]:
+    """The capture session a recording link belongs to, as the input field of
+    ``link_field`` ("RecordingUrl" or "VideoRecordingUrl") names it:
+    ``RecordingUrlSession`` or ``VideoRecordingUrlSession``.
+
+    The meeting page's player plays each session's recording at its place on
+    the transcript timeline, so each link is stored with its session
+    (Call.RecordingUrlSessions, Call.VideoRecordingUrlSessions). A writer that
+    names the session in the event (the Virtual Participant) is taken at its
+    word. For one that does not -- a streaming client's transcriber, whose
+    meetings have one session, or a Virtual Participant image that predates
+    naming it -- the link is taken to belong to the session the meeting is in:
+    a recording is uploaded as its session ends, before a rejoin can start the
+    next. Empty when the meeting could not be read, which stores the link with
+    no session rather than a guessed one.
+    """
+    field = f"{link_field}Session"
+    if not input_declares(appsync_session, f"Update{link_field}Input", field):
+        return {}
+    if "SessionNumber" in message:
+        return {field: session_number_of(message)}
+    status, started_session = await get_call_state(message, appsync_session)
+    return {} if status is None else {field: started_session}
+
+
 async def execute_add_s3_recording_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1189,11 +1277,12 @@ async def execute_add_s3_recording_mutation(
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
+    session_field = await recording_session_field(message, appsync_session, "RecordingUrl")
 
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.updateRecordingUrl.args(
-                input={**message, "RecordingUrl": recording_url}
+                input={**message, "RecordingUrl": recording_url, **session_field}
             ).select(*call_fields(schema))
         )
     )
@@ -1307,11 +1396,12 @@ async def execute_add_s3_video_recording_mutation(
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
+    session_field = await recording_session_field(message, appsync_session, "VideoRecordingUrl")
 
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.updateVideoRecordingUrl.args(
-                input={**message, "VideoRecordingUrl": video_recording_url}
+                input={**message, "VideoRecordingUrl": video_recording_url, **session_field}
             ).select(*call_fields(schema))
         )
     )
