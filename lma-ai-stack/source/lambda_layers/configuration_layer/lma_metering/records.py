@@ -91,6 +91,7 @@ CONTEXTS = (
     "SpeakerNaming",
     "AgendaDerivation",
     "SlideText",
+    "ChatAttachments",
     "ConsentVerification",
     "Sentiment",
     "PageAutomation",

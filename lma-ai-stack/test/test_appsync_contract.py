@@ -229,6 +229,7 @@ OTHER_FIELDS = [
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),
     ("Mutation", "addVideoKeyframe"),
+    ("Mutation", "addChatAttachment"),
     ("Mutation", "addChatToken"),
     # One meeting at a time, authorized per meeting by the resolver against its
     # owner and share list rather than by group.
@@ -296,6 +297,8 @@ OTHER_FIELDS = [
     ("Query", "getTranscriptSegmentsWithSentiment"),
     # One meeting's key frames, authorized in the resolver by getCall's rule.
     ("Query", "getVideoKeyframes"),
+    # One meeting's chat attachments, authorized in the resolver by getCall's rule.
+    ("Query", "getChatAttachments"),
     # One meeting's consent record, authorized in the resolver by getCall's rule.
     ("Query", "getMeetingConsent"),
     ("Query", "listCallsDateRange"),

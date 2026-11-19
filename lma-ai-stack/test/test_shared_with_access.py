@@ -688,6 +688,7 @@ LAMBDA_FUNCTIONS = AI_STACK / "source" / "lambda_functions"
 PYTHON_READERS = [
     "agenda_deriver/index.py",
     "call_cost_resolver/index.py",
+    "chat_attachments_resolver/index.py",
     "list_calls_gsi_resolver/index.py",
     "mcp_analytics/tools/get_virtual_participant_status.py",
     "meeting_consent_resolver/index.py",

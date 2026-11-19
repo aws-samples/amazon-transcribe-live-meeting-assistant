@@ -110,6 +110,7 @@ def test_the_content_retention_rules_are_unchanged(main: dict) -> None:
         "TranscriptRetention": {"Ref": "TranscriptionExpirationInDays"},
         "VideoKeyframeRetention": {"Ref": "TranscriptionExpirationInDays"},
         "ConsentEvidenceRetention": {"Ref": "TranscriptionExpirationInDays"},
+        "ChatAttachmentRetention": {"Ref": "TranscriptionExpirationInDays"},
         "VideoChunkCleanup": 1,
         "PendingUploadCleanup": 7,
     }
