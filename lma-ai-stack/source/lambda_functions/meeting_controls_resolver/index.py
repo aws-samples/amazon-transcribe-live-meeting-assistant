@@ -766,7 +766,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
         #  7. Deletion of the meeting's consent evidence images
         #  8. Deletion of the meeting's chat attachments (PK att#<CallId>, and files)
-        #  9. Deletion of the guidance pushed to it through the MCP server (PK gd#<CallId>)
+        #  9. Deletion of its notifications and every user's view of them (PK nt#<CallId>)
         with ThreadPoolExecutor(max_workers=9) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(delete_transcript_items, callid)
@@ -777,7 +777,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             keyframes_future = pool.submit(delete_keyframes, callid)
             evidence_future = pool.submit(delete_consent_evidence, callid)
             attachments_future = pool.submit(delete_chat_attachments, callid)
-            guidance_future = pool.submit(delete_meeting_guidance, callid)
+            notifications_future = pool.submit(delete_meeting_notifications, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -788,7 +788,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             keyframes_future.result()
             evidence_future.result()
             attachments_future.result()
-            guidance_future.result()
+            notifications_future.result()
 
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")
@@ -846,13 +846,17 @@ def delete_metering_records(callid):
     return _delete_partition(f"mtr#{callid}", "metering record", callid)
 
 
-def delete_meeting_guidance(callid):
-    """Delete the guidance pushed to the meeting through the MCP server (PK ``gd#<CallId>``).
+def delete_meeting_notifications(callid):
+    """Delete the meeting's notifications (PK ``nt#<CallId>``), and the older guidance rows.
 
-    Each note expires with the meeting, so without this a deleted meeting's
-    notes would remain until then. A meeting has a handful of them.
+    The partition holds the notifications, their dedup pointers, the per-minute
+    publish counters and each user's view of them (what they dismissed and
+    muted); each expires with the meeting, so without this a deleted meeting's
+    would remain until then. ``gd#<CallId>`` held guidance before notifications
+    replaced it, on deployments of a development build only, and goes too.
     """
-    return _delete_partition(f"gd#{callid}", "guidance item", callid)
+    deleted = _delete_partition(f"nt#{callid}", "notification row", callid)
+    return deleted + _delete_partition(f"gd#{callid}", "guidance item", callid)
 
 
 def _delete_partition(pk, kind, callid):

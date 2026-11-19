@@ -6,31 +6,27 @@
 
 Guidance is a short note an external agent leaves on a meeting for the people
 following it in LMA: "the customer asked about pricing twice; the 2026 price
-sheet is in the deal folder". It is stored under the meeting and announced to
-the meeting page, which shows it as a dismissible notification to the
-meeting's owner and the people it is shared with. It is never posted to the
-meeting's own chat, so the meeting's other participants do not see it.
+sheet is in the deal folder". It is a meeting notification of category
+``guidance`` (docs/meeting-notifications.md): shown at once in the meeting
+page's notifications panel to the meeting's owner and the people it is shared
+with, and never posted to the meeting's own chat, so the meeting's other
+participants do not see it. Guidance may quote the meeting, so it is deleted
+with the meeting's transcript.
 
-Each item is a row of the EventSourcing table under ``gd#<CallId>``, sorted by
-when it was added (``g#<CreatedAt>#<GuidanceId>``), so anything that wants the
-guidance a meeting has been given -- this tool's list, or an assistant reading
-it as instructions -- queries that one partition. The row carries the meeting's
-Owner, SharedWith and ExpiresAfter as they were when it was written, so it is
-announced to the same people and expires with the meeting.
-
-The write goes through the addMeetingGuidance mutation, which stores the row
-and publishes it to the onAddMeetingGuidance subscription, filtered on Owner and
-SharedWith like the meeting's other subscriptions (subscription.js).
+push publishes through lma_notifications.publish_meeting_notification, whose
+resolver puts the meeting's Owner and SharedWith on the published message.
+list reads the meeting's guidance, newest first, with the same query as
+list_meeting_notifications, so it includes guidance from other publishers.
 """
 
-import uuid
 from typing import Any, Dict, Optional
 
-from boto3.dynamodb.conditions import Key
+# pylint: disable-next=import-error
+from lma_notifications import GUIDANCE, publish_meeting_notification
 
-from tools.access import Caller, calls_table, require_meeting
+from tools.access import Caller, require_meeting
 from tools.appsync_client import graphql
-from tools.get_virtual_participant_status import shared_with_entries
+from tools.notifications import list_limit, read_page
 
 MAX_TEXT_CHARS = 2000
 MAX_TITLE_CHARS = 200
@@ -39,23 +35,8 @@ DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 # Recorded on each item, so a reader can tell where guidance came from.
 SOURCE = "mcp"
-
-ADD_MEETING_GUIDANCE = """
-mutation AddMeetingGuidance($input: AddMeetingGuidanceInput!) {
-  addMeetingGuidance(input: $input) {
-    CallId
-    GuidanceId
-    Title
-    Text
-    Level
-    Source
-    CreatedBy
-    CreatedAt
-    Owner
-    SharedWith
-  }
-}
-"""
+# The type within the guidance category of a note pushed over MCP.
+NOTE_TYPE = "note"
 
 
 def _text(value: Any, field: str, limit: int, required: bool) -> Optional[str]:
@@ -80,12 +61,6 @@ def _level(value: Any) -> str:
     return level
 
 
-def published_shared_with(value: Any) -> Optional[str]:
-    """SharedWith as "[a, b]", the form every filtered subscription message carries."""
-    entries = shared_with_entries(value)
-    return f"[{', '.join(entries)}]" if entries else None
-
-
 def push(
     caller: Caller,
     meeting_id: str,
@@ -100,27 +75,20 @@ def push(
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or meeting_id.strip()
 
-    item: Dict[str, Any] = {
-        "CallId": call_id,
-        "GuidanceId": str(uuid.uuid4()),
-        "Text": body,
-        "Level": severity,
-        "Source": SOURCE,
-        "CreatedBy": caller.user_id,
-        "Owner": meeting.get("Owner"),
-    }
-    if heading:
-        item["Title"] = heading
-    shared_with = published_shared_with(meeting.get("SharedWith"))
-    if shared_with:
-        item["SharedWith"] = shared_with
-    if meeting.get("ExpiresAfter") is not None:
-        item["ExpiresAfter"] = int(meeting["ExpiresAfter"])
-
-    stored = graphql(ADD_MEETING_GUIDANCE, {"input": item}).get("addMeetingGuidance") or {}
+    stored = publish_meeting_notification(
+        call_id,
+        category=GUIDANCE,
+        type=NOTE_TYPE,
+        title=heading,
+        body=body,
+        severity=severity,
+        source=SOURCE,
+        created_by=caller.user_id,
+        graphql=graphql,
+    )
     return {
         "meetingId": call_id,
-        "guidanceId": stored.get("GuidanceId", item["GuidanceId"]),
+        "guidanceId": stored.get("NotificationId"),
         "createdAt": stored.get("CreatedAt"),
         "level": severity,
         "title": heading,
@@ -129,34 +97,28 @@ def push(
     }
 
 
-def _list_limit(value: Any) -> int:
-    if value is None:
-        return DEFAULT_LIST_LIMIT
-    try:
-        return max(1, min(int(value), MAX_LIST_LIMIT))
-    except (TypeError, ValueError) as error:
-        raise ValueError("limit must be a whole number") from error
-
-
 def list_items(caller: Caller, meeting_id: str, limit: Any = None) -> Dict[str, Any]:
     """The guidance a meeting has been given, newest first."""
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or meeting_id.strip()
-    response = calls_table().query(
-        KeyConditionExpression=Key("PK").eq(f"gd#{call_id}"),
-        ScanIndexForward=False,
-        Limit=_list_limit(limit),
+    page = read_page(
+        call_id,
+        category=GUIDANCE,
+        limit=min(list_limit(limit, DEFAULT_LIST_LIMIT), MAX_LIST_LIMIT),
+        newest_first=True,
     )
     items = [
         {
-            "guidanceId": row.get("GuidanceId"),
+            "guidanceId": row.get("NotificationId"),
             "createdAt": row.get("CreatedAt"),
             "createdBy": row.get("CreatedBy"),
             "source": row.get("Source"),
-            "level": row.get("Level"),
+            "type": row.get("Type"),
+            "level": row.get("Severity"),
             "title": row.get("Title"),
-            "text": row.get("Text"),
+            "text": row.get("Body"),
         }
-        for row in response.get("Items", [])
+        for row in page.get("Items") or []
+        if row
     ]
     return {"meetingId": call_id, "guidance": items, "count": len(items)}

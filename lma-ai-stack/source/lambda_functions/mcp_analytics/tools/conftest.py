@@ -32,10 +32,10 @@ from tools._meeting_fakes import FakeTable, Recorder  # noqa: E402
 @pytest.fixture
 def calls_table(monkeypatch):
     """The EventSourcing table every tool reads."""
-    from tools import access, guidance, transcript_rows
+    from tools import access, transcript_rows
 
     table = FakeTable()
-    for module in (access, guidance, transcript_rows):
+    for module in (access, transcript_rows):
         monkeypatch.setattr(module, "calls_table", lambda: table)
     return table
 
@@ -58,11 +58,19 @@ def appsync(monkeypatch):
         meeting_actions,
         meeting_agenda,
         meeting_record,
+        notifications,
         virtual_participants,
     )
 
     recorder = Recorder()
-    for module in (guidance, meeting_actions, meeting_agenda, meeting_record, virtual_participants):
+    for module in (
+        guidance,
+        meeting_actions,
+        meeting_agenda,
+        meeting_record,
+        notifications,
+        virtual_participants,
+    ):
         monkeypatch.setattr(module, "graphql", recorder.graphql)
     return recorder
 

@@ -57,10 +57,10 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "name": "push_meeting_guidance",
         "description": (
             "Leave a short note of guidance on a meeting for the people following it in "
-            "LMA: it appears at once on the meeting page as a dismissible notification for "
-            "the meeting's owner and the people it is shared with, and is stored with the "
-            "meeting. It is NOT posted to the meeting's chat, so other participants do not "
-            "see it. Requires a read-write API key."
+            "LMA: it appears at once in the meeting page's notifications panel for the "
+            "meeting's owner and the people it is shared with, and is stored with the "
+            "meeting until its transcript is deleted. It is NOT posted to the meeting's "
+            "chat, so other participants do not see it. Requires a read-write API key."
         ),
         "inputSchema": {
             "type": "object",
@@ -83,12 +83,37 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "list_meeting_guidance",
-        "description": "List the guidance notes pushed to a meeting, newest first.",
+        "description": "List the guidance given on a meeting, newest first.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "meeting_id": MEETING_ID,
                 "limit": {"type": "number", "description": "Most items to return (default 50)"},
+            },
+            "required": ["meeting_id"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "list_meeting_notifications",
+        "description": (
+            "List the notifications LMA showed on a meeting's page to the people who can see "
+            "the meeting -- guidance (category 'guidance') and any other category -- oldest "
+            "first, a page at a time. Each has its category, type, severity, title, body "
+            "(Markdown), refs, dedupKey, actions and times. Pass since (ISO 8601) to get only "
+            "those created or updated since then, and nextCursor as cursor for the next page."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": MEETING_ID,
+                "category": {"type": "string", "description": "Only this category"},
+                "since": {
+                    "type": "string",
+                    "description": "Only those created or updated at or after this ISO 8601 time",
+                },
+                "limit": {"type": "number", "description": "Most items to return (default 100)"},
+                "cursor": {"type": "string", "description": "nextCursor from the previous page"},
             },
             "required": ["meeting_id"],
         },

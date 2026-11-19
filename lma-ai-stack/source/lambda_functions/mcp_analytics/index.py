@@ -36,6 +36,7 @@ from tools import (
     meeting_actions,
     meeting_agenda,
     meeting_record,
+    notifications,
     schedule_meeting,
     search_meetings,
     start_meeting_now,
@@ -557,6 +558,14 @@ MEETING_TOOL_HANDLERS = {
     ),
     "list_meeting_guidance": lambda caller, a: guidance.list_items(
         caller, a.get("meeting_id"), limit=a.get("limit")
+    ),
+    "list_meeting_notifications": lambda caller, a: notifications.list_items(
+        caller,
+        a.get("meeting_id"),
+        category=a.get("category"),
+        since=a.get("since"),
+        limit=a.get("limit"),
+        cursor=a.get("cursor"),
     ),
     "update_meeting_agenda": lambda caller, a: meeting_agenda.execute(
         caller,

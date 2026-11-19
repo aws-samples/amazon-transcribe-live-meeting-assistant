@@ -427,9 +427,20 @@ type Mutation @aws_iam {
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
 	# like addTranscriptSegment. See docs/meeting-video.md.
 	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
-	# Written by the hosted MCP server's push_meeting_guidance tool, which sets
-	# Owner and SharedWith from the meeting; IAM only, like addVideoKeyframe.
-	addMeetingGuidance(input: AddMeetingGuidanceInput!): MeetingGuidance
+	# Stores a notification on a meeting for the people who can see it, and
+	# publishes it to onMeetingNotification. IAM only: a backend publishes it,
+	# through lma_notifications.publish_meeting_notification. The resolver reads
+	# the meeting and puts its current Owner and SharedWith on the published
+	# message; the publisher does not name recipients, and the stored row holds
+	# none. A second publish with the same Category and DedupKey updates the
+	# notification it made. See docs/meeting-notifications.md.
+	publishMeetingNotification(input: PublishMeetingNotificationInput!): MeetingNotification
+	# The signed-in user's own view of one meeting's notifications: the ones
+	# they dismissed and the categories they muted there. Changes only their own
+	# view; anyone getCall answers for the meeting may keep one.
+	updateMyMeetingNotificationState(input: UpdateMyMeetingNotificationStateInput!): MeetingNotificationState @aws_cognito_user_pools
+	# The signed-in user's categories muted on every meeting.
+	updateMyNotificationPreferences(input: UpdateMyNotificationPreferencesInput!): NotificationPreferences @aws_cognito_user_pools
 	# Written by the call event processor for an ADD_CHAT_ATTACHMENT event; IAM
 	# only, like addTranscriptSegment. See docs/virtual-participant.md.
 	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment
@@ -557,6 +568,15 @@ type Query @aws_cognito_user_pools
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
 	getMeetingConsent(CallId: ID!): MeetingConsentState
+	# A meeting's notifications in the order they were first published (newest
+	# first with NewestFirst), a page at a time. Category keeps one category;
+	# Since keeps those created or updated at or after it. Answered to the
+	# callers getCall answers, decided from the meeting as it is now.
+	listMeetingNotifications(CallId: ID!, Category: String, Since: AWSDateTime, Limit: Int, NextToken: String, NewestFirst: Boolean): MeetingNotificationPage
+	# The signed-in user's view of one meeting's notifications.
+	getMyMeetingNotificationState(CallId: ID!): MeetingNotificationState @aws_cognito_user_pools
+	# The signed-in user's categories muted on every meeting.
+	getMyNotificationPreferences: NotificationPreferences @aws_cognito_user_pools
 	# The deployment's consent mode and rule, and whether a meeting may choose a
 	# less strict one, for the Create Virtual Participant form to show which
 	# choices apply. Read by every signed-in user, before any meeting exists.
@@ -1006,8 +1026,10 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
 		@aws_subscribe(mutations: ["addVideoKeyframe"])
-	onAddMeetingGuidance(CallId: ID): MeetingGuidance
-		@aws_subscribe(mutations: ["addMeetingGuidance"])
+	# Filtered on Owner and SharedWith by subscription.js, as the meeting's own
+	# messages are. Without CallId, every meeting the subscriber may see.
+	onMeetingNotification(CallId: ID): MeetingNotification
+		@aws_subscribe(mutations: ["publishMeetingNotification"])
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
@@ -1162,50 +1184,126 @@ input AddVideoKeyframeInput {
 	SharedWith: String
 }
 
-# How prominently the meeting page shows a guidance item.
-enum MeetingGuidanceLevel {
+# How prominently a meeting notification is shown.
+enum NotificationSeverity {
 	INFO
+	SUGGESTION
 	WARNING
 	URGENT
 }
 
-# A note of guidance an external agent left on a meeting through the hosted MCP
-# server (push_meeting_guidance), for the people following it in LMA. Stored
-# under the meeting (PK "gd#<CallId>", SK "g#<CreatedAt>#<GuidanceId>") with the
-# meeting's Owner, SharedWith and ExpiresAfter, and shown on the meeting page;
-# never posted to the meeting's chat. See docs/mcp-api-key-auth.md.
-type MeetingGuidance implements DynamoDbBase @aws_cognito_user_pools
-@aws_iam {
-	PK: ID!
-	SK: ID!
-	CreatedAt: AWSDateTime!
-	UpdatedAt: AWSDateTime
-	ExpiresAfter: AWSTimestamp
+# What a notification's button does when it is pressed.
+enum NotificationActionKind {
+	MUTATION
+	COPY
+}
+
+# A button on a notification. For COPY, Payload is {"text": "..."}, copied to
+# the clipboard. For MUTATION, Payload is {"action": "<name>", "args": {...}},
+# naming an action from a fixed list that the publish resolver and the UI both
+# hold; the UI runs that action's own operation as the signed-in user. Payload
+# is never an operation itself.
+type NotificationAction @aws_cognito_user_pools @aws_iam {
+	Label: String!
+	Kind: NotificationActionKind!
+	Payload: String!
+}
+
+input NotificationActionInput {
+	Label: String!
+	Kind: NotificationActionKind!
+	Payload: String!
+}
+
+# A notification on a meeting, for its owner and the people it is shared with,
+# shown in LMA only: never posted to the meeting's chat or spoken. Stored under
+# the meeting (PK "nt#<CallId>", SK "n#<CreatedAt>#<NotificationId>") with no
+# recipient list; who may read it is decided from the meeting each time. Owner
+# and SharedWith are set on the published message only, from the meeting as it
+# was when it was published. See docs/meeting-notifications.md.
+type MeetingNotification @aws_cognito_user_pools @aws_iam {
 	CallId: ID!
-	GuidanceId: ID!
+	NotificationId: ID!
+	# "guidance", or another lower-case name of up to 32 characters.
+	Category: String!
+	# A free name within the category, such as "ask_question".
+	Type: String!
+	Severity: NotificationSeverity!
 	Title: String
-	Text: String!
-	Level: MeetingGuidanceLevel!
-	# Where it came from: "mcp".
-	Source: String
-	# The user the MCP API key belongs to.
+	# Markdown.
+	Body: String
+	# Opaque references, such as "segment:<segmentId>", kept as given.
+	Refs: [String]
+	DedupKey: String
+	Actions: [NotificationAction]
+	# Who published it: "mcp", or the publishing feature's name.
+	Source: String!
+	# The user it was published on behalf of, when there is one.
 	CreatedBy: String
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime!
+	# 1 when first published; one more on each update through DedupKey.
+	Revision: Int!
+	# After this the page stops showing it; it stays stored until the meeting,
+	# or for guidance the transcript, is deleted.
+	ExpiresAt: AWSDateTime
+	# True when the publish created it, false when it updated one. Set on the
+	# publish answer only.
+	Created: Boolean
+	# Set on the published message only, from the meeting.
 	Owner: String
 	SharedWith: String
 }
 
-input AddMeetingGuidanceInput {
-	CallId: ID!
-	GuidanceId: ID!
-	Title: String
-	Text: String!
-	Level: MeetingGuidanceLevel!
-	Source: String
-	CreatedBy: String
-	ExpiresAfter: AWSTimestamp
-	Owner: String
-	SharedWith: String
+type MeetingNotificationPage @aws_cognito_user_pools @aws_iam {
+	Items: [MeetingNotification]
+	NextToken: String
 }
+
+input PublishMeetingNotificationInput {
+	CallId: ID!
+	Category: String!
+	Type: String!
+	Severity: NotificationSeverity!
+	Title: String
+	Body: String
+	Refs: [String]
+	DedupKey: String
+	Actions: [NotificationActionInput]
+	Source: String!
+	CreatedBy: String
+	ExpiresAt: AWSDateTime
+	# The row's expiry (DynamoDB TTL); never later than the meeting's.
+	ExpiresAfter: AWSTimestamp
+}
+
+# One user's view of one meeting's notifications.
+type MeetingNotificationState @aws_cognito_user_pools {
+	CallId: ID!
+	Dismissed: [ID]
+	MutedCategories: [String]
+}
+
+# Dismiss and Restore cannot both be given, nor Mute and Unmute.
+input UpdateMyMeetingNotificationStateInput {
+	CallId: ID!
+	Dismiss: [ID]
+	Restore: [ID]
+	Mute: [String]
+	Unmute: [String]
+}
+
+# One user's categories muted on every meeting.
+type NotificationPreferences @aws_cognito_user_pools {
+	MutedCategories: [String]
+}
+
+# Mute and Unmute cannot both be given.
+input UpdateMyNotificationPreferencesInput {
+	Mute: [String]
+	Unmute: [String]
+}
+
 # An image or file shared in the meeting chat, beside the chat message that
 # carried it (SegmentId). Stored under the meeting (PK "att#<CallId>") with the
 # transcript's retention and the meeting's Owner and SharedWith, and deleted

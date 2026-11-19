@@ -8248,18 +8248,221 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.response.vtl
 
-  # A note of guidance on a meeting from the hosted MCP server
-  # (push_meeting_guidance); published to onAddMeetingGuidance.
-  AddMeetingGuidanceAppSyncResolver:
+  # Meeting notifications (docs/meeting-notifications.md), all in AppSync and
+  # DynamoDB with no Lambda. publishMeetingNotification (IAM only) checks the
+  # notification and reads the meeting, whose Owner and SharedWith go on the
+  # published message only; counts it against the meeting's allowance for the
+  # minute; finds the notification an earlier publish with the same DedupKey
+  # made; and stores it. The reads run after MeetingAccessAppSyncFunction, which
+  # decides access from the meeting as it is now.
+  NotificationPublishMeetingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishMeeting
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishMeeting.js
+
+  NotificationPublishRateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishRate
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishRate.js
+
+  NotificationPublishDedupAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishDedup
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishDedup.js
+
+  NotificationPublishWriteAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishWrite.js
+
+  ListMeetingNotificationsAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ListMeetingNotifications
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/listMeetingNotifications.js
+
+  NotificationMeetingExpiryAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationMeetingExpiry
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationMeetingExpiry.js
+
+  MyMeetingNotificationStateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MyMeetingNotificationState
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/myMeetingNotificationState.js
+
+  PublishMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
-      FieldName: addMeetingGuidance
-      RequestMappingTemplateS3Location: ../source/appsync/addMeetingGuidance.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      FieldName: publishMeetingNotification
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt NotificationPublishMeetingAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishRateAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishDedupAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishWriteAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  ListMeetingNotificationsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listMeetingNotifications
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt ListMeetingNotificationsAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  UpdateMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt NotificationMeetingExpiryAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  UpdateMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   AddChatAttachmentAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -8806,13 +9009,13 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
 
-  OnAddMeetingGuidanceAppSyncResolver:
+  OnMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Subscription
-      FieldName: onAddMeetingGuidance
+      FieldName: onMeetingNotification
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
       Runtime:
@@ -11955,6 +12158,7 @@ Resources:
           USER_POOL_ID: !Ref UserPoolId
           ADMIN_GROUP: "Admin"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -12010,6 +12214,24 @@ Resources:
                   - cognito-idp:AdminRemoveUserFromGroup
                   - cognito-idp:AdminListGroupsForUser
                 Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              # A deleted user's meeting notification preferences: DeleteItem
+              # only, and only under the usr# partitions.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DeleteItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "usr#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   UserManagementDataSourceRole:
     Type: AWS::IAM::Role
@@ -12282,7 +12504,7 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
                 # The meeting tools' writes, each made only after the tool has
                 # checked the MCP caller's access (tools/access.py).
-                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/addMeetingGuidance"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/publishMeetingNotification"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAgenda"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateScheduledVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/endVirtualParticipant"

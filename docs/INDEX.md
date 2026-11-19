@@ -58,6 +58,7 @@ title: "LMA Documentation"
 ### MCP Server Integration
 
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
+- [Meeting Notifications](meeting-notifications.md) — Items shown live in a meeting's Notifications panel to the people who can see the meeting (guidance is one category): who sees them, dismissing and muting, buttons, retention, reading them over MCP, and publishing one from a backend function
 - [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, key scopes (read only, read and write), JSON-RPC 2.0 protocol support, and every hosted MCP tool: the live transcript, meeting guidance, the meeting record, the meeting assistant and meeting management
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Salesforce Connected App with OAuth 2.1
 - [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)

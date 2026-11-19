@@ -49,7 +49,11 @@ What is deleted, for the meeting:
 * the meeting's chat attachments, which belong to the chat lines of the
   transcript: their items (``att#<CallId>``) and every version of every file in
   the meeting's attachments folder (``lma-chat-attachments/<CallId>/``);
-* the transcript knowledge base's entries for those files.
+* the transcript knowledge base's entries for those files;
+* the meeting's notifications of the categories that may quote the transcript
+  (``guidance``; ``lma_notifications.TRANSCRIPT_BOUND_CATEGORIES``), with
+  their dedup pointers, and any guidance rows an earlier build stored under
+  ``gd#<CallId>``. The meeting's other notifications are kept.
 
 The meeting record is then stamped with when its transcript was deleted, and
 how many segments and files were removed, which the meeting page shows. The
@@ -81,6 +85,7 @@ from lma_config import (  # configuration layer
     deletion_delay_minutes,
 )
 from lma_meeting_preparation.rules import strip_quotes  # configuration layer
+from lma_notifications import TRANSCRIPT_BOUND_CATEGORIES  # configuration layer
 
 # pylint: enable=import-error
 
@@ -395,6 +400,45 @@ def _attachment_items(call_id: str) -> Iterable[Dict[str, Any]]:
         query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
+def _partition_items(
+    pk: str, *, names: Optional[Dict[str, str]] = None
+) -> Iterable[Dict[str, Any]]:
+    """Every item under one partition key, a page at a time, with PK, SK and ``names``."""
+    query: Dict[str, Any] = {
+        "KeyConditionExpression": Key("PK").eq(pk),
+        "ProjectionExpression": ", ".join(["PK", "SK", *(names or {})]),
+        "ConsistentRead": True,
+    }
+    if names:
+        query["ExpressionAttributeNames"] = names
+    while True:
+        page = _table().query(**query)
+        yield from page.get("Items", [])
+        if not page.get("LastEvaluatedKey"):
+            return
+        query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def delete_transcript_bound_notifications(call_id: str) -> int:
+    """Delete the meeting's notifications that may quote the transcript; returns how many rows.
+
+    The notifications of TRANSCRIPT_BOUND_CATEGORIES and their dedup pointers,
+    both of which carry the category, under ``nt#<CallId>``; the partition's
+    other rows (other categories, publish counters, users' views) are kept.
+    Also every row under ``gd#<CallId>``, where an earlier build kept guidance.
+    """
+    deleted = 0
+    with _table().batch_writer() as batch:
+        for item in _partition_items(f"nt#{call_id}", names={"#category": "Category"}):
+            if item.get("Category") in TRANSCRIPT_BOUND_CATEGORIES:
+                batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                deleted += 1
+        for item in _partition_items(f"gd#{call_id}"):
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+            deleted += 1
+    return deleted
+
+
 def delete_attachments(call_id: str) -> int:
     """Delete the meeting's chat attachments: their items, and every version of their files.
 
@@ -494,6 +538,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     keys = delete_files(call_id)
     remove_from_knowledge_base(keys)
     attachments = delete_attachments(call_id)
+    notifications = delete_transcript_bound_notifications(call_id)
     record_deletion(call_id, trigger, segments, len(keys) + attachments)
     checklist_items = strip_checklist_quotes(call_id)
     LOGGER.info(
@@ -506,6 +551,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
                 "filesDeleted": len(keys),
                 "attachmentFilesDeleted": attachments,
                 "checklistItemsWithQuotesRemoved": checklist_items,
+                "notificationRowsDeleted": notifications,
             }
         )
     )
