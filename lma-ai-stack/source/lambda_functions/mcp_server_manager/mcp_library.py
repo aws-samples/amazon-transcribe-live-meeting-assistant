@@ -42,10 +42,12 @@ of its own.
 
 An import (``plan_import``) reads such a document and decides, per server and
 matched to the installed servers **by name**, whether it creates a server or
-updates one. Whatever the document holds in a credential field is ignored: an
-imported server's credentials are always entered again on the receiving
-deployment, and a server that needs them is marked ``CredentialsRequired`` until
-they are, which keeps the meeting assistant from loading it.
+updates one. Whatever the document holds in a credential field is ignored. A
+server the import creates has its credentials entered on the receiving
+deployment; a server it updates keeps the credentials it stores when the entry
+gives the same endpoint and authentication type, and otherwise has them entered
+again. A server waiting for its credentials is marked ``CredentialsRequired``
+until they are entered, which keeps the meeting assistant from loading it.
 
 This module does no I/O.
 """
@@ -104,6 +106,11 @@ OAUTH_SETTINGS: Dict[str, Sequence[str]] = {
 HEADER_NAME = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}")
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 AUTH_TYPE_NAME = re.compile(r"[a-z0-9_]{1,64}")
+#: The server ids an import accepts: the same forms oauth_manager validates
+#: (SERVER_ID_PATTERN and HTTP_ENDPOINT_PATTERN there), which are what the UI
+#: and the registry produce. test_mcp_library.py holds the copies equal.
+SERVER_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)?")
+HTTP_ENDPOINT_PATTERN = re.compile(r"https?://[^\s\x00-\x1f\x7f]+")
 
 MAX_SERVERS = 50
 MAX_TEXT = 2048
@@ -307,9 +314,12 @@ def _imported(entry: Any, validate_package: Callable[[str, str], str]) -> Import
     name = _text(entry.get("name"), 256)
     if not name:
         raise LibraryError("an entry has no name")
-    server_id = _text(entry.get("serverId"), 256) or name
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in server_id):
-        raise LibraryError(f"{name}: the server id holds control characters")
+    server_id = _text(entry.get("serverId"), 214) or name
+    if not (SERVER_ID_PATTERN.fullmatch(server_id) or HTTP_ENDPOINT_PATTERN.fullmatch(server_id)):
+        raise LibraryError(
+            f"{name}: the server id is not a registry name (letters, digits, '.', '_', '-' "
+            "and at most one '/') or an http(s) endpoint URL"
+        )
     package_type = entry.get("packageType") or "pypi"
     if package_type not in PACKAGE_TYPES:
         raise LibraryError(f"{name}: package type {package_type!r} is not one of {PACKAGE_TYPES}")

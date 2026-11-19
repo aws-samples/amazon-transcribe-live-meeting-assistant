@@ -535,6 +535,24 @@ def test_a_package_server_import_starts_its_layer_build(monkeypatch):
     assert target.items["env-server"]["BuildId"] == "build-x"
 
 
+def test_the_server_id_patterns_are_the_oauth_managers():
+    oauth = (Path(__file__).parent.parent / "oauth_manager" / "index.py").read_text(
+        encoding="utf-8"
+    )
+    for name in ("SERVER_ID_PATTERN", "HTTP_ENDPOINT_PATTERN"):
+        pattern = getattr(mcp_library, name).pattern
+        assert f'{name} = re.compile(r"{pattern}")' in oauth, name
+
+
+@pytest.mark.parametrize("server_id", ["has space", "a/b/c", "-leading", "ftp://x"])
+def test_an_entry_whose_server_id_is_not_an_accepted_form_is_skipped(server_id):
+    document = _export([RECORDS[0]])
+    document["servers"][0]["serverId"] = server_id
+    result = _run(FakeTable([]), "importMCPServerLibrary", ADMIN, library=json.dumps(document))
+    assert result["Servers"][0]["Action"] == "skipped"
+    assert "server id" in result["Servers"][0]["Message"]
+
+
 def test_reimporting_an_unchanged_package_server_starts_no_build(monkeypatch):
     monkeypatch.setattr(index, "CODEBUILD_PROJECT", "layer-build")
     target = FakeTable([RECORDS[3]])

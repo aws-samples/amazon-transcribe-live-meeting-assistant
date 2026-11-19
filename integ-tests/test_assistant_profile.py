@@ -19,7 +19,11 @@ Three behaviours, each from the outside:
 - **The MCP server library round-trips.** ``client.mcp.export_library()`` holds no
   credential; importing it back changes nothing but the update times (an unchanged
   package server starts no layer build, so the re-import rebuilds nothing); and a
-  server imported from a library is created waiting for its credentials.
+  server imported from a library is created waiting for its credentials. On a
+  long-lived stack, the round trip can also fail for a reason that is not a
+  regression: a server stored without a ``Version`` comes back as ``latest``
+  (and a package server then rebuilds), and a server whose stored package or id
+  an install would refuse today is ``skipped``. Check those first.
 
 Opt-in. It runs only with ``LMA_TEST_ASSISTANT_PROFILE=1``, because it changes
 deployment-wide settings while it runs (put back in teardown), takes several

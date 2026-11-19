@@ -27,6 +27,7 @@ import AuthConfigModal from './AuthConfigModal';
 import McpLibraryActions from './McpLibraryActions';
 import { updateCredentialsMutation } from './mcp-library';
 import useUserGroups from '../../hooks/use-user-groups';
+import useSettingsContext from '../../contexts/settings';
 import './mcp-servers.css';
 
 const client = generateClient();
@@ -62,6 +63,7 @@ export const importedSettings = (server) => {
  */
 const MCPServersContent = ({ vpData = null }) => {
   const { isAdmin } = useUserGroups();
+  const { settings } = useSettingsContext() || {};
   const [installedServers, setInstalledServers] = useState([]);
   const [loadingInstalled, setLoadingInstalled] = useState(false);
   const [installedError, setInstalledError] = useState(null);
@@ -400,7 +402,7 @@ const MCPServersContent = ({ vpData = null }) => {
                     Export the installed servers to a file without their credentials, or import such a file from another
                     deployment. An imported server that needs credentials is not used until they are entered.
                   </Box>
-                  <McpLibraryActions onImported={fetchInstalledServers} />
+                  <McpLibraryActions onImported={fetchInstalledServers} stackName={settings?.StackName || ''} />
                 </SpaceBetween>
               )}
 

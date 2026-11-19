@@ -724,7 +724,9 @@ def _update_request(
         if not present
     ]
     if server.needs_credentials and not step.keep_credentials:
-        # The stored credentials are for another type of authentication.
+        # The stored credentials are not kept (plan_import): the entry gives
+        # another authentication type or another endpoint, or the server was
+        # already waiting for its credentials.
         sets += [
             "CredentialsRequired = :required",
             "RequiredAuthType = :authType",
