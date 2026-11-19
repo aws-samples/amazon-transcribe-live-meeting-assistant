@@ -740,7 +740,9 @@ def _fetch_server_configs() -> List[Dict]:
         }
     )
     
-    servers = response.get('Items', [])
+    # A server imported from an MCP server library waits for its credentials to
+    # be entered on this deployment, and is not loaded until they are.
+    servers = [s for s in response.get('Items', []) if not s.get('CredentialsRequired')]
     logger.info(f"Found {len(servers)} active MCP servers for account {AWS_ACCOUNT_ID}")
     
     _cached_server_configs = servers
@@ -752,6 +754,38 @@ def _fetch_server_configs() -> List[Dict]:
 def load_account_mcp_servers() -> Tuple[List, bool]:
     """
     Load MCP server clients for the current AWS account using Strands MCPClient.
+
+    The clients of load_account_mcp_servers_by_id(), without their server ids.
+
+    Returns:
+        Tuple of (List of MCPClient objects, bool indicating if cache was used)
+    """
+    clients, from_cache = load_account_mcp_servers_by_id()
+    return list(clients.values()), from_cache
+
+
+def installed_mcp_server_names() -> Dict[str, str]:
+    """The active installed MCP servers, ServerId -> Name, as last fetched.
+
+    Read from the server records load_account_mcp_servers_by_id() fetched (and
+    caches for _CONFIG_CACHE_TTL_SECONDS), so call it after that. A server that
+    is installed but whose client could not be started is listed here and not
+    among the clients; the meeting assistant names such a server to the model as
+    not available. A record with no Name is listed under its ServerId.
+    """
+    return {
+        str(server['ServerId']): str(server.get('Name') or server['ServerId'])
+        for server in _cached_server_configs
+        if server.get('ServerId')
+    }
+
+
+def load_account_mcp_servers_by_id() -> Tuple[Dict[str, Any], bool]:
+    """
+    Load MCP server clients for the current AWS account using Strands MCPClient,
+    keyed by each server's ServerId, so a caller can offer some servers and not
+    others (the meeting assistant's per-server selection in the configuration
+    profile).
     
     Uses module-level caching to avoid recreating MCP clients on every Lambda invocation.
     On warm starts with unchanged configs, returns cached clients almost instantly.
@@ -763,18 +797,18 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
     - Unhealthy clients are automatically recreated
     
     Returns:
-        Tuple of (List of MCPClient objects, bool indicating if cache was used)
+        Tuple of (ServerId -> MCPClient, bool indicating if cache was used)
         The bool is True if cached clients were returned (warm start), False if freshly created
     """
     global _cached_mcp_clients, _cached_config_fingerprint
     
     if not MCP_SERVERS_TABLE:
         logger.warning("MCP_SERVERS_TABLE not configured")
-        return [], False
+        return {}, False
     
     if not AWS_ACCOUNT_ID:
         logger.warning("AWS_ACCOUNT_ID not configured")
-        return [], False
+        return {}, False
     
     try:
         # Check if required dependencies are available
@@ -783,7 +817,7 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
             from mcp import stdio_client, StdioServerParameters
         except ImportError as e:
             logger.warning(f"Strands MCP support not available: {e}")
-            return [], False
+            return {}, False
         
         # Fetch server configs (uses cache with TTL)
         servers = _fetch_server_configs()
@@ -792,7 +826,7 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
             logger.info("No active MCP servers found")
             if _cached_mcp_clients:
                 _cleanup_cached_clients()
-            return [], False
+            return {}, False
         
         # Check if config has changed since last time
         new_fingerprint = _compute_config_fingerprint(servers)
@@ -839,7 +873,7 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
                 logger.info(f"Returning {len(healthy_clients)} MCP clients ({restarted} restarted, {len(dead_ids)} recreated)")
             else:
                 logger.info(f"Returning {len(healthy_clients)} cached MCP clients (all active, zero restart needed)")
-            return list(healthy_clients.values()), True
+            return dict(healthy_clients), True
         
         # Config changed or no cache - rebuild all clients
         if config_changed and _cached_mcp_clients:
@@ -866,7 +900,7 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
         _cached_config_fingerprint = new_fingerprint
         
         logger.info(f"Created and pre-started {len(new_clients)} MCP clients from {len(servers)} servers in {total_elapsed:.2f}s")
-        return list(new_clients.values()), False
+        return dict(new_clients), False
         
     except Exception as e:
         logger.error(f"Error loading MCP clients: {e}")
@@ -876,9 +910,9 @@ def load_account_mcp_servers() -> Tuple[List, bool]:
         # If we have cached clients, return them as fallback
         if _cached_mcp_clients:
             logger.info(f"Returning {len(_cached_mcp_clients)} cached MCP clients as fallback after error")
-            return list(_cached_mcp_clients.values()), True
+            return dict(_cached_mcp_clients), True
         
-        return [], False
+        return {}, False
 
 
 def _create_mcp_client_for_server(server: Dict) -> Optional[Any]:

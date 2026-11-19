@@ -294,6 +294,12 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
             "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/meeting_consent.json",
             "transcriber",
         ),
+        # The UI's configuration editor tests render every section schema and
+        # compile its patterns as JavaScript.
+        (
+            "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/meeting_assist.json",
+            "ui",
+        ),
         # The VP static tests read the README's Launch Stack table and these Lambdas.
         ("README.md", "vp_template"),
         ("lma-ai-stack/source/lambda_functions/vnc_edge_token/index.py", "vp_template"),
