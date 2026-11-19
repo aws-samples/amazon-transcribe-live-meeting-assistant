@@ -2084,7 +2084,9 @@ async def execute_process_event_api_mutation(
 
         add_transcript_tasks = []
         add_transcript_sentiment_tasks = []
-        dropped_for_deletion: List[Dict[str, Any]] = []
+        # Every segment of a record names the same meeting, so one whose
+        # transcript is deleted drops them all, and the duration update too.
+        transcript_deleted = False
         # At most one per language new to the meeting; see language_to_record.
         detected_language_tasks = []
 
@@ -2106,7 +2108,7 @@ async def execute_process_event_api_mutation(
                     "Segment for a meeting whose transcript was deleted; not written",
                     extra=dict(call_id=normalized_message.get("CallId")),
                 )
-                dropped_for_deletion.append(normalized_message)
+                transcript_deleted = True
                 continue
 
             # The Owner the event itself carried, before the segment takes the
@@ -2181,9 +2183,7 @@ async def execute_process_event_api_mutation(
         # end latest, so the duration is given the latest end of all of them.
         update_call_aggregation_tasks = []
         final_messages = [
-            m
-            for m in normalized_messages
-            if not m["IsPartial"] and not any(m is d for d in dropped_for_deletion)
+            m for m in normalized_messages if not m["IsPartial"] and not transcript_deleted
         ]
         if final_messages:
             update_call_aggregation_tasks = await get_call_aggregation_tasks(

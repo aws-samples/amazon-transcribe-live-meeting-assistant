@@ -280,10 +280,11 @@ def session_number_of(record: Any, key: str = "SessionNumber") -> int:
     """The capture session that ``record[key]`` names.
 
     A meeting has one session unless it is rejoined (docs/virtual-participant.md#rejoin).
-    Only the START and END events of a later session carry ``SessionNumber``,
-    and a meeting record carries ``SessionStartedNumber`` once a later session
-    has started. Anything that names no session, or a number below 2, is the
-    first session. A bool is not read as a number.
+    A Virtual Participant names its session in every START and END, the first
+    session's included. Events from streaming clients, the stale-meeting reaper
+    and older VP releases name none, which is read as session 1. A meeting
+    record carries ``SessionStartedNumber`` once a later session has started.
+    A number below 2 is the first session too, and a bool is not read as a number.
     """
     if not isinstance(record, dict):
         return 1

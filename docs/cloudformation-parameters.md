@@ -608,7 +608,7 @@ Console label: *Lambda Hook Function ARN for Custom Post Processing, after the C
 - **Allowed values:** Matches `^(|arn:aws:lambda:.*)$`
 - **Kind:** Resource. Grants the meeting event processor permission to invoke the named function.
 
-(Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed. This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
+(Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed. This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system. For a meeting whose transcript has been deleted by the Retention settings, the payload also carries TranscriptDeletedAt.
 
 ## Amazon CloudFront Configuration
 

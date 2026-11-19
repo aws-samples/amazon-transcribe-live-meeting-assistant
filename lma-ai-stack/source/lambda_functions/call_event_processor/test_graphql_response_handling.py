@@ -37,6 +37,7 @@ the response reads are the pipeline's own.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
 import sys
@@ -2447,3 +2448,33 @@ def test_a_late_end_of_the_first_session_leaves_a_rejoined_meeting_live(
     )
     assert mutation_inputs(session, "updateCallStatus") == []
     assert _deletion_payloads(deletion_function) == []
+
+
+class EchoingTranscriptHook:
+    """A transcript hook that hands each segment back unchanged, as a new dict."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, **kwargs: Any) -> Dict[str, Any]:
+        self.calls += 1
+        return {"Payload": io.BytesIO(kwargs["Payload"].encode("utf-8"))}
+
+
+def test_a_segment_of_a_deleted_transcript_is_dropped_with_a_transcript_hook_set(
+    schema, emitted, monkeypatch
+):
+    """The hook's answer replaces the segment with a new dict; the duration
+    update is still left out."""
+    hook = EchoingTranscriptHook()
+    session = segment_session(schema, _meeting_record(TranscriptDeletedAt=DELETED_AT))
+    run_with(
+        session,
+        dict(SEGMENT_EVENT),
+        monkeypatch,
+        TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN="arn:transcript-hook",
+        LAMBDA_HOOK_CLIENT=hook,
+    )
+    assert hook.calls == 1, "the hook ran, so the segment is a dict of its own"
+    assert mutation_inputs(session, "addTranscriptSegment") == []
+    assert mutation_inputs(session, "updateCallAggregation") == []
