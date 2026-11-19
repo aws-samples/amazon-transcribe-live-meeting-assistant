@@ -155,7 +155,7 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `search_lma_meetings` | read | own meetings (Admin: all) | Search transcripts/summaries with natural language |
 | `get_meeting_transcript` | read | owner, shared, Admin | Get full transcript (json, text, or srt format) |
 | `get_meeting_summary` | read | owner, shared, Admin | Get AI summary with action items and topics |
-| `list_meetings` | read | owner, shared, Admin | List meetings with date/participant/status filters |
+| `list_meetings` | read | owner, shared, Admin | List meetings with date and status filters (`participant` matches no meeting LMA recorded) |
 | `get_virtual_participant_status` | read | VP owner, shared, Admin | Poll a Virtual Participant's status |
 | `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant. A meeting the caller has already scheduled is updated rather than scheduled twice; see [Scheduling a Meeting Again](#scheduling-a-meeting-again) |
 | `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant |
