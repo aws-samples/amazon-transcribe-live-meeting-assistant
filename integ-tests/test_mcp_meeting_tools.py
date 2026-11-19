@@ -109,3 +109,6 @@ def test_delete_meeting_requires_confirm(observed) -> None:
 def test_delete_meeting_with_confirm_deletes_the_meeting(observed) -> None:
     assert observed["delete_error"] is None, observed["delete_error"]
     assert not observed["meeting_after_delete"], "the meeting row is still there after delete_meeting"
+    assert observed["guidance_after_delete"] == 0, (
+        f"{observed['guidance_after_delete']} guidance row(s) left after delete_meeting"
+    )

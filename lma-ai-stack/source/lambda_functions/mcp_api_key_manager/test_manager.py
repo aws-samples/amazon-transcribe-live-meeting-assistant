@@ -218,7 +218,7 @@ class TestListKeys(unittest.TestCase):
 
 
 class TestKeyScope(unittest.TestCase):
-    """A key is read unless read-write is asked for; a key stored without one is read."""
+    """A key is read unless read-write is asked for; a key stored without one is listed as legacy."""
 
     def _generate(self, mock_dynamo, arguments):
         mock_table = MagicMock()

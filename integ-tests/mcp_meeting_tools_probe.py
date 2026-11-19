@@ -311,6 +311,8 @@ class Probe:
         while time.monotonic() < deadline and self.meeting_row():
             time.sleep(3)
         self.observed["meeting_after_delete"] = self.meeting_row() is not None
+        # Read before cleanup() runs, which removes gd# rows itself.
+        self.observed["guidance_after_delete"] = self._guidance_rows()
 
 
 def _fetch_status(url: str) -> int | None:

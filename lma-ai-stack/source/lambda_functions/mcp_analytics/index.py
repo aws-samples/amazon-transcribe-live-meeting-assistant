@@ -497,7 +497,8 @@ def tools_for_scope(scope: str) -> list:
 def scope_refusal(tool_name: str, scope: str) -> str:
     """Why a key cannot call a tool that changes something."""
     held = (
-        "this key was created before keys had scopes, and keeps the original tools only"
+        "this key was created before keys had scopes, and keeps the original tools "
+        "and the read-only tools"
         if scope == LEGACY_SCOPE
         else "this key has the read scope"
     )
