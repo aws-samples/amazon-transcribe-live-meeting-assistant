@@ -128,11 +128,13 @@ def _definitions(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     ]
 
 
-def _end(client: LMAClient, vp_id: str | None) -> None:
+def _end(client: LMAClient, vp_id: str | None, reason: str) -> None:
+    """End a VP the test started. A reason naming "cancelled" records a VP that
+    never launched as CANCELLED (end_virtual_participant's rule)."""
     if not vp_id:
         return
     try:
-        client.vp.end(vp_id, reason="integ-test meeting preparation cleanup")
+        client.vp.end(vp_id, reason=reason)
     except LMAError as err:
         print(f"could not end Virtual Participant {vp_id}: {err}")
 
@@ -217,7 +219,7 @@ def test_a_scheduled_vp_stores_its_preparation_and_an_edit_before_it_starts(clie
                 EDIT_VP, {"input": {"id": vp_id, "checklist": [{"ItemId": "x", "Text": "t", "Kind": "idea"}]}}
             )
     finally:
-        _end(client, vp_id)
+        _end(client, vp_id, "integ-test meeting preparation: cancelled before launch")
 
 
 # ── a meeting created with its preparation ──────────────────────────────────
@@ -398,4 +400,4 @@ def test_a_vp_scheduled_and_edited_before_it_starts_creates_the_meeting_with_the
         assert record["MeetingContext"] == "Edited context"
         assert [(item["ItemId"], item["Status"]) for item in record["Checklist"]] == [("q1", "open")]
     finally:
-        _end(client, vp_id)
+        _end(client, vp_id, "integ-test meeting preparation: ended after the check")

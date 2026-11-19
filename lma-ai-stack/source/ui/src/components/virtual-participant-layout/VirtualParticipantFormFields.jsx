@@ -231,7 +231,7 @@ const VirtualParticipantFormFields = ({
             </FormField>
             <FormField
               label="Labels"
-              description="One key=value per line, for example project=website-relaunch, for other systems to find it by."
+              description="One key=value per line, for example project=website-relaunch, to find it by."
               errorText={labelsError}
               stretch
             >

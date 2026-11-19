@@ -71,6 +71,33 @@ def user(name: str, *, admin: bool = False) -> Dict[str, Any]:
     }
 
 
+def _split(text: str, separator: str) -> list:
+    """``text`` split at ``separator`` where it is not inside parentheses."""
+    parts, depth, current, i = [], 0, "", 0
+    while i < len(text):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+        if depth == 0 and text.startswith(separator, i):
+            parts.append(current)
+            current, i = "", i + len(separator)
+            continue
+        current += text[i]
+        i += 1
+    return parts + [current]
+
+
+def _dynamo_type(value) -> str:
+    if isinstance(value, str):
+        return "S"
+    if isinstance(value, (set, frozenset)):
+        return "SS"
+    if isinstance(value, list):
+        return "L"
+    return "?"
+
+
 def _condition_holds(expression: str, item: Dict[str, Any], names: Dict, values: Dict) -> bool:
     """The condition forms the resolver writes, evaluated against a plain item."""
 
@@ -80,25 +107,36 @@ def _condition_holds(expression: str, item: Dict[str, Any], names: Dict, values:
             return item.get(names[token])
         return DES.deserialize(values[token])
 
-    def term(text: str) -> bool:
+    def evaluate(text: str) -> bool:
         text = text.strip()
+        ors = _split(text, " OR ")
+        if len(ors) > 1:
+            return any(evaluate(part) for part in ors)
+        ands = _split(text, " AND ")
+        if len(ands) > 1:
+            return all(evaluate(part) for part in ands)
         if text.startswith("(") and text.endswith(")"):
-            return any(term(part) for part in text[1:-1].split(" OR "))
+            return evaluate(text[1:-1])
         match = re.fullmatch(r"attribute_exists\((\S+)\)", text)
         if match:
-            name = match.group(1)
-            return (names.get(name, name)) in item
+            return names.get(match.group(1), match.group(1)) in item
         match = re.fullmatch(r"attribute_not_exists\((\S+)\)", text)
         if match:
             return names[match.group(1)] not in item
+        match = re.fullmatch(r"attribute_type\((\S+), (\S+)\)", text)
+        if match:
+            return names[match.group(1)] in item and _dynamo_type(
+                resolve(match.group(1))
+            ) == resolve(match.group(2))
         match = re.fullmatch(r"contains\((\S+), (\S+)\)", text)
         if match:
             container = resolve(match.group(1))
-            return isinstance(container, (list, set)) and resolve(match.group(2)) in container
+            needle = resolve(match.group(2))
+            return needle in container if isinstance(container, (list, set, str)) else False
         left, right = text.split(" = ")
         return resolve(left) == resolve(right)
 
-    return all(term(part) for part in expression.split(" AND "))
+    return evaluate(expression)
 
 
 class FakeDynamo:
@@ -200,6 +238,15 @@ def test_a_meeting_shared_as_text_is_written_by_its_listed_users(table):
 
 def test_a_user_unshared_between_the_read_and_the_write_is_refused(table):
     table.before_write = lambda: table.row.update(SharedWith=[])
+    with pytest.raises(index.ForbiddenError):
+        call("updateCallMeetingContext", user(SHARED), MeetingContext="notes")
+    assert "MeetingContext" not in table.row
+
+
+def test_a_list_turned_into_text_between_the_read_and_the_write_is_judged_whole(table):
+    # Re-shared as a String holding the caller as part of a longer name: the
+    # write's condition compares whole elements of a List or set only.
+    table.before_write = lambda: table.row.update(SharedWith=f"x{SHARED}")
     with pytest.raises(index.ForbiddenError):
         call("updateCallMeetingContext", user(SHARED), MeetingContext="notes")
     assert "MeetingContext" not in table.row

@@ -222,11 +222,17 @@ def access_condition(
                 names,
                 {":accessCaller": {"S": username}, ":accessSharedAsRead": {"S": shared}},
             )
-        # A List or string set: `contains` compares whole elements.
+        # Still a List or string set, on which `contains` compares whole
+        # elements (as updateCallAgenda.request.vtl states it).
         return (
-            "(#accessOwner = :accessCaller OR contains(#accessShared, :accessCaller))",
+            "(#accessOwner = :accessCaller OR ((attribute_type(#accessShared, :accessList) "
+            "OR attribute_type(#accessShared, :accessSet)) AND contains(#accessShared, :accessCaller)))",
             names,
-            {":accessCaller": {"S": username}},
+            {
+                ":accessCaller": {"S": username},
+                ":accessList": {"S": "L"},
+                ":accessSet": {"S": "SS"},
+            },
         )
     raise ForbiddenError("Unauthorized: you may not change this meeting")
 

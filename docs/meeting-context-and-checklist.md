@@ -122,7 +122,7 @@ subscription, without a reload.
 
 **The meeting list** has two filters beside the search box: a label filter
 (`key=value`, or a key alone for any meeting with that label) and an audience
-filter (any, internal, external or unspecified). The list's Excel download has
+filter (any, internal, external or unspecified). Like the list's search box, they apply to the meetings loaded for the list's date range. The list's Excel download has
 each meeting's labels as `key=value` text; the meeting context and checklist
 are not in it.
 
