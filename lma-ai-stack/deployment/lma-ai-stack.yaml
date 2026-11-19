@@ -352,6 +352,21 @@ Parameters:
       it to open a short-lived embedding session; empty means that engine is not
       deployed, and enrolling a voice is refused rather than appearing to work.
 
+  AsrModelBundleId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The ASR model bundle baked into the MicroVM image. Voice
+      enrollment names it when the bundle cannot compute a voiceprint.
+
+  AsrSpeakerModelId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The speaker-embedding model in that bundle, or "none". Voice
+      enrollment needs one; with "none" the portal says so before anything is
+      recorded. Empty means not known, and the embedding session decides.
+
   TroubleshootingAgentFunctionArn:
     Type: String
     Default: ""
@@ -1125,6 +1140,11 @@ Resources:
           # The embedding model lives in the ASR MicroVM image, so computing a
           # voiceprint means acquiring a short-lived session from the launcher.
           ASR_LAUNCHER_FUNCTION_ARN: !Ref AsrLauncherFunctionArn
+          # Not every bundle carries a speaker-embedding model (the default one
+          # diarizes end to end without one), and its MicroVM then refuses to
+          # embed. Knowing it here lets the portal say so up front.
+          ASR_MODEL_BUNDLE_ID: !Ref AsrModelBundleId
+          ASR_SPEAKER_MODEL_ID: !Ref AsrSpeakerModelId
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentManagerFunction

@@ -1339,6 +1339,11 @@ type VoiceEnrollmentState @aws_cognito_user_pools {
 	# The exact text the enrollee is shown and whose hash is stored with their
 	# consent, so a stored consent proves what it was given to.
 	Terms: String
+	# False when this deployment cannot compute a voiceprint: no on-demand
+	# speech engine, or an ASR model bundle with no speaker model. The reason
+	# says which, and the portal shows it instead of offering to record.
+	EnrollmentAvailable: Boolean
+	EnrollmentUnavailableReason: String
 }
 
 type VoiceEnrollmentResult @aws_cognito_user_pools {
