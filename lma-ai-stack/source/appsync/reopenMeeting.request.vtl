@@ -1,0 +1,14 @@
+## Forwards reopenMeeting to the meeting reopen resolver Lambda
+## (lambda_functions/meeting_reopen_resolver): the arguments, the verified
+## identity, which decides who may reopen the meeting, and the field name.
+## The response template raises a refusal the Lambda answers with
+## ({"errorType", "message"}) as a GraphQL error of that type.
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "arguments": $util.toJson($ctx.arguments),
+    "identity": $util.toJson($ctx.identity),
+    "info": { "fieldName": $util.toJson($ctx.info.fieldName) }
+  }
+}

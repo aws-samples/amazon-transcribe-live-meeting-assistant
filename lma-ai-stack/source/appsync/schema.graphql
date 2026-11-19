@@ -144,13 +144,15 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# recorded here; see Consent.
 	TranscriptionPause: String
 	# Capture sessions. A meeting is captured in one session unless its owner
-	# or an Admin rejoins it with its Virtual Participant (rejoinVirtualParticipant),
-	# which reopens it and appends a further session. SessionNumber is the
-	# latest session the rejoin allowed (absent: 1), SessionOffsetSeconds where
-	# that session starts on the transcript timeline, and ReopenedAt and
-	# ReopenedBy when and by whom it was allowed. SessionStartedNumber and
-	# SessionStartedAt are written by startCallSession when that session's
-	# START event reopens the meeting. See docs/virtual-participant.md#rejoin.
+	# or an Admin rejoins it with its Virtual Participant (rejoinVirtualParticipant)
+	# or continues it from a streaming client (reopenMeeting), which reopens it
+	# and appends a further session. SessionNumber is the latest session allowed
+	# (absent: 1), SessionOffsetSeconds where that session starts on the
+	# transcript timeline, and ReopenedAt and ReopenedBy when and by whom it was
+	# allowed. SessionStartedNumber and SessionStartedAt are written by
+	# startCallSession when that session's START event reopens the meeting. See
+	# docs/virtual-participant.md#rejoin and
+	# docs/desktop-capture-app.md#continue-an-existing-meeting.
 	SessionNumber: Int
 	SessionOffsetSeconds: Float
 	ReopenedAt: AWSDateTime
@@ -394,6 +396,15 @@ type Mutation @aws_iam {
 	# password is given, the source's stored meeting password is used. For the
 	# source's owner and Admins. See docs/virtual-participant.md#join-again.
 	joinAgainVirtualParticipant(input: JoinAgainVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
+	# Allow one more capture session on an existing meeting, for a streaming
+	# client that is to continue it under the same CallId. For the meeting's
+	# owner and Admins; refused for a meeting that is still being captured or
+	# whose transcript has been deleted. Answers with the session number the
+	# client names in its START frame (sessionNumber) and where the session
+	# starts on the transcript timeline. The meeting is reopened when that
+	# session's START event arrives. See
+	# docs/desktop-capture-app.md#continue-an-existing-meeting.
+	reopenMeeting(input: ReopenMeetingInput!): ReopenMeetingOutput @aws_cognito_user_pools
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
@@ -779,6 +790,17 @@ input JoinAgainVirtualParticipantInput {
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
+}
+
+input ReopenMeetingInput {
+	CallId: ID!
+}
+
+type ReopenMeetingOutput @aws_cognito_user_pools {
+	CallId: ID!
+	SessionNumber: Int!
+	SessionOffsetSeconds: Float!
+	ReopenedAt: AWSDateTime
 }
 
 input EndVirtualParticipantInput {

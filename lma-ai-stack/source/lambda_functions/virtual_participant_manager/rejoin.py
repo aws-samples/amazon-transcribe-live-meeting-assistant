@@ -47,16 +47,26 @@ can try again.
 
 import json
 import logging
-import math
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable, Optional
 
 import boto3
+import lma_sessions
 from access import NotAuthorizedError, caller_may_change, caller_owns_meeting
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
+
+# The session rules shared with the meeting reopen resolver (lma_sessions, in
+# the configuration layer).
+from lma_sessions import (  # noqa: F401 - re-exported for this module's callers
+    SESSION_GAP_SECONDS,
+    meeting_key,
+    next_session_offset,
+    session_number,
+    who,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +75,6 @@ CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 #: The statuses a Virtual Participant has left its meeting in. CANCELLED is a
 #: scheduled one that never started, so it has no meeting to rejoin.
 REJOINABLE_STATUSES = ("ENDED", "COMPLETED", "FAILED")
-
-#: Seconds between the end of the earlier sessions and the start of the new one
-#: on the transcript timeline.
-SESSION_GAP_SECONDS = 1
 
 #: What the claim removes from the row: everything that describes how the
 #: earlier run ended, and its host's connection details, which the new host
@@ -119,87 +125,22 @@ def _error_code(error: ClientError) -> str:
     return str(error.response.get("Error", {}).get("Code", ""))
 
 
-def meeting_key(call_id: str) -> Dict[str, str]:
-    return {"PK": f"c#{call_id}", "SK": f"c#{call_id}"}
-
-
-def session_number(value: Any) -> int:
-    """A stored session number: absent, or anything below 2, is the first session."""
-    if isinstance(value, bool):
-        return 1
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return 1
-    return max(number, 1)
-
-
 def next_session_number(vp: Dict[str, Any], meeting: Dict[str, Any]) -> int:
     """One more than any session the row or the meeting record has seen."""
-    return (
-        max(
-            session_number(vp.get("sessionNumber")),
-            session_number(meeting.get("SessionNumber")),
-            session_number(meeting.get("SessionStartedNumber")),
-        )
-        + 1
+    return lma_sessions.next_session_number(
+        vp.get("sessionNumber"),
+        meeting.get("SessionNumber"),
+        meeting.get("SessionStartedNumber"),
     )
-
-
-def _seconds(value: Any) -> float:
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return seconds if math.isfinite(seconds) and seconds > 0 else 0.0
-
-
-def next_session_offset(transcript_end_times: Iterable[Any], meeting: Dict[str, Any]) -> int:
-    """Where the new session starts on the transcript timeline, in whole seconds.
-
-    After the latest end time of anything in the transcript -- speech, chat
-    messages and assistant answers alike -- after the meeting's recorded
-    duration, and after the start of the latest earlier session. With nothing to
-    follow, the session starts at 0.
-    """
-    latest = max(
-        [
-            *(_seconds(end) for end in transcript_end_times),
-            _seconds(meeting.get("TotalConversationDurationMillis")) / 1000.0,
-            _seconds(meeting.get("SessionOffsetSeconds")),
-        ],
-        default=0.0,
-    )
-    if latest <= 0:
-        return 0
-    return math.ceil(latest) + SESSION_GAP_SECONDS
 
 
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
-    response = _events_table().get_item(Key=meeting_key(call_id), ConsistentRead=True)
-    return response.get("Item")
+    return lma_sessions.read_meeting(_events_table(), call_id)
 
 
 def transcript_end_times(call_id: str) -> Iterable[Any]:
     """The EndTime of every item in the meeting's transcript, a page at a time."""
-    query: Dict[str, Any] = {
-        "KeyConditionExpression": "PK = :pk",
-        "ExpressionAttributeValues": {":pk": f"trs#{call_id}"},
-        "ProjectionExpression": "#end",
-        "ExpressionAttributeNames": {"#end": "EndTime"},
-    }
-    while True:
-        page = _events_table().query(**query)
-        for item in page.get("Items", []):
-            yield item.get("EndTime")
-        if not page.get("LastEvaluatedKey"):
-            return
-        query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
-
-
-def who(identity: Dict[str, Any]) -> str:
-    claims = identity.get("claims") or {}
-    return str(claims.get("email") or identity.get("username") or "unknown")
+    return lma_sessions.transcript_end_times(_events_table(), call_id)
 
 
 def claim(
@@ -270,29 +211,11 @@ def release(table: Any, vp_id: str, reason: str) -> None:
 def allow_session(call_id: str, session: int, offset: int, rejoined_by: str) -> None:
     """Record on the meeting the session its next START may open."""
     try:
-        _events_table().update_item(
-            Key=meeting_key(call_id),
-            UpdateExpression=(
-                "SET SessionNumber = :session, SessionOffsetSeconds = :offset, "
-                "ReopenedAt = :now, ReopenedBy = :by"
-            ),
-            ConditionExpression=(
-                "attribute_exists(PK) AND attribute_not_exists(TranscriptDeletedAt) "
-                "AND (attribute_not_exists(SessionNumber) OR SessionNumber < :session)"
-            ),
-            ExpressionAttributeValues={
-                ":session": session,
-                ":offset": Decimal(offset),
-                ":now": _now_iso(),
-                ":by": rejoined_by,
-            },
-        )
-    except ClientError as error:
-        if _error_code(error) == "ConditionalCheckFailedException":
-            raise RejoinRefused(
-                "The meeting changed while it was being reopened; refresh the page and try again."
-            ) from error
-        raise
+        lma_sessions.allow_session(_events_table(), call_id, session, offset, rejoined_by)
+    except lma_sessions.SessionNotAllowed as error:
+        raise RejoinRefused(
+            "The meeting changed while it was being reopened; refresh the page and try again."
+        ) from error
 
 
 def launch_input(vp: Dict[str, Any], identity: Dict[str, Any], launch_token: str) -> Dict[str, Any]:
