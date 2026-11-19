@@ -1471,6 +1471,15 @@ also holds the reply classifier described above.
 - **The record is meeting data.** It is kept and deleted with the meeting, and
   anyone the meeting is shared with can read it, including participants' names
   and replies.
+- **The MCP server applies the consent settings to the MCP tools that return
+  captured content, which are listed in
+  [MCP API Key Authentication](mcp-api-key-auth.md#tools-that-apply-the-consent-settings).**
+  `get_meeting_agenda` withholds an agenda when its source is not one a person
+  supplied (typed on the meeting page, given when the Virtual Participant was
+  started or scheduled, or passed by an MCP client), so an agenda read from the
+  transcript is withheld from a meeting whose settings do not allow capture.
+  `get_meeting_frames` always applies them. `get_meeting_transcript` and
+  `get_meeting_summary` do not apply them, as before.
 
 ## Related
 

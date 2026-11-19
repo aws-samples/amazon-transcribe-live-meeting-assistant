@@ -249,7 +249,7 @@ class TestListActiveMeetingsThroughTheEndpoint(unittest.TestCase):
         self.assertTrue(listed["annotations"]["readOnlyHint"])
         self.assertIn("lastActivityAt", listed["description"])
         self.assertIn("truncated", listed["description"])
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 10)
 
     def test_the_gateway_path_does_not_reach_the_tool(self):
         event = {

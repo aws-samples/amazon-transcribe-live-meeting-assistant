@@ -25,6 +25,8 @@ for mod_name in [
     "tools.get_summary",
     "tools.list_meetings",
     "tools.list_active_meetings",
+    "tools.get_meeting_agenda",
+    "tools.get_meeting_frames",
     "tools.schedule_meeting",
     "tools.start_meeting_now",
 ]:
@@ -84,19 +86,21 @@ class TestMCPToolsList(unittest.TestCase):
     """Test MCP tools/list method."""
 
     def test_tools_list_returns_all_tools(self):
-        """tools/list returns all 8 tools."""
+        """tools/list returns all 10 tools."""
         body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
         result = index.lambda_handler(api_gw_event(body), None)
 
         resp = json.loads(result["body"])
         tools = resp["result"]["tools"]
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 10)
         tool_names = [t["name"] for t in tools]
         self.assertIn("search_lma_meetings", tool_names)
         self.assertIn("get_meeting_transcript", tool_names)
         self.assertIn("get_meeting_summary", tool_names)
         self.assertIn("list_meetings", tool_names)
         self.assertIn("list_active_meetings", tool_names)
+        self.assertIn("get_meeting_agenda", tool_names)
+        self.assertIn("get_meeting_frames", tool_names)
         self.assertIn("schedule_meeting", tool_names)
         self.assertIn("start_meeting_now", tool_names)
         self.assertIn("get_virtual_participant_status", tool_names)
@@ -247,6 +251,119 @@ class TestMCPToolCall(unittest.TestCase):
         self.assertTrue(resp["result"]["isError"])
         self.assertIn("limit must be an integer", resp["result"]["content"][0]["text"])
 
+    def test_tools_call_get_meeting_agenda(self):
+        """tools/call routes to get_meeting_agenda with the caller's identity."""
+        from tools import get_meeting_agenda
+
+        get_meeting_agenda.execute = MagicMock(return_value={"hasAgenda": False})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {"name": "get_meeting_agenda", "arguments": {"meetingId": "m1"}},
+        }
+        result = index.lambda_handler(
+            api_gw_event(body, user_id="u1", username="U One", is_admin="true"), None
+        )
+
+        resp = json.loads(result["body"])
+        self.assertFalse(json.loads(resp["result"]["content"][0]["text"])["hasAgenda"])
+        get_meeting_agenda.execute.assert_called_once_with(
+            meeting_id="m1", user_id="u1", is_admin=True
+        )
+
+    def test_tools_call_get_meeting_frames(self):
+        """tools/call routes to get_meeting_frames with every argument and the identity."""
+        from tools import get_meeting_frames
+
+        get_meeting_frames.execute = MagicMock(return_value={"count": 0})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "get_meeting_frames",
+                "arguments": {"meetingId": "m1", "last": 5, "fromSeconds": 1.5, "toSeconds": 90},
+            },
+        }
+        result = index.lambda_handler(api_gw_event(body), None)
+
+        resp = json.loads(result["body"])
+        self.assertEqual(json.loads(resp["result"]["content"][0]["text"])["count"], 0)
+        get_meeting_frames.execute.assert_called_once_with(
+            meeting_id="m1",
+            last=5,
+            from_seconds=1.5,
+            to_seconds=90,
+            user_id="testuser",
+            is_admin=False,
+        )
+
+    def test_tools_call_get_meeting_frames_without_optional_arguments_passes_none(self):
+        from tools import get_meeting_frames
+
+        get_meeting_frames.execute = MagicMock(return_value={})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {"name": "get_meeting_frames", "arguments": {"meetingId": "m1"}},
+        }
+        index.lambda_handler(api_gw_event(body), None)
+
+        get_meeting_frames.execute.assert_called_once_with(
+            meeting_id="m1",
+            last=None,
+            from_seconds=None,
+            to_seconds=None,
+            user_id="testuser",
+            is_admin=False,
+        )
+
+    def test_the_new_tools_do_not_run_each_other_or_list_meetings(self):
+        from tools import get_meeting_agenda, get_meeting_frames, list_meetings
+
+        for module in (get_meeting_agenda, get_meeting_frames, list_meetings):
+            module.execute = MagicMock(return_value={})
+
+        for id_, name in ((15, "get_meeting_agenda"), (16, "get_meeting_frames")):
+            body = {
+                "jsonrpc": "2.0",
+                "id": id_,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": {"meetingId": "m1"}},
+            }
+            index.lambda_handler(api_gw_event(body), None)
+
+        get_meeting_agenda.execute.assert_called_once()
+        get_meeting_frames.execute.assert_called_once()
+        list_meetings.execute.assert_not_called()
+
+    def test_a_refusal_from_a_new_tool_is_reported_as_a_tool_error(self):
+        from tools import get_meeting_agenda, get_meeting_frames
+
+        get_meeting_agenda.execute = MagicMock(
+            side_effect=PermissionError("Access denied to this meeting")
+        )
+        get_meeting_frames.execute = MagicMock(
+            side_effect=ValueError("last must be a whole number")
+        )
+
+        for id_, name in ((17, "get_meeting_agenda"), (18, "get_meeting_frames")):
+            body = {
+                "jsonrpc": "2.0",
+                "id": id_,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": {"meetingId": "m1"}},
+            }
+            resp = json.loads(index.lambda_handler(api_gw_event(body), None)["body"])
+
+            self.assertTrue(resp["result"]["isError"])
+            self.assertTrue(resp["result"]["content"][0]["text"].startswith("Error: "))
+
     def test_tools_call_unknown_tool(self):
         """tools/call with unknown tool returns error."""
         body = {
@@ -324,9 +441,11 @@ class TestPathDetection(unittest.TestCase):
         list_meetings.execute.assert_called_once()
         call_kwargs = list_meetings.execute.call_args
         self.assertEqual(
-            call_kwargs[1].get("user_id") or call_kwargs[0][5]
-            if len(call_kwargs[0]) > 5
-            else call_kwargs[1].get("user_id"),
+            (
+                call_kwargs[1].get("user_id") or call_kwargs[0][5]
+                if len(call_kwargs[0]) > 5
+                else call_kwargs[1].get("user_id")
+            ),
             "user123",
         )
 
@@ -341,6 +460,25 @@ class TestPathDetection(unittest.TestCase):
             index.lambda_handler(bedrock_event(tool_input, claims={"sub": "user123"}), None)
 
         list_active_meetings.execute.assert_not_called()
+
+    def test_bedrock_path_never_runs_the_agenda_and_frames_tools(self):
+        """Tool input on the gateway path is read by its shape, and no shape is theirs."""
+        from tools import get_meeting_agenda, get_meeting_frames, list_meetings
+
+        get_meeting_agenda.execute = MagicMock(return_value={})
+        get_meeting_frames.execute = MagicMock(return_value={})
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+
+        shapes = (
+            {"meetingId": "m1"},
+            {"meetingId": "m1", "last": 3},
+            {"meetingId": "m1", "fromSeconds": 1, "toSeconds": 9},
+        )
+        for tool_input in shapes:
+            index.lambda_handler(bedrock_event(tool_input, claims={"sub": "user123"}), None)
+
+        get_meeting_agenda.execute.assert_not_called()
+        get_meeting_frames.execute.assert_not_called()
 
     def test_bedrock_path_without_identity_is_rejected(self):
         """A request with no caller identity is answered with 403."""
@@ -458,6 +596,8 @@ class TestReadOnlyHintAnnotations(unittest.TestCase):
         "get_meeting_summary",
         "list_meetings",
         "list_active_meetings",
+        "get_meeting_agenda",
+        "get_meeting_frames",
     }
     WRITE_TOOLS = {"schedule_meeting", "start_meeting_now"}
 

@@ -6,8 +6,9 @@
 """
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access
-Provides 8 tools: search, get transcript, get summary, list meetings, list active meetings (API
-key endpoint only), schedule meeting, start meeting, get virtual participant status
+Provides 10 tools: search, get transcript, get summary, list meetings, list active meetings, get
+meeting agenda, get meeting frames (the last three on the API key endpoint only), schedule
+meeting, start meeting, get virtual participant status
 """
 
 import json
@@ -17,6 +18,8 @@ from typing import Any, Dict
 
 # Import tool implementations
 from tools import (
+    get_meeting_agenda,
+    get_meeting_frames,
     get_summary,
     get_transcript,
     get_virtual_participant_status,
@@ -323,6 +326,63 @@ MCP_TOOLS = [
         "annotations": {"readOnlyHint": True},
     },
     {
+        "name": "get_meeting_agenda",
+        "description": (
+            "Get the agenda of a meeting the caller can read (their own, one shared with them, "
+            "or any meeting for an Admin): numbered items, where the agenda came from (source: "
+            "scheduled, mcp, ui or derived) and hasAgenda=false when none was set. Returns what "
+            "is stored; it does not say which items were covered. An agenda typed or passed in "
+            "by a person (scheduled, mcp, ui) is always returned; any other agenda (derived from "
+            "the transcript, or of a source that is not recorded) is withheld when the meeting's "
+            "consent settings do not allow capture. A very long agenda is cut to 100 items and "
+            "a bounded amount of text: then truncated=true and note says what was left out."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "get_meeting_frames",
+        "description": (
+            "Get the key frames of a meeting's shared screen (slides, documents), as text: for "
+            "each frame when it was on screen (fromSeconds, toSeconds, from, to), its title and "
+            "the text read from it. Images are not returned. By default returns the last 3 "
+            "frames; pass last (1 to 20) for more, or fromSeconds and/or toSeconds (seconds from "
+            "the start of the meeting) for the frames on screen in that range, up to the latest "
+            "20. The meeting must be one the caller can read, and its consent settings must "
+            "allow capture. Check note and textTruncated: long texts are shortened to keep the "
+            "answer small."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
+                "last": {
+                    "type": "integer",
+                    "description": (
+                        "How many of the latest frames to return (1 to 20, default 3). Ignored "
+                        "when fromSeconds or toSeconds is given."
+                    ),
+                },
+                "fromSeconds": {
+                    "type": "number",
+                    "description": "Start of a time range, in seconds from the start of the meeting",
+                },
+                "toSeconds": {
+                    "type": "number",
+                    "description": "End of a time range, in seconds from the start of the meeting",
+                },
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": {"readOnlyHint": True},
+    },
+    {
         "name": "schedule_meeting",
         "description": "Schedule a future meeting with virtual participant",
         "inputSchema": {
@@ -529,6 +589,21 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
         elif tool_name == "list_active_meetings":
             result = list_active_meetings.execute(
                 limit=arguments.get("limit"),
+                user_id=user_id,
+                is_admin=is_admin,
+            )
+        elif tool_name == "get_meeting_agenda":
+            result = get_meeting_agenda.execute(
+                meeting_id=arguments.get("meetingId"),
+                user_id=user_id,
+                is_admin=is_admin,
+            )
+        elif tool_name == "get_meeting_frames":
+            result = get_meeting_frames.execute(
+                meeting_id=arguments.get("meetingId"),
+                last=arguments.get("last"),
+                from_seconds=arguments.get("fromSeconds"),
+                to_seconds=arguments.get("toSeconds"),
                 user_id=user_id,
                 is_admin=is_admin,
             )

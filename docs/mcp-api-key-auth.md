@@ -74,7 +74,7 @@ MCP client connects to REST API Gateway endpoint
     → Routes to MCP protocol handler:
       - initialize → returns server capabilities + protocolVersion
       - notifications/initialized → empty 200 acknowledgment
-      - tools/list → returns 8 tool definitions with inputSchema
+      - tools/list → returns 10 tool definitions with inputSchema
       - tools/call → routes to tool implementation, returns MCP result
       - ping → returns empty result
     → User context from authorizer enforces UBAC on tool calls
@@ -117,7 +117,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 |--------|-------------|
 | `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
 | `notifications/initialized` | Client acknowledgment, returns empty 200 |
-| `tools/list` | Returns all 8 tool definitions with inputSchema |
+| `tools/list` | Returns all 10 tool definitions with inputSchema |
 | `tools/call` | Executes a tool by name with arguments, returns MCP content result |
 | `ping` | Health check, returns empty result |
 
@@ -130,6 +130,8 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 | `get_meeting_summary` | Get AI summary with action items and topics |
 | `list_meetings` | List meetings with date and status filters |
 | `list_active_meetings` | List the meetings that are running now (API key endpoint only) |
+| `get_meeting_agenda` | Get the agenda of a meeting as numbered items (API key endpoint only) |
+| `get_meeting_frames` | Get the shared-screen key frames of a meeting as text (API key endpoint only) |
 | `schedule_meeting` | Schedule a future meeting with virtual participant |
 | `start_meeting_now` | Start a meeting immediately with virtual participant |
 | `get_virtual_participant_status` | Poll the status of a virtual participant launched by `start_meeting_now` |
@@ -160,6 +162,46 @@ No transcript text is returned. The answer is `{"meetings": [...], "count": n}`.
 **Who sees what.** An Admin sees every running meeting. Anyone else sees the meetings they own (named as the meeting's owner or its agent, as `list_meetings` decides) and the meetings shared with them. This is wider than `list_meetings`, `get_meeting_transcript` and `get_meeting_summary`, which show a person only the meetings they own.
 
 **When the list may be incomplete.** At most 1,000 of the most recent meetings of the last 24 hours are checked. When that limit ended the search and there were more meetings left, the answer has `"truncated": true` and a `note`; a running meeting that started earlier in the window may then be missing. When some meetings could not be read the `note` says "Some meetings could not be read; try again.". If the lookup fails, the error is `Failed to list active meetings`. A meeting whose start time was stamped by a device with a clock ahead of the server's is listed only once the server's clock reaches that time.
+
+### `get_meeting_agenda`
+
+Returns the agenda stored on a meeting. It is offered by the API key endpoint only: the OAuth gateway keeps its seven tools.
+
+| Argument | Description |
+|----------|-------------|
+| `meetingId` | Required. The meeting's id (CallId), a non-empty string of at most 256 characters |
+
+The answer has `meetingId`, `hasAgenda`, `items` (`[{number, text}]`, numbered from 1 as the meeting page numbers them), `source` (`scheduled`, `mcp`, `ui` or `derived`, or `null`) and `sourceDescription`. A meeting with no agenda has `hasAgenda: false`. No model is called; the tool says nothing about which items were covered.
+
+**Size.** The answer is bounded: at most 100 items, and the text of all items together is held to 20,000 units (counted as for frames below), shared out so that a short item keeps its room. When anything is cut the answer has `truncated: true` and a `note` saying what was left out; a shortened item has `textTruncated: true`. An agenda that fits has none of these fields, and the largest possible answer is under 100 KB.
+
+**Who sees what.** An Admin reads every meeting. Anyone else reads the meetings they own and the meetings shared with them. A meeting that does not exist and one the caller may not read are both answered `Access denied to this meeting`, and the id is not repeated.
+
+**Consent.** An agenda a person typed or passed in (`scheduled`, `mcp` or `ui`, which includes an agenda edited on the meeting page) is not captured content and is returned whatever the meeting's consent settings say. An agenda read from the transcript (`derived`), and one whose source is missing or not one of the three, is returned only when the meeting's consent settings allow capture, by the same rule the capture clients apply. When the settings cannot be read, the request is refused.
+
+The meeting row is read with a strongly consistent read, so an objection that was just recorded is seen by the next call. A meeting whose own consent record names a mode is decided by that record. A meeting with no record, which is every meeting in a deployment where consent is off, and every meeting that was held before consent was switched on, is decided by the deployment's mode, read from the configuration table on each call (three strongly consistent reads). In a deployment whose mode is opt-in, such a meeting is withheld. If the configuration table cannot be read, the tool refuses with "try again" for those meetings and never returns content it could not check.
+
+### `get_meeting_frames`
+
+Returns the key frames of a meeting's shared screen as text. It is offered by the API key endpoint only.
+
+| Argument | Description |
+|----------|-------------|
+| `meetingId` | Required. The meeting's id (CallId) |
+| `last` | How many of the latest frames. Default 3, from 1 to 20; a number outside that range is moved to the nearest end. A boolean, text, a fraction and a value that is not finite are refused. Ignored when a time range is given |
+| `fromSeconds`, `toSeconds` | Optional time range in seconds from the start of the meeting. The tool returns the frames that were on screen at any point of the range, up to the latest 20 (the `note` says when frames were cut). A boolean, text, a negative number, a value that is not finite or too large for a number, and `fromSeconds` after `toSeconds` are refused |
+
+The answer has `meetingId`, `count`, `totalFrames` (frames of shared content), `frames` and `textRead`, and a `note` when there is something to say. Each frame has `frameId`, `fromSeconds`, `toSeconds` (`null` for the latest frame), `from` and `to` (`MM:SS`, or `H:MM:SS` from one hour), `title`, `text` (`null` while it has not been read) and `textTruncated`. Frames of the meeting's camera video are left out, and no picture or link to one is returned.
+
+**Size.** The titles and texts of one answer share 20,000 units (an ASCII character is 1, another character 3, an emoji 6). A title is cut to 200 characters and 200 units first, a `frameId` to 64 characters, and what the titles and ids use comes off the 20,000; the texts then get equal shares, with short texts leaving their room to long ones. A cut frame has `textTruncated: true` and the `note` says so. Whatever the frames hold, in any alphabet, the answer is under 100 KB as sent (about 52 KB for 20 frames of 6,000 Chinese characters).
+
+**What is read.** The frames are read in two steps. First the ids, times and kind of every frame, up to 2,000 frames, 100 per query (past that the `note` names the time after which frames were not read). This costs the same whatever `last` or the time range is: DynamoDB bills a query by the size of the items it reads, not by the attributes it returns, so a meeting with 2,000 frames costs about 22 requests (the meeting row, 20 queries one after another, one batch read), and one with a few hundred frames a handful. Then the title and text of the frames that were chosen are read in one batch; the text of the other frames is not read and not returned.
+
+**Who sees what, and consent.** The same access rule as `get_meeting_agenda`. Frames are always captured content: the meeting's consent settings must allow capture, for an Admin too, or the tool answers that capture is not allowed for the meeting.
+
+### Tools that apply the consent settings
+
+The tools that return content captured from a meeting check the meeting's consent settings, by the rule the capture clients apply, before they answer. Today these are `get_meeting_frames` (always) and `get_meeting_agenda` (for an agenda that a person did not supply). `get_meeting_transcript` and `get_meeting_summary` do not apply them, as before. See [Meeting Consent](meeting-consent.md).
 
 ## DynamoDB Table Schema
 

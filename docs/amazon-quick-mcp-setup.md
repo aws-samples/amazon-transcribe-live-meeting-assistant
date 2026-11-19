@@ -13,9 +13,9 @@ Quick products:
 | **Amazon Quick Desktop** | Native macOS / Windows app | API key (Bearer) | Individual users wanting scheduled agents and a personal knowledge graph |
 
 Both expose the same seven LMA tools (search, transcript, summary, list,
-schedule, start-now, VP status); the API key path offers an eighth,
-`list_active_meetings`. Pick the path below that matches the product
-you're connecting.
+schedule, start-now, VP status); the API key path offers three more,
+`list_active_meetings`, `get_meeting_agenda` and `get_meeting_frames`. Pick the
+path below that matches the product you're connecting.
 
 > **Looking for ways to use LMA from Quick Desktop?** Once you've completed
 > the Quick Desktop setup below, see
@@ -65,8 +65,8 @@ auth path Quick uses.
 
 ## Available LMA Tools
 
-Both auth paths expose the same set of tools, except that `list_active_meetings`
-is offered on the API key endpoint only. Read-only tools are annotated
+Both auth paths expose the same set of tools, except that `list_active_meetings`,
+`get_meeting_agenda` and `get_meeting_frames` are offered on the API key endpoint only. Read-only tools are annotated
 with `readOnlyHint: true` so MCP clients (including Quick Desktop scheduled
 agents) classify them correctly.
 
@@ -77,6 +77,8 @@ agents) classify them correctly.
 | `get_meeting_summary` | ✅ | AI-generated summary with action items and topics |
 | `list_meetings` | ✅ | Filter by date range or status |
 | `list_active_meetings` | ✅ | The meetings running now (API key endpoint only) |
+| `get_meeting_agenda` | ✅ | The agenda of a meeting, as numbered items (API key endpoint only) |
+| `get_meeting_frames` | ✅ | The shared-screen key frames of a meeting, as text (API key endpoint only) |
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
@@ -116,7 +118,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools, and one more. See
+> the user's identity on every request and exposes the same seven tools, and three more. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -268,7 +270,7 @@ architecture.
      - **Value**: your API key from Step 1
 6. Click **Connect**
 
-Quick Desktop will discover the eight LMA tools and confirm the connection.
+Quick Desktop will discover the ten LMA tools and confirm the connection.
 
 > **Note**: Quick Desktop authenticates the API-key path with a custom
 > `x-api-key` header rather than a Bearer-token field. LMA's MCP API Gateway
@@ -382,6 +384,94 @@ Use the `meetingId` with the other tools.
 Meetings shared with you are listed here although `list_meetings`,
 `get_meeting_transcript` and `get_meeting_summary` show only the meetings you
 own. See [MCP API Key Authentication](mcp-api-key-auth.md#list_active_meetings).
+
+### `get_meeting_agenda`
+
+Available on the API key endpoint only (Path B), not on the OAuth path.
+
+- `meetingId` (required) — the meeting `CallId`
+
+Returns the agenda stored on a meeting you can read (one you own, one shared with
+you, or any meeting for an Admin): `meetingId`, `hasAgenda`, `items` (each with
+`number` and `text`), `source` and `sourceDescription`. Items are numbered the way
+the meeting page numbers them: one per line, with blank lines and list marks (`-`,
+`*`, `1.`, `a)`) removed. A meeting with no agenda returns `hasAgenda: false`, an
+empty `items` and `source: null`. No model is called and nothing is judged: the tool
+returns what is stored, and does not say which items were covered.
+
+The answer is bounded however long the stored agenda is. At most 100 items are
+returned, and the text of all items together is held to 20,000 units (an ASCII
+character counts 1, any other character 3, an emoji 6), shared out so that a short
+item keeps all of its room and a long one is cut. When anything was cut, the answer
+has `truncated: true` and a `note` that says whether items were left out, texts were
+shortened, or both; an item whose text was shortened has `textTruncated: true`. An
+agenda that fits (every real one) has none of these fields.
+
+`source` is where the agenda came from: `scheduled` (given when the Virtual
+Participant was started or scheduled), `mcp` (passed by an MCP client), `ui` (set on
+the meeting page) or `derived` (read from the transcript), or `null` when none is
+recorded. An agenda that a person typed or passed in (`scheduled`, `mcp`, `ui`,
+including one edited on the meeting page) is returned whatever the meeting's
+consent settings say. An agenda with any other source, `derived` included, is
+captured content and is returned only when the meeting's consent settings allow
+capture; otherwise the tool answers that capture is not allowed for the meeting.
+
+A meeting that does not exist and a meeting you may not read give the same answer,
+`Access denied to this meeting`.
+
+### `get_meeting_frames`
+
+Available on the API key endpoint only (Path B), not on the OAuth path.
+
+- `meetingId` (required) — the meeting `CallId`
+- `last` — how many of the latest frames to return: default 3, from 1 to 20; a
+  number outside the range is moved to the nearest end, and a value that is not a
+  whole number is refused
+- `fromSeconds` / `toSeconds` — optional, seconds from the start of the meeting.
+  With either, the tool returns the frames that were on screen at any point of the
+  range, up to the latest 20, and `last` is ignored. A boolean, text, a negative
+  number, a value that is not finite or too large, and a `fromSeconds` after
+  `toSeconds` are refused
+
+Returns the key frames of the meeting's shared screen (slides, documents), as text:
+`meetingId`, `count`, `totalFrames` (the frames of shared content the meeting has),
+`frames` and `textRead` (how many of the returned frames had their text read from
+the picture). Each frame has `frameId`, `fromSeconds` and `toSeconds` (when it went
+up and when the next frame replaced it; `toSeconds` is `null` for the latest),
+`from` and `to` as `MM:SS` (`H:MM:SS` from one hour), `title`, `text` and
+`textTruncated`. `text` is `null` for a frame whose text has not been read yet. Frames
+of the meeting's camera video are not returned. Pictures and links to them are never
+returned.
+
+- The titles and the texts of one answer share 20,000 units: an ASCII character
+  counts 1, any other character 3, and an emoji or other character beyond U+FFFF
+  counts 6. A title is cut to 200 characters and 200 units first, a `frameId` to
+  64 characters, and what the titles and ids use comes off the 20,000. The texts
+  then get equal shares, and a short text leaves what it does not use to longer
+  ones. A frame whose text was cut has `textTruncated: true`, and the answer's
+  `note` says so. Twenty frames of 6,000 Chinese characters come to about 52 KB as
+  sent; the largest answer of any alphabet (20 frames, every title and text at its
+  maximum, made of characters that are escaped twice, such as quotation marks) is
+  under 100 KB.
+- Every call reads the projected attributes (id, time, kind) of all the meeting's
+  frames, up to 2,000, whatever `last` or the time range is, because DynamoDB bills
+  a query by the size of the items it reads and not by the attributes it returns. A
+  meeting with 2,000 frames costs about 22 requests: the meeting row, 20 queries of
+  100 frames one after another, and one batch read for the text of the chosen
+  frames. A meeting with a few hundred frames costs a handful. Only the chosen
+  frames' text is returned.
+- At most 2,000 frames of a meeting are read. If it has more, the `note` names the
+  time after which frames were not read.
+- The meeting must be one you can read, and its consent settings must allow capture:
+  frames are always withheld from a meeting whose consent settings do not. The
+  meeting row is read with a strongly consistent read, so an objection that was
+  just recorded is seen by the next call. A meeting whose own consent record names a
+  mode is decided by that record. A meeting without one (every meeting in a
+  deployment where consent is off) is decided by the deployment's consent mode,
+  which is read from the configuration table on each call (three strongly consistent
+  reads); if that read fails, the tool refuses with "try again" and returns nothing.
+
+See [MCP API Key Authentication](mcp-api-key-auth.md#get_meeting_agenda).
 
 ### `schedule_meeting`
 
