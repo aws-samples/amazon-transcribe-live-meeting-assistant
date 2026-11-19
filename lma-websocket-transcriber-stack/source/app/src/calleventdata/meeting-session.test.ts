@@ -17,6 +17,7 @@ import {
     MEETING_REFUSALS,
     MeetingRecordView,
     decideMeetingAccess,
+    publishesRecording,
     readMeetingRecord,
     readMeetingRecordWithRetries,
     requestedSessionNumber,
@@ -180,4 +181,11 @@ test('a record that could not be read is read again, and the last failure is rai
     const fails = answering(new Error('a'), new Error('b'), new Error('c'));
     await assert.rejects(readMeetingRecordWithRetries(fails, 'm', [5, 10], sleep), /c/);
     assert.equal(fails.calls, 3);
+});
+
+test('a continued meeting\'s later session links its own recording; a reconnect stored beside one does not', () => {
+    assert.equal(publishesRecording(false, {}), true, 'a meeting\'s first recording');
+    assert.equal(publishesRecording(true, {}), false, 'stored beside the meeting\'s recording');
+    assert.equal(publishesRecording(true, { sessionNumber: 1 }), false);
+    assert.equal(publishesRecording(true, { sessionNumber: 2 }), true, 'a continued session');
 });

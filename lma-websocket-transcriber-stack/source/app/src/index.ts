@@ -89,6 +89,7 @@ import {
     MeetingAccess,
     decideMeetingAccess,
     meetingRefusal,
+    publishesRecording,
     readMeetingRecordWithRetries,
 } from './calleventdata/meeting-session';
 
@@ -1239,8 +1240,11 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
                 `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording ${upload.outcome}: ${upload.wavKey} (${socketData.recordingFileSize} bytes)`
             );
             // A meeting that already has a recording keeps it: this
-            // session's audio is stored beside it, not in its place.
-            if (!upload.storedSeparately) {
+            // session's audio is stored beside it, not in its place. A
+            // continued meeting's later session links its own recording, which
+            // the meeting record adds to its list of every session's
+            // recordings (calleventdata/meeting-session.ts).
+            if (publishesRecording(upload.storedSeparately, socketData.callMetadata)) {
                 const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${upload.wavKey}`;
                 await writeCallRecordingEvent(callMetaData, recordingUrl, server);
             }

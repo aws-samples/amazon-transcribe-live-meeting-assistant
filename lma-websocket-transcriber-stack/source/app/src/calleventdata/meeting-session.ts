@@ -226,3 +226,14 @@ export const sessionSegment = <T extends { SegmentId: string; StartTime: number;
 /** `{ SessionNumber }` for a START or END event, or nothing when no session is named. */
 export const sessionEventFields = (session: SessionFields): { SessionNumber?: number } =>
     session.sessionNumber !== undefined ? { SessionNumber: session.sessionNumber } : {};
+
+/**
+ * Whether a session's audio recording is linked on the meeting record. A
+ * meeting's first recording is; a recording stored beside one the meeting
+ * already has (a reconnect that reached another task) is not, so the meeting
+ * keeps the recording it has. A later session of a continued meeting links its
+ * own, which replaces the meeting's current link and is added to the meeting's
+ * list of every session's recordings (RecordingUrls).
+ */
+export const publishesRecording = (storedSeparately: boolean, session: SessionFields): boolean =>
+    !storedSeparately || (session.sessionNumber ?? 1) >= 2;

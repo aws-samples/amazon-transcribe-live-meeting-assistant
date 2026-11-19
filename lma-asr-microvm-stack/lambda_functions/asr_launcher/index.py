@@ -10,7 +10,8 @@ Invoked synchronously by the transcriber task (one MicroVM per meeting):
     {"action": "release", "microvmId": "..."} -> {"ok"}
 
 An acquire may also carry "session": the meeting's capture session, which a
-rejoined Virtual Participant gives from 2 on (see _token_seed).
+rejoined Virtual Participant, and a streaming client continuing a meeting,
+give from 2 on (see _token_seed).
 
 The transcriber owns the session and could call the lambda-microvms API itself,
 but that API is absent from the AWS SDKs (see microvm_client.py), so the calls
@@ -105,10 +106,11 @@ def _token_seed(call_id: str, session: int, attempt: int) -> str:
 
     RunMicrovm is idempotent on its token, so a repeated acquire for the same
     meeting gets the MicroVM already started for it. A rejoined Virtual
-    Participant (docs/virtual-participant.md#rejoin) captures a later session of
-    the same meeting, whose MicroVM must be a new one, so its sessions from 2
-    on seed the token with the session. The first session, and streaming
-    clients, which name none, keep the meeting's token. A retry after a
+    Participant (docs/virtual-participant.md#rejoin), or a streaming client
+    continuing a meeting (docs/desktop-capture-app.md#continue-an-existing-meeting),
+    captures a later session of the same meeting, whose MicroVM must be a new
+    one, so its sessions from 2 on seed the token with the session. The first
+    session, which names none, keeps the meeting's token. A retry after a
     MicroVM ended starts from a fresh one.
     """
     seed = call_id if session <= 1 else f"{call_id}#s{session}"
