@@ -28,6 +28,7 @@ title: "Virtual Participant"
     - [What a rejoin does](#what-a-rejoin-does)
     - [One transcript timeline](#one-transcript-timeline)
     - [Consent on a rejoined meeting](#consent-on-a-rejoined-meeting)
+    - [Recordings and playback](#recordings-and-playback)
     - [Limitations of rejoin](#limitations-of-rejoin)
 - [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
 - [AI-driven self-healing](#ai-driven-self-healing)
@@ -680,10 +681,14 @@ The gap between the sessions in real time is not shown on the timeline: the new 
 
 The consent record belongs to the meeting, so it carries over: the mode and rule, the notices already posted, the replies and the evidence. The rejoined Virtual Participant starts consent with the same choice, which leaves the record as it is, posts the notice again in the meeting chat, and records that notice on the same record beside the earlier ones. Replies to it are recorded on the same record too. See [Meeting consent](meeting-consent.md).
 
+#### Recordings and playback
+
+Each session is recorded in files of its own, which start at 0:00. The meeting record keeps the links of every session's files (`RecordingUrls` and `VideoRecordingUrls`, oldest first) with the session of each beside them (`RecordingUrlSessions` and `VideoRecordingUrlSessions`), and lists where each later session starts on the transcript timeline (`Sessions`, written when the session's START reopens the meeting). `RecordingUrl` and `VideoRecordingUrl` name the latest session's files. Deleting the meeting deletes every session's files.
+
+The meeting page's player plays one session's recording at a time, at that session's place on the transcript timeline: playing from a transcript row plays the recording of the row's session from the right point, the row being heard is highlighted, a session's recording plays on into the next session's when it ends, and a selector chooses a session. The **Details** tab lists each session's recordings. See [A meeting continued in more than one session](web-ui-guide.md#a-meeting-continued-in-more-than-one-session).
+
 #### Limitations of rejoin
 
-- **Recordings.** The meeting page shows one audio recording and one video recording. The rejoined session's recordings are uploaded as separate files, and their links replace the earlier session's on the page. The earlier files stay in the recordings bucket, and the meeting record keeps the links of every session's files (`RecordingUrls` and `VideoRecordingUrls`), so deleting the meeting deletes all of them.
-- **Playback.** The recording on the meeting page is the latest session's, and it starts at the beginning of that session, while the transcript holds every session on one timeline. Clicking a transcript row to play from it, and the highlighting of the row being played, are therefore right only in the first session's meeting; in a continued meeting they are offset by the time at which the latest session starts, and rows of earlier sessions do not correspond to the recording at all.
 - **An earlier session's summary.** If the earlier session's summary is still being generated when the rejoined session starts, it is shown on the meeting page when it arrives, until the rejoined session ends and the summary over the whole meeting replaces it. It does not delete or schedule the deletion of the transcript (see [Transcript deletion](transcript-deletion.md)).
 - **Voice labels.** With speaker separation on, the speech engine numbers the voices it hears afresh in each session (`spk_0`, `spk_1`, …), and a name given to a voice on the meeting page applies to that label throughout the meeting. A voice named in one session can therefore carry its name onto a different person's voice in the next; check the names after a rejoin. Rows named from the meeting platform's roster are not affected.
 - **Retention.** A rejoined meeting keeps the expiry it was created with, which is also when it leaves the meeting list.

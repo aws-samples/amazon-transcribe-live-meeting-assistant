@@ -312,6 +312,38 @@ The ones that only move the player are for looking at something rather than
 listening to it; the player is then ready at that point when the Transcript tab
 is opened.
 
+##### A meeting continued in more than one session
+
+A meeting that was continued, by a Virtual Participant's
+[Continue meeting](virtual-participant.md#rejoin), is captured in more than one
+*session*. The transcript holds every session on
+one timeline, each after the one before, while each session is recorded in a
+file of its own that starts at 0:00. The player plays one session's recording
+at a time, at that session's place on the transcript's timeline:
+
+- **Session selector** — beside the other controls, *Session 1 (from 0:00)*,
+  *Session 2 (from 5:17)* and so on, one per session that has a recording, with
+  where each starts on the transcript. Choosing one plays that session's
+  recording from its start. A meeting captured in one session has no selector,
+  and its player works as described above.
+- **Playing from a segment, a chapter or a key frame** — plays the recording
+  of the session the time falls in, from that time less the session's start.
+- **Playing on** — when a session's recording ends, the next session's starts
+  playing.
+- **The transcript follows the recording** — the segment highlighted is the
+  one being heard, on the transcript's timeline, in whichever session is
+  playing.
+- **The seek bar** — is the playing session's recording, so it carries the
+  chapters and screen shares within that session.
+- **Details tab** — lists each session's recordings (*Audio recording, Session
+  2 (from 5:17)*), each with **Play**, which plays it from its session's start,
+  and **Open file**.
+
+A session with no recording (the Virtual Participant was not admitted, or the
+recording failed) is left out, and the session before it plays on into the one
+after. Each session's video is lined up with the transcript on its own key
+frames, as below.
+
 ##### Lining the recording up with the transcript
 
 Transcript times are on the transcript's clock, which starts when transcription
