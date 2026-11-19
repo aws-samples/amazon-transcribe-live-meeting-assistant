@@ -381,6 +381,12 @@ type Mutation @aws_iam {
 	# which is reopened if it has ended. For the meeting's owner and Admins. See
 	# docs/virtual-participant.md#rejoin.
 	rejoinVirtualParticipant(input: RejoinVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
+	# Join again as a new meeting: create and launch a new Virtual Participant,
+	# owned by the caller, from an existing one's meeting details as the form
+	# gives them. When the platform and meeting ID are the source's and no
+	# password is given, the source's stored meeting password is used. For the
+	# source's owner and Admins. See docs/virtual-participant.md#join-again.
+	joinAgainVirtualParticipant(input: JoinAgainVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
@@ -745,6 +751,29 @@ input RejoinVirtualParticipantInput {
 	id: ID!
 }
 
+# The Create Virtual Participant form's values, for a new Virtual Participant
+# started from the source one (joinAgainVirtualParticipant). The fields are
+# those of CreateVirtualParticipantInput the form sends, under the same rules;
+# the status, owner and launching user's sub are the server's.
+input JoinAgainVirtualParticipantInput {
+	sourceVpId: ID!
+	meetingName: String!
+	meetingPlatform: String!
+	meetingId: String!
+	# A typed password, which is always used. Omitted or empty, the source's
+	# stored password is used when the platform and meeting ID are the source's.
+	meetingPassword: String
+	# Given, the Virtual Participant is scheduled for this time; omitted, it is
+	# launched now.
+	meetingTime: AWSTimestamp
+	scheduledTimeZone: String
+	enableVideoRecording: Boolean
+	agenda: String
+	consentMode: String
+	consentRule: String
+	useStoredZoomAccount: Boolean
+}
+
 input EndVirtualParticipantInput {
 	id: ID!
 	endReason: String!
@@ -876,7 +905,7 @@ type Subscription {
 	onUnshareCall: UnshareCallOutput
 		@aws_subscribe(mutations: ["unshareCall"])
 	onCreateVirtualParticipant: VirtualParticipant
-		@aws_subscribe(mutations: ["createVirtualParticipant"])
+		@aws_subscribe(mutations: ["createVirtualParticipant", "joinAgainVirtualParticipant"])
 	onUpdateVirtualParticipant: VirtualParticipant
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant", "rejoinVirtualParticipant"])
 	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl

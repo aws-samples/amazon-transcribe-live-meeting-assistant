@@ -17,6 +17,7 @@ import boto3
 from access import NotAuthorizedError, caller_may_change
 from alb_cleanup import ALBCleanupManager
 from ecs_manager import ECSTaskManager
+from join_again import JoinAgainRefused, join_again_virtual_participant
 from microvm_client import MicrovmError
 from microvm_manager import MicrovmManager
 from rejoin import RejoinRefused, rejoin_virtual_participant
@@ -446,6 +447,12 @@ def lambda_handler(event, context):
             )
             logger.info("VP rejoin started")
 
+        elif operation == "joinAgainVirtualParticipant":
+            result = join_again_virtual_participant(
+                vp_manager, arguments.get("input", {}), identity=event.get("identity") or {}
+            )
+            logger.info("VP join again started")
+
         elif operation == "deleteVirtualParticipants":
             input_data = arguments.get("input", {})
             ids = input_data.get("ids", [])
@@ -474,7 +481,7 @@ def lambda_handler(event, context):
         logger.warning(str(e))
         return {"statusCode": 403, "body": {"error": str(e), "errorType": "AuthorizationError"}}
 
-    except RejoinRefused as e:
+    except (RejoinRefused, JoinAgainRefused) as e:
         logger.warning(str(e))
         return {"statusCode": 400, "body": {"error": str(e), "errorType": "BadRequest"}}
 

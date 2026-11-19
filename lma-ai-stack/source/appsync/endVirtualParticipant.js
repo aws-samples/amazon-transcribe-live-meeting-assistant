@@ -4,21 +4,24 @@
  * See the LICENSE file in the project root for full license information.
  */
 /**
- * AppSync JavaScript Resolver for endVirtualParticipant and rejoinVirtualParticipant
+ * AppSync JavaScript Resolver for endVirtualParticipant, rejoinVirtualParticipant
+ * and joinAgainVirtualParticipant.
  * Hands the mutation to the Virtual Participant manager Lambda, which ends a
- * Virtual Participant, or relaunches one into its meeting, and answers with the row.
+ * Virtual Participant, relaunches one into its meeting, or starts a new one from
+ * an existing one's meeting details, and answers with the row.
  */
 
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
   const { input } = ctx.arguments;
-  // The Lambda's operation is the field resolved: endVirtualParticipant or
-  // rejoinVirtualParticipant.
+  // The Lambda's operation is the field resolved: endVirtualParticipant,
+  // rejoinVirtualParticipant or joinAgainVirtualParticipant.
   const { fieldName } = ctx.info;
 
-  // The Virtual Participant id only: the identity and input stay out of the logs.
-  console.log(fieldName, input.id);
+  // The Virtual Participant id only: the identity and input (which can hold a
+  // meeting password) stay out of the logs.
+  console.log(fieldName, input.id || input.sourceVpId);
 
   // Invoke Lambda function for enhanced VP management
   return {

@@ -295,7 +295,7 @@ def allow_session(call_id: str, session: int, offset: int, rejoined_by: str) -> 
         raise
 
 
-def launch_input(vp: Dict[str, Any], session: int, identity: Dict[str, Any]) -> Dict[str, Any]:
+def launch_input(vp: Dict[str, Any], identity: Dict[str, Any], launch_token: str) -> Dict[str, Any]:
     """The launcher state machine's input, as the Create button builds it.
 
     Read from the row: the meeting password is stored there and returned by no
@@ -327,19 +327,26 @@ def launch_input(vp: Dict[str, Any], session: int, identity: Dict[str, Any]) -> 
             "accessToken": "",
             "idToken": "",
             "rereshToken": "",
-            # Distinct per session: RunMicrovm is idempotent on its client token.
-            "launchToken": f"{vp['id']}-s{session}",
+            # RunMicrovm is idempotent on its client token, so every launch of
+            # a row carries a token of its own (see start_launch).
+            "launchToken": launch_token,
         },
     }
 
 
-def start_launch(vp: Dict[str, Any], session: int, identity: Dict[str, Any]) -> None:
-    """Start the launcher state machine; its own failures mark the row FAILED."""
+def start_launch(vp: Dict[str, Any], identity: Dict[str, Any], launch_token: str) -> None:
+    """Start the launcher state machine; its own failures mark the row FAILED.
+
+    Used by rejoin and by Join again (join_again.py). `launch_token` is the
+    Virtual Participant's id for its first launch, the token the MicroVM
+    launcher falls back to when a launch from the browser names none, and
+    `<id>-s<session>` for a rejoined session.
+    """
     arn = os.environ.get("VP_STATE_MACHINE_ARN")
     if not arn:
         raise RuntimeError("the Virtual Participant launcher is not configured")
     _client("stepfunctions").start_execution(
-        stateMachineArn=arn, input=json.dumps(launch_input(vp, session, identity))
+        stateMachineArn=arn, input=json.dumps(launch_input(vp, identity, launch_token))
     )
 
 
@@ -409,7 +416,8 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
     claimed = claim(manager.table, vp, session, offset, rejoined_by)
     try:
         allow_session(call_id, session, offset, rejoined_by)
-        start_launch(vp, session, identity)
+        # Distinct per session: the row's first launch used its id.
+        start_launch(vp, identity, f"{vp_id}-s{session}")
     except RejoinRefused as refused:
         release(manager.table, vp_id, str(refused))
         raise

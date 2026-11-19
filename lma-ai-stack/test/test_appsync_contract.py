@@ -273,6 +273,9 @@ OTHER_FIELDS = [
     # Lambda resolver: the Virtual Participant's owner or an Admin, who must also
     # be the meeting's owner or an Admin (rejoin.py).
     ("Mutation", "rejoinVirtualParticipant"),
+    # Lambda resolver: the source Virtual Participant's owner or an Admin; the
+    # new one belongs to the caller (join_again.py).
+    ("Mutation", "joinAgainVirtualParticipant"),
     ("Mutation", "deleteVirtualParticipants"),
     ("Mutation", "shareVirtualParticipant"),
     ("Mutation", "unshareVirtualParticipant"),
