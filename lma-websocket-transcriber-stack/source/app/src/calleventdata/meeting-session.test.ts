@@ -17,7 +17,7 @@ import {
     MEETING_REFUSALS,
     MeetingRecordView,
     decideMeetingAccess,
-    publishesRecording,
+    recordingBaseName,
     readMeetingRecord,
     readMeetingRecordWithRetries,
     requestedSessionNumber,
@@ -183,9 +183,8 @@ test('a record that could not be read is read again, and the last failure is rai
     assert.equal(fails.calls, 3);
 });
 
-test('a continued meeting\'s later session links its own recording; a reconnect stored beside one does not', () => {
-    assert.equal(publishesRecording(false, {}), true, 'a meeting\'s first recording');
-    assert.equal(publishesRecording(true, {}), false, 'stored beside the meeting\'s recording');
-    assert.equal(publishesRecording(true, { sessionNumber: 1 }), false);
-    assert.equal(publishesRecording(true, { sessionNumber: 2 }), true, 'a continued session');
+test('each capture session stores its recording under a name of its own', () => {
+    assert.equal(recordingBaseName('Weekly_sync', {}), 'Weekly_sync', 'a meeting\'s first session');
+    assert.equal(recordingBaseName('Weekly_sync', { sessionNumber: 1 }), 'Weekly_sync');
+    assert.equal(recordingBaseName('Weekly_sync', { sessionNumber: 3 }), 'Weekly_sync_s3', 'a continued session');
 });

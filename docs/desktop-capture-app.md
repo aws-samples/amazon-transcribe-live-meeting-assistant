@@ -598,7 +598,6 @@ nothing is recorded:
 | *Only the meeting's owner or an Admin can continue this meeting.* | Ask the owner to continue it, or start a new meeting. |
 | *This meeting's transcript has been deleted…* | Start a new meeting. |
 | *This meeting is still being captured…* | Wait until the meeting shows as **Done** in LMA, then try again. |
-| *This copy of the app cannot continue meetings…* | Download the app again from LMA: the option needs the API endpoint that packages built from this release on include. |
 
 **Continue an existing meeting…** is shown only by a download that includes
 LMA's API endpoint (`graphqlEndpoint` in `lma-config.json`), which packages
@@ -608,8 +607,8 @@ deployment does not show it; download the app again after updating the stack.
 Limitations:
 
 - **Recordings.** The meeting page shows one audio recording and one screen
-  video. The continued recording's audio (stored as `<meeting ID>_<time>.wav`
-  under the recordings prefix) and video are uploaded as files of their own,
+  video. The continued recording's audio (stored as `<meeting ID>_s2.wav`,
+  `_s3` and so on, under the recordings prefix) and video are uploaded as files of their own,
   and their links replace the earlier recording's on the page. The earlier files
   stay in the recordings bucket, and the meeting record keeps the links of every
   recording (`RecordingUrls` and `VideoRecordingUrls`), so deleting the meeting

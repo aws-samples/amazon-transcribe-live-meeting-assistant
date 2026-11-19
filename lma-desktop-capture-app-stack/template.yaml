@@ -387,6 +387,8 @@ Resources:
       CognitoUserPoolId: !Ref CognitoUserPoolId
       CognitoClientId: !Ref CognitoClientId
       Region: !Ref Region
+      CloudfrontEndpoint: !Ref CloudfrontEndpoint
+      AppSyncGraphQLUrl: !Ref AppSyncGraphQLUrl
       SourceCodeLocation: !Ref SourceCodeLocation
 
 Outputs:

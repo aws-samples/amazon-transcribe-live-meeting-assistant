@@ -1898,10 +1898,12 @@ async def execute_process_event_api_mutation(
         # The END of an earlier capture session, arriving after a rejoin has
         # started a later one (a redelivery, or the earlier participant still
         # shutting down), must not end the live session. The Virtual
-        # Participant and the End button name the session in every END, the
-        # first session's included. One that names none -- from a streaming
-        # client, the stale meeting reaper, or a Virtual Participant of an
-        # earlier release -- is taken to be the current session's.
+        # Participant, the End button and the WebSocket transcriber name the
+        # session in every END, the first session's included. One that names
+        # none -- a transcriber session that added to an existing meeting
+        # without naming a session (a reconnect that reached another task),
+        # the stale meeting reaper, or a Virtual Participant of an earlier
+        # release -- is taken to be the current session's.
         if "SessionNumber" in message and session_number_of(message) < started_session:
             LOGGER.info(
                 "END event for capture session %s of a meeting now in session %s; ignored",

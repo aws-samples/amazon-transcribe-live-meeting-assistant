@@ -228,12 +228,15 @@ export const sessionEventFields = (session: SessionFields): { SessionNumber?: nu
     session.sessionNumber !== undefined ? { SessionNumber: session.sessionNumber } : {};
 
 /**
- * Whether a session's audio recording is linked on the meeting record. A
- * meeting's first recording is; a recording stored beside one the meeting
- * already has (a reconnect that reached another task) is not, so the meeting
- * keeps the recording it has. A later session of a continued meeting links its
- * own, which replaces the meeting's current link and is added to the meeting's
- * list of every session's recordings (RecordingUrls).
+ * The name a session's audio recording is stored under, before `.wav`: the
+ * meeting's file name for its first session, and the meeting's file name with
+ * the session (`<name>_s2`, ...) for a later session of a continued meeting.
+ * The upload is conditional on the name being free (utils/recording-upload.ts),
+ * and only an upload that gets that name is linked on the meeting record. So
+ * each session links its own first recording, which replaces the earlier
+ * session's link and joins the meeting's list of every session's recordings
+ * (RecordingUrls); a reconnect within the session that reaches another task
+ * stores its audio beside it, unlinked, as a first session's does.
  */
-export const publishesRecording = (storedSeparately: boolean, session: SessionFields): boolean =>
-    !storedSeparately || (session.sessionNumber ?? 1) >= 2;
+export const recordingBaseName = (meetingFileName: string, session: SessionFields): string =>
+    (session.sessionNumber ?? 1) >= 2 ? `${meetingFileName}_s${session.sessionNumber}` : meetingFileName;

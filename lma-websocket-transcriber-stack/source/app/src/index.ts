@@ -89,7 +89,7 @@ import {
     MeetingAccess,
     decideMeetingAccess,
     meetingRefusal,
-    publishesRecording,
+    recordingBaseName,
     readMeetingRecordWithRetries,
 } from './calleventdata/meeting-session';
 
@@ -1216,7 +1216,9 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
                 recordingStore,
                 {
                     prefix: RECORDING_FILE_PREFIX,
-                    baseName: posixifyFilename(callMetaData.callId),
+                    // Per session, so each session links its own first recording
+                    // (calleventdata/meeting-session.ts recordingBaseName).
+                    baseName: recordingBaseName(posixifyFilename(callMetaData.callId), socketData.callMetadata),
                     wavPath,
                     rawPath,
                 },
@@ -1239,12 +1241,11 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
             server.log.info(
                 `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording ${upload.outcome}: ${upload.wavKey} (${socketData.recordingFileSize} bytes)`
             );
-            // A meeting that already has a recording keeps it: this
-            // session's audio is stored beside it, not in its place. A
-            // continued meeting's later session links its own recording, which
-            // the meeting record adds to its list of every session's
-            // recordings (calleventdata/meeting-session.ts).
-            if (publishesRecording(upload.storedSeparately, socketData.callMetadata)) {
+            // A session that already has a recording keeps it: this
+            // connection's audio is stored beside it, not in its place. A
+            // continued meeting's later session has a name of its own, so its
+            // first recording is linked (calleventdata/meeting-session.ts).
+            if (!upload.storedSeparately) {
                 const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${upload.wavKey}`;
                 await writeCallRecordingEvent(callMetaData, recordingUrl, server);
             }
