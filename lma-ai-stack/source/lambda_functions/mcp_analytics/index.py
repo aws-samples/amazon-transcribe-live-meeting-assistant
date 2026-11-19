@@ -345,7 +345,10 @@ MCP_TOOLS = [
                         "sensitive."
                     ),
                 },
-                "limit": {"type": "number", "description": "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)"},
+                "limit": {
+                    "type": "number",
+                    "description": "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)",
+                },
             },
         },
         "annotations": {"readOnlyHint": True},
