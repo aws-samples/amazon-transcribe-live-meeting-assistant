@@ -32,6 +32,7 @@ import tavily_secret
 from configuration_settings import base_model_id, model_arn, read_setting, resolve_model_id
 import call_metering
 import meeting_agenda
+import meeting_attachments
 import meeting_frames
 
 # Loaded once at import time, before any tool can run. Strands runs the
@@ -1781,6 +1782,62 @@ def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_i
     return get_meeting_agenda
 
 
+def create_chat_attachments_tool(call_id: str, message_id: str = None):
+    """Factory for the tool that lists the images and files shared in the meeting chat.
+
+    Offered in every tool scope, as the key frames are: the attachments were
+    shared with everyone in the meeting, in the chat everyone reads. Lists each
+    with its AI title and summary; see meeting_attachments.
+    """
+    from strands import tool
+
+    def run_query(document: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+        from gql import gql
+        client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+        return client.execute(gql(document), variable_values=variables)
+
+    @tool
+    def get_chat_attachments() -> dict:
+        """List the images and files participants shared in this meeting's chat, each with when
+        it was shared, its file name, and a short AI title and summary of what it shows or says.
+
+        Use this when someone asks about something shared in the chat rather than said or shown
+        on screen: "What was the picture Alice posted?", "Which documents were shared?",
+        "Summarize the file in the chat".
+
+        Returns:
+            One line per attachment, in the order shared.
+        """
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_use',
+                'tool_name': 'get_chat_attachments',
+                'tool_input': {},
+                'timestamp': datetime.utcnow().isoformat()
+            }, 0)
+        success = True
+        try:
+            result = meeting_attachments.build_tool_result(
+                meeting_attachments.load_attachments(run_query, call_id)
+            )
+        except Exception as e:
+            logger.error(f"Error reading the meeting's chat attachments: {str(e)}")
+            result = {'status': 'error', 'content': [{'text': "The meeting's chat attachments could not be read just now."}]}
+            success = False
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            summary = result['content'][0].get('text', '') if result.get('content') else ''
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_result',
+                'tool_name': 'get_chat_attachments',
+                'result': summary[:160],
+                'success': success,
+                'timestamp': datetime.utcnow().isoformat()
+            }, 1)
+        return result
+
+    return get_chat_attachments
+
+
 def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id: str,
                                show_inline: bool, message_id: str = None):
     """Factory for the tool that shows the agent the meeting's shared screen.
@@ -2659,6 +2716,13 @@ def handler(event, context):
                 message_id=message_id
             ))
             logger.info("Meeting frames tool enabled")
+
+        # The images and files shared in the meeting chat, with their AI
+        # titles and summaries. In every scope, as the frames: they were
+        # shared with everyone in the meeting.
+        if APPSYNC_GRAPHQL_URL:
+            tools.append(create_chat_attachments_tool(call_id=call_id, message_id=message_id))
+            logger.info("Chat attachments tool enabled")
 
         # Add VNC preview control tool (available to all users)
         if APPSYNC_GRAPHQL_URL and request_scope.allows(TOOL_GROUP_VP_CONTROLS):
