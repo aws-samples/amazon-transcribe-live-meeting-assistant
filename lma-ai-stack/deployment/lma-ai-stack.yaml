@@ -866,6 +866,9 @@ Outputs:
   MCPServersTableName:
     Description: Name of the MCP Servers DynamoDB table
     Value: !Ref MCPServersTable
+  SkillsTableName:
+    Description: Name of the meeting assistant skills DynamoDB table
+    Value: !Ref SkillsTable
   MCPLayerBuildProjectName:
     Description: Name of the CodeBuild project for MCP layer building
     Value: !Ref MCPLayerBuildProject
@@ -2766,14 +2769,19 @@ Resources:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/*"
-              # The MCP server library import is for administrators (the Admin
-              # group, or an operator's IAM principal through the SDK and CLI),
-              # not for the stack's own function roles.
+              # The MCP server library import and the skill writes are for
+              # administrators (the Admin group, or an operator's IAM principal
+              # through the SDK and CLI), not for the stack's own function roles.
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkillLibrary"
               - Effect: Allow
                 Action:
                   - appsync:EventConnect
@@ -3021,13 +3029,18 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
-            # The MCP server library import is for administrators, not for the
-            # stack's own function roles.
+            # The MCP server library import and the skill writes are for
+            # administrators, not for the stack's own function roles.
             - Effect: Deny
               Action:
                 - appsync:GraphQL
               Resource:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkill"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkillLibrary"
             - Effect: Allow
               Action:
                 - comprehend:DetectSentiment
@@ -3939,13 +3952,18 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
-              # The MCP server library import is for administrators, not for
-              # the stack's own function roles.
+              # The MCP server library import and the skill writes are for
+              # administrators, not for the stack's own function roles.
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkill"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importSkillLibrary"
               - Effect: Allow
                 Action:
                   - "s3:GetObject"
@@ -11033,6 +11051,358 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "updateMCPServerCredentials"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # Meeting assistant skills: an administrator's guidance for the assistant
+  # (a name, a description, Markdown instructions and text reference files),
+  # stored account-wide in their own table, as MCP servers are. Read by every
+  # signed-in user and by the meeting assistant; written by the Admin group and
+  # IAM-signed callers (the LMA SDK and CLI). See docs/meeting-assistant-skills.md.
+  ##########################################################################
+
+  SkillsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Skills"
+      AttributeDefinitions:
+        - AttributeName: AccountId
+          AttributeType: S
+        - AttributeName: SkillId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AccountId
+          KeyType: HASH
+        - AttributeName: SkillId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  SkillsManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/SkillsManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  SkillsManagerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access - only interacts with DynamoDB
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for an AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-SkillsManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/skills_manager
+      Description: Manages the meeting assistant's skills library
+      MemorySize: 256
+      Timeout: 60
+      Tracing: Active
+      LoggingConfig:
+        LogGroup: !Ref SkillsManagerFunctionLogGroup
+      Environment:
+        Variables:
+          SKILLS_TABLE: !Ref SkillsTable
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          # Group allowed to create, change, delete and import skills. Matches
+          # UserManagementFunction.
+          ADMIN_GROUP: "Admin"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SkillsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:Encrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+    DependsOn:
+      - SkillsManagerFunctionLogGroup
+
+  SkillsManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: SkillsManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt SkillsManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt SkillsManagerFunction.Arn
+
+  SkillsManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt SkillsManagerFunction.Arn
+
+  ListSkillsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listSkills
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listSkills"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ExportSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: exportSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "exportSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ExportSkillLibraryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: exportSkillLibrary
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "exportSkillLibrary"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UpdateSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "updateSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: deleteSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "deleteSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ImportSkillResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: importSkill
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "importSkill"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ImportSkillLibraryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: importSkillLibrary
+      DataSourceName: !GetAtt SkillsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "importSkillLibrary"
             }
           }
         }

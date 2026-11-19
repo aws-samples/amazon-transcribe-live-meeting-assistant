@@ -1376,6 +1376,27 @@ def test_the_assistant_profile_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_assistant_skills_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_ASSISTANT_SKILLS=1, change a deployment-wide setting and write a skill."""
+    import test_assistant_skills
+
+    names = [m.name for m in test_assistant_skills.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_skills_log_line_reader_reads_the_assistants_line() -> None:
+    """The line strands_meeting_assist_function logs for each request offered skills."""
+    import assistant_profile_probe
+
+    match = assistant_profile_probe.SKILLS_LINE.search(
+        "Skills: offered=launch-review, notes not offered=integ-tests-zephyr-checklist"
+    )
+    assert match["offered"] == "launch-review, notes"
+    assert match["not_offered"] == "integ-tests-zephyr-checklist"
+    assert assistant_profile_probe.OFFERED_LINE.search("MCP servers: offered=a not offered=none")
+
+
 class _FakeConfigurationStore:
     """The parts of lma_config.ConfigurationStore the consent override uses."""
 

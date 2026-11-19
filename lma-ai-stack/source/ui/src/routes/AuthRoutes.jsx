@@ -21,6 +21,7 @@ import BrowserExtensionRoutes from './BrowserExtensionRoutes';
 import DesktopCaptureAppRoutes from './DesktopCaptureAppRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
+import SkillsRoutes from './SkillsRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import ConfigurationRoutes from './ConfigurationRoutes';
 import movedConfigurationRoutes from './moved-configuration-routes';
@@ -41,6 +42,7 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
+  SKILLS_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   EMBED_PATH,
@@ -88,6 +90,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
         <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
+        <Route path={`${SKILLS_PATH}/*`} element={<SkillsRoutes />} />
         {/* The pages that each edited one section moved into the Configuration
             page, and the Configuration History page into its revision history
             dialog; a bookmark to one opens it there. */}
