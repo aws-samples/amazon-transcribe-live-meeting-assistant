@@ -281,8 +281,10 @@ transcript timeline; a streaming client then continues the meeting by streaming
 with the meeting ID as its `callId` and that number as `sessionNumber` in its
 START frame (see
 [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)).
-The meeting stays as it is until that session's START arrives; a session that
-never starts leaves it as it was, and the next reopen allows the next number.
+The meeting stays as it is until that session's START arrives. While a session
+allowed in the last 15 minutes has not started, another reopen is refused
+(`MeetingInProgress`); after that the session is taken as abandoned and the
+next reopen allows the next number.
 A refusal is printed with its type (`MeetingNotFound`, `Unauthorized`,
 `TranscriptDeleted`, `MeetingInProgress`, `MeetingChanged` or `BadRequest`),
 and the command exits with status 1. Options: `--stack-name`, `--region`,
