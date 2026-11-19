@@ -15,6 +15,7 @@ title: "Meeting Assistant"
 - [Built-in Tools](#built-in-tools)
   - [In-meeting requests](#in-meeting-requests)
   - [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one)
+  - [Skills](#skills)
 - [Assistant Instructions](#assistant-instructions)
 - [Knowledge Base Configuration](#knowledge-base-configuration)
   - [S3 Data Source](#s3-data-source)
@@ -101,6 +102,7 @@ None of these can tell who in the meeting asked: a chat sender is known only by 
   | **In-meeting requests: the owner's past meetings** (`inMeetingMeetingHistory`) | `recent_meetings_list` and `meeting_history`, acting for the meeting's LMA user as **Unrestricted** does. With this switch off, no user is acted for. |
   | **In-meeting requests: MCP servers** (`inMeetingMcpServers`) | Every installed MCP server, except one whose own setting says otherwise; see [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one) |
   | **In-meeting requests: Virtual Participant controls** (`inMeetingVpControls`) | `control_vnc_preview` and `control_vp_browser` |
+  | **In-meeting requests: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise; see [Skills](#skills) |
 
   A tool that is switched on but that the deployment cannot offer (web search with no Tavily API key, a knowledge base that is not deployed, MCP servers when none is installed or none could be loaded) is named to the assistant as not available, so that it says so when a request needs it. The meeting assistant function's log records, for every in-meeting request, the tool groups allowed, offered and unavailable.
 
@@ -123,7 +125,11 @@ How a request is answered:
 
 A server the profile does not name behaves as it did before this setting existed, so a profile with no entries offers exactly what it did. The assistant is told, by name, which installed servers are not available for the request — those turned off or not allowed, and those the profile names that could not be started or are waiting for their credentials after an import — so that it says so when a request needs one, as it does for the tool groups. A server the profile names that is not installed on this deployment (after an import from another, say) is listed as **Not installed** and is ignored until it is removed or installed. The meeting assistant function's log records, for every request that may use MCP servers, the servers offered and those loaded but not offered.
 
-The same structure has a `skills` member, with the same three flags per skill, for skills, which are not yet offered; nothing reads it.
+The same structure has a `skills` member, with the same three flags per skill and the same rules, with **In-meeting requests: skills** as the Selected tools default; see [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile).
+
+### Skills
+
+A skill is guidance an administrator writes on the **Skills** page for one kind of request: a name, a description of when it applies, Markdown instructions and text reference files. The assistant's prompt lists the skills a request may use by name and description, and the assistant reads a skill's instructions with `load_skill`, and a reference file with `read_skill_file`, only when a request matches it. What those two tools return is followed as an administrator's guidance, within the fixed part of the instructions, which still applies whatever a skill says. See [Meeting Assistant Skills](meeting-assistant-skills.md).
 
 ## Assistant Instructions
 

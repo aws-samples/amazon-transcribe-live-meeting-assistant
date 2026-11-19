@@ -56,6 +56,7 @@ export default defineConfig({
               slug: "microvm-asr",
             },
             { label: "Meeting Assistant", slug: "meeting-assistant" },
+            { label: "Meeting Assistant Skills", slug: "meeting-assistant-skills" },
             {
               label: "Transcript Summarization",
               slug: "transcript-summarization",
