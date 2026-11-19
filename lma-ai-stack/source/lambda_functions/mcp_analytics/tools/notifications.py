@@ -26,6 +26,10 @@ from tools.appsync_client import graphql
 DEFAULT_LIST_LIMIT = 100
 MAX_LIST_LIMIT = 500
 MAX_CATEGORY = 32
+# The most pages one call reads while collecting `limit` matching items. Category
+# and since are filters DynamoDB applies after reading a page, so a page of
+# other rows can match nothing.
+MAX_PAGES = 10
 
 LIST_MEETING_NOTIFICATIONS = """
 query ListMeetingNotifications(
@@ -107,6 +111,40 @@ def read_page(
     return data.get("listMeetingNotifications") or {}
 
 
+def read_items(
+    call_id: str,
+    *,
+    limit: int,
+    category: Optional[str] = None,
+    since: Optional[str] = None,
+    cursor: Optional[str] = None,
+    newest_first: bool = False,
+) -> Dict[str, Any]:
+    """Up to ``limit`` matching notifications, following pages until there are that many.
+
+    Each page asks for at most the number still wanted, so no item read is
+    left out of the answer, and the returned NextToken continues exactly after
+    the last one. At most MAX_PAGES pages are read; the answer can then be
+    short, with a NextToken.
+    """
+    items: list = []
+    token = cursor
+    for _ in range(MAX_PAGES):
+        page = read_page(
+            call_id,
+            category=category,
+            since=since,
+            limit=limit - len(items),
+            cursor=token,
+            newest_first=newest_first,
+        )
+        items.extend(row for row in page.get("Items") or [] if row)
+        token = page.get("NextToken")
+        if not token or len(items) >= limit:
+            break
+    return {"Items": items, "NextToken": token}
+
+
 def _actions(values: Any) -> list:
     actions = []
     for action in values or []:
@@ -152,7 +190,7 @@ def list_items(
     """The meeting's notifications, oldest first, with a cursor for the next page."""
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or meeting_id.strip()
-    page = read_page(
+    page = read_items(
         call_id,
         category=_optional_text(category, "category", MAX_CATEGORY),
         since=_optional_text(since, "since", 64),

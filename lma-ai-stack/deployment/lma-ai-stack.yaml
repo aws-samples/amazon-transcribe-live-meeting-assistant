@@ -12443,6 +12443,9 @@ Resources:
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # The guidance push_meeting_guidance publishes expires with the
+          # transcript: the Retention section's value, at most this parameter's.
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName

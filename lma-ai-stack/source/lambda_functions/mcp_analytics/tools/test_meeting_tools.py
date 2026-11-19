@@ -150,7 +150,7 @@ def test_guidance_is_listed_newest_first_from_the_guidance_category(calls_table,
 def test_notifications_are_listed_with_type_refs_and_dedup_key(calls_table, appsync):
     calls_table.put(meeting_row())
     appsync.answers["ListMeetingNotifications"] = {
-        "listMeetingNotifications": {"Items": [ROW], "NextToken": "next"}
+        "listMeetingNotifications": {"Items": [ROW], "NextToken": None}
     }
     listed = notifications.list_items(
         caller(SHARED), "m1", category="guidance", since="2026-11-19T13:00:00Z", cursor="c"
@@ -172,7 +172,7 @@ def test_notifications_are_listed_with_type_refs_and_dedup_key(calls_table, apps
     assert item["actions"] == [
         {"label": "Copy question", "kind": "COPY", "payload": {"text": "Who signs?"}}
     ]
-    assert listed["nextCursor"] == "next" and listed["count"] == 1
+    assert listed["nextCursor"] is None and listed["count"] == 1
 
 
 def test_an_admin_lists_any_meetings_notifications(calls_table, appsync):
@@ -611,3 +611,57 @@ def test_an_unknown_section_or_a_hidden_meeting_is_refused(calls_table, appsync)
     with pytest.raises(PermissionError):
         meeting_record.execute(caller(OTHER), "m1", include=["recordings"])
     assert appsync.calls == []
+
+
+def _paged(monkeypatch, pages):
+    """read_page answering from `pages` in turn, recording the limit each call asked for."""
+    asked = []
+
+    def read_page(
+        call_id, *, category=None, since=None, limit=100, cursor=None, newest_first=False
+    ):
+        asked.append({"limit": limit, "cursor": cursor})
+        return pages[len(asked) - 1]
+
+    monkeypatch.setattr(notifications, "read_page", read_page)
+    return asked
+
+
+def test_a_filtered_list_follows_pages_until_it_has_the_limit(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    asked = _paged(
+        monkeypatch,
+        [
+            {"Items": [], "NextToken": "t1"},
+            {"Items": [dict(ROW, NotificationId="a")], "NextToken": "t2"},
+            {"Items": [dict(ROW, NotificationId="b")], "NextToken": "t3"},
+        ],
+    )
+    listed = notifications.list_items(caller(), "m1", category="guidance", limit=2)
+    assert [item["notificationId"] for item in listed["notifications"]] == ["a", "b"]
+    # Each page asks only for what is still wanted, so nothing read is left out.
+    assert [call["limit"] for call in asked] == [2, 2, 1]
+    assert [call["cursor"] for call in asked] == [None, "t1", "t2"]
+    assert listed["nextCursor"] == "t3"
+
+
+def test_a_filtered_list_stops_after_its_page_budget(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    pages = [{"Items": [], "NextToken": f"t{i}"} for i in range(notifications.MAX_PAGES + 5)]
+    asked = _paged(monkeypatch, pages)
+    listed = notifications.list_items(caller(), "m1", category="guidance")
+    assert len(asked) == notifications.MAX_PAGES
+    assert listed["count"] == 0 and listed["nextCursor"] == f"t{notifications.MAX_PAGES - 1}"
+
+
+def test_guidance_is_listed_past_other_categories(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    _paged(
+        monkeypatch,
+        [
+            {"Items": [], "NextToken": "t1"},
+            {"Items": [dict(ROW, NotificationId="g")], "NextToken": None},
+        ],
+    )
+    listed = guidance.list_items(caller(), "m1")
+    assert [item["guidanceId"] for item in listed["guidance"]] == ["g"]

@@ -111,7 +111,11 @@ const CallAnalyticsLayout = () => {
         activeDrawerId,
         onDrawerChange: ({ detail }) => {
           setToolsOpen(detail.activeDrawerId === TOOLS_DRAWER_ID);
-          drawer.setOpen(detail.activeDrawerId === NOTIFICATIONS_DRAWER_ID);
+          // Opening Help in its place is not closing it: only a close of the
+          // Notifications drawer itself keeps it from opening by itself again.
+          if (detail.activeDrawerId === NOTIFICATIONS_DRAWER_ID) drawer.setOpen(true);
+          else if (activeDrawerId === NOTIFICATIONS_DRAWER_ID && detail.activeDrawerId === null) drawer.setOpen(false);
+          else drawer.hide();
         },
       }
     : {

@@ -167,7 +167,10 @@ list_meeting_notifications(meeting_id, category?, since?, limit?, cursor?)
   so a client that polls with the latest `updatedAt` it has seen also receives
   updates.
 - `limit` defaults to 100 and is at most 500. Pass the answer's `nextCursor` as
-  `cursor` for the next page.
+  `cursor` for the next page. `category` and `since` are applied to the rows as
+  they are read, so the tool reads up to ten pages to fill `limit`; an answer
+  can still be short, or empty, with a `nextCursor`. Keep following
+  `nextCursor` until it is absent.
 
 Each item has `notificationId`, `category`, `type`, `severity`, `title`, `body`,
 `refs`, `dedupKey`, `actions`, `source`, `createdBy`, `createdAt`, `updatedAt`,

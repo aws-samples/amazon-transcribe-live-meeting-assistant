@@ -89,3 +89,20 @@ describe('useNotificationsDrawer', () => {
     expect(again.result.current.size).toBe(480);
   });
 });
+
+describe('useNotificationsDrawer, put away for Help', () => {
+  it('still opens by itself after Help took its place', () => {
+    const storage = memoryStorage();
+    const { result, rerender } = renderHook(
+      ({ arrivals }) => useNotificationsDrawer({ callId: 'm1', liveArrivals: arrivals, storage }),
+      { initialProps: { arrivals: 0 } },
+    );
+    rerender({ arrivals: 1 });
+    expect(result.current.open).toBe(true);
+    act(() => result.current.hide());
+    expect(result.current.open).toBe(false);
+    rerender({ arrivals: 2 });
+    expect(result.current.open).toBe(true);
+    expect(result.current.badge).toBe(false);
+  });
+});

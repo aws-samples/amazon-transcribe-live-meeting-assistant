@@ -67,6 +67,9 @@ const useNotificationsDrawer = ({ callId, liveArrivals, storage = window.localSt
     [callId],
   );
 
+  // Put away for another drawer (Help), which is not the user closing it.
+  const hide = useCallback(() => setOpen(false), []);
+
   const resize = useCallback(
     (next) => {
       setSize(next);
@@ -79,7 +82,7 @@ const useNotificationsDrawer = ({ callId, liveArrivals, storage = window.localSt
     [storage],
   );
 
-  return { open, setOpen: change, badge, size, resize };
+  return { open, setOpen: change, hide, badge, size, resize };
 };
 
 export default useNotificationsDrawer;

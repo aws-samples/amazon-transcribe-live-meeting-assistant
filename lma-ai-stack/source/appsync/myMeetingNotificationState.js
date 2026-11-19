@@ -90,7 +90,8 @@ function updateRequest(ctx) {
         condition = {
             expression: 'attribute_not_exists(#dismissed) OR size(#dismissed) < :max',
             expressionNames: { '#dismissed': 'Dismissed' },
-            expressionValues: { ':max': util.dynamodb.toDynamoDB(MAX_DISMISSED) },
+            // Room for every id this change adds, so the set never passes the cap.
+            expressionValues: { ':max': util.dynamodb.toDynamoDB(MAX_DISMISSED - input.Dismiss.length + 1) },
         };
     }
     if (given(input.Restore)) {

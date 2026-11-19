@@ -16,7 +16,7 @@
  *
  * The publish resolver (appsync/notificationPublishMeeting.js) refuses a
  * MUTATION action whose name is not on its own list;
- * test_meeting_notifications_contract.py holds the two lists to each other.
+ * test_appsync_contract.py holds the two lists to each other.
  */
 
 // BEGIN notificationMutationActions -- one entry per action, each with the

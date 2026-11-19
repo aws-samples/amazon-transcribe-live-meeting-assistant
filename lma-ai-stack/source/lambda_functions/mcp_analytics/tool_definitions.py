@@ -101,7 +101,8 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "the meeting -- guidance (category 'guidance') and any other category -- oldest "
             "first, a page at a time. Each has its category, type, severity, title, body "
             "(Markdown), refs, dedupKey, actions and times. Pass since (ISO 8601) to get only "
-            "those created or updated since then, and nextCursor as cursor for the next page."
+            "those created or updated since then. While nextCursor is set there may be more: "
+            "pass it as cursor for the next page, which can be short or empty."
         ),
         "inputSchema": {
             "type": "object",

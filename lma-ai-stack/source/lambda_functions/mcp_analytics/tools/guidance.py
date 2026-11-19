@@ -26,7 +26,7 @@ from lma_notifications import GUIDANCE, publish_meeting_notification
 
 from tools.access import Caller, require_meeting
 from tools.appsync_client import graphql
-from tools.notifications import list_limit, read_page
+from tools.notifications import list_limit, read_items
 
 MAX_TEXT_CHARS = 2000
 MAX_TITLE_CHARS = 200
@@ -101,7 +101,7 @@ def list_items(caller: Caller, meeting_id: str, limit: Any = None) -> Dict[str, 
     """The guidance a meeting has been given, newest first."""
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or meeting_id.strip()
-    page = read_page(
+    page = read_items(
         call_id,
         category=GUIDANCE,
         limit=min(list_limit(limit, DEFAULT_LIST_LIMIT), MAX_LIST_LIMIT),

@@ -47,7 +47,7 @@ const MAX_ARG = 200;
 // BEGIN notificationMutationActions -- the actions a MUTATION button may name,
 // each with the argument names it accepts. The UI's registry
 // (ui/src/components/meeting-notifications/notification-actions.js) holds the
-// same names; test_meeting_notifications_contract.py holds the two to each
+// same names; test_appsync_contract.py holds the two to each
 // other. Empty: no action is offered yet.
 const MUTATION_ACTIONS = {};
 // END notificationMutationActions
