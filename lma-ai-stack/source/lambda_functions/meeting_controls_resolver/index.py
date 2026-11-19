@@ -42,6 +42,9 @@ S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
 # prefix, one folder per meeting, and items under PK kf#<CallId>.
 S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
 S3_CONSENT_EVIDENCE_PREFIX = environ.get("S3_CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
+# Chat attachments (docs/virtual-participant.md): files under this prefix, one
+# folder per meeting, and items under PK att#<CallId>.
+S3_CHAT_ATTACHMENTS_PREFIX = environ.get("S3_CHAT_ATTACHMENTS_PREFIX", "lma-chat-attachments/")
 # Meeting video recordings (docs/meeting-video.md): the final .mp4 under the
 # first prefix, and the Virtual Participant's in-progress segments under
 # <chunks prefix><CallId>/ until the .mp4 is assembled.
@@ -458,6 +461,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
                 new_recipients,
             )
         share_keyframes(callid, new_recipients)
+        share_chat_attachments(callid, new_recipients)
 
         input = {
             "CallId": callid,
@@ -569,6 +573,57 @@ def delete_keyframes(callid):
     )
     if deleted or images:
         logger.info("Deleted %d key frame(s) and %d image(s) for %s", deleted, images, callid)
+    return deleted
+
+
+def _chat_attachment_keys(callid):
+    """The PK/SK of every chat attachment stored for the meeting."""
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": f"att#{callid}"},
+        "ProjectionExpression": "PK, SK",
+    }
+    while True:
+        response = ddbTable.query(**kwargs)
+        yield from response.get("Items", [])
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
+def share_chat_attachments(callid, new_recipients):
+    """Give the meeting's chat attachments the meeting's new SharedWith, as its key frames."""
+    updated = 0
+    for key in _chat_attachment_keys(callid):
+        if new_recipients:
+            ddbTable.update_item(
+                Key=key,
+                UpdateExpression="SET SharedWith = :val",
+                ExpressionAttributeValues={":val": new_recipients},
+            )
+        else:
+            ddbTable.update_item(Key=key, UpdateExpression="REMOVE SharedWith")
+        updated += 1
+    return updated
+
+
+def delete_chat_attachments(callid):
+    """Delete the meeting's chat attachments: their items and every version of their files.
+
+    The files are found by the meeting's folder, named with the same posixify
+    rule as the key frames'; the trailing slash keeps one meeting's folder from
+    matching another whose id merely begins the same way.
+    """
+    deleted = 0
+    for key in _chat_attachment_keys(callid):
+        ddbTable.delete_item(Key={"PK": key["PK"], "SK": key["SK"]})
+        deleted += 1
+    files = _batch_delete_prefix(
+        S3_BUCKET_NAME, f"{S3_CHAT_ATTACHMENTS_PREFIX}{posixify_filename(callid)}/"
+    )
+    if deleted or files:
+        logger.info("Deleted %d chat attachment(s) and %d file(s) for %s", deleted, files, callid)
     return deleted
 
 
@@ -710,7 +765,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  5. Deletion of the meeting's metering records (PK mtr#<CallId>)
         #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
         #  7. Deletion of the meeting's consent evidence images
-        with ThreadPoolExecutor(max_workers=7) as pool:
+        #  8. Deletion of the meeting's chat attachments (PK att#<CallId>, and files)
+        with ThreadPoolExecutor(max_workers=8) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(delete_transcript_items, callid)
             details_future = pool.submit(get_call_details, appsync_session, schema, callid)
@@ -719,6 +775,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             metering_future = pool.submit(delete_metering_records, callid)
             keyframes_future = pool.submit(delete_keyframes, callid)
             evidence_future = pool.submit(delete_consent_evidence, callid)
+            attachments_future = pool.submit(delete_chat_attachments, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -728,6 +785,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             metering_future.result()
             keyframes_future.result()
             evidence_future.result()
+            attachments_future.result()
 
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")

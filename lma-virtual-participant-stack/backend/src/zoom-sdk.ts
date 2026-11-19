@@ -17,6 +17,7 @@ import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { applyZoomPersonalLink } from './zoom-join-link.js';
 import { createLogger } from './logger.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 
 const log = createLogger('zoom-sdk');
 
@@ -413,6 +414,10 @@ export default class ZoomSdk {
         let lastSpeaker = '';
         let consecutiveLonely = 0;
         const POLLS_BEFORE_LONELY = 2;
+        // Until somebody else has been counted, a lonely count does not end the
+        // meeting before the first-attendee wait is over (first-attendee-wait.ts).
+        const firstAttendee = new FirstAttendeeWait();
+        let firstAttendeeWaitReported = false;
         let pollsSinceLonelyCheck = 0;
         const monitorTimer = setInterval(async () => {
             if (this.ended || page.isClosed()) return;
@@ -552,9 +557,15 @@ export default class ZoomSdk {
                 // is absent (domCount === -1), so a missed onUserJoin can't
                 // falsely strand the VP as "alone".
                 const effectiveCount = snap.domCount >= 0 ? snap.domCount : snap.count;
+                firstAttendee.note(effectiveCount);
                 if (effectiveCount <= 1) {
                     consecutiveLonely += 1;
-                    if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
+                    if (consecutiveLonely >= POLLS_BEFORE_LONELY && !firstAttendee.mayLeaveAlone()) {
+                        if (!firstAttendeeWaitReported) {
+                            firstAttendeeWaitReported = true;
+                            log.info(`[zoom-sdk] nobody else has joined yet (count=${effectiveCount}) — waiting up to ${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee`);
+                        }
+                    } else if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
                         log.info(`[zoom-sdk] alone in meeting (count=${effectiveCount}) — leaving`);
                         details.start = false;
                         this.requestEnd({ reason: 'alone-in-meeting', trigger: 'sdk-participants' });

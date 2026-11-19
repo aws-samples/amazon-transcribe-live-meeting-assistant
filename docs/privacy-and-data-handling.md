@@ -265,6 +265,7 @@ are rewritten or expire (see
 | **Meeting record**: title, owner, sharing list, times, participants, speaker names, sentiment, transcript-deletion stamps | The meetings table, the meeting's row and its meeting-list rows | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
 | **Transcript segments**: every turn, partial or final, on every channel | The meetings table, the meeting's transcript items | 90 days | `TranscriptionExpirationInDays`; **Days to keep transcript segments**; **Delete the transcript after the summary** | Deleted |
 | **Meeting chat lines** a Virtual Participant adds to the transcript | Stored with the transcript segments | As the transcript | As the transcript; **Virtual Participant › Add the meeting chat to the transcript** (default On) decides whether they are captured. See [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript) | Deleted |
+| **Chat attachments**: images and files shared in the meeting chat, and each one's AI title and summary | Files in the recordings bucket, `lma-chat-attachments/<meeting>/`, encrypted with the stack's key; one item each in the meetings table (file name, kind, type, size, title, summary). Captured only from a chat line that is added to the transcript, and only while **Virtual Participant › Capture chat attachments** (default Off) is on; an attachment that is not stored keeps its file name only | 90 days | Items: as the transcript, including **Delete the transcript after the summary**. Files: the `lma-chat-attachments/` lifecycle rule, from `TranscriptionExpirationInDays`, and deleted with the transcript. **AI titles and summaries for chat attachments** (default On) decides whether the model reads them. See [Chat Attachments](virtual-participant.md#chat-attachments) | Deleted; the files, every version |
 | **Summary** | On the meeting record; with the transcript knowledge base deployed, also as a file in the recordings bucket (see the next rows) | As the meeting record; the file as the transcript files | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
 | **Meeting assistant answers** | Stored with the transcript segments | As the transcript | As the transcript | Deleted |
 | **Other model outputs**: the derived agenda, speaker names found from the transcript, key-frame text | On the meeting record (agenda, speaker names) or on the key-frame items (text) | As the record they are on | As that record | Deleted |
@@ -376,9 +377,10 @@ within the minute it is due.
   the meeting after it. A scheduled deletion runs even if the setting has since
   been turned off.
 - **What is deleted.** Every transcript segment, the chat lines a Virtual
-  Participant added, the meeting assistant answers, the transcript files in the
-  recordings bucket (every version), and their entries in the transcript
-  knowledge base.
+  Participant added and the chat attachments stored with them (their records,
+  and every version of their files), the meeting assistant answers, the
+  transcript files in the recordings bucket (every version), and their entries
+  in the transcript knowledge base.
 - **What is kept.** The summary (on the meeting and in the knowledge base), the
   meeting record, the audio and video recordings, key frames and their text, and
   the consent record. Turn **Record meeting audio** off and set
@@ -408,6 +410,7 @@ Deleting a meeting removes, for that meeting:
   assistant answers;
 - the usage records behind its cost estimate;
 - its key-frame items and images, and its consent evidence images;
+- its chat attachments: their items, and every version of their files;
 - its audio recording and its video recording, with any video segments still in
   the bucket;
 - the transcript and summary files in `lma-transcripts/` whose names begin with
@@ -493,7 +496,10 @@ lists every place LMA sends meeting content. In summary:
   Amazon Transcribe in `en-US`, `en-AU`, `en-GB` or `es-US`; it does not apply to
   meetings using language identification or the on-demand engine, which has no
   redaction. It redacts the transcript text only: the audio recording, the video,
-  key frames and their text, and the meeting chat are not redacted. See
+  key frames and their text, and the meeting chat are not redacted. Chat
+  attachments, and the titles and summaries a model writes about them, are not
+  redacted either; since they are captured only with the meeting chat, which is
+  not added while redaction is on, none are captured in a meeting that redacts. See
   [Content Redaction (PII)](transcription-and-translation.md#content-redaction-pii).
 
 ### Logging
@@ -535,7 +541,8 @@ preset set, and leaves every other setting as it is. See
 | Redact personal information | Off | Off | On | On |
 | Model inference geography | Global | Global | Same geography | Same geography |
 
-No preset sets **Read spoken replies**. Under the consent-required preset, Stream
+No preset sets **Read spoken replies** or **Capture chat attachments**, which
+is off by default. Under the consent-required preset, Stream
 Audio and the Desktop Capture App cannot be used to start a meeting, the Webex
 join cannot be granted, and the Teams browser join is granted only by consent
 said aloud. Under the notify preset, every capture method that shows a consent

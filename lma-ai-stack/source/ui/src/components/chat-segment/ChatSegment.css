@@ -51,3 +51,48 @@
   font-size: 0.95em;
   word-break: break-all;
 }
+
+/* A chat line's attachments (ChatAttachments.jsx): a thumbnail or a file
+   chip, the AI title and summary under it. */
+.chat-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chat-attachment-thumb-button {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.chat-attachment-thumb {
+  display: block;
+  max-width: 240px;
+  max-height: 160px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.chat-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-attachment-size {
+  color: #5f6b7a;
+}
+
+.awsui-dark-mode .chat-attachment-size {
+  color: #a4abb3;
+}
+
+.chat-attachment-text {
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}

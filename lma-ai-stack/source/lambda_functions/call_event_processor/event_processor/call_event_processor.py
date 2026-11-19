@@ -31,6 +31,10 @@ import boto3
 # custom utils/helpers imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import execute_gql_query_with_retries
+
+# Validation of ADD_CHAT_ATTACHMENT and ADD_VIDEO_KEYFRAME, AWS-free for the
+# same reason as pure.py below.
+from attachment_input import AttachmentEventError, build_attachment_input  # noqa: E402
 from aws_lambda_powertools import Logger
 from botocore.config import Config as BotoCoreConfig
 from eventprocessor_utils import (
@@ -54,8 +58,6 @@ from graphql_helpers import (
     transcript_segment_sentiment_fields,
     video_keyframe_fields,
 )
-
-# Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
 from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
 from lma_channels import canonical_channel, is_speech_channel  # noqa: E402
 from lma_config import (  # noqa: E402
@@ -124,6 +126,9 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
+# Gives each stored chat attachment its AI title and summary, once, after it is
+# stored. See chat_attachment_summarizer.
+CHAT_ATTACHMENT_SUMMARIZER_ARN = getenv("CHAT_ATTACHMENT_SUMMARIZER_ARN", "")
 #: The threshold used when the Meeting Agenda section cannot be read: 300
 #: seconds, the setting's shipped default in setting_defaults.json.
 AGENDA_DERIVATION_AFTER_SECONDS = 300.0
@@ -202,6 +207,7 @@ if (
     or TRANSCRIPT_DELETION_FUNCTION_ARN
     or AGENDA_DERIVER_ARN
     or KEYFRAME_TEXT_EXTRACTOR_ARN
+    or CHAT_ATTACHMENT_SUMMARIZER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
     or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
     or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
@@ -1394,6 +1400,109 @@ def queue_keyframe_text(keyframe: Mapping[str, Any]) -> None:
         )
 
 
+async def execute_add_chat_attachment_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Store one chat attachment on the meeting (ADD_CHAT_ATTACHMENT).
+
+    As a key frame: the attachment takes the meeting's Owner and SharedWith,
+    read here rather than trusted from the event, so it is visible to the people
+    who can see the transcript; see attachment_input.py. Unlike a key frame it
+    takes the transcript's own expiry, shortened while transcripts are deleted
+    after the summary, because it is deleted with the transcript. A meeting that
+    is not there yet fails the record, which is redelivered.
+
+    An event that can never be stored is logged and dropped rather than raised,
+    for the reason given in execute_add_video_keyframe_mutation.
+    """
+    try:
+        attachment = build_attachment_input(
+            message,
+            owner=None,
+            shared_with=None,
+            expires_after=get_transcription_ttl(),
+        )
+    except AttachmentEventError as error:
+        LOGGER.error(
+            "dropping an ADD_CHAT_ATTACHMENT event that cannot be stored: %s",
+            error,
+            extra=dict(call_id=message.get("CallId"), attachment_id=message.get("AttachmentId")),
+        )
+        return {"ok": False, "Dropped": True}
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    access_query = dsl_gql(
+        DSLQuery(
+            schema.Query.getCall.args(CallId=attachment["CallId"]).select(
+                schema.Call.CallId,
+                schema.Call.Owner,
+                schema.Call.SharedWith,
+            )
+        )
+    )
+    access = await execute_gql_query_with_retries(
+        access_query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+    call = require_graphql_field(access, "getCall", logger=LOGGER)
+    for field in ("Owner", "SharedWith"):
+        if call.get(field) is not None:
+            attachment[field] = call[field]
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.addChatAttachment.args(input=attachment).select(
+                schema.ChatAttachment.PK,
+                schema.ChatAttachment.SK,
+                schema.ChatAttachment.CallId,
+                schema.ChatAttachment.AttachmentId,
+                schema.ChatAttachment.Status,
+            )
+        )
+    )
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+    LOGGER.debug("chat attachment stored", extra=dict(attachment_id=attachment["AttachmentId"]))
+    if attachment.get("Summarize"):
+        queue_attachment_summary(attachment)
+    return result
+
+
+def queue_attachment_summary(attachment: Mapping[str, Any]) -> None:
+    """Have the attachment's title and summary written, asynchronously, once it is stored.
+
+    Fire-and-forget, as the key frame text: nothing in this batch waits on it,
+    and an attachment without a title is shown by its file name. The summarizer
+    skips an attachment that already has one, so a redelivered event costs
+    nothing.
+    """
+    if not CHAT_ATTACHMENT_SUMMARIZER_ARN:
+        return
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=CHAT_ATTACHMENT_SUMMARIZER_ARN,
+            InvocationType="Event",
+            Payload=json.dumps(
+                {"CallId": attachment["CallId"], "AttachmentId": attachment["AttachmentId"]}
+            ),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the summary of a chat attachment; continuing",
+            extra=dict(
+                call_id=attachment.get("CallId"), attachment_id=attachment.get("AttachmentId")
+            ),
+        )
+
+
 async def execute_add_call_summary_text_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1743,6 +1852,7 @@ async def execute_process_event_api_mutation(
         ADD_S3_RECORDING_URL="ADD_S3_RECORDING_URL",
         ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
         ADD_VIDEO_KEYFRAME="ADD_VIDEO_KEYFRAME",
+        ADD_CHAT_ATTACHMENT="ADD_CHAT_ATTACHMENT",
         UPDATE_CAPTURE_CONTEXT="UPDATE_CAPTURE_CONTEXT",
         UPDATE_TRANSCRIPTION_PAUSE="UPDATE_TRANSCRIPTION_PAUSE",
     )
@@ -2282,6 +2392,16 @@ async def execute_process_event_api_mutation(
     elif event_type == "ADD_VIDEO_KEYFRAME":
         LOGGER.debug("Add video keyframe")
         response = await execute_add_video_keyframe_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "ADD_CHAT_ATTACHMENT":
+        LOGGER.debug("Add chat attachment")
+        response = await execute_add_chat_attachment_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):

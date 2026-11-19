@@ -320,6 +320,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The transcriber's tests compare its key-frame detector with the VP's copy and
     # read the consent defaults and schema it mirrors.
     (f"{VP}/backend/src/keyframe-detector.ts", "transcriber"),
+    # The call event processor's tests hold its list of chat attachment types to
+    # the VP's.
+    (f"{VP}/backend/src/chat-attachments.ts", "lambdas"),
     (f"{FUNCTIONS}/configuration_seeder/defaults/**", ("transcriber", "vp")),
     (f"{LAYERS}/configuration_layer/lma_config/schemas/**", "transcriber"),
     # The VP unit tests read these UI components, the AI stack template, the

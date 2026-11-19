@@ -597,6 +597,14 @@ def test_the_virtual_participant_task_sets_the_variable_from_the_same_parameter(
 #: that no stack parameter backs: (section, setting) -> (file, exported name).
 VP_SHIPPED_FALLBACKS = {
     ("virtual_participant", "captureMeetingChat"): ("meeting-chat.ts", "CAPTURE_MEETING_CHAT_DEFAULT"),
+    ("virtual_participant", "captureChatAttachments"): (
+        "chat-attachments.ts",
+        "CAPTURE_CHAT_ATTACHMENTS_DEFAULT",
+    ),
+    ("virtual_participant", "chatAttachmentSummaries"): (
+        "chat-attachments.ts",
+        "CHAT_ATTACHMENT_SUMMARIES_DEFAULT",
+    ),
 }
 
 
