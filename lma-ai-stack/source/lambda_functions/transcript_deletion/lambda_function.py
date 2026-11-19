@@ -17,7 +17,11 @@ the meeting's ``CallId`` and a ``Trigger``:
     by which the meeting is deleted even if its summary never arrives.
 ``summary-written``
     By the call event processor, once the summary is stored. Moves the
-    deletion forward to the summary plus the delay, or deletes now.
+    deletion forward to the summary plus the delay, or deletes now. Not while
+    the meeting is live (``STARTED``): an earlier session's summary that lands
+    after a rejoined session has started leaves the deletion to that session's
+    END and summary. ``meeting-ended`` has no such check, because the END
+    invokes it before writing ``ENDED``.
 ``scheduled``
     By the one-time EventBridge Scheduler schedule either of the above made.
     Deletes.
@@ -192,7 +196,8 @@ def schedule_name(call_id: str) -> str:
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
     response = _table().get_item(
         Key=meeting_key(call_id),
-        ProjectionExpression="PK, TranscriptDeletionScheduledFor, TranscriptDeletedAt",
+        ProjectionExpression="PK, #status, TranscriptDeletionScheduledFor, TranscriptDeletedAt",
+        ExpressionAttributeNames={"#status": "Status"},
         ConsistentRead=True,
     )
     return response.get("Item")
@@ -544,6 +549,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if trigger == MEETING_ENDED:
         wait = delay + (SUMMARY_WAIT_MINUTES if IS_TRANSCRIPT_SUMMARY_ENABLED else 0)
     else:
+        # A summary is written after its meeting has ended. One that is written
+        # while the meeting is live again -- an earlier session's summary
+        # arriving after a rejoined session has started -- neither deletes nor
+        # schedules: that session's own END and summary do.
+        meeting = read_meeting(call_id) or {}
+        if meeting.get("Status") == "STARTED":
+            LOGGER.info("meeting %s is live; its summary leaves the deletion as it is", call_id)
+            return {"action": "live"}
         wait = delay
     if wait == 0:
         return delete_now(call_id, trigger, context)

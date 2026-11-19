@@ -514,3 +514,48 @@ def test_a_change_between_the_read_and_the_cancel_keeps_the_schedule(aws, monkey
 def test_a_reopen_of_a_meeting_with_no_record_does_nothing(aws):
     outcome = lf.handler({**REOPENED_2, "CallId": "not-a-meeting"}, CONTEXT)
     assert outcome == {"action": "none"}
+
+
+# ── a summary written while the meeting is live again ───────────────────────
+
+
+def _transcript_items(aws) -> int:
+    return len([k for k in aws.table.items if k[0] == f"trs#{CALL_ID}"])
+
+
+def test_a_summary_written_while_the_meeting_is_live_deletes_nothing(aws, monkeypatch):
+    """An earlier session's summary landing after a rejoined session started."""
+    _set_delay(monkeypatch, 0)
+    _live_in_session(aws)
+
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome == {"action": "live"}
+    assert _transcript_items(aws) == 7
+    assert "TranscriptDeletedAt" not in _meeting(aws)
+    assert aws.scheduler.schedules == {}
+
+
+def test_a_summary_written_while_the_meeting_is_live_schedules_nothing(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    _live_in_session(aws)
+
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome == {"action": "live"}
+    assert aws.scheduler.schedules == {}
+    assert "TranscriptDeletionScheduledFor" not in _meeting(aws)
+
+
+def test_the_rejoined_sessions_own_end_and_summary_still_delete(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    _live_in_session(aws)
+    lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    # The rejoined session ends; its summary follows.
+    _meeting(aws)["Status"] = "ENDED"
+    lf.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, CONTEXT)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome["action"] == "scheduled"
+    assert abs(_minutes_from_now(_scheduled_at(aws)) - 15) < 1.1

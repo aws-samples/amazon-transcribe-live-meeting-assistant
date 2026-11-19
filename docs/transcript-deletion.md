@@ -78,7 +78,10 @@ which also lists the retention stack parameters a preset cannot set, and
   [rejoin](virtual-participant.md#rejoin) while the setting is on, a pending
   deletion is cancelled once the rejoined session starts capturing, because the
   meeting is being captured again. The rejoined session's end schedules the
-  deletion afresh, by the rules above. A cancel that reaches the deletion
+  deletion afresh, by the rules above. A summary written while the meeting is
+  in progress, such as the earlier session's summary arriving after the
+  rejoined session has started, neither deletes the transcript nor schedules
+  a deletion; the rejoined session's own summary does. A cancel that reaches the deletion
   function only after that session has ended changes nothing. While the
   setting is off, a rejoin keeps the pending deletion: it runs at its time,
   during the rejoined session if that is still going on, as the next paragraph
