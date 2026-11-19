@@ -120,7 +120,30 @@ def test_the_function_reads_only_the_content_an_archive_holds(ai_stack: dict) ->
     assert read == allowed
     listing = _for_action(ai_stack, "s3:ListBucket")
     assert len(listing) == 1
-    assert listing[0]["Condition"] == {"StringLike": {"s3:prefix": ["lma-consent-evidence/*"]}}
+    assert listing[0]["Condition"] == {
+        "StringLike": {"s3:prefix": ["lma-consent-evidence/*", f"{ARCHIVE_PREFIX}*"]}
+    }
+
+
+def test_meeting_json_holds_only_fields_get_call_answers() -> None:
+    """The archive's meeting.json is an allow-list of the schema's Call fields
+    (plus the session lists a continued meeting keeps), never the consent record."""
+    import re
+
+    schema = (REPO_ROOT / "lma-ai-stack" / "source" / "appsync" / "schema.graphql").read_text()
+    body = re.search(r"\ntype Call implements[^{]*\{(.*?)\n\}", schema, re.S).group(1)
+    call_fields = set(re.findall(r"^\s+([A-Za-z]+)\s*[:(]", body, re.M))
+    source = (
+        REPO_ROOT / "lma-ai-stack" / "source" / "lambda_functions" / "meeting_archive" / "index.py"
+    ).read_text()
+    listed = set(
+        re.findall(
+            r'^    "([A-Za-z]+)",$', source.split("DETAILS_FIELDS = (")[1].split(")")[0], re.M
+        )
+    )
+    assert listed, "DETAILS_FIELDS not found"
+    assert listed - {"RecordingUrls", "VideoRecordingUrls"} <= call_fields
+    assert not listed & {"PK", "SK", "ExpiresAfter", "Consent", "CallSummaryText"}
 
 
 def test_the_function_reads_only_meeting_partitions_and_writes_no_items(ai_stack: dict) -> None:

@@ -38,9 +38,9 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
-      // Every session's recordings, for a meeting continued after the Virtual
-      // Participant rejoined it; absent otherwise, and on a query that does not
-      // ask for them.
+      // A list of every session's recordings, read when the meeting record has
+      // one. Nothing in this repository writes these lists yet, and the getCall
+      // query does not ask for them, so they are absent until it does.
       RecordingUrls: recordingUrls,
       VideoRecordingUrls: videoRecordingUrls,
       // How the meeting was captured and transcribed, as its START recorded it;

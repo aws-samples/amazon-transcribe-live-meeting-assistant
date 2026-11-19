@@ -59,7 +59,10 @@ from urllib.parse import unquote, urlparse
 import boto3
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.config import Config as BotoCoreConfig
+from botocore.exceptions import ClientError
 
+# Stdlib logging rather than aws_lambda_powertools: this function carries no
+# layer and uses the runtime's own boto3.
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -289,11 +292,49 @@ def write_status(status: Mapping[str, Any]) -> None:
 
 
 def read_status(call_id: str, archive_id: str) -> Optional[Dict[str, Any]]:
+    """The archive's status object, or None when there is none."""
     try:
         body = S3.get_object(Bucket=RECORDINGS_BUCKET, Key=status_key(call_id, archive_id))["Body"]
     except S3.exceptions.NoSuchKey:
         return None
+    except ClientError as error:
+        # A missing key reads as NoSuchKey with s3:ListBucket on the prefix,
+        # and as AccessDenied without it; either way there is no archive.
+        if error.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "AccessDenied"):
+            return None
+        raise
     return json.loads(body.read())
+
+
+#: How long an archive already prepared is offered again instead of a new one:
+#: well inside the day the lifecycle rule keeps it.
+REUSE_SECONDS = 20 * 3600
+
+
+def reusable_archive(call_id: str, status: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The caller's own archive of the same contents still preparing, or ready
+    and recent, so that asking again neither starts a second build nor waits."""
+    folder = f"{ARCHIVE_PREFIX}{posixify_filename(call_id)}/"
+    best: Optional[Dict[str, Any]] = None
+    for page in S3.get_paginator("list_objects_v2").paginate(
+        Bucket=RECORDINGS_BUCKET, Prefix=folder
+    ):
+        for entry in page.get("Contents", []):
+            parts = entry["Key"][len(folder) :].split("/")
+            if len(parts) != 2 or parts[1] != "status.json" or not ARCHIVE_ID.match(parts[0]):
+                continue
+            found = read_status(call_id, parts[0])
+            if not found or any(
+                found.get(k) != status.get(k) for k in ("Contents", "RequestedBy", "IncludeConsent")
+            ):
+                continue
+            age = _age_seconds(found.get("CreatedAt"))
+            fresh = (found.get("Status") == PREPARING and age <= STALE_SECONDS) or (
+                found.get("Status") == READY and age <= REUSE_SECONDS
+            )
+            if fresh and (best is None or str(found.get("CreatedAt")) > str(best.get("CreatedAt"))):
+                best = found
+    return best
 
 
 def archive_file_name(call_id: str, contents: str) -> str:
@@ -330,7 +371,8 @@ def recording_key(url: Any, prefix: str) -> Optional[str]:
 
 
 def session_urls(meeting: Mapping[str, Any], single: str, many: str) -> List[str]:
-    """Every session's recording URL: the list a continued meeting keeps, and the current one."""
+    """Every recording URL the meeting record names: the ``many`` list, when the
+    record has one (nothing in this repository writes it yet), then the current one."""
     urls: List[str] = []
     listed = meeting.get(many)
     if isinstance(listed, list):
@@ -654,9 +696,41 @@ def transcript_html(title: str, facts, rows) -> str:
 
 # --- the plan ----------------------------------------------------------------------
 
-#: Meeting record attributes left out of meeting.json: the keys, and the
-#: consent record (in consent/ for its owner and Admins).
-DETAILS_LEFT_OUT = re.compile(r"^(PK|SK|ExpiresAfter|Consent.*)$")
+#: The meeting record attributes meeting.json holds: fields of the schema's Call
+#: type that getCall answers (lma-ai-stack/test/test_meeting_archive_template.py
+#: holds the list to it), and the recording lists a record may carry. The
+#: keys, the summary (in summary/) and the consent record (in consent/, for the
+#: owner and Admins) are not among them, nor is any attribute added later.
+DETAILS_FIELDS = (
+    "CallId",
+    "CreatedAt",
+    "UpdatedAt",
+    "Status",
+    "Owner",
+    "SharedWith",
+    "AgentId",
+    "CustomerPhoneNumber",
+    "SystemPhoneNumber",
+    "TotalConversationDurationMillis",
+    "RecordingUrl",
+    "VideoRecordingUrl",
+    "RecordingUrls",
+    "VideoRecordingUrls",
+    "Agenda",
+    "AgendaSource",
+    "AgendaUpdatedBy",
+    "AgendaUpdatedAt",
+    "SpeakerIdentities",
+    "CaptureSource",
+    "TranscriptionEngine",
+    "TranscriptionLanguage",
+    "SpeakerSeparation",
+    "DetectedLanguages",
+    "TranscriptDeletionScheduledFor",
+    "TranscriptDeletedAt",
+    "TranscriptSegmentsDeleted",
+    "TranscriptFilesDeleted",
+)
 
 
 def meeting_title(call_id: str) -> str:
@@ -784,7 +858,7 @@ def plan_archive(
         if not urls:
             plan.leave_out(f"{kind.capitalize()} recording", "the meeting has none")
 
-    details = {k: v for k, v in meeting.items() if not DETAILS_LEFT_OUT.match(k)}
+    details = {k: meeting[k] for k in DETAILS_FIELDS if k in meeting}
     details["Participants"] = participants
     details["Sessions"] = sessions
     plan.add_text(
@@ -983,6 +1057,9 @@ def prepare(event: Mapping[str, Any], context: Any) -> Dict[str, Any]:
         "CreatedAt": now_iso(),
         "UpdatedAt": now_iso(),
     }
+    existing = reusable_archive(call_id, status)
+    if existing is not None:
+        return public_status(existing)
     write_status(status)
     LAMBDA.invoke(
         FunctionName=context.invoked_function_arn,

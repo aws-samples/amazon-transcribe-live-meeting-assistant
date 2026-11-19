@@ -166,7 +166,7 @@ class FakeS3:
         return f"https://signed.example.com/{Params['Key']}?expires={ExpiresIn}"
 
     def get_paginator(self, _name):
-        objects = self.objects
+        objects = {**self.objects, **{k: len(v) for k, v in self.stored.items()}}
 
         class Pages:
             def paginate(self, Bucket, Prefix):
@@ -550,3 +550,53 @@ def test_unknown_contents_is_refused(fakes):
     fakes()
     with pytest.raises(RuntimeError, match="required"):
         prepare(OWNER, contents="ALL_FILES")
+
+
+def test_asking_again_returns_the_archive_already_preparing_or_ready(fakes):
+    _dynamo, s3, lam = fakes()
+    first = prepare(OWNER)
+    again = prepare(OWNER)
+    assert again["ArchiveId"] == first["ArchiveId"]
+    assert len(lam.invocations) == 1
+    run_build(lam)
+    ready = prepare(OWNER)
+    assert ready["ArchiveId"] == first["ArchiveId"]
+    assert ready["Status"] == "READY" and ready["DownloadUrl"]
+    assert len(lam.invocations) == 1
+
+
+def test_another_caller_or_other_contents_gets_an_archive_of_its_own(fakes):
+    _dynamo, _s3, lam = fakes()
+    first = prepare(OWNER)
+    assert prepare(FRIEND)["ArchiveId"] != first["ArchiveId"]
+    assert prepare(OWNER, contents="KEY_FRAMES")["ArchiveId"] != first["ArchiveId"]
+    assert len(lam.invocations) == 3
+
+
+def test_a_stale_or_old_archive_is_not_offered_again(fakes):
+    _dynamo, s3, lam = fakes()
+    first = prepare(OWNER)
+    key = index.status_key(CALL, first["ArchiveId"])
+    status = json.loads(s3.stored[key])
+    s3.stored[key] = json.dumps({**status, "CreatedAt": "2020-01-01T00:00:00Z"}).encode()
+    assert prepare(OWNER)["ArchiveId"] != first["ArchiveId"]
+    assert len(lam.invocations) == 2
+
+
+def test_a_missing_status_reads_as_no_archive_whatever_s3_answers(fakes, monkeypatch):
+    _dynamo, s3, _lam = fakes()
+
+    def denied(**_kwargs):
+        raise index.ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+
+    monkeypatch.setattr(s3, "get_object", lambda Bucket, Key: denied())
+    with pytest.raises(RuntimeError, match="no such archive"):
+        get(OWNER, "b" * 32)
+
+
+def test_meeting_json_holds_only_listed_fields(fakes):
+    meeting = meeting_item(InternalNote=s("not for the archive"))
+    s3, answer, _ready = build_for(fakes, OWNER, meeting=meeting)
+    details = json.loads(archive_of(s3, answer).read("meeting.json"))
+    assert "InternalNote" not in details and "CallSummaryText" not in details
+    assert details["CallId"] == CALL and details["Owner"] == "owner@example.com"

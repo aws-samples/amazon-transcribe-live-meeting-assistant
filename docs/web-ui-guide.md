@@ -165,9 +165,9 @@ assistant is a panel beside the tabs, on every tab; see
     header confirms the copy). The summary can also be sent with **Email
     summary (beta)**. The transcript's entries are disabled, with the reason,
     once the Retention settings have deleted it.
-  - **Recordings** — the **Audio** and **Video** files, one entry per session
-    for a meeting the Virtual Participant rejoined. Each opens through a link
-    signed when it is chosen, as **Open file** on the **Details** tab does.
+  - **Recordings** — the meeting's **Audio** and **Video** recordings. Each
+    opens through a link signed when it is chosen, as **Open file** on the
+    **Details** tab does.
   - **Screen share** — **Slides (PDF)**, the deck **Export slides (PDF)** on the
     **Screen share** tab prints, and **Key frames (.zip)**, every key frame's
     picture.
@@ -680,10 +680,10 @@ seconds for a short meeting, a few minutes for hours of video), and then a
 |---|---|
 | `summary/` | The summary as a web page and as Markdown, sections in the [reading order](#summary-section-order). The Word and PDF summaries are built in the browser, so they are not in the archive; use **Download › Summary** |
 | `transcript/` | The transcript as text and as a web page. Left out once the Retention settings have deleted it. Speaker names are as recorded with each line |
-| `recordings/` | Every session's audio and video recording |
+| `recordings/` | The audio and video recordings |
 | `keyframes/` | Every key frame's picture. The slide deck is printed by the browser, so it is not in the archive; use **Download › Screen share › Slides (PDF)** |
 | `chat-attachments/` | Every stored chat attachment |
-| `meeting.json` | The meeting's details: its record (dates, owner, sharing, agenda, recording links), its participants and its sessions |
+| `meeting.json` | The meeting's details: its record (dates, owner, sharing, agenda, recording links, transcription settings), its participants and the recording files in the archive |
 | `consent/` | The consent record and its evidence images, only when the person asking is the meeting's owner or an Admin |
 | `README.md` | Every file in the archive, and anything left out and why |
 
