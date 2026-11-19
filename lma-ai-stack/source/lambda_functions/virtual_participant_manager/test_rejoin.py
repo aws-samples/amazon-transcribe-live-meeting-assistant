@@ -237,7 +237,8 @@ def test_the_owner_rejoins_an_ended_virtual_participant_into_the_same_meeting(wo
     assert data["launchToken"] == "vp-1-s2"
     assert data["meetingTime"] == ""
     assert data["meetingID"] == "123456789"
-    assert data["meetingPassword"] == "pw-on-the-row"
+    assert "meetingPassword" not in data, "the VP reads its password from its row at startup"
+    assert "pw-on-the-row" not in json.dumps(execution["input"])
     assert data["userSub"] == "sub-owner"
     assert data["userZoomSub"] == ""
     assert data["enableVideoRecording"] == "true"
@@ -517,3 +518,10 @@ def test_a_host_whose_state_cannot_be_read_is_taken_to_be_running(host_manager):
 def test_no_registered_host_is_not_a_running_one(host_manager, entry):
     host_manager.get_task_details_from_registry = lambda vp_id: entry
     assert host_manager.registered_host_running("vp-1") is False
+
+
+def test_launch_input_carries_no_meeting_password() -> None:
+    """The Virtual Participant reads its meeting password from its row at startup."""
+    launch = rejoin.launch_input(ended_vp(), OWNER, "vp-1-s2")
+    assert "meetingPassword" not in launch["data"]
+    assert "pw-on-the-row" not in json.dumps(launch)

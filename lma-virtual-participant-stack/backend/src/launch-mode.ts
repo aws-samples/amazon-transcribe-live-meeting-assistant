@@ -31,12 +31,15 @@
 
 export type LaunchType = 'EC2' | 'FARGATE' | 'MICROVM';
 
-/** Values the launcher supplies per meeting (as opposed to per image/task). */
+/**
+ * Values the launcher supplies per meeting (as opposed to per image/task). The
+ * meeting password is not one of them: the VP reads it from its record at
+ * startup (startup-meeting-password.ts).
+ */
 export const PER_MEETING_KEYS = [
     'VIRTUAL_PARTICIPANT_ID',
     'MEETING_PLATFORM',
     'MEETING_ID',
-    'MEETING_PASSWORD',
     'MEETING_NAME',
     'MEETING_TIME',
     'LMA_USER',
@@ -274,7 +277,8 @@ export function microvmVncEndpoint(endpoint: string | undefined): string {
 
 /**
  * Redact secret-bearing values for logging. The per-meeting config carries
- * three Cognito JWTs and a meeting password; none should ever reach CloudWatch.
+ * three Cognito JWTs; none should ever reach CloudWatch. MEETING_PASSWORD stays
+ * listed for a config staged by an earlier release's launcher.
  */
 export function redactPerMeetingConfig(config: PerMeetingConfig): Record<string, string> {
     // Kept in step with SECRET_KEYS in the launcher Lambda

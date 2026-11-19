@@ -298,8 +298,8 @@ def allow_session(call_id: str, session: int, offset: int, rejoined_by: str) -> 
 def launch_input(vp: Dict[str, Any], identity: Dict[str, Any], launch_token: str) -> Dict[str, Any]:
     """The launcher state machine's input, as the Create button builds it.
 
-    Read from the row: the meeting password is stored there and returned by no
-    read, so a launch from the browser could not supply it. The launching user's
+    It carries no meeting password: the Virtual Participant reads that from its
+    row when it starts, as every launch does. The launching user's
     Cognito sub (the persistent browser profile, and the stored Zoom account) is
     the row's for a scheduled Virtual Participant, and otherwise the caller's
     when the caller is its owner; an Admin rejoining someone else's Virtual
@@ -315,7 +315,6 @@ def launch_input(vp: Dict[str, Any], identity: Dict[str, Any], launch_token: str
         "data": {
             "meetingPlatform": vp.get("meetingPlatform", ""),
             "meetingID": vp.get("meetingId", ""),
-            "meetingPassword": vp.get("meetingPassword") or "",
             "meetingName": vp.get("meetingName", ""),
             # Empty: launch now, not on a schedule.
             "meetingTime": "",

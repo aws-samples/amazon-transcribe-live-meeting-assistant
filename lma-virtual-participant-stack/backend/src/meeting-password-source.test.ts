@@ -1,0 +1,196 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/**
+ * The meeting password the VP reads at startup: from its own record, and from
+ * MEETING_PASSWORD (a local run, or a launch request queued by an earlier
+ * release) only where the record gives none.
+ */
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  PASSWORD_UNREADABLE_TRIGGER,
+  failLaunchIfPasswordUnreadable,
+  resolveMeetingPassword,
+  type MeetingPasswordRow,
+} from './meeting-password-source.js';
+
+const LAUNCHED = { VIRTUAL_PARTICIPANT_ID: 'vp-1', VP_TABLE_NAME: 'stack-VirtualParticipant' };
+const noSleep = async (): Promise<void> => {};
+
+function reader(...answers: Array<MeetingPasswordRow | null | Error>) {
+  const calls: Array<[string, string]> = [];
+  const readRow = async (tableName: string, vpId: string) => {
+    calls.push([tableName, vpId]);
+    const answer = answers[Math.min(calls.length - 1, answers.length - 1)];
+    if (answer instanceof Error) throw answer;
+    return answer;
+  };
+  return { calls, readRow };
+}
+
+test('the password is read from the VP record by its id', async () => {
+  const { calls, readRow } = reader({ meetingPassword: 'pw-on-the-row' });
+  const result = await resolveMeetingPassword({ env: { ...LAUNCHED }, readRow, sleep: noSleep });
+  assert.deepEqual(result, { ok: true, password: 'pw-on-the-row', origin: 'record' });
+  assert.deepEqual(calls, [['stack-VirtualParticipant', 'vp-1']]);
+});
+
+test('the record wins over a password in the environment', async () => {
+  // A schedule queued by an earlier release carries the password it was created
+  // with; a password changed on the record since is the one to use.
+  const { calls, readRow } = reader({ meetingPassword: 'edited-on-the-row' });
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: 'queued-before-the-update' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'edited-on-the-row', origin: 'record' });
+  assert.equal(calls.length, 1);
+});
+
+test('the environment is used when the record has no password', async () => {
+  const { readRow } = reader({});
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: 'from-env' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'from-env', origin: 'environment' });
+});
+
+test('the environment is used when every read of the record fails', async () => {
+  const { calls, readRow } = reader(new Error('AccessDeniedException'));
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: 'from-env' },
+    readRow,
+    attempts: 3,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'from-env', origin: 'environment' });
+  assert.equal(calls.length, 3, 'the record is tried first, with its retries');
+});
+
+test('a local run uses the environment without reading a record', async () => {
+  const { calls, readRow } = reader(new Error('not reached'));
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, LOCAL_TEST: 'true', MEETING_PASSWORD: 'local-pw' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'local-pw', origin: 'environment' });
+  assert.equal(calls.length, 0);
+});
+
+test('an empty MEETING_PASSWORD still reads the record', async () => {
+  const { calls, readRow } = reader({ meetingPassword: 'pw-on-the-row' });
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED, MEETING_PASSWORD: '  ' },
+    readRow,
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { ok: true, password: 'pw-on-the-row', origin: 'record' });
+  assert.equal(calls.length, 1);
+});
+
+test('an empty or absent password on the record is no password', async () => {
+  for (const row of [{}, { meetingPassword: '' }]) {
+    const { readRow } = reader(row);
+    const result = await resolveMeetingPassword({ env: { ...LAUNCHED }, readRow, sleep: noSleep });
+    assert.deepEqual(result, { ok: true, password: '', origin: 'none' });
+  }
+});
+
+test('a failed read is tried again', async () => {
+  const { calls, readRow } = reader(new Error('throttled'), { meetingPassword: 'pw' });
+  const retries: number[] = [];
+  const waits: number[] = [];
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED },
+    readRow,
+    delayMs: 10,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+    onRetry: (attempt) => retries.push(attempt),
+  });
+  assert.deepEqual(result, { ok: true, password: 'pw', origin: 'record' });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(retries, [1]);
+  assert.deepEqual(waits, [10]);
+});
+
+test('a read that keeps failing gives up after the attempts with the reason', async () => {
+  const { calls, readRow } = reader(new Error('AccessDeniedException'));
+  const waits: number[] = [];
+  const result = await resolveMeetingPassword({
+    env: { ...LAUNCHED },
+    readRow,
+    attempts: 4,
+    delayMs: 10,
+    sleep: async (ms) => {
+      waits.push(ms);
+    },
+  });
+  assert.deepEqual(result, { ok: false, error: 'AccessDeniedException' });
+  assert.equal(calls.length, 4);
+  assert.deepEqual(waits, [10, 20, 40]);
+});
+
+test('a record that is not there fails like a read that fails', async () => {
+  const { calls, readRow } = reader(null);
+  const result = await resolveMeetingPassword({ env: { ...LAUNCHED }, readRow, attempts: 2, sleep: noSleep });
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /no Virtual Participant record has the id vp-1/);
+  assert.equal(calls.length, 2);
+});
+
+test('without a VP id or table, or in a local run, there is no record to read', async () => {
+  for (const env of [
+    { VP_TABLE_NAME: 'table' },
+    { VIRTUAL_PARTICIPANT_ID: 'vp-1' },
+    { ...LAUNCHED, LOCAL_TEST: 'true' },
+  ]) {
+    const { calls, readRow } = reader(new Error('not reached'));
+    const result = await resolveMeetingPassword({ env, readRow, sleep: noSleep });
+    assert.deepEqual(result, { ok: true, password: '', origin: 'none' });
+    assert.equal(calls.length, 0);
+  }
+});
+
+function launchFailure(setFailed: (message: string, endTrigger: string) => Promise<unknown>) {
+  const exits: number[] = [];
+  const errors: string[] = [];
+  const deps = { setFailed, exit: (code: number) => exits.push(code), logError: (m: string) => errors.push(m) };
+  return { deps, exits, errors };
+}
+
+test('an unreadable password marks the VP FAILED with its endTrigger and exits non-zero', async () => {
+  const failed: Array<[string, string]> = [];
+  const { deps, exits } = launchFailure(async (message, endTrigger) => failed.push([message, endTrigger]));
+  await failLaunchIfPasswordUnreadable({ ok: false, error: 'AccessDeniedException' }, deps);
+  assert.equal(failed.length, 1);
+  assert.match(failed[0][0], /Could not read the meeting password/);
+  assert.equal(failed[0][1], PASSWORD_UNREADABLE_TRIGGER);
+  assert.equal(PASSWORD_UNREADABLE_TRIGGER, 'startup:meeting-password-unreadable');
+  assert.deepEqual(exits, [1]);
+});
+
+test('the launch still exits when the FAILED status cannot be recorded', async () => {
+  const { deps, exits, errors } = launchFailure(async () => {
+    throw new Error('AppSync down');
+  });
+  await failLaunchIfPasswordUnreadable({ ok: false, error: 'x' }, deps);
+  assert.deepEqual(exits, [1]);
+  assert.match(errors[0], /AppSync down/);
+});
+
+test('a password that was read lets the launch go on', async () => {
+  const { deps, exits } = launchFailure(async () => assert.fail('not called'));
+  await failLaunchIfPasswordUnreadable({ ok: true, password: '', origin: 'none' }, deps);
+  assert.deepEqual(exits, []);
+});
