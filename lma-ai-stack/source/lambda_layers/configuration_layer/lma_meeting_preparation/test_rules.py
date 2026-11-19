@@ -305,6 +305,11 @@ def test_a_note_is_at_most_1000_characters():
         update(checklist(definition("a")), Note="n" * 1001)
 
 
+def test_an_empty_status_is_refused_rather_than_stored():
+    with pytest.raises(PreparationError, match="Status must be one of"):
+        update(checklist(definition("a")), Status="")
+
+
 def test_an_unknown_status_is_refused():
     with pytest.raises(PreparationError, match="Status must be one of"):
         update(checklist(definition("a")), Status="done")

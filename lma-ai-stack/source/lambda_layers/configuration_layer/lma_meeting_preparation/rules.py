@@ -348,7 +348,10 @@ def apply_item_update(
             f"The status of checklist item {item_id} was set by a user, so only a user can change it"
         )
     if update.get("Status") is not None:
-        item["Status"] = _one_of(update["Status"], STATUSES, "Status")
+        if update["Status"] not in STATUSES:
+            # An empty status is refused too: every item always has one.
+            raise PreparationError(f"Status must be one of {', '.join(STATUSES)}")
+        item["Status"] = update["Status"]
         item["StatusSource"] = status_source
     if update.get("Note") is not None:
         item["Note"] = _text(update["Note"], "Note", MAX_NOTE_CHARS)
