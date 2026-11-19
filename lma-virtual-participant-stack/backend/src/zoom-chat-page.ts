@@ -24,6 +24,12 @@
  * the browser as a download. Every row also holds Zoom's emoji reaction icons
  * as `<img>` elements, which is why only those two classes are read.
  *
+ * A pasted image can finish uploading after its message's text is drawn: the
+ * row is then read with no image. So a row is watched for `watchMs` after it is
+ * first read, and an attachment that appears on it meanwhile is returned once,
+ * in `late`, to be added to the chat line the row became. An image is not
+ * taken until it has its `blob:` address.
+ *
  * Nothing here imports Playwright: the in-page functions are passed whole to
  * page.evaluate, and the rest is plain logic, so both are unit-tested.
  */
@@ -58,6 +64,12 @@ export type ZoomChatSelectors = {
     container: string;
     /** The attachment selectors; a row's attachments are not read without them. */
     imagePreview?: string;
+    /**
+     * How long, in milliseconds, a row is watched after it is first read for
+     * attachments that appear later (`ZoomChatReading.late`). 0 or absent: not
+     * watched.
+     */
+    watchMs?: number;
     fileCard?: string;
     fileName?: string;
     fileSize?: string;
@@ -95,6 +107,12 @@ export interface ZoomChatReading {
     baseline: boolean;
     /** The rows not read before, in list order, the VP's own excluded. */
     rows: ZoomChatRaw[];
+    /**
+     * Rows read before, within `watchMs` of their first reading, that hold
+     * attachments not seen on them before: those attachments alone, each
+     * returned once.
+     */
+    late?: ZoomChatRaw[];
 }
 
 /**
@@ -116,17 +134,26 @@ export interface ZoomChatReading {
  */
 export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number }): ZoomChatReading {
     const w = window as any;
-    const state: { seen: Set<string>; listFirstSeenAt: number | null } = (w.__lmaZoomChat ||= {
+    const state: {
+        seen: Set<string>;
+        listFirstSeenAt: number | null;
+        watched?: Map<string, { at: number; attachments: Set<string> }>;
+    } = (w.__lmaZoomChat ||= {
         seen: new Set<string>(),
         listFirstSeenAt: null,
     });
+    const watched = (state.watched ||= new Map<string, { at: number; attachments: Set<string> }>());
     let list: Element | null = null;
     for (const s of sels.lists) {
         list = document.querySelector(s);
         if (list) break;
     }
-    if (!list) return { listFound: false, baseline: state.listFirstSeenAt === null, rows: [] };
+    if (!list) return { listFound: false, baseline: state.listFirstSeenAt === null, rows: [], late: [] };
     const now = Date.now();
+    const watchMs = sels.watchMs ?? 0;
+    for (const [key, entry] of watched) {
+        if (now - entry.at >= watchMs) watched.delete(key);
+    }
     const firstRead = state.listFirstSeenAt === null;
     if (firstRead) state.listFirstSeenAt = now;
     const baseline = firstRead || now - (state.listFirstSeenAt as number) < sels.settleMs;
@@ -135,7 +162,30 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
         rows = Array.from(list.querySelectorAll(s));
         if (rows.length) break;
     }
+    // A row's attachments as they are now. An image is taken only once Zoom has
+    // given it its blob: address: until then it is still being uploaded.
+    const attachmentsIn = (scope: Element): ZoomChatAttachmentRaw[] => {
+        const found: ZoomChatAttachmentRaw[] = [];
+        if (sels.imagePreview) {
+            Array.from(scope.querySelectorAll(sels.imagePreview)).forEach((img, index) => {
+                const src = (img as HTMLImageElement).currentSrc || img.getAttribute('src') || '';
+                if (!/^blob:/i.test(src)) return;
+                found.push({ kind: 'image', name: (img.getAttribute('alt') || '').trim(), src, index });
+            });
+        }
+        if (sels.fileCard) {
+            Array.from(scope.querySelectorAll(sels.fileCard)).forEach((card, index) => {
+                const named = sels.fileName ? card.querySelector(sels.fileName) : null;
+                const sized = sels.fileSize ? card.querySelector(sels.fileSize) : null;
+                const name = ((named?.textContent || '').trim() || (card.getAttribute('aria-label') || '').trim()).replace(/\s+/g, ' ');
+                found.push({ kind: 'document', name, sizeText: (sized?.textContent || '').trim() || null, index });
+            });
+        }
+        return found;
+    };
+    const attachmentKey = (a: ZoomChatAttachmentRaw): string => (a.kind === 'image' ? `img:${a.src}` : `file:${a.index}:${a.name}`);
     const out: ZoomChatRaw[] = [];
+    const late: ZoomChatRaw[] = [];
     for (const row of rows) {
         const label = (row.getAttribute('aria-label') || '').trim();
         // No label yet: the row is filled in by a later render, so it is not
@@ -145,33 +195,30 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
         const messageId = container?.getAttribute('data-id') || null;
         const rowId = row.id || '';
         const key = messageId ? `id:${messageId}` : `row:${rowId}|${label}`;
-        if (state.seen.has(key)) continue;
+        const scope = container || row;
+        const id = messageId || (rowId ? rowId.replace(/^chat-message-content-?/, '') || rowId : null);
+        if (state.seen.has(key)) {
+            // Read before, and still watched: an attachment that has appeared
+            // since (a pasted image finishing its upload after the text).
+            const entry = watched.get(key);
+            if (!entry) continue;
+            const added = attachmentsIn(scope).filter((a) => !entry.attachments.has(attachmentKey(a)));
+            if (!added.length) continue;
+            added.forEach((a) => entry.attachments.add(attachmentKey(a)));
+            late.push({ label, id, links: [], messageId, attachments: added });
+            continue;
+        }
         state.seen.add(key);
         if (baseline) continue;
         if (/^you to /i.test(label)) continue;
-        const scope = container || row;
         const links = Array.from(scope.querySelectorAll('a[href]'))
             .map((a) => (a as HTMLAnchorElement).href)
             .filter(Boolean);
-        const id = messageId || (rowId ? rowId.replace(/^chat-message-content-?/, '') || rowId : null);
-        const attachments: ZoomChatAttachmentRaw[] = [];
-        if (sels.imagePreview) {
-            Array.from(scope.querySelectorAll(sels.imagePreview)).forEach((img, index) => {
-                const src = (img as HTMLImageElement).currentSrc || img.getAttribute('src') || '';
-                attachments.push({ kind: 'image', name: (img.getAttribute('alt') || '').trim(), src, index });
-            });
-        }
-        if (sels.fileCard) {
-            Array.from(scope.querySelectorAll(sels.fileCard)).forEach((card, index) => {
-                const named = sels.fileName ? card.querySelector(sels.fileName) : null;
-                const sized = sels.fileSize ? card.querySelector(sels.fileSize) : null;
-                const name = ((named?.textContent || '').trim() || (card.getAttribute('aria-label') || '').trim()).replace(/\s+/g, ' ');
-                attachments.push({ kind: 'document', name, sizeText: (sized?.textContent || '').trim() || null, index });
-            });
-        }
+        const attachments = attachmentsIn(scope);
+        if (watchMs > 0) watched.set(key, { at: now, attachments: new Set(attachments.map(attachmentKey)) });
         out.push({ label, id, links, messageId, ...(attachments.length ? { attachments } : {}) });
     }
-    return { listFound: true, baseline, rows: out };
+    return { listFound: true, baseline, rows: out, late };
 }
 
 /** How a Zoom row's attachments are fetched; zoom.ts gives the page-bound halves. */

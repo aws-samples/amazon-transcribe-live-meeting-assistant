@@ -2572,7 +2572,9 @@ export default class Teams {
                         .catch(() => []);
                     attachmentChats.push(...teamsAttachmentChats(attachmentRows, history, (src) => pageBlobFetcher(page, src)));
                 }
-                for (const chat of attachmentChats) meetingChat.offer(chat);
+                // An attachment Teams draws on a message already offered (a pasted
+                // image still loading then) is added to that message's line.
+                for (const chat of attachmentChats) meetingChat.offerLateAttachments(chat);
                 if (fresh.length) {
                     emptyStreak = 0;
                     for (const { text, ...row } of fresh) {

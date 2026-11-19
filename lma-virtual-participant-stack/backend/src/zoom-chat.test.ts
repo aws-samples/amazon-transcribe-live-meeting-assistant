@@ -158,8 +158,8 @@ class FakePage {
             querySelectorAll: (s: string) => this.body.querySelectorAll(s),
         };
     }
-    read(settleMs = 0) {
-        return readZoomChatInPage({ ...ZOOM_CHAT_SELECTORS, settleMs });
+    read(settleMs = 0, watchMs = 0) {
+        return readZoomChatInPage({ ...ZOOM_CHAT_SELECTORS, settleMs, watchMs });
     }
     panelState() {
         return zoomChatPanelStateInPage(ZOOM_CHAT_SELECTORS);
@@ -508,4 +508,85 @@ test('the size Zoom shows on a file card is read in bytes', () => {
     assert.equal(parseShownSize('2 GB'), 2 * 1024 ** 3);
     assert.equal(parseShownSize('Click to download'), null);
     assert.equal(parseShownSize(null), null);
+});
+
+// ---- attachments that appear after the row was read ----
+
+/** Runs `fn` with Date.now returning what `clock.now` holds. */
+function withClock(fn: (clock: { now: number }) => void): void {
+    const real = Date.now;
+    const clock = { now: 1_000_000 };
+    Date.now = () => clock.now;
+    try {
+        fn(clock);
+    } finally {
+        Date.now = real;
+    }
+}
+
+test('an image pasted after its text is read once it has its blob: address, as a late attachment of the same row', () => {
+    withClock((clock) => {
+        withPage((page) => {
+            const { panel, list } = chatPanel(message(0, 'm-intro', INTRO));
+            page.body.append(panel);
+            page.read(0, 60_000);
+            const preview = el('img', { class: 'chat-image-preview-img', src: '', alt: 'Screenshot.png' });
+            const row = message(1, 'm-shot', 'Alice Example to Everyone, 4:20 PM, Screenshot pasted:', { extra: [reactions()] });
+            list.append(row);
+            const first = page.read(0, 60_000);
+            assert.equal(first.rows.length, 1);
+            assert.equal(first.rows[0].attachments, undefined, 'read before the image was there');
+
+            // The image element is drawn, still uploading: not taken yet.
+            row.querySelector('.new-chat-message__text-box')!.append(preview);
+            clock.now += 2_000;
+            assert.deepEqual(page.read(0, 60_000).late, []);
+
+            preview.setAttribute('src', 'blob:https://app.zoom.us/shot');
+            clock.now += 2_000;
+            const later = page.read(0, 60_000);
+            assert.deepEqual(later.rows, [], 'the row is not read again as a new message');
+            assert.equal(later.late?.length, 1);
+            assert.equal(later.late?.[0].messageId, 'm-shot');
+            assert.deepEqual(later.late?.[0].attachments, [
+                { kind: 'image', name: 'Screenshot.png', src: 'blob:https://app.zoom.us/shot', index: 0 },
+            ]);
+
+            clock.now += 2_000;
+            assert.deepEqual(page.read(0, 60_000).late, [], 'and only once');
+        });
+    });
+});
+
+test('a row is no longer watched for attachments once its window has passed', () => {
+    withClock((clock) => {
+        withPage((page) => {
+            const { panel, list } = chatPanel(message(0, 'm-intro', INTRO));
+            page.body.append(panel);
+            page.read(0, 60_000);
+            const row = message(1, 'm-slow', 'Alice Example to Everyone, 4:20 PM, see below', {});
+            list.append(row);
+            page.read(0, 60_000);
+            clock.now += 61_000;
+            row.querySelector('.new-chat-message__text-box')!.append(
+                el('img', { class: 'chat-image-preview-img', src: 'blob:https://app.zoom.us/late', alt: 'late.png' }),
+            );
+            assert.deepEqual(page.read(0, 60_000).late, []);
+        });
+    });
+});
+
+test('rows are not watched for late attachments unless asked to be', () => {
+    withPage((page) => {
+        const { panel, list } = chatPanel(message(0, 'm-intro', INTRO));
+        page.body.append(panel);
+        page.read();
+        const row = message(1, 'm-x', 'Alice Example to Everyone, 4:20 PM, hi', {});
+        list.append(row);
+        page.read();
+        row.querySelector('.new-chat-message__text-box')!.append(
+            el('img', { class: 'chat-image-preview-img', src: 'blob:https://app.zoom.us/x', alt: 'x.png' }),
+        );
+        assert.deepEqual(page.read().late, []);
+    });
 });
