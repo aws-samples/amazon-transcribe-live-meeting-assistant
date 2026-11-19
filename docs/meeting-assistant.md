@@ -90,7 +90,7 @@ None of these can tell who in the meeting asked: a chat sender is known only by 
 
 - **Current meeting only** (`current_meeting_only`, the default). The answer comes from the current meeting alone, through four tools: `current_meeting_transcript` (what was said, and the messages typed in the meeting chat, each as a line `[chat] <sender>: <message>`), `get_meeting_agenda`, `get_meeting_frames` (what was shown on the shared screen: each frame's title, its text, when it was on screen and what was said meanwhile), and `get_chat_attachments` (the images and files shared in the meeting chat, with their AI titles and summaries). No other tool is offered, and no user is acted for, so past meetings are not searched.
 - **Unrestricted** (`unrestricted`). Every tool above, acting for the meeting's LMA user (the Virtual Participant's user for the chat and the voice assistant; the user the transcript was streamed for, for the wake phrase). This is how in-meeting requests were answered before the setting existed. Choose it only where everyone who can join a meeting may read or hear what those tools return.
-- **Selected tools** (`selected`). The current meeting's three tools, plus each group of tools switched on in the Meeting Assistant section. Every switch is off until it is switched on, and the switches have no effect with the other two choices:
+- **Selected tools** (`selected`). The current meeting's four tools, plus each group of tools switched on in the Meeting Assistant section. Every switch is off until it is switched on, and the switches have no effect with the other two choices:
 
   | Switch | Tools it offers |
   |---|---|
