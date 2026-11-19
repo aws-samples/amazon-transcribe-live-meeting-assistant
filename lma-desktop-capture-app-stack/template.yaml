@@ -45,6 +45,14 @@ Parameters:
     Type: String
     Description: Cloudfront Endpoint for the web app
 
+  AppSyncGraphQLUrl:
+    Type: String
+    Description: >-
+      LMA's AppSync GraphQL endpoint, baked into lma-config.json as
+      graphqlEndpoint so the app can continue an existing meeting
+      (reopenMeeting). Empty leaves that option out of the app.
+    Default: ""
+
   WebAppCloudFrontDistribution:
     Type: String
     Description: WebApp CloudFront Distribution Id (for cache invalidation)
@@ -181,6 +189,8 @@ Resources:
           Value: !Ref Region
         - Name: WEB_ENDPOINT
           Value: !Ref CloudfrontEndpoint
+        - Name: GRAPHQL_ENDPOINT
+          Value: !Ref AppSyncGraphQLUrl
         - Name: WEBAPP_BUCKET
           Value: !Ref WebAppBucket
         - Name: CLOUDFRONT_DISTRIBUTION_ID
@@ -218,8 +228,8 @@ Resources:
                   # JSON-escape the free-text values (may contain quotes/newlines).
                   DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
                   STACK_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("LMA_STACK_NAME","")))')
-                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
-                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$MAC_DIR/lma-config.json"
+                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "graphqlEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
+                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$GRAPHQL_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$MAC_DIR/lma-config.json"
                   cat "$MAC_DIR/lma-config.json"
                   # Zip the preconfigured macOS source tree (source + install
                   # scripts + baked config), excluding any build artifacts.
@@ -241,8 +251,8 @@ Resources:
                   if [ -n "$WIN_DIR" ]; then
                     DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
                     STACK_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("LMA_STACK_NAME","")))')
-                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
-                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$WIN_DIR/lma-config.json"
+                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "graphqlEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
+                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$GRAPHQL_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$WIN_DIR/lma-config.json"
                     cat "$WIN_DIR/lma-config.json"
                     winzip=lma-desktop-capture-app-windows-v<VERSION_TOKEN>.zip
                     (cd "$WIN_DIR" && rm -rf bin obj && zip -r "$OLDPWD/../${winzip}" . -x '*/bin/*' -x '*/obj/*')

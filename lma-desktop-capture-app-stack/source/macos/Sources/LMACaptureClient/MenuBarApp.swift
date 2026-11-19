@@ -31,6 +31,17 @@ final class MenuBarAppState: ObservableObject {
     @Published var meetingName = ""
     @Published var lastLog = ""
 
+    // "Continue an existing meeting…": capture into a meeting that already
+    // exists, named by its meeting ID or its page link (MeetingReopen.swift).
+    // Off by default; Start then starts a new meeting, as before.
+    @Published var continueExisting = false
+    @Published var continueMeetingInput = ""
+    /// Why the meeting could not be continued (the server's refusal), shown
+    /// under the field. Cleared when the field changes or the mode is left.
+    @Published var continueError: String?
+    /// True while LMA is asked to reopen the meeting.
+    @Published private(set) var reopening = false
+
     @Published var rememberLogin = false
 
     // Settings (own window, opened from the gear): per-channel speaker labels,
@@ -184,6 +195,13 @@ final class MenuBarAppState: ObservableObject {
                 self.endElapsedTimer(succeeded: succeeded)
                 // Consent is per meeting: the next one is confirmed afresh.
                 self.resetConsentStep()
+                // A meeting continued once leaves the next Start a new meeting
+                // again, as by default. One that failed stays, with the reason.
+                if succeeded {
+                    self.continueExisting = false
+                    self.continueMeetingInput = ""
+                    self.continueError = nil
+                }
             }
             // Signed in, or back from a recording: read the settings in force.
             if s == .authenticated { self.refreshConsentSettings() }
@@ -198,6 +216,11 @@ final class MenuBarAppState: ObservableObject {
                 self.consentEvidenceStatus = Consent.describe(state)
             } else {
                 self.consentStatus = Consent.describe(state)
+            }
+            // The transcriber refused to continue the meeting (not the owner, the
+            // session not allowed, the transcript deleted): say so by the field.
+            if state.stopsCapture && self.continueExisting {
+                self.continueError = Consent.describe(state)
             }
             // Refused or not recorded (rather than objected to): the settings shown
             // may not be the ones in force, so the next Start reads them again.
@@ -533,9 +556,18 @@ final class MenuBarAppState: ObservableObject {
     private func reallyStart() {
         // Push current settings (labels may depend on the signed-in email).
         pushSettingsToController()
+        if continueExisting {
+            continueMeeting()
+            return
+        }
         rememberMeetingName(meetingName)
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
-        // The step rides START even when none was shown (see Consent.Settings.notShown).
+        applyConsentPayload(meetingName: meetingName)
+        controller.start(callId: name.isEmpty ? nil : name)
+    }
+
+    /// The consent step rides START even when none was shown (see Consent.Settings.notShown).
+    private func applyConsentPayload(meetingName: String) {
         if let settings = consentSettings, settings.required {
             controller.consentPayload = Consent.payload(
                 settings: settings, step: consentStep, lmaUser: effectiveMicLabel,
@@ -548,7 +580,43 @@ final class MenuBarAppState: ObservableObject {
             controller.consentEvidenceJPEG = nil
         }
         consentStatus = ""
-        controller.start(callId: name.isEmpty ? nil : name)
+    }
+
+    /// Continue an existing meeting: ask LMA to reopen it, then stream into it
+    /// with the session it allowed. A refusal is shown under the meeting ID field
+    /// and nothing is captured.
+    private func continueMeeting() {
+        guard let callId = MeetingReopen.meetingId(from: continueMeetingInput) else {
+            continueError = MeetingReopen.describe(.invalidMeetingId)
+            return
+        }
+        guard !reopening else { return }
+        continueError = nil
+        reopening = true
+        lastLog = "Reopening the meeting…"
+        Task { [weak self] in
+            guard let self = self else { return }
+            let result = await self.controller.reopenMeeting(callId: callId)
+            await MainActor.run {
+                self.reopening = false
+                switch result {
+                case .success(let session):
+                    self.lastLog = "Continuing the meeting (capture session \(session.sessionNumber))."
+                    self.applyConsentPayload(meetingName: session.callId)
+                    self.controller.start(callId: session.callId, sessionNumber: session.sessionNumber)
+                case .failure(let failure):
+                    let text = MeetingReopen.describe(failure)
+                    self.continueError = text
+                    self.lastLog = text
+                }
+            }
+        }
+    }
+
+    /// Switch between starting a new meeting (the default) and continuing one.
+    func setContinueExisting(_ on: Bool) {
+        continueExisting = on
+        continueError = nil
     }
     func stop() { controller.stop() }
     func togglePause() {
@@ -837,6 +905,42 @@ struct MenuBarContentView: View {
                     }
                     .padding(10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.08)))
+                } else if !s.isStreaming && s.continueExisting {
+                    // "Continue an existing meeting…": the meeting ID (or its page
+                    // link) instead of a new meeting's name.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Continue an existing meeting").font(.subheadline.weight(.semibold))
+                        TextField("Meeting ID or meeting page link", text: Binding(
+                            get: { s.continueMeetingInput },
+                            set: { s.continueMeetingInput = $0; s.continueError = nil }))
+                            .textFieldStyle(.roundedBorder)
+                        Text("Capture is added to that meeting, even one shown as Done, and its summary "
+                             + "is generated again when you stop. Copy the ID from the meeting's page in LMA.")
+                            .font(.caption2).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let why = s.continueError {
+                            Text(why).font(.caption).foregroundColor(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    ConsentPanelView(s: s)
+                    CaptureInputsView(s: s)
+                    Button(action: s.start) {
+                        HStack {
+                            if s.reopening { ProgressView().scaleEffect(0.6) }
+                            Label("Continue Meeting", systemImage: "record.circle")
+                        }.frame(maxWidth: .infinity)
+                    }
+                    .disabled(s.isBusy || s.consentFetchInFlight || s.reopening
+                              || s.continueMeetingInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                    .onAppear { s.refreshConsentSettings() }
+                    Button("Start a new meeting instead") { s.setContinueExisting(false) }
+                        .buttonStyle(.link).font(.caption)
+                    Label("Ensure all participants have consented to recording.",
+                          systemImage: "checkmark.shield")
+                        .font(.caption2).foregroundColor(.secondary)
+                        .help(consentTooltip)
                 } else if !s.isStreaming {
                     HStack(spacing: 4) {
                         TextField("Meeting name (optional)", text: $s.meetingName)
@@ -873,6 +977,12 @@ struct MenuBarContentView: View {
                     // Read the consent settings whenever the Start controls show;
                     // the consent panel above renders nothing until they are known.
                     .onAppear { s.refreshConsentSettings() }
+                    // Only in a download that knows LMA's API endpoint.
+                    if s.controller.canContinueMeetings {
+                        Button("Continue an existing meeting…") { s.setContinueExisting(true) }
+                            .buttonStyle(.link).font(.caption)
+                            .help("Add this capture to a meeting that already exists in LMA")
+                    }
                     // Persistent consent reminder: the full disclaimer is a
                     // one-time gate, but the obligation is per-meeting — keep a
                     // one-liner next to Start so it stays visible. It reflects

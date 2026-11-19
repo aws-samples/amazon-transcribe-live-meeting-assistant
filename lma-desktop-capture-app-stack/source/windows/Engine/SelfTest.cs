@@ -251,6 +251,9 @@ public static class SelfTest
         Console.WriteLine("\nMeeting consent step:");
         foreach (var (caseName, caseGot, caseWant) in Consent.SelfTestCases()) Check(caseName, caseGot, caseWant);
 
+        Console.WriteLine("\nContinue an existing meeting:");
+        foreach (var (caseName, caseGot, caseWant) in MeetingReopen.SelfTestCases()) Check(caseName, caseGot, caseWant);
+
         Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED" : $"\n{failures} self-test(s) FAILED");
         return failures == 0 ? 0 : 1;
     }

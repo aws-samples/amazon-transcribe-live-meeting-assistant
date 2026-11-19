@@ -307,13 +307,35 @@ final class CaptureController {
 
     // MARK: - Streaming lifecycle
 
+    /// Whether this download can continue an existing meeting: its
+    /// lma-config.json names LMA's AppSync endpoint.
+    var canContinueMeetings: Bool { !config.graphqlEndpoint.isEmpty }
+
+    /// Ask LMA to reopen an existing meeting for one more capture session
+    /// (MeetingReopen.swift). On success, pass the answer's callId and session
+    /// number to start(callId:sessionNumber:).
+    func reopenMeeting(callId: String) async -> Result<MeetingReopen.Session, MeetingReopen.Failure> {
+        guard canContinueMeetings else { return .failure(.notConfigured) }
+        if let tokens = tokenStore, tokens.needsRefreshBeforeUse {
+            _ = await tokens.refreshIfNeeded()
+        }
+        let idToken = tokenStore?.idToken ?? config.idToken
+        let token = idToken.isEmpty ? (tokenStore?.accessToken ?? config.accessToken) : idToken
+        guard !token.isEmpty else { return .failure(.unavailable("You are not signed in.")) }
+        return await MeetingReopen.reopen(endpoint: config.graphqlEndpoint, token: token, callId: callId)
+    }
+
     /// Begin capture + streaming. Uses a fresh callId per session unless the
     /// caller set one on the config. Safe to call only when authenticated.
-    func start(callId: String? = nil) {
+    ///
+    /// `sessionNumber` is set only to continue an existing meeting: the session
+    /// reopenMeeting answered for `callId`. 0 (the default) starts a new meeting.
+    func start(callId: String? = nil, sessionNumber: Int = 0) {
         guard !config.accessToken.isEmpty else { setState(.error("Not signed in")); return }
         setState(.starting)
 
         config.callId = Config.sessionCallId(requested: callId, configured: config.configuredCallId)
+        config.sessionNumber = sessionNumber
         activeCallId = config.callId
 
         // Apply Settings overrides: speaker labels ride the START frame as

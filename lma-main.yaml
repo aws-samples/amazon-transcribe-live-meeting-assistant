@@ -3330,6 +3330,8 @@ Resources:
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         Region: !Ref AWS::Region
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+        # For "Continue an existing meeting…" (reopenMeeting).
+        AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>

@@ -76,6 +76,7 @@ Source layout:
 - `AudioCapture.swift`   — ScreenCaptureKit (system audio) + AVAudioEngine (mic).
 - `StereoMixer.swift`    — align two mono streams → interleaved int16 chunks.
 - `Consent.swift`, `ConsentSelfTest.swift` — meeting consent step (frames, notice, START payload) and its `--selftest` cases.
+- `MeetingReopen.swift`, `MeetingReopenSelfTest.swift` — **Continue an existing meeting…**: the meeting ID or page link, the `reopenMeeting` request to LMA's AppSync API (`graphqlEndpoint` in `lma-config.json`) and its answer, and their `--selftest` cases.
 - `ConsentSettingsFetcher.swift` — reads the consent settings on a short-lived socket before Start.
 - `ConsentView.swift`    — the consent block on the menu-bar panel.
 - `main.swift`           — wire-up + Ctrl-C shutdown.

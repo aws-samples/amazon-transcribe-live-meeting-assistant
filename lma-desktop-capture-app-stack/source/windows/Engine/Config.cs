@@ -33,6 +33,18 @@ public sealed class Config
     public string RefreshToken = "";
     public string CallId = "";
     public string ConfiguredCallId = "";
+    /// <summary>
+    /// The capture session this stream continues an existing meeting in, as
+    /// reopenMeeting answered it; 0 for a new meeting (the default). Sent in
+    /// every START for the stream, reconnects included.
+    /// </summary>
+    public int SessionNumber;
+    /// <summary>
+    /// LMA's AppSync GraphQL endpoint, for reopenMeeting ("Continue an existing
+    /// meeting…"). Baked into lma-config.json as graphqlEndpoint; empty in
+    /// packages built before the option, which then cannot offer it.
+    /// </summary>
+    public string GraphqlEndpoint = "";
     public string AgentId = "";
     public string FromNumber = "";
     public string ToNumber = "";
@@ -111,6 +123,12 @@ public sealed class Config
     public static string DefaultCallId(DateTime utc) =>
         "LMA native prototype - " + utc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// The `sessionNumber` a START names: the session reopenMeeting allowed, or
+    /// null for a new meeting, whose START names none.
+    /// </summary>
+    public static int? StartSessionNumber(int sessionNumber) => sessionNumber >= 2 ? sessionNumber : null;
+
     public static string SessionCallId(string? requested, string configured, DateTime utcNow)
     {
         if (!string.IsNullOrEmpty(requested)) return requested!;
@@ -170,6 +188,7 @@ public sealed class Config
             ClientId = Value("client-id", "LMA_CLIENT_ID", "clientId"),
             Region = Value("region", "LMA_REGION", "region"),
             WebEndpoint = Value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint"),
+            GraphqlEndpoint = Value("graphql-endpoint", "LMA_GRAPHQL_ENDPOINT", "graphqlEndpoint"),
             RecordingDisclaimer = Value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
                                         DefaultDisclaimer),
             VideoEnabled = new[] { "1", "true", "yes" }.Contains(Value("video", "LMA_VIDEO").ToLowerInvariant()),

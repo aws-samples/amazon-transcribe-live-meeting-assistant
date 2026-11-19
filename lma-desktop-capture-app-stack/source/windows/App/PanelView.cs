@@ -39,6 +39,18 @@ public sealed class PanelView : Border
     // Authenticated / not streaming
     private readonly TextBox _meetingName = new();
     private readonly Button _start = new() { Content = "● Start Recording" };
+
+    // "Continue an existing meeting…": capture into a meeting that already
+    // exists, named by its meeting ID or its page link (MeetingReopen.cs). Off by
+    // default; Start then starts a new meeting, as before.
+    private bool _continueExisting;
+    private readonly TextBox _continueInput = new();
+    /// <summary>Why the meeting could not be continued (the server's refusal).</summary>
+    private string? _continueError;
+    /// <summary>True while LMA is asked to reopen the meeting.</summary>
+    private bool _reopening;
+    private readonly Button _continueLink = LinkButton("Continue an existing meeting…");
+    private readonly Button _newMeetingLink = LinkButton("Start a new meeting instead");
     private readonly CheckBox _launchAtLogin = new() { Content = "Start automatically at login" };
     private readonly Button _signOut = new() { Content = "Sign out" };
 
@@ -243,6 +255,9 @@ public sealed class PanelView : Border
         // may not be the ones in force, so the next Start reads them again.
         if (state.StopsCapture && state.Status != "objected" && state.Code != "OBJECTION_RECEIVED")
             _consentSettings = null;
+        // The transcriber refused to continue the meeting (not the owner, the
+        // session not allowed, the transcript deleted): say so by the field.
+        if (state.StopsCapture && _continueExisting) _continueError = Consent.Describe(state);
         Refresh();
     }
 
@@ -622,6 +637,15 @@ public sealed class PanelView : Border
         _signIn.Click += (_, _) => DoLogin();
         _signOut.Click += (_, _) => { _c.Logout(); _password.Clear(); if (!_remember.IsChecked!.Value) _email.Clear(); Refresh(); };
         _start.Click += (_, _) => DoStart();
+        _continueLink.Click += (_, _) => SetContinueExisting(true);
+        _newMeetingLink.Click += (_, _) => SetContinueExisting(false);
+        _continueInput.TextChanged += (_, _) =>
+        {
+            if (_continueError == null) return;
+            _continueError = null;
+            Refresh();
+        };
+        _continueLink.ToolTip = "Add this capture to a meeting that already exists in LMA";
         _stop.Click += (_, _) => _c.Stop();
         _pause.Click += (_, _) =>
         {
@@ -639,7 +663,7 @@ public sealed class PanelView : Border
             catch (Exception ex) { OnLog($"Couldn't change Start-at-login: {ex.Message}"); }
         };
 
-        StyleBox(_email); StyleBox(_meetingName); StyleBox(_micLabel); StyleBox(_systemLabel);
+        StyleBox(_email); StyleBox(_meetingName); StyleBox(_micLabel); StyleBox(_systemLabel); StyleBox(_continueInput);
         _password.Margin = _email.Margin = _meetingName.Margin = new Thickness(0, 0, 0, 6);
         _password.Padding = new Thickness(4);
 
@@ -999,6 +1023,14 @@ public sealed class PanelView : Border
             }
             // Consent is per meeting: the next one is confirmed afresh.
             ResetConsentStep();
+            // A meeting continued once leaves the next Start a new meeting again,
+            // as by default. One that failed stays, with the reason.
+            if (s.Kind != CaptureController.StateKind.Error)
+            {
+                _continueExisting = false;
+                _continueInput.Text = "";
+                _continueError = null;
+            }
         }
         Refresh();
         // Signed in, or back from a recording: read the settings in force.
@@ -1054,10 +1086,35 @@ public sealed class PanelView : Border
             }
             else if (!streaming)
             {
-                _body.Children.Add(Label("Meeting name (optional)"));
-                _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
-                    ? Visibility.Visible : Visibility.Collapsed;
-                _body.Children.Add(_meetingNameRow);
+                if (_continueExisting)
+                {
+                    // "Continue an existing meeting…": the meeting ID (or its page
+                    // link) instead of a new meeting's name.
+                    _body.Children.Add(Label("Continue an existing meeting: meeting ID or meeting page link"));
+                    _body.Children.Add(_continueInput);
+                    _body.Children.Add(new TextBlock
+                    {
+                        Text = "Capture is added to that meeting, even one shown as Done, and its summary is " +
+                               "generated again when you stop. Copy the ID from the meeting's page in LMA.",
+                        Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                        Margin = new Thickness(0, 0, 0, 4),
+                    });
+                    if (!string.IsNullOrEmpty(_continueError))
+                    {
+                        _body.Children.Add(new TextBlock
+                        {
+                            Text = _continueError, Foreground = Brushes.Red, FontSize = 11,
+                            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4),
+                        });
+                    }
+                }
+                else
+                {
+                    _body.Children.Add(Label("Meeting name (optional)"));
+                    _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
+                        ? Visibility.Visible : Visibility.Collapsed;
+                    _body.Children.Add(_meetingNameRow);
+                }
                 // Meeting consent step (Notify / Opt-in deployments only).
                 if (BuildConsentBlock(streaming: false) is { } consentIdle) _body.Children.Add(consentIdle);
                 // What will actually be captured, BEFORE pressing Start. Both
@@ -1066,7 +1123,15 @@ public sealed class PanelView : Border
                 // about to share?".
                 _body.Children.Add(BuildCaptureInputsBlock());
                 _start.Margin = new Thickness(0, 4, 0, 4);
+                _start.Content = _continueExisting
+                    ? (_reopening ? "Reopening the meeting…" : "● Continue Meeting")
+                    : "● Start Recording";
+                _start.IsEnabled = !_reopening;
                 _body.Children.Add(_start);
+                // Switch between a new meeting (the default) and continuing one;
+                // continuing is offered only by a download that knows LMA's API.
+                if (_continueExisting) _body.Children.Add(_newMeetingLink);
+                else if (_c.CanContinueMeetings) _body.Children.Add(_continueLink);
                 // Persistent consent reminder: the full disclaimer is a one-time
                 // gate, but the obligation is per-meeting — keep a one-liner next
                 // to Start. Hover shows the consent record (when + the exact text
@@ -1455,25 +1520,85 @@ public sealed class PanelView : Border
     {
         // Push current settings (the mic label may depend on the signed-in email).
         PushSettingsToController();
+        if (_continueExisting)
+        {
+            ContinueMeeting();
+            return;
+        }
         AppSettings.RememberMeetingName(_meetingName.Text);
         var name = string.IsNullOrEmpty(_meetingName.Text)
             ? null
             : $"{_meetingName.Text} - {DateTime.Now:yyyy-MM-dd HH:mm}";
+        ApplyConsentPayload(_meetingName.Text);
+        _c.Start(name);
+    }
+
+    /// <summary>The consent step rides START even when none was shown (see Consent.Settings.NotShown).</summary>
+    private void ApplyConsentPayload(string meetingName)
+    {
         if (_consentSettings is { Required: true } consent)
         {
-            _c.ConsentPayload = Consent.Payload(consent, _consentStep, _c.MicLabel, _meetingName.Text,
+            _c.ConsentPayload = Consent.Payload(consent, _consentStep, _c.MicLabel, meetingName,
                 ConsentNoticeText);
             _c.ConsentEvidenceJpeg = _consentEvidenceJpeg;
         }
         else
         {
-            // The step rides START even when none was shown (see Consent.Settings.NotShown).
             _c.ConsentPayload = Consent.Payload(Consent.Settings.NotShown, new Consent.Step(), _c.MicLabel,
-                _meetingName.Text, "");
+                meetingName, "");
             _c.ConsentEvidenceJpeg = null;
         }
         _consentStatus = "";
-        _c.Start(name);
+    }
+
+    /// <summary>
+    /// Continue an existing meeting: ask LMA to reopen it, then stream into it
+    /// with the session it allowed. A refusal is shown under the meeting ID field
+    /// and nothing is captured.
+    /// </summary>
+    private void ContinueMeeting()
+    {
+        var callId = MeetingReopen.MeetingId(_continueInput.Text);
+        if (callId == null)
+        {
+            _continueError = MeetingReopen.Describe(new MeetingReopen.Failure(MeetingReopen.FailureKind.InvalidMeetingId));
+            Refresh();
+            return;
+        }
+        if (_reopening) return;
+        _continueError = null;
+        _reopening = true;
+        OnLog("Reopening the meeting…");
+        Refresh();
+        _ = _c.ReopenMeetingAsync(callId).ContinueWith(t => Dispatcher.Invoke(() =>
+        {
+            _reopening = false;
+            var result = t.IsCompletedSuccessfully
+                ? t.Result
+                : MeetingReopen.Result.Fail(new MeetingReopen.Failure(MeetingReopen.FailureKind.Unavailable,
+                    Message: t.Exception?.GetBaseException().Message ?? ""));
+            if (result.Session is { } session)
+            {
+                OnLog($"Continuing the meeting (capture session {session.SessionNumber}).");
+                ApplyConsentPayload(session.CallId);
+                _c.Start(session.CallId, session.SessionNumber);
+            }
+            else
+            {
+                var text = MeetingReopen.Describe(result.Failure!);
+                _continueError = text;
+                OnLog(text);
+            }
+            Refresh();
+        }));
+    }
+
+    /// <summary>Switch between starting a new meeting (the default) and continuing one.</summary>
+    private void SetContinueExisting(bool on)
+    {
+        _continueExisting = on;
+        _continueError = null;
+        Refresh();
     }
 
     /// <summary>
@@ -1592,6 +1717,20 @@ public sealed class PanelView : Border
         g.Children.Add(hint);
         return g;
     }
+
+    /// <summary>A borderless, link-styled button for a secondary choice on the panel.</summary>
+    private static Button LinkButton(string text) => new()
+    {
+        Content = text,
+        FontSize = 11,
+        Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x66, 0xCC)),
+        Background = Brushes.Transparent,
+        BorderThickness = new Thickness(0),
+        Padding = new Thickness(0),
+        Margin = new Thickness(0, 0, 0, 6),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Cursor = System.Windows.Input.Cursors.Hand,
+    };
 
     private static TextBlock Label(string s) => new()
     {

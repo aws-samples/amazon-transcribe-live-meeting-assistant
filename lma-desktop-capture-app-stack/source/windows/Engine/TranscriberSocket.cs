@@ -326,6 +326,13 @@ public sealed class TranscriberSocket
         {
             meta["consent"] = ConsentPayload;
         }
+        // A stream that continues an existing meeting names the capture session
+        // reopenMeeting allowed, on every START (reconnects included). A new
+        // meeting names none.
+        if (Config.StartSessionNumber(_config.SessionNumber) is int session)
+        {
+            meta["sessionNumber"] = session;
+        }
         SendJson(meta, "START");
         List<Dictionary<string, object>> waiting;
         lock (_sendLock)

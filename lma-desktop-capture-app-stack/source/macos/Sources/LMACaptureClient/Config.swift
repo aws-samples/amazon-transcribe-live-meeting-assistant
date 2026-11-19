@@ -28,6 +28,10 @@ import CryptoKit
 ///   --diarize-system 1 (label individual voices in the meeting audio)
 ///   --diarize-mic    1 (label individual voices on the microphone)
 ///   --asr-engine transcribe|microvm (which engine transcribes this meeting)
+///   --graphql-endpoint https://<id>.appsync-api.<region>.amazonaws.com/graphql
+///                (or LMA_GRAPHQL_ENDPOINT; baked into lma-config.json as
+///                graphqlEndpoint) — the AppSync API "Continue an existing
+///                meeting…" asks to reopen the meeting
 ///   --config     /path/to/lma-config.json  (override config-file location)
 struct Config {
     var endpoint: String
@@ -39,6 +43,13 @@ struct Config {
     var refreshToken: String
     var callId: String
     var configuredCallId: String
+    /// The capture session this stream continues an existing meeting in, as
+    /// reopenMeeting answered it; 0 for a new meeting (the default). Sent in
+    /// every START for the stream, reconnects included.
+    var sessionNumber: Int = 0
+    /// LMA's AppSync GraphQL endpoint, for reopenMeeting. Empty in packages
+    /// built before "Continue an existing meeting…", which then cannot offer it.
+    var graphqlEndpoint: String = ""
     var agentId: String
     var fromNumber: String
     var toNumber: String
@@ -156,6 +167,12 @@ struct Config {
         "LMA native prototype - \(ISO8601DateFormatter().string(from: date))"
     }
 
+    /// The `sessionNumber` a START names: the session reopenMeeting allowed, or
+    /// nil for a new meeting, whose START names none.
+    static func startSessionNumber(_ sessionNumber: Int) -> Int? {
+        sessionNumber >= 2 ? sessionNumber : nil
+    }
+
     static func sessionCallId(requested: String?, configured: String, now: Date = Date()) -> String {
         if let r = requested, !r.isEmpty { return r }
         if !configured.isEmpty { return configured }
@@ -187,7 +204,7 @@ struct Config {
         let sr = Int(value("sample-rate", "LMA_SAMPLE_RATE", "samplingRate", "48000")) ?? 48000
         let configuredCallId = value("call-id", "LMA_CALL_ID")
 
-        return Config(
+        var config = Config(
             endpoint: value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             accessToken: value("token", "LMA_ACCESS_TOKEN"),
             idToken: value("id-token", "LMA_ID_TOKEN"),
@@ -219,6 +236,8 @@ struct Config {
             stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
             appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )
+        config.graphqlEndpoint = value("graphql-endpoint", "LMA_GRAPHQL_ENDPOINT", "graphqlEndpoint")
+        return config
     }
 
     /// Locate and parse lma-config.json. Search order:
