@@ -18,6 +18,7 @@ import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
+import { CallSessionReadError, callSessionFromVpRow, type VpCallSession } from './call-session.js';
 import { createLogger, registerSecretValue } from './logger.js';
 
 const log = createLogger('status-manager');
@@ -242,32 +243,6 @@ let processShuttingDown = false;
  * a row whose end has been recorded (see the updateVirtualParticipant
  * resolver).
  */
-/** The CallId on a VP's row, and the capture session of that meeting it runs. */
-export interface VpCallSession {
-  callId: string;
-  /** 1 for a VP that was not rejoined; 2 and up, one per rejoin. */
-  sessionNumber: number;
-  /** Where the session starts on the meeting's transcript timeline, in seconds. */
-  sessionTimeOffset: number;
-}
-
-/**
- * Read a VpCallSession from a getVirtualParticipant answer: null without a
- * CallId; a session number or offset that is absent or not usable is session 1,
- * at 0, which is every VP that was not rejoined.
- */
-export const callSessionFromVpRow = (row: any): VpCallSession | null => {
-  const callId = typeof row?.CallId === 'string' ? row.CallId.trim() : '';
-  if (!callId) return null;
-  const number = Number(row?.sessionNumber);
-  const offset = Number(row?.sessionTimeOffset);
-  return {
-    callId,
-    sessionNumber: Number.isInteger(number) && number > 1 ? number : 1,
-    sessionTimeOffset: Number.isFinite(offset) && offset > 0 ? offset : 0,
-  };
-};
-
 export const beginShutdown = (): void => {
   processShuttingDown = true;
 };
@@ -686,11 +661,15 @@ export class VirtualParticipantStatusManager {
    * One read, so a VP that knows its CallId also knows its session: a rejoined
    * VP (docs/virtual-participant.md#rejoin) that started its meeting's events as
    * session 1 would send segments over the earlier session's. Null when the row
-   * has no CallId or cannot be read, as getCallId.
+   * was read and has no CallId (a first launch); CallSessionReadError when it
+   * could not be read, which is not the same thing: treating it as a first
+   * launch would start a rejoined VP's meeting under a new CallId. Without a
+   * GraphQL endpoint (local runs) there is no row, and the answer is null.
    */
   async getCallSession(): Promise<VpCallSession | null> {
-    try {
-      const query = `
+    if (!this.graphqlEndpoint) return null;
+    let result: any;
+    const query = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
@@ -700,18 +679,23 @@ export class VirtualParticipantStatusManager {
           }
         }
       `;
-      const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
-      const session = callSessionFromVpRow(result?.getVirtualParticipant);
-      log.info(
-        session
-          ? `Retrieved CallId ${session.callId} (session ${session.sessionNumber}) for VP ${this.participantId}`
-          : `No CallId found for VP ${this.participantId}`,
-      );
-      return session;
+    try {
+      result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
     } catch (error) {
-      log.error('Error getting CallId:', error);
-      return null;
+      throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
     }
+    // signAndSendGraphQLRequest answers null for an HTTP failure, and the row is
+    // always there for a launched VP: neither is a row without a CallId.
+    if (!result?.getVirtualParticipant) {
+      throw new CallSessionReadError("the Virtual Participant's record could not be read");
+    }
+    const session = callSessionFromVpRow(result.getVirtualParticipant);
+    log.info(
+      session
+        ? `Retrieved CallId ${session.callId} (session ${session.sessionNumber}) for VP ${this.participantId}`
+        : `No CallId found for VP ${this.participantId}`,
+    );
+    return session;
   }
 
   /**

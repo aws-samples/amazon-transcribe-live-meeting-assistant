@@ -22,12 +22,12 @@ the meeting's ``CallId`` and a ``Trigger``:
     By the one-time EventBridge Scheduler schedule either of the above made.
     Deletes.
 ``meeting-reopened``
-    By the Virtual Participant manager, synchronously, when the meeting's owner
-    or an Admin rejoins it (docs/virtual-participant.md#rejoin). Cancels the
-    pending deletion, whatever the setting says, because the meeting is about to
-    be captured again; its next END schedules one afresh. Answers
+    By the call event processor, when a rejoined session of the meeting has
+    started and made it live again (docs/virtual-participant.md#rejoin). Cancels
+    the pending deletion, whatever the setting says, because the meeting is
+    being captured again; that session's END schedules one afresh. Answers
     ``{"action": "deleted"}`` without cancelling anything when the transcript is
-    already gone, which the rejoin is refused for.
+    already gone.
 
 A schedule is only ever moved earlier, so a redelivered END cannot postpone a
 deletion. After a deletion made on the spot, one more is scheduled

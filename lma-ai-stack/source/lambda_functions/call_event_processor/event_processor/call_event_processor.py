@@ -1704,6 +1704,33 @@ async def execute_process_event_api_mutation(
                 extra=dict(call_id=message.get("CallId")),
             )
 
+        # The meeting is being captured again, so a transcript deletion
+        # scheduled when it last ended is cancelled now -- not when the rejoin
+        # was asked for, since a session that never starts (its launch failed,
+        # or it was not admitted) leaves the meeting ended and must leave its
+        # deletion in place too. startCallSession is refused once the transcript
+        # is deleted, so this is never reached for a meeting whose deletion has
+        # run. The session's END schedules the deletion afresh.
+        #
+        # Fire-and-forget, and kept out of the record's outcome: the session
+        # has started, a redelivery would not start it again, and so would not
+        # reach this either. A failure to queue the cancel is logged instead.
+        if session_started and TRANSCRIPT_DELETION_FUNCTION_ARN:
+            try:
+                LAMBDA_HOOK_CLIENT.invoke(
+                    FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                    InvocationType="Event",
+                    Payload=json.dumps(
+                        {"CallId": message.get("CallId"), "Trigger": "meeting-reopened"}
+                    ),
+                )
+            except Exception:  # pylint: disable=broad-except
+                LOGGER.exception(
+                    "START: could not tell the transcript deletion function the meeting "
+                    "was reopened; a deletion scheduled when it last ended still applies",
+                    extra=dict(call_id=message.get("CallId")),
+                )
+
         # At most once per meeting. Redelivery is routine on this stream -- the
         # END branch below explains why -- and a deployment's own start-of-call
         # hook would read a second invocation as a second meeting starting.

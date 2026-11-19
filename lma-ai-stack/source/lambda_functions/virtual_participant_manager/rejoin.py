@@ -17,17 +17,20 @@ What a rejoin does, in order:
 2. Checks the Virtual Participant has left (ENDED, COMPLETED or FAILED) and has a
    meeting, and that the meeting's transcript has not been deleted.
 3. Works out the new session's number and where it starts on the transcript
-   timeline: one second after the latest end time of anything in the transcript.
+   timeline: after everything already on it, rounded up to a whole second, plus
+   one second (next_session_offset).
    The container adds that offset to every segment it sends, so the new
    session's segments follow the earlier ones instead of starting again at 0.
 4. Claims the row with a conditional write, which resets it to INITIALIZING and
    clears what the earlier run left on it (its end reason above all: the
    updateVirtualParticipant resolver refuses a progress status on a row that
    has one). A second rejoin of the same row fails the condition.
-5. Cancels any pending transcript deletion (the transcript deletion function's
-   ``meeting-reopened`` trigger), and allows the session on the meeting record.
-   The meeting itself stays ENDED until the session's START event arrives; the
-   call event processor then makes it live again (startCallSession).
+5. Allows the session on the meeting record. The meeting itself stays ENDED
+   until the session's START event arrives; the call event processor then makes
+   it live again (startCallSession) and only then cancels a pending transcript
+   deletion. A rejoin whose session never starts -- the launch fails, or the
+   Virtual Participant is not admitted -- leaves the meeting, and its deletion
+   schedule, as they were.
 6. Stops any host the task registry still holds for the Virtual Participant, and
    starts the launcher state machine, as the Create button does, with a launch
    token unique to the session: a launch is idempotent on its token, and the
@@ -260,23 +263,6 @@ def release(table: Any, vp_id: str, reason: str) -> None:
         logger.exception(f"VP {vp_id}: could not record why the rejoin did not go ahead")
 
 
-def cancel_transcript_deletion(call_id: str) -> None:
-    """Cancel the meeting's pending transcript deletion, or refuse if it has run."""
-    function_arn = os.environ.get("TRANSCRIPT_DELETION_FUNCTION_ARN")
-    if not function_arn:
-        return
-    response = _client("lambda").invoke(
-        FunctionName=function_arn,
-        InvocationType="RequestResponse",
-        Payload=json.dumps({"CallId": call_id, "Trigger": "meeting-reopened"}),
-    )
-    if response.get("FunctionError"):
-        raise RuntimeError("the pending transcript deletion could not be cancelled")
-    outcome = json.loads(response["Payload"].read() or b"{}")
-    if outcome.get("action") == "deleted":
-        raise RejoinRefused("The meeting's transcript has been deleted, so it cannot be reopened.")
-
-
 def allow_session(call_id: str, session: int, offset: int, rejoined_by: str) -> None:
     """Record on the meeting the session its next START may open."""
     try:
@@ -412,7 +398,6 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
 
     claimed = claim(manager.table, vp, session, offset, rejoined_by)
     try:
-        cancel_transcript_deletion(call_id)
         allow_session(call_id, session, offset, rejoined_by)
         manager.terminate_registered_host(vp_id, "Virtual Participant rejoining its meeting")
         start_launch(vp, session, identity)

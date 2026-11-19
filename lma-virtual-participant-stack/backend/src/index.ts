@@ -19,6 +19,7 @@ import { blankCameraInitScript } from './blank-camera.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
+import { readCallSession, type VpCallSession } from './call-session.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
 import { keyframeSampler } from './keyframe-sampler.js';
@@ -324,8 +325,30 @@ const main = async (): Promise<void> => {
             statusManager = new VirtualParticipantStatusManager(vpId);
             
             // Get existing CallId from VP record first, with the capture session
-            // a rejoined VP runs (docs/virtual-participant.md#rejoin).
-            const existing = await statusManager.getCallSession();
+            // a rejoined VP runs (docs/virtual-participant.md#rejoin). A row
+            // without a CallId is a first launch, which makes its own below. A
+            // row that cannot be read is read again, and if it still cannot be,
+            // the launch fails: going on would start a rejoined VP's meeting
+            // under a new CallId instead of adding to the one it rejoined.
+            let existing: VpCallSession | null;
+            try {
+                const manager = statusManager;
+                existing = await readCallSession(() => manager.getCallSession(), {
+                    onRetry: (attempt, error) =>
+                        log.warn(`Reading the VP record failed (attempt ${attempt}); retrying: ${error}`),
+                });
+            } catch (readError) {
+                log.error(`Could not read the VP record; not starting: ${readError}`);
+                try {
+                    await statusManager?.setFailed(
+                        'Could not read this Virtual Participant\'s record, so it did not start. Try again.',
+                        'startup:vp-record-unreadable',
+                    );
+                } catch (statusError) {
+                    log.error(`Failed to record the startup failure: ${statusError}`);
+                }
+                process.exit(1);
+            }
             const existingCallId = existing?.callId;
 
             if (existing && existingCallId) {

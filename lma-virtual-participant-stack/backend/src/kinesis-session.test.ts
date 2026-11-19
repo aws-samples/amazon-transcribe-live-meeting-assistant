@@ -18,7 +18,7 @@ delete process.env.CALL_DATA_STREAM_NAME;
 // eslint-disable-next-line import/first
 import { kinesisStreamManager } from './kinesis-stream.js';
 // eslint-disable-next-line import/first
-import { callSessionFromVpRow } from './status-manager.js';
+import { callSessionFromVpRow } from './call-session.js';
 
 type Record_ = Record<string, any>;
 const sent: Record_[] = [];

@@ -2276,3 +2276,76 @@ def test_only_the_not_started_marker_counts_as_a_session_not_started():
     assert cep.was_session_started(cep.SESSION_NOT_STARTED) is False
     assert cep.was_session_started(REOPENED) is True
     assert cep.was_session_started(None) is False
+
+
+# ── the transcript deletion of a rejoined meeting ───────────────────────────
+#
+# A pending deletion is cancelled only once the rejoined session has started.
+# A session that never starts -- the launch failed, or the Virtual Participant
+# was not admitted -- leaves the ended meeting and its deletion schedule alone.
+
+
+def _start_with_deletion(schema, responses, monkeypatch) -> List[Dict[str, Any]]:
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    session = QueuedSession(schema, responses)
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == DELETION_ARN
+    ]
+
+
+def test_a_started_session_cancels_the_pending_transcript_deletion(schema, emitted, monkeypatch):
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, REOPENED], monkeypatch)
+    assert payloads == [{"CallId": "call-1", "Trigger": "meeting-reopened"}]
+
+
+def test_a_session_that_was_not_started_leaves_the_deletion_alone(schema, emitted, monkeypatch):
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, SESSION_REFUSED], monkeypatch)
+    assert payloads == []
+
+
+def test_a_failure_to_queue_the_cancel_does_not_fail_the_start(schema, emitted, monkeypatch):
+    class FailingForDeletion(RecordingLambda):
+        def invoke(self, **kwargs: Any) -> Dict[str, Any]:
+            if kwargs["FunctionName"] == DELETION_ARN:
+                raise RuntimeError("throttled")
+            return super().invoke(**kwargs)
+
+    hook = FailingForDeletion()
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message=dict(REJOINED_START),
+            appsync_session=QueuedSession(schema, [ALREADY_EXISTS, REOPENED]),
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+    assert any(
+        "could not tell the transcript deletion" in m for m in cep.LOGGER.at_level("EXCEPTION")
+    )
+    assert [i["FunctionName"] for i in hook.invocations] == ["arn:hook"]
+
+
+def test_the_end_of_a_session_that_never_started_leaves_the_deletion_alone(
+    schema, emitted, deletion_function, monkeypatch
+):
+    """The Virtual Participant was not admitted: no START for session 2 arrived,
+    so the meeting is still ENDED from session 1, with its deletion scheduled."""
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "ENDED", "SessionStartedNumber": None}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert _deletion_payloads(deletion_function) == []
+    assert metric_names.MEETINGS_ENDED not in emitted.counts

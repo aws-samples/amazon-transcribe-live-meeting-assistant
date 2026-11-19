@@ -10120,10 +10120,9 @@ Resources:
           # per-VP listener rules and target groups, which exist solely on the
           # ECS launch paths.
           ALB_LISTENER_ARN: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
-          # Rejoin (rejoinVirtualParticipant): the meeting record it reopens,
-          # the transcript deletion it cancels, and the launcher it starts.
+          # Rejoin (rejoinVirtualParticipant): the meeting record it allows a
+          # session on, and the launcher it starts.
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          TRANSCRIPT_DELETION_FUNCTION_ARN: !GetAtt TranscriptDeletionFunction.Arn
           VP_STATE_MACHINE_ARN: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
       Policies:
         - DynamoDBCrudPolicy:
@@ -10137,10 +10136,6 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:UpdateItem
               Resource: !GetAtt EventSourcingTable.Arn
-            - Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt TranscriptDeletionFunction.Arn
             - Effect: Allow
               Action:
                 - states:StartExecution

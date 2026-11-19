@@ -3,13 +3,12 @@
 # See the LICENSE file in the project root for full license information.
 """Rejoining a Virtual Participant to its meeting (rejoin.py).
 
-The two tables, the transcript deletion function and the launcher state machine
+The two tables and the launcher state machine
 are in-memory fakes, so a rejoin runs end to end without AWS.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import sys
@@ -42,7 +41,6 @@ CALL_ID = "Weekly sync-2026-11-18-09-00-00-000"
 STATE_MACHINE = (
     "arn:aws:states:us-east-1:123456789012:stateMachine:LMA-LMAVirtualParticipantScheduler"
 )
-DELETION = "arn:aws:lambda:us-east-1:123456789012:function:LMA-TranscriptDeletion"
 
 
 def _conflict() -> ClientError:
@@ -145,16 +143,6 @@ class EventsTable:
         return {}
 
 
-class DeletionFunction:
-    def __init__(self, outcome: Dict[str, Any]) -> None:
-        self.outcome = outcome
-        self.invocations: List[Dict[str, Any]] = []
-
-    def invoke(self, **kwargs: Any) -> Dict[str, Any]:
-        self.invocations.append(kwargs)
-        return {"Payload": io.BytesIO(json.dumps(self.outcome).encode())}
-
-
 class StateMachine:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
@@ -175,7 +163,6 @@ def world(monkeypatch):
         vp: Dict[str, Any] | None = None,
         meeting: Dict[str, Any] | None = None,
         end_times: List[Any] | None = None,
-        deletion: Dict[str, Any] | None = None,
         launch_fails: bool = False,
     ) -> SimpleNamespace:
         vp_row = vp if vp is not None else ended_vp()
@@ -188,21 +175,20 @@ def world(monkeypatch):
                 "Owner": "owner@example.com",
                 "Status": "ENDED",
                 "TotalConversationDurationMillis": Decimal("1800250"),
+                "TranscriptDeletionScheduledFor": "2026-11-18T11:00:00+00:00",
             }
         )
         vp_table = VpTable(vp_row)
         events = EventsTable(
             meeting_row, end_times if end_times is not None else [Decimal("1700.5"), 1800.25]
         )
-        deletion_function = DeletionFunction(deletion or {"action": "cancelled"})
         state_machine = StateMachine(fail=launch_fails)
         monkeypatch.setattr(
             rejoin,
             "_clients",
-            {"events": events, "lambda": deletion_function, "stepfunctions": state_machine},
+            {"events": events, "stepfunctions": state_machine},
         )
         monkeypatch.setenv("VP_STATE_MACHINE_ARN", STATE_MACHINE)
-        monkeypatch.setenv("TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION)
         terminated: List[str] = []
         manager = SimpleNamespace(
             table=vp_table,
@@ -215,7 +201,6 @@ def world(monkeypatch):
             manager=manager,
             vp_table=vp_table,
             events=events,
-            deletion=deletion_function,
             state_machine=state_machine,
             terminated=terminated,
         )
@@ -240,10 +225,9 @@ def test_the_owner_rejoins_an_ended_virtual_participant_into_the_same_meeting(wo
     assert w.events.meeting["SessionOffsetSeconds"] == Decimal(1802)
     assert w.events.meeting["Status"] == "ENDED", "the session's START reopens it, not this"
 
-    # The pending transcript deletion is cancelled.
-    (invocation,) = w.deletion.invocations
-    assert invocation["InvocationType"] == "RequestResponse"
-    assert json.loads(invocation["Payload"]) == {"CallId": CALL_ID, "Trigger": "meeting-reopened"}
+    # The pending transcript deletion stays until the session starts; the call
+    # event processor cancels it then.
+    assert w.events.meeting["TranscriptDeletionScheduledFor"] == "2026-11-18T11:00:00+00:00"
 
     # A launch, as the Create button starts one, with a token of its own.
     (execution,) = w.state_machine.executions
@@ -335,12 +319,21 @@ def test_a_meeting_whose_transcript_was_deleted_is_not_reopened(world):
     assert w.vp_table.updates == [] and w.state_machine.executions == []
 
 
-def test_a_deletion_that_ran_after_the_check_refuses_the_rejoin_and_releases_the_row(world):
-    w = world(deletion={"action": "deleted"})
-    with pytest.raises(rejoin.RejoinRefused, match="transcript has been deleted"):
+def test_a_deletion_that_ran_after_the_check_refuses_the_rejoin_and_releases_the_row(
+    world, monkeypatch
+):
+    w = world()
+    real_read = rejoin.read_meeting
+
+    def read_then_delete(call_id):
+        meeting = real_read(call_id)
+        w.events.meeting["TranscriptDeletedAt"] = "2026-11-18T10:00:00+00:00"
+        return meeting
+
+    monkeypatch.setattr(rejoin, "read_meeting", read_then_delete)
+    with pytest.raises(rejoin.RejoinRefused, match="meeting changed"):
         rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
     assert w.vp_table.row["status"] == "FAILED"
-    assert "transcript has been deleted" in w.vp_table.row["errorMessage"]
     assert w.state_machine.executions == []
 
 
@@ -350,6 +343,18 @@ def test_a_launch_that_cannot_be_started_marks_the_row_failed(world):
         rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
     assert w.vp_table.row["status"] == "FAILED"
     assert w.vp_table.row["errorMessage"].startswith("Could not rejoin the meeting")
+
+
+def test_a_launch_that_cannot_be_started_leaves_the_transcript_deletion_in_place(world):
+    """No session starts, so the meeting stays ended with its deletion scheduled."""
+    w = world(launch_fails=True)
+    with pytest.raises(RuntimeError):
+        rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.events.meeting["Status"] == "ENDED"
+    assert w.events.meeting["TranscriptDeletionScheduledFor"] == "2026-11-18T11:00:00+00:00"
+    (update,) = w.events.updates
+    assert "TranscriptDeletion" not in update["UpdateExpression"]
+    assert "lambda" not in rejoin._clients, "no function is asked to cancel the deletion"
 
 
 def test_a_second_rejoin_of_the_same_row_is_refused(world):
