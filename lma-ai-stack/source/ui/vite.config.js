@@ -44,7 +44,13 @@ const getPackageName = (id) => {
   return parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
 };
 
+// react-dom's server renderer is used only by the web page download
+// (src/components/common/html-export.jsx), which is loaded on demand. Grouped
+// with react-dom it would be in the chunk every page loads.
+const REACT_DOM_SERVER = /node_modules\/react-dom\/(?:server[^/]*\.js|cjs\/react-dom-server)/;
+
 const manualChunks = (id) => {
+  if (REACT_DOM_SERVER.test(id)) return 'react-dom-server';
   const pkg = getPackageName(id);
   if (!pkg) return undefined;
   const entry = Object.entries(manualChunkGroups).find(([, pkgs]) => pkgs.includes(pkg));

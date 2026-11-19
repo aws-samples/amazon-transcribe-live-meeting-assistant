@@ -225,8 +225,9 @@ How it is built:
   frame the summary names; selecting it opens the full picture. A picture whose
   signed link has lapsed (links last an hour) is read again by itself. A frame
   that cannot be read, because the meeting's retention has removed it, shows as
-  its alt text. The Word and PDF summary downloads embed a thumbnail of each
-  frame the summary names: the browser reads the frames through
+  its alt text. The Word, PDF and web page (.html) summary downloads embed a
+  thumbnail of each frame the summary names (the web page as a `data:` URI
+  inside the file): the browser reads the frames through
   `getVideoKeyframes`, as the Summary tab does, fetches each picture through
   its signed link, and scales it to 480 pixels wide. At most 40 frames are
   embedded; a frame past that, or one that cannot be fetched, is written as

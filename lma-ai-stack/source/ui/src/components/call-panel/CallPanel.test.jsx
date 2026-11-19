@@ -280,6 +280,33 @@ describe('the Summary tab', () => {
     expect(screen.getByText('Sarah covered Q3.')).toBeTruthy();
   });
 
+  it('lists its sections in the reading order the downloads use, custom ones last in their configured order', () => {
+    const stored = JSON.stringify({
+      'CHAT & SHARED LINKS': 'Chat.',
+      RISKS: 'Risks.',
+      DETAILS: 'Details.',
+      'SCREEN SHARE SUMMARY': 'Shared.',
+      ACTIONS: 'Actions.',
+      SUMMARY: 'Sarah walked through the plan.',
+      'CUSTOMER QUOTES': 'Quotes.',
+    });
+    renderPage({ item: { ...ITEM, callSummaryText: stored }, url: '/calls/m?tab=summary' });
+    const toc = screen.getByRole('navigation', { name: 'Summary sections' });
+    expect(
+      within(toc)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([
+      'SUMMARY',
+      'ACTIONS',
+      'DETAILS',
+      'SCREEN SHARE SUMMARY',
+      'CHAT & SHARED LINKS',
+      'RISKS',
+      'CUSTOMER QUOTES',
+    ]);
+  });
+
   it('opens and closes every section at once, and remembers the choice', () => {
     const { unmount } = renderPage({ url: '/calls/m?tab=summary' });
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
@@ -1170,12 +1197,14 @@ describe('the Download menu', () => {
       'Markdown (.md)',
       'Word (.docx)',
       'PDF (.pdf)',
+      'Web page (.html)',
       'Plain text (.txt)',
       'Copy to clipboard (Markdown)',
       'Email summary (beta)',
       'Markdown (.md)',
       'Word (.docx)',
       'PDF (.pdf)',
+      'Web page (.html)',
       'Plain text (.txt)',
       'Excel (.xlsx)',
       'Copy to clipboard (Markdown)',

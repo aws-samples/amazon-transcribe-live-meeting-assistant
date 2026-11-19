@@ -101,16 +101,25 @@ const headingOf = (line) => {
   return /[A-Z]/.test(bold) && !/[a-z]/.test(bold) ? bold : null;
 };
 
-/** A summary written as one Markdown document, as its sections, split at its headings. */
-const markdownSections = (text) => {
+/**
+ * A summary written as one Markdown document, as its sections, split at its
+ * headings. With `withHeadings`, each headed section also carries `heading`,
+ * its heading line as written, so a download can put a hand-written
+ * document's sections in order without rewording them.
+ */
+const markdownSections = (text, { withHeadings = false } = {}) => {
   // The first entry holds what comes before the first heading, and has no title.
   const sections = [{ title: null, lines: [] }];
   text.split(/\r?\n/).forEach((line) => {
     const heading = headingOf(line);
     if (heading === null) sections[sections.length - 1].lines.push(line);
-    else sections.push({ title: heading, lines: [] });
+    else sections.push({ title: heading, heading: line, lines: [] });
   });
-  const [preamble, ...headed] = sections.map(({ title, lines }) => ({ title, markdown: lines.join('\n').trim() }));
+  const [preamble, ...headed] = sections.map(({ title, heading, lines }) => ({
+    title,
+    markdown: lines.join('\n').trim(),
+    ...(withHeadings && heading !== undefined ? { heading } : {}),
+  }));
   // Text before the first heading, or a document with no heading at all, is a section called Summary.
   return preamble.markdown || !headed.length ? [{ ...preamble, title: 'Summary' }, ...headed] : headed;
 };
@@ -166,6 +175,105 @@ export const summarySections = (callSummaryText, omit = []) => {
 };
 
 /**
+ * The order a summary's sections are read in, wherever the summary is shown or
+ * taken away: the Summary tab and every download. Each entry names a section
+ * the shipped prompt templates write, with the other names it is known by (an
+ * older name, such as SLIDES PRESENTED, or a common rewording an Admin may
+ * have given the template). A section matching none of them -- a custom
+ * template -- comes after all of these, in its configured order. The short
+ * names (AGENDA, CHAT, SLIDES, SCREEN SHARE) are taken on purpose: a template
+ * an Admin called just that is read as the shipped section it names.
+ */
+export const SUMMARY_SECTION_ORDER = [
+  { name: 'SUMMARY', aliases: ['SUMMARY', 'MEETING SUMMARY', 'EXECUTIVE SUMMARY'] },
+  { name: 'ACTIONS', aliases: ['ACTIONS', 'ACTION', 'ACTION ITEMS', 'ACTION ITEM'] },
+  { name: 'AGENDA COVERAGE', aliases: ['AGENDA COVERAGE', 'AGENDA'] },
+  { name: 'DETAILS', aliases: ['DETAILS', 'DETAIL', 'MEETING DETAILS', 'KEY DETAILS'] },
+  { name: 'CHAPTERS', aliases: ['CHAPTERS', 'CHAPTER', 'MEETING CHAPTERS'] },
+  {
+    name: 'SCREEN SHARE SUMMARY',
+    aliases: [
+      'SCREEN SHARE SUMMARY',
+      'SCREEN SHARE',
+      'SCREENSHARE SUMMARY',
+      'SCREENSHARE',
+      'SHARED SCREEN',
+      'SHARED SCREEN SUMMARY',
+      'SLIDES PRESENTED',
+      'SLIDES',
+    ],
+  },
+  {
+    name: 'CHAT & SHARED LINKS',
+    aliases: ['CHAT AND SHARED LINKS', 'CHAT SHARED LINKS', 'CHAT AND LINKS', 'CHAT', 'CHAT SUMMARY', 'SHARED LINKS'],
+  },
+];
+
+/**
+ * A section title as the order compares it: in capitals, "&" read as "AND",
+ * and every run of anything other than a letter or digit (spaces, "_", ":",
+ * "/", the "**" of a bold heading) as one space. "Chat & shared links",
+ * "CHAT_AND_SHARED_LINKS" and "**Chat / Shared Links:**" all compare alike.
+ */
+export const sectionOrderKey = (title) =>
+  String(title ?? '')
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/&/g, ' AND ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+const SECTION_RANKS = new Map(
+  SUMMARY_SECTION_ORDER.flatMap(({ aliases }, rank) => aliases.map((alias) => [sectionOrderKey(alias), rank])),
+);
+
+/** Where a section comes in SUMMARY_SECTION_ORDER; a custom section after every listed one. */
+export const summarySectionRank = (title) => {
+  const rank = SECTION_RANKS.get(sectionOrderKey(title));
+  return rank === undefined ? SUMMARY_SECTION_ORDER.length : rank;
+};
+
+/**
+ * Sections ([{ title, ... }]) in reading order (SUMMARY_SECTION_ORDER). The
+ * sort is stable: sections of one rank, the custom ones among them, keep the
+ * order they were given in, which for a generated summary is the order of
+ * the prompt templates. Returns a new array; the sections are not copied.
+ */
+export const orderSummarySections = (sections) =>
+  (sections || [])
+    .map((section, index) => ({ section, index, rank: summarySectionRank(section?.title) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ section }) => section);
+
+/** The summary's sections as every download writes them: all of them (summarySections), in reading order. */
+export const downloadSummarySections = (callSummaryText) => orderSummarySections(summarySections(callSummaryText));
+
+// The summary's sections when it is stored as JSON, a section per prompt
+// template: [[title, value]] in reading order. Null for a summary written by hand.
+const orderedJsonEntries = (callSummaryText) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(callSummaryText);
+  } catch (e) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return orderSummarySections(Object.entries(parsed).map(([title, value]) => ({ title, value }))).map(
+    ({ title, value }) => [title, value],
+  );
+};
+
+// A summary written by hand, with its sections in reading order. Each section
+// keeps its heading line and text exactly as written, and a document whose
+// sections are already in order is returned exactly as it is.
+const orderedMarkdownDocument = (text) => {
+  const sections = markdownSections(text, { withHeadings: true });
+  const ordered = orderSummarySections(sections);
+  if (ordered.every((section, index) => section === sections[index])) return text;
+  return ordered.map((section) => [section.heading, section.markdown].filter(Boolean).join('\n\n')).join('\n\n');
+};
+
+/**
  * The summary as a percent-encoded `mailto:` body.
  *
  * The text is assembled as plain text and encoded in one pass at the end,
@@ -179,16 +287,10 @@ export const getEmailFormattedSummary = (callSummaryText) => {
   if (!callSummaryText) {
     return encodeURIComponent('Not available');
   }
-  let summary = callSummaryText;
-  try {
-    const jsonSummary = JSON.parse(summary);
-    summary = '';
-    Object.entries(jsonSummary).forEach(([key, value]) => {
-      summary += `${key}\n\n${value}\n\n`;
-    });
-  } catch (e) {
-    summary = callSummaryText;
-  }
+  const entries = orderedJsonEntries(callSummaryText);
+  const summary = entries
+    ? entries.map(([key, value]) => `${key}\n\n${value}\n\n`).join('')
+    : orderedMarkdownDocument(callSummaryText);
   // CRLF is the line ending a mail body takes; normalise to LF first so a text
   // that already uses CRLF does not end up with doubled carriage returns.
   const body = keyframeImagesAsText(summary).replace(/\*\*/g, '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
@@ -199,26 +301,21 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
   if (!callSummaryText) {
     return 'Not available';
   }
-  // The copy, the text file and the Word document cannot show a key frame.
-  let summary = keyframeImagesAsText(callSummaryText);
-  try {
-    const jsonSummary = JSON.parse(summary);
-    summary = '';
-    Object.entries(jsonSummary).forEach(([key, value]) => {
-      summary += `${key}\n\n${value}\n\n`;
-      summary = summary.replace(/\*\*/g, '');
-    });
-  } catch (e) {
-    return keyframeImagesAsText(callSummaryText);
-  }
-  return summary;
+  // A text file cannot show a key frame, so each is written as its caption.
+  // The sections are in reading order (SUMMARY_SECTION_ORDER), as in every download.
+  const entries = orderedJsonEntries(callSummaryText);
+  if (!entries) return keyframeImagesAsText(orderedMarkdownDocument(callSummaryText));
+  return entries
+    .map(([key, value]) => `${key}\n\n${keyframeImagesAsText(String(value ?? ''))}\n\n`.replace(/\*\*/g, ''))
+    .join('');
 };
 
 /**
- * The meeting as plain text: title, date, length and summary, and the consent
- * record when the meeting has one (see meeting-consent.js).
+ * The meeting as plain text: title, date, participants (`participants`, the
+ * names the meeting page's header lists, when given), length and summary, and
+ * the consent record when the meeting has one (see meeting-consent.js).
  */
-export const getTextFileFormattedMeetingDetails = (meeting, consent = null) => {
+export const getTextFileFormattedMeetingDetails = (meeting, consent = null, { participants = [] } = {}) => {
   let meetingDetails = '';
   meetingDetails += `Title: ${meeting.callId}\n`;
 
@@ -227,6 +324,9 @@ export const getTextFileFormattedMeetingDetails = (meeting, consent = null) => {
   // const date = new Date(call.initiationTimeStamp);
   const date = meeting.initiationTimeStamp;
   meetingDetails += `Date: ${date}\n`;
+
+  const names = (participants || []).map((name) => String(name ?? '').trim()).filter(Boolean);
+  if (names.length) meetingDetails += `Participants: ${names.join(', ')}\n`;
 
   meetingDetails += `Length: ${meeting.conversationDurationTimeStamp}\n`;
 
