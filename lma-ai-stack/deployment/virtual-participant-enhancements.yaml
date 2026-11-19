@@ -130,6 +130,18 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/*"
+              # The MCP server library import and the skill writes are for
+              # administrators, not for the stack's own roles.
+              - Effect: Deny
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/createSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/updateSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/deleteSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/importSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/importSkillLibrary"
               - Effect: Allow
                 Action:
                   - ecs:ListTasks

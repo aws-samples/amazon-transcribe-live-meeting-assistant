@@ -1,6 +1,9 @@
 // First, so the Configuration page's values are in the environment before this
 // module reads it at import: see stack-settings.ts.
 import './stack-settings.js';
+// Also before the details are built: the meeting password, read from the VP's
+// record at startup (startup-meeting-password.ts).
+import { startupMeetingPassword } from './startup-meeting-password.js';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeChatText } from './chat-text.js';
 import { addressingVpHandle } from './vp-handle.js';
@@ -137,7 +140,13 @@ class DetailsManager {
     const meetingPlatform = (process.env.MEETING_PLATFORM as 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX' | 'GOOGLE_MEET') || 'Chime';
     let meetingId = process.env.MEETING_ID || '';
     // Grouping spaces removed from a numeric Zoom passcode: see meeting-password.ts.
-    let meetingPassword = normalizeMeetingPassword(process.env.MEETING_PASSWORD, meetingPlatform);
+    // Read from the VP's record at startup; a read that failed leaves it empty,
+    // and index.ts fails the launch before any join (startup-meeting-password.ts).
+    let meetingPassword = normalizeMeetingPassword(
+      startupMeetingPassword.ok ? startupMeetingPassword.password : '',
+      meetingPlatform,
+    );
+    registerSecretValue(meetingPassword);
     let zoomPersonalLink: ZoomPersonalLink | undefined;
     // A Zoom join link given as the meeting ID: its meeting number, and its
     // pwd value unless a passcode was given too (zoom-join-link.ts). The pwd

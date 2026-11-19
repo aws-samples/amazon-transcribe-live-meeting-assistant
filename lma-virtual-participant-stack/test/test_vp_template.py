@@ -537,13 +537,13 @@ def test_scheduled_ecs_target_is_unchanged(template: dict) -> None:
     )
     env = parsed["Input"]["containerOverrides"][0]["environment"]
     # Note the mixed key casing: the LMA_USER entry uses Name/Value while the
-    # others use name/value. Preserved verbatim from the original template.
+    # others use name/value. The meeting password is not among them: the VP
+    # reads it from its record at startup.
     assert env[0] == {"name": "MEETING_PLATFORM", "value.$": "$.data.meetingPlatform"}
     assert env[1] == {"name": "MEETING_ID", "value.$": "$.data.meetingID"}
-    assert env[2] == {"name": "MEETING_PASSWORD", "value.$": "$.data.meetingPassword"}
-    assert env[3] == {"name": "MEETING_NAME", "value.$": "$.data.meetingName"}
-    assert env[4] == {"Name": "LMA_USER", "Value.$": "$.data.userName"}
-    assert len(env) == 5
+    assert env[2] == {"name": "MEETING_NAME", "value.$": "$.data.meetingName"}
+    assert env[3] == {"Name": "LMA_USER", "Value.$": "$.data.userName"}
+    assert len(env) == 4
 
 
 def test_scheduled_microvm_target_invokes_the_launcher(template: dict) -> None:
@@ -1636,7 +1636,6 @@ def test_scheduled_microvm_payload_is_readable_by_the_launcher(
     assert payload["virtualParticipantId"] == "vp-1"
     assert payload["meetingId"] == "25582977335241"
     assert payload["meetingPlatform"] == "TEAMS"
-    assert payload["meetingPassword"] == "secret"
     # meetingTime is the real meeting time, not the (2-min-earlier) fire time.
     assert payload["meetingTime"] == "1788299100"
 
@@ -1795,6 +1794,7 @@ def test_a_new_fire_time_already_due_is_not_applied(raw: str) -> None:
         # Writes that leave the launch fields alone.
         ({}, {"SharedWith": {"S": "bob@example.com"}}),
         ({}, {"agenda": {"S": "Read by the VP from the row"}}),
+        ({}, {"meetingPassword": {"S": "also read by the VP from the row"}}),
         ({}, {"consentMode": {"S": "notify"}}),
         ({}, {"errorMessage": {"S": "a note"}}),
     ],
@@ -2043,7 +2043,217 @@ def test_the_task_reaper_logs_the_task_not_its_environment(raw: str) -> None:
     assert "detail.get('taskArn')" in handler
 
 
+class _ReaperDynamo:
+    """The VP table and the task registry, as the reaper reads and writes them."""
+
+    def __init__(self, row: dict, registered: str | None) -> None:
+        from botocore.exceptions import ClientError
+
+        self.ClientError = ClientError
+        self.row = dict(row)
+        self.registry = {"vp-1": {"taskArn": registered}} if registered else {}
+
+    def _conflict(self):
+        return self.ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}}, "Op"
+        )
+
+    def get_item(self, TableName, Key, **_):
+        if TableName == "registry":
+            entry = self.registry.get(Key["vpId"]["S"])
+            return {"Item": {"taskArn": {"S": entry["taskArn"]}}} if entry else {}
+        return {"Item": {"CallId": {"S": self.row["CallId"]}}}
+
+    def update_item(self, ConditionExpression, ExpressionAttributeValues, **_):
+        values = ExpressionAttributeValues
+        if self.row["status"] in ("FAILED", "COMPLETED", "ENDED", "CANCELLED"):
+            raise self._conflict()
+        if "#rj" in ConditionExpression and self.row.get("rejoinedAt"):
+            if not self.row["rejoinedAt"] < values[":created"]["S"]:
+                raise self._conflict()
+        self.row.update(status="FAILED", errorMessage=values[":err"]["S"])
+        return {}
+
+    def delete_item(self, TableName, Key, ExpressionAttributeValues, **_):
+        entry = self.registry.get(Key["vpId"]["S"])
+        if entry and entry["taskArn"] != ExpressionAttributeValues[":ta"]["S"]:
+            raise self._conflict()
+        self.registry.pop(Key["vpId"]["S"], None)
+        return {}
+
+
+def _run_reaper(raw: str, dynamo: _ReaperDynamo, task_arn: str, created_at: str) -> tuple:
+    import types
+    from unittest import mock
+
+    kinesis = mock.Mock()
+    module = types.ModuleType("reaper")
+    env = {
+        "VP_TABLE_NAME": "vps",
+        "VP_TASK_REGISTRY_TABLE_NAME": "registry",
+        "KINESIS_STREAM_NAME": "calls",
+        "CLUSTER_ARN": "cluster",
+    }
+    with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+        "boto3.client",
+        side_effect=lambda service, *a, **k: dynamo if service == "dynamodb" else kinesis,
+    ):
+        source = _inline_handler_source(raw, "def _build_error_message")
+        exec(compile(source, "reaper", "exec"), module.__dict__)
+        event = {
+            "detail": {
+                "lastStatus": "STOPPED",
+                "clusterArn": "cluster",
+                "taskArn": task_arn,
+                "createdAt": created_at,
+                "stopCode": "EssentialContainerExited",
+                "overrides": {
+                    "containerOverrides": [
+                        {"environment": [{"name": "VIRTUAL_PARTICIPANT_ID", "value": "vp-1"}]}
+                    ]
+                },
+            }
+        }
+        result = module.lambda_handler(event, None)
+    return result, kinesis
+
+
+ACTIVE_ROW = {"id": "vp-1", "status": "ACTIVE", "CallId": "call-1"}
+
+
+def test_the_reaper_fails_the_run_whose_task_stopped(raw: str) -> None:
+    dynamo = _ReaperDynamo(ACTIVE_ROW, registered="task-2")
+    result, kinesis = _run_reaper(raw, dynamo, "task-2", "2026-11-19T10:00:00.000Z")
+    assert result["flipped"] is True
+    assert dynamo.row["status"] == "FAILED"
+    assert kinesis.put_record.called, "the meeting is closed"
+    assert dynamo.registry == {}
+
+
+def test_the_reaper_leaves_a_rejoined_run_alone_when_an_earlier_task_stops(raw: str) -> None:
+    """The registry holds the rejoined run's task."""
+    dynamo = _ReaperDynamo(ACTIVE_ROW, registered="task-2")
+    result, kinesis = _run_reaper(raw, dynamo, "task-1", "2026-11-19T09:00:00.000Z")
+    assert result["skipped"] == "earlier task"
+    assert dynamo.row["status"] == "ACTIVE"
+    assert not kinesis.put_record.called
+    assert dynamo.registry == {"vp-1": {"taskArn": "task-2"}}
+
+
+def test_the_reaper_leaves_a_rejoined_run_alone_before_it_registers(raw: str) -> None:
+    """No registry entry yet: the task predates the rejoin, which the row records."""
+    row = {**ACTIVE_ROW, "status": "INITIALIZING", "rejoinedAt": "2026-11-19T10:00:00.250000+00:00"}
+    dynamo = _ReaperDynamo(row, registered=None)
+    result, kinesis = _run_reaper(raw, dynamo, "task-1", "2026-11-19T09:00:00.000Z")
+    assert result["flipped"] is False
+    assert dynamo.row["status"] == "INITIALIZING"
+    assert not kinesis.put_record.called
+
+
+def test_the_reaper_fails_a_rejoined_run_whose_own_task_stopped(raw: str) -> None:
+    row = {**ACTIVE_ROW, "rejoinedAt": "2026-11-19T10:00:00.250000+00:00"}
+    dynamo = _ReaperDynamo(row, registered=None)
+    result, _ = _run_reaper(raw, dynamo, "task-2", "2026-11-19T10:00:05.000Z")
+    assert result["flipped"] is True
+    assert dynamo.row["status"] == "FAILED"
+
+
 def test_the_asg_deletion_handler_logs_the_request_not_the_event(raw: str) -> None:
     source = _inline_handler_source(raw, "autoscaling = boto3.client('autoscaling')")
     assert 'logger.info(f"Event: {event}")' not in source
     assert "event.get('RequestType')" in source
+
+
+# The VP reads its meeting password from its own record at startup
+# (backend/src/startup-meeting-password.ts); no launch path carries it.
+
+
+@pytest.mark.parametrize("launch_type", LAUNCH_TYPES)
+def test_state_machine_definition_carries_no_meeting_password(
+    template: dict, launch_type: str
+) -> None:
+    rendered = json.dumps(
+        _render_definition(
+            template, is_microvm=launch_type == "MICROVM", is_ec2=launch_type == "EC2"
+        )
+    )
+    assert "meetingPassword" not in rendered
+    assert "MEETING_PASSWORD" not in rendered
+
+
+def test_state_machine_template_never_references_meeting_password(template: dict) -> None:
+    """Both variants of every fragment, not only the one a launch type renders."""
+    definition = json.dumps(
+        template["Resources"]["LMAVirtualParticipantSchedulerStateMachine"]["Properties"][
+            "DefinitionString"
+        ]
+    )
+    assert "meetingPassword" not in definition
+    assert "MEETING_PASSWORD" not in definition
+
+
+@pytest.mark.parametrize("launch_type", ["FARGATE", "EC2", "MICROVM"])
+def test_scheduled_launch_input_carries_no_meeting_password(raw: str, launch_type: str) -> None:
+    schedule = _run_scheduler(raw, launch_type)
+    target_input = schedule["Target"]["Input"]
+    assert SCHEDULED_ROW["meetingPassword"]["S"] not in target_input
+    assert "meetingPassword" not in target_input
+    assert "MEETING_PASSWORD" not in target_input
+
+
+def test_scheduler_lambda_source_never_reads_the_meeting_password(raw: str) -> None:
+    source = _scheduler_source(raw)
+    code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
+    assert "'meetingPassword'" not in code
+    assert "MEETING_PASSWORD" not in code
+
+
+def test_a_changed_password_alone_does_not_move_the_schedule(raw: str) -> None:
+    """The VP reads the password from its row when it starts."""
+    old = _future_row()
+    new = _future_row(meetingPassword={"S": "changed"})
+    fake, _ = _run_modify(raw, old, new)
+    assert fake.updated == [] and fake.created == []
+
+
+def _task_role_statements(template: dict) -> list[dict]:
+    return [
+        statement
+        for policy in template["Resources"]["TaskRole"]["Properties"]["Policies"]
+        if isinstance(policy, dict) and "PolicyDocument" in policy
+        for statement in policy["PolicyDocument"]["Statement"]
+    ]
+
+
+def test_task_role_reads_only_the_password_from_the_vp_table(template: dict) -> None:
+    """The ECS task role is also the MicroVM execution role, so this covers both.
+
+    Its one GetItem on the VirtualParticipant table may project only the row's
+    id and meetingPassword, which is what the startup read asks for.
+    """
+    vp_table = "table/${VirtualParticipantTableName}"
+    reads = [
+        s
+        for s in _task_role_statements(template)
+        if "dynamodb:GetItem" in json.dumps(s["Action"]) and vp_table in json.dumps(s["Resource"])
+    ]
+    assert len(reads) == 1, reads
+    (read,) = reads
+    assert read["Action"] == ["dynamodb:GetItem"]
+    assert read["Condition"]["ForAllValues:StringEquals"]["dynamodb:Attributes"] == [
+        "id",
+        "meetingPassword",
+    ]
+    assert read["Condition"]["StringEqualsIfExists"]["dynamodb:Select"] == "SPECIFIC_ATTRIBUTES"
+    # No other statement grants a read of the table that the condition would not limit.
+    for statement in _task_role_statements(template):
+        if statement is read:
+            continue
+        if "VirtualParticipant" in json.dumps(statement.get("Resource")):
+            assert "dynamodb:GetItem" not in json.dumps(statement["Action"]), statement
+
+
+def test_the_startup_read_projects_what_the_task_role_allows() -> None:
+    source = (TEMPLATE.parent / "backend" / "src" / "startup-meeting-password.ts").read_text()
+    assert "ProjectionExpression: '#id, #pw'" in source
+    assert "ExpressionAttributeNames: { '#id': 'id', '#pw': 'meetingPassword' }" in source

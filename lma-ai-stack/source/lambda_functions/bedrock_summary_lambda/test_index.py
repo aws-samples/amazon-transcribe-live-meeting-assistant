@@ -2212,3 +2212,79 @@ def test_cache_reads_and_writes_are_metered_per_section(monkeypatch) -> None:
         },
     ]
     assert {item["Service"]["S"] for item in metering.items} == {f"bedrock/{CLAUDE}"}
+
+
+# --------------------------------------------------------------------------
+# A meeting with nothing to summarise
+# --------------------------------------------------------------------------
+
+EMPTY_ANSWER = {"summary": "Nothing to summarise: the meeting has no transcript"}
+
+
+def fetched(**payload):
+    """The fetch-transcript answer, with the fields given."""
+    client = FakeLambdaClient()
+    client.payload = {"transcript": "", "metadata": dict(METADATA), **payload}
+    return client
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"transcript": "  \n "},
+        {"chat": "", "chatLinks": [], "keyframes": []},
+        {"keyframes": [{"FrameId": "f1", "Timestamp": 4.0, "SlideText": "  "}]},
+        {"keyframes": [{"FrameId": "f1", "Timestamp": 4.0, "SlideText": None}]},
+    ],
+)
+def test_a_meeting_with_no_transcript_is_answered_without_calling_the_model(
+    monkeypatch: pytest.MonkeyPatch, payload
+) -> None:
+    """No speech, no chat and no screen text: nothing for the model to read, so
+    neither the model nor the prompt templates are asked, and no Knowledge Base
+    copy is written. The templates are left unseeded here, so reading them
+    would have answered with the error text instead."""
+    bedrock, s3 = install(
+        monkeypatch, templates=None, custom=None, lambda_client=fetched(**payload)
+    )
+    assert index.handler({"CallId": CALL_ID}, None) == EMPTY_ANSWER
+    assert index.handler({"CallId": CALL_ID, "RefreshConfiguration": True}, None) == EMPTY_ANSWER
+    assert bedrock.requests == []
+    assert s3.objects == {}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"transcript": "Bob: hello"},
+        {"chat": "[00:10] Bob: link coming"},
+        {"keyframes": [{"FrameId": "f1", "Timestamp": 4.0, "SlideText": "Q3 roadmap"}]},
+    ],
+)
+def test_speech_chat_or_screen_text_alone_is_summarised(
+    monkeypatch: pytest.MonkeyPatch, payload
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["one", "two"]),
+        templates=ddb_item(**{"1#Summary": "s {transcript}", "2#Topics": "t {transcript}"}),
+        custom=ddb_item(),
+        lambda_client=fetched(**payload),
+    )
+    summary = index.handler({"CallId": CALL_ID}, None)["summary"]
+    assert json.loads(summary) == {"Summary": "one", "Topics": "two"}
+    assert len(bedrock.requests) == 2
+
+
+def test_a_callers_own_prompt_is_answered_even_without_a_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the meeting's summary is skipped; an ad-hoc prompt still reaches the model."""
+    bedrock, _ = install(
+        monkeypatch, bedrock=FakeBedrock(texts=["an answer"]), lambda_client=fetched()
+    )
+    assert index.handler({"CallId": CALL_ID, "Prompt": "Anything? {transcript}"}, None) == {
+        "summary": "an answer"
+    }
+    assert len(bedrock.requests) == 1

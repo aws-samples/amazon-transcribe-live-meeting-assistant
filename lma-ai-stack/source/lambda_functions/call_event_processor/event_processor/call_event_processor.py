@@ -87,6 +87,7 @@ from pure import (  # noqa: E402
     language_to_record,
     merge_dicts,
     segment_analyses,
+    session_number_of,
     transcription_pause_state,
 )
 
@@ -248,6 +249,11 @@ PUT_CONDITION_FAILURE_MESSAGES = frozenset(
 # it is module state that ends up in the batch's results.
 CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
 
+# Stands in for a startCallSession result when the resolver refused the session:
+# a redelivered START of a session that has already started, or a START naming
+# a session no rejoin allowed. Read-only for the same reason as CALL_ALREADY_CREATED.
+SESSION_NOT_STARTED: Mapping[str, Any] = MappingProxyType({"ok": True, "SessionNotStarted": True})
+
 # Stands in for an addCallSummaryText result when the resolver rejected the
 # write, so the ADD_SUMMARY branch can drop the event without reporting the
 # summary as stored. Read-only for the same reason as CALL_ALREADY_CREATED.
@@ -281,6 +287,11 @@ def is_put_condition_failure(error: Any) -> bool:
       different reason -- ``get_call_details`` reads the meeting earlier in the
       same record and has already failed it on a null ``getCall``, so the
       aggregation write is not reached.
+    * ``startCallSession`` writes only for the session a rejoin allowed and only
+      once, so a rejection is a redelivered START of a session that has started,
+      or a START naming a session nobody allowed; neither may reopen the
+      meeting. ``execute_start_call_session_mutation`` answers with
+      :data:`SESSION_NOT_STARTED`.
     * ``addCallSummaryText`` writes through the same template, with no
       ``UpdatedAt`` of its own, so the template stamps it with the resolver's
       clock and a rejection is, in practice, a meeting deleted before its summary
@@ -494,9 +505,27 @@ FAILED_SUMMARY_TEXTS = frozenset(
 )
 
 
+# What the Bedrock summariser answers for a meeting with nothing to summarise
+# (its EMPTY_SUMMARY_TEXT, which lma-ai-stack/test/test_summary_empty_outcome.py
+# holds this copy to). Like a failed run's placeholder it is not stored as the
+# summary, but the state records it as "empty", with this text as its message.
+EMPTY_SUMMARY_TEXT = "Nothing to summarise: the meeting has no transcript"
+
+
+def summary_is_empty_outcome(text: Any) -> bool:
+    """Whether the summariser reported that the meeting had nothing to summarise."""
+    return isinstance(text, str) and (
+        text.strip().rstrip(".").lower() == EMPTY_SUMMARY_TEXT.lower()
+    )
+
+
 def summary_was_produced(text: Any) -> bool:
-    """Whether a stored summary is one, rather than a failed run's placeholder."""
-    return isinstance(text, str) and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+    """Whether a stored summary is one, rather than a placeholder for no summary."""
+    return (
+        isinstance(text, str)
+        and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+        and not summary_is_empty_outcome(text)
+    )
 
 
 # The summary state (Call.CallSummaryState) the end-of-meeting run writes: one
@@ -506,6 +535,7 @@ def summary_was_produced(text: Any) -> bool:
 # for this one sooner.
 SUMMARY_TRIGGER_MEETING_END = "meeting-end"
 SUMMARY_FAILED_MESSAGE = "the summary could not be generated"
+SUMMARY_STATUS_EMPTY = "empty"
 
 
 def _now_iso() -> str:
@@ -530,7 +560,17 @@ def summary_queued_state() -> str:
 
 
 def summary_outcome_state(text: Any) -> str:
-    """The state written beside the end-of-meeting summary: done, or failed."""
+    """The state written beside the end-of-meeting summary: done, empty, or failed."""
+    if summary_is_empty_outcome(text):
+        return json.dumps(
+            {
+                "source": "generated",
+                "status": SUMMARY_STATUS_EMPTY,
+                "trigger": SUMMARY_TRIGGER_MEETING_END,
+                "message": EMPTY_SUMMARY_TEXT,
+                "updatedAt": _now_iso(),
+            }
+        )
     if summary_was_produced(text):
         return json.dumps(
             {
@@ -548,6 +588,143 @@ def summary_outcome_state(text: Any) -> str:
             "message": SUMMARY_FAILED_MESSAGE,
             "updatedAt": _now_iso(),
         }
+    )
+
+
+async def execute_start_call_session_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Any:
+    """Make the meeting live again for the session the START event names.
+
+    Called for a START whose meeting already exists and which names a later
+    capture session (a rejoin, docs/virtual-participant.md#rejoin). Answers
+    :data:`SESSION_NOT_STARTED` when the resolver refuses it: the session has
+    started already, or no rejoin allowed it.
+    """
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+    session_input: Dict[str, Any] = {
+        "CallId": message.get("CallId"),
+        "SessionNumber": session_number_of(message),
+    }
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.startCallSession.args(input=session_input).select(*call_fields(schema))
+        )
+    )
+    return await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=SESSION_NOT_STARTED,
+    )
+
+
+#: Why a rejoined Virtual Participant is ended when its session cannot start.
+TRANSCRIPT_DELETED_END_REASON = (
+    "The meeting's transcript was deleted before the rejoined session started, "
+    "so the meeting was not reopened."
+)
+
+
+async def end_rejoined_vp_of_deleted_meeting(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> bool:
+    """End the Virtual Participant whose rejoined session was refused because the
+    meeting's transcript had been deleted in the meantime. Returns whether it did.
+
+    The rejoin refuses a meeting whose transcript is deleted, but a scheduled
+    deletion can still run between the rejoin and the session's START, and the
+    relaunched Virtual Participant would then go on capturing a meeting that
+    keeps no transcript. The Virtual Participant is named by the START event; it
+    is ended only if its row is the one that rejoined this meeting as this
+    session, through the same end path as the End button. Nothing here fails the
+    record: segments of a meeting whose transcript is deleted are not written in
+    any case (see the ADD_TRANSCRIPT_SEGMENT branch).
+    """
+    vp_id = message.get("VirtualParticipantId")
+    call_id = message.get("CallId")
+    if not vp_id or not call_id or not appsync_session.client.schema:
+        return False
+    schema = DSLSchema(appsync_session.client.schema)
+    try:
+        meeting = await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLQuery(
+                    schema.Query.getCall.args(CallId=call_id).select(
+                        schema.Call.CallId, schema.Call.TranscriptDeletedAt
+                    )
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        if not ((meeting or {}).get("getCall") or {}).get("TranscriptDeletedAt"):
+            return False
+        row = await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLQuery(
+                    schema.Query.getVirtualParticipant.args(id=vp_id).select(
+                        schema.VirtualParticipant.id,
+                        schema.VirtualParticipant.CallId,
+                        schema.VirtualParticipant.sessionNumber,
+                    )
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        vp = (row or {}).get("getVirtualParticipant") or {}
+        if vp.get("CallId") != call_id or session_number_of(
+            vp, "sessionNumber"
+        ) != session_number_of(message):
+            return False
+        await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLMutation(
+                    schema.Mutation.endVirtualParticipant.args(
+                        input={"id": vp_id, "endReason": TRANSCRIPT_DELETED_END_REASON}
+                    ).select(schema.VirtualParticipant.id)
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        # The status line the Virtual Participant page shows.
+        await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLMutation(
+                    schema.Mutation.updateVirtualParticipant.args(
+                        input={"id": vp_id, "errorMessage": TRANSCRIPT_DELETED_END_REASON}
+                    ).select(schema.VirtualParticipant.id)
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "START: could not end the rejoined Virtual Participant of a meeting whose "
+            "transcript was deleted",
+            extra=dict(call_id=call_id),
+        )
+        return False
+    LOGGER.info(
+        "START: ended the rejoined Virtual Participant; the meeting's transcript was deleted",
+        extra=dict(call_id=call_id),
+    )
+    return True
+
+
+def was_session_started(start_call_session_result: Any) -> bool:
+    """Whether a startCallSession result is the session starting, rather than
+    :data:`SESSION_NOT_STARTED`."""
+    return isinstance(start_call_session_result, Mapping) and not start_call_session_result.get(
+        "SessionNotStarted"
     )
 
 
@@ -608,9 +785,21 @@ async def get_call_status(
     meeting were still open, because doing the end-of-meeting work twice is
     better than not doing it at all.
     """
+    status, _started_session = await get_call_state(message, appsync_session)
+    return status
+
+
+async def get_call_state(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Tuple[Optional[str], int]:
+    """The meeting's current Status, as :func:`get_call_status` reads it, and the
+    capture session that last started (``SessionStartedNumber``; 1 when the
+    meeting was never rejoined, or could not be read).
+    """
     call_id = message.get("CallId")
     if not call_id or not appsync_session.client.schema:
-        return None
+        return None, 1
 
     schema = DSLSchema(appsync_session.client.schema)
     query = dsl_gql(
@@ -618,6 +807,7 @@ async def get_call_status(
             schema.Query.getCall.args(CallId=call_id).select(
                 schema.Call.CallId,
                 schema.Call.Status,
+                schema.Call.SessionStartedNumber,
             )
         )
     )
@@ -638,14 +828,21 @@ async def get_call_status(
             describe_exception(error),
             extra=dict(frames=traceback_frames(error)),
         )
-        return None
+        return None, 1
 
     # Optional, not required: a null getCall or a response without one leaves the
     # status unknown, and an unknown status is what the fail-open contract above
     # is for. The shape that came back is logged by the helper.
     status = optional_graphql_field(result, "getCall", "Status", logger=LOGGER)
-    LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
-    return status
+    # Read without the helper: a meeting that was never rejoined has no session
+    # number, which is not a response shape worth a warning.
+    call = result.get("getCall") if isinstance(result, dict) else None
+    started_session = session_number_of(call, "SessionStartedNumber")
+    LOGGER.debug(
+        "current call status",
+        extra=dict(call_id=call_id, status=status, started_session=started_session),
+    )
+    return status, started_session
 
 
 async def execute_get_transcript_segments_query(
@@ -1341,11 +1538,12 @@ async def execute_add_call_summary_text_mutation(
 ) -> Dict:
     """Store the end-of-meeting summary, and the outcome of the run beside it.
 
-    A run that produced nothing usable -- the summariser's placeholder text, or
-    none -- stores no text. The input field is required, so it is sent blank,
+    A run that produced nothing usable -- the summariser's placeholder text, its
+    answer for a meeting with nothing to summarise, or none -- stores no text. The input field is required, so it is sent blank,
     and updateCall.request.vtl writes no attribute for a blank value: whatever
     the meeting already holds stays, and the state says the run failed, which
-    is what the meeting page shows alongside its Regenerate action.
+    is what the meeting page shows alongside its Regenerate action; or, for a
+    meeting with nothing to summarise, that the summary is empty.
     """
     calltext = message.get("CallSummaryText", None)
     call_summary_text = ""
@@ -1580,6 +1778,7 @@ async def get_call_details(
         DSLQuery(
             schema.Query.getCall.args(CallId=message["CallId"]).select(
                 *call_fields(schema),
+                schema.Call.TranscriptDeletedAt,
             )
         )
     )
@@ -1606,7 +1805,7 @@ async def get_call_details(
     call_summary = call.get("CallSummaryText", "")
     people_can_access = call.get("SharedWith", None)
 
-    return dict(
+    details = dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
@@ -1615,6 +1814,10 @@ async def get_call_details(
         SharedWith=people_can_access,
         DetectedLanguages=call.get("DetectedLanguages"),
     )
+    # Only when set, so the post-call hook's payload is unchanged otherwise.
+    if call.get("TranscriptDeletedAt"):
+        details["TranscriptDeletedAt"] = call["TranscriptDeletedAt"]
+    return details
 
 
 ##########################################################################
@@ -1723,6 +1926,63 @@ async def execute_process_event_api_mutation(
             if not was_already_created(response):
                 METRICS.count(metric_names.MEETINGS_STARTED)
 
+        # A later capture session of a meeting that already exists: its owner or
+        # an Admin rejoined it (docs/virtual-participant.md#rejoin), which allowed
+        # this session number on the meeting record. startCallSession makes the
+        # meeting live again, once; a redelivered START, or a START of the first
+        # session, finds the meeting already created and changes nothing. Not
+        # counted as a meeting started: it is the same meeting.
+        session_started = False
+        if was_already_created(response) and session_number_of(message) > 1:
+            session_started = was_session_started(
+                await execute_start_call_session_mutation(
+                    message=message, appsync_session=appsync_session
+                )
+            )
+            LOGGER.info(
+                "START event for capture session %s of a meeting that already exists: %s",
+                session_number_of(message),
+                "the meeting is live again" if session_started else "the session was not started",
+                extra=dict(call_id=message.get("CallId")),
+            )
+            if not session_started:
+                await end_rejoined_vp_of_deleted_meeting(
+                    message=message, appsync_session=appsync_session
+                )
+
+        # The meeting is being captured again, so a transcript deletion
+        # scheduled when it last ended is cancelled now -- not when the rejoin
+        # was asked for, since a session that never starts (its launch failed,
+        # or it was not admitted) leaves the meeting ended and must leave its
+        # deletion in place too. startCallSession is refused once the transcript
+        # is deleted, so this is never reached for a meeting whose deletion has
+        # run. The session's END schedules the deletion afresh.
+        #
+        # Fire-and-forget, and kept out of the record's outcome: the session
+        # has started, a redelivery would not start it again, and so would not
+        # reach this either. A failure to queue the cancel is logged instead.
+        if session_started and TRANSCRIPT_DELETION_FUNCTION_ARN:
+            try:
+                LAMBDA_HOOK_CLIENT.invoke(
+                    FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+                    InvocationType="Event",
+                    # The session, so a cancel handled after the session's own
+                    # END has rescheduled the deletion leaves it alone.
+                    Payload=json.dumps(
+                        {
+                            "CallId": message.get("CallId"),
+                            "Trigger": "meeting-reopened",
+                            "SessionNumber": session_number_of(message),
+                        }
+                    ),
+                )
+            except Exception:  # pylint: disable=broad-except
+                LOGGER.exception(
+                    "START: could not tell the transcript deletion function the meeting "
+                    "was reopened; a deletion scheduled when it last ended still applies",
+                    extra=dict(call_id=message.get("CallId")),
+                )
+
         # At most once per meeting. Redelivery is routine on this stream -- the
         # END branch below explains why -- and a deployment's own start-of-call
         # hook would read a second invocation as a second meeting starting.
@@ -1735,12 +1995,19 @@ async def execute_process_event_api_mutation(
         # needs a durable record of having delivered it, which this does not
         # have; skipping it is the safer of the two mistakes, because invoking it
         # twice is visible in whatever the hook does.
-        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
+        #
+        # A rejoined meeting's new session invokes it once more, with the
+        # session number, on the same once-only condition: the session started.
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and (
+            not was_already_created(response) or session_started
+        ):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
                 CallDataStream=CALL_DATA_STREAM_NAME,
             )
+            if session_started:
+                payload["SessionNumber"] = session_number_of(message)
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
                 InvocationType="Event",
@@ -1763,9 +2030,27 @@ async def execute_process_event_api_mutation(
         # onwards is redelivered; the summary orchestrator is not idempotent, so
         # invoking it again would produce a second summary and a second
         # ADD_SUMMARY write for the same meeting.
-        was_already_ended = (
-            await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
+        current_status, started_session = await get_call_state(
+            message=message, appsync_session=appsync_session
         )
+        was_already_ended = current_status == "ENDED"
+
+        # The END of an earlier capture session, arriving after a rejoin has
+        # started a later one (a redelivery, or the earlier participant still
+        # shutting down), must not end the live session. The Virtual
+        # Participant and the End button name the session in every END, the
+        # first session's included. One that names none -- from a streaming
+        # client, the stale meeting reaper, or a Virtual Participant of an
+        # earlier release -- is taken to be the current session's.
+        if "SessionNumber" in message and session_number_of(message) < started_session:
+            LOGGER.info(
+                "END event for capture session %s of a meeting now in session %s; ignored",
+                session_number_of(message),
+                started_session,
+                extra=dict(call_id=message.get("CallId")),
+            )
+            return_value["successes"].append({"ok": True, "StaleSession": True})
+            return return_value
 
         # Name the separated voices once at the end of the meeting.
         #
@@ -1852,7 +2137,13 @@ async def execute_process_event_api_mutation(
             # is not counted at all -- it raises rather than reaching here, the
             # batch processor attributes it to this record's sequence number,
             # and the record is redelivered with the meeting still open.
-            if not was_already_ended:
+            # A rejoined meeting's later sessions end it again, but it is still
+            # one meeting, counted once as it was once as started. Known gap: a
+            # meeting whose first session never ended (its Virtual Participant
+            # crashed without an END) and which was then rejoined is not
+            # counted as ended at all; nothing records whether an earlier
+            # session's END was processed.
+            if not was_already_ended and started_session == 1:
                 METRICS.count(metric_names.MEETINGS_ENDED)
 
     elif event_type == "ADD_SUMMARY":
@@ -1939,6 +2230,9 @@ async def execute_process_event_api_mutation(
 
         add_transcript_tasks = []
         add_transcript_sentiment_tasks = []
+        # Every segment of a record names the same meeting, so one whose
+        # transcript is deleted drops them all, and the duration update too.
+        transcript_deleted = False
         # At most one per language new to the meeting; see language_to_record.
         detected_language_tasks = []
 
@@ -1950,6 +2244,18 @@ async def execute_process_event_api_mutation(
             payload = await get_call_details(
                 message=normalized_message, appsync_session=appsync_session
             )
+
+            # A meeting whose transcript has been deleted keeps none: a segment
+            # that still arrives (an engine's late correction, or a capture
+            # client still running) is dropped rather than written, since no
+            # later deletion would remove it.
+            if payload.get("TranscriptDeletedAt"):
+                LOGGER.info(
+                    "Segment for a meeting whose transcript was deleted; not written",
+                    extra=dict(call_id=normalized_message.get("CallId")),
+                )
+                transcript_deleted = True
+                continue
 
             # The Owner the event itself carried, before the segment takes the
             # meeting's: the agent assist request below is made as before, and
@@ -2022,7 +2328,9 @@ async def execute_process_event_api_mutation(
         # can normalize into several final segments, and the last one need not
         # end latest, so the duration is given the latest end of all of them.
         update_call_aggregation_tasks = []
-        final_messages = [m for m in normalized_messages if not m["IsPartial"]]
+        final_messages = [
+            m for m in normalized_messages if not m["IsPartial"] and not transcript_deleted
+        ]
         if final_messages:
             update_call_aggregation_tasks = await get_call_aggregation_tasks(
                 message=final_messages[-1],

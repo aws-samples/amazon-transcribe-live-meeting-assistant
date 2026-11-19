@@ -324,7 +324,10 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # the VP's.
     (f"{VP}/backend/src/chat-attachments.ts", "lambdas"),
     (f"{FUNCTIONS}/configuration_seeder/defaults/**", ("transcriber", "vp")),
-    (f"{LAYERS}/configuration_layer/lma_config/schemas/**", "transcriber"),
+    # The section schemas: read by the transcriber's tests, as above, and by the
+    # UI's configuration editor tests, which render every section from its schema
+    # and compile its patterns as JavaScript.
+    (f"{LAYERS}/configuration_layer/lma_config/schemas/**", ("transcriber", "ui")),
     # The VP unit tests read these UI components, the AI stack template, the
     # troubleshooting prompt and the VP doc's list of exit triggers.
     (f"{UI}/src/components/virtual-participant-layout/**", "vp"),
@@ -340,6 +343,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # helpers (speaker modes, channels, summary state) to keep the two sides equal.
     (f"{UI}/src/graphql/**", "lambdas"),
     (f"{UI}/src/components/common/**", "lambdas"),
+    # The skills manager's tests import every Amazon Quick skill in the skills pack.
+    ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests read the runtime's catalogue.
     (f"{ASR}/source/catalog.json", "lambdas"),
     (f"{ASR}/template.yaml", "lambdas"),

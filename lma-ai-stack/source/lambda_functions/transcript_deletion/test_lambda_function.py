@@ -62,11 +62,21 @@ class FakeTable:
         item = self.items.get((Key["PK"], Key["SK"]))
         return {"Item": dict(item)} if item else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, **_):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **_):
         item = self.items.get((Key["PK"], Key["SK"]))
         if item is None:
             raise _conflict("ConditionalCheckFailedException")
         values = ExpressionAttributeValues
+        if UpdateExpression == "REMOVE TranscriptDeletionScheduledFor":
+            if (
+                "TranscriptDeletedAt" in item
+                or item.get("Status") != values[":started"]
+                or item.get("SessionStartedNumber") != values[":session"]
+                or item.get("TranscriptDeletionScheduledFor") != values[":at"]
+            ):
+                raise _conflict("ConditionalCheckFailedException")
+            item.pop("TranscriptDeletionScheduledFor", None)
+            return
         if UpdateExpression.startswith("SET TranscriptDeletionScheduledFor"):
             item["TranscriptDeletionScheduledFor"] = values[":at"]
             return
@@ -146,6 +156,11 @@ class FakeScheduler:
 
     def update_schedule(self, **definition):
         self.schedules[definition["Name"]] = definition
+
+    def delete_schedule(self, Name, GroupName):
+        if Name not in self.schedules:
+            raise _conflict("ResourceNotFoundException")
+        del self.schedules[Name]
 
 
 class FakeKnowledgeBase:
@@ -406,6 +421,146 @@ def test_the_setting_is_read_past_the_cache(monkeypatch):
     assert calls == ["invalidate", "read"]
 
 
+# ── a rejoined meeting ──────────────────────────────────────────────────────
+
+REOPENED_2 = {"CallId": CALL_ID, "Trigger": "meeting-reopened", "SessionNumber": 2}
+
+
+def _live_in_session(aws, session=2):
+    _meeting(aws).update(Status="STARTED", SessionStartedNumber=session)
+
+
+def _pending_deletion(aws, monkeypatch, minutes=15):
+    _set_delay(monkeypatch, minutes)
+    lf.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, CONTEXT)
+    assert aws.scheduler.schedules
+
+
+def test_a_reopened_meeting_has_its_pending_deletion_cancelled(aws, monkeypatch):
+    _pending_deletion(aws, monkeypatch)
+    _live_in_session(aws)
+
+    outcome = lf.handler(dict(REOPENED_2), CONTEXT)
+
+    assert outcome == {"action": "cancelled"}
+    assert aws.scheduler.schedules == {}
+    assert "TranscriptDeletionScheduledFor" not in _meeting(aws)
+    assert len([k for k in aws.table.items if k[0] == f"trs#{CALL_ID}"]) == 7
+
+
+def test_a_cancel_arriving_after_the_session_ended_keeps_the_new_deletion(aws, monkeypatch):
+    """The cancel is queued when the session starts, but the session's own END,
+    which scheduled the deletion again, was handled first."""
+    _live_in_session(aws)
+    _meeting(aws)["Status"] = "ENDED"
+    _pending_deletion(aws, monkeypatch)
+    scheduled = dict(aws.scheduler.schedules)
+
+    outcome = lf.handler(dict(REOPENED_2), CONTEXT)
+
+    assert outcome == {"action": "unchanged"}
+    assert aws.scheduler.schedules == scheduled
+    assert "TranscriptDeletionScheduledFor" in _meeting(aws)
+
+
+def test_a_cancel_for_an_earlier_session_changes_nothing(aws, monkeypatch):
+    _pending_deletion(aws, monkeypatch)
+    _live_in_session(aws, session=3)
+    assert lf.handler(dict(REOPENED_2), CONTEXT) == {"action": "unchanged"}
+    assert aws.scheduler.schedules
+
+
+def test_a_reopen_with_the_setting_off_keeps_the_pending_deletion(aws, monkeypatch):
+    """Nothing would schedule it again, and participants may have been told."""
+    _pending_deletion(aws, monkeypatch)
+    _live_in_session(aws)
+    _set_delay(monkeypatch, None)
+
+    outcome = lf.handler(dict(REOPENED_2), CONTEXT)
+
+    assert outcome["action"] == "kept"
+    assert aws.scheduler.schedules
+    assert "TranscriptDeletionScheduledFor" in _meeting(aws)
+
+
+def test_a_reopen_with_nothing_pending_changes_nothing(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    _live_in_session(aws)
+    assert lf.handler(dict(REOPENED_2), CONTEXT) == {"action": "none"}
+
+
+def test_a_reopen_after_the_transcript_was_deleted_reports_the_deletion(aws):
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    outcome = lf.handler(dict(REOPENED_2), CONTEXT)
+    assert outcome["action"] == "deleted"
+    assert outcome["transcriptDeletedAt"] == _meeting(aws)["TranscriptDeletedAt"]
+
+
+def test_a_change_between_the_read_and_the_cancel_keeps_the_schedule(aws, monkeypatch):
+    _pending_deletion(aws, monkeypatch)
+    _live_in_session(aws)
+    real_get = aws.table.get_item
+
+    def read_then_end(**kwargs):
+        meeting = real_get(**kwargs)
+        _meeting(aws)["Status"] = "ENDED"
+        return meeting
+
+    monkeypatch.setattr(aws.table, "get_item", read_then_end)
+    assert lf.handler(dict(REOPENED_2), CONTEXT) == {"action": "unchanged"}
+    assert aws.scheduler.schedules
+
+
+def test_a_reopen_of_a_meeting_with_no_record_does_nothing(aws):
+    outcome = lf.handler({**REOPENED_2, "CallId": "not-a-meeting"}, CONTEXT)
+    assert outcome == {"action": "none"}
+
+
+# ── a summary written while the meeting is live again ───────────────────────
+
+
+def _transcript_items(aws) -> int:
+    return len([k for k in aws.table.items if k[0] == f"trs#{CALL_ID}"])
+
+
+def test_a_summary_written_while_the_meeting_is_live_deletes_nothing(aws, monkeypatch):
+    """An earlier session's summary landing after a rejoined session started."""
+    _set_delay(monkeypatch, 0)
+    _live_in_session(aws)
+
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome == {"action": "live"}
+    assert _transcript_items(aws) == 7
+    assert "TranscriptDeletedAt" not in _meeting(aws)
+    assert aws.scheduler.schedules == {}
+
+
+def test_a_summary_written_while_the_meeting_is_live_schedules_nothing(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    _live_in_session(aws)
+
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome == {"action": "live"}
+    assert aws.scheduler.schedules == {}
+    assert "TranscriptDeletionScheduledFor" not in _meeting(aws)
+
+
+def test_the_rejoined_sessions_own_end_and_summary_still_delete(aws, monkeypatch):
+    _set_delay(monkeypatch, 15)
+    _live_in_session(aws)
+    lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    # The rejoined session ends; its summary follows.
+    _meeting(aws)["Status"] = "ENDED"
+    lf.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, CONTEXT)
+    outcome = lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT)
+
+    assert outcome["action"] == "scheduled"
+    assert abs(_minutes_from_now(_scheduled_at(aws)) - 15) < 1.1
+
+
 # ── chat attachments ────────────────────────────────────────────────────────
 
 
@@ -430,6 +585,19 @@ def test_deleting_the_transcript_deletes_the_chat_attachments_and_every_version(
     assert f"lma-chat-attachments/{name}0/0000000000-ab/other.png" in aws.s3.versions
     # The fixture's three transcript files, and the meeting's two attachment files.
     assert outcome["filesDeleted"] == 5
+
+
+def test_a_summary_written_while_the_meeting_is_live_keeps_the_chat_attachments(aws, monkeypatch):
+    """The live guard covers everything a deletion removes, attachments included."""
+    name = _with_attachments(aws)
+    _set_delay(monkeypatch, 0)
+    _live_in_session(aws)
+
+    assert lf.handler({"CallId": CALL_ID, "Trigger": "summary-written"}, CONTEXT) == {
+        "action": "live"
+    }
+    assert len([k for k in aws.table.items if k[0] == f"att#{CALL_ID}"]) == 3
+    assert [k for k in aws.s3.versions if k.startswith(f"lma-chat-attachments/{name}/")]
 
 
 def test_an_attachment_file_that_cannot_be_deleted_fails_the_invocation_for_a_retry(aws):

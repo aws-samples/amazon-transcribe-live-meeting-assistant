@@ -18,6 +18,7 @@ import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
+import { CallSessionReadError, callSessionFromVpRow, type VpCallSession } from './call-session.js';
 import { createLogger, registerSecretValue } from './logger.js';
 
 const log = createLogger('status-manager');
@@ -652,6 +653,49 @@ export class VirtualParticipantStatusManager {
       log.error('Error getting CallId:', error);
       return null;
     }
+  }
+
+  /**
+   * The CallId on this VP's row and the capture session it runs, read together.
+   *
+   * One read, so a VP that knows its CallId also knows its session: a rejoined
+   * VP (docs/virtual-participant.md#rejoin) that started its meeting's events as
+   * session 1 would send segments over the earlier session's. Null when the row
+   * was read and has no CallId (a first launch); CallSessionReadError when it
+   * could not be read, which is not the same thing: treating it as a first
+   * launch would start a rejoined VP's meeting under a new CallId. Without a
+   * GraphQL endpoint (local runs) there is no row, and the answer is null.
+   */
+  async getCallSession(): Promise<VpCallSession | null> {
+    if (!this.graphqlEndpoint) return null;
+    let result: any;
+    const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            CallId
+            sessionNumber
+            sessionTimeOffset
+          }
+        }
+      `;
+    try {
+      result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+    } catch (error) {
+      throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
+    }
+    // signAndSendGraphQLRequest answers null for an HTTP failure, and the row is
+    // always there for a launched VP: neither is a row without a CallId.
+    if (!result?.getVirtualParticipant) {
+      throw new CallSessionReadError("the Virtual Participant's record could not be read");
+    }
+    const session = callSessionFromVpRow(result.getVirtualParticipant);
+    log.info(
+      session
+        ? `Retrieved CallId ${session.callId} (session ${session.sessionNumber}) for VP ${this.participantId}`
+        : `No CallId found for VP ${this.participantId}`,
+    );
+    return session;
   }
 
   /**

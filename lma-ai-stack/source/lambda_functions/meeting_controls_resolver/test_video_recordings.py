@@ -170,7 +170,7 @@ def test_deleting_a_meeting_deletes_the_video_named_on_its_record(monkeypatch) -
     monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
     monkeypatch.setattr(index, "delete_meeting_guidance", lambda callid: 0)
     monkeypatch.setattr(
-        index, "delete_video_recordings", lambda callid, url: calls.append((callid, url))
+        index, "delete_video_recordings", lambda callid, url, _earlier: calls.append((callid, url))
     )
 
     class _Field:
@@ -192,3 +192,16 @@ def test_deleting_a_meeting_deletes_the_video_named_on_its_record(monkeypatch) -
 
     index.delete_meeting(_Session(), _Field(), "m1", "cls#x", "x", "owner@example.com")
     assert calls == [("m1", video_url)]
+
+
+def test_every_sessions_video_recording_is_deleted(monkeypatch) -> None:
+    """A meeting continued by a rejoin names one file per session in VideoRecordingUrls."""
+    first = f"lma-video-recordings/call_Team_sync_ab_{STAMP}.mp4"
+    second = "lma-video-recordings/call_Team_sync_ab_2026-10-30T15-00-00-000Z.mp4"
+    s3 = FakeS3([first, second])
+    monkeypatch.setattr(index, "s3_client", s3)
+    deleted = index.delete_video_recordings(
+        "Team sync+ab", _url(second), [_url(first), _url(second)]
+    )
+    assert deleted == 2
+    assert sorted(s3.deleted) == sorted([first, second])

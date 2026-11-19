@@ -270,7 +270,7 @@ const lambda = (): LambdaClient => {
     return lambdaClient;
 };
 
-const invokeLauncher = async (payload: Record<string, string>): Promise<Record<string, string> | undefined> => {
+const invokeLauncher = async (payload: Record<string, unknown>): Promise<Record<string, string> | undefined> => {
     if (!ASR_LAUNCHER_FUNCTION_ARN) {
         return undefined;
     }
@@ -303,13 +303,22 @@ const invokeLauncher = async (payload: Record<string, string>): Promise<Record<s
     }
 };
 
-export const acquireLease = async (callId: string): Promise<AsrLease | undefined> => {
+/**
+ * The acquire request for a meeting's capture `session`. Sessions from 2 on (a
+ * rejoined VP) name theirs, so the launcher starts a MicroVM of their own
+ * instead of handing back the first session's, which it would for the same
+ * meeting; the first session's request is unchanged.
+ */
+export const acquireRequest = (callId: string, session = 1): Record<string, unknown> =>
+    Number.isInteger(session) && session > 1 ? { action: 'acquire', callId, session } : { action: 'acquire', callId };
+
+export const acquireLease = async (callId: string, session = 1): Promise<AsrLease | undefined> => {
     if (ASR_DIRECT_ENDPOINT) {
         log.info(`[ASR] using ASR_DIRECT_ENDPOINT ${ASR_DIRECT_ENDPOINT} (no MicroVM launch)`);
         return { endpointUrl: ASR_DIRECT_ENDPOINT };
     }
     const started = Date.now();
-    const body = await invokeLauncher({ action: 'acquire', callId });
+    const body = await invokeLauncher(acquireRequest(callId, session));
     if (!body) {
         return undefined;
     }

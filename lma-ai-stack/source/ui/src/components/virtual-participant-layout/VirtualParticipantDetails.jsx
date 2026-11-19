@@ -32,6 +32,15 @@ import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
 import { describeJoinMethod, mergeVpUpdate, vpOwner } from './vp-details';
+import {
+  JOIN_AGAIN_STATE_KEY,
+  canJoinAgain,
+  continueOptionFor,
+  joinAgainFormFrom,
+  joinAgainMeetingQuery,
+  meetingFromRead,
+} from './join-again';
+import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
@@ -608,7 +617,15 @@ ErrorTroubleshooting.propTypes = {
   canAcknowledge: PropTypes.bool,
 };
 
-export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, canManage = false }) => {
+export const ActionButtons = ({
+  vpDetails,
+  onRefresh,
+  onEnd,
+  onCancelSchedule,
+  onJoinAgain = undefined,
+  joinAgainLoading = false,
+  canManage = false,
+}) => {
   // Ending and cancelling are for the owner and Admins.
   const canEnd = canManage && ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
   const canCancelSchedule = canManage && vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
@@ -623,6 +640,16 @@ export const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule, c
         {canEnd && (
           <Button variant="normal" iconName="close" onClick={onEnd}>
             End Virtual Participant
+          </Button>
+        )}
+
+        {/* Join again: continue this Virtual Participant's meeting, or start a
+            new one from its meeting details (join-again.js). For the owner and
+            Admins, as the server's joinAgainVirtualParticipant and
+            rejoinVirtualParticipant require. */}
+        {onJoinAgain && canJoinAgain(vpDetails, canManage) && (
+          <Button variant="normal" iconName="redo" onClick={onJoinAgain} loading={joinAgainLoading}>
+            Join again
           </Button>
         )}
 
@@ -651,10 +678,13 @@ ActionButtons.propTypes = {
     status: PropTypes.string.isRequired,
     CallId: PropTypes.string,
     isScheduled: PropTypes.bool,
+    meetingId: PropTypes.string,
   }).isRequired,
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
   onCancelSchedule: PropTypes.func.isRequired,
+  onJoinAgain: PropTypes.func,
+  joinAgainLoading: PropTypes.bool,
   canManage: PropTypes.bool,
 };
 
@@ -673,6 +703,8 @@ const VirtualParticipantDetails = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  // While Join again reads the meeting before opening its form.
+  const [joinAgainLoading, setJoinAgainLoading] = useState(false);
 
   const loadVpDetails = async () => {
     try {
@@ -873,6 +905,27 @@ const VirtualParticipantDetails = () => {
       };
       setNotifications((prev) => [...prev, notification]);
     }
+  };
+
+  // Opens the create form on the list page as a Join again form, filled in
+  // from this Virtual Participant (join-again.js). The meeting is read first,
+  // to say whether it can be continued.
+  const handleJoinAgain = async () => {
+    let meeting = null;
+    if (vpDetails.CallId) {
+      setJoinAgainLoading(true);
+      try {
+        const result = await client.graphql({ query: joinAgainMeetingQuery, variables: { callId: vpDetails.CallId } });
+        meeting = meetingFromRead({ data: result?.data });
+      } catch (err) {
+        logger.debug('Reading the meeting for Join again failed', err);
+        meeting = meetingFromRead({ error: err });
+      } finally {
+        setJoinAgainLoading(false);
+      }
+    }
+    const values = joinAgainFormFrom(vpDetails, continueOptionFor(vpDetails, meeting));
+    navigate(VIRTUAL_PARTICIPANT_PATH, { state: { [JOIN_AGAIN_STATE_KEY]: values } });
   };
 
   const handleCancelSchedule = async () => {
@@ -1134,6 +1187,8 @@ const VirtualParticipantDetails = () => {
         onRefresh={handleRefresh}
         onEnd={handleEnd}
         onCancelSchedule={handleCancelSchedule}
+        onJoinAgain={handleJoinAgain}
+        joinAgainLoading={joinAgainLoading}
         canManage={canManageVirtualParticipant(vpDetails, { username: user?.username, isAdmin })}
       />
     </SpaceBetween>

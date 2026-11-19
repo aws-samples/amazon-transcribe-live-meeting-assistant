@@ -43,7 +43,7 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel. Uploaded recordings use the language, or language identification with the language options | To streaming meetings that start after the save, to the next Virtual Participant to start, and to uploads started after the save |
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save, and to the next Virtual Participant to start |
-| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)) | To transcript segments processed, and answers started, about five minutes after the save or later |
+| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)); the editable part of the assistant's instructions ([Assistant Instructions](meeting-assistant.md#assistant-instructions)); and, per installed MCP server and per skill, whether the assistant uses it and whether requests made in the meeting may ([Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one), [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile)) | To transcript segments processed, and answers started, about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The name the Virtual Participant joins meetings under (see [More than one LMA in a meeting](virtual-participant.md#more-than-one-lma-in-a-meeting)), its voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
 | Retention | How many days meeting records and transcript segments are kept, up to the limit the stack sets | To records written about five minutes after the save or later; a record already written keeps its expiry |
@@ -371,6 +371,15 @@ select **Save changes**.
   Once you choose one, the dialog lists the settings it changes in each
   section.
 
+The file carries the Meeting Assistant section's instructions and tool selection
+like any other setting. The tool selection names MCP servers by their server id,
+and the servers themselves are not in the file: move them with the MCP Servers
+page's own **Export** and **Import** (see
+[Exporting and Importing the Server Library](mcp-servers.md#exporting-and-importing-the-server-library)),
+which keep each server's id where it is free, so that the selection still names
+them. A selection entry for a server that is not installed is shown as **Not
+installed** and has no effect.
+
 ### Configuration presets
 
 A **preset** is a complete organizational default for consent, retention and
@@ -513,6 +522,35 @@ allows. Whichever you choose, enable access to that model in the Amazon Bedrock
 console for the region you deploy into first — see
 [Amazon Bedrock Model Access](prerequisites-and-deployment.md#amazon-bedrock-model-access).
 The Configuration page offers only the models listed here.
+
+### The meeting assistant's instructions and MCP servers
+
+**Meeting Assistant › Assistant instructions** is the editable part of the
+assistant's system prompt: its persona, how long and in what tone it answers, and
+how it chooses among its tools. It ships with the text earlier releases used. LMA
+appends a fixed part after it on every request that a profile cannot change: that
+what the tools return is quoted data and never instructions, that people are not
+identified from their faces, how to drive the Virtual Participant browser, and
+the limits on requests made in the meeting. Write the persona you want and leave
+those to the fixed part; see
+[Assistant Instructions](meeting-assistant.md#assistant-instructions).
+
+**Meeting Assistant › Tool selection** lists the installed MCP servers, with
+**Enabled**, **In-meeting requests** and **Always on** (reserved, not yet used) for
+each. Leave a server at its defaults to keep the behaviour it had before: used for
+the owner's requests, and for in-meeting requests as **In-meeting requests**
+allows. To offer one server to requests made in the meeting and not another, set
+**In-meeting requests** to **Selected tools** and set each server's own
+**In-meeting requests** to Allowed or Not allowed. Servers are installed, and their
+credentials entered, on the MCP Servers page; see
+[Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one).
+
+The same table lists the meeting assistant's skills, written on the Skills page,
+with the same three settings for each, and **In-meeting requests: skills** is the
+Selected tools default for a skill whose own **In-meeting requests** is not set.
+The selection names skills by id, and the skills themselves move between
+deployments with the Skills page's library export and import; see
+[Meeting Assistant Skills](meeting-assistant-skills.md).
 
 ### Teams meeting-end detection
 

@@ -37,8 +37,32 @@ const KEPT_WHEN_ABSENT = [
   'joinMethod',
 ];
 
+/** The statuses a run ends in; a rejoin sets the row back to INITIALIZING from one. */
+const RUN_ENDED_STATUSES = ['ENDED', 'COMPLETED', 'FAILED'];
+
+/** What describes one run of the Virtual Participant: its host's live view and how it ended. */
+const RUN_FIELDS = [
+  'vncEndpoint',
+  'vncPort',
+  'taskPrivateIp',
+  'joinMethod',
+  'errorMessage',
+  'endTrigger',
+  'endReason',
+  'userAcknowledgedFailure',
+];
+
 /** The record after `updated`, merged over what the page held in `prev`. */
 export const mergeVpUpdate = (prev, updated) => {
+  // A rejoin starts a new run of the same row: the earlier run's live view and
+  // outcome do not carry over, for anyone watching the page.
+  if (RUN_ENDED_STATUSES.includes(prev?.status) && updated?.status === 'INITIALIZING') {
+    const fresh = { ...prev, ...updated, vncReady: false };
+    RUN_FIELDS.forEach((field) => {
+      if (updated[field] == null) fresh[field] = null;
+    });
+    return fresh;
+  }
   const next = { ...prev, ...updated };
   KEPT_WHEN_ABSENT.forEach((field) => {
     if (updated?.[field] == null && prev?.[field] != null) next[field] = prev[field];

@@ -322,7 +322,10 @@ Parameters:
       Lambda function for beginning or start of  call event. This function can implement
       custom logic that is relevant to beginning of call processing, for example,
       retrieving
-      call summary details logged into a case in a CRM.
+      call summary details logged into a case in a CRM. It is invoked once when a meeting
+      starts, and once more each time the meeting's owner or an Admin rejoins it with its
+      Virtual Participant and the rejoined session starts. Those later invocations carry the
+      same CallId as the first, plus a SessionNumber (2 for the first rejoin, and so on).
 
   PostCallSummaryLambdaHookFunctionArn:
     Default: ""
@@ -332,7 +335,8 @@ Parameters:
       (Optional) The specified Lambda function is invoked by the LMA Call Event Processor
       Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing,
-      for example, updating the call summary to a CRM system.
+      for example, updating the call summary to a CRM system. For a meeting whose transcript
+      has been deleted by the Retention settings, the payload also carries TranscriptDeletedAt.
 
   AdminEmail:
     Type: String
@@ -3017,6 +3021,7 @@ Resources:
         AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         EventApiHttpUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiHttpUrl
         MCPServersTableName: !GetAtt AISTACK.Outputs.MCPServersTableName
+        SkillsTableName: !GetAtt AISTACK.Outputs.SkillsTableName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         BedrockGuardrailId: !Ref BedrockGuardrailId

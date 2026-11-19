@@ -92,8 +92,8 @@ def test_deleting_a_meeting_deletes_its_guidance(monkeypatch) -> None:
     ):
         monkeypatch.setattr(index, step, lambda callid: 0)
     monkeypatch.setattr(index, "get_call_details", lambda *a: {"getCall": {}})
-    monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url: None)
-    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url: None)
+    monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url, _earlier: None)
+    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: None)
     monkeypatch.setattr(index, "delete_meeting_guidance", deleted.append)
     monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
     monkeypatch.setattr(index, "DSLMutation", lambda *a: None)

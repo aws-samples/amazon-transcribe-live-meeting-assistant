@@ -39,7 +39,9 @@ dynamodb = boto3.client("dynamodb")
 
 # Must stay in sync with PER_MEETING_KEYS in the container's
 # src/launch-mode.ts. Anything not listed here is ignored by the
-# container, so adding a value needs a change in both places.
+# container, so adding a value needs a change in both places. The meeting
+# password is not staged: the VP reads it from its record at startup, so a
+# meetingPassword in the event is not forwarded.
 FIELD_MAP = {
     "VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),
     "MEETING_PLATFORM": ("meetingPlatform",),
@@ -49,7 +51,6 @@ FIELD_MAP = {
     # EMPTY meeting id (and a misleading "Invalid meeting ID" from Zoom) because
     # only the lowercase spelling was checked.
     "MEETING_ID": ("meetingID", "meetingId"),
-    "MEETING_PASSWORD": ("meetingPassword",),
     "MEETING_NAME": ("meetingName",),
     "MEETING_TIME": ("meetingTime",),
     "LMA_USER": ("userName", "owner"),
@@ -86,6 +87,8 @@ SECRET_KEYS = {
     "USER_ACCESS_TOKEN",
     "USER_ID_TOKEN",
     "USER_REFRESH_TOKEN",
+    # Not a FIELD_MAP key: the VP reads its meeting password from its record at
+    # startup. Kept so redaction still covers the name wherever it is logged.
     "MEETING_PASSWORD",
     *INTEGRATION_SECRET_NAMES,
 }
@@ -298,6 +301,20 @@ def _extract(payload):
     return config
 
 
+def _client_token(payload, vp_id: str) -> str:
+    """RunMicrovm's idempotency token for this launch.
+
+    The VP's id, so a retried invocation of one launch cannot start a second
+    MicroVM. A rejoin (docs/virtual-participant.md#rejoin) is a further launch of
+    the same VP, and passes a `launchToken` of its own; with the VP's id again,
+    RunMicrovm would answer with the first launch's MicroVM.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    data = data if isinstance(data, dict) else (payload if isinstance(payload, dict) else {})
+    token = data.get("launchToken")
+    return token if isinstance(token, str) and token.strip() else vp_id
+
+
 def _write_config_to_registry(vp_id: str, config: dict) -> bool:
     """Stage the VP's full configuration in the task registry.
 
@@ -390,7 +407,7 @@ def lambda_handler(event, context):
             maximumDurationInSeconds=MAX_DURATION_SECONDS,
             logging=_logging_config(),
             runHookPayload=run_hook_payload,
-            clientToken=vp_id,
+            clientToken=_client_token(event, vp_id),
         )
     except MicrovmError as exc:
         # Quota exhaustion arrives as a 402/429 from the API; surface whatever

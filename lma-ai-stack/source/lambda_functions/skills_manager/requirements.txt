@@ -1,0 +1,2 @@
+# boto3 ships with the python3.12 Lambda runtime.
+PyYAML==6.0.3  # to read the front matter of SKILL.md and Amazon Quick skill files

@@ -86,6 +86,8 @@ class LMAClient:
         self._publish_ops = None
         self._appsync_ops = None
         self._vp_ops = None
+        self._mcp_ops = None
+        self._skill_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -155,6 +157,33 @@ class LMAClient:
 
             self._vp_ops = VirtualParticipantOperations(self)
         return self._vp_ops
+
+    @property
+    def mcp(self):
+        """MCP server library operations (``export_library``, ``import_library``).
+
+        Returns:
+            McpServerOperations instance.
+        """
+        if self._mcp_ops is None:
+            from lma_sdk.operations.mcp_servers import McpServerOperations
+
+            self._mcp_ops = McpServerOperations(self)
+        return self._mcp_ops
+
+    @property
+    def skills(self):
+        """The meeting assistant's skills (``list``, ``get``, ``create``, ``update``,
+        ``delete``, ``import_file``, ``export``, ``import_library``, ``export_library``).
+
+        Returns:
+            SkillOperations instance.
+        """
+        if self._skill_ops is None:
+            from lma_sdk.operations.skills import SkillOperations
+
+            self._skill_ops = SkillOperations(self)
+        return self._skill_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

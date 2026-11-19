@@ -56,6 +56,31 @@ describe('vpOwner', () => {
 });
 
 describe('mergeVpUpdate', () => {
+  it('drops the earlier run when a rejoin starts a new one', () => {
+    const ended = {
+      ...CREATED,
+      status: 'FAILED',
+      CallId: 'call-1',
+      vncEndpoint: 'wss://old',
+      vncPort: 5901,
+      vncReady: true,
+      errorMessage: 'The host stopped',
+      userAcknowledgedFailure: true,
+    };
+    const next = mergeVpUpdate(ended, { id: 'vp-1', status: 'INITIALIZING', sessionNumber: 2 });
+    expect(next.status).toBe('INITIALIZING');
+    expect(next.CallId).toBe('call-1');
+    expect(next.sessionNumber).toBe(2);
+    expect(next.vncReady).toBe(false);
+    expect(next.vncEndpoint).toBeNull();
+    expect(next.errorMessage).toBeNull();
+    expect(next.userAcknowledgedFailure).toBeNull();
+    // The new run's own viewer fields, once they arrive, are taken as usual.
+    const live = mergeVpUpdate(next, { id: 'vp-1', status: 'JOINING', vncEndpoint: 'wss://new', vncReady: true });
+    expect(live.vncEndpoint).toBe('wss://new');
+    expect(live.vncReady).toBe(true);
+  });
+
   it('keeps the owner when a status update does not carry the lowercase field', () => {
     const next = mergeVpUpdate(CREATED, STATUS_WRITE);
     expect(next.owner).toBe('alex@example.com');

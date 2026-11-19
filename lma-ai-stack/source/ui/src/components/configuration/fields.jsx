@@ -740,6 +740,11 @@ NumberedMap.propTypes = {
 
 /** The control for any value, chosen from its schema. */
 export const SchemaNode = ({ schema, path, label = '', nested = false }) => {
+  // A field can name a control of its own (`widget`), which the section's
+  // provider supplies: the meeting assistant's tool selection lists the
+  // installed MCP servers, which only that control reads.
+  const Widget = useSection()?.widgets?.[schema.widget];
+  if (Widget) return <Widget schema={schema} path={path} label={label} />;
   if (schema.numberedKeys) return <NumberedMap schema={schema} path={path} />;
   const type = typeOf(schema);
   if (type === 'object') {
@@ -778,6 +783,7 @@ export const SectionProvider = ({
   settings = {},
   problems,
   readOnly = false,
+  widgets = undefined,
   onChange,
   children,
 }) => {
@@ -792,13 +798,14 @@ export const SectionProvider = ({
       defaults,
       settings,
       readOnly,
+      widgets,
       problemsAt: (path) => byPath.get(pathKey(path)) || [],
       set: (path, next) => onChange(setAt(values, path, next)),
       setAll: (path, next) => onChange(setAt(values, path, next)),
       reset: (path) => onChange(resetAt(defaults, values, path)),
       remove: (path) => onChange(removeAt(values, path)),
     };
-  }, [values, defaults, settings, problems, readOnly, onChange]);
+  }, [values, defaults, settings, problems, readOnly, widgets, onChange]);
   return <SectionContext.Provider value={context}>{children}</SectionContext.Provider>;
 };
 
@@ -808,6 +815,8 @@ SectionProvider.propTypes = {
   settings: PropTypes.shape({}),
   problems: PropTypes.arrayOf(PropTypes.shape({ path: PATH, message: PropTypes.string })).isRequired,
   readOnly: PropTypes.bool,
+  // Controls a field names by its schema's `widget`, by name.
+  widgets: PropTypes.objectOf(PropTypes.elementType),
   onChange: PropTypes.func.isRequired,
   children: PropTypes.node.isRequired,
 };

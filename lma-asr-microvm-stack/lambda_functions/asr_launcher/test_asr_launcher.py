@@ -106,6 +106,30 @@ def test_acquire_uses_a_deterministic_client_token_for_the_call() -> None:
     assert all(character in "0123456789abcdef" for character in token)
 
 
+def _acquire_token(event: dict) -> str:
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client):
+        assert index.lambda_handler({"action": "acquire", **event}, None)["ok"] is True
+    return client.run_microvm.call_args.kwargs["clientToken"]
+
+
+def test_the_first_session_and_streaming_clients_keep_the_meetings_token() -> None:
+    call_id = "Weekly review - 2026-08-11T10:00:00Z"
+    expected = index._client_token(call_id)
+    assert _acquire_token({"callId": call_id}) == expected
+    assert _acquire_token({"callId": call_id, "session": 1}) == expected
+    assert _acquire_token({"callId": call_id, "session": "not a number"}) == expected
+
+
+def test_a_rejoined_session_gets_a_microvm_of_its_own() -> None:
+    call_id = "Weekly review - 2026-08-11T10:00:00Z"
+    first = _acquire_token({"callId": call_id})
+    second = _acquire_token({"callId": call_id, "session": 2})
+    third = _acquire_token({"callId": call_id, "session": 3})
+    assert len({first, second, third}) == 3
+    assert second == _acquire_token({"callId": call_id, "session": "2"}), "repeatable per session"
+
+
 def test_acquire_waits_for_running_before_reporting_success() -> None:
     client = fake_microvms()
     client.run_microvm.return_value = {"microvmId": "mvm-1", "endpoint": "e", "state": "PENDING"}

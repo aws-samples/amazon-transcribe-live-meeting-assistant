@@ -237,6 +237,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user_id=user_id,
                 is_admin=is_admin,
                 agenda=tool_input.get("agenda"),
+                allow_duplicate=tool_input.get("allowDuplicate") is True,
             )
 
         elif tool_name == "start_meeting_now":
@@ -344,14 +345,23 @@ MCP_TOOLS = [
                         "sensitive."
                     ),
                 },
-                "limit": {"type": "number", "description": "Maximum number of meetings to return"},
+                "limit": {"type": "number", "description": "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)"},
             },
         },
         "annotations": {"readOnlyHint": True},
     },
     {
         "name": "schedule_meeting",
-        "description": "Schedule a future meeting with virtual participant",
+        "description": (
+            "Schedule a future meeting with virtual participant. If you already have a "
+            "Virtual Participant waiting for a meeting with the same name (ignoring case) "
+            "and scheduled time (within a minute), that one is updated with the meeting "
+            "link or ID, password, agenda and platform given here instead of scheduling a "
+            'second one, and the result has action "updated" and its '
+            'virtualParticipantId (otherwise action "created"). A Virtual Participant '
+            "cannot be changed within 5 minutes of its start. Pass allowDuplicate=true to "
+            "schedule a second Virtual Participant anyway."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -386,6 +396,14 @@ MCP_TOOLS = [
                         "Optional meeting agenda, one item per line -- for example "
                         "the agenda from the calendar invite. It is stored on the "
                         "meeting record and shown on the meeting's page."
+                    ),
+                },
+                "allowDuplicate": {
+                    "type": "boolean",
+                    "description": (
+                        "Schedule a new Virtual Participant even if one is already "
+                        "scheduled for a meeting with the same name and time (default "
+                        "false: that one is updated instead)."
                     ),
                 },
             },
@@ -674,6 +692,7 @@ def execute_tool_call(  # pylint: disable=too-many-arguments
                 user_id=user_id,
                 is_admin=is_admin,
                 agenda=arguments.get("agenda"),
+                allow_duplicate=arguments.get("allowDuplicate") is True,
             )
         elif tool_name == "start_meeting_now":
             result = start_meeting_now.execute(

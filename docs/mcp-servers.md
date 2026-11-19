@@ -12,6 +12,7 @@ title: "MCP Servers"
 - [Admin UI](#admin-ui)
 - [Package Specifiers](#package-specifiers)
 - [Stored Server Credentials](#stored-server-credentials)
+- [Exporting and Importing the Server Library](#exporting-and-importing-the-server-library)
 - [Built-in LMA MCP Tools](#built-in-lma-mcp-tools)
 - [MCP Layer Rebuild](#mcp-layer-rebuild)
 - [OAuth Callback URLs](#oauth-callback-urls)
@@ -61,6 +62,8 @@ Configure custom MCP server endpoints that are not listed in the public registry
 - Install, update, and uninstall MCP servers (Admin group)
 - Maximum of **5 MCP servers** per account
 
+Which installed servers the meeting assistant uses, for the owner's own requests and for requests made in the meeting, is set per server in the active configuration profile, under **Meeting Assistant › Tool selection** on the Configuration page; see [Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one). That setting holds only the flags; the servers and their credentials stay here.
+
 ## Package Specifiers
 
 A server that LMA installs into its MCP Lambda layer is identified by a published package name, optionally with a single version pin. The accepted forms are:
@@ -78,6 +81,58 @@ Names and versions may contain letters, digits, `.`, `_` and `-`. Anything else 
 Servers that require authentication store their credential material (bearer token, OAuth client credentials, custom headers, environment variables) in the `AuthConfig` field of the MCP servers DynamoDB table. That field is write-only from the API's point of view: it is supplied on `installMCPServer`/`updateMCPServer` and read at runtime directly from DynamoDB by the meeting-assist function, and it is not part of the `MCPServer` type that `listInstalledMCPServers` returns. The read path returns `HasAuthConfig: Boolean` instead, so a client can tell whether a server has credentials configured without receiving them.
 
 If you have built a custom client that selected `AuthConfig` from `listInstalledMCPServers`, select `HasAuthConfig` instead and re-enter the credential through the UI (or an `updateMCPServer` call) if you need to change it. The LMA UI never read the field, so no change is needed for the bundled UI.
+
+## Exporting and Importing the Server Library
+
+An Admin can move a deployment's installed servers to another deployment as a JSON file, the **MCP server library**. The **Export** and **Import** buttons are in the **Agent MCP Servers** panel of the MCP Servers page; the same operations are `client.mcp.export_library()` and `client.mcp.import_library(...)` in the LMA SDK and `lma mcp export` and `lma mcp import` in the CLI:
+
+```bash
+lma --stack-name LMA-source mcp export --output mcp-servers.json
+lma --stack-name LMA-target mcp import mcp-servers.json
+```
+
+**The export holds no credentials.** It is built by the stack (`exportMCPServerLibrary`) from an allowlist of each server's definition: its id, name, package type, package or URL, version, transport, description, and its authentication described by type with the names of what it needs. Every credential is written as an empty placeholder, and listed in the server's `credentialsToReenter`:
+
+| Authentication type | What the export keeps | Written empty, to be entered again |
+|---|---|---|
+| `none` | — | — |
+| `bearer` | the type | `token` |
+| `custom_headers` | the header names | each header's value |
+| `env_vars` | the environment variable names | each variable's value |
+| `oauth_client_credentials` | grant type, client id, token URL, scopes | `clientSecret` |
+| `oauth2` | provider, client id, authorization and token URLs, scopes | `accessToken`, `refreshToken` |
+
+A stored type the release does not recognise is exported as `unknown`, with none of its settings.
+
+```json
+{
+  "kind": "lma-mcp-server-library",
+  "version": 1,
+  "exportedAt": "2026-11-19T12:00:00Z",
+  "servers": [
+    {
+      "serverId": "https://mcp.example.com/mcp",
+      "name": "Team tools",
+      "packageType": "streamable-http",
+      "package": "https://mcp.example.com/mcp",
+      "serverUrl": "https://mcp.example.com/mcp",
+      "version": "latest",
+      "transport": ["streamable-http"],
+      "requiresAuth": true,
+      "auth": { "authType": "custom_headers", "headers": { "X-API-Key": "" } },
+      "credentialsToReenter": ["auth.headers"]
+    }
+  ]
+}
+```
+
+`kind` and `version` name the document's type and format version. The meeting assistant's skills have a library of the same pattern, with the `kind` `lma-skill-library`; see [The Skill Library](meeting-assistant-skills.md#the-skill-library).
+
+**An import matches servers by name.** A server whose name is installed is updated, keeping its server id; its stored credentials are kept only when the file gives the same endpoint (the package type, and the URL of a remote server or the package of an installed one) and the same authentication type, and are removed otherwise, so they are never sent anywhere other than where they were entered. An entry with authentication type `none` keeps the credentials a server already stores at the same endpoint, and clears **Needs credentials** if the server had it, since the file says none are needed. A server whose name is not installed is created under the file's server id, up to the limit of five servers per account. A package server that is created, or whose package, package type or version changes, starts a layer build as an install does; re-importing an unchanged server starts none. An entry that cannot be read (a package specifier that is not accepted, an id another server uses) is skipped with the reason, and the rest are imported. The import never stores a credential, whatever the file holds in a credential field.
+
+**A server that needs credentials waits for them.** An imported server whose authentication type needs credentials is marked **Needs credentials** on the MCP Servers page, and the meeting assistant does not load it until an Admin enters them with **Enter credentials** on its card (`updateMCPServerCredentials`, or the OAuth flow for an `oauth2` server). The form opens on the authentication type the server needs, with the header or variable names and OAuth client settings the file gave it already filled in and every credential empty. A later export still lists those settings.
+
+The export and the import accept the Admin group and IAM-signed requests, which is how the SDK and CLI call them; an IAM caller is a principal with `appsync:GraphQL` permission on the deployment's API. The roles the stacks create for their own functions and for the Virtual Participant are denied the import explicitly, even where they may call every other mutation. Entering credentials is for the Admin group only.
 
 ## Built-in LMA MCP Tools
 

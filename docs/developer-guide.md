@@ -186,8 +186,10 @@ Execute the VP scheduler Step Function directly:
 ```bash
 aws stepfunctions start-execution \
   --state-machine-arn arn:aws:states:us-east-1:123456789012:stateMachine:SchedulerStateMachine-XXXX \
-  --input '{"apiInfo":{"httpMethod":"POST"},"data":{"meetingPlatform":"Zoom","meetingID":"12345678","meetingPassword":"a1b2c3","meetingName":"Test","meetingTime":"","userName":"Bob"}}'  # pragma: allowlist secret
+  --input '{"apiInfo":{"httpMethod":"POST"},"data":{"meetingPlatform":"Zoom","meetingID":"12345678","meetingName":"Test","meetingTime":"","userName":"Bob","virtualParticipantId":"<id of a Virtual Participant record>"}}'
 ```
+
+The input carries no meeting password. The Virtual Participant reads it at startup from the VirtualParticipant table record named by `virtualParticipantId`, so create that record first (with `createVirtualParticipant`, which saves the password).
 
 Supported `httpMethod` values: `POST` (join/schedule), `GET` (list scheduled), `DELETE` (cancel scheduled).
 

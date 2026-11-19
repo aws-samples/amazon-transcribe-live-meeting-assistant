@@ -11,12 +11,16 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import boto3
+from access import NotAuthorizedError, caller_may_change
 from alb_cleanup import ALBCleanupManager
 from ecs_manager import ECSTaskManager
+from join_again import JoinAgainRefused, join_again_virtual_participant
+from microvm_client import MicrovmError
 from microvm_manager import MicrovmManager
+from rejoin import RejoinRefused, rejoin_virtual_participant
 
 # Configure logging
 logger = logging.getLogger()
@@ -25,31 +29,6 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource("dynamodb")
 scheduler = boto3.client("scheduler")
-
-
-class NotAuthorizedError(Exception):
-    """The caller may not change this Virtual Participant."""
-
-
-def caller_may_change(identity: Optional[Dict[str, Any]], vp: Optional[Dict[str, Any]]) -> bool:
-    """The "Virtual Participant owner condition" of the AppSync templates.
-
-    A signed-in caller who is not an Admin may change a Virtual Participant only
-    as its Owner. Admins, and backend roles with IAM credentials (the Virtual
-    Participant task and the Lambdas that launch and manage it), may change any.
-    A backend role is detected as the templates detect it: by an assumed-role ARN.
-    """
-    identity = identity or {}
-    user_arn = identity.get("userArn") or ""
-    if ":assumed-role/" in user_arn:
-        return True
-    groups = identity.get("groups") or (identity.get("claims") or {}).get("cognito:groups") or []
-    if isinstance(groups, str):
-        groups = [group.strip() for group in groups.split(",") if group.strip()]
-    if "Admin" in groups:
-        return True
-    username = identity.get("username")
-    return bool(username) and bool(vp) and vp.get("Owner") == username
 
 
 class VirtualParticipantManager:
@@ -131,51 +110,9 @@ class VirtualParticipantManager:
         ecs_termination_success = False
         alb_cleanup_success = False
         if not is_scheduled or vp_status != "SCHEDULED":
-            task_details = self.get_task_details_from_registry(vp_id)
-
-            if task_details:
-                # A MicroVM-hosted VP has a microvmId and no taskArn. Dispatch on
-                # what the registry actually holds rather than on a launch-type
-                # setting, so a stack whose parameter changed mid-meeting still
-                # terminates the VPs that are already running.
-                microvm_id = task_details.get("microvmId")
-                if microvm_id:
-                    logger.info(f"Found MicroVM {microvm_id} in registry for VP {vp_id}")
-                    # Naming: this flag gates the registry cleanup below and is
-                    # reported as the termination result, so it covers both hosts.
-                    ecs_termination_success = self.microvm_manager.terminate_microvm(
-                        microvm_id, vp_id
-                    )
-                    # No ALB under MICROVM: each MicroVM is reached through its
-                    # own HTTPS endpoint, so there is no target group or listener
-                    # rule to remove.
-                else:
-                    task_arn = task_details.get("taskArn")
-                    cluster_arn = task_details.get("clusterArn")
-                    logger.info(f"Found task details in registry for VP {vp_id}")
-
-                    # Direct termination using stored ARNs
-                    ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(
-                        task_arn, cluster_arn, vp_id, end_reason
-                    )
-
-                    # Clean up ALB resources (target group and listener rule)
-                    listener_arn = os.environ.get("ALB_LISTENER_ARN")
-                    if listener_arn:
-                        logger.info(f"Cleaning up ALB resources for VP {vp_id}")
-                        alb_cleanup_success = self.alb_cleanup_manager.cleanup_vp_alb_resources(
-                            vp_id, listener_arn
-                        )
-                    else:
-                        logger.warning(
-                            "ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup"
-                        )
-
-                # Clean up registry entry
-                if ecs_termination_success:
-                    self.cleanup_registry_entry(vp_id)
-            else:
-                logger.warning(f"No task details found in registry for VP {vp_id}")
+            ecs_termination_success, alb_cleanup_success = self.terminate_registered_host(
+                vp_id, end_reason
+            )
 
         # Update VP status
         try:
@@ -212,6 +149,93 @@ class VirtualParticipantManager:
             logger.error(f"Error updating VP {vp_id} status: {str(e)}")
             raise
 
+    def terminate_registered_host(self, vp_id: str, reason: str) -> Tuple[bool, bool]:
+        """Stop the host the task registry holds for this VP, and remove its entry.
+
+        Returns whether the host was terminated and whether its ALB resources were
+        cleaned up. Both are False when the registry holds no host.
+        """
+        task_details = self.get_task_details_from_registry(vp_id)
+        if not task_details:
+            logger.warning(f"No task details found in registry for VP {vp_id}")
+            return False, False
+
+        terminated = False
+        alb_cleaned_up = False
+        # A MicroVM-hosted VP has a microvmId and no taskArn. Dispatch on
+        # what the registry actually holds rather than on a launch-type
+        # setting, so a stack whose parameter changed mid-meeting still
+        # terminates the VPs that are already running.
+        microvm_id = task_details.get("microvmId")
+        if microvm_id:
+            logger.info(f"Found MicroVM {microvm_id} in registry for VP {vp_id}")
+            terminated = self.microvm_manager.terminate_microvm(microvm_id, vp_id)
+            # No ALB under MICROVM: each MicroVM is reached through its
+            # own HTTPS endpoint, so there is no target group or listener
+            # rule to remove.
+        else:
+            task_arn = task_details.get("taskArn")
+            cluster_arn = task_details.get("clusterArn")
+            logger.info(f"Found task details in registry for VP {vp_id}")
+
+            # Direct termination using stored ARNs
+            terminated = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, reason)
+
+            # Clean up ALB resources (target group and listener rule)
+            listener_arn = os.environ.get("ALB_LISTENER_ARN")
+            if listener_arn:
+                logger.info(f"Cleaning up ALB resources for VP {vp_id}")
+                alb_cleaned_up = self.alb_cleanup_manager.cleanup_vp_alb_resources(
+                    vp_id, listener_arn
+                )
+            else:
+                logger.warning(
+                    "ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup"
+                )
+
+        # Clean up registry entry
+        if terminated:
+            self.cleanup_registry_entry(vp_id)
+        return terminated, alb_cleaned_up
+
+    def registered_host_running(self, vp_id: str) -> bool:
+        """Whether a host the task registry holds for this VP may still be running.
+
+        A host that is gone -- an ECS task that has STOPPED or is not found, a
+        MicroVM that is TERMINATED, FAILED or not found -- is not, and its stale
+        registry entry is removed. A host whose state cannot be read is taken to
+        be running. An entry that names no host (the MicroVM launcher's staged
+        configuration alone) is not a host.
+        """
+        task_details = self.get_task_details_from_registry(vp_id)
+        if not task_details:
+            return False
+        microvm_id = task_details.get("microvmId")
+        task_arn = task_details.get("taskArn")
+        if not microvm_id and not task_arn:
+            return False
+        try:
+            if microvm_id:
+                try:
+                    state = self.microvm_manager.client.get_microvm(microvm_id).get("state")
+                except MicrovmError as error:
+                    if error.status != 404:
+                        raise
+                    state = "TERMINATED"
+                gone = state in ("TERMINATED", "FAILED")
+            else:
+                described = self.ecs_manager.ecs_client.describe_tasks(
+                    cluster=task_details.get("clusterArn"), tasks=[task_arn]
+                )
+                tasks = described.get("tasks") or []
+                gone = not tasks or all(t.get("lastStatus") == "STOPPED" for t in tasks)
+        except Exception:  # noqa: BLE001 - unknown is treated as running
+            logger.exception(f"VP {vp_id}: could not read the state of its registered host")
+            return True
+        if gone:
+            self.cleanup_registry_entry(vp_id)
+        return not gone
+
     def send_end_meeting_event(self, call_id: str, vp: Dict[str, Any]) -> bool:
         """Send END event to Kinesis to close the meeting transcript"""
         try:
@@ -232,6 +256,9 @@ class VirtualParticipantManager:
                 "IdToken": "",
                 "RefreshToken": "",
             }
+            # The END names the VP's capture session, the first one's too, so
+            # the call event processor can tell it from the END of another.
+            end_call_event["SessionNumber"] = max(int(vp.get("sessionNumber") or 1), 1)
 
             kinesis.put_record(
                 StreamName=kinesis_stream_name,
@@ -413,6 +440,19 @@ def lambda_handler(event, context):
 
             logger.info("VP termination completed successfully")
 
+        elif operation == "rejoinVirtualParticipant":
+            input_data = arguments.get("input", {})
+            result = rejoin_virtual_participant(
+                vp_manager, input_data["id"], identity=event.get("identity") or {}
+            )
+            logger.info("VP rejoin started")
+
+        elif operation == "joinAgainVirtualParticipant":
+            result = join_again_virtual_participant(
+                vp_manager, arguments.get("input", {}), identity=event.get("identity") or {}
+            )
+            logger.info("VP join again started")
+
         elif operation == "deleteVirtualParticipants":
             input_data = arguments.get("input", {})
             ids = input_data.get("ids", [])
@@ -440,6 +480,10 @@ def lambda_handler(event, context):
     except NotAuthorizedError as e:
         logger.warning(str(e))
         return {"statusCode": 403, "body": {"error": str(e), "errorType": "AuthorizationError"}}
+
+    except (RejoinRefused, JoinAgainRefused) as e:
+        logger.warning(str(e))
+        return {"statusCode": 400, "body": {"error": str(e), "errorType": "BadRequest"}}
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")

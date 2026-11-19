@@ -27,6 +27,10 @@
  * ENDED status write marks it running, and the summary write marks it idle or
  * failed. The meeting page words the two differently -- "Summary in progress"
  * against "Regenerating" -- and waits a shorter time for the second.
+ *
+ * Either run can also end `empty`: the meeting had no speech, chat or screen
+ * text, so there was nothing to summarise and no model was called. That is
+ * shown as a plain statement, not as an error, and offers nothing to retry.
  */
 
 export const SOURCE_GENERATED = 'generated';
@@ -34,6 +38,7 @@ export const SOURCE_MANUAL = 'manual';
 export const STATUS_RUNNING = 'running';
 export const STATUS_FAILED = 'failed';
 export const STATUS_IDLE = 'idle';
+export const STATUS_EMPTY = 'empty';
 export const TRIGGER_MEETING_END = 'meeting-end';
 
 /**
@@ -206,9 +211,23 @@ export const regenerationFailure = (state, now = Date.now()) => {
   return state.message || 'could not regenerate the summary';
 };
 
+/**
+ * True when the last run found nothing to summarise. A run that starts after it
+ * replaces the status with `running`, so this is then false.
+ *
+ * Not aged out as a failed regeneration is: it describes the meeting's
+ * transcript rather than a press somebody made, and stays true until a run
+ * finds something to summarise.
+ */
+export const isSummaryEmpty = (state) => state?.status === STATUS_EMPTY;
+
 export const SUMMARY_IN_PROGRESS_TEXT = 'Summary in progress…';
 export const SUMMARY_FAILED_TEXT = 'The summary could not be generated.';
 export const SUMMARY_OVERDUE_TEXT = 'The summary is taking longer than expected.';
+// The summariser's own sentence (EMPTY_SUMMARY_TEXT in the summary Lambdas), so
+// every reader says the same; lma-ai-stack/test/test_summary_empty_outcome.py
+// holds the two to each other.
+export const SUMMARY_EMPTY_TEXT = 'Nothing to summarise: the meeting has no transcript.';
 
 /**
  * What to say in place of a meeting's summary when it has none to show, or
@@ -222,6 +241,7 @@ export const summaryStatusText = (state, now = Date.now()) => {
   if (isSummaryInProgress(state, now)) return SUMMARY_IN_PROGRESS_TEXT;
   if (isSummaryOverdue(state, now)) return SUMMARY_OVERDUE_TEXT;
   if (isMeetingEndRun(state) && state?.status === STATUS_FAILED) return SUMMARY_FAILED_TEXT;
+  if (isSummaryEmpty(state)) return SUMMARY_EMPTY_TEXT;
   return null;
 };
 

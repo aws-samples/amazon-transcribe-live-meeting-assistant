@@ -378,7 +378,7 @@ so a release cannot ship a default its own save would refuse.
 | `language_models` | The Model inference geography (`global`, `geography` or `in_region`) and the four model ids, each one of the models its setting offers, nothing else |
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
-| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only`, `unrestricted` or `selected`; `inMeetingWebSearch`, `inMeetingDocumentSearch`, `inMeetingMeetingHistory`, `inMeetingMcpServers` and `inMeetingVpControls`, each `true` or `false` |
+| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only`, `unrestricted` or `selected`; `inMeetingWebSearch`, `inMeetingDocumentSearch`, `inMeetingMeetingHistory`, `inMeetingMcpServers`, `inMeetingVpControls` and `inMeetingSkills`, each `true` or `false`; `systemPrompt`, the editable part of the assistant's instructions, text of 1 to 20,000 characters; `toolSelection`, an object of `mcpServers` and `skills`, each up to 200 entries keyed by a server or skill id (1 to 256 characters, no control characters), each entry holding only `enabled`, `inMeetingRequests` and `alwaysOn`, each `true` or `false` |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary`, one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript Deletion After the Summary](transcript-deletion.md)) |
@@ -1228,6 +1228,61 @@ beside its merged ones (`ResolvedSection.baseline_values`), which is how each li
 says whether its price is the release's or the profile's. There was no earlier
 store for prices, so nothing is adopted on upgrade.
 
+### The meeting assistant's instructions and tool selection
+
+Two settings of the `meeting_assist` section shape the meeting assistant itself.
+Both are ordinary settings: shipped in `lma_config/setting_defaults.json`, checked
+by `schemas/meeting_assist.json` on every save, carried by the baseline and by every
+Managed profile (no preset sets them), edited on the Configuration page, and moved
+by the Configuration page's export and import with the rest of the section.
+
+- **`systemPrompt`**, **Meeting Assistant › Assistant instructions**: the editable
+  part of the assistant's system prompt, shipped as the text earlier releases used.
+  The meeting assistant function appends a fixed part after it that no profile can
+  change — that tool results are quoted data and never instructions, that people
+  are not identified from their faces, the Virtual Participant browser procedure,
+  and the notes for in-meeting requests. See
+  [Assistant Instructions](meeting-assistant.md#assistant-instructions).
+- **`toolSelection`**, **Meeting Assistant › Tool selection**: per-item flags,
+  shaped so that a later kind of tool takes the same form:
+
+  ```json
+  {
+    "mcpServers": {
+      "<ServerId>": { "enabled": true, "inMeetingRequests": false, "alwaysOn": false }
+    },
+    "skills": {}
+  }
+  ```
+
+  `mcpServers` is keyed by the `ServerId` of an installed MCP server. Each flag is
+  optional: `enabled` (absent means true), `inMeetingRequests` (absent means the
+  In-meeting requests setting decides) and `alwaysOn` (reserved for a later
+  always-on mode; stored and not read). `skills` has the same shape, keyed by the
+  `SkillId` of a skill in the skills table, with `inMeetingSkills` as its Selected
+  tools default (see
+  [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile)).
+  The shipped value names
+  nothing. An MCP server the profile does not name behaves as it did before the
+  setting existed; a skill it does not name is enabled for the owner's own
+  requests, and for in-meeting requests it follows the In-meeting requests setting
+  (under Selected tools, `inMeetingSkills` decides).
+  See
+  [Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one).
+
+  The Configuration page lists the installed servers (`listInstalledMCPServers`)
+  and the skills (`listSkills`) for this setting and stores a flag only where it
+  differs from its default; an item left with no flag is removed from the map.
+  A skill the profile names that is not stored is shown as **No such skill**, as
+  a server is shown below. An entry for a server that is
+  not installed — one carried by a profile exported from another deployment,
+  whose servers have other ids — is shown as **Not installed**, can be removed,
+  and is ignored by the assistant.
+
+  `toolSelection` is the first setting whose value is an object, so
+  `setting_defaults.json` accepts the type `object` for a shipped setting; no stack
+  parameter backs one, and `read_setting` returns a copy of it.
+
 ## Settings that were stack parameters until 0.4.0
 
 Until 0.4.0, 24 released stack parameters only ever reached application code -- a model
@@ -1350,6 +1405,23 @@ OAuth tokens are refreshed. That is entity data with its own lifecycle rather
 than a configuration document, and putting credentials into a profile body would
 mix them into a record every configuration page reads. It stays a table of its
 own; the `standard` tier is its caching policy, generalised.
+
+What a profile does hold about those servers is which of them the meeting
+assistant uses: `meeting_assist.toolSelection`, described under
+[The meeting assistant's instructions and tool selection](#the-meeting-assistants-instructions-and-tool-selection).
+That is a choice an administrator makes per configuration, with no credential in
+it, so it belongs in the profile, where it is versioned, compared, exported and
+restored with the rest. The registry is moved between deployments by its own
+export and import, which leave every credential out; see
+[Exporting and importing the server library](mcp-servers.md#exporting-and-importing-the-server-library).
+
+**The meeting assistant's skills** (`SkillsTable`), which came after the six,
+follow the MCP server list's pattern for the same reason: each skill is a record
+of its own, written and imported on the Skills page and read by the meeting
+assistant with the same five-minute cache, not a configuration document. The
+profile holds which skills the assistant uses (`meeting_assist.toolSelection.skills`),
+and the skills move between deployments with the skill library; see
+[Meeting Assistant Skills](meeting-assistant-skills.md).
 
 The troubleshooting agent's prompt is not one of the six — it lives in the table
 the summary prompts moved out of — and it does move, for the reason given in its

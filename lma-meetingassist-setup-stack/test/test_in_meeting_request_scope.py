@@ -18,7 +18,7 @@ The meeting page's own chat sends no scope and is offered every tool whatever
 the setting.
 
 The handler is driven end to end with every tool group's precondition met --
-an MCP server installed, both knowledge bases, web search, AppSync and the
+an MCP server installed, a skill defined, both knowledge bases, web search, AppSync and the
 Event API configured, and a user email on the event -- and the Strands
 ``Agent`` it constructs is a stand-in that records the tools and system prompt
 it was given. So these assert which tools the handler actually builds, rather
@@ -55,6 +55,8 @@ ALL_TOOLS = {
     "get_chat_attachments",
     "control_vnc_preview",
     "control_vp_browser",
+    "load_skill",
+    "read_skill_file",
 }
 
 # The current meeting: its transcript, its agenda, its shared screen and the
@@ -137,9 +139,20 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
     monkeypatch.setattr(handler_module, "MCP_LOADER_AVAILABLE", True)
     monkeypatch.setattr(
         handler_module,
-        "load_account_mcp_servers",
-        lambda: ([_named("mcp_server")], True),
+        "load_account_mcp_servers_by_id",
+        lambda: ({"server-1": _named("mcp_server")}, True),
         raising=False,
+    )
+    monkeypatch.setattr(
+        handler_module,
+        "installed_mcp_server_names",
+        lambda: {"server-1": "Server One"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        handler_module.meeting_skills,
+        "load_catalog",
+        lambda: [handler_module.meeting_skills.SkillSummary("skill-1", "skill-one", "One skill.")],
     )
     monkeypatch.setattr(handler_module.tavily_secret, "is_configured", lambda: True)
     monkeypatch.setattr(
@@ -314,6 +327,7 @@ GROUP_SWITCHES = {
     "inMeetingMeetingHistory": {"recent_meetings_list", "meeting_history"},
     "inMeetingMcpServers": {"mcp_server"},
     "inMeetingVpControls": {"control_vnc_preview", "control_vp_browser"},
+    "inMeetingSkills": {"load_skill", "read_skill_file"},
 }
 
 
@@ -392,7 +406,8 @@ def test_an_allowed_tool_the_deployment_cannot_offer_is_named_to_the_assistant(
 def test_mcp_servers_allowed_with_none_installed_are_named_unavailable(
     built, configured, monkeypatch
 ):
-    monkeypatch.setattr(handler_module, "load_account_mcp_servers", lambda: ([], False))
+    monkeypatch.setattr(handler_module, "load_account_mcp_servers_by_id", lambda: ({}, False))
+    monkeypatch.setattr(handler_module, "installed_mcp_server_names", lambda: {})
     configured(_selected(inMeetingMcpServers=True))
     assert handler_module.UNAVAILABLE_TOOL_GROUP_TEXT["mcp_servers"] in built(CHAT)["system_prompt"]
 
