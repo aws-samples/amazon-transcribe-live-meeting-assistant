@@ -176,13 +176,28 @@ export const passesSpeakerFilter = (segment, selectedSpeakers, isSpeech) => {
 };
 
 /**
- * Whether a segment is shown under the transcript's filter: a chat message
- * when `showChat` is on, whatever speakers are chosen; anything else as
- * passesSpeakerFilter decides.
+ * Which lines the transcript shows: everything (the default), everything but
+ * the meeting chat, or the meeting chat alone.
+ */
+export const TRANSCRIPT_VIEWS = Object.freeze({ ALL: 'all', SPEECH: 'speech', CHAT: 'chat' });
+
+/** The view control's choices, in the order shown. */
+export const TRANSCRIPT_VIEW_OPTIONS = [
+  { id: TRANSCRIPT_VIEWS.ALL, text: 'Speech and chat' },
+  { id: TRANSCRIPT_VIEWS.SPEECH, text: 'Speech only' },
+  { id: TRANSCRIPT_VIEWS.CHAT, text: 'Chat only' },
+];
+
+/**
+ * Whether a segment is shown under the transcript's filter. `view` is one of
+ * TRANSCRIPT_VIEWS (anything else reads as ALL). A chat message is shown unless
+ * the view is SPEECH, whatever speakers are chosen; anything else is hidden in
+ * the CHAT view, and otherwise shown as passesSpeakerFilter decides.
  */
 export const passesTranscriptFilter = (segment, filter, isSpeech) => {
-  const { speakers = [], showChat = true } = filter || {};
-  if (isChatChannel(segment?.channel)) return Boolean(showChat);
+  const { speakers = [], view = TRANSCRIPT_VIEWS.ALL } = filter || {};
+  if (isChatChannel(segment?.channel)) return view !== TRANSCRIPT_VIEWS.SPEECH;
+  if (view === TRANSCRIPT_VIEWS.CHAT) return false;
   return passesSpeakerFilter(segment, speakers, isSpeech);
 };
 

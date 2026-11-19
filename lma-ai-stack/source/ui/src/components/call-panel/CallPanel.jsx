@@ -20,6 +20,7 @@ import {
   Link,
   Modal,
   Popover,
+  SegmentedControl,
   Select,
   SpaceBetween,
   StatusIndicator,
@@ -106,6 +107,8 @@ import {
   rehypeMarkMatches,
   speakerFilterOptions,
   stepMatch,
+  TRANSCRIPT_VIEW_OPTIONS,
+  TRANSCRIPT_VIEWS,
   textMatches,
 } from '../common/transcript-search';
 import useSettingsContext from '../../contexts/settings';
@@ -953,8 +956,8 @@ const TranscriptToolbar = ({
   selectedSpeakers,
   onSpeakersChange,
   hasChat = false,
-  showChat = true,
-  onShowChatChange = () => {},
+  view = TRANSCRIPT_VIEWS.ALL,
+  onViewChange = () => {},
   editableSpeakers = null,
   onEditSpeaker = undefined,
   chipEntries = null,
@@ -972,6 +975,9 @@ const TranscriptToolbar = ({
   // caller has not grouped them.
   const entries = chipEntries ?? speakerNames.map((name) => ({ type: 'name', name, keys: [] }));
   const hasGroups = entries.some((entry) => entry.type === 'group');
+  // With the chat shown alone, no spoken line is shown, so the chips name the
+  // speakers (and can still be edited) without filtering.
+  const filterable = speakerNames.length > 1 && view !== TRANSCRIPT_VIEWS.CHAT;
   return (
     <div className="transcript-toolbar" data-testid="transcript-toolbar">
       <div className="transcript-search">
@@ -1007,7 +1013,7 @@ const TranscriptToolbar = ({
         <div className="transcript-speaker-filter" role="group" aria-label="Show speakers">
           {(speakerNames.length > 1 || canEdit || hasGroups) && (
             <>
-              {speakerNames.length > 1 && (
+              {filterable && (
                 <ToggleButton
                   pressed={!selectedSpeakers.length}
                   onChange={() => onSpeakersChange([])}
@@ -1018,7 +1024,7 @@ const TranscriptToolbar = ({
               )}
               <TranscriptSpeakerChips
                 entries={entries}
-                filterable={speakerNames.length > 1}
+                filterable={filterable}
                 selectedSpeakers={selectedSpeakers}
                 onToggleSpeaker={toggleSpeaker}
                 editableSpeakers={canEdit ? editableSpeakers : null}
@@ -1028,17 +1034,15 @@ const TranscriptToolbar = ({
               />
             </>
           )}
-          {/* The meeting chat is shown or hidden on its own, whichever speakers are chosen. */}
+          {/* The meeting chat is shown, hidden or shown alone, whichever speakers are chosen. */}
           {hasChat && (
             <span className="transcript-chat-filter">
-              <ToggleButton
-                iconName="contact"
-                pressed={showChat}
-                onChange={({ detail }) => onShowChatChange(detail.pressed)}
-                ariaLabel="Chat messages"
-              >
-                Chat
-              </ToggleButton>
+              <SegmentedControl
+                label="Transcript lines"
+                selectedId={view}
+                onChange={({ detail }) => onViewChange(detail.selectedId)}
+                options={TRANSCRIPT_VIEW_OPTIONS}
+              />
             </span>
           )}
         </div>
@@ -1073,7 +1077,8 @@ const CallInProgressTranscript = ({
   const [query, setQuery] = useState('');
   const [activeMatch, setActiveMatch] = useState(-1);
   const [selectedSpeakers, setSelectedSpeakers] = useState([]);
-  const [showChat, setShowChat] = useState(true);
+  // Which lines are shown: speech and chat (the default), speech only or chat only.
+  const [transcriptView, setTranscriptView] = useState(TRANSCRIPT_VIEWS.ALL);
   // Until when a scroll event is the page's own scrolling, not the reader's.
   const programmaticUntilRef = useRef(0);
 
@@ -1214,6 +1219,8 @@ const CallInProgressTranscript = ({
     [selectedSpeakers, speakerNames],
   );
   const hasChat = useMemo(() => turnByTurnSegments.some((s) => isChatChannel(s.channel)), [turnByTurnSegments]);
+  // The view chosen, while there is chat to choose about; every line otherwise.
+  const view = hasChat ? transcriptView : TRANSCRIPT_VIEWS.ALL;
   // The voices each speaker's chip stands for: usually one, and several when
   // voices that were never merged were given the same name. A name given to a
   // single segment stands for no voice, so it is not edited from its chip.
@@ -1273,10 +1280,8 @@ const CallInProgressTranscript = ({
   const editingRows = editingKeys ? roster.filter((row) => editingKeys.has(row.key)) : [];
   const visibleSegments = useMemo(
     () =>
-      turnByTurnSegments.filter((s) =>
-        passesTranscriptFilter(s, { speakers: activeSpeakers, showChat }, isSpeechSegment),
-      ),
-    [turnByTurnSegments, activeSpeakers, showChat],
+      turnByTurnSegments.filter((s) => passesTranscriptFilter(s, { speakers: activeSpeakers, view }, isSpeechSegment)),
+    [turnByTurnSegments, activeSpeakers, view],
   );
   // Translated a bounded number of lines at a time, newest first while the
   // meeting runs and the lines on screen first after it (see
@@ -1493,8 +1498,8 @@ const CallInProgressTranscript = ({
         selectedSpeakers={activeSpeakers}
         onSpeakersChange={setSelectedSpeakers}
         hasChat={hasChat}
-        showChat={showChat}
-        onShowChatChange={setShowChat}
+        view={view}
+        onViewChange={setTranscriptView}
         editableSpeakers={editableSpeakers}
         onEditSpeaker={editableSpeakers ? setEditingSpeaker : undefined}
         chipEntries={chipEntries}
@@ -1549,7 +1554,7 @@ const CallInProgressTranscript = ({
         >
           {visibleSegments.length === 0 && turnByTurnSegments.length > 0 && (
             <Box color="text-body-secondary" padding="s">
-              {!showChat && !activeSpeakers.length
+              {view === TRANSCRIPT_VIEWS.SPEECH && !activeSpeakers.length
                 ? 'No lines to show with the chat hidden.'
                 : 'No lines from the speakers chosen.'}
             </Box>
