@@ -3220,8 +3220,13 @@ When responding:
 #: The editable part of the meeting assistant's system prompt as the release
 #: ships it: the assistant's persona and how it uses its tools. A profile's
 #: **Meeting Assistant › Assistant instructions** (meeting_assist.systemPrompt)
-#: replaces it; this is the setting's shipped default in setting_defaults.json,
-#: which lma-ai-stack/test/test_parameter_backed_settings.py holds the two to.
+#: replaces it. It is a copy of the setting's shipped default in
+#: setting_defaults.json, held equal to it by
+#: test_the_shipped_instructions_are_the_settings_shipped_default in
+#: lma-meetingassist-setup-stack/test/test_assistant_prompt_and_tool_selection.py
+#: (and, as the read_setting fallback, by the generic
+#: test_a_readers_last_resort_is_the_settings_default in
+#: lma-ai-stack/test/test_parameter_backed_settings.py).
 #: What must hold whatever a profile says is not here but in
 #: FIXED_INSTRUCTIONS and VP_BROWSER_INSTRUCTIONS, appended in code.
 DEFAULT_SYSTEM_PROMPT = """You are an AI assistant helping participants during a live meeting. Your role is to:

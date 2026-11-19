@@ -485,3 +485,43 @@ def test_a_package_server_import_starts_its_layer_build(monkeypatch):
     )
     assert result["Servers"][0]["Message"] == "Layer build started (build-x)"
     assert target.items["env-server"]["Status"] == "INSTALLING"
+
+
+def test_reimporting_an_unchanged_package_server_starts_no_build(monkeypatch):
+    monkeypatch.setattr(index, "CODEBUILD_PROJECT", "layer-build")
+    target = FakeTable([RECORDS[3]])
+    result = _run(
+        target, "importMCPServerLibrary", ADMIN, library=json.dumps(_export([RECORDS[3]]))
+    )
+    assert result["Servers"][0]["Action"] == "updated"
+    assert result["Servers"][0]["Message"] == ""
+    assert target.items["env-server"]["Status"] == "ACTIVE"
+
+
+def test_an_imported_server_lists_the_settings_its_form_opens_with_and_no_credential():
+    target = FakeTable([])
+    library = json.dumps(_export([RECORDS[2], RECORDS[5]]))
+    _run(target, "importMCPServerLibrary", ADMIN, library=library)
+    listed = {s["Name"]: s for s in _run(target, "listInstalledMCPServers", ADMIN)}
+    headers = json.loads(listed["Headers"]["ImportedAuthSettings"])
+    assert headers == {"authType": "custom_headers", "headers": {"X-API-Key": "", "X-Team": ""}}
+    oauth = json.loads(listed["Client credentials"]["ImportedAuthSettings"])["oauth"]
+    assert oauth["clientId"] == "client-id-123" and oauth["clientSecret"] == ""
+    assert all("ImportedAuth" not in s and "AuthConfig" not in s for s in listed.values())
+
+
+def test_a_server_with_its_credentials_lists_no_imported_settings():
+    listed = _run(FakeTable([RECORDS[1]]), "listInstalledMCPServers", ADMIN)
+    assert "ImportedAuthSettings" not in listed[0]
+
+
+def test_an_entry_without_authentication_keeps_a_servers_credentials_and_clears_the_wait():
+    installed = _record("local", "Bearer", {"authType": "bearer", "token": "kept-token"})
+    waiting = _record("waiting", "Waiting", CredentialsRequired=True, RequiredAuthType="bearer")
+    target = FakeTable([installed, waiting])
+    document = _export([_record("x", "Bearer"), _record("y", "Waiting")])
+    result = _run(target, "importMCPServerLibrary", ADMIN, library=json.dumps(document))
+    assert [r["CredentialsRequired"] for r in result["Servers"]] == [False, False]
+    assert target.items["local"]["AuthConfig"]["token"] == "kept-token"
+    assert target.items["local"]["RequiresAuth"] is True
+    assert "CredentialsRequired" not in target.items["waiting"]

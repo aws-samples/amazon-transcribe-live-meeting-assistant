@@ -1367,6 +1367,15 @@ def test_the_transcript_deletion_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_assistant_profile_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_ASSISTANT_PROFILE=1, and change a deployment-wide setting."""
+    import test_assistant_profile
+
+    names = [m.name for m in test_assistant_profile.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 class _FakeConfigurationStore:
     """The parts of lma_config.ConfigurationStore the consent override uses."""
 

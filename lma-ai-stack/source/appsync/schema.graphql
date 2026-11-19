@@ -2165,6 +2165,9 @@ input ToggleVNCPreviewInput {
 # server imported from an MCP server library whose credentials have not been
 # entered on this deployment; the meeting assistant does not load it until they
 # are (updateMCPServerCredentials), and RequiredAuthType names what is needed.
+# ImportedAuthSettings holds, for such a server, the settings the library kept
+# for its form (header and variable names, OAuth client settings), never a
+# credential.
 type MCPServer @aws_cognito_user_pools @aws_iam {
 	ServerId: ID!
 	AccountId: String!
@@ -2184,6 +2187,7 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	Description: String
 	CredentialsRequired: Boolean
 	RequiredAuthType: String
+	ImportedAuthSettings: AWSJSON
 }
 
 input UpdateMCPServerCredentialsInput {

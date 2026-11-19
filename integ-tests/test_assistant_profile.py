@@ -17,8 +17,9 @@ Three behaviours, each from the outside:
   assistant's log line for each request records. Needs an installed, active MCP
   server; without one it fails saying so.
 - **The MCP server library round-trips.** ``client.mcp.export_library()`` holds no
-  credential; importing it back changes nothing but the update times; and a server
-  imported from a library is created waiting for its credentials.
+  credential; importing it back changes nothing but the update times (an unchanged
+  package server starts no layer build, so the re-import rebuilds nothing); and a
+  server imported from a library is created waiting for its credentials.
 
 Opt-in. It runs only with ``LMA_TEST_ASSISTANT_PROFILE=1``, because it changes
 deployment-wide settings while it runs (put back in teardown), takes several

@@ -190,8 +190,21 @@ def redact_server(server: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     if not server:
         return server
-    redacted = {k: v for k, v in server.items() if k not in CREDENTIAL_FIELDS}
+    redacted = {
+        k: v for k, v in server.items() if k not in CREDENTIAL_FIELDS and k != "ImportedAuth"
+    }
     redacted["HasAuthConfig"] = any(bool(server.get(field)) for field in CREDENTIAL_FIELDS)
+    if server.get("CredentialsRequired"):
+        # What the credentials form of an imported server opens with: re-read
+        # through the library export's allowlist, so it holds no credential.
+        redacted["ImportedAuthSettings"] = json.dumps(
+            mcp_library.export_auth(
+                {
+                    "ImportedAuth": server.get("ImportedAuth"),
+                    "RequiredAuthType": server.get("RequiredAuthType"),
+                }
+            )
+        )
     return redacted
 
 
@@ -381,8 +394,8 @@ def uninstall_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         UninstallMCPServerOutput with success status
     """
     try:
-        # The event carries the caller's claims, so only the arguments are logged.
-        logger.info("Uninstall MCP server request: %s", event.get("arguments", {}))
+        # Only the server id is logged: nothing else of the request is needed.
+        logger.info("Uninstall MCP server request: %s", event.get("arguments", {}).get("serverId"))
 
         server_id = event.get("arguments", {}).get("serverId")
 
@@ -721,7 +734,17 @@ def _update_request(
         values[":authType"] = server.auth_type
         values[":importedAuth"] = json.dumps(server.auth)
         removes.append("AuthConfig")
-    changed = any(existing.get(k) != v for k, v in definition.items() if k != "Name")
+    elif server.auth_type == mcp_library.AUTH_NONE:
+        # The library says the server needs no credentials: nothing is waited
+        # for. Credentials the server already stores are kept, and so is its
+        # RequiresAuth, so a stored credential is never left marked unused.
+        removes += ["CredentialsRequired", "RequiredAuthType", "ImportedAuth"]
+        if existing.get("AuthConfig"):
+            values[":RequiresAuth"] = True
+    # Only what the layer build installs starts a build.
+    changed = any(
+        existing.get(k) != definition[k] for k in ("NpmPackage", "PackageType", "Version")
+    )
     rebuild = server.package_type != "streamable-http" and changed
     if rebuild:
         sets.append("#status = :status")
@@ -755,8 +778,8 @@ def _apply_step(table: Any, account_id: str, step: "mcp_library.ImportStep") -> 
         existing = table.get_item(Key=key).get("Item", {})
         request, rebuild = _update_request(existing, step, now)
         table.update_item(Key=key, **request)
-        needs_credentials = (server.needs_credentials and not step.keep_credentials) or bool(
-            existing.get("CredentialsRequired")
+        needs_credentials = server.needs_credentials and (
+            not step.keep_credentials or bool(existing.get("CredentialsRequired"))
         )
     result = {
         "Name": step.name,

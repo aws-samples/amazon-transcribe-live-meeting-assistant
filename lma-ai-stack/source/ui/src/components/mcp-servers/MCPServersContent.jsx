@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
   Alert,
@@ -33,6 +33,25 @@ const client = generateClient();
 const logger = new ConsoleLogger('MCPServersContent');
 
 /**
+ * What the credentials form of an imported server opens with: the type it
+ * needs and the settings the library kept (ImportedAuthSettings, AWSJSON, which
+ * holds no credential), or just the type when those cannot be read.
+ */
+export const importedSettings = (server) => {
+  if (!server) return null;
+  let settings = server.ImportedAuthSettings;
+  if (typeof settings === 'string') {
+    try {
+      settings = JSON.parse(settings);
+    } catch (err) {
+      settings = null;
+    }
+  }
+  if (settings && typeof settings === 'object' && settings.authType) return settings;
+  return server.RequiredAuthType ? { authType: server.RequiredAuthType } : null;
+};
+
+/**
  * MCP Servers Content - Reusable component for managing MCP servers
  * Shows Lambda MCP servers (always available) and VP MCP (active meetings only)
  *
@@ -51,6 +70,8 @@ const MCPServersContent = ({ vpData = null }) => {
   const [registryVersions, setRegistryVersions] = useState({});
   // The imported server whose credentials are being entered, if any.
   const [credentialsFor, setCredentialsFor] = useState(null);
+  // Memoised: the form reapplies these whenever the object changes.
+  const credentialsSettings = useMemo(() => importedSettings(credentialsFor), [credentialsFor]);
 
   const fetchRegistryVersions = useCallback(async (servers) => {
     // Fetch latest versions from registry for each installed server
@@ -116,6 +137,7 @@ const MCPServersContent = ({ vpData = null }) => {
             ServerUrl
             CredentialsRequired
             RequiredAuthType
+            ImportedAuthSettings
           }
         }
       `;
@@ -542,6 +564,7 @@ const MCPServersContent = ({ vpData = null }) => {
           visible
           onDismiss={() => setCredentialsFor(null)}
           onSubmit={handleCredentials}
+          initialSettings={credentialsSettings}
           server={{
             id: credentialsFor.ServerId,
             name: credentialsFor.Name,
