@@ -157,12 +157,26 @@ assistant is a panel beside the tabs, on every tab; see
   when the deployment has the meeting assistant enabled. A dot on the button
   means an answer finished while the panel was closed.
 - **Share**, **Download** and the **⋮** menu — **Download** is the one place a
-  meeting is taken away from. It offers the summary and, once the meeting has
-  ended, the transcript, each as **Markdown (.md)**, **Word (.docx)**, **PDF
-  (.pdf)**, **Web page (.html)** and **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
-  be copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
-  header confirms the copy). The summary can also be sent with **Email summary
-  (beta)**. See [Transcript Downloads](#transcript-downloads). **Delete
+  meeting is taken away from. Its groups open to the side:
+  - **Summary** and, once the meeting has ended, **Transcript**, each as **Word
+    (.docx)**, **PDF (.pdf)**, **Web page (.html)**, **Markdown (.md)** and
+    **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each
+    copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
+    header confirms the copy). The summary can also be sent with **Email
+    summary (beta)**. The transcript's entries are disabled, with the reason,
+    once the Retention settings have deleted it.
+  - **Recordings** — the **Audio** and **Video** files, one entry per session
+    for a meeting the Virtual Participant rejoined. Each opens through a link
+    signed when it is chosen, as **Open file** on the **Details** tab does.
+  - **Screen share** — **Slides (PDF)**, the deck **Export slides (PDF)** on the
+    **Screen share** tab prints, and **Key frames (.zip)**, every key frame's
+    picture.
+  - **Chat attachments** — each stored attachment, read again for a fresh link
+    and saved rather than opened, and **All attachments (.zip)**.
+  - **Everything (.zip)** — see [Everything as one archive](#everything-as-one-archive).
+
+  An entry with nothing behind it is disabled, and says why. See
+  [Transcript Downloads](#transcript-downloads). **Delete
   meeting** is in the **⋮** menu. Share and Delete open the same dialogs as on the
   meeting list.
 - **Diagnose** — runs the AI troubleshooting agent's diagnosis of this meeting:
@@ -653,6 +667,32 @@ do, with the consent record at the end when the meeting has one.
 
 A web page is suggested over a single-file web archive (MHTML), which opens
 properly only in Chromium-based browsers.
+
+### Everything as one archive
+
+**Download › Everything (.zip)** asks the server to put the meeting's files in one
+ZIP archive. The header shows **Preparing download…** while it is built (a few
+seconds for a short meeting, a few minutes for hours of video), and then a
+**Download** link, valid for an hour. **Key frames (.zip)** and **All attachments
+(.zip)** are built the same way, holding only those files. The archive holds:
+
+| Folder or file | What it is |
+|---|---|
+| `summary/` | The summary as a web page and as Markdown, sections in the [reading order](#summary-section-order). The Word and PDF summaries are built in the browser, so they are not in the archive; use **Download › Summary** |
+| `transcript/` | The transcript as text and as a web page. Left out once the Retention settings have deleted it. Speaker names are as recorded with each line |
+| `recordings/` | Every session's audio and video recording |
+| `keyframes/` | Every key frame's picture. The slide deck is printed by the browser, so it is not in the archive; use **Download › Screen share › Slides (PDF)** |
+| `chat-attachments/` | Every stored chat attachment |
+| `meeting.json` | The meeting's details: its record (dates, owner, sharing, agenda, recording links), its participants and its sessions |
+| `consent/` | The consent record and its evidence images, only when the person asking is the meeting's owner or an Admin |
+| `README.md` | Every file in the archive, and anything left out and why |
+
+The archive is answered to the people who can open the meeting, and its link only
+to the person who asked for it (or an Admin). An archive whose files come to more
+than 5 GB is not built; the header says so, and the recordings can be downloaded
+on their own. The archive is a temporary copy: it is deleted a day after it was
+written, and when the meeting is deleted. See
+[Privacy and Data Handling](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime).
 
 The PDF files are built in the browser, and their text can be selected and
 searched. They are set in the standard PDF fonts, which cover Western European

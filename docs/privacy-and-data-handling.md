@@ -286,6 +286,7 @@ are rewritten or expire (see
 | **S3 server access logs** of the stack's buckets, which name the objects read and written, and so the file names derived from meeting IDs | The stack's logging bucket, encrypted with Amazon S3 managed keys | 180 days | Fixed lifecycle rule | Not affected |
 | **Virtual Participant browser profiles** (meeting-platform cookies, per user) | The Virtual Participant profiles bucket | 365 days after the profile was last saved | Removed when the user removes their Zoom credentials. See [Persistent Chromium profile per user](zoom-credentials-and-join-reliability.md#persistent-chromium-profile-per-user) | Not affected |
 | **Downloads**: transcript, summary and slide exports | Produced in the user's browser and saved on the user's device | Outside LMA | Outside LMA. See [Transcript Downloads](web-ui-guide.md#transcript-downloads) | Not affected |
+| **Meeting archives**: the ZIP files **Download › Everything (.zip)**, **Key frames (.zip)** and **All attachments (.zip)** prepare, and a status file for each | The recordings bucket, `lma-meeting-archives/<meeting>/`, encrypted with the stack's key. Each is a copy of the meeting's files as they were when it was prepared; the consent record and evidence are in it only for the meeting's owner or an Admin | 1 day | Fixed lifecycle rule (`MeetingArchiveCleanup`), which also removes an unfinished upload after a day. See [Everything as one archive](web-ui-guide.md#everything-as-one-archive) | Deleted, every version |
 
 Who can read each item is described in
 [User-Based Access Control](user-based-access-control.md): the meeting's owner,
@@ -306,6 +307,7 @@ that neither the retention settings nor deleting a meeting change:
 | The meetings table's DynamoDB stream | 24 hours |
 | The point-in-time recovery of the stack's DynamoDB tables | 35 days; a deleted item can be restored from it until then. Point-in-time recovery is a safety protection and stays on |
 | Earlier versions of objects in the recordings bucket | Up to about two days after they stop being current; see [Earlier versions in the recordings bucket](#earlier-versions-in-the-recordings-bucket). Deleting a meeting, and **Delete the transcript after the summary**, delete every version of the files they remove at once |
+| A meeting archive prepared for download | One day after it was written (up to about two, with its earlier version), whatever the retention settings say of the files it copied. **Delete the transcript after the summary** and the other retention rules do not reach into an archive already prepared; deleting the meeting deletes its archives. A person who downloaded an archive keeps their copy, as with any download |
 | CloudWatch logs | `CloudWatchLogsExpirationInDays` |
 | Amazon Bedrock model invocation logging | As configured for the account. Off by default; if the account has it on, every prompt is logged, including summary prompts that contain the whole transcript |
 | Optional integrations outside AWS | Under each provider's own terms; see [Optional integrations outside AWS](infrastructure-and-security.md#optional-integrations-outside-aws) |
