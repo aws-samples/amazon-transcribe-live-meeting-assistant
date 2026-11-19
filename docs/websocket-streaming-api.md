@@ -273,6 +273,82 @@ Sent once at the beginning of a session to initialize the transcription.
 | `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
 | `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
 | `clientType` | `string` | No | `API` | Which client is capturing the meeting: `STREAM_AUDIO` (the Stream Audio page and its embeddable components), `BROWSER_EXTENSION` or `DESKTOP_APP`. Stored on the meeting as its capture source; any other value, or none, is stored as `API`. See [Capture Context](#capture-context). |
+| `sessionNumber` | `number` | No | — | Only to continue an existing meeting: the capture session the `reopenMeeting` mutation answered for this `callId` (an integer from 2). Send it on every START for the session, reconnects included. See [Continuing an existing meeting](#continuing-an-existing-meeting). |
+
+#### Who may start a meeting, or add to one
+
+A START whose `callId` names no meeting creates one, owned by the caller.
+
+A START whose `callId` names a meeting that already exists adds to that
+meeting, so the server accepts it only from that meeting's owner or an Admin
+(the `Admin` Cognito group, read from the access token). It reads the meeting
+record before anything is written for the START. A START that is not accepted
+is answered with a `CONSENT_STATE` frame with `captureAllowed: false` and one
+of the codes below, and the connection is closed with code `1008`. Stop
+capturing and do not reconnect for that meeting.
+
+| `code` | Meaning |
+|---|---|
+| `MEETING_NOT_OWNED` | The meeting belongs to another user. Start again with another meeting name (another `callId`). |
+| `MEETING_NOT_FOUND` | The START names a `sessionNumber`, but no meeting has this `callId`. |
+| `SESSION_NOT_ALLOWED` | The `sessionNumber` is not the session `reopenMeeting` last allowed on this meeting, or is not an integer from 2. Call `reopenMeeting` again. |
+| `TRANSCRIPT_DELETED` | The START names a `sessionNumber`, and the meeting's transcript has been deleted. |
+| `MEETING_NOT_CHECKED` | The server could not read the meeting record (it tried three times). Try again. |
+
+The server reads the meeting record through LMA's AppSync API, with the
+transcriber task's role.
+
+#### Continuing an existing meeting
+
+A meeting's owner or an Admin can add a further capture **session** to a
+meeting that already exists, even one that has ended (shown as **Done**), so
+that it continues under the same `callId` on one transcript timeline. This is
+what the Desktop Capture App's **Continue an existing meeting…** does (see
+[Desktop Capture App](desktop-capture-app.md#continue-an-existing-meeting)),
+and the same mechanism a Virtual Participant
+[rejoin](virtual-participant.md#rejoin) uses.
+
+1. Call the `reopenMeeting` mutation on LMA's AppSync API, authorized with the
+   user's Cognito token (ID or access token) in the `Authorization` header:
+
+   ```graphql
+   mutation ReopenMeeting($input: ReopenMeetingInput!) {
+     reopenMeeting(input: $input) { CallId SessionNumber SessionOffsetSeconds ReopenedAt }
+   }
+   ```
+
+   with `{"input": {"CallId": "<the meeting's callId>"}}`. The answer names the
+   session (`SessionNumber`, 2 for the first continuation, and so on) and where
+   it starts on the meeting's transcript timeline (`SessionOffsetSeconds`). A
+   refusal is a GraphQL error whose `errorType` is one of:
+
+   | `errorType` | Meaning |
+   |---|---|
+   | `MeetingNotFound` | No meeting has this `callId`. |
+   | `Unauthorized` | The caller is not the meeting's owner or an Admin. Being one of the users the meeting is shared with is not enough. |
+   | `TranscriptDeleted` | The meeting's transcript has been deleted by the Retention settings. |
+   | `MeetingInProgress` | The meeting is still being captured (status `STARTED` or `TRANSCRIBING`). |
+   | `MeetingChanged` | The meeting record changed during the call. Try again. |
+   | `BadRequest` | The `CallId` is missing or not usable. |
+
+2. Open the WebSocket and send START with that `callId` and
+   `"sessionNumber": <SessionNumber>`, then stream as usual. Send the same
+   `sessionNumber` on every START of the session, reconnects included.
+
+The server takes the session's offset from the meeting record, not from the
+client. It names the session on the meeting's START and END events, adds the
+offset to the start and end time of every transcript segment and screen key
+frame, and prefixes the session's segment ids with `s<n>-`, because the speech
+engines' ids restart with each session. The meeting stays as it is until the
+session's START event is processed; it is then shown as in progress again, and
+when the session ends the end-of-meeting work runs again, including the summary
+over the whole transcript. The details, and what is kept from the earlier
+sessions, are in [What a rejoin does](virtual-participant.md#what-a-rejoin-does).
+
+A `reopenMeeting` whose session never starts leaves the meeting as it was; a
+later `reopenMeeting` allows the next session number. Each continuation is a
+new session: a client that only lost its connection reconnects with the same
+START instead (see [Reconnection](#reconnection)).
 
 > **Older field names.** Clients written for LMA before 0.4.0 send the two
 > speaker names as `agentId` (for `localSpeakerName`) and `fromNumber` (for
@@ -360,10 +436,12 @@ Sent to signal the end of the audio streaming session.
 
 #### 6.1.4 Frames the Server Sends
 
-The server sends JSON text frames to the client only for meeting consent
-(below). Each has an `event` field, not `callEvent`. A client that does not
-use meeting consent never asks for one, and may ignore any text frame it
-receives.
+The server sends JSON text frames to the client for meeting consent (below)
+and to refuse a START (see [Who may start a meeting, or add to
+one](#who-may-start-a-meeting-or-add-to-one)), which uses the consent frame
+`CONSENT_STATE`. Each has an `event` field, not `callEvent`. A client that
+does not use meeting consent never asks for a frame, and may ignore any it
+receives other than a `CONSENT_STATE` with `captureAllowed: false`.
 
 #### 6.1.5 Meeting Consent Frames
 
@@ -496,7 +574,7 @@ meeting owned by the signed-in user who sent `START`.
 |-------|---------|
 | `status` | The record's status: `pending`, `granted`, `objected` or `not_required` |
 | `captureAllowed` | `false` only when the server has stopped, or will not start, capturing the meeting; the meeting is then ended and the connection closed. Stop capturing and do not reconnect for the same meeting |
-| `code`, `message` | When something was refused or not recorded: `CONSENT_REQUIRED` (no consent step, and the deployment refuses such clients), `CONSENT_NOT_CONFIRMED`, `CONSENT_RULE_UNSUPPORTED`, `CONSENT_NOT_RECORDED` (the record could not be written; in notify capture goes on), `NOTICE_NOT_RECORDED` (the notice was not recorded as posted; capture goes on), `MEETING_NOT_OWNED` (the meeting named belongs to another user; start again with another name), `OBJECTION_RECEIVED`, `EVIDENCE_REFUSED`, `EVIDENCE_NOT_STORED`, `NO_MEETING` |
+| `code`, `message` | When something was refused or not recorded: `CONSENT_REQUIRED` (no consent step, and the deployment refuses such clients), `CONSENT_NOT_CONFIRMED`, `CONSENT_RULE_UNSUPPORTED`, `CONSENT_NOT_RECORDED` (the record could not be written; in notify capture goes on), `NOTICE_NOT_RECORDED` (the notice was not recorded as posted; capture goes on), `MEETING_NOT_OWNED`, `MEETING_NOT_FOUND`, `SESSION_NOT_ALLOWED`, `TRANSCRIPT_DELETED` and `MEETING_NOT_CHECKED` (a START that is not accepted for the meeting it names; see [Who may start a meeting, or add to one](#who-may-start-a-meeting-or-add-to-one)), `OBJECTION_RECEIVED`, `EVIDENCE_REFUSED`, `EVIDENCE_NOT_STORED`, `NO_MEETING` |
 | `evidence` | After an evidence image: `evidenceId`, `stored`, and once checked the `verdict` (`supports_consent`, `objection_found` or `inconclusive`) |
 
 A refused `START` is answered with a `CONSENT_STATE` frame and the connection is
@@ -520,6 +598,7 @@ type CallMetaData = {
   diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
   consent?: object;         // START only: the client's consent step (6.1.5)
   clientType?: string;      // START only: STREAM_AUDIO | BROWSER_EXTENSION | DESKTOP_APP (Capture Context)
+  sessionNumber?: number;   // START only: the session reopenMeeting allowed, to continue a meeting
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -754,6 +833,7 @@ speaking on both channels therefore gets a different number on each.
 | WebSocket error (network) | Server logs the error and forces a close, triggering automatic end-of-call cleanup. |
 | Client disconnects unexpectedly | Server holds the meeting for 60 seconds for the client to reconnect (see [Reconnection](#reconnection)); if it does not, the server writes the call end event and cleans up resources. |
 | Meeting consent refuses the meeting, or stops it | Server sends a `CONSENT_STATE` frame with `captureAllowed: false` and closes the connection with code `1008`. See [Meeting Consent Frames](#615-meeting-consent-frames). |
+| START names a meeting the caller may not add to, or a session that was not allowed | Server sends a `CONSENT_STATE` frame with `captureAllowed: false` and closes the connection with code `1008`. See [Who may start a meeting, or add to one](#who-may-start-a-meeting-or-add-to-one). |
 
 ### Reconnection
 
@@ -828,7 +908,8 @@ does not reconnect: a dropped connection stops its capture.
 The held meeting lives on the transcriber task that served it. With more than
 one task (`TranscriberDesiredTaskCount` above 1), a reconnection can reach a
 different task, which starts a second session for the same `callId`: its
-transcript starts again from zero, and its audio recording is stored beside the
+transcript starts again from zero (from the session's offset, for a
+[continued meeting](#continuing-an-existing-meeting)), and its audio recording is stored beside the
 meeting's first one (`<callId>_<timestamp>.wav` under the recordings prefix)
 rather than replacing it, while the meeting keeps its first recording. The same
 happens to a reconnection after the 60 seconds.

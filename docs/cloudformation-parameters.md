@@ -598,7 +598,7 @@ Console label: *Lambda Hook Function ARN for Custom Start of Call Processing (ex
 - **Allowed values:** Matches `^(|arn:aws:lambda:.*)$`
 - **Kind:** Resource. Grants the meeting event processor permission to invoke the named function.
 
-(Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function for beginning or start of call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving call summary details logged into a case in a CRM. It is invoked once when a meeting starts, and once more each time the meeting's owner or an Admin rejoins it with its Virtual Participant and the rejoined session starts. Those later invocations carry the same CallId as the first, plus a SessionNumber (2 for the first rejoin, and so on).
+(Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function for beginning or start of call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving call summary details logged into a case in a CRM. It is invoked once when a meeting starts, and once more each time the meeting's owner or an Admin rejoins it with its Virtual Participant, or continues it from the Desktop Capture App, and that session starts. Those later invocations carry the same CallId as the first, plus a SessionNumber (2 for the first rejoin or continuation, and so on).
 
 ### `PostCallSummaryLambdaHookFunctionArn`
 

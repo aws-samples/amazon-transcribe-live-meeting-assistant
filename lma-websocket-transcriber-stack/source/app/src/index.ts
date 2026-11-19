@@ -465,12 +465,11 @@ const checkMeetingAccess = async (
 ): Promise<MeetingAccess> => {
     const caller = getAuthenticatedCaller(request);
     if (!graphqlCaller) {
-        // A transcriber deployed without the AppSync API (LMA's own stack always
-        // passes it) cannot read the meeting record: it captures as it did
-        // before the check, and cannot continue a meeting.
+        // No AppSync API (GRAPHQL_ENDPOINT), so no meeting record to read: the
+        // START is taken as it comes, and no meeting can be continued.
         if (!warnedNoMeetingApi) {
             warnedNoMeetingApi = true;
-            server.log.warn('[START]: No GRAPHQL_ENDPOINT; meeting ownership is not checked and meetings cannot be continued.');
+            server.log.warn('[START]: No GRAPHQL_ENDPOINT: meeting records are not read at START, and meetings cannot be continued.');
         }
         return callMetaData.sessionNumber === undefined || callMetaData.sessionNumber === null
             ? { kind: 'append', offsetSeconds: 0 }

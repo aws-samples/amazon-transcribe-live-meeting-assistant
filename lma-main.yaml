@@ -324,8 +324,9 @@ Parameters:
       retrieving
       call summary details logged into a case in a CRM. It is invoked once when a meeting
       starts, and once more each time the meeting's owner or an Admin rejoins it with its
-      Virtual Participant and the rejoined session starts. Those later invocations carry the
-      same CallId as the first, plus a SessionNumber (2 for the first rejoin, and so on).
+      Virtual Participant, or continues it from the Desktop Capture App, and that session
+      starts. Those later invocations carry the same CallId as the first, plus a
+      SessionNumber (2 for the first rejoin or continuation, and so on).
 
   PostCallSummaryLambdaHookFunctionArn:
     Default: ""
