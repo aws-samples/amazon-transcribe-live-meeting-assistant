@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, T
 
 import boto3
 
+from tools.access import Caller, can_read
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 
 logger = logging.getLogger()
@@ -67,15 +68,15 @@ SEARCH_FAILED_NOTE = "The search could not be completed; try again."
 
 # A filtered walk first asks for only the attributes its filters look at (and the
 # key, to match each row to its meeting), which keeps the response small; full
-# rows are asked for the matches only. Owner and Status are reserved words,
-# hence the names.
+# rows are asked for the matches only. The access rule reads Owner and
+# SharedWith. Owner and Status are reserved words, hence the names.
 DECISION_PROJECTION: Dict[str, Any] = {
-    "ProjectionExpression": "#pk, #id, #owner, #agent, #status, #participants",
+    "ProjectionExpression": "#pk, #id, #owner, #shared, #status, #participants",
     "ExpressionAttributeNames": {
         "#pk": "PK",
         "#id": "CallId",
         "#owner": "Owner",
-        "#agent": "AgentId",
+        "#shared": "SharedWith",
         "#status": "Status",
         "#participants": "Participants",
     },
@@ -236,16 +237,18 @@ def build_filter(
     participant: Optional[str],
     statuses: Optional[FrozenSet[str]],
 ) -> Optional[Callable[[Dict[str, Any]], bool]]:
-    """The test a meeting row has to pass to be listed, or None when every row is."""
+    """The test a meeting row has to pass to be listed, or None when every row is.
+
+    Access is the rule of the meeting page (tools/access.py can_read): an Admin
+    sees every meeting; anyone else sees the meetings they own and the ones
+    shared with them. A caller with no identity sees none.
+    """
     if is_admin and not participant and statuses is None:
         return None
+    caller = Caller(user_id=user_id or "", is_admin=bool(is_admin))
 
     def include(meeting: Dict[str, Any]) -> bool:
-        # No identity, no meetings: an empty or missing user id must not match
-        # a row whose Owner or AgentId is empty or missing.
-        if not is_admin and (
-            not user_id or user_id not in (meeting.get("Owner"), meeting.get("AgentId"))
-        ):
+        if not can_read(meeting, caller):
             return False
         if participant and not participant_in_meeting(meeting, participant):
             return False
@@ -287,14 +290,15 @@ def walk_date_range(
 
     The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
     "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
-    and paginates via LastEvaluatedKey — no shard fan-out.  The index carries
-    only a few attributes of a meeting (not AgentId, not Status), so every
-    meeting row is read before ``include`` decides on it: first only the
-    attributes in DECISION_PROJECTION (a smaller response; DynamoDB still reads
-    and bills whole items), one request per index page, then, in full and in
-    index order, the rows that match, no more than still needed.  Without
-    ``include`` the rows are read in full at once.  At most ``limit`` rows are
-    returned.
+    and paginates via LastEvaluatedKey — no shard fan-out.  An index row is
+    not the meeting's own row and carries only a few of its attributes (not
+    Status), so every meeting row is read before ``include`` decides on it:
+    first only the attributes in DECISION_PROJECTION (a smaller response;
+    DynamoDB still reads and bills whole items), one request per index page,
+    then, in full and in index order, the rows that match, no more than still
+    needed.  Access is decided on the meeting's own row, in both steps, and not
+    on the index row's copy of Owner and SharedWith.  Without ``include`` the
+    rows are read in full at once.  At most ``limit`` rows are returned.
     """
     from datetime import timedelta
 

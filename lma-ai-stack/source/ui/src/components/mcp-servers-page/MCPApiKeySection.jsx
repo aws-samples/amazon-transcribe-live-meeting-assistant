@@ -6,14 +6,18 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Container,
   CopyToClipboard,
+  FormField,
   Header,
   Modal,
+  RadioGroup,
   SpaceBetween,
   Spinner,
   StatusIndicator,
@@ -23,6 +27,47 @@ import { generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys } from '../../graphq
 const client = generateClient();
 const logger = new ConsoleLogger('MCPApiKeySection');
 
+/**
+ * The two scopes a new key can have. A read key reaches only the hosted MCP
+ * server's tools that change nothing. A key created before keys had a scope is
+ * listed as legacy: it keeps the server's original tools, including starting and
+ * scheduling Virtual Participants, and the read tools added since.
+ */
+export const SCOPE_OPTIONS = [
+  {
+    value: 'read',
+    label: 'Read only',
+    description: 'Search and read meetings, transcripts, summaries and guidance. The default.',
+  },
+  {
+    value: 'read-write',
+    label: 'Read and write',
+    description:
+      'Also start, end, share and delete meetings, change agendas, push guidance and ask the meeting assistant.',
+  },
+];
+
+export const isLegacyScope = (scope) => scope !== 'read' && scope !== 'read-write';
+
+export const LEGACY_HINT =
+  'This key was created before keys had scopes. It keeps the original MCP tools, including starting and ' +
+  'scheduling Virtual Participants. To use the newer tools that change meetings, revoke it and generate a ' +
+  'key with the Read and write scope.';
+
+export const scopeLabel = (scope) => {
+  if (scope === 'read-write') return 'Read and write';
+  if (scope === 'read') return 'Read only';
+  return 'Legacy (original tools)';
+};
+
+const ScopeBadge = ({ scope = null }) => (
+  <Badge color={scope === 'read-write' ? 'blue' : 'grey'}>{scopeLabel(scope)}</Badge>
+);
+
+ScopeBadge.propTypes = {
+  scope: PropTypes.string,
+};
+
 const MCPApiKeySection = () => {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +76,7 @@ const MCPApiKeySection = () => {
   const [newKey, setNewKey] = useState(null);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
   const [error, setError] = useState(null);
+  const [scope, setScope] = useState('read');
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -53,7 +99,7 @@ const MCPApiKeySection = () => {
     try {
       setGenerating(true);
       setError(null);
-      const result = await client.graphql({ query: generateMCPApiKey });
+      const result = await client.graphql({ query: generateMCPApiKey, variables: { scope } });
       setNewKey(result.data.generateMCPApiKey);
       await fetchKeys();
     } catch (err) {
@@ -96,6 +142,7 @@ const MCPApiKeySection = () => {
             {key.keyPrefix}
             ••••••••
           </StatusIndicator>
+          <ScopeBadge scope={key.scope} />
           <Box color="text-body-secondary" fontSize="body-s">
             Created {new Date(key.createdAt).toLocaleDateString()}
           </Box>
@@ -103,6 +150,11 @@ const MCPApiKeySection = () => {
             Revoke
           </Button>
         </SpaceBetween>
+        {isLegacyScope(key.scope) && (
+          <Box color="text-body-secondary" fontSize="body-s" margin={{ top: 'xxs' }}>
+            {LEGACY_HINT}
+          </Box>
+        )}
       </Box>
     ));
 
@@ -114,7 +166,17 @@ const MCPApiKeySection = () => {
       return <SpaceBetween size="s">{renderKeyList()}</SpaceBetween>;
     }
     return (
-      <Box color="text-body-secondary">No API key generated. Click &quot;Generate API Key&quot; to create one.</Box>
+      <SpaceBetween size="s">
+        <Box color="text-body-secondary">
+          No API key generated. Choose its scope, then click &quot;Generate API Key&quot;.
+        </Box>
+        <FormField
+          label="Scope"
+          description="What MCP clients using this key may do. To change it, revoke the key and generate a new one."
+        >
+          <RadioGroup value={scope} onChange={({ detail }) => setScope(detail.value)} items={SCOPE_OPTIONS} />
+        </FormField>
+      </SpaceBetween>
     );
   };
 
@@ -145,6 +207,9 @@ const MCPApiKeySection = () => {
         <Modal visible onDismiss={() => setNewKey(null)} header="API Key Generated">
           <SpaceBetween size="m">
             <Alert type="warning">Copy this key now. You won&apos;t be able to see it again.</Alert>
+            <Box>
+              Scope: <ScopeBadge scope={newKey.scope} />
+            </Box>
             <CopyToClipboard
               copyButtonAriaLabel="Copy API key"
               copySuccessText="API key copied"

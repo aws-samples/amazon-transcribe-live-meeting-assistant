@@ -165,6 +165,28 @@ class FakeTable:
         return [b for b, p in zip(self.batch_calls, self.batch_projections) if p is None]
 
 
+def reference_may_read(row, user):
+    """The meeting page's rule written out by hand: the owner, or an entry of SharedWith.
+
+    Entries of a text are split at "[", "]" and ","; a list or set holds one
+    entry per string that has none of those characters. Entries are trimmed and
+    empty ones dropped. A caller without an id may read nothing, and AgentId
+    grants nothing.
+    """
+    if not user:
+        return False
+    if row.get("Owner") == user:
+        return True
+    shared = row.get("SharedWith")
+    if isinstance(shared, str):
+        entries = shared.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(shared, (list, set)):
+        entries = [e for e in shared if isinstance(e, str) and not set(e) & set("[],")]
+    else:
+        entries = []
+    return user in [e.strip() for e in entries if e.strip()]
+
+
 def run(table, **kwargs):
     """list_meetings.execute against the stand-in table."""
     resource = type("Resource", (), {"Table": lambda self, name: table})()
@@ -217,12 +239,64 @@ class TestFiltersBeforeTheLimit(unittest.TestCase):
 
         self.assertEqual(run(table)["meetings"], [])
 
-    def test_agent_id_counts_as_owner(self):
-        older = meeting("old-row", owner=None, AgentId=ME)
-        del older["Owner"]
-        table = FakeTable([meeting("x", owner=OTHER), older])
+    def test_agent_id_alone_grants_nothing(self):
+        # A row the caller's id is only the AgentId of belongs to someone else,
+        # or to nobody; it is the owner's, or an entry of SharedWith, that grants.
+        ownerless = meeting("ownerless", owner=None, AgentId=ME)
+        del ownerless["Owner"]
+        rows = [
+            ownerless,
+            meeting("theirs", owner=OTHER, AgentId=ME),
+            meeting("shared-elsewhere", owner=OTHER, AgentId=ME, SharedWith=[OTHER]),
+        ]
 
-        self.assertEqual(ids(run(table, limit=1)), ["old-row"])
+        for filters in ({}, {"status": "ENDED"}, {"participant": "ann"}):
+            with self.subTest(**filters):
+                self.assertEqual(run(FakeTable(rows), **filters)["meetings"], [])
+
+    def test_a_meeting_shared_with_the_caller_is_listed(self):
+        rows = [
+            meeting("not-mine", owner=OTHER),
+            meeting("shared-list", owner=OTHER, SharedWith=[OTHER, ME]),
+            meeting("shared-text", owner=OTHER, SharedWith=f"{OTHER}, {ME}"),
+            meeting("shared-brackets", owner=OTHER, SharedWith=f"[{ME}]"),
+            meeting("shared-set", owner=OTHER, SharedWith={ME}),
+            meeting("mine"),
+        ]
+
+        self.assertEqual(
+            ids(run(FakeTable(rows))),
+            ["shared-list", "shared-text", "shared-brackets", "shared-set", "mine"],
+        )
+
+    def test_a_shared_meeting_counts_toward_the_limit_before_older_ones(self):
+        rows = [meeting(f"o{i}", owner=OTHER) for i in range(30)]
+        rows += [meeting("shared", owner=OTHER, SharedWith=[ME]), meeting("mine")]
+
+        self.assertEqual(ids(run(FakeTable(rows), limit=2)), ["shared", "mine"])
+
+    def test_sharing_matches_a_whole_entry_only(self):
+        rows = [
+            meeting("longer", owner=OTHER, SharedWith=[f"x{ME}"]),
+            meeting("prefix", owner=OTHER, SharedWith=[ME[:-4]]),
+            meeting("in-a-longer-text", owner=OTHER, SharedWith=f"x{ME}, y{ME}"),
+            meeting("someone-else", owner=OTHER, SharedWith=[OTHER]),
+            meeting("nothing", owner=OTHER, SharedWith=[]),
+            meeting("unset", owner=OTHER),
+        ]
+
+        self.assertEqual(run(FakeTable(rows))["meetings"], [])
+
+    def test_a_shared_meeting_is_listed_with_a_status_and_a_participant_filter(self):
+        rows = [
+            meeting("a", owner=OTHER, SharedWith=[ME], status="STARTED", Participants=["Ann"]),
+            meeting("b", owner=OTHER, SharedWith=[ME], status="ENDED", Participants=["Ann"]),
+            meeting("c", owner=OTHER, SharedWith=[OTHER], status="STARTED", Participants=["Ann"]),
+        ]
+
+        result = run(FakeTable(rows), status="IN_PROGRESS", participant="ann")
+
+        self.assertEqual(ids(result), ["a"])
 
     def test_a_caller_without_an_identity_sees_nothing(self):
         # An empty or missing id must not match a row whose owner is empty or missing.
@@ -233,6 +307,8 @@ class TestFiltersBeforeTheLimit(unittest.TestCase):
             meeting("empty", owner=""),
             meeting("null", owner=None),
             meeting("agent-empty", owner=OTHER, AgentId=""),
+            meeting("shared-empty", owner=OTHER, SharedWith=["", " "]),
+            meeting("shared-empty-text", owner=OTHER, SharedWith=",, []"),
             meeting("mine"),
         ]
 
@@ -706,6 +782,22 @@ class TestCallersWithoutAFilter(unittest.TestCase):
 
                     self.assertEqual(len(found), limit)
 
+    def test_a_read_that_needs_few_more_rows_still_asks_for_a_minimum_batch(self):
+        # Page one holds 30 ids and one of them has gone, so one row is still
+        # needed; the next read asks for BATCH_GET_MIN keys, not one, so that a
+        # second row gone does not cost another request.
+        table = FakeTable([meeting(f"m{i:02d}") for i in range(100)])
+        table.rows.pop("c#m01")
+        table.rows.pop("c#m30")
+
+        rows = list_meetings.walk_date_range(table, "2026-11-01", "2026-11-18", 30)[0]
+
+        self.assertEqual(len(rows), 30)
+        self.assertEqual(rows[-1]["CallId"], "m31")
+        self.assertEqual(
+            [len(batch) for batch in table.batch_calls], [30, list_meetings.BATCH_GET_MIN]
+        )
+
     def test_the_answer_of_execute_holds_at_most_the_limit(self):
         table = FakeTable([meeting(f"m{i}") for i in range(150)])
 
@@ -782,7 +874,7 @@ class TestTwoStepReads(unittest.TestCase):
             request["ExpressionAttributeNames"][part.strip()]
             for part in request["ProjectionExpression"].split(",")
         }
-        self.assertEqual(named, {"PK", "CallId", "Owner", "AgentId", "Status", "Participants"})
+        self.assertEqual(named, {"PK", "CallId", "Owner", "SharedWith", "Status", "Participants"})
         self.assertEqual(table.batch_projections[0], request["ProjectionExpression"])
 
     def test_only_the_matches_still_needed_are_read_whole(self):
@@ -804,47 +896,76 @@ class TestTwoStepReads(unittest.TestCase):
         self.assertTrue(entry["hasTranscript"])
 
     def test_answers_are_those_of_reading_every_row_whole(self):
+        # The old call read every row of the walk whole and cut the list at
+        # the limit before it filtered; the rule here is the meeting page's. The
+        # reference below applies that rule by hand to every row, newest first,
+        # then the limit, over random tables of the stored shapes of SharedWith.
         import random
 
         chooser = random.Random(5)
-        rows = []
-        for i in range(400):
-            row = meeting(
-                f"m{i}",
-                owner=chooser.choice([ME, OTHER, "third@example.com"]),
-                status=chooser.choice(["STARTED", "TRANSCRIBING", "ENDED", "ERRORED"]),
-                Participants=chooser.choice([["Ann"], ["Cy"], [{"Name": "Ann Lee"}], []]),
-            )
-            if chooser.random() < 0.1:
-                del row["Owner"]
-                row["AgentId"] = chooser.choice([ME, OTHER])
-            rows.append(row)
-        for user, admin in ((ME, False), (OTHER, False), ("admin", True)):
-            for status in (None, "IN_PROGRESS", "ENDED"):
-                for participant in (None, "ann"):
-                    for limit in (1, 7, 60):
-                        statuses = list_meetings.statuses_for(status)
-                        expected = [
-                            r["CallId"]
-                            for r in rows
-                            if (admin or user in (r.get("Owner"), r.get("AgentId")))
-                            and (
-                                not participant
-                                or list_meetings.participant_in_meeting(r, participant)
-                            )
-                            and (statuses is None or r["Status"] in statuses)
-                        ][:limit]
-                        with self.subTest(user=user, status=status, p=participant, limit=limit):
-                            result = run(
-                                FakeTable(rows),
-                                user_id=user,
-                                is_admin=admin,
-                                status=status,
-                                participant=participant,
-                                limit=limit,
-                            )
-                            self.assertEqual(ids(result), expected)
-                            self.assertEqual(result["count"], len(expected))
+        users = [ME, OTHER, "third@example.com"]
+        shapes = (
+            lambda who: list(who),
+            lambda who: ", ".join(who),
+            lambda who: "[" + ", ".join(who) + "]",
+            lambda who: set(who),
+            lambda who: None,
+        )
+        for size in (400, 1150):
+            rows = []
+            for i in range(size):
+                row = meeting(
+                    f"m{i}",
+                    owner=chooser.choice(users),
+                    status=chooser.choice(["STARTED", "TRANSCRIBING", "ENDED", "ERRORED"]),
+                    Participants=chooser.choice([["Ann"], ["Cy"], [{"Name": "Ann Lee"}], []]),
+                )
+                who = chooser.sample(users, chooser.randint(0, 2))
+                shared = chooser.choice(shapes)(who)
+                if shared is not None:
+                    row["SharedWith"] = shared
+                if chooser.random() < 0.1:
+                    del row["Owner"]
+                if chooser.random() < 0.2:
+                    row["AgentId"] = chooser.choice(users)
+                rows.append(row)
+            for user, admin in (
+                (ME, False),
+                (OTHER, False),
+                ("", False),
+                (None, False),
+                ("a", True),
+            ):
+                for status in (None, "IN_PROGRESS", "ENDED"):
+                    for participant in (None, "ann"):
+                        for limit in (1, 7, 60):
+                            statuses = list_meetings.statuses_for(status)
+                            walked = rows[
+                                : list_meetings.MAX_PAGES * list_meetings.FILTERED_PAGE_SIZE
+                            ]
+                            expected = [
+                                r["CallId"]
+                                for r in walked
+                                if (admin or reference_may_read(r, user))
+                                and (
+                                    not participant
+                                    or list_meetings.participant_in_meeting(r, participant)
+                                )
+                                and (statuses is None or r["Status"] in statuses)
+                            ][:limit]
+                            with self.subTest(
+                                size=size, user=user, status=status, p=participant, limit=limit
+                            ):
+                                result = run(
+                                    FakeTable(rows),
+                                    user_id=user,
+                                    is_admin=admin,
+                                    status=status,
+                                    participant=participant,
+                                    limit=limit,
+                                )
+                                self.assertEqual(ids(result), expected)
+                                self.assertEqual(result["count"], len(expected))
 
     def test_a_row_that_changed_after_the_first_read_is_decided_again(self):
         table = FakeTable([meeting("a", status="STARTED"), meeting("b", status="STARTED")])

@@ -84,7 +84,7 @@ class FakeTable:
         return {"Item": row} if row else {}
 
 
-def row(call_id, owner=ME, status="ENDED"):
+def row(call_id, owner=ME, status="ENDED", **extra):
     return {
         "PK": f"c#{call_id}",
         "SK": f"c#{call_id}",
@@ -92,22 +92,24 @@ def row(call_id, owner=ME, status="ENDED"):
         "Owner": owner,
         "Status": status,
         "MeetingTopic": f"topic {call_id}",
+        **extra,
     }
 
 
-def call(arguments, rows, user_id=ME, is_admin="false", tool="list_meetings"):
+def call(arguments, rows, user_id=ME, is_admin="false", tool="list_meetings", scope=None):
     body = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
         "params": {"name": tool, "arguments": arguments},
     }
+    authorizer = {"userId": user_id, "username": user_id, "isAdmin": is_admin}
+    if scope is not None:
+        authorizer["scope"] = scope
     event = {
         "httpMethod": "POST",
         "body": json.dumps(body),
-        "requestContext": {
-            "authorizer": {"userId": user_id, "username": user_id, "isAdmin": is_admin}
-        },
+        "requestContext": {"authorizer": authorizer},
     }
     table = FakeTable(rows)
     resource = type("Resource", (), {"Table": lambda self, name: table})()
@@ -154,6 +156,49 @@ class TestListMeetingsThroughTheEndpoint(unittest.TestCase):
         answer = json.loads(call({}, rows)["content"][0]["text"])
 
         self.assertEqual([m["meetingId"] for m in answer["meetings"]], ["mine"])
+
+    def test_a_meeting_shared_with_the_caller_is_listed_for_a_read_key(self):
+        rows = [
+            row("theirs", owner=OTHER),
+            row("shared", owner=OTHER, SharedWith=[ME]),
+            row("shared-text", owner=OTHER, SharedWith=f"{OTHER},{ME}"),
+            row("mine"),
+        ]
+
+        answer = json.loads(call({}, rows, scope="read")["content"][0]["text"])
+
+        self.assertEqual(
+            [m["meetingId"] for m in answer["meetings"]], ["shared", "shared-text", "mine"]
+        )
+
+    def test_an_agent_id_alone_grants_nothing(self):
+        rows = [row("theirs", owner=OTHER, AgentId=ME), row("shared", owner=OTHER, AgentId=ME)]
+
+        answer = json.loads(call({}, rows, scope="read-write")["content"][0]["text"])
+
+        self.assertEqual(answer["meetings"], [])
+
+    def test_a_request_without_a_caller_is_refused_before_any_row_is_read(self):
+        table_reads = []
+        with patch("boto3.resource", side_effect=lambda *a, **k: table_reads.append(a)):
+            event = {
+                "httpMethod": "POST",
+                "body": json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {"name": "list_meetings", "arguments": {}},
+                    }
+                ),
+                "requestContext": {
+                    "authorizer": {"userId": "", "username": "", "isAdmin": "false"}
+                },
+            }
+            response = index.lambda_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(table_reads, [])
 
     def test_an_admin_sees_the_meetings_of_others(self):
         rows = [row("theirs", owner=OTHER, status="STARTED")]

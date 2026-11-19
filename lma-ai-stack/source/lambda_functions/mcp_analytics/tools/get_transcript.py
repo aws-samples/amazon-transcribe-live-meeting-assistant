@@ -112,8 +112,8 @@ def execute(
 
 def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:
     """
-    Check if user has permission to access meeting.
-    Admins can access all meetings, users can access only their own.
+    Check if user has permission to access meeting: getCall's rule -- an
+    Admin, the meeting's owner, or a user it is shared with (tools/access.py).
     """
     if is_admin:
         return True
@@ -127,10 +127,10 @@ def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:
         response = table.get_item(Key={"PK": f"c#{meeting_id}", "SK": f"c#{meeting_id}"})
 
         meeting = response.get("Item", {})
-        owner = meeting.get("Owner", meeting.get("AgentId", ""))
+        # Imported here: this module's own tests load it without the package.
+        from tools.access import Caller, can_read  # pylint: disable=import-outside-toplevel
 
-        # Check if user is the owner
-        return owner == user_id
+        return can_read(meeting, Caller(user_id=user_id or ""))
 
     except Exception as e:
         logger.error(f"Error checking meeting access: {e}")
