@@ -20,7 +20,15 @@ Self-contained: it needs no meeting, no Cognito user and no setting change. The
 deletion is invoked with the ``scheduled`` trigger, which deletes the one
 synthetic meeting's transcript at once whatever the Retention section says.
 
-Used by test_meeting_chat_segment_is_stored_read_and_deleted in
+It also follows a chat attachment the same way (``send_attachment``): a
+Markdown file put in the meeting's attachments folder, as the VP stores one
+(chat-attachments.ts), and the ADD_CHAT_ATTACHMENT event naming it. The call
+event processor stores the attachment's item and queues the summarizer, which
+writes its AI title and summary; the transcript deletion removes the item and
+the file.
+
+Used by test_meeting_chat_segment_is_stored_read_and_deleted and
+test_chat_attachment_is_summarized_and_deleted_with_the_transcript in
 test_lma_integration.py, and can be run standalone:
 
     AWS_PROFILE=default python integ-tests/meeting_chat_probe.py lma-integtest1
@@ -41,6 +49,16 @@ from boto3.dynamodb.types import TypeDeserializer
 from kds_pipeline_probe import _stack_resources, _stream_name
 
 CHAT_CHANNEL = "MEETING_CHAT"
+ATTACHMENTS_PREFIX = "lma-chat-attachments/"
+#: A short Markdown file, the type whose summary the live test of #1185 found
+#: missing on a reasoning model.
+ATTACHMENT_NAME = "integ-notes.md"
+ATTACHMENT_BODY = (
+    b"# Q3 launch checklist\n\n"
+    b"- Freeze the release branch on 3 March\n"
+    b"- Finish the pricing page\n"
+    b"- Brief the support team\n"
+)
 OWNER = "integ-test@lma.aws"
 SENDER = "Integ Chat Sender"
 
@@ -57,6 +75,8 @@ class ChatProbe:
     call_id: str
     segment_id: str
     text: str
+    bucket: Optional[str] = None
+    attachment_id: Optional[str] = None
 
     @classmethod
     def for_stack(cls, stack_name: str, region: Optional[str] = None) -> "ChatProbe":
@@ -74,6 +94,8 @@ class ChatProbe:
             raise RuntimeError(f"{stack_name} has no AISTACK nested stack")
         ai = {r["LogicalResourceId"]: r["PhysicalResourceId"] for r in _stack_resources(cfn, ai_stack)}
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        parameters = cfn.describe_stacks(StackName=ai_stack)["Stacks"][0].get("Parameters", [])
+        bucket = next((p["ParameterValue"] for p in parameters if p["ParameterKey"] == "S3BucketName"), None)
         return cls(
             session=session,
             stream=_stream_name(cfn, stack_name),
@@ -85,6 +107,9 @@ class ChatProbe:
             # A marker no transcript would hold by chance, plus a link, as a
             # participant's message would carry one.
             text=f"integ chat marker {stamp} https://example.com/integ-{stamp}",
+            bucket=bucket,
+            # Zero-padded milliseconds plus a suffix, as attachmentIdFor writes.
+            attachment_id=f"0000001500-{stamp[-8:]}",
         )
 
     # ── the events a Virtual Participant sends ────────────────────────────────
@@ -147,6 +172,67 @@ class ChatProbe:
                 "RefreshToken": "",
             }
         )
+
+    def attachment_folder(self) -> str:
+        """The meeting's attachments folder, named as chat-attachments.ts names it."""
+        import re
+
+        name = re.sub(r"_+$", "", re.sub(r"^_+", "", re.sub(r"[^a-zA-Z0-9_.]", "_", self.call_id)))
+        return f"{ATTACHMENTS_PREFIX}{name}/"
+
+    def attachment_key(self) -> str:
+        return f"{self.attachment_folder()}{self.attachment_id}/{ATTACHMENT_NAME}"
+
+    def send_attachment(self) -> None:
+        """Store a Markdown file as the VP does, and send the event it sends, field for field."""
+        if not self.bucket:
+            raise RuntimeError("the AI stack names no S3BucketName")
+        self.session.client("s3").put_object(
+            Bucket=self.bucket,
+            Key=self.attachment_key(),
+            Body=ATTACHMENT_BODY,
+            ContentType="text/markdown",
+            ContentDisposition="attachment",
+        )
+        self._put(
+            {
+                "EventType": "ADD_CHAT_ATTACHMENT",
+                "CallId": self.call_id,
+                "AttachmentId": self.attachment_id,
+                "SegmentId": self.segment_id,
+                "Timestamp": 1.5,
+                "FileName": ATTACHMENT_NAME,
+                "Platform": "zoom",
+                "Kind": "DOCUMENT",
+                "Status": "STORED",
+                "ContentType": "text/markdown",
+                "Size": len(ATTACHMENT_BODY),
+                "S3Key": self.attachment_key(),
+                "Summarize": True,
+                "CreatedAt": datetime.now(timezone.utc).isoformat(),
+                "AccessToken": "",
+                "IdToken": "",
+                "RefreshToken": "",
+            }
+        )
+
+    def attachment_item(self) -> Optional[Dict[str, Any]]:
+        items = self._items(f"att#{self.call_id}")
+        return next((i for i in items if i.get("SK") == f"a#{self.attachment_id}"), None)
+
+    def summarized_attachment(self) -> Optional[Dict[str, Any]]:
+        item = self.attachment_item()
+        return item if item and item.get("SummaryState") else None
+
+    def attachment_files(self) -> List[str]:
+        """Every version of every file left in the meeting's attachments folder."""
+        if not self.bucket:
+            return []
+        found: List[str] = []
+        paginator = self.session.client("s3").get_paginator("list_object_versions")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.attachment_folder()):
+            found += [v["Key"] for v in page.get("Versions", []) + page.get("DeleteMarkers", [])]
+        return found
 
     # ── reading back ──────────────────────────────────────────────────────────
 
@@ -211,7 +297,16 @@ class ChatProbe:
     def cleanup(self) -> None:
         """Best effort: the synthetic meeting's record and anything left of its transcript."""
         ddb = self.session.client("dynamodb")
-        for pk in (f"c#{self.call_id}", f"trs#{self.call_id}"):
+        if self.bucket:
+            try:
+                s3 = self.session.client("s3")
+                paginator = s3.get_paginator("list_object_versions")
+                for page in paginator.paginate(Bucket=self.bucket, Prefix=self.attachment_folder()):
+                    for v in page.get("Versions", []) + page.get("DeleteMarkers", []):
+                        s3.delete_object(Bucket=self.bucket, Key=v["Key"], VersionId=v["VersionId"])
+            except Exception:  # noqa: BLE001
+                pass
+        for pk in (f"c#{self.call_id}", f"trs#{self.call_id}", f"att#{self.call_id}"):
             try:
                 for item in self._items(pk):
                     ddb.delete_item(
