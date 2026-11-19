@@ -4695,11 +4695,13 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/${TranscriptFilePrefix}*"
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-chat-attachments/*"
-              # The one-time schedules, in this stack's group only.
+              # The one-time schedules, in this stack's group only. A schedule
+              # is deleted when the meeting is rejoined.
               - Effect: Allow
                 Action:
                   - scheduler:CreateSchedule
                   - scheduler:UpdateSchedule
+                  - scheduler:DeleteSchedule
                 Resource: !Sub "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${TranscriptDeletionScheduleGroup}/*"
               - Effect: Allow
                 Action:
@@ -7810,6 +7812,19 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # The START event of a session a rejoin allowed makes the meeting live again
+  # (see startCallSession.request.vtl and docs/virtual-participant.md#rejoin).
+  StartCallSessionAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: startCallSession
+      RequestMappingTemplateS3Location: ../source/appsync/startCallSession.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   AddCallDetectedLanguageAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -10473,10 +10488,30 @@ Resources:
           # per-VP listener rules and target groups, which exist solely on the
           # ECS launch paths.
           ALB_LISTENER_ARN: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
+          # Rejoin (rejoinVirtualParticipant): the meeting record it allows a
+          # session on, and the launcher it starts. Join again
+          # (joinAgainVirtualParticipant) starts the same launcher.
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          VP_STATE_MACHINE_ARN: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+          # Join again writes ExpiresAfter on the new row, as
+          # createVirtualParticipant does.
+          MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref VirtualParticipantTable
         - Statement:
+            # Rejoin reads the meeting record and its transcript's end, and
+            # writes the session it allows onto the meeting record.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Resource: !GetAtt EventSourcingTable.Arn
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
             - Effect: Allow
               Action:
                 - kinesis:PutRecord
@@ -11916,6 +11951,37 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: endVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/endVirtualParticipant.js
+
+  # Rejoin is answered by the same Lambda, through the same resolver code,
+  # which names the operation after the field it resolves.
+  RejoinVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: rejoinVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/endVirtualParticipant.js
+
+  # Join again as a new meeting: the same Lambda and resolver code. The
+  # resolver's answer, published to onCreateVirtualParticipant, carries no
+  # meeting password.
+  JoinAgainVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: joinAgainVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
       Runtime:
         Name: APPSYNC_JS

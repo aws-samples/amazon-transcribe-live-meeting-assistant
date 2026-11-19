@@ -74,6 +74,25 @@ which also lists the retention stack parameters a preset cannot set, and
   deletion, such as a meeting assistant answer that was still being written or
   a segment the speech engine corrected after the meeting ended.
 
+- **When the meeting is reopened** by a Virtual Participant
+  [rejoin](virtual-participant.md#rejoin) while the setting is on, a pending
+  deletion is cancelled once the rejoined session starts capturing, because the
+  meeting is being captured again. The rejoined session's end schedules the
+  deletion afresh, by the rules above. A summary written while the meeting is
+  in progress, such as the earlier session's summary arriving after the
+  rejoined session has started, neither deletes the transcript nor schedules
+  a deletion; the rejoined session's own summary does. A cancel that reaches the deletion
+  function only after that session has ended changes nothing. While the
+  setting is off, a rejoin keeps the pending deletion: it runs at its time,
+  during the rejoined session if that is still going on, as the next paragraph
+  describes. A rejoin whose session never starts (its launch fails, or
+  the Virtual Participant is not admitted to the meeting) does not reopen the
+  meeting, and the pending deletion runs at its time. A meeting whose
+  transcript has already been deleted cannot be reopened, and a deletion that
+  runs between the rejoin and the start of its session stops the meeting from
+  reopening: the relaunched Virtual Participant is ended. Transcript segments
+  that arrive for a meeting whose transcript has been deleted are not written.
+
 A scheduled deletion runs at its time even if the setting has since been
 turned off. Participants may have been told the transcript would be deleted,
 and turning the setting off does not undo that promise for meetings that have

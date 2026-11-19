@@ -276,6 +276,28 @@ def capture_context_fields(message: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def session_number_of(record: Any, key: str = "SessionNumber") -> int:
+    """The capture session that ``record[key]`` names.
+
+    A meeting has one session unless it is rejoined (docs/virtual-participant.md#rejoin).
+    A Virtual Participant names its session in every START and END, the first
+    session's included. Events from streaming clients, the stale-meeting reaper
+    and older VP releases name none, which is read as session 1. A meeting
+    record carries ``SessionStartedNumber`` once a later session has started.
+    A number below 2 is the first session too, and a bool is not read as a number.
+    """
+    if not isinstance(record, dict):
+        return 1
+    value = record.get(key)
+    if isinstance(value, bool):
+        return 1
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return number if number > 1 else 1
+
+
 #: Longest chat sender name stored in Call.TranscriptionPause.
 MAX_PAUSED_BY_LENGTH = 200
 

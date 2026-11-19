@@ -213,47 +213,66 @@ def _delete_stored_recording(key, callid, kind):
     return 1
 
 
-def delete_audio_recording(callid, audio_url=None):
-    """Delete the audio recording file the meeting record's RecordingUrl names.
+def _stored_urls(current, earlier=None):
+    """The recording links a meeting record names, each once.
+
+    ``current`` is RecordingUrl or VideoRecordingUrl, ``earlier`` the matching
+    RecordingUrls or VideoRecordingUrls list, which holds the link of every
+    session of a meeting continued by a rejoin (and can name one twice).
+    """
+    urls = []
+    for url in [*(earlier if isinstance(earlier, list) else []), current]:
+        if isinstance(url, str) and url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def delete_audio_recording(callid, audio_url=None, earlier_urls=None):
+    """Delete the audio recording files the meeting record's links name.
 
     delete_recordings_transcripts removes the files whose names begin with the
     meeting's CallId, which is how the transcriber names its recordings. The
     Virtual Participant names its file from the meeting name and the time the
     recording was written, so that file is found only through the URL stored on
-    the meeting. Returns 1 when a file was deleted and 0 when there was none;
-    raises when S3 does not delete one of its versions (see
+    the meeting: RecordingUrl, and RecordingUrls (``earlier_urls``) for every
+    session of a meeting continued by a rejoin. Returns the number of files
+    deleted; raises when S3 does not delete one of their versions (see
     _delete_stored_recording).
     """
     if not callid:
         return 0
-    stored = _recording_key_from_url(audio_url, S3_RECORDINGS_PREFIX)
-    if not stored:
-        return 0
-    deleted = _delete_stored_recording(stored, callid, "audio")
-    if deleted:
-        logger.info("Deleted audio recording %s for %s", stored, callid)
+    deleted = 0
+    for url in _stored_urls(audio_url, earlier_urls):
+        stored = _recording_key_from_url(url, S3_RECORDINGS_PREFIX)
+        if not stored:
+            continue
+        if _delete_stored_recording(stored, callid, "audio"):
+            deleted += 1
+            logger.info("Deleted audio recording %s for %s", stored, callid)
     return deleted
 
 
-def delete_video_recordings(callid, video_url=None):
-    """Delete the meeting's video recording and any leftover recording segments.
+def delete_video_recordings(callid, video_url=None, earlier_urls=None):
+    """Delete the meeting's video recordings and any leftover recording segments.
 
-    Two keys are known exactly, so only those are deleted: the file the meeting
-    record's VideoRecordingUrl names, and the Virtual Participant's segments
+    Only keys known exactly are deleted: the files the meeting record's
+    VideoRecordingUrl and VideoRecordingUrls (``earlier_urls``, every session of
+    a meeting continued by a rejoin) name, and the Virtual Participant's segments
     under ``<chunks prefix><CallId>/``, a folder named with the CallId as it is
     (the trailing slash keeps one meeting's folder from matching another whose
     id merely begins the same way). The video file names themselves are not
     searched: both producers turn the CallId into a file name by replacing
     characters, so two meetings can share one, and a name is no proof of whose
-    file it is. Returns the number of recording files deleted (0 or 1); raises
-    when S3 does not delete one of their versions.
+    file it is. Returns the number of recording files deleted; raises when S3
+    does not delete one of their versions.
     """
     if not callid:
         return 0
     deleted = 0
-    stored = _video_key_from_url(video_url)
-    if stored:
-        deleted = _delete_stored_recording(stored, callid, "video")
+    for url in _stored_urls(video_url, earlier_urls):
+        stored = _video_key_from_url(url)
+        if stored:
+            deleted += _delete_stored_recording(stored, callid, "video")
     segments = _batch_delete_prefix(S3_BUCKET_NAME, f"{S3_VIDEO_CHUNKS_PREFIX}{callid}/")
     if deleted or segments:
         logger.info(
@@ -275,6 +294,8 @@ def get_call_details(appsync_session, schema, callid):
                     schema.Call.SharedWith,
                     schema.Call.RecordingUrl,
                     schema.Call.VideoRecordingUrl,
+                    schema.Call.RecordingUrls,
+                    schema.Call.VideoRecordingUrls,
                 )
             )
         )
@@ -772,10 +793,15 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")
 
-        # After the details, because the stored RecordingUrl and VideoRecordingUrl
-        # name the files.
-        delete_audio_recording(callid, call_details.get("RecordingUrl"))
-        delete_video_recordings(callid, call_details.get("VideoRecordingUrl"))
+        # After the details, because the stored links name the files: the
+        # current RecordingUrl and VideoRecordingUrl, and the lists that hold
+        # every session's.
+        delete_audio_recording(
+            callid, call_details.get("RecordingUrl"), call_details.get("RecordingUrls")
+        )
+        delete_video_recordings(
+            callid, call_details.get("VideoRecordingUrl"), call_details.get("VideoRecordingUrls")
+        )
 
         input = {
             "CallId": callid,

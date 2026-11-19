@@ -111,6 +111,6 @@ test('stop waits, with a bound, for the engine run to release its MicroVM, and a
     const once = methodBody('private async runMicrovmTranscriptionOnce');
     assert.match(
         once,
-        /const acquired = pending \?\? \(await acquireLease\(callId\)\) \?\? null;[\s\S]*const meetingReady = await meetingSession\.start\(\);\s*if \(!this\.isTranscribing\) \{[\s\S]*?await this\.finishMicrovmSessions\(\);\s*await this\.releaseMicrovm\(meetingSession\);\s*return true;/,
+        /const acquired = pending \?\? \(await acquireLease\(callId, kinesisStreamManager\.sessionNumber\)\) \?\? null;[\s\S]*const meetingReady = await meetingSession\.start\(\);\s*if \(!this\.isTranscribing\) \{[\s\S]*?await this\.finishMicrovmSessions\(\);\s*await this\.releaseMicrovm\(meetingSession\);\s*return true;/,
     );
 });

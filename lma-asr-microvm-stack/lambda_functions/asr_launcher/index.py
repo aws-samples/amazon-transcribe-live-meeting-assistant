@@ -9,6 +9,9 @@ Invoked synchronously by the transcriber task (one MicroVM per meeting):
     {"action": "token",   "microvmId": "..."} -> {"ok", "authToken", "expiresAt"}
     {"action": "release", "microvmId": "..."} -> {"ok"}
 
+An acquire may also carry "session": the meeting's capture session, which a
+rejoined Virtual Participant gives from 2 on (see _token_seed).
+
 The transcriber owns the session and could call the lambda-microvms API itself,
 but that API is absent from the AWS SDKs (see microvm_client.py), so the calls
 live here in Python where the SigV4 shim already exists, and the task role only
@@ -87,6 +90,31 @@ def _client_token(call_id: str) -> str:
     return hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:32]
 
 
+def _session_of(value: object) -> int:
+    """The meeting's capture session an acquire is for: absent, or below 2, is the first."""
+    if isinstance(value, bool):
+        return 1
+    try:
+        return max(int(value), 1)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return 1
+
+
+def _token_seed(call_id: str, session: int, attempt: int) -> str:
+    """What the RunMicrovm client token is derived from.
+
+    RunMicrovm is idempotent on its token, so a repeated acquire for the same
+    meeting gets the MicroVM already started for it. A rejoined Virtual
+    Participant (docs/virtual-participant.md#rejoin) captures a later session of
+    the same meeting, whose MicroVM must be a new one, so its sessions from 2
+    on seed the token with the session. The first session, and streaming
+    clients, which name none, keep the meeting's token. A retry after a
+    MicroVM ended starts from a fresh one.
+    """
+    seed = call_id if session <= 1 else f"{call_id}#s{session}"
+    return seed if attempt == 0 else f"{seed}#{uuid.uuid4().hex}"
+
+
 def _mint_token(microvm_id: str) -> dict:
     response = microvms.create_microvm_auth_token(
         microvm_identifier=microvm_id,
@@ -100,13 +128,13 @@ def _mint_token(microvm_id: str) -> dict:
     }
 
 
-def _acquire(call_id: str) -> dict:
+def _acquire(call_id: str, session: int = 1) -> dict:
     if not call_id:
         return {"ok": False, "reason": "callId is required to acquire an ASR MicroVM"}
     deadline = time.time() + ACQUIRE_TIMEOUT_SECONDS
     outcome: dict = {}
     for attempt in range(ACQUIRE_ATTEMPTS):
-        outcome = _start_microvm(call_id, attempt, deadline)
+        outcome = _start_microvm(call_id, attempt, deadline, session)
         remaining = deadline - time.time()
         if outcome.get("ok") or not outcome.get("retryable") or remaining < RETRY_MIN_REMAINING_SECONDS:
             break
@@ -120,8 +148,8 @@ def _acquire(call_id: str) -> dict:
     return outcome
 
 
-def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
-    token_seed = call_id if attempt == 0 else f"{call_id}#{uuid.uuid4().hex}"
+def _start_microvm(call_id: str, attempt: int, deadline: float, session: int = 1) -> dict:
+    token_seed = _token_seed(call_id, session, attempt)
     try:
         response = microvms.run_microvm(
             imageIdentifier=os.environ["MICROVM_IMAGE_ARN"],
@@ -225,7 +253,7 @@ def lambda_handler(event, context):
     logger.info("ASR launcher action=%s", action)
 
     if action == "acquire":
-        return _acquire(str(event.get("callId", "")))
+        return _acquire(str(event.get("callId", "")), _session_of(event.get("session")))
     if action == "release":
         return _release(str(event.get("microvmId", "")))
     if action == "token":

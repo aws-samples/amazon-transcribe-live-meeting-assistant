@@ -37,6 +37,7 @@ the response reads are the pipeline's own.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
 import sys
@@ -2138,3 +2139,342 @@ def test_get_call_details_returns_the_meetings_detected_languages(schema):
     details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
     assert details["DetectedLanguages"] == ["en-US"]
     assert "DetectedLanguages" in print_ast(session.queries[0])
+
+
+# ── a rejoined meeting: a later capture session reopens it ──────────────────
+#
+# A rejoin (docs/virtual-participant.md#rejoin) allows a later session number on
+# the meeting record. That session's START finds the meeting already created,
+# and startCallSession makes it live again -- once. The END of the session then
+# finds the meeting open, so the end-of-meeting work runs again over the whole
+# transcript.
+
+ALREADY_EXISTS = TransportQueryError(
+    "Item already exists",
+    errors=[{"message": "Item already exists", "errorType": "DynamoDB"}],
+)
+SESSION_REFUSED = TransportQueryError(
+    "item put condition failure",
+    errors=[{"message": "item put condition failure", "errorType": "DynamoDB"}],
+)
+REOPENED = {"startCallSession": {"CallId": "call-1", "Status": "STARTED"}}
+
+REJOINED_START = {
+    "EventType": "START",
+    "CallId": "call-1",
+    "AgentId": "someone@example.com",
+    "SessionNumber": 2,
+}
+
+
+def process_start_with_hook(session: Any, message: Dict[str, Any], monkeypatch) -> RecordingLambda:
+    """Runs a START event with a start-of-call hook configured; returns the hook."""
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message=message,
+            appsync_session=session,
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+    return hook
+
+
+def test_the_start_of_an_allowed_session_reopens_the_meeting_and_runs_the_hook_once(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, [ALREADY_EXISTS, REOPENED])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    (sent,) = mutation_inputs(session, "startCallSession")
+    assert sent == {"CallId": "call-1", "SessionNumber": "2"}
+    assert [json.loads(i["Payload"])["SessionNumber"] for i in hook.invocations] == [2]
+    assert metric_names.MEETINGS_STARTED not in emitted.counts, "it is the same meeting"
+
+
+def test_a_redelivered_start_of_a_session_does_not_run_the_hook_again(schema, emitted, monkeypatch):
+    session = QueuedSession(schema, [ALREADY_EXISTS, SESSION_REFUSED])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    assert len(mutation_inputs(session, "startCallSession")) == 1
+    assert hook.invocations == []
+    assert any("not started" in m for m in cep.LOGGER.at_level("INFO"))
+
+
+def test_a_start_naming_no_later_session_never_tries_to_reopen_the_meeting(
+    schema, emitted, monkeypatch
+):
+    session = QueuedSession(schema, [ALREADY_EXISTS])
+    message = {key: value for key, value in REJOINED_START.items() if key != "SessionNumber"}
+    hook = process_start_with_hook(session, message, monkeypatch)
+
+    assert mutation_inputs(session, "startCallSession") == []
+    assert hook.invocations == []
+
+
+def test_a_new_meeting_naming_a_session_is_created_without_a_reopen(schema, emitted, monkeypatch):
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = QueuedSession(schema, [created])
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+
+    assert mutation_inputs(session, "startCallSession") == []
+    assert len(hook.invocations) == 1
+
+
+def test_the_end_of_a_reopened_session_runs_the_end_of_meeting_work_again(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert _deletion_payloads(deletion_function) == [
+        {"CallId": "call-1", "Trigger": "meeting-ended"}
+    ]
+    assert [i["Status"] for i in mutation_inputs(session, "updateCallStatus")] == ["ENDED"]
+    assert metric_names.MEETINGS_ENDED not in emitted.counts, "the meeting ended once already"
+
+
+def test_the_end_of_an_earlier_session_leaves_a_reopened_meeting_live(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [{"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 3}}],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert mutation_inputs(session, "updateCallStatus") == []
+    assert _deletion_payloads(deletion_function) == []
+
+
+def test_an_end_naming_no_session_still_ends_a_reopened_meeting(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert [i["Status"] for i in mutation_inputs(session, "updateCallStatus")] == ["ENDED"]
+
+
+def test_only_the_not_started_marker_counts_as_a_session_not_started():
+    assert cep.was_session_started(cep.SESSION_NOT_STARTED) is False
+    assert cep.was_session_started(REOPENED) is True
+    assert cep.was_session_started(None) is False
+
+
+# ── the transcript deletion of a rejoined meeting ───────────────────────────
+#
+# A pending deletion is cancelled only once the rejoined session has started.
+# A session that never starts -- the launch failed, or the Virtual Participant
+# was not admitted -- leaves the ended meeting and its deletion schedule alone.
+
+
+def _start_with_deletion(schema, responses, monkeypatch) -> List[Dict[str, Any]]:
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    session = QueuedSession(schema, responses)
+    hook = process_start_with_hook(session, dict(REJOINED_START), monkeypatch)
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == DELETION_ARN
+    ]
+
+
+def test_a_started_session_cancels_the_pending_transcript_deletion(schema, emitted, monkeypatch):
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, REOPENED], monkeypatch)
+    assert payloads == [{"CallId": "call-1", "Trigger": "meeting-reopened", "SessionNumber": 2}]
+
+
+def test_a_session_that_was_not_started_leaves_the_deletion_alone(schema, emitted, monkeypatch):
+    payloads = _start_with_deletion(schema, [ALREADY_EXISTS, SESSION_REFUSED], monkeypatch)
+    assert payloads == []
+
+
+def test_a_failure_to_queue_the_cancel_does_not_fail_the_start(schema, emitted, monkeypatch):
+    class FailingForDeletion(RecordingLambda):
+        def invoke(self, **kwargs: Any) -> Dict[str, Any]:
+            if kwargs["FunctionName"] == DELETION_ARN:
+                raise RuntimeError("throttled")
+            return super().invoke(**kwargs)
+
+    hook = FailingForDeletion()
+    monkeypatch.setattr(cep, "TRANSCRIPT_DELETION_FUNCTION_ARN", DELETION_ARN)
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message=dict(REJOINED_START),
+            appsync_session=QueuedSession(schema, [ALREADY_EXISTS, REOPENED]),
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+    assert any(
+        "could not tell the transcript deletion" in m for m in cep.LOGGER.at_level("EXCEPTION")
+    )
+    assert [i["FunctionName"] for i in hook.invocations] == ["arn:hook"]
+
+
+def test_the_end_of_a_session_that_never_started_leaves_the_deletion_alone(
+    schema, emitted, deletion_function, monkeypatch
+):
+    """The Virtual Participant was not admitted: no START for session 2 arrived,
+    so the meeting is still ENDED from session 1, with its deletion scheduled."""
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "ENDED", "SessionStartedNumber": None}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 2}, monkeypatch
+    )
+    assert _deletion_payloads(deletion_function) == []
+    assert metric_names.MEETINGS_ENDED not in emitted.counts
+
+
+# ── a rejoined session that cannot reopen a meeting whose transcript is deleted ──
+#
+# A scheduled deletion that runs between the rejoin and the session's START makes
+# startCallSession refuse. The relaunched Virtual Participant is then ended, and
+# any segment that still arrives for the meeting is not written.
+
+DELETED_AT = "2026-11-18T11:00:00+00:00"
+REJOINED_START_WITH_VP = {**REJOINED_START, "VirtualParticipantId": "vp-1"}
+
+
+def _refused_start(schema, meeting, vp_row, monkeypatch) -> QueuedSession:
+    session = QueuedSession(
+        schema,
+        [
+            ALREADY_EXISTS,
+            SESSION_REFUSED,
+            {"getCall": {"CallId": "call-1", **meeting}},
+            {"getVirtualParticipant": vp_row},
+            {"endVirtualParticipant": {"id": "vp-1"}},
+            {"updateVirtualParticipant": {"id": "vp-1"}},
+        ],
+    )
+    process_start_with_hook(session, dict(REJOINED_START_WITH_VP), monkeypatch)
+    return session
+
+
+def test_a_session_refused_because_the_transcript_was_deleted_ends_its_virtual_participant(
+    schema, emitted, monkeypatch
+):
+    session = _refused_start(
+        schema,
+        {"TranscriptDeletedAt": DELETED_AT},
+        {"id": "vp-1", "CallId": "call-1", "sessionNumber": 2},
+        monkeypatch,
+    )
+    assert mutation_inputs(session, "endVirtualParticipant") == [
+        {"id": "vp-1", "endReason": cep.TRANSCRIPT_DELETED_END_REASON}
+    ]
+    assert mutation_inputs(session, "updateVirtualParticipant") == [
+        {"id": "vp-1", "errorMessage": cep.TRANSCRIPT_DELETED_END_REASON}
+    ]
+
+
+def test_a_redelivered_start_of_a_live_meeting_ends_no_virtual_participant(
+    schema, emitted, monkeypatch
+):
+    session = _refused_start(
+        schema, {}, {"id": "vp-1", "CallId": "call-1", "sessionNumber": 2}, monkeypatch
+    )
+    assert mutation_inputs(session, "endVirtualParticipant") == []
+
+
+@pytest.mark.parametrize(
+    "vp_row",
+    [
+        {"id": "vp-1", "CallId": "another-call", "sessionNumber": 2},
+        {"id": "vp-1", "CallId": "call-1", "sessionNumber": 3},
+        None,
+    ],
+)
+def test_only_the_virtual_participant_that_rejoined_as_this_session_is_ended(
+    schema, emitted, vp_row, monkeypatch
+):
+    session = _refused_start(schema, {"TranscriptDeletedAt": DELETED_AT}, vp_row, monkeypatch)
+    assert mutation_inputs(session, "endVirtualParticipant") == []
+
+
+def test_a_segment_for_a_meeting_whose_transcript_was_deleted_is_not_written(
+    schema, emitted, monkeypatch
+):
+    session = segment_session(schema, _meeting_record(TranscriptDeletedAt=DELETED_AT))
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    assert mutation_inputs(session, "addTranscriptSegment") == []
+    assert mutation_inputs(session, "updateCallAggregation") == []
+    assert metric_names.TRANSCRIPT_SEGMENTS_WRITTEN not in emitted.counts
+
+
+def test_a_segment_for_a_meeting_with_its_transcript_is_written(schema, emitted, monkeypatch):
+    session = segment_session(schema, _meeting_record())
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    assert len(mutation_inputs(session, "addTranscriptSegment")) == 1
+
+
+def test_a_late_end_of_the_first_session_leaves_a_rejoined_meeting_live(
+    schema, emitted, deletion_function, monkeypatch
+):
+    """The Virtual Participant names session 1 in its END too, so this is told apart."""
+    session = QueuedSession(
+        schema,
+        [{"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}}],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 1}, monkeypatch
+    )
+    assert mutation_inputs(session, "updateCallStatus") == []
+    assert _deletion_payloads(deletion_function) == []
+
+
+class EchoingTranscriptHook:
+    """A transcript hook that hands each segment back unchanged, as a new dict."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, **kwargs: Any) -> Dict[str, Any]:
+        self.calls += 1
+        return {"Payload": io.BytesIO(kwargs["Payload"].encode("utf-8"))}
+
+
+def test_a_segment_of_a_deleted_transcript_is_dropped_with_a_transcript_hook_set(
+    schema, emitted, monkeypatch
+):
+    """The hook's answer replaces the segment with a new dict; the duration
+    update is still left out."""
+    hook = EchoingTranscriptHook()
+    session = segment_session(schema, _meeting_record(TranscriptDeletedAt=DELETED_AT))
+    run_with(
+        session,
+        dict(SEGMENT_EVENT),
+        monkeypatch,
+        TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN="arn:transcript-hook",
+        LAMBDA_HOOK_CLIENT=hook,
+    )
+    assert hook.calls == 1, "the hook ran, so the segment is a dict of its own"
+    assert mutation_inputs(session, "addTranscriptSegment") == []
+    assert mutation_inputs(session, "updateCallAggregation") == []

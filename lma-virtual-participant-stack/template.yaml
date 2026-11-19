@@ -4495,21 +4495,77 @@ Resources:
               except ClientError as e:
                   logger.warning(f'Kinesis PutRecord failed for CallId={call_id}: {e}')
 
-          def _delete_registry_entry(vp_id):
+          def _registered_task_arn(vp_id):
+              # The task the registry holds for the VP: its current run's.
+              try:
+                  resp = ddb.get_item(
+                      TableName=REGISTRY_TABLE,
+                      Key={'vpId': {'S': vp_id}},
+                      ProjectionExpression='taskArn',
+                      ConsistentRead=True,
+                  )
+              except ClientError as e:
+                  logger.warning(f'Registry read failed for vp_id={vp_id}: {e}')
+                  return None
+              return resp.get('Item', {}).get('taskArn', {}).get('S')
+
+          def _row_time(value):
+              # An ECS event time ('2026-11-19T10:00:00.123Z') written as the
+              # VP row writes its times (datetime.isoformat, UTC), so the two
+              # compare as strings in a condition expression.
+              if not value:
+                  return None
+              try:
+                  moment = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+              except ValueError:
+                  return None
+              return moment.astimezone(timezone.utc).isoformat(timespec='microseconds')
+
+          def _delete_registry_entry(vp_id, task_arn):
+              # Only this task's entry: a rejoined run registers its own
+              # task under the same vpId.
               try:
                   ddb.delete_item(
                       TableName=REGISTRY_TABLE,
                       Key={'vpId': {'S': vp_id}},
+                      ConditionExpression='attribute_not_exists(vpId) OR taskArn = :ta',
+                      ExpressionAttributeValues={':ta': {'S': task_arn}},
                   )
               except ClientError as e:
+                  if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                      return
                   logger.warning(f'Registry delete failed for vp_id={vp_id}: {e}')
 
-          def _mark_failed(vp_id, error_message):
+          def _mark_failed(vp_id, error_message, task_created_at=None):
               # Conditional update: only flip to FAILED if the row is
               # still in a non-terminal status. This makes us safe to
               # race against the VP's own emergencyCleanup and against
-              # the manage-Lambda's user-initiated end.
+              # the manage-Lambda's user-initiated end. A task created
+              # before the row was rejoined ran an earlier session, so its
+              # stop says nothing about the current one.
               now = datetime.now(timezone.utc).isoformat()
+              condition = (
+                  'attribute_exists(id) AND NOT (#s IN '
+                  '(:failed, :completed, :ended, :cancelled))'
+              )
+              names = {
+                  '#s': 'status',
+                  '#e': 'errorMessage',
+                  '#ea': 'updatedAt',
+                  '#endedAt': 'endedAt',
+              }
+              values = {
+                  ':failed': {'S': 'FAILED'},
+                  ':completed': {'S': 'COMPLETED'},
+                  ':ended': {'S': 'ENDED'},
+                  ':cancelled': {'S': 'CANCELLED'},
+                  ':err': {'S': error_message[:1000]},
+                  ':now': {'S': now},
+              }
+              if task_created_at:
+                  condition += ' AND (attribute_not_exists(#rj) OR #rj < :created)'
+                  names['#rj'] = 'rejoinedAt'
+                  values[':created'] = {'S': task_created_at}
               try:
                   ddb.update_item(
                       TableName=VP_TABLE,
@@ -4517,24 +4573,9 @@ Resources:
                       UpdateExpression=(
                           'SET #s = :failed, #e = :err, #ea = :now, #endedAt = :now'
                       ),
-                      ConditionExpression=(
-                          'attribute_exists(id) AND NOT (#s IN '
-                          '(:failed, :completed, :ended, :cancelled))'
-                      ),
-                      ExpressionAttributeNames={
-                          '#s': 'status',
-                          '#e': 'errorMessage',
-                          '#ea': 'updatedAt',
-                          '#endedAt': 'endedAt',
-                      },
-                      ExpressionAttributeValues={
-                          ':failed': {'S': 'FAILED'},
-                          ':completed': {'S': 'COMPLETED'},
-                          ':ended': {'S': 'ENDED'},
-                          ':cancelled': {'S': 'CANCELLED'},
-                          ':err': {'S': error_message[:1000]},
-                          ':now': {'S': now},
-                      },
+                      ConditionExpression=condition,
+                      ExpressionAttributeNames=names,
+                      ExpressionAttributeValues=values,
                   )
                   logger.info(
                       f'VP {vp_id} flipped to FAILED by reaper: {error_message}'
@@ -4564,8 +4605,8 @@ Resources:
                       'The meeting was interrupted because its host server was '
                       'restarted for routine infrastructure maintenance (e.g. an '
                       'automatic security patch reboot) — not because of a problem '
-                      'with the meeting link or password. Please re-add the Virtual '
-                      'Participant to rejoin the meeting. '
+                      'with the meeting link or password. Use Join again on this '
+                      'page to send it back to the meeting. '
                       f'(stopCode={stop_code}: '
                       f'{stopped_reason or "no reason given"}).'
                   )
@@ -4604,18 +4645,29 @@ Resources:
                   )
                   return {'skipped': 'no vp_id'}
 
+              # A rejoined VP runs a new task under the same vpId. The stop of
+              # an earlier one (its event can arrive late) is not the current
+              # run's: the registry holds the current task once it has
+              # registered, and before that the row's rejoinedAt is later
+              # than the earlier task's creation (see _mark_failed).
+              registered = _registered_task_arn(vp_id)
+              if registered and registered != task_arn:
+                  logger.info(
+                      f'Task {task_arn} of VP {vp_id} stopped, but the VP now runs '
+                      f'{registered}; left alone'
+                  )
+                  return {'vpId': vp_id, 'taskArn': task_arn, 'skipped': 'earlier task'}
+
               error_message = _build_error_message(stop_code, stopped_reason)
 
-              flipped = _mark_failed(vp_id, error_message)
+              flipped = _mark_failed(vp_id, error_message, _row_time(detail.get('createdAt')))
               if flipped:
                   call_id = _get_vp_callid(vp_id)
                   _send_end_to_kinesis(call_id)
-                  _delete_registry_entry(vp_id)
-              else:
-                  # Even if the VP row was already terminal, the registry
-                  # entry is now stale — its TTL will eventually clean up,
-                  # but explicit delete avoids a small window of confusion.
-                  _delete_registry_entry(vp_id)
+              # Even if the VP row was already terminal, the registry entry is
+              # now stale — its TTL will eventually clean up, but explicit
+              # delete avoids a small window of confusion.
+              _delete_registry_entry(vp_id, task_arn)
 
               return {
                   'vpId': vp_id,

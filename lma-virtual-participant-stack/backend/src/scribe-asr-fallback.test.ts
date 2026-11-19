@@ -45,7 +45,7 @@ test('the meeting is captured from before the MicroVM is acquired, not from when
     const body = methodBody('private async runMicrovmTranscriptionOnce');
     const capture = body.indexOf('this.startMeetingAudioFanout(');
     const recording = body.indexOf('this.audioStream(recordingStream)');
-    const acquire = body.indexOf('acquireLease(callId)');
+    const acquire = body.indexOf('acquireLease(callId, kinesisStreamManager.sessionNumber)');
     assert.ok(capture !== -1 && recording !== -1 && acquire !== -1);
     assert.ok(capture < acquire, 'the engine feed starts before the acquisition');
     assert.ok(recording < acquire, 'the recording starts with it, so the two clocks agree');

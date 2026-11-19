@@ -28,8 +28,15 @@ import type { AsrSegment } from './asr-microvm-client.js';
 // at 2 s backoff, no endpoint - and the timing and fallback tests below would run
 // against those. A dynamic import after the assignments is what makes the env
 // actually apply.
-const { MicrovmAsrSession, coalesceBacklog, fetchAsrRuntimeSwitches, finishWaitMs, resolveVpAsrEngine, speakerNameFor } =
-    await import('./asr-microvm-client.js');
+const {
+    MicrovmAsrSession,
+    acquireRequest,
+    coalesceBacklog,
+    fetchAsrRuntimeSwitches,
+    finishWaitMs,
+    resolveVpAsrEngine,
+    speakerNameFor,
+} = await import('./asr-microvm-client.js');
 
 interface FakeAsr {
     url: string;
@@ -829,6 +836,13 @@ test('finishing stops waiting when the engine closes the connection', async () =
     } finally {
         await asr.close();
     }
+});
+
+test('a rejoined session names itself in the ASR acquire; the first session does not', () => {
+    assert.deepEqual(acquireRequest('call-1'), { action: 'acquire', callId: 'call-1' });
+    assert.deepEqual(acquireRequest('call-1', 1), { action: 'acquire', callId: 'call-1' });
+    assert.deepEqual(acquireRequest('call-1', 2), { action: 'acquire', callId: 'call-1', session: 2 });
+    assert.deepEqual(acquireRequest('call-1', Number.NaN), { action: 'acquire', callId: 'call-1' });
 });
 
 test('the finish wait grows with the audio not yet finalised, within its bounds', () => {

@@ -61,25 +61,46 @@ def test_an_audio_recording_s3_did_not_delete_is_logged_and_raises(monkeypatch, 
 
 
 def test_deleting_a_meeting_deletes_the_audio_named_on_its_record(monkeypatch) -> None:
-    """delete_meeting reads RecordingUrl from the meeting and passes it on."""
+    """delete_meeting reads the recording links from the meeting and passes them on."""
     calls = []
     audio_url = _url(VP_FILE)
+    earlier_audio = [_url("rec/Team_sync_session_1.wav"), audio_url]
+    video_url = _url("lma-video-recordings/b.mp4")
+    earlier_video = [_url("lma-video-recordings/a.mp4"), video_url]
     monkeypatch.setattr(index, "cleanup_virtual_participants", lambda callid: None)
     monkeypatch.setattr(index, "delete_transcript_items", lambda callid: 0)
     monkeypatch.setattr(
         index,
         "get_call_details",
-        lambda *a: {"getCall": {"SharedWith": None, "RecordingUrl": audio_url}},
+        lambda *a: {
+            "getCall": {
+                "SharedWith": None,
+                "RecordingUrl": audio_url,
+                "RecordingUrls": earlier_audio,
+                "VideoRecordingUrl": video_url,
+                "VideoRecordingUrls": earlier_video,
+            }
+        },
     )
     monkeypatch.setattr(index, "delete_recordings_transcripts", lambda callid: None)
     monkeypatch.setattr(index, "delete_metering_records", lambda callid: 0)
     monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
-    monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
     monkeypatch.setattr(index, "delete_meeting_guidance", lambda callid: 0)
-    monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
-    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url: 0)
+    # A meeting continued by a rejoin keeps one CallId, so its attachments
+    # (keyed on the CallId) are deleted with every session's recordings.
     monkeypatch.setattr(
-        index, "delete_audio_recording", lambda callid, url: calls.append((callid, url))
+        index, "delete_chat_attachments", lambda callid: calls.append(("attachments", callid))
+    )
+    monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
+    monkeypatch.setattr(
+        index,
+        "delete_video_recordings",
+        lambda callid, url, earlier: calls.append(("video", callid, url, earlier)),
+    )
+    monkeypatch.setattr(
+        index,
+        "delete_audio_recording",
+        lambda callid, url, earlier: calls.append(("audio", callid, url, earlier)),
     )
 
     class _Field:
@@ -100,4 +121,27 @@ def test_deleting_a_meeting_deletes_the_audio_named_on_its_record(monkeypatch) -
             return {}
 
     index.delete_meeting(_Session(), _Field(), "m1", "cls#x", "x", "owner@example.com")
-    assert calls == [("m1", audio_url)]
+    # The attachments go in the parallel preparation, the recordings after it.
+    assert calls == [
+        ("attachments", "m1"),
+        ("audio", "m1", audio_url, earlier_audio),
+        ("video", "m1", video_url, earlier_video),
+    ]
+
+
+def test_every_sessions_audio_recording_is_deleted(monkeypatch) -> None:
+    """A meeting continued by a rejoin names one file per session in RecordingUrls."""
+    first = "rec/Team_sync_2026_11_07T13_00_00_000Z.wav"
+    s3 = FakeS3([first, VP_FILE])
+    monkeypatch.setattr(index, "s3_client", s3)
+    # The latest is also the current RecordingUrl, and a redelivery listed it twice.
+    urls = [_url(first), _url(VP_FILE), _url(VP_FILE)]
+    assert index.delete_audio_recording("m1", _url(VP_FILE), urls) == 2
+    assert sorted(s3.deleted) == sorted([first, VP_FILE])
+
+
+def test_a_meeting_without_the_list_still_has_its_audio_deleted(monkeypatch) -> None:
+    s3 = FakeS3([VP_FILE])
+    monkeypatch.setattr(index, "s3_client", s3)
+    assert index.delete_audio_recording("m1", _url(VP_FILE), None) == 1
+    assert s3.deleted == [VP_FILE]

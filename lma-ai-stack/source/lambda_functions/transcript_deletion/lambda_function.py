@@ -17,10 +17,20 @@ the meeting's ``CallId`` and a ``Trigger``:
     by which the meeting is deleted even if its summary never arrives.
 ``summary-written``
     By the call event processor, once the summary is stored. Moves the
-    deletion forward to the summary plus the delay, or deletes now.
+    deletion forward to the summary plus the delay, or deletes now. Not while
+    the meeting is live (``STARTED``): an earlier session's summary that lands
+    after a rejoined session has started leaves the deletion to that session's
+    END and summary. ``meeting-ended`` has no such check, because the END
+    invokes it before writing ``ENDED``.
 ``scheduled``
     By the one-time EventBridge Scheduler schedule either of the above made.
     Deletes.
+``meeting-reopened``
+    By the call event processor, with the ``SessionNumber``, when a rejoined
+    session of the meeting has started and made it live again
+    (docs/virtual-participant.md#rejoin). Cancels the pending deletion while the
+    meeting is still live in that session and the setting is on, because that
+    session's END schedules one afresh; see cancel_deletion.
 
 A schedule is only ever moved earlier, so a redelivered END cannot postpone a
 deletion. After a deletion made on the spot, one more is scheduled
@@ -98,7 +108,8 @@ SWEEP_MINUTES = 10
 MEETING_ENDED = "meeting-ended"
 SUMMARY_WRITTEN = "summary-written"
 SCHEDULED = "scheduled"
-TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED)
+MEETING_REOPENED = "meeting-reopened"
+TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED, MEETING_REOPENED)
 
 _clients: Dict[str, Any] = {}
 
@@ -189,7 +200,8 @@ def schedule_name(call_id: str) -> str:
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
     response = _table().get_item(
         Key=meeting_key(call_id),
-        ProjectionExpression="PK, TranscriptDeletionScheduledFor, TranscriptDeletedAt",
+        ProjectionExpression="PK, #status, TranscriptDeletionScheduledFor, TranscriptDeletedAt",
+        ExpressionAttributeNames={"#status": "Status"},
         ConsistentRead=True,
     )
     return response.get("Item")
@@ -487,6 +499,88 @@ def schedule_deletion(call_id: str, moment: datetime, context: Any) -> Dict[str,
     return {"action": "scheduled", "scheduledFor": _iso(moment)}
 
 
+def _session_of(value: Any) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(number, 1)
+
+
+def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
+    """Cancel the meeting's pending deletion while rejoined ``session`` is live.
+
+    Only while the meeting is STARTED in that session: this is invoked
+    asynchronously when the session starts, so it can arrive after the
+    session's own END has dealt with the deletion, and must then leave it
+    alone. Only when a deletion will follow, too: with the setting off, the
+    session's END schedules none, and the pending one is kept, as a scheduled
+    deletion is kept when the setting is turned off.
+
+    The recorded time is removed first, conditional on the meeting being as it
+    was read -- still live in the session, the deletion still pending at the
+    same time, the transcript still there -- and the schedule is deleted only
+    when that write succeeds.
+    """
+    response = _table().get_item(
+        Key=meeting_key(call_id),
+        ProjectionExpression=(
+            "PK, #status, SessionStartedNumber, TranscriptDeletionScheduledFor, TranscriptDeletedAt"
+        ),
+        ExpressionAttributeNames={"#status": "Status"},
+        ConsistentRead=True,
+    )
+    meeting = response.get("Item")
+    if meeting is None:
+        return {"action": "none"}
+    if meeting.get("TranscriptDeletedAt"):
+        return {"action": "deleted", "transcriptDeletedAt": meeting["TranscriptDeletedAt"]}
+    if (
+        meeting.get("Status") != "STARTED"
+        or _session_of(meeting.get("SessionStartedNumber")) != session
+    ):
+        LOGGER.info(
+            "meeting %s is not live in session %s; deletion left as it is", call_id, session
+        )
+        return {"action": "unchanged"}
+    scheduled_for = meeting.get("TranscriptDeletionScheduledFor")
+    if not scheduled_for:
+        return {"action": "none"}
+    if current_delay() is None:
+        LOGGER.info("deletion is off; meeting %s keeps its pending deletion", call_id)
+        return {"action": "kept", "scheduledFor": scheduled_for}
+    try:
+        _table().update_item(
+            Key=meeting_key(call_id),
+            UpdateExpression="REMOVE TranscriptDeletionScheduledFor",
+            ConditionExpression=(
+                "attribute_exists(PK) AND attribute_not_exists(TranscriptDeletedAt) "
+                "AND #status = :started AND SessionStartedNumber = :session "
+                "AND TranscriptDeletionScheduledFor = :at"
+            ),
+            ExpressionAttributeNames={"#status": "Status"},
+            ExpressionAttributeValues={
+                ":started": "STARTED",
+                ":session": session,
+                ":at": scheduled_for,
+            },
+        )
+    except ClientError as error:
+        if _error_code(error) != "ConditionalCheckFailedException":
+            raise
+        LOGGER.info("meeting %s changed while its deletion was being cancelled", call_id)
+        return {"action": "unchanged"}
+    try:
+        _client("scheduler").delete_schedule(
+            Name=schedule_name(call_id), GroupName=SCHEDULE_GROUP_NAME
+        )
+    except ClientError as error:
+        if _error_code(error) != "ResourceNotFoundException":
+            raise
+    LOGGER.info(json.dumps({"msg": "cancelled the transcript deletion", "callId": call_id}))
+    return {"action": "cancelled"}
+
+
 def delete_now(call_id: str, trigger: str, context: Any) -> Dict[str, Any]:
     outcome = delete_transcript(call_id, trigger)
     outcome["sweep"] = schedule_deletion(
@@ -505,6 +599,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # have been told the transcript would be deleted at that time.
     if trigger == SCHEDULED:
         return delete_transcript(call_id, trigger)
+    if trigger == MEETING_REOPENED:
+        return cancel_deletion(call_id, _session_of(event.get("SessionNumber")))
 
     delay = current_delay()
     if delay is None:
@@ -513,6 +609,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if trigger == MEETING_ENDED:
         wait = delay + (SUMMARY_WAIT_MINUTES if IS_TRANSCRIPT_SUMMARY_ENABLED else 0)
     else:
+        # A summary is written after its meeting has ended. One that is written
+        # while the meeting is live again -- an earlier session's summary
+        # arriving after a rejoined session has started -- neither deletes nor
+        # schedules: that session's own END and summary do.
+        meeting = read_meeting(call_id) or {}
+        if meeting.get("Status") == "STARTED":
+            LOGGER.info("meeting %s is live; its summary leaves the deletion as it is", call_id)
+            return {"action": "live"}
         wait = delay
     if wait == 0:
         return delete_now(call_id, trigger, context)

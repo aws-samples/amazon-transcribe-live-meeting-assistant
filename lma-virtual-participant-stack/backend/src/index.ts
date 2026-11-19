@@ -19,6 +19,7 @@ import { blankCameraInitScript } from './blank-camera.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
+import { readCallSession, type VpCallSession } from './call-session.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
 import { keyframeSampler } from './keyframe-sampler.js';
@@ -324,17 +325,47 @@ const main = async (): Promise<void> => {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
             
-            // Get existing CallId from VP record first
-            const existingCallId = await statusManager.getCallId();
-            
-            if (existingCallId) {
+            // Get existing CallId from VP record first, with the capture session
+            // a rejoined VP runs (docs/virtual-participant.md#rejoin). A row
+            // without a CallId is a first launch, which makes its own below. A
+            // row that cannot be read is read again, and if it still cannot be,
+            // the launch fails: going on would start a rejoined VP's meeting
+            // under a new CallId instead of adding to the one it rejoined.
+            let existing: VpCallSession | null;
+            try {
+                const manager = statusManager;
+                existing = await readCallSession(() => manager.getCallSession(), {
+                    onRetry: (attempt, error) =>
+                        log.warn(`Reading the VP record failed (attempt ${attempt}); retrying: ${error}`),
+                });
+            } catch (readError) {
+                log.error(`Could not read the VP record; not starting: ${readError}`);
+                try {
+                    await statusManager?.setFailed(
+                        'Could not read this Virtual Participant\'s record, so it did not start. Try again.',
+                        'startup:vp-record-unreadable',
+                    );
+                } catch (statusError) {
+                    log.error(`Failed to record the startup failure: ${statusError}`);
+                }
+                process.exit(1);
+            }
+            const existingCallId = existing?.callId;
+
+            if (existing && existingCallId) {
                 // Use existing CallId from VP record, for the meeting's events too
                 // (kinesis-stream.ts useCallId), so it is the one CallId throughout.
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 kinesisStreamManager.useCallId(existingCallId);
+                kinesisStreamManager.useSession(existing.sessionNumber, existing.sessionTimeOffset);
                 process.env.VP_CALL_ID = existingCallId;
                 bindLogContext({ callId: existingCallId });
-                log.info(`Using existing VP CallId: ${existingCallId}`);
+                log.info(
+                    existing.sessionNumber > 1
+                        ? `Rejoining meeting ${existingCallId} as capture session ${existing.sessionNumber}, ` +
+                              `at ${existing.sessionTimeOffset}s on its transcript timeline`
+                        : `Using existing VP CallId: ${existingCallId}`,
+                );
             } else {
                 // Generate new CallId and set it in VP record
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
@@ -900,7 +931,10 @@ const main = async (): Promise<void> => {
                     callId: kinesisStreamManager.currentCallId,
                     bucket: details.recordingsBucketName,
                     isLive: () => transcriptionService.transcribingLive,
-                    timelineSeconds: () => transcriptionService.timelineSeconds(),
+                    // On the meeting's transcript timeline, like the segments: a
+                    // rejoined VP's session starts at its offset, not at 0.
+                    timelineSeconds: () =>
+                        kinesisStreamManager.sessionOffsetSeconds + transcriptionService.timelineSeconds(),
                     recordingStartedAtMs: () => videoRecorder.startedAtMs,
                     shareActive: hasShareProbe
                         ? () => {

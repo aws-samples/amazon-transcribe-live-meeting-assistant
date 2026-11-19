@@ -51,6 +51,7 @@ from pure import (  # noqa: E402
     matches_wake_phrase,
     merge_dicts,
     segment_analyses,
+    session_number_of,
 )
 
 # The configuration layer, for the channel names the processor passes in.
@@ -466,3 +467,30 @@ def test_the_memory_of_languages_is_bounded(monkeypatch):
     language_to_record("c2", "en-US", None, noted)
     language_to_record("c3", "en-US", None, noted)
     assert set(noted) == {"c3"}
+
+
+# ── session_number_of ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "record,expected",
+    [
+        ({"SessionNumber": 3}, 3),
+        ({"SessionNumber": "2"}, 2),
+        ({"SessionNumber": 1}, 1),
+        ({"SessionNumber": 0}, 1),
+        ({"SessionNumber": -4}, 1),
+        ({"SessionNumber": None}, 1),
+        ({"SessionNumber": "two"}, 1),
+        ({"SessionNumber": True}, 1),
+        ({}, 1),
+        (None, 1),
+    ],
+)
+def test_anything_that_names_no_later_session_is_the_first(record, expected):
+    assert session_number_of(record) == expected
+
+
+def test_a_meeting_record_is_read_by_the_session_that_started():
+    meeting = {"SessionNumber": 3, "SessionStartedNumber": 2}
+    assert session_number_of(meeting, "SessionStartedNumber") == 2

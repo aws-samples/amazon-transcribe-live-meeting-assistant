@@ -30,7 +30,7 @@ title: "Transcript Summarization"
 
 LMA summarizes meeting transcripts automatically when a meeting ends, and on-demand via UI buttons during or after meetings. Two summarization options are available: **BEDROCK** (default) and **LAMBDA**.
 
-A meeting's summary is generated once, from the transcript and the prompt templates as they were at the time. The Meeting Summary panel on the meeting page lets you run it again, or write the summary yourself.
+A meeting's summary is generated once, from the transcript and the prompt templates as they were at the time. The Meeting Summary panel on the meeting page lets you run it again, or write the summary yourself. A meeting reopened by a Virtual Participant [rejoin](virtual-participant.md#rejoin) is summarized again when the rejoined session ends, over the whole transcript, and the new summary replaces the earlier one (including one written by hand).
 
 The summary of a long meeting takes a few minutes after the meeting ends. Until it arrives, the Meeting Summary panel -- and the Summary column of the meetings list -- shows **Summary in progress…**, and the summary replaces it by itself, with nothing to reload. If the summary could not be generated, the panel says so and **Regenerate** tries again. If no summary has arrived after 10 minutes, the panel stops waiting and offers **Regenerate**. With summaries switched off for the deployment, an ended meeting shows **Not available** straight away. The meeting's summary has up to 13 minutes to finish; one that takes longer is reported as not generated.
 

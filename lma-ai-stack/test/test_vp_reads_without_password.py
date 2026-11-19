@@ -97,6 +97,24 @@ def test_the_end_answer_drops_the_password() -> None:
     assert "body.meetingPassword = null;" in (APPSYNC / "endVirtualParticipant.js").read_text()
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["endVirtualParticipant", "rejoinVirtualParticipant", "joinAgainVirtualParticipant"],
+)
+def test_each_lambda_answered_mutation_drops_the_password(resources: dict, field: str) -> None:
+    """The Virtual Participant manager Lambda answers these with the row; the
+    resolver code that nulls the password is the one that relays the answer.
+    joinAgainVirtualParticipant's row can hold a copied password."""
+    (props,) = [
+        r["Properties"]
+        for r in resources.values()
+        if r.get("Type") == "AWS::AppSync::Resolver"
+        and r["Properties"].get("TypeName") == "Mutation"
+        and r["Properties"].get("FieldName") == field
+    ]
+    assert props["CodeS3Location"].endswith("/endVirtualParticipant.js")
+
+
 def test_no_graphql_client_in_the_repository_reads_the_password() -> None:
     """The launch paths read it from the row or their input, never through
     GraphQL; a selection of it would only ever receive null."""
