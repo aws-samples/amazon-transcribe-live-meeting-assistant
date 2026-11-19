@@ -87,6 +87,7 @@ class LMAClient:
         self._appsync_ops = None
         self._vp_ops = None
         self._mcp_ops = None
+        self._meetings_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -169,6 +170,19 @@ class LMAClient:
 
             self._mcp_ops = McpServerOperations(self)
         return self._mcp_ops
+
+    @property
+    def meetings(self):
+        """Meeting operations (``reopen``).
+
+        Returns:
+            MeetingOperations instance.
+        """
+        if self._meetings_ops is None:
+            from lma_sdk.operations.meetings import MeetingOperations
+
+            self._meetings_ops = MeetingOperations(self)
+        return self._meetings_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

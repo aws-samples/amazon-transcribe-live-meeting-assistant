@@ -128,6 +128,29 @@ query GetVirtualParticipant($id: ID!) {
 }
 """.strip()
 
+# Relaunch a VP that has left into the same meeting, as the Virtual
+# Participant page's Join again > Continue meeting does
+# (docs/virtual-participant.md#rejoin).
+_REJOIN_MUTATION = """
+mutation RejoinVirtualParticipant($input: RejoinVirtualParticipantInput!) {
+  rejoinVirtualParticipant(input: $input) {
+    id
+    meetingName
+    meetingPlatform
+    meetingId
+    status
+    updatedAt
+    owner
+    Owner
+    CallId
+    sessionNumber
+    sessionTimeOffset
+    rejoinedAt
+    rejoinedBy
+  }
+}
+""".strip()
+
 _END_MUTATION = """
 mutation EndVirtualParticipant($input: EndVirtualParticipantInput!) {
   endVirtualParticipant(input: $input) {
@@ -584,6 +607,31 @@ class VirtualParticipantOperations:
         if not row:
             raise LMAVirtualParticipantError(
                 f"endVirtualParticipant returned no row for {vp_id!r}",
+                details={"response": data},
+            )
+        return VpRow.model_validate(row)
+
+    def rejoin(self, vp_id: str) -> VpRow:
+        """Send a Virtual Participant that has left back into the same meeting.
+
+        It adds to the same LMA meeting (the CallId on its row) as a further
+        capture session, which reopens the meeting when it starts capturing.
+        Returns the row, with ``status`` ``INITIALIZING`` and the session's
+        ``sessionNumber`` and ``sessionTimeOffset``. The server refuses a VP
+        that has not left, one that never started a meeting, and a meeting
+        whose transcript has been deleted; the refusal is raised as
+        ``LMAAppSyncError`` with the server's message. Signed with IAM, the
+        call needs an assumed role (an SSO or role profile), which may rejoin
+        any VP; the launch joins as a guest, without its owner's browser
+        profile. See docs/virtual-participant.md#rejoin.
+        """
+        data = self._client.appsync.graphql(
+            query=_REJOIN_MUTATION, variables={"input": {"id": vp_id}}
+        )
+        row = (data or {}).get("rejoinVirtualParticipant")
+        if not row:
+            raise LMAVirtualParticipantError(
+                f"rejoinVirtualParticipant returned no row for {vp_id!r}",
                 details={"response": data},
             )
         return VpRow.model_validate(row)

@@ -1,6 +1,6 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
-"""Virtual Participant commands — create, get, end, list.
+"""Virtual Participant commands — create, get, end, rejoin, list.
 
 Usage::
 
@@ -10,6 +10,7 @@ Usage::
     lma vp create --name "Demo" --platform GOOGLE_MEET --id abc-defg-hij
     lma vp get --id <vp-id>
     lma vp end --id <vp-id>
+    lma vp rejoin --id <vp-id>
     lma vp list
 """
 
@@ -201,6 +202,41 @@ def vp_end_cmd(ctx, stack_name, region, vp_id, reason, as_json):
         return
 
     print_success(f"Virtual Participant ended: {row.id} → {row.status}")
+
+
+@vp_cmd.command("rejoin")
+@click.option(
+    "--stack-name", default=None, envvar="LMA_STACK_NAME",
+    help="CloudFormation stack name.",
+)
+@click.option("--region", default=None, envvar="AWS_DEFAULT_REGION", help="AWS region.")
+@click.option("--id", "vp_id", required=True, help="Virtual Participant ID.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="JSON output.")
+@click.pass_context
+def vp_rejoin_cmd(ctx, stack_name, region, vp_id, as_json):
+    """Send a Virtual Participant that has left back into the same meeting.
+
+    It continues the same LMA meeting as a further capture session, as Join
+    again > Continue meeting does on the Virtual Participant page. Needs an
+    assumed-role profile (SSO or role); the launch joins as a guest.
+    """
+    from lma_sdk.exceptions import LMAError
+
+    client = ctx.obj["client_factory"](stack_name=stack_name, region=region)
+    try:
+        row = client.vp.rejoin(vp_id)
+    except LMAError as e:
+        print_error(str(e))
+        sys.exit(1)
+
+    if as_json:
+        console.print_json(json.dumps(row.model_dump(), indent=2, default=str))
+        return
+
+    print_success(f"Virtual Participant rejoining: {row.id} → {row.status}")
+    print_info(f"Meeting:        {row.CallId or '—'}")
+    print_info(f"Session:        {row.sessionNumber or 1}")
+    print_info(f"Session offset: {row.sessionTimeOffset or 0:g} s on the transcript timeline")
 
 
 @vp_cmd.command("list")
