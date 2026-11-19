@@ -52,9 +52,36 @@ export function isMediaPermissionDialog(
     return MEDIA_PERMISSION_TEXT.test(analysis.message || '');
 }
 
+/** Text of a dialog saying the VP was removed from the meeting. */
+const REMOVED_TEXT =
+    /\b(?:been\s+)?removed\s+(?:you\s+)?from\s+(?:the|this)\s+(?:meeting|call)\b|\bremoved\s+by\s+(?:the\s+)?(?:host|organi[sz]er)\b/i;
+/** Text of a dialog saying the meeting has ended. */
+const ENDED_TEXT =
+    /\b(?:meeting|call)\s+(?:has\s+)?(?:been\s+)?ended\b|\b(?:host|organi[sz]er)\s+(?:has\s+)?ended\b|\bended\s+(?:the|this)\s+(?:meeting|call)\b/i;
+
+/** Dialog types a removal or end notice can be classified as. */
+const MEETING_OVER_TYPES: ReadonlySet<string> = new Set(['BLOCKED', 'OTHER']);
+
+/**
+ * How a dialog says the meeting is over for the VP: it was removed, or the
+ * meeting ended; null when it says neither. Read from the model's message,
+ * for the types such a notice is classified as.
+ */
+export function meetingOverReason(
+    analysis: Pick<DialogAnalysis, 'type' | 'message'>,
+): 'removed-from-meeting' | 'host-ended' | null {
+    if (!MEETING_OVER_TYPES.has(analysis.type)) return null;
+    const message = analysis.message || '';
+    if (REMOVED_TEXT.test(message)) return 'removed-from-meeting';
+    if (ENDED_TEXT.test(message)) return 'host-ended';
+    return null;
+}
+
 export type DialogDecision =
     | { kind: 'click'; selector: string }
     | { kind: 'escalate'; message: string }
+    /** The dialog says the meeting is over for the VP: an exit, never a manual action. */
+    | { kind: 'meeting-over'; reason: 'removed-from-meeting' | 'host-ended' }
     | { kind: 'ignore' };
 
 /** The manual-action message for a dialog, with the no-audio warning added to
@@ -92,17 +119,29 @@ export function manualActionMessage(
  *   needing manual action. Before the join such a dialog may be what blocks
  *   it, so it still goes to a human there; the classified blocking types
  *   (CAPTCHA, sign-in, SSO, blocked) do at any time.
+ * - A dialog saying the VP was removed, or that the meeting ended, is the
+ *   meeting's end, not something a human can act on: `meeting-over`, never
+ *   escalated, whatever its type.
+ * - Once the meeting is over for the VP (`meetingOver`: it has ended, or the
+ *   VP's teardown has begun), every dialog is left alone. Nothing a human
+ *   could do would keep the VP in the meeting, and the VP's final status is
+ *   decided by its exit.
  */
 export function decideDialogAction(
     analysis: DialogAnalysis,
     platform: string,
     actionText: string | null,
     inMeeting: boolean = false,
+    meetingOver: boolean = false,
 ): DialogDecision {
     const escalate = (): DialogDecision => ({
         kind: 'escalate',
         message: manualActionMessage(analysis, platform, actionText),
     });
+
+    if (meetingOver) return { kind: 'ignore' };
+    const over = meetingOverReason(analysis);
+    if (over) return { kind: 'meeting-over', reason: over };
 
     if (AUTOCLICK_TYPES.has(analysis.type)) {
         if (isNoAudioAction(actionText)) return escalate();

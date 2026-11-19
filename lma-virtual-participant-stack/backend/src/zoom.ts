@@ -220,7 +220,14 @@ export default class Zoom {
     // before the join completes (so verification / consent dialogs that
     // block the prejoin/waiting-room are caught and escalated to MANUAL).
     private startUnknownDialogWatchdog(page: Page): void {
-        startDialogWatchdog(page, { platform: 'ZOOM' });
+        startDialogWatchdog(page, {
+            platform: 'ZOOM',
+            // A removal or end notice the watchdog read is this meeting's end.
+            onMeetingOver: (reason) => {
+                details.start = false;
+                this.requestEnd({ reason, trigger: 'dialog-watchdog' });
+            },
+        });
     }
 
     /**

@@ -19,6 +19,7 @@ import {
     isMediaPermissionDialog,
     isNoAudioAction,
     manualActionMessage,
+    meetingOverReason,
     NO_AUDIO_WARNING,
 } from './dialog-decision.js';
 
@@ -213,4 +214,45 @@ test('in the meeting, a consent or recording notice is still clicked', () => {
         true,
     );
     assert.deepEqual(d, { kind: 'click', selector: '#ok' });
+});
+
+// ── the end of the meeting is an exit, not a manual action ───────────────────
+
+const removed = (overrides: Partial<DialogAnalysis> = {}): DialogAnalysis => ({
+    type: 'BLOCKED',
+    message: 'User has been removed from the meeting by the host',
+    needsHuman: true,
+    ...overrides,
+});
+
+test('a dialog saying the VP was removed by the host ends the meeting as a removal, never as a manual action', () => {
+    for (const inMeeting of [true, false]) {
+        assert.deepEqual(decideDialogAction(removed(), 'ZOOM', null, inMeeting), {
+            kind: 'meeting-over',
+            reason: 'removed-from-meeting',
+        });
+    }
+    assert.deepEqual(decideDialogAction(removed({ type: 'OTHER', message: 'The host removed you from this meeting.' }), 'ZOOM', 'OK', true), {
+        kind: 'meeting-over',
+        reason: 'removed-from-meeting',
+    });
+});
+
+test('a dialog saying the meeting has ended ends it as ended by the host, never as a manual action', () => {
+    for (const message of ['This meeting has been ended by host', 'The host has ended this meeting', 'Meeting ended']) {
+        assert.deepEqual(decideDialogAction(removed({ message }), 'ZOOM', null, true), { kind: 'meeting-over', reason: 'host-ended' }, message);
+    }
+});
+
+test('a blocking dialog that is not an end notice still goes to a human', () => {
+    const d = decideDialogAction(removed({ message: 'The browser was blocked by bot detection' }), 'ZOOM', null, true);
+    assert.equal(d.kind, 'escalate');
+    assert.equal(meetingOverReason({ type: 'CAPTCHA', message: 'removed from the meeting' }), null, 'a CAPTCHA is never read as an end notice');
+});
+
+test('no dialog is escalated or clicked once the meeting is over for the VP', () => {
+    const blocking = removed({ type: 'CAPTCHA', message: 'Solve the puzzle to continue' });
+    assert.deepEqual(decideDialogAction(blocking, 'ZOOM', null, true, true), { kind: 'ignore' });
+    assert.deepEqual(decideDialogAction(removed(), 'ZOOM', null, true, true), { kind: 'ignore' });
+    assert.deepEqual(decideDialogAction(consent(), 'TEAMS', 'Allow', true, true), { kind: 'ignore' });
 });
