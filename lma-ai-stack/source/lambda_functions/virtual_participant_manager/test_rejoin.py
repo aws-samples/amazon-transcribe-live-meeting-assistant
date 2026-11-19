@@ -522,6 +522,6 @@ def test_no_registered_host_is_not_a_running_one(host_manager, entry):
 
 def test_launch_input_carries_no_meeting_password() -> None:
     """The Virtual Participant reads its meeting password from its row at startup."""
-    launch = rejoin.launch_input(ended_vp(), 2, OWNER)
+    launch = rejoin.launch_input(ended_vp(), OWNER, "vp-1-s2")
     assert "meetingPassword" not in launch["data"]
     assert "pw-on-the-row" not in json.dumps(launch)
