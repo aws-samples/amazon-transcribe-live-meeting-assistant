@@ -49,4 +49,9 @@ export const chatAttachments = new ChatAttachmentCapture({
         );
     },
     emit: (event) => kinesisStreamManager.sendChatAttachment(event),
+    // The chat line as the meeting stores it: a rejoined session's prefix and offset.
+    onMeetingTimeline: (segmentId, timelineSeconds) => ({
+        segmentId: kinesisStreamManager.meetingSegmentId(segmentId),
+        timelineSeconds: kinesisStreamManager.meetingSeconds(timelineSeconds),
+    }),
 });
