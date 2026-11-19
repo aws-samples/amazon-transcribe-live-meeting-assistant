@@ -778,6 +778,27 @@ def test_enrolling_without_a_speaker_model_is_refused_before_any_audio_is_sent(
     assert ddb.enrollment_rows() == []
 
 
+def test_no_consent_is_recorded_when_no_voiceprint_can_be_computed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refused by the backend, not only by the page, so any caller is covered."""
+    _bundle(monkeypatch, NO_SPEAKER_BUNDLE, "none")
+    ddb = install(monkeypatch, enrollment=None)
+    result = index.handler(event("grantVoiceConsent"), None)
+    assert result == {"Success": False, "Message": NO_SPEAKER_REASON}
+    assert ddb.consent_rows() == []
+    assert ddb.enrollment_rows() == []
+
+
+def test_consent_is_recorded_as_before_when_the_bundle_has_a_speaker_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bundle(monkeypatch, "parakeet-tdt-v3-titanet-small", "titanet-small")
+    ddb = install(monkeypatch, enrollment=None)
+    assert index.handler(event("grantVoiceConsent"), None)["Success"] is True
+    assert [row["Action"]["S"] for row in ddb.consent_rows()] == ["GRANTED"]
+
+
 def test_a_session_that_refuses_to_embed_is_reported_as_the_missing_speaker_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

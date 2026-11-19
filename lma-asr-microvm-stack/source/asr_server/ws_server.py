@@ -1120,10 +1120,7 @@ class AsrSession:
 
     async def _safe_close(self, reason: str = "") -> None:
         with contextlib.suppress(ConnectionClosed):
-            if reason:
-                await self._conn.close(reason=reason)
-            else:
-                await self._conn.close()
+            await self._conn.close(reason=reason)
 
 
 def _classify_first_text(frame: str) -> tuple[dict[str, object] | None, bool]:

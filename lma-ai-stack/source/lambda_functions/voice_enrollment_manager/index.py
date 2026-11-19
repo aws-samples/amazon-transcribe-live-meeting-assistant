@@ -223,6 +223,13 @@ def grant_consent(event, who):
     if not pure.may_grant(pure.ACTION_GRANTED, subject_id, who["sub"], who["groups"]):
         return {"Success": False, "Message": "only you can give your own consent"}
 
+    unavailable = enrollment_unavailable_reason()
+    if unavailable:
+        # A consent to an enrollment that cannot finish here would append a
+        # row and start a pending record for nothing. The portal does not offer
+        # it; this holds for any other caller of the API too.
+        return {"Success": False, "Message": unavailable}
+
     existing = read_enrollment(subject_id)
     action = (
         pure.ACTION_RE_CONSENTED
