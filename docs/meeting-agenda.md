@@ -8,7 +8,9 @@ title: "Meeting Agenda"
 # Meeting Agenda
 
 A meeting in LMA can carry an **agenda**: a short list of the items the meeting
-is meant to cover. The agenda is stored on the meeting record beside the
+is meant to cover. Beside it, a meeting can carry labels, an audience, a meeting
+context and a checklist; see
+[Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md). The agenda is stored on the meeting record beside the
 transcript and the summary, so everyone who can open the meeting sees the same
 agenda, and every change to it reaches open meeting pages straight away.
 

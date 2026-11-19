@@ -380,7 +380,10 @@ def test_every_mutation_a_filtered_subscription_receives_publishes_shared_with(
             if mutation == "createVirtualParticipant":
                 # A new row is shared with nobody, so its message reaches the
                 # owner and Admins alone.
-                request = props["RequestMappingTemplate"]
+                # A pipeline; its write is CreateVirtualParticipantAppSyncFunction.
+                request = resources["CreateVirtualParticipantAppSyncFunction"]["Properties"][
+                    "RequestMappingTemplate"
+                ]
                 if isinstance(request, dict):
                     request = request["Fn::Sub"]
                 assert '$util.qr($input.put("SharedWith", ""))' in request
@@ -697,6 +700,7 @@ PYTHON_READERS = [
     "list_calls_gsi_resolver/index.py",
     "mcp_analytics/tools/get_virtual_participant_status.py",
     "meeting_consent_resolver/index.py",
+    "meeting_preparation_resolver/index.py",
     "meeting_controls_resolver/index.py",
     "microvm_vnc_token/vp_access.py",
     "speaker_name_resolver/index.py",

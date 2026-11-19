@@ -1581,6 +1581,91 @@ describe('the agenda on the Transcript tab', () => {
   });
 });
 
+describe('the meeting preparation', () => {
+  const PREPARED = {
+    labels: [{ Key: 'project', Value: 'website-relaunch' }],
+    audience: 'external',
+    meetingMetadataUpdatedAt: '2026-11-03T14:00:00.000Z',
+    meetingContext: '**Goal**: agree the budget',
+    meetingContextUpdatedBy: 'alice',
+    meetingContextUpdatedAt: '2026-11-03T14:00:00.000Z',
+    checklist: [
+      {
+        ItemId: 'q1',
+        Text: 'Who owns the budget?',
+        Kind: 'question',
+        Priority: 'must',
+        Status: 'covered',
+        StatusSource: 'assistant',
+        Evidence: [{ SegmentId: 's1', StartTime: 64, Quote: 'Dana owns it' }],
+        UpdatedBy: 'LMA',
+        UpdatedAt: '2026-11-03T14:10:00.000Z',
+      },
+    ],
+    checklistUpdatedAt: '2026-11-03T14:10:00.000Z',
+  };
+  const VIEWERS = {
+    owner: { owner: 'alice', sharedWith: '' },
+    'a shared user': { owner: 'bob', sharedWith: '[carol, alice]' },
+  };
+
+  it.each(Object.keys(VIEWERS))('can be edited by %s', (viewer) => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send };
+    renderPage({ item: { ...ITEM, ...VIEWERS[viewer], ...PREPARED }, url: '/calls/m?tab=summary' });
+    const summary = screen.getByTestId('meeting-context-panel').closest('[role="tabpanel"]');
+    expect(within(summary).getByText('project=website-relaunch')).toBeTruthy();
+    expect(within(summary).getByText('External')).toBeTruthy();
+    expect(within(screen.getByTestId('meeting-context-panel')).getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(within(screen.getByTestId('checklist-panel')).getByRole('button', { name: 'Edit list' })).toBeTruthy();
+    expect(within(summary).getByRole('button', { name: 'Edit labels and audience' })).toBeTruthy();
+    // A status is set from the item's own control, as a user's.
+    expect(within(screen.getByTestId('checklist-panel')).getByLabelText('Status of Who owns the budget?')).toBeTruthy();
+  });
+
+  it('is shown read-only to a viewer who is neither the owner nor shared with', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, owner: 'bob', sharedWith: '', ...PREPARED }, url: '/calls/m?tab=summary' });
+    const context = screen.getByTestId('meeting-context-panel');
+    expect(within(context).queryByRole('button', { name: 'Edit' })).toBeNull();
+    const checklist = screen.getByTestId('checklist-panel');
+    expect(within(checklist).queryByRole('button', { name: 'Edit list' })).toBeNull();
+    expect(within(checklist).queryByLabelText('Status of Who owns the budget?')).toBeNull();
+    expect(within(checklist).getByText('Covered')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit labels and audience' })).toBeNull();
+  });
+
+  it('is left out for a viewer who cannot change a meeting that has none', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, owner: 'bob', sharedWith: '' }, url: '/calls/m?tab=summary' });
+    expect(screen.queryByTestId('meeting-context-panel')).toBeNull();
+    expect(screen.queryByTestId('checklist-panel')).toBeNull();
+    expect(screen.queryByTestId('meeting-labels')).toBeNull();
+  });
+
+  it('sends a status the owner sets as a checklist item update', async () => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send };
+    renderPage({ item: { ...ITEM, ...PREPARED }, url: '/calls/m?tab=summary' });
+    const select = createWrapper(screen.getByTestId('checklist-panel')).findSelect();
+    select.openDropdown();
+    select.selectOptionByValue('deferred', { expandToViewport: true });
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(ITEM.callId, 'checklistItem', { ItemId: 'q1', Status: 'deferred' }),
+    );
+  });
+
+  it('shows the checklist on the Transcript tab, with evidence that opens the transcript there', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, ...PREPARED } });
+    const collapsible = screen.getByTestId('checklist-collapsible');
+    fireEvent.click(collapsible.querySelector('[aria-expanded]'));
+    expect(within(collapsible).getByRole('button', { name: 'Show the transcript at 1:04' })).toBeTruthy();
+    fireEvent.click(within(collapsible).getByRole('button', { name: 'Show the transcript at 1:04' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+  });
+});
+
 describe('the language of each line', () => {
   const line = (id, transcript, startTime, languageCode) => ({
     segmentId: id,

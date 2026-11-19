@@ -145,6 +145,18 @@ $util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead")
   #end
 #end
 
+## The meeting preparation inputs (labels, audience, meetingContext,
+## checklist), checked by the pipeline's first function, which put them in the
+## stash: each one the request carried is stored, or removed when sent empty.
+#set( $preparation = $util.defaultIfNull($ctx.stash.preparation, {}) )
+#foreach( $name in $util.defaultIfNull($preparation.present, []) )
+  #if( $util.isNull($preparation.get($name)) )
+    $util.qr( $removeNames.add($name) )
+  #else
+    $util.qr( $setValues.put($name, $preparation.get($name)) )
+  #end
+#end
+
 ## Meeting consent, with createVirtualParticipant's names and rule.
 #if( $ctx.args.input.containsKey("consentMode") )
   #if( $util.isNullOrBlank($ctx.args.input.consentMode) )

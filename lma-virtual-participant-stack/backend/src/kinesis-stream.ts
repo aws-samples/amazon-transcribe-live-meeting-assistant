@@ -4,6 +4,7 @@ import { details } from './details.js';
 import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
+import { preparationStartFields, type VpPreparation } from './meeting-preparation.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
@@ -108,6 +109,17 @@ class KinesisStreamManager {
 
   setAgenda(agenda: VpAgenda | null): void {
     this.agenda = agenda;
+  }
+
+  /**
+   * The meeting preparation (labels, audience, meeting context, checklist) the
+   * VP was started or scheduled with, read with the agenda; see
+   * meeting-preparation.ts. Null when there is none.
+   */
+  private preparation: VpPreparation | null = null;
+
+  setPreparation(preparation: VpPreparation | null): void {
+    this.preparation = preparation;
   }
 
   /**
@@ -243,6 +255,7 @@ class KinesisStreamManager {
       // Created with the meeting, so it is there from the first event; nothing
       // is added when the VP has no agenda.
       ...agendaStartFields(this.agenda, details.lmaUser),
+      ...preparationStartFields(this.preparation, details.lmaUser),
       CaptureSource: 'VIRTUAL_PARTICIPANT',
       ...(this.transcriptionContext ?? {}),
       ...this.sessionField(),

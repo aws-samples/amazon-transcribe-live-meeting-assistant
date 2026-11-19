@@ -43,7 +43,7 @@ import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
-import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from '../common/map-call-attributes';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged, preparationChanged } from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 import { getMarkdownSummary } from '../common/summary';
@@ -519,6 +519,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
+    sendUpdateMeetingPreparation,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -674,7 +675,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
         // ...unless this copy is older than the one on screen.
         !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
       const changed = timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged;
-      if (changed || agendaChanged(call, callDetails)) {
+      if (changed || agendaChanged(call, callDetails) || preparationChanged(call, callDetails)) {
         // Keeping the fields only getCall reads, as CallDetails.js does.
         setCall(adoptMeetingCopy(call, callDetails));
         if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
@@ -752,6 +753,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
+    sendUpdateMeetingPreparation,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

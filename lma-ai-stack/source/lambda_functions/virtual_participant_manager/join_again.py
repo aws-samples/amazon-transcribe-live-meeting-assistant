@@ -34,6 +34,7 @@ from typing import Any, Dict, Optional
 
 from access import NotAuthorizedError, caller_may_change
 from botocore.exceptions import ClientError
+from lma_meeting_preparation import rules as preparation  # configuration layer
 from rejoin import start_launch, without_password
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,25 @@ def new_row(
             raise JoinAgainRefused(f"The agenda is longer than {MAX_AGENDA_CHARS} characters")
         row["agenda"] = agenda
         row["agendaSource"] = "scheduled"
+
+    # The meeting preparation, with the limits createVirtualParticipant's check
+    # applies (lma_meeting_preparation); only what was given is stored.
+    try:
+        labels = preparation.normalize_labels(request.get("labels"))
+        audience = preparation.normalize_audience(request.get("audience"))
+        meeting_context = preparation.normalize_context(request.get("meetingContext"))
+        checklist = preparation.normalize_definitions(request.get("checklist"))
+        preparation.check_checklist_size(checklist)
+    except preparation.PreparationError as error:
+        raise JoinAgainRefused(str(error)) from error
+    if labels:
+        row["labels"] = labels
+    if audience:
+        row["audience"] = audience
+    if meeting_context:
+        row["meetingContext"] = meeting_context
+    if checklist:
+        row["checklist"] = checklist
 
     mode = _text(request.get("consentMode"))
     rule = _text(request.get("consentRule"))

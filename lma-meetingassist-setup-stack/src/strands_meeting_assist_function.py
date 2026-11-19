@@ -32,6 +32,7 @@ import tavily_secret
 from configuration_settings import base_model_id, model_arn, read_setting, resolve_model_id
 import call_metering
 import meeting_agenda
+import meeting_preparation
 import meeting_attachments
 import meeting_frames
 import meeting_skills
@@ -1794,6 +1795,97 @@ def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_i
     return get_meeting_agenda
 
 
+def _meeting_preparation_tool(call_id: str, dynamodb_table_name: str, message_id: str,
+                              tool_name: str, describe, unreadable: str):
+    """Run one of the two meeting preparation tools, with its thinking steps."""
+    if call_id and message_id and APPSYNC_GRAPHQL_URL:
+        send_thinking_step_to_appsync(call_id, message_id, {
+            'type': 'tool_use',
+            'tool_name': tool_name,
+            'tool_input': {},
+            'timestamp': datetime.utcnow().isoformat()
+        }, 0)
+    try:
+        record = meeting_preparation.read_meeting_record(dynamodb.Table(dynamodb_table_name), call_id)
+        result = describe(record)
+        success = True
+    except Exception as e:
+        logger.error(f"Error reading the meeting for {tool_name}: {str(e)}")
+        result = unreadable
+        success = False
+    # Sizes only: the context can hold the owner's preparation notes.
+    logger.info(f"{tool_name} for {call_id}: {len(result)} characters")
+    if call_id and message_id and APPSYNC_GRAPHQL_URL:
+        send_thinking_step_to_appsync(call_id, message_id, {
+            'type': 'tool_result',
+            'tool_name': tool_name,
+            'result': result[:200],
+            'success': success,
+            'timestamp': datetime.utcnow().isoformat()
+        }, 1)
+    return result
+
+
+def create_meeting_context_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
+    """Factory for the tool that reads the current meeting's meeting context.
+
+    Offered only where meeting_preparation.context_tools_allowed says: the
+    meeting page's own chat, and a request made in the meeting only when an
+    Admin allows it (inMeetingContextAccess).
+    """
+    from strands import tool
+
+    @tool
+    def get_meeting_context() -> str:
+        """Get the meeting context of the current meeting: a briefing written by the
+        people preparing it (its goals, background, terms, what a good outcome is).
+
+        Use this when:
+        - Someone asks what the meeting is for, its goals, or what a good outcome is
+        - You need the background or terms the meeting was prepared with to answer
+
+        Returns:
+            The meeting context as Markdown, or a note that the meeting has none.
+        """
+        return _meeting_preparation_tool(
+            call_id, dynamodb_table_name, message_id, 'get_meeting_context',
+            meeting_preparation.describe_context_for_agent,
+            "The meeting context could not be read just now.",
+        )
+
+    return get_meeting_context
+
+
+def create_meeting_checklist_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
+    """Factory for the tool that reads the current meeting's checklist.
+
+    Offered where the meeting context tool is; see create_meeting_context_tool.
+    """
+    from strands import tool
+
+    @tool
+    def get_meeting_checklist() -> str:
+        """Get the checklist of the current meeting: the questions, topics, risks,
+        confirmations, decisions and actions it should cover, each with its status
+        (open, covered, partial, deferred or not_applicable) and evidence times.
+
+        Use this when:
+        - Someone asks what has or has not been covered yet, or what is still open
+        - Someone asks which questions still need answers, or what to raise next
+
+        Returns:
+            One line per item with its status, priority, kind, text and the transcript
+            times of its evidence; or a note that the meeting has no checklist.
+        """
+        return _meeting_preparation_tool(
+            call_id, dynamodb_table_name, message_id, 'get_meeting_checklist',
+            meeting_preparation.describe_checklist_for_agent,
+            "The meeting checklist could not be read just now.",
+        )
+
+    return get_meeting_checklist
+
+
 def create_chat_attachments_tool(call_id: str, message_id: str = None):
     """Factory for the tool that lists the images and files shared in the meeting chat.
 
@@ -2262,6 +2354,28 @@ def configured_in_meeting_request_tools() -> str:
     return DEFAULT_IN_MEETING_TOOLS
 
 
+def configured_in_meeting_context_access() -> str:
+    """Whether a request made in the meeting may read the meeting context and checklist.
+
+    The Meeting Assistant section's inMeetingContextAccess setting: ``none``
+    (the shipped default) or ``allowed``. Decided apart from
+    inMeetingRequestTools, so Unrestricted and Selected tools do not offer the
+    two tools. Read per answer; any other value, or a setting that cannot be
+    read, is ``none``.
+    """
+    # The name written out (meeting_preparation.IN_MEETING_CONTEXT_ACCESS_SETTING),
+    # as test_parameter_backed_settings.py reads every read_setting call.
+    value = read_setting(
+        'meeting_assist',
+        'inMeetingContextAccess',
+        default=meeting_preparation.DEFAULT_IN_MEETING_CONTEXT_ACCESS,
+    )
+    if value in meeting_preparation.IN_MEETING_CONTEXT_ACCESS_VALUES:
+        return value
+    logger.warning("Unrecognised inMeetingContextAccess value; using none")
+    return meeting_preparation.DEFAULT_IN_MEETING_CONTEXT_ACCESS
+
+
 def configured_tool_selection() -> ToolSelection:
     """The active profile's per-item tool selection (meeting_assist.toolSelection).
 
@@ -2313,6 +2427,14 @@ CURRENT_MEETING_SCOPE_NOTE = (
     "each slide, page or view shown, with its title, its text and when it was on screen). "
     "Do not try any other tool named above, do not search the web, and do not refer to past "
     "meetings or documents."
+)
+
+# Appended to the system prompt of an in-meeting request when an Admin allows
+# such requests the meeting context and checklist (inMeetingContextAccess).
+IN_MEETING_CONTEXT_NOTE = (
+    "\n\nThe meeting context (get_meeting_context) and checklist (get_meeting_checklist) are "
+    "also available for this request. They were written by the people preparing the meeting, "
+    "and your answer reaches everyone in it, so use them only as far as the request needs."
 )
 
 # Appended to the system prompt of an in-meeting request answered with
@@ -2871,6 +2993,24 @@ def handler(event, context):
             ))
             logger.info("Meeting agenda tool enabled")
 
+        # The meeting context and checklist: the meeting page's own chat, and
+        # a request made in the meeting only when an Admin allows it, whatever
+        # In-meeting requests is set to. The context can hold the owner's
+        # preparation notes, and an in-meeting answer reaches everyone there.
+        context_tools_offered = False
+        if dynamodb_table_name and meeting_preparation.context_tools_allowed(
+            request_scope.tool_scope,
+            configured_in_meeting_context_access() if request_scope.tool_scope else '',
+        ):
+            tools.append(create_meeting_context_tool(
+                call_id=call_id, dynamodb_table_name=dynamodb_table_name, message_id=message_id
+            ))
+            tools.append(create_meeting_checklist_tool(
+                call_id=call_id, dynamodb_table_name=dynamodb_table_name, message_id=message_id
+            ))
+            context_tools_offered = True
+            logger.info("Meeting context and checklist tools enabled")
+
         # The meeting's shared screen. In every scope, as the agenda: the
         # frames show what was shared with everyone in the meeting. Frames
         # can be shown inline only in the meeting page's chat panel, the one
@@ -2996,6 +3136,11 @@ def handler(event, context):
                 )
                 + (MEETING_CHAT_NOTE if request_scope.from_meeting_chat else '')
                 + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else '')
+                + (
+                    IN_MEETING_CONTEXT_NOTE
+                    if request_scope.tool_scope and context_tools_offered
+                    else ''
+                )
                 + selected_scope_note
                 + mcp_servers_not_offered_note(mcp_servers_unavailable)
                 + skills_not_offered_note(skills_unavailable),

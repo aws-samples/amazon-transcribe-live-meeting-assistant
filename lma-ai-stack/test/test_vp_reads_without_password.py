@@ -64,7 +64,7 @@ def resources() -> dict:
 
 
 def _create_response(resources: dict) -> str:
-    return resources["CreateVirtualParticipantResolver"]["Properties"]["ResponseMappingTemplate"]
+    return resources["CreateVirtualParticipantAppSyncFunction"]["Properties"]["ResponseMappingTemplate"]
 
 
 # ── text ────────────────────────────────────────────────────────────────────

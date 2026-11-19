@@ -8,6 +8,7 @@ import PropTypes from 'prop-types';
 import {
   Alert,
   DatePicker,
+  ExpandableSection,
   FormField,
   Input,
   Select,
@@ -18,6 +19,15 @@ import {
 } from '@cloudscape-design/components';
 
 import { MAX_AGENDA_CHARS } from '../common/agenda';
+import {
+  AUDIENCE_OPTIONS,
+  EMPTY_VP_PREPARATION,
+  MAX_CONTEXT_CHARS,
+  checklistProblem,
+  optionFor,
+  parseLabelsText,
+} from '../common/meeting-preparation';
+import { ChecklistEditor } from '../call-panel/ChecklistPanel';
 import { MEETING_CONSENT_OPTIONS, meetingConsentOptionsFor } from './meeting-consent-options';
 import { isMeetingUrl, zoomMeetingLinkHint } from './launch-settings';
 import { PLATFORM_OPTIONS, agendaIsTooLong, meetingIdError } from './vp-form';
@@ -70,6 +80,15 @@ const VirtualParticipantFormFields = ({
   }
   // The resolver refuses a longer agenda, so the form does not offer to submit one.
   const agendaTooLong = agendaIsTooLong(form.agenda);
+  // The meeting preparation, checked as the resolver checks it.
+  const preparation = form.preparation || EMPTY_VP_PREPARATION;
+  const setPreparation = (patch) => onChange({ preparation: { ...preparation, ...patch } });
+  const labelsError = parseLabelsText(preparation.labelsText).error;
+  const contextTooLong = (preparation.meetingContext || '').length > MAX_CONTEXT_CHARS;
+  const checklistError = checklistProblem(preparation.checklist);
+  const preparationGiven = Boolean(
+    preparation.labelsText || preparation.audience || preparation.meetingContext || preparation.checklist?.length,
+  );
   // A choice the platform or the deployment rules out is shown disabled, with the reason.
   const consentOptions = meetingConsentOptionsFor(form.meetingPlatform, consentDefaults);
 
@@ -191,6 +210,69 @@ const VirtualParticipantFormFields = ({
         />
       </FormField>
 
+      {/* A continued meeting keeps the preparation it has; Join again's Continue locks the settings. */}
+      {!settingsLocked && (
+        <ExpandableSection
+          headerText="Meeting preparation (Optional)"
+          headerDescription={
+            'Labels, audience, a briefing for the assistant and the summary, and a checklist of what the ' +
+            'meeting should cover. Stored on the meeting and editable on its page; never posted in the meeting chat.'
+          }
+          defaultExpanded={preparationGiven}
+        >
+          <SpaceBetween size="m">
+            <FormField label="Audience" description="Whether people outside your organization are in the meeting.">
+              <Select
+                selectedOption={optionFor(AUDIENCE_OPTIONS, preparation.audience)}
+                options={AUDIENCE_OPTIONS}
+                onChange={({ detail }) => setPreparation({ audience: detail.selectedOption.value })}
+                ariaLabel="Audience"
+              />
+            </FormField>
+            <FormField
+              label="Labels"
+              description="One key=value per line, for example project=website-relaunch, for other systems to find it by."
+              errorText={labelsError}
+              stretch
+            >
+              <Textarea
+                value={preparation.labelsText}
+                onChange={({ detail }) => setPreparation({ labelsText: detail.value })}
+                rows={3}
+                ariaLabel="Labels, one key=value per line"
+              />
+            </FormField>
+            <FormField
+              label="Meeting context"
+              description="Goals, background, terms and what a good outcome looks like, in Markdown."
+              constraintText={
+                contextTooLong ? `The meeting context is limited to ${MAX_CONTEXT_CHARS} characters.` : undefined
+              }
+              stretch
+            >
+              <Textarea
+                value={preparation.meetingContext}
+                onChange={({ detail }) => setPreparation({ meetingContext: detail.value })}
+                rows={5}
+                ariaLabel="Meeting context, Markdown"
+                invalid={contextTooLong}
+              />
+            </FormField>
+            <FormField
+              label="Checklist"
+              description="Questions to ask, topics, risks to probe and things to confirm. Every item starts open."
+              errorText={preparation.checklist?.length ? checklistError : null}
+              stretch
+            >
+              <ChecklistEditor
+                draft={preparation.checklist || []}
+                setDraft={(checklist) => setPreparation({ checklist })}
+              />
+            </FormField>
+          </SpaceBetween>
+        </ExpandableSection>
+      )}
+
       <FormField
         label="Meeting consent"
         description={
@@ -240,6 +322,12 @@ VirtualParticipantFormFields.propTypes = {
     meetingDate: PropTypes.string,
     meetingTime: PropTypes.string,
     agenda: PropTypes.string,
+    preparation: PropTypes.shape({
+      labelsText: PropTypes.string,
+      audience: PropTypes.string,
+      meetingContext: PropTypes.string,
+      checklist: PropTypes.arrayOf(PropTypes.shape({ ItemId: PropTypes.string })),
+    }),
   }).isRequired,
   onChange: PropTypes.func.isRequired,
   zoomSdkEnabled: PropTypes.bool,
