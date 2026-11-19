@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Table,
   Box,
@@ -19,6 +20,7 @@ import {
   Flashbar,
   Checkbox,
   Textarea,
+  RadioGroup,
   Pagination,
   TextFilter,
 } from '@cloudscape-design/components';
@@ -49,6 +51,21 @@ import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
+import {
+  CONTINUE_SETTINGS_NOTE,
+  JOIN_MODE_CONTINUE,
+  JOIN_MODE_NEW,
+  MEETING_CHANGED_NOTE,
+  continueLabel,
+  joinAgainErrorText,
+  joinAgainFormChange,
+  joinAgainFromState,
+  joinAgainInputFrom,
+  joinAgainModeChange,
+  joinAgainPasswordHint,
+  joinAgainVirtualParticipantMutation,
+  rejoinVirtualParticipantMutation,
+} from './join-again';
 import {
   CREATE_MIN_LEAD_MINUTES,
   EMPTY_VP_FORM,
@@ -114,21 +131,77 @@ const VirtualParticipantList = () => {
   const [participants, setParticipants] = useState([]);
   const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  // Join again on a Virtual Participant's page opens this page with the
+  // create form's values in the router state (join-again.js). They are read
+  // once, when the page mounts, and the state is then cleared so that a reload
+  // or Back does not open the form again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  // While the form is a Join again form, `joinAgain` holds its values
+  // (joinAgainFormFrom); null for a plain create, and once the form closes.
+  const [joinAgain, setJoinAgain] = useState(() => joinAgainFromState(location.state));
+  useEffect(() => {
+    if (joinAgain) navigate(location.pathname, { replace: true, state: null });
+  }, []);
+  const [showCreateModal, setShowCreateModal] = useState(!!joinAgain);
+  // Join again's choice: continue the source's meeting or start a new one;
+  // whether an edit of the meeting moved it to a new one; and why the last
+  // submission was refused, shown in the form.
+  const [joinMode, setJoinMode] = useState(joinAgain?.mode || JOIN_MODE_NEW);
+  const [meetingChangedNote, setMeetingChangedNote] = useState(false);
+  const [joinAgainError, setJoinAgainError] = useState('');
   // Why a parsed invitation left the meeting ID empty, shown on the field itself.
   const [meetingIdNote, setMeetingIdNote] = useState('');
-  // The note belongs to the invitation just parsed: it goes when the form
-  // closes (cancel, dismiss or create), and when another platform is chosen.
-  useEffect(() => {
-    if (!showCreateModal) setMeetingIdNote('');
-  }, [showCreateModal]);
-  const [createForm, setCreateForm] = useState(EMPTY_VP_FORM);
+  const [createForm, setCreateForm] = useState(joinAgain?.form || EMPTY_VP_FORM);
   const [consentChecked, setConsentChecked] = useState(false);
   // Per-VP screen-recording toggle. Default ON (matches the ENABLE_VIDEO_RECORDING
   // task-definition default); users untick to launch a VP that records audio +
   // transcript only.
-  const [enableVideoRecording, setEnableVideoRecording] = useState(true);
-  const [meetingConsentChoice, setMeetingConsentChoice] = useState('default');
+  const [enableVideoRecording, setEnableVideoRecording] = useState(joinAgain ? joinAgain.enableVideoRecording : true);
+  const [meetingConsentChoice, setMeetingConsentChoice] = useState(joinAgain?.consentChoice || 'default');
+  // The invitation note belongs to the invitation just parsed: it goes when the
+  // form closes (cancel, dismiss or create), and when another platform is
+  // chosen. A Join again form is a one-off: closing it empties the form, so
+  // Create Virtual Participant opens a blank one.
+  useEffect(() => {
+    if (showCreateModal) return;
+    setMeetingIdNote('');
+    if (joinAgain) {
+      setJoinAgain(null);
+      setJoinMode(JOIN_MODE_NEW);
+      setMeetingChangedNote(false);
+      setJoinAgainError('');
+      setCreateForm(EMPTY_VP_FORM);
+      setConsentChecked(false);
+      setEnableVideoRecording(true);
+      setMeetingConsentChoice('default');
+    }
+  }, [showCreateModal]);
+  const continuing = !!joinAgain && joinMode === JOIN_MODE_CONTINUE;
+  // A change to a form field. In Join again's Continue, an edit of the meeting
+  // moves the choice to Start a new meeting (joinAgainFormChange).
+  const handleFormChange = (patch) => {
+    if (!joinAgain) {
+      setCreateForm((prev) => ({ ...prev, ...patch }));
+      return;
+    }
+    const next = joinAgainFormChange(
+      { mode: joinMode, source: joinAgain.source, form: createForm, changedNote: meetingChangedNote },
+      patch,
+    );
+    setCreateForm(next.form);
+    setJoinMode(next.mode);
+    setMeetingChangedNote(next.changedNote);
+  };
+  const handleJoinModeChange = (mode) => {
+    const next = joinAgainModeChange(joinAgain, createForm, mode);
+    setCreateForm(next.form);
+    setJoinMode(next.mode);
+    setMeetingChangedNote(next.changedNote);
+    if (next.consentChoice !== undefined) setMeetingConsentChoice(next.consentChoice);
+    if (next.enableVideoRecording !== undefined) setEnableVideoRecording(next.enableVideoRecording);
+    setJoinAgainError('');
+  };
   // Read each time the form opens. Null until read, or when it cannot be:
   // every choice is then offered, and the VP still applies the deployment's rule.
   const consentDefaults = useMeetingConsentDefaults(showCreateModal);
@@ -599,67 +672,86 @@ const VirtualParticipantList = () => {
         if (userZoomSub) vpInput.userZoomSub = userZoomSub;
       }
 
-      const vpResult = await client.graphql({
-        query: createVirtualParticipant,
-        variables: {
-          input: vpInput,
-        },
-      });
-
-      const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
-
-      // For immediate execution, still use Step Functions (backward compatibility)
-      if (!isScheduled) {
-        const sfnClient = new SFNClient({
-          region: awsExports.aws_project_region,
-          credentials: currentCredentials,
-        });
-
-        const sfnParams = {
-          stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
-          input: JSON.stringify({
-            apiInfo: { httpMethod: 'POST' },
-            data: {
-              meetingPlatform: createForm.meetingPlatform,
-              meetingID: effectiveMeetingId,
-              meetingPassword: effectivePassword,
-              meetingName: createForm.meetingName,
-              meetingTime: '',
-              userName,
-              virtualParticipantId,
-              userSub,
-              userZoomSub,
-              // ECS container Environment values must be strings, not booleans.
-              enableVideoRecording: enableVideoRecording ? 'true' : 'false',
-              accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
-              idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
-              rereshToken: '', // Amplify v6 does not expose refresh tokens directly
+      if (joinAgain) {
+        // Join again as a new meeting: the server creates and launches the new
+        // Virtual Participant, so that for the same meeting it can use the
+        // saved meeting password, which no read returns (join-again.js).
+        setJoinAgainError('');
+        try {
+          await client.graphql({
+            query: joinAgainVirtualParticipantMutation,
+            variables: {
+              input: joinAgainInputFrom(joinAgain.source.id, vpInput, { useStoredZoomAccount: !!userZoomSub }),
             },
-          }),
-        };
-
-        const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
-
-        if (data.status === 'FAILED') {
-          const errorMessage = parseStepFunctionError(data);
-          setNotification({
-            type: 'error',
-            content: errorMessage,
           });
+        } catch (joinErr) {
+          logger.error('Join again failed', joinErr);
+          setJoinAgainError(joinAgainErrorText(joinErr, 'The Virtual Participant could not be started.'));
           return;
         }
+      } else {
+        const vpResult = await client.graphql({
+          query: createVirtualParticipant,
+          variables: {
+            input: vpInput,
+          },
+        });
 
-        if (data.status === 'SUCCEEDED') {
-          const { output } = data;
-          const parsedOutput = output ? JSON.parse(output) : {};
+        const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
 
-          if (parsedOutput.success === false || parsedOutput.error) {
+        // For immediate execution, still use Step Functions (backward compatibility)
+        if (!isScheduled) {
+          const sfnClient = new SFNClient({
+            region: awsExports.aws_project_region,
+            credentials: currentCredentials,
+          });
+
+          const sfnParams = {
+            stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
+            input: JSON.stringify({
+              apiInfo: { httpMethod: 'POST' },
+              data: {
+                meetingPlatform: createForm.meetingPlatform,
+                meetingID: effectiveMeetingId,
+                meetingPassword: effectivePassword,
+                meetingName: createForm.meetingName,
+                meetingTime: '',
+                userName,
+                virtualParticipantId,
+                userSub,
+                userZoomSub,
+                // ECS container Environment values must be strings, not booleans.
+                enableVideoRecording: enableVideoRecording ? 'true' : 'false',
+                accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
+                idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
+                rereshToken: '', // Amplify v6 does not expose refresh tokens directly
+              },
+            }),
+          };
+
+          const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
+
+          if (data.status === 'FAILED') {
             const errorMessage = parseStepFunctionError(data);
             setNotification({
               type: 'error',
               content: errorMessage,
             });
             return;
+          }
+
+          if (data.status === 'SUCCEEDED') {
+            const { output } = data;
+            const parsedOutput = output ? JSON.parse(output) : {};
+
+            if (parsedOutput.success === false || parsedOutput.error) {
+              const errorMessage = parseStepFunctionError(data);
+              setNotification({
+                type: 'error',
+                content: errorMessage,
+              });
+              return;
+            }
           }
         }
       }
@@ -713,6 +805,35 @@ const VirtualParticipantList = () => {
           content: 'Failed to start virtual participant. Please check your meeting details and try again.',
         });
       }
+    } finally {
+      setIsCreating(false);
+      setCreatingType(null);
+    }
+  };
+
+  // Join again's Continue: the same Virtual Participant rejoins its meeting
+  // now, with its saved settings and password. The server says why when it
+  // cannot (its earlier run is still shutting down, for one); the form stays
+  // open with the reason.
+  const handleContinueMeeting = async () => {
+    setIsCreating(true);
+    setCreatingType('continue');
+    setJoinAgainError('');
+    try {
+      await client.graphql({
+        query: rejoinVirtualParticipantMutation,
+        variables: { input: { id: joinAgain.source.id } },
+      });
+      const { meetingName } = joinAgain.source;
+      setShowCreateModal(false);
+      loadParticipants();
+      setNotification({
+        type: 'success',
+        content: `The Virtual Participant is rejoining "${meetingName}". Its transcript continues on the same meeting.`,
+      });
+    } catch (err) {
+      logger.error('Rejoin failed', err);
+      setJoinAgainError(joinAgainErrorText(err, 'The Virtual Participant could not rejoin the meeting.'));
     } finally {
       setIsCreating(false);
       setCreatingType(null);
@@ -788,76 +909,128 @@ const VirtualParticipantList = () => {
       <Modal
         visible={showCreateModal}
         onDismiss={() => setShowCreateModal(false)}
-        header="Create Virtual Participant"
+        header={joinAgain ? 'Join again' : 'Create Virtual Participant'}
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
               <Button variant="link" onClick={() => setShowCreateModal(false)}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                onClick={() => handleCreateParticipant(false)}
-                disabled={!isFormValidForImmediate || isCreating}
-                loading={isCreating && creatingType === 'immediate'}
-                loadingText="Starting Virtual Participant..."
-              >
-                {isCreating && creatingType === 'immediate' ? 'Starting...' : 'Join Now'}
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => handleCreateParticipant(true)}
-                disabled={!isFormValidForScheduling || isCreating}
-                loading={isCreating && creatingType === 'scheduled'}
-                loadingText="Scheduling Virtual Participant..."
-              >
-                {isCreating && creatingType === 'scheduled' ? 'Scheduling...' : 'Schedule for Later'}
-              </Button>
+              {continuing ? (
+                <Button
+                  variant="primary"
+                  onClick={handleContinueMeeting}
+                  disabled={!isFormValidForImmediate || isCreating}
+                  loading={isCreating && creatingType === 'continue'}
+                  loadingText="Rejoining the meeting..."
+                >
+                  Continue Meeting
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleCreateParticipant(false)}
+                    disabled={!isFormValidForImmediate || isCreating}
+                    loading={isCreating && creatingType === 'immediate'}
+                    loadingText="Starting Virtual Participant..."
+                  >
+                    {isCreating && creatingType === 'immediate' ? 'Starting...' : 'Join Now'}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleCreateParticipant(true)}
+                    disabled={!isFormValidForScheduling || isCreating}
+                    loading={isCreating && creatingType === 'scheduled'}
+                    loadingText="Scheduling Virtual Participant..."
+                  >
+                    {isCreating && creatingType === 'scheduled' ? 'Scheduling...' : 'Schedule for Later'}
+                  </Button>
+                </>
+              )}
             </SpaceBetween>
           </Box>
         }
       >
         <Form>
           <SpaceBetween direction="vertical" size="l">
+            {joinAgain && (
+              <FormField label="Meeting to join" stretch>
+                <SpaceBetween direction="vertical" size="xs">
+                  <RadioGroup
+                    value={joinMode}
+                    onChange={({ detail }) => handleJoinModeChange(detail.value)}
+                    ariaLabel="Meeting to join"
+                    items={[
+                      {
+                        value: JOIN_MODE_CONTINUE,
+                        label: continueLabel(joinAgain.source),
+                        description: joinAgain.continueOption.available
+                          ? 'The same Virtual Participant joins now and adds to the same LMA meeting: the ' +
+                            'transcript continues after what is already there, and the summary is generated ' +
+                            'again for the whole meeting when it leaves.'
+                          : joinAgain.continueOption.reason,
+                        disabled: !joinAgain.continueOption.available,
+                      },
+                      {
+                        value: JOIN_MODE_NEW,
+                        label: 'Start a new meeting',
+                        description:
+                          'A new Virtual Participant and a new LMA meeting. Nothing is added to the earlier meeting.',
+                      },
+                    ]}
+                  />
+                  {meetingChangedNote && <Box color="text-status-info">{MEETING_CHANGED_NOTE}</Box>}
+                  {continuing && <Box color="text-body-secondary">{CONTINUE_SETTINGS_NOTE}</Box>}
+                </SpaceBetween>
+              </FormField>
+            )}
+            {joinAgainError && <Alert type="error">{joinAgainError}</Alert>}
             <VirtualParticipantFormFields
               form={createForm}
-              onChange={(patch) => setCreateForm((prev) => ({ ...prev, ...patch }))}
+              onChange={handleFormChange}
               zoomSdkEnabled={zoomSdkEnabled}
+              settingsLocked={continuing}
               zoomAccountField={
-                <FormField
-                  label="Zoom account (Optional)"
-                  description={
-                    'Stored Zoom credentials let LMA join meetings as authenticated user. Two-factor and ' +
-                    'CAPTCHA challenges still require manual action via the LMA viewer.'
-                  }
-                  stretch
-                >
-                  <SpaceBetween direction="vertical" size="s">
-                    <ZoomCredentialsManager onChange={handleZoomCredsChange} />
-                    {zoomCredsStatus.present && (
-                      <Checkbox checked={useZoomLogin} onChange={({ detail }) => setUseZoomLogin(detail.checked)}>
-                        Use my stored Zoom account when joining this meeting (recommended)
-                      </Checkbox>
-                    )}
-                  </SpaceBetween>
-                </FormField>
+                continuing ? null : (
+                  <FormField
+                    label="Zoom account (Optional)"
+                    description={
+                      'Stored Zoom credentials let LMA join meetings as authenticated user. Two-factor and ' +
+                      'CAPTCHA challenges still require manual action via the LMA viewer.'
+                    }
+                    stretch
+                  >
+                    <SpaceBetween direction="vertical" size="s">
+                      <ZoomCredentialsManager onChange={handleZoomCredsChange} />
+                      {zoomCredsStatus.present && (
+                        <Checkbox checked={useZoomLogin} onChange={({ detail }) => setUseZoomLogin(detail.checked)}>
+                          Use my stored Zoom account when joining this meeting (recommended)
+                        </Checkbox>
+                      )}
+                    </SpaceBetween>
+                  </FormField>
+                )
               }
               browserProfileField={
-                <FormField
-                  label="Stored browser profile (Optional)"
-                  description={
-                    'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
-                    'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
-                    'Remove it to start fresh.'
-                  }
-                  stretch
-                >
-                  <ChromeProfileManager platform={createForm.meetingPlatform} />
-                </FormField>
+                continuing ? null : (
+                  <FormField
+                    label="Stored browser profile (Optional)"
+                    description={
+                      'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
+                      'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
+                      'Remove it to start fresh.'
+                    }
+                    stretch
+                  >
+                    <ChromeProfileManager platform={createForm.meetingPlatform} />
+                  </FormField>
+                )
               }
               meetingIdNote={meetingIdNote}
               onMeetingIdNoteClear={() => setMeetingIdNote('')}
               meetingTimeError={meetingTimeErrorText}
+              passwordDescription={joinAgain ? joinAgainPasswordHint(joinMode, joinAgain.source, createForm) : ''}
               consentChoice={meetingConsentChoice}
               onConsentChoiceChange={setMeetingConsentChoice}
               consentDefaults={consentDefaults}

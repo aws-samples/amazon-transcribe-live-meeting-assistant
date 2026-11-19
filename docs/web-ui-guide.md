@@ -98,6 +98,7 @@ Click a VP from the list to open its detail page. The page shows:
 - **Troubleshooting** card — when a VP fails, the human-readable `errorMessage` written by the VP backend is displayed here, along with common solutions for that error class.
 - **Status history** with timestamps for each state transition.
 - **Diagnose** in the page header — runs the AI troubleshooting agent's diagnosis of this Virtual Participant: whether it joined, and if it failed or ended early, why. Shown to Admins only; see [AI Troubleshooting Agent › The Diagnose button](troubleshooting-agent.md#the-diagnose-button).
+- **Join again** in the **Actions** section — shown to the VP's owner and Admins. Opens the Create Virtual Participant modal, titled **Join again** and filled in from this VP, with a choice at the top: **Continue meeting** sends the same VP back in and adds to the same LMA meeting (a rejoin; joins now, with the VP's saved settings), and **Start a new meeting** starts a new VP and a new meeting. Continue is the default when the meeting can still be continued; otherwise it is greyed out with the reason. Editing the platform or meeting ID switches to a new meeting. The saved meeting password is used without being entered again. See [Virtual Participant › Join again](virtual-participant.md#join-again).
 
 ## Meeting Detail Page
 

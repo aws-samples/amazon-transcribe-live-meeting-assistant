@@ -18,14 +18,17 @@ title: "Virtual Participant"
   - [Zoom passcodes and join links](#zoom-passcodes-and-join-links)
 - [Joining a Meeting](#joining-a-meeting)
   - [Reviewing the launch settings](#reviewing-the-launch-settings)
+  - [Joining the same meeting again](#joining-the-same-meeting-again)
 - [Status Lifecycle](#status-lifecycle)
   - [The status detail line](#the-status-detail-line)
   - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
-- [Rejoin](#rejoin)
-  - [What a rejoin does](#what-a-rejoin-does)
-  - [One transcript timeline](#one-transcript-timeline)
-  - [Consent on a rejoined meeting](#consent-on-a-rejoined-meeting)
-  - [Limitations of rejoin](#limitations-of-rejoin)
+- [Join again](#join-again)
+  - [Starting a new meeting](#starting-a-new-meeting)
+  - [Rejoin](#rejoin)
+    - [What a rejoin does](#what-a-rejoin-does)
+    - [One transcript timeline](#one-transcript-timeline)
+    - [Consent on a rejoined meeting](#consent-on-a-rejoined-meeting)
+    - [Limitations of rejoin](#limitations-of-rejoin)
 - [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
 - [AI-driven self-healing](#ai-driven-self-healing)
 - [Zoom Sign-in](#zoom-sign-in)
@@ -499,6 +502,10 @@ The Virtual Participant page has a **Launch settings** section (collapsed by def
 
 A setting the form did not send, such as on a Virtual Participant started from an MCP client or created before the setting was recorded, reads **Not set (deployment default)** or **Not recorded**.
 
+### Joining the same meeting again
+
+To send a Virtual Participant to a meeting that an earlier one attended, such as a recurring meeting link or a meeting the earlier one left early, open the earlier Virtual Participant's page and choose **Join again** in its **Actions** section. It opens this form filled in from the earlier Virtual Participant, with a choice between continuing the earlier LMA meeting and starting a new one, and the saved meeting password is used without being entered again. See [Join again](#join-again).
+
 ## Status Lifecycle
 
 The VP reports a granular status as it boots, joins, and runs. The UI uses these to give a precise picture of where in the startup sequence the VP is:
@@ -516,7 +523,7 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | `JOINING` | Navigating to the meeting URL; signing in to Zoom if credentials are stored |
 | `MANUAL_ACTION_REQUIRED` | A CAPTCHA, 2FA, SSO, consent dialog, or other Zoom verification step needs human input — see [Manual Action Required](#manual-action-required-captcha-2fa-sso) |
 | `ACTIVE` / `JOINED` | VP is in the meeting and capturing audio |
-| `COMPLETED` / `ENDED` | Meeting ended cleanly (host removed the VP, all attendees left, or the VP got "lonely"). The owner or an Admin can send it back into the same meeting with [Rejoin](#rejoin). |
+| `COMPLETED` / `ENDED` | Meeting ended cleanly (host removed the VP, all attendees left, or the VP got "lonely"). The owner or an Admin can send it back into the same meeting with [Join again](#join-again). |
 | `FAILED` | The VP could not join. The DDB record carries an `errorMessage` describing what went wrong (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) |
 
 When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty `failures` array — typically the container instance agent is briefly disconnected), the state machine catches it explicitly and writes `FAILED` plus the original failure reason to the VP record, instead of leaving the VP stuck in `INITIALIZING` indefinitely. That write is conditional on the row not having reached a terminal status, so a task that did start and is reporting its own outcome keeps it.
@@ -606,13 +613,40 @@ The VP clicks **Leave** and, where the client asks, confirms (on Zoom, **Leave M
 
 Ending a VP from LMA stops its ECS task or terminates its MicroVM. ECS sends the container `SIGTERM` and stops it 30 seconds later, and the MicroVM's terminate hook allows 30 seconds, waiting up to 25 for the VP to finish. The VP leaves the meeting first, then does the same end-of-meeting work as when a meeting ends on its own: it stops the consent flow (waiting at most 3 seconds for its evidence, rather than 15), stops key-frame sampling and transcription, uploads the audio and video recordings and sends their links to the meeting, and sends the meeting's END event. It then records its status and saves its browser profile. The leave and the consent waits take at most 16 seconds together; the uploads take as long as the recordings need, and one still running when the grace period ends is cut off. Its log has `Received SIGTERM`, then `Leaving the meeting (stopped by SIGTERM)` and `Leave the meeting: left` (or `not-left`, `timeout` or `failed`).
 
-## Rejoin
+## Join again
 
-When a Virtual Participant left a meeting too early (the host removed it, it crashed, or somebody ended it by mistake), the meeting's owner or an Admin can send it back in. **Rejoin**, at the top of the Virtual Participant's page, relaunches it into the same online meeting, and it adds to the same LMA meeting as before: the same CallId, the same meeting page and transcript, under the meeting's original date in the meeting list. A meeting already shown as **Done** is reopened.
+**Join again**, in the **Actions** section of a Virtual Participant's page, sends a Virtual Participant back to the meeting an earlier one attended: a meeting it left too early (the host removed it, it crashed, or somebody ended it by mistake), or a recurring meeting link. The button is shown to the Virtual Participant's owner and to Admins, once it is no longer waiting for a scheduled launch, and the server holds the same rule.
 
-Rejoin is offered once the Virtual Participant has left (status `ENDED`, `COMPLETED` or `FAILED`) for a meeting it started. It is not offered for a scheduled one that was cancelled, and it is refused for one that was never admitted to its meeting, because no LMA meeting was created to reopen. It is also refused when the meeting's transcript has already been deleted by the Retention settings (see [Transcript deletion](transcript-deletion.md)); a deployment that deletes transcripts **Immediately** after the summary therefore cannot reopen a meeting once its summary is written. The rule is enforced by the server: the caller must be the Virtual Participant's owner or an Admin, and also the meeting's owner or an Admin. Being one of the people a meeting is shared with is not enough. The same operation is available to API clients as the `rejoinVirtualParticipant` mutation.
+Join again opens the **Create Virtual Participant** form on the Virtual Participants list, titled **Join again** and filled in from the earlier Virtual Participant: the meeting name, platform, meeting ID or link, agenda, meeting consent choice and video recording setting. At the top of the form is a choice between two ways to join:
 
-### What a rejoin does
+- **Continue meeting "<meeting name>"** sends the same Virtual Participant back in, and it adds to the same LMA meeting. This is a [rejoin](#rejoin). It is the default when it is available.
+- **Start a new meeting** starts a new Virtual Participant, which records a new LMA meeting. See [Starting a new meeting](#starting-a-new-meeting).
+
+**Continue** is available when the Virtual Participant has left (status `ENDED`, `COMPLETED` or `FAILED`), it started an LMA meeting, the meeting still exists and its transcript has not been deleted. Otherwise the choice is shown greyed out with the reason, and the form opens on **Start a new meeting**. Some reasons are known only when the form is submitted, for example that the Virtual Participant's earlier run is still shutting down; the form then shows the server's reason and stays open.
+
+Continuing joins now: the form has no meeting time, and the meeting name, password, agenda, meeting consent choice and video recording setting are those the Virtual Participant was started with, shown but not editable. The platform and meeting ID or link can be edited, but editing either names another meeting, so the choice moves to **Start a new meeting** and a note under the choice says so. Choosing **Continue** again restores the original meeting details and settings.
+
+In both cases the user does not have to enter the meeting password again. LMA stores it on the Virtual Participant and never returns it to the browser, so the form cannot show it; when the earlier Virtual Participant had one, the password field says **The saved password will be used**. A meeting link carries its own password and is copied with it.
+
+### Starting a new meeting
+
+**Start a new meeting** creates a new Virtual Participant, owned by the user who starts it, and it records a new LMA meeting with its own transcript and summary; nothing is added to the earlier meeting. Any field can be changed, and the new Virtual Participant can join now or be scheduled. The Zoom account choice, the stored browser profile and the acknowledgement checkbox are as for any new Virtual Participant: they belong to the user who starts it, and the checkbox has to be ticked again. The copied meeting consent choice is checked as on any new Virtual Participant: when the deployment's current [Meeting Consent](#meeting-consent) setting no longer allows it, the form goes back to the deployment's setting.
+
+The meeting password follows these rules, which the server applies:
+
+- With the platform and the meeting ID unchanged and the password field left empty, the earlier Virtual Participant's stored password is copied onto the new one. The password field says **The saved password will be used. Enter a password to use a different one.**
+- A password typed into the field is always used instead.
+- When the platform or the meeting ID changed, nothing is copied, and the password field works as on any new Virtual Participant.
+
+Because the copied password never reaches the browser, the server also launches the new Virtual Participant (or, when it is scheduled, the scheduler does at its time, as for any scheduled one), rather than the browser launching it as the plain **Create** button does. A launch that cannot be started marks the new Virtual Participant `FAILED`. The operation is available to API clients as the `joinAgainVirtualParticipant` mutation, for the earlier Virtual Participant's owner and Admins; its answer, like every read, carries no meeting password.
+
+### Rejoin
+
+**Continue meeting** relaunches the Virtual Participant into the same online meeting, and it adds to the same LMA meeting as before: the same CallId, the same meeting page and transcript, under the meeting's original date in the meeting list. A meeting already shown as **Done** is reopened.
+
+A rejoin is refused for a Virtual Participant that was never admitted to its meeting, because no LMA meeting was created to reopen, and when the meeting's transcript has already been deleted by the Retention settings (see [Transcript deletion](transcript-deletion.md)); a deployment that deletes transcripts **Immediately** after the summary therefore cannot reopen a meeting once its summary is written. The server holds the rule on who may: the caller must be the Virtual Participant's owner or an Admin, and also the meeting's owner or an Admin. Being one of the people a meeting is shared with is not enough. The same operation is available to API clients as the `rejoinVirtualParticipant` mutation.
+
+#### What a rejoin does
 
 The meeting is captured in **sessions**. The first session is the one the Virtual Participant started; each rejoin adds one more, numbered from 2.
 
@@ -623,7 +657,7 @@ The meeting is captured in **sessions**. The first session is the one the Virtua
 
 The meeting remains **Done** between the click and the moment the Virtual Participant starts capturing. If the launch fails, or the Virtual Participant cannot get into the meeting (it is not admitted, or the meeting has ended on the platform), the LMA meeting is not reopened, and a transcript deletion it had scheduled still runs at its time. If that deletion runs after the click but before the session starts capturing, the meeting is not reopened either: the relaunched Virtual Participant is ended, with the reason on its status line, and no transcript segment is written for a meeting whose transcript has been deleted.
 
-### One transcript timeline
+#### One transcript timeline
 
 Transcript times are seconds from the start of capture, and every session's own clock starts at 0. A rejoined session's segments would therefore start again at 0 and interleave with the earlier ones. Rejoin works out where the new session starts on the meeting's timeline. It takes the latest of three times: the latest end time of anything already in the transcript (speech, chat messages and meeting assistant answers), the meeting's recorded duration (`TotalConversationDurationMillis`), and the start of the previous session. It rounds that up to a whole second and adds one second. A meeting with nothing on its timeline yet starts the new session at 0. The Virtual Participant adds that offset to the start and end time of every segment it sends, and to the time of every key frame, so the new session follows the earlier ones. Inside the container everything keeps its own clock starting at 0, as in any meeting; the offset is applied only to what is sent.
 
@@ -631,18 +665,18 @@ The segment ids of a later session are prefixed with the session (`s2-…`, `s3-
 
 The gap between the sessions in real time is not shown on the timeline: the new session starts at most two seconds after the earlier one's last segment.
 
-### Consent on a rejoined meeting
+#### Consent on a rejoined meeting
 
 The consent record belongs to the meeting, so it carries over: the mode and rule, the notices already posted, the replies and the evidence. The rejoined Virtual Participant starts consent with the same choice, which leaves the record as it is, posts the notice again in the meeting chat, and records that notice on the same record beside the earlier ones. Replies to it are recorded on the same record too. See [Meeting consent](meeting-consent.md).
 
-### Limitations of rejoin
+#### Limitations of rejoin
 
 - **Recordings.** A meeting holds one audio recording link and one video recording link. The rejoined session's recordings are uploaded as separate files, and their links replace the earlier session's on the meeting record. The earlier files stay in the recordings bucket, but the meeting page links to the latest session's only.
 - **Voice labels.** With speaker separation on, the speech engine numbers the voices it hears afresh in each session (`spk_0`, `spk_1`, …), and a name given to a voice on the meeting page applies to that label throughout the meeting. A voice named in one session can therefore carry its name onto a different person's voice in the next; check the names after a rejoin. Rows named from the meeting platform's roster are not affected.
 - **Retention.** A rejoined meeting keeps the expiry it was created with, which is also when it leaves the meeting list.
 - **Browser profile.** When an Admin rejoins someone else's Virtual Participant that was started immediately (not scheduled), the launch has no owner's browser profile and joins as a guest.
 - **Streaming clients.** Continuing an existing meeting from Stream Audio, the browser extension or the desktop capture app is not available yet.
-- **CLI.** The `lma` CLI has no rejoin command yet; use the Virtual Participant page or the `rejoinVirtualParticipant` mutation.
+- **CLI.** The `lma` CLI has no rejoin or join-again command yet; use the Virtual Participant page, or the `rejoinVirtualParticipant` and `joinAgainVirtualParticipant` mutations.
 
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 

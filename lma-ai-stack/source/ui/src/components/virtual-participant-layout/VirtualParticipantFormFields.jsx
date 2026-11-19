@@ -45,6 +45,11 @@ const VirtualParticipantFormFields = ({
   meetingTimeDescription = 'Choose a date and time that is at least two minutes from now to schedule the participant.',
   passwordLabel = 'Meeting Password (Optional)',
   passwordPlaceholder = 'Enter meeting password if required',
+  passwordDescription = '',
+  // Join again's Continue: the meeting keeps the Virtual Participant's saved
+  // settings, so only the platform and meeting ID can be edited (which starts
+  // a new meeting instead), and there is no time to choose.
+  settingsLocked = false,
   consentChoice,
   onConsentChoiceChange,
   consentDefaults = null,
@@ -75,6 +80,7 @@ const VirtualParticipantFormFields = ({
           value={form.meetingName}
           onChange={({ detail }) => onChange({ meetingName: detail.value })}
           placeholder="Enter meeting name"
+          disabled={settingsLocked}
         />
       </FormField>
 
@@ -116,11 +122,12 @@ const VirtualParticipantFormFields = ({
       </FormField>
 
       {!meetingIdIsUrl && !isGoogleMeetForm && (
-        <FormField label={passwordLabel} stretch>
+        <FormField label={passwordLabel} description={passwordDescription || undefined} stretch>
           <Input
             value={form.meetingPassword}
             onChange={({ detail }) => onChange({ meetingPassword: detail.value })}
             placeholder={passwordPlaceholder}
+            disabled={settingsLocked}
           />
         </FormField>
       )}
@@ -138,29 +145,31 @@ const VirtualParticipantFormFields = ({
 
       {browserProfileField}
 
-      <FormField label={meetingTimeLabel} description={meetingTimeDescription} stretch>
-        <SpaceBetween direction="horizontal" size="l">
-          <DatePicker
-            onChange={({ detail }) => onChange({ meetingDate: detail.value })}
-            value={form.meetingDate}
-            isDateEnabled={(date) => {
-              const currentDate = new Date();
-              currentDate.setDate(currentDate.getDate() - 1);
-              return date > currentDate;
-            }}
-            placeholder="YYYY/MM/DD"
-          />
-          <TimeInput
-            onChange={({ detail }) => onChange({ meetingTime: detail.value })}
-            value={form.meetingTime}
-            disabled={form.meetingDate.length !== 10}
-            format="hh:mm"
-            placeholder="hh:mm (24-hour format)"
-            use24Hour
-          />
-        </SpaceBetween>
-        {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
-      </FormField>
+      {!settingsLocked && (
+        <FormField label={meetingTimeLabel} description={meetingTimeDescription} stretch>
+          <SpaceBetween direction="horizontal" size="l">
+            <DatePicker
+              onChange={({ detail }) => onChange({ meetingDate: detail.value })}
+              value={form.meetingDate}
+              isDateEnabled={(date) => {
+                const currentDate = new Date();
+                currentDate.setDate(currentDate.getDate() - 1);
+                return date > currentDate;
+              }}
+              placeholder="YYYY/MM/DD"
+            />
+            <TimeInput
+              onChange={({ detail }) => onChange({ meetingTime: detail.value })}
+              value={form.meetingTime}
+              disabled={form.meetingDate.length !== 10}
+              format="hh:mm"
+              placeholder="hh:mm (24-hour format)"
+              use24Hour
+            />
+          </SpaceBetween>
+          {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
+        </FormField>
+      )}
 
       <FormField
         label="Agenda (Optional)"
@@ -178,6 +187,7 @@ const VirtualParticipantFormFields = ({
           rows={4}
           ariaLabel="Agenda, one item per line"
           invalid={agendaTooLong}
+          disabled={settingsLocked}
         />
       </FormField>
 
@@ -197,6 +207,7 @@ const VirtualParticipantFormFields = ({
           onChange={({ detail }) => onConsentChoiceChange(detail.selectedOption.value)}
           options={consentOptions}
           ariaLabel="Meeting consent"
+          disabled={settingsLocked}
         />
       </FormField>
 
@@ -208,7 +219,11 @@ const VirtualParticipantFormFields = ({
         }
         stretch
       >
-        <Toggle checked={enableVideoRecording} onChange={({ detail }) => onEnableVideoRecordingChange(detail.checked)}>
+        <Toggle
+          checked={enableVideoRecording}
+          onChange={({ detail }) => onEnableVideoRecordingChange(detail.checked)}
+          disabled={settingsLocked}
+        >
           Record meeting video
         </Toggle>
       </FormField>
@@ -237,6 +252,8 @@ VirtualParticipantFormFields.propTypes = {
   meetingTimeDescription: PropTypes.string,
   passwordLabel: PropTypes.string,
   passwordPlaceholder: PropTypes.string,
+  passwordDescription: PropTypes.string,
+  settingsLocked: PropTypes.bool,
   consentChoice: PropTypes.string.isRequired,
   onConsentChoiceChange: PropTypes.func.isRequired,
   consentDefaults: PropTypes.shape({
