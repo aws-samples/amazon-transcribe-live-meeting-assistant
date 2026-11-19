@@ -24,6 +24,7 @@ import logging
 import os
 
 import boto3
+from pure import EmbeddingUnsupportedError
 
 LOGGER = logging.getLogger()
 
@@ -137,9 +138,59 @@ def _invoke_launcher(payload):
     return body
 
 
+# How the ASR server says its image has no speaker-embedding model. Newer images
+# put it on the close frame; every image sends a fatal BAD_CONFIG error frame
+# naming the missing model first (asr_server/ws_server.py, _run_embed_session).
+EMBED_UNSUPPORTED_CLOSE_REASON = "embed_unsupported"
+EMBED_UNSUPPORTED_ERROR_CODE = "BAD_CONFIG"
+EMBED_UNSUPPORTED_ERROR_TEXT = "speaker-embedding model"
+
+
+def _is_embed_unsupported_error(payload):
+    return payload.get("code") == EMBED_UNSUPPORTED_ERROR_CODE and (
+        EMBED_UNSUPPORTED_ERROR_TEXT in str(payload.get("message") or "")
+    )
+
+
+def _closed_as_unsupported(closed):
+    received = getattr(closed, "rcvd", None)
+    return getattr(received, "reason", "") == EMBED_UNSUPPORTED_CLOSE_REASON
+
+
+async def _unsupported_after_close(socket, closed):
+    """Whether a session that closed under us was refusing ``embed`` mode.
+
+    The server refuses right after the config, while this client is still
+    sending utterances, so the send is what fails and the error frame that
+    explains why is still unread. Frames that arrived before the close stay
+    readable, so drain them rather than reporting a bare normal closure.
+    """
+    from websockets.exceptions import ConnectionClosed  # noqa: PLC0415
+
+    if _closed_as_unsupported(closed):
+        return True
+    try:
+        while True:
+            message = await socket.recv()
+            if isinstance(message, bytes):
+                continue
+            payload = json.loads(message)
+            if payload.get("type") == "error" and _is_embed_unsupported_error(payload):
+                return True
+    except ConnectionClosed:
+        return False
+    except ValueError:
+        return False
+
+
 async def _embed(frames, endpoint, auth_token):
-    """One ``embed``-mode session: config, frames, then read the vectors back."""
+    """One ``embed``-mode session: config, frames, then read the vectors back.
+
+    Raises ``EmbeddingUnsupportedError`` when the session's image has no
+    speaker-embedding model, however that reaches this client.
+    """
     import websockets  # noqa: PLC0415 - optional at import time, as elsewhere
+    from websockets.exceptions import ConnectionClosed  # noqa: PLC0415
 
     vectors = []
     async with websockets.connect(
@@ -148,25 +199,39 @@ async def _embed(frames, endpoint, auth_token):
         open_timeout=20,
         subprotocols=_subprotocols(auth_token) or None,
     ) as socket:
-        await socket.send(
-            json.dumps(
-                {
-                    "type": "config",
-                    "mode": "embed",
-                    "sample_rate": ASR_SAMPLE_RATE,
-                    "encoding": "pcm_s16le",
-                    "channels": 1,
-                }
+        try:
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "config",
+                        "mode": "embed",
+                        "sample_rate": ASR_SAMPLE_RATE,
+                        "encoding": "pcm_s16le",
+                        "channels": 1,
+                    }
+                )
             )
-        )
-        for frame in frames:
-            await socket.send(frame)
-        # `eos` tells the server no more audio is coming, so it finishes and
-        # closes rather than waiting on a socket that will never speak again.
-        await socket.send(json.dumps({"type": "eos"}))
+            for frame in frames:
+                await socket.send(frame)
+            # `eos` tells the server no more audio is coming, so it finishes and
+            # closes rather than waiting on a socket that will never speak again.
+            await socket.send(json.dumps({"type": "eos"}))
+        except ConnectionClosed as closed:
+            if await _unsupported_after_close(socket, closed):
+                raise EmbeddingUnsupportedError(
+                    "the ASR image has no speaker-embedding model"
+                ) from closed
+            raise
 
         while len(vectors) < len(frames):
-            message = await socket.recv()
+            try:
+                message = await socket.recv()
+            except ConnectionClosed as closed:
+                if _closed_as_unsupported(closed):
+                    raise EmbeddingUnsupportedError(
+                        "the ASR image has no speaker-embedding model"
+                    ) from closed
+                raise
             if isinstance(message, bytes):
                 continue
             payload = json.loads(message)
@@ -174,6 +239,8 @@ async def _embed(frames, endpoint, auth_token):
             if kind == "embedding":
                 vectors.append([float(value) for value in payload.get("vector") or []])
             elif kind == "error":
+                if _is_embed_unsupported_error(payload):
+                    raise EmbeddingUnsupportedError("the ASR image has no speaker-embedding model")
                 raise RuntimeError(f"embedding failed: {payload.get('message')}")
             elif kind == "termination":
                 break
@@ -186,7 +253,9 @@ def embed_utterances(samples):
     Raises ``ValueError`` for a request that is not a plausible enrollment and
     ``RuntimeError`` when the ASR session cannot produce vectors -- the caller
     turns both into "could not use those recordings" rather than surfacing
-    either to the browser.
+    either to the browser. The one ``RuntimeError`` it tells apart is
+    ``EmbeddingUnsupportedError``, the image having no speaker model, which no
+    re-recording can fix and which the caller reports as such.
     """
     # Decode BEFORE acquiring anything. A request that is not a plausible
     # enrollment should not have started a MicroVM.

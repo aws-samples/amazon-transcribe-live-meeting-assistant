@@ -222,6 +222,48 @@ def enrollment_is_sufficient(total_seconds, utterance_count):
     return total_seconds >= MIN_ENROLLMENT_SECONDS and utterance_count >= MIN_ENROLLMENT_UTTERANCES
 
 
+# What the catalog (lma-asr-microvm-stack/source/catalog.json) writes for a
+# bundle that carries no speaker-embedding model: the -sortformer bundles, whose
+# diarizer labels frames end to end and computes no per-utterance embedding, and
+# the -transcription-only ones.
+NO_SPEAKER_MODEL = "none"
+
+ENGINE_MISSING_MESSAGE = "voice enrollment needs the on-demand speech engine, which is not deployed"
+
+
+class EmbeddingUnsupportedError(RuntimeError):
+    """The ASR session has no speaker-embedding model to compute a voiceprint.
+
+    Raised from the embedding session when the MicroVM refuses ``embed`` mode,
+    which is the backstop for a deployment whose bundle settings did not reach
+    this function. Lives here, with no dependencies, so both the handler and the
+    ASR client can name it.
+    """
+
+
+def speaker_model_missing_message(bundle_id):
+    """Why enrolling cannot work on a bundle with no speaker model, in words."""
+    bundle = (bundle_id or "").strip()
+    named = f"the active bundle {bundle} has none" if bundle else "the active bundle has none"
+    return f"Voice enrollment needs an ASR model bundle with a speaker model; {named}."
+
+
+def enrollment_unavailable_reason(*, engine_configured, bundle_id, speaker_model_id):
+    """Why a voiceprint cannot be computed in this deployment, or None if it can.
+
+    Decided from what the deployment already knows, before any audio is
+    recorded, so somebody is not asked for clips that were never going to be
+    usable. An unknown speaker model (an empty value: a direct development
+    endpoint, or a stack that does not pass the setting) is treated as present,
+    and the embedding session's own refusal is the backstop for that case.
+    """
+    if not engine_configured:
+        return ENGINE_MISSING_MESSAGE
+    if (speaker_model_id or "").strip().lower() == NO_SPEAKER_MODEL:
+        return speaker_model_missing_message(bundle_id)
+    return None
+
+
 def enrollment_record(
     *,
     subject_id,

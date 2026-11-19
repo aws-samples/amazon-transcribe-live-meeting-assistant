@@ -96,6 +96,52 @@ describe('the page header', () => {
   });
 });
 
+describe('when this deployment cannot compute a voiceprint', () => {
+  const REASON =
+    'Voice enrollment needs an ASR model bundle with a speaker model; the active bundle ' +
+    'parakeet-tdt-v3-live-nemotron35-sortformer has none.';
+  const unavailable = (overrides = {}) =>
+    state({ EnrollmentAvailable: false, EnrollmentUnavailableReason: REASON, ...overrides });
+
+  it('says why, before anything is recorded', async () => {
+    renderWith(unavailable());
+    await waitFor(() => expect(screen.getByText(REASON)).toBeTruthy());
+    expect(screen.getByText('Voice enrollment is not available')).toBeTruthy();
+  });
+
+  it('does not let somebody record clips that would be refused', async () => {
+    renderWith(unavailable({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText('Record a line')).toBeTruthy());
+    const record = screen.getByText('Record a line').closest('button');
+    expect(record.disabled).toBe(true);
+    fireEvent.click(record);
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(screen.getByText('Enroll my voice').closest('button').disabled).toBe(true);
+    expect(screen.getByText(REASON)).toBeTruthy();
+  });
+
+  it('still lets an enrolled person delete their voiceprint', async () => {
+    renderWith(unavailable({ Status: 'active', DisplayName: 'Sarah Lee', ConsentExpiresAt: '2099-01-01T00:00:00Z' }));
+    await waitFor(() => expect(screen.getByText('Delete my voiceprint')).toBeTruthy());
+    expect(screen.getByText('Delete my voiceprint').closest('button').disabled).toBe(false);
+  });
+
+  it('offers recording as before when enrollment is available', async () => {
+    renderWith(state({ Status: 'pending', EnrollmentAvailable: true, EnrollmentUnavailableReason: '' }));
+    await waitFor(() => expect(screen.getByText('Record a line')).toBeTruthy());
+    expect(screen.getByText('Record a line').closest('button').disabled).toBe(false);
+    expect(screen.queryByText('Voice enrollment is not available')).toBeNull();
+  });
+
+  it('treats a backend that does not report availability as available', async () => {
+    // An older backend leaves the field null; the enrollment call still
+    // reports the reason, so the recorder stays usable.
+    renderWith(state({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText('Record a line')).toBeTruthy());
+    expect(screen.getByText('Record a line').closest('button').disabled).toBe(false);
+  });
+});
+
 describe('before anybody has agreed', () => {
   it('shows the terms in full, as given', async () => {
     // Rendered as supplied rather than summarised: a summary is not what the

@@ -12,6 +12,9 @@ and that the append-only log never carries a centroid.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pure
 import pytest
 
@@ -638,3 +641,79 @@ def test_a_consent_row_records_the_version_whenever_one_is_known() -> None:
     )
     assert row["TermsVersion"] == "2"
     assert row["TermsSha256"] == "what-was-agreed"
+
+
+# --------------------------------------------------------------------------
+# Whether this deployment can compute a voiceprint at all
+# --------------------------------------------------------------------------
+
+SORTFORMER_BUNDLE = "parakeet-tdt-v3-live-nemotron35-sortformer"
+
+
+def test_a_bundle_with_no_speaker_model_cannot_enroll_and_says_which_bundle() -> None:
+    reason = pure.enrollment_unavailable_reason(
+        engine_configured=True, bundle_id=SORTFORMER_BUNDLE, speaker_model_id="none"
+    )
+    assert reason == (
+        "Voice enrollment needs an ASR model bundle with a speaker model; the active "
+        f"bundle {SORTFORMER_BUNDLE} has none."
+    )
+
+
+def test_a_bundle_with_a_speaker_model_can_enroll() -> None:
+    assert (
+        pure.enrollment_unavailable_reason(
+            engine_configured=True,
+            bundle_id="parakeet-tdt-v3-titanet-small",
+            speaker_model_id="titanet-small",
+        )
+        is None
+    )
+
+
+def test_an_unknown_speaker_model_is_left_to_the_embedding_session() -> None:
+    """A direct development endpoint, or a stack that passes nothing, says nothing.
+
+    Refusing then would block a deployment that can enroll; the session's own
+    refusal is the backstop.
+    """
+    assert (
+        pure.enrollment_unavailable_reason(
+            engine_configured=True, bundle_id="", speaker_model_id=""
+        )
+        is None
+    )
+
+
+def test_no_engine_is_reported_before_the_bundle_is_considered() -> None:
+    reason = pure.enrollment_unavailable_reason(
+        engine_configured=False, bundle_id=SORTFORMER_BUNDLE, speaker_model_id="none"
+    )
+    assert reason == pure.ENGINE_MISSING_MESSAGE
+
+
+def test_the_missing_speaker_model_message_reads_without_a_bundle_id() -> None:
+    assert pure.speaker_model_missing_message("") == (
+        "Voice enrollment needs an ASR model bundle with a speaker model; the active "
+        "bundle has none."
+    )
+
+
+def test_every_catalog_bundle_without_a_speaker_model_is_reported_unavailable() -> None:
+    """Pinned to the catalog's own spelling, so a bundle cannot slip through."""
+    catalog = json.loads(
+        (
+            Path(__file__).resolve().parents[4]
+            / "lma-asr-microvm-stack"
+            / "source"
+            / "catalog.json"
+        ).read_text(encoding="utf-8")
+    )
+    for bundle in catalog["bundles"]:
+        reason = pure.enrollment_unavailable_reason(
+            engine_configured=True,
+            bundle_id=bundle["id"],
+            speaker_model_id=bundle.get("speakerModelId", "none"),
+        )
+        has_speaker_model = bundle.get("speakerModelId", "none") != "none"
+        assert (reason is None) is has_speaker_model, bundle["id"]

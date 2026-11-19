@@ -444,6 +444,11 @@ def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
             f"{client.stack_name} has no voice-enrollment tables "
             f"(EnableVoiceEnrollment=false, which is the default)"
         )
+    if observed.get("unavailable"):
+        # Enrollment is switched on but cannot compute a voiceprint here: no
+        # ASR MicroVM engine, or a model bundle with no speaker model (the
+        # default bundle has none). A deployment choice, not a defect.
+        pytest.skip(f"{client.stack_name}: {observed['unavailable']}")
 
     # Consent, before any audio exists.
     assert observed["granted"], f"grantVoiceConsent failed: {observed['grant_message']}"
@@ -452,14 +457,14 @@ def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
         "to be recorded first, and nothing stored until samples arrive"
     )
 
-    # The voiceprint itself. A failure here is usually the embedding path:
-    # enrolling needs the ASR MicroVM engine (EnableMicrovmAsr=true, the
-    # default, in a Region with Lambda MicroVMs), because that engine computes
-    # the speaker embeddings and Amazon Transcribe exposes none.
+    # The voiceprint itself. The engine and the bundle's speaker model were
+    # both checked above, so a failure here is the embedding session itself:
+    # the launcher, the MicroVM, or the AppSync time budget.
     assert observed["enrolled"], (
         f"enrolMyVoice failed ({observed['enrol_message']}) after sending "
-        f"{observed['clips']} clips / {observed['seconds']}s. If it says the "
-        f"on-demand engine is missing, set EnableMicrovmAsr=true."
+        f"{observed['clips']} clips / {observed['seconds']}s. The stack has the "
+        f"ASR MicroVM engine and a bundle with a speaker model, so look at the "
+        f"VoiceEnrollmentManagerFunction log and the ASR MicroVM's session log."
     )
     assert observed["status_after_enrol"] == "active", observed["status_after_enrol"]
     assert observed["centroid_dimensions"] > 0, "no centroid was stored"

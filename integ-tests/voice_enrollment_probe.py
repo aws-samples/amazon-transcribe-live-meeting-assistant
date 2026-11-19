@@ -32,7 +32,6 @@ import hashlib
 import json
 
 import boto3
-import requests
 
 # What the portal asks somebody to read. Phonetically varied on purpose: a
 # voiceprint from one short phrase recognises the phrase more than the person.
@@ -94,6 +93,10 @@ def _tokens(outputs, username, password, region):
 
 
 def _call(url, token, query, variables=None):
+    # Imported here so the module, and its stack checks, load without it: the
+    # plumbing tests import this file in an environment that has no requests.
+    import requests
+
     response = requests.post(
         url,
         headers={"Authorization": token, "Content-Type": "application/json"},
@@ -135,6 +138,44 @@ def _voice_tables(stack_name, region):
     return None
 
 
+def _asr_engine_outputs(stack_name, region):
+    """The ASR MicroVM nested stack's outputs, or None when it is not deployed."""
+    cfn = boto3.client("cloudformation", region_name=region)
+    for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name):
+        for resource in page["StackResourceSummaries"]:
+            if resource["ResourceType"] != "AWS::CloudFormation::Stack":
+                continue
+            if resource["LogicalResourceId"] != "ASRMICROVMSTACK":
+                continue
+            stacks = cfn.describe_stacks(StackName=resource["PhysicalResourceId"])["Stacks"]
+            return {o["OutputKey"]: o["OutputValue"] for o in stacks[0].get("Outputs") or []}
+    return None
+
+
+def enrollment_unavailable_reason(stack_name, region=None):
+    """Why this stack cannot compute a voiceprint, or None if it can.
+
+    The same two facts the backend reads: the on-demand engine is deployed, and
+    the model bundle baked into its image carries a speaker-embedding model.
+    The default bundle diarizes end to end and carries none, so a stack on it
+    refuses every enrollment however well the rest of the feature works.
+    """
+    outputs = _asr_engine_outputs(stack_name, region)
+    if outputs is None:
+        return (
+            "voice enrollment needs the ASR MicroVM engine, which this stack does not "
+            "deploy (EnableMicrovmAsr=false, or a Region without AWS Lambda MicroVMs)"
+        )
+    if (outputs.get("AsrSpeakerModelId") or "").strip().lower() == "none":
+        bundle = outputs.get("AsrModelBundleId") or "(unknown)"
+        return (
+            "Voice enrollment needs an ASR model bundle with a speaker model; the active "
+            f"bundle {bundle} has none. See docs/voice-enrollment.md for the bundles "
+            "that support it."
+        )
+    return None
+
+
 def _synthesise(region):
     """The script as raw PCM clips, via Amazon Polly.
 
@@ -166,6 +207,11 @@ def run_probe(stack_name, username, password, region=None, display_name="lma-int
     tables = _voice_tables(stack_name, region)
     if tables is None:
         return {"enabled": False}
+    # Checked before consent is recorded, so a stack that can never enroll is
+    # reported as such and no consent row is appended for nothing.
+    unavailable = enrollment_unavailable_reason(stack_name, region)
+    if unavailable:
+        return {"enabled": True, "unavailable": unavailable}
 
     url = _graphql_url(outputs)
     id_token, access_token = _tokens(outputs, username, password, region)

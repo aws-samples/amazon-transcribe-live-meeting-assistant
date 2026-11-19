@@ -2894,6 +2894,15 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
+        # Voice enrollment needs a bundle with a speaker-embedding model.
+        AsrModelBundleId: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleId
+          - ""
+        AsrSpeakerModelId: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrSpeakerModelId
+          - ""
         AsrConfigTableArn: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableArn

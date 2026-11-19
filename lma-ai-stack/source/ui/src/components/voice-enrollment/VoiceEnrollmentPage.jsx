@@ -160,6 +160,14 @@ const VoiceEnrollmentPage = () => {
   // Whether the consent ran out, as distinct from the terms having moved. Both
   // raise NeedsReconsent, and they need different words.
   const lapsed = Boolean(state?.ConsentExpiresAt) && new Date(state.ConsentExpiresAt) <= new Date();
+  // Why this deployment cannot compute a voiceprint at all (no on-demand
+  // engine, or a model bundle with no speaker model), or null when it can.
+  // Only an explicit false counts: a backend that predates the field leaves it
+  // null, and the enrollment call still reports the reason if there is one.
+  const unavailableReason =
+    state?.EnrollmentAvailable === false
+      ? state?.EnrollmentUnavailableReason || 'Voice enrollment is not available in this deployment.'
+      : null;
 
   const giveConsent = async () => {
     setBusy(true);
@@ -301,7 +309,7 @@ const VoiceEnrollmentPage = () => {
           description={
             <SpaceBetween direction="vertical" size="xxs">
               <span>Let meetings label what you say with your name, instead of “Other Participant”.</span>
-              <span>Requires the on-demand (MicroVM) speech engine.</span>
+              <span>Requires the on-demand (MicroVM) speech engine, with a model bundle that has a speaker model.</span>
             </SpaceBetween>
           }
         >
@@ -321,6 +329,14 @@ const VoiceEnrollmentPage = () => {
         {notice && (
           <Alert type="success" dismissible onDismiss={() => setNotice(null)}>
             {notice}
+          </Alert>
+        )}
+        {/* Said before anything is recorded, so nobody reads six lines aloud
+            for clips the backend can only refuse. Not dismissible: it stays
+            true for as long as the page is open. */}
+        {unavailableReason && (
+          <Alert type="warning" header="Voice enrollment is not available">
+            {unavailableReason}
           </Alert>
         )}
 
@@ -444,7 +460,11 @@ const VoiceEnrollmentPage = () => {
                     Stop
                   </Button>
                 ) : (
-                  <Button iconName="microphone" onClick={startRecording} disabled={busy || clips.length >= MAX_CLIPS}>
+                  <Button
+                    iconName="microphone"
+                    onClick={startRecording}
+                    disabled={busy || clips.length >= MAX_CLIPS || Boolean(unavailableReason)}
+                  >
                     Record a line
                   </Button>
                 )}
@@ -461,7 +481,7 @@ const VoiceEnrollmentPage = () => {
 
               <Button
                 variant="primary"
-                disabled={!enough || !displayName.trim() || busy || recording}
+                disabled={!enough || !displayName.trim() || busy || recording || Boolean(unavailableReason)}
                 loading={busy}
                 onClick={submit}
               >

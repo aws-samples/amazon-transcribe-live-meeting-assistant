@@ -714,7 +714,11 @@ class AsrSession:
                 _CODE_BAD_CONFIG,
                 "embed mode requires an image built with a speaker-embedding model",
             )
-            await self._safe_close()
+            # The ending is also the close reason, so a client that has not read
+            # the error frame yet (voice enrollment sends every utterance before
+            # it reads anything) can still tell "this image has no speaker model"
+            # from any other closure.
+            await self._safe_close(reason="embed_unsupported")
             return "embed_unsupported"
 
         _LOG.info(
@@ -1114,9 +1118,12 @@ class AsrSession:
     async def _send_error(self, code: str, message: str) -> None:
         await self._send(Error(code=code, message=message, fatal=True))
 
-    async def _safe_close(self) -> None:
+    async def _safe_close(self, reason: str = "") -> None:
         with contextlib.suppress(ConnectionClosed):
-            await self._conn.close()
+            if reason:
+                await self._conn.close(reason=reason)
+            else:
+                await self._conn.close()
 
 
 def _classify_first_text(frame: str) -> tuple[dict[str, object] | None, bool]:

@@ -10,7 +10,10 @@ title: "Voice Enrollment (Speaker Recognition)"
 > **Status: Beta.** The **Enroll My Voice** page and its navigation entry are
 > marked Beta in the web UI. Enrolling and matching both require the
 > [ASR MicroVM speech engine](microvm-asr.md), which is deployed by default
-> (`EnableMicrovmAsr=true`) in Regions with AWS Lambda MicroVMs. Amazon Transcribe
+> (`EnableMicrovmAsr=true`) in Regions with AWS Lambda MicroVMs, built from a
+> model bundle that has a speaker model. **The default bundle has none**; see
+> [which model bundles support enrollment](#which-model-bundles-support-enrollment).
+> Amazon Transcribe
 > is the default transcription engine for every meeting source, so matching also
 > needs an admin to move the meeting sources it should apply to onto the ASR
 > MicroVM engine in the **Transcription Engine** section of the
@@ -39,6 +42,7 @@ title: "Voice Enrollment (Speaker Recognition)"
 - [The audit trail](#the-audit-trail)
 - [Who can enroll](#who-can-enroll)
 - [Enrolling a voice](#enrolling-a-voice)
+  - [Which model bundles support enrollment](#which-model-bundles-support-enrollment)
 - [How a match is used](#how-a-match-is-used)
   - [Which voices a meeting is given](#which-voices-a-meeting-is-given)
 - [Withdrawing consent](#withdrawing-consent)
@@ -191,6 +195,47 @@ embedding model lives in that image and Amazon Transcribe exposes no speaker
 embedding. In a deployment with enrollment on but that engine absent, the portal
 says so rather than telling somebody their recordings were unusable.
 
+### Which model bundles support enrollment
+
+The engine is not enough on its own: the [model bundle](microvm-asr.md#model-bundles)
+baked into its image has to carry a **speaker-embedding model** (`speakerModelId`
+in `lma-asr-microvm-stack/source/catalog.json`). Enrolling computes one embedding
+per recording with that model, and matching compares the embeddings of meeting
+speech against the stored voiceprints with it, so a bundle without one can do
+neither.
+
+| Supports enrollment and matching (TitaNet-small speaker model) | Does not (no speaker model) |
+|---|---|
+| `fastconformer-titanet-small` | `parakeet-tdt-v3-live-nemotron35-sortformer` (**the default**) |
+| `nemotron35-titanet-small` | `parakeet-tdt-v3-sortformer` |
+| `nemotron-titanet-small` | `parakeet-tdt-v3-live-sortformer` |
+| `parakeet-tdt-v3-titanet-small` | `parakeet-tdt-v3-live-kroko-sortformer` |
+| `parakeet-tdt-v2-titanet-small` | `fastconformer-transcription-only` |
+| `qwen3-asr-titanet-small` | `qwen3-asr-transcription-only` |
+| `cohere-transcribe-titanet-small` | |
+| `parakeet-tdt-v3-live-titanet-small` | |
+| `parakeet-tdt-v3-live-nemotron35-titanet-small` | |
+
+The `-sortformer` bundles, the default among them, label speakers with an
+end-to-end diarizer that works frame by frame and produces no per-utterance
+embedding, so they carry no speaker model. **With the default bundle, voice
+enrollment is therefore unavailable.** To use it, set `ModelBundle` in the
+`AsrDefaults` mapping of `lma-main.yaml` to one of the bundles in the left-hand
+column and update the stack; the closest to the default is
+`parakeet-tdt-v3-live-nemotron35-titanet-small`, which has the same ASR models
+with TitaNet-small in place of the Sortformer diarizer. Changing the bundle
+rebuilds the MicroVM image (about 20 minutes) and changes how every meeting on
+the ASR MicroVM engine is diarized, not only enrollment; see
+[Model bundles](microvm-asr.md#model-bundles).
+
+On a bundle without a speaker model, **Enroll My Voice** still shows the terms
+and still lets an enrolled person delete their voiceprint, but it shows
+*"Voice enrollment needs an ASR model bundle with a speaker model; the active
+bundle `<id>` has none"* and does not offer to record. The backend reads the
+bundle from the stack, so the check happens before any audio is recorded. If the
+bundle is not known to it (a stack built before this check existed), the ASR
+MicroVM's own refusal to compute embeddings is reported with the same message.
+
 **The sample audio is not kept.** It is held in memory for the length of the
 request and never written to S3 or to a table. What persists is the centroid,
 which is a one-way summary: it is enough to recognise the voice and not enough to
@@ -314,7 +359,10 @@ the engine that computes speaker embeddings — one to build a voiceprint, the
 other to compare against it. Amazon Transcribe exposes none, so with enrollment
 on and that engine off the tables, the portal and the consent log all exist and
 work, and the step that would create a voiceprint reports that the engine is
-missing. With the engine deployed, matching still applies only to the meeting
+missing. The engine's model bundle also has to carry a speaker model, which the
+default bundle does not: see
+[which model bundles support enrollment](#which-model-bundles-support-enrollment).
+With the engine deployed, matching still applies only to the meeting
 sources an admin has moved onto it in the **Transcription Engine** section of
 the Configuration page; every source ships on Amazon Transcribe.
 

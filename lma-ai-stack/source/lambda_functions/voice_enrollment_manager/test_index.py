@@ -706,3 +706,95 @@ def test_destroying_a_voiceprint_records_the_terms_it_was_created_under(
     assert deleted, [r["Action"]["S"] for r in ddb.consent_rows()]
     assert deleted[0]["TermsSha256"]["S"] == "the-older-words"
     assert deleted[0]["TermsSha256"]["S"] != index.pure.terms_fingerprint("")
+
+
+# --------------------------------------------------------------------------
+# A model bundle with no speaker model
+#
+# The default bundle diarizes end to end and carries no speaker-embedding
+# model, so its MicroVM refuses to embed. Measured on a dev stack: the
+# enrollee was told "could not complete that just now" after recording every
+# clip. The deployment knows the bundle up front, so it says so up front.
+# --------------------------------------------------------------------------
+
+NO_SPEAKER_BUNDLE = "parakeet-tdt-v3-live-nemotron35-sortformer"
+NO_SPEAKER_REASON = (
+    "Voice enrollment needs an ASR model bundle with a speaker model; the active "
+    f"bundle {NO_SPEAKER_BUNDLE} has none."
+)
+
+
+def _bundle(monkeypatch, bundle_id, speaker_model_id):
+    monkeypatch.setenv("ASR_MODEL_BUNDLE_ID", bundle_id)
+    monkeypatch.setenv("ASR_SPEAKER_MODEL_ID", speaker_model_id)
+
+
+def test_the_portal_says_enrollment_is_unavailable_without_a_speaker_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bundle(monkeypatch, NO_SPEAKER_BUNDLE, "none")
+    install(monkeypatch, enrollment=consented())
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["EnrollmentAvailable"] is False
+    assert result["EnrollmentUnavailableReason"] == NO_SPEAKER_REASON
+    # The terms are still shown: the page explains, it does not break.
+    assert result["Terms"]
+
+
+def test_the_portal_says_enrollment_is_available_with_a_speaker_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bundle(monkeypatch, "parakeet-tdt-v3-titanet-small", "titanet-small")
+    install(monkeypatch, enrollment=None)
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["EnrollmentAvailable"] is True
+    assert result["EnrollmentUnavailableReason"] == ""
+
+
+def test_the_portal_says_enrollment_is_unavailable_without_the_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ASR_LAUNCHER_FUNCTION_ARN", raising=False)
+    monkeypatch.delenv("ASR_DIRECT_ENDPOINT", raising=False)
+    install(monkeypatch, enrollment=None)
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["EnrollmentAvailable"] is False
+    assert "engine" in result["EnrollmentUnavailableReason"]
+
+
+def test_enrolling_without_a_speaker_model_is_refused_before_any_audio_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bundle(monkeypatch, NO_SPEAKER_BUNDLE, "none")
+    ddb = install(monkeypatch, enrollment=consented())
+    sent = []
+    monkeypatch.setattr(index, "embed_samples", lambda samples: sent.append(samples) or [])
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result == {"Success": False, "Message": NO_SPEAKER_REASON}
+    assert sent == []
+    assert ddb.enrollment_rows() == []
+
+
+def test_a_session_that_refuses_to_embed_is_reported_as_the_missing_speaker_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backstop: the stack did not say, and the MicroVM refused.
+
+    Not "could not complete that just now", which was what the enrollee saw.
+    """
+    monkeypatch.setenv("ASR_MODEL_BUNDLE_ID", NO_SPEAKER_BUNDLE)
+    monkeypatch.delenv("ASR_SPEAKER_MODEL_ID", raising=False)
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(),
+        embed_error=index.pure.EmbeddingUnsupportedError("no speaker model"),
+    )
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result == {"Success": False, "Message": NO_SPEAKER_REASON}
+    assert ddb.enrollment_rows() == []

@@ -22,6 +22,8 @@ export const voiceEnrollmentTerms = /* GraphQL */ `
       NeedsReconsent
       TermsVersion
       Terms
+      EnrollmentAvailable
+      EnrollmentUnavailableReason
     }
   }
 `;
