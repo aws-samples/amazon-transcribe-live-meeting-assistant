@@ -252,6 +252,10 @@ def record_deletion(call_id: str, trigger: str, segments: int, files: int) -> No
 QUOTE_STRIP_ATTEMPTS = 4
 
 
+class ChecklistQuotesNotRemoved(RuntimeError):
+    """The checklist kept changing while its quotes were being removed."""
+
+
 def strip_checklist_quotes(call_id: str) -> int:
     """Remove every evidence quote from the meeting's checklist; the number of items changed.
 
@@ -305,8 +309,12 @@ def strip_checklist_quotes(call_id: str) -> int:
             for before, after in zip(checklist, stripped)
             if (before.get("Evidence") or []) != (after.get("Evidence") or [])
         )
-    LOGGER.warning("could not remove the checklist quotes of %s; the next run tries again", call_id)
-    return 0
+    # Raised, so the invocation fails and is retried (the schedule's retry
+    # policy, or the caller's): the deletion is safe to run again, and a
+    # transcript recorded as deleted must not keep its quotes.
+    raise ChecklistQuotesNotRemoved(
+        f"the checklist of {call_id} kept changing while removing its quotes"
+    )
 
 
 # ── deleting ────────────────────────────────────────────────────────────────

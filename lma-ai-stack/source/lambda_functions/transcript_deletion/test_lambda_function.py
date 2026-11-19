@@ -310,7 +310,7 @@ def test_deleting_the_transcript_removes_each_checklist_quote_and_keeps_where_it
     assert meeting["ChecklistVersion"] == 4
 
 
-def test_a_checklist_written_before_versions_is_still_stripped(aws):
+def test_a_checklist_the_meeting_was_created_with_is_still_stripped(aws):
     _meeting(aws).update(Checklist=CHECKLIST)
     lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] is None
@@ -332,6 +332,21 @@ def test_a_checklist_that_changes_meanwhile_is_read_again(aws, monkeypatch):
     assert lf.strip_checklist_quotes(CALL_ID) == 1
     assert _meeting(aws)["ChecklistVersion"] == 5
     assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] is None
+
+
+def test_a_checklist_that_never_stops_changing_fails_the_run_so_it_is_retried(aws, monkeypatch):
+    _meeting(aws).update(Checklist=CHECKLIST, ChecklistVersion=3)
+    original = aws.table.update_item
+
+    def update_item(**kwargs):
+        if kwargs["UpdateExpression"].startswith("SET Checklist"):
+            _meeting(aws)["ChecklistVersion"] += 1
+        return original(**kwargs)
+
+    monkeypatch.setattr(aws.table, "update_item", update_item)
+    with pytest.raises(lf.ChecklistQuotesNotRemoved):
+        lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] == "Dana owns it"
 
 
 def test_a_meeting_without_quotes_is_not_written(aws):

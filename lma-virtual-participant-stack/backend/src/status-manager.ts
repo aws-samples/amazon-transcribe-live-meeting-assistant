@@ -662,11 +662,13 @@ export class VirtualParticipantStatusManager {
    * (getMeetingInputs), in one read. The meeting password is not among them:
    * it is read separately, from the table, by startup-meeting-password.ts.
    */
-  private static readonly STARTUP_FIELDS = `
+  private static readonly SESSION_FIELDS = `
             id
             CallId
             sessionNumber
-            sessionTimeOffset
+            sessionTimeOffset`;
+
+  private static readonly STARTUP_FIELDS = `${VirtualParticipantStatusManager.SESSION_FIELDS}
             agenda
             agendaSource
             labels { Key Value }
@@ -708,28 +710,47 @@ export class VirtualParticipantStatusManager {
    * GraphQL endpoint (local runs) there is no row, and the answer is null.
    *
    * The same read takes the agenda and meeting preparation, which
-   * getMeetingInputs then answers with.
+   * getMeetingInputs then answers with. If that read fails, the CallId and
+   * session are read again on their own, so the preparation never fails a
+   * launch.
    */
   async getCallSession(): Promise<VpCallSession | null> {
     if (!this.graphqlEndpoint) return null;
     let result: any;
-    const query = `
+    const query = (fields: string) => `
         query GetVirtualParticipant($id: ID!) {
-          getVirtualParticipant(id: $id) {${VirtualParticipantStatusManager.STARTUP_FIELDS}
+          getVirtualParticipant(id: $id) {${fields}
           }
         }
       `;
     try {
-      result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      result = await this.signAndSendGraphQLRequest(query(VirtualParticipantStatusManager.STARTUP_FIELDS), {
+        id: this.participantId,
+      });
+      if (result?.getVirtualParticipant) {
+        this.meetingInputs = this.meetingInputsFrom(result.getVirtualParticipant);
+      }
     } catch (error) {
-      throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
+      // The agenda and meeting preparation are enhancements and must not fail
+      // the launch: the CallId and session are read again on their own, and
+      // getMeetingInputs makes its own read, which may fail without harm.
+      log.warn(`Reading the VP record with its meeting inputs failed; reading the CallId alone: ${error}`);
+      result = null;
+    }
+    if (!result?.getVirtualParticipant) {
+      try {
+        result = await this.signAndSendGraphQLRequest(query(VirtualParticipantStatusManager.SESSION_FIELDS), {
+          id: this.participantId,
+        });
+      } catch (error) {
+        throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
+      }
     }
     // signAndSendGraphQLRequest answers null for an HTTP failure, and the row is
     // always there for a launched VP: neither is a row without a CallId.
     if (!result?.getVirtualParticipant) {
       throw new CallSessionReadError("the Virtual Participant's record could not be read");
     }
-    this.meetingInputs = this.meetingInputsFrom(result.getVirtualParticipant);
     const session = callSessionFromVpRow(result.getVirtualParticipant);
     log.info(
       session

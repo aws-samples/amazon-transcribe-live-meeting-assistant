@@ -226,6 +226,12 @@ def test_the_vp_reads_the_four_inputs_with_the_agenda_and_sends_them_in_start():
     getter = getter[: getter.index("`;")]
     for field in ("labels { Key Value }", "audience", "meetingContext", "checklist { ItemId Text Kind Priority Source }"):
         assert field in getter
+    # A failed read with the preparation falls back to the CallId and session
+    # alone, so the preparation never fails a launch.
+    session = status_manager[status_manager.index("async getCallSession()") :]
+    session = session[: session.index("\n  }\n")]
+    assert "query(VirtualParticipantStatusManager.SESSION_FIELDS)" in session
+    assert session.index("STARTUP_FIELDS") < session.index("SESSION_FIELDS")
     start = stream[stream.index("async sendStartMeeting()") :]
     start = start[: start.index("await this.sendRecord(record);")]
     assert "...preparationStartFields(this.preparation, details.lmaUser)," in start

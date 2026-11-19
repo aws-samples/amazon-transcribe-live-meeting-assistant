@@ -423,8 +423,10 @@ def render_checklist(
     """The checklist as numbered lines, one per item with its status; "" when empty.
 
     For example ``2. [partial] (must, question) Who owns the budget? Evidence at 12:04.``
-    This is the text of the ``{checklist}`` summary placeholder and of the
-    meeting assistant's checklist tool.
+    This is the text of the ``{checklist}`` summary placeholder. The meeting
+    assistant's checklist tool builds its own lines
+    (lma-meetingassist-setup-stack/src/meeting_preparation.py), with the
+    transcript times in the form its other tools use.
     """
     lines = []
     for number, item in enumerate((i for i in (items or []) if isinstance(i, Mapping)), start=1):
