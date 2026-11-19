@@ -2766,6 +2766,14 @@ Resources:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/*"
+              # The MCP server library import is for administrators (the Admin
+              # group, or an operator's IAM principal through the SDK and CLI),
+              # not for the stack's own function roles.
+              - Effect: Deny
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
               - Effect: Allow
                 Action:
                   - appsync:EventConnect
@@ -3013,6 +3021,13 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+            # The MCP server library import is for administrators, not for the
+            # stack's own function roles.
+            - Effect: Deny
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
             - Effect: Allow
               Action:
                 - comprehend:DetectSentiment
@@ -3924,6 +3939,13 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+              # The MCP server library import is for administrators, not for
+              # the stack's own function roles.
+              - Effect: Deny
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
               - Effect: Allow
                 Action:
                   - "s3:GetObject"

@@ -54,6 +54,9 @@ _cached_config_fingerprint: str = ''
 _config_cache_timestamp: float = 0
 # Cached server configs from DynamoDB
 _cached_server_configs: List[Dict] = []
+# ServerId -> Name of the active servers waiting for their credentials, fetched
+# with the configs above and not loaded.
+_cached_waiting_server_names: Dict[str, str] = {}
 # How often to re-check DynamoDB for config changes (seconds)
 _CONFIG_CACHE_TTL_SECONDS = 300  # 5 minutes
 # Sentinel consumer ID to keep MCP clients alive across Agent lifecycles
@@ -742,9 +745,19 @@ def _fetch_server_configs() -> List[Dict]:
     
     # A server imported from an MCP server library waits for its credentials to
     # be entered on this deployment, and is not loaded until they are.
-    servers = [s for s in response.get('Items', []) if not s.get('CredentialsRequired')]
+    # They are still named, so the assistant can say a server is not available.
+    items = response.get('Items', [])
+    servers = [s for s in items if not s.get('CredentialsRequired')]
     logger.info(f"Found {len(servers)} active MCP servers for account {AWS_ACCOUNT_ID}")
-    
+
+    _cached_waiting_server_names.clear()
+    _cached_waiting_server_names.update(
+        {
+            str(s['ServerId']): str(s.get('Name') or s['ServerId'])
+            for s in items
+            if s.get('CredentialsRequired') and s.get('ServerId')
+        }
+    )
     _cached_server_configs = servers
     _config_cache_timestamp = now
     
@@ -771,13 +784,17 @@ def installed_mcp_server_names() -> Dict[str, str]:
     caches for _CONFIG_CACHE_TTL_SECONDS), so call it after that. A server that
     is installed but whose client could not be started is listed here and not
     among the clients; the meeting assistant names such a server to the model as
-    not available. A record with no Name is listed under its ServerId.
+    not available. So is a server waiting for its credentials after an import
+    (CredentialsRequired), which is never loaded. A record with no Name is
+    listed under its ServerId.
     """
-    return {
+    names = {
         str(server['ServerId']): str(server.get('Name') or server['ServerId'])
         for server in _cached_server_configs
         if server.get('ServerId')
     }
+    names.update(_cached_waiting_server_names)
+    return names
 
 
 def load_account_mcp_servers_by_id() -> Tuple[Dict[str, Any], bool]:

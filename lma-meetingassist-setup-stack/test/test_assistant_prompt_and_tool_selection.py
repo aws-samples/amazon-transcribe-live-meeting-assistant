@@ -404,3 +404,38 @@ def test_the_selection_kinds_and_flags_are_the_schemas():
 def test_the_shipped_tool_selection_names_nothing():
     shipped = parameters.shipped_setting_defaults()["meeting_assist"]["toolSelection"]
     assert shipped == {"mcpServers": {}, "skills": {}}
+
+
+def test_a_server_waiting_for_credentials_is_named_but_not_loaded(monkeypatch):
+    import types
+
+    import mcp_server_loader
+
+    items = [
+        {"ServerId": "alpha", "Name": "Alpha", "Status": "ACTIVE"},
+        {"ServerId": "beta", "Name": "Beta", "Status": "ACTIVE", "CredentialsRequired": True},
+    ]
+    table = types.SimpleNamespace(query=lambda **_kwargs: {"Items": items})
+    monkeypatch.setattr(mcp_server_loader, "MCP_SERVERS_TABLE", "servers")
+    monkeypatch.setattr(mcp_server_loader, "_cached_server_configs", [])
+    monkeypatch.setattr(mcp_server_loader, "_cached_waiting_server_names", {})
+    monkeypatch.setattr(mcp_server_loader, "_config_cache_timestamp", 0)
+    monkeypatch.setattr(mcp_server_loader.dynamodb, "Table", lambda _name: table)
+    loaded = mcp_server_loader._fetch_server_configs()  # pylint: disable=protected-access
+    assert [s["ServerId"] for s in loaded] == ["alpha"]
+    assert mcp_server_loader.installed_mcp_server_names() == {"alpha": "Alpha", "beta": "Beta"}
+
+
+def test_a_profile_named_server_waiting_for_credentials_is_named_unavailable(
+    built, configured, monkeypatch
+):
+    monkeypatch.setattr(
+        handler_module,
+        "load_account_mcp_servers_by_id",
+        lambda: ({"alpha": _named("mcp_alpha")}, True),
+    )
+    monkeypatch.setattr(
+        handler_module, "installed_mcp_server_names", lambda: {"alpha": "Alpha", "beta": "Beta"}
+    )
+    configured(_selection(beta={"inMeetingRequests": True}))
+    assert "not available for this request: Beta." in built(OWNER)["system_prompt"]

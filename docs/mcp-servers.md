@@ -132,7 +132,7 @@ A stored type the release does not recognise is exported as `unknown`, with none
 
 **A server that needs credentials waits for them.** An imported server whose authentication type needs credentials is marked **Needs credentials** on the MCP Servers page, and the meeting assistant does not load it until an Admin enters them with **Enter credentials** on its card (`updateMCPServerCredentials`, or the OAuth flow for an `oauth2` server). The form opens on the authentication type the server needs, with the header or variable names and OAuth client settings the file gave it already filled in and every credential empty. A later export still lists those settings.
 
-The export and the import accept the Admin group and IAM-signed requests, which is how the SDK and CLI call them; an IAM caller is a principal with `appsync:GraphQL` permission on the deployment's API. Entering credentials is for the Admin group only.
+The export and the import accept the Admin group and IAM-signed requests, which is how the SDK and CLI call them; an IAM caller is a principal with `appsync:GraphQL` permission on the deployment's API. The roles the stacks create for their own functions and for the Virtual Participant are denied the import explicitly, even where they may call every other mutation. Entering credentials is for the Admin group only.
 
 ## Built-in LMA MCP Tools
 

@@ -32,7 +32,8 @@ const download = (text, name) => {
   link.href = url;
   link.download = name;
   link.click();
-  URL.revokeObjectURL(url);
+  // Revoked a moment later: some browsers start the download asynchronously.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 const ACTION_TEXT = {
