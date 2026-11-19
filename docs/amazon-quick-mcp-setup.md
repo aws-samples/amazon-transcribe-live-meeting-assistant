@@ -116,7 +116,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools, and one more. See
+> the user's identity on every request and exposes the same seven tools plus `list_active_meetings`. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration

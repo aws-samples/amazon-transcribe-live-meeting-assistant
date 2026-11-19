@@ -1078,5 +1078,10 @@ class TestProjectedReads(SleepFree):
         self.assertNotIn("123456789012", text)
 
 
+class TestSharedHelpers(unittest.TestCase):
+    def test_the_index_probe_is_the_one_list_meetings_uses(self):
+        self.assertIs(list_active_meetings.rows_left, list_meetings.rows_left)
+
+
 if __name__ == "__main__":
     unittest.main()

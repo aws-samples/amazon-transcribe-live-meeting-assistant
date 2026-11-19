@@ -159,7 +159,7 @@ No transcript text is returned. The answer is `{"meetings": [...], "count": n}`.
 
 **Who sees what.** An Admin sees every running meeting. Anyone else sees the meetings they own (named as the meeting's owner or its agent, as `list_meetings` decides) and the meetings shared with them. This is wider than `list_meetings`, `get_meeting_transcript` and `get_meeting_summary`, which show a person only the meetings they own.
 
-**When the list may be incomplete.** At most 1,000 of the most recent meetings of the last 24 hours are checked. When that limit ended the search and there were more meetings left, the answer has `"truncated": true` and a `note`; a running meeting that started earlier in the window may then be missing. When some meetings could not be read the `note` says "Some meetings could not be read; try again.". If the lookup fails, the error is `Failed to list active meetings`. A meeting whose start time was stamped by a device with a clock ahead of the server's is listed only once the server's clock reaches that time.
+**When the list may be incomplete.** At most 1,000 of the most recent meetings of the last 24 hours are checked. When that limit ended the search and there were more meetings left, the answer has `"truncated": true` and a `note`; a running meeting that started earlier in the window may then be missing. When some meetings could not be read the `note` says "Some meetings could not be read; try again." If the lookup fails, the error is `Failed to list active meetings`. A meeting whose start time was stamped by a device with a clock ahead of the server's is listed only once the server's clock reaches that time.
 
 ## DynamoDB Table Schema
 
