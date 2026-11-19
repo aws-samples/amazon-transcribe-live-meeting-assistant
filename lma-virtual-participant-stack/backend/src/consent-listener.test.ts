@@ -209,7 +209,7 @@ test('the listening sessions hand on final results only, and write nothing anywh
 test('a MicroVM acquired for listening is handed to transcription, and released when it is not taken', () => {
     // Both acquire under one lock, so they never both launch one.
     const once = methodBody('private async runMicrovmTranscriptionOnce');
-    assert.match(once, /await this\.withLeaseLock\(async \(\) => \{[\s\S]*?const pending = this\.pendingLease;[\s\S]*?pending \?\? \(await acquireLease\(callId\)\)/);
+    assert.match(once, /await this\.withLeaseLock\(async \(\) => \{[\s\S]*?const pending = this\.pendingLease;[\s\S]*?pending \?\? \(await acquireLease\(callId, kinesisStreamManager\.sessionNumber\)\)/);
     assert.match(methodBody('private async openListenerMicrovm'), /await this\.withLeaseLock\(async \(\) => \{[\s\S]*?this\.microvmLease \?\? this\.pendingLease/);
     // Released after any acquisition still under way, when nobody took it.
     assert.match(methodBody('private releasePendingLease'), /return this\.withLeaseLock\(/);

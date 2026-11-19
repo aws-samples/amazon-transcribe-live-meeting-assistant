@@ -960,7 +960,7 @@ export class TranscriptionService {
                 // is one: it is this meeting's, and its listening session is closing.
                 const pending = this.pendingLease;
                 this.pendingLease = null;
-                const acquired = pending ?? (await acquireLease(callId)) ?? null;
+                const acquired = pending ?? (await acquireLease(callId, kinesisStreamManager.sessionNumber)) ?? null;
                 if (acquired && this.isTranscribing) {
                     this.microvmLease = acquired;
                 }
@@ -1577,7 +1577,7 @@ export class TranscriptionService {
             if (current || this.meetingOver) {
                 return { lease: current, acquiredHere: false };
             }
-            const acquired = (await acquireLease(callId)) ?? null;
+            const acquired = (await acquireLease(callId, kinesisStreamManager.sessionNumber)) ?? null;
             this.pendingLease = acquired;
             return { lease: acquired, acquiredHere: acquired !== null };
         });

@@ -683,6 +683,11 @@ class KinesisStreamManager {
     return true;
   }
 
+  /** The meeting's capture session this VP runs (1 unless it was rejoined). */
+  get sessionNumber(): number {
+    return this.session.number;
+  }
+
   /** Where this VP's session starts on the meeting's transcript timeline, in seconds. */
   get sessionOffsetSeconds(): number {
     return this.session.offsetSeconds;
