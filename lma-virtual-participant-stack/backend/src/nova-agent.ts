@@ -54,6 +54,7 @@ import {
   skippedLookupResult,
 } from './muted-lookup.js';
 import { WakeReplyGate } from './wake-reply-gate.js';
+import { addressesAssistantByWakeOrName, assistantNames } from './voice-addressing.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   applyAssistantChatCommand,
@@ -108,13 +109,15 @@ export const TRANSLATOR_PAUSE_PHRASE_WINDOW_MS = 8000;
 export const WAKE_PHRASE_MODE_PROMPT = 'WAKE PHRASE MODE:\n'
   + 'You are a participant in a meeting with several people, and you hear everything that is said. '
   + 'Most of it is the participants talking to each other, not to you.\n'
-  + '1. Answer only a request that is addressed to you with your wake phrase, and a follow-up '
-  + 'the same person adds straight away.\n'
+  + '1. Answer only a request that is addressed to you - with your wake phrase, or by your name '
+  + 'when it opens what they say or closes it after a comma - and a follow-up the same person '
+  + 'adds straight away. A sentence that only mentions your name is not addressed to you.\n'
   + '2. Everything else is conversation between other people. Say nothing in reply to it - not '
   + '"okay", not "I understand", not a summary of what they said - and do not look anything up for it.\n'
-  + '3. When you have answered, stop and stay silent. Someone will say your wake phrase again '
+  + '3. When you have answered, stop and stay silent. Someone will address you again '
   + 'when they want you.\n'
-  + '4. If someone talks over you without saying your wake phrase, stop and say nothing.\n';
+  + '4. If someone talks over you without addressing you, stop and say nothing.\n'
+  + '5. If a lookup comes back as not run, say nothing at all: no apology and no answer of your own.\n';
 
 /**
  * How long the transcript route waits for Nova to call the `mute` tool itself
@@ -323,9 +326,16 @@ interface SessionData {
   /** Set when a participant has asked a translator to stop: whatever this
    *  session says from then on is a translation of that request, and is dropped. */
   silenced?: boolean;
-  /** Drop this session's audio until its current turn ends (an unaddressed
-   *  `set_mode` call; see handleSetModeTool). */
+  /** Drop this session's audio until the next participant turn: the reply
+   *  to a turn the wake-phrase reply gate withheld (wake-reply-gate.ts), or to
+   *  an unaddressed `set_mode` call (handleSetModeTool). That is the whole
+   *  reply, including what the model says after a tool result, and not just
+   *  its first audio block. */
   dropTurn?: boolean;
+  /** Something of the reply `dropTurn` covers has already been withheld: audio
+   *  dropped, or a lookup refused. Such a reply is never released part-way
+   *  (WakeReplyGate.noteAddressedTranscript). */
+  withheldOutput?: boolean;
   /** Keep the text of that same reply out of the history and the transcript.
    *  Cleared at the next participant turn rather than with the audio, because
    *  the FINAL text of a turn arrives after its audio has ended. */
@@ -1478,7 +1488,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       systemPromptContent += '\n\n' + WAKE_PHRASE_MODE_PROMPT;
       systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
         'When you are interrupted mid-response (you will see { "interrupted" : true }), stop. '
-        + 'Reply only if the interruption says your wake phrase or is plainly the person you were '
+        + 'Reply only if the interruption addresses you by wake phrase or name, or is plainly the person you were '
         + 'answering correcting you; otherwise say nothing.\n' +
         (stopToolAvailable
           ? 'If the interruption asks you to stop, stop talking, be quiet, shut up or mute yourself, '
@@ -1776,13 +1786,60 @@ export class NovaAgent implements VoiceAssistantProvider {
    */
   private gateUserTurn(session: SessionData, content: string): void {
     if (!this.replyGateMode() || !this._isActivated) return;
-    // addressesAssistant rather than containsWakePhrase: the same matching,
-    // without a debug block per turn.
-    const decision = this.replyGate.noteUserTurn(addressesAssistant(content, configuredWakePhrases()));
-    if (decision.audible) return;
+    // Decided over the utterance the turn belongs to, by wake phrase or by
+    // name (voice-addressing.ts), not over the turn alone.
+    const decision = this.replyGate.noteUserUtterance(content, (text) => this.addressedToAssistant(text));
+    if (decision.audible) {
+      if (decision.reason === 'addressed' || decision.reason === 'split-utterance'
+        || decision.reason === 'transcript-addressed') {
+        // Addressed by name re-arms the window as the wake phrase does
+        // (handleUserTurnWakePhrase); a second re-arm for a wake phrase is harmless.
+        this.activationWindow.rearm(`addressed (${decision.reason})`);
+      }
+      if (decision.reason !== 'addressed') {
+        log.info(`[wake-gate] action=answered reason=${decision.reason}`);
+      }
+      return;
+    }
     session.dropTurn = true;
     session.dropReplyText = true;
     log.info(`[wake-gate] action=withheld-reply reason=${decision.reason} muted=${this._isMuted}`);
+  }
+
+  /** The names the assistant answers to: its system prompt's "You are Alex",
+   *  and the name its wake phrases share (voice-addressing.ts). */
+  private assistantNames(): string[] {
+    return assistantNames(this.systemPrompt, configuredWakePhrases());
+  }
+
+  /** Whether an utterance addresses the assistant, by wake phrase or by name.
+   *  No debug block per call, unlike containsWakePhrase. */
+  private addressedToAssistant(text: string): boolean {
+    return addressesAssistantByWakeOrName(text, configuredWakePhrases(), this.assistantNames());
+  }
+
+  /**
+   * The participants' transcript has finalised an utterance (from the scribe).
+   * In wake-phrase assistant mode, one addressed to the assistant answers the
+   * Nova turn of the same speech: the next one, if Nova has not finished it
+   * yet, or the one just withheld, if nothing of its reply has been withheld
+   * yet. Nova's turn detection splits utterances that this transcript keeps
+   * whole ("Awesome. Alex, can you tell me the weather this afternoon in
+   * Herndon?" was two Nova turns, neither addressed on its own).
+   */
+  private gateParticipantUtterance(text: string): void {
+    if (!this.replyGateMode() || !this._isActivated) return;
+    if (!this.addressedToAssistant(text)) return;
+    const session = this.session;
+    const releasable = !!session && !session.withheldOutput;
+    if (this.replyGate.noteAddressedTranscript(releasable) && session?.dropTurn) {
+      session.dropTurn = false;
+      session.dropReplyText = false;
+      log.info('[wake-gate] action=released-reply reason=transcript-addressed');
+    } else if (session?.dropTurn && !releasable) {
+      log.info('[wake-gate] action=kept-withheld reason=reply-already-withheld');
+    }
+    this.activationWindow.rearm('addressed (transcript)');
   }
 
   /**
@@ -2346,7 +2403,8 @@ export class NovaAgent implements VoiceAssistantProvider {
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
               if (session?.silenced || session?.dropTurn) {
                 // A translation of "stop translating", or a reply to an
-                // unaddressed set_mode call: not to be heard.
+                // unaddressed turn or set_mode call: not to be heard.
+                if (session.dropTurn) session.withheldOutput = true;
               } else if (session && this.holdsPlaybackFor(session)) {
                 this.holdPlayback(session, audioBuffer);
               } else {
@@ -2364,6 +2422,9 @@ export class NovaAgent implements VoiceAssistantProvider {
                 // Decided here, at the tool-use event, so that a lookup that will
                 // not be run never arms the acknowledgement either.
                 lookupSkip = this.strandsLookupSkipReason(session);
+                // Refused for a withheld reply: what the model says next is
+                // that reply too, and is never released part-way.
+                if (lookupSkip === 'unaddressed-turn') session.withheldOutput = true;
                 if (!lookupSkip) {
                   // Its answer is owed, however much the room talks meanwhile.
                   this.replyGate.noteLookupStarted();
@@ -2426,7 +2487,14 @@ export class NovaAgent implements VoiceAssistantProvider {
                     this.replyGate.noteAnswerHeard(this._isProcessingTool);
                   }
                   session.audioTurnOpen = false;
-                  session.dropTurn = false;
+                  // dropTurn is NOT cleared here. A withheld reply goes on
+                  // after its first audio block ends: the model answers the
+                  // tool result of a refused lookup with a second response of
+                  // its own ("Sorry, I can't provide real-time weather
+                  // updates"), and on a live meeting that second response was
+                  // played because the flag had been cleared at the first
+                  // block's END_TURN. It is cleared at the next participant
+                  // turn, and when an activation starts.
                   if (this.heldPlayback.size > 0) {
                     this.releaseHeldPlayback();
                   }
@@ -2489,6 +2557,7 @@ export class NovaAgent implements VoiceAssistantProvider {
                   // A participant's new turn is not the dropped one.
                   session.dropTurn = false;
                   session.dropReplyText = false;
+                  session.withheldOutput = false;
                   this.handleUserTurnWakePhrase(currentTurn.content);
                   // Wake-phrase assistant mode: the reply to a turn nobody
                   // addressed to the assistant is not heard (wake-reply-gate.ts).
@@ -3599,8 +3668,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     // The request this activation was woken for is owed an answer; what the
-    // session hears after it is gated (wake-reply-gate.ts).
+    // session hears after it is gated (wake-reply-gate.ts). Nothing withheld
+    // before the activation carries over to its reply.
     this.replyGate.noteActivated();
+    if (this.session) {
+      this.session.dropTurn = false;
+      this.session.dropReplyText = false;
+      this.session.withheldOutput = false;
+    }
 
     // Handle initial context by sending as text message
     if (initialContext) {
@@ -4996,6 +5071,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (!text || !text.trim()) return;
     this.participantTranscriptSeen = true;
     this.handleTranslatorUtterance(text, this.session, 'transcript');
+    this.gateParticipantUtterance(text);
   }
 
   /**
