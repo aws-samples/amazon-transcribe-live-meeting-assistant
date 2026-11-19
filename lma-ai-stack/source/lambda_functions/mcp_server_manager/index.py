@@ -736,10 +736,13 @@ def _update_request(
         removes.append("AuthConfig")
     elif server.auth_type == mcp_library.AUTH_NONE:
         # The library says the server needs no credentials: nothing is waited
-        # for. Credentials the server already stores are kept, and so is its
-        # RequiresAuth, so a stored credential is never left marked unused.
+        # for. Credentials the server already stores are kept, with its
+        # RequiresAuth, while its endpoint is unchanged, and removed when the
+        # entry moves it elsewhere (keep_credentials, from plan_import).
         removes += ["CredentialsRequired", "RequiredAuthType", "ImportedAuth"]
-        if existing.get("AuthConfig"):
+        if not step.keep_credentials:
+            removes.append("AuthConfig")
+        elif existing.get("AuthConfig"):
             values[":RequiresAuth"] = True
     # Only what the layer build installs starts a build.
     changed = any(
@@ -796,6 +799,12 @@ def _apply_step(table: Any, account_id: str, step: "mcp_library.ImportStep") -> 
                 "INSTALL_MCP_SERVER" if step.action == "create" else "UPDATE_MCP_SERVER",
             )
             result["Message"] = f"Layer build started ({build_id})" if build_id else ""
+            if build_id:
+                table.update_item(
+                    Key=key,
+                    UpdateExpression="SET BuildId = :buildId",
+                    ExpressionAttributeValues={":buildId": build_id},
+                )
         except Exception as build_error:  # pylint: disable=broad-except
             logger.error("Failed to start CodeBuild for %s: %s", step.server_id, build_error)
             table.update_item(
@@ -869,11 +878,16 @@ def update_mcp_server_credentials(event: Dict[str, Any], context: Any) -> Dict[s
             "Success": False,
             "Message": "ServerId and AuthConfig are required",
         }
-    if mcp_library.stored_auth_type({"AuthConfig": auth_config}) == mcp_library.AUTH_UNKNOWN:
+    try:
+        parsed = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+    except ValueError:
+        parsed = None
+    auth_type = parsed.get("authType") if isinstance(parsed, dict) else None
+    if auth_type not in mcp_library.AUTH_TYPES or auth_type == mcp_library.AUTH_NONE:
         return {
             "ServerId": server_id,
             "Success": False,
-            "Message": "AuthConfig has an unknown authType",
+            "Message": "AuthConfig must be an object with a known authType",
         }
     if not MCP_SERVERS_TABLE:
         return {
@@ -882,6 +896,16 @@ def update_mcp_server_credentials(event: Dict[str, Any], context: Any) -> Dict[s
             "Message": "MCP Servers table not configured",
         }
     table = dynamodb.Table(MCP_SERVERS_TABLE)
+    existing = table.get_item(Key={"AccountId": account_id, "ServerId": server_id}).get("Item")
+    if not existing:
+        return {"ServerId": server_id, "Success": False, "Message": "Server not found"}
+    required = existing.get("RequiredAuthType")
+    if required in mcp_library.AUTH_TYPES and required != auth_type:
+        return {
+            "ServerId": server_id,
+            "Success": False,
+            "Message": f"This server needs {required} credentials, not {auth_type}",
+        }
     try:
         table.update_item(
             Key={"AccountId": account_id, "ServerId": server_id},

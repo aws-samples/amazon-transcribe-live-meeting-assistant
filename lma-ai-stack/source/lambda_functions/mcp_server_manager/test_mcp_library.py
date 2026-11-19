@@ -419,14 +419,61 @@ def test_an_import_updates_a_server_of_the_same_name_and_keeps_its_matching_cred
     installed = _record("local-bearer", "Bearer", {"authType": "bearer", "token": "kept-token"})
     target = FakeTable([installed])
     document = _export([RECORDS[1]])
-    document["servers"][0]["serverUrl"] = "https://mcp.example.com/moved"
+    document["servers"][0]["serverUrl"] = installed["ServerUrl"]
+    document["servers"][0]["description"] = "Now described"
     result = _run(target, "importMCPServerLibrary", ADMIN, library=json.dumps(document))
     assert result["Servers"][0]["Action"] == "updated"
     assert result["Servers"][0]["ServerId"] == "local-bearer"
     updated = target.items["local-bearer"]
-    assert updated["ServerUrl"] == "https://mcp.example.com/moved"
+    assert updated["Description"] == "Now described"
     assert updated["AuthConfig"]["token"] == "kept-token"
     assert "CredentialsRequired" not in updated
+
+
+@pytest.mark.parametrize("auth", [{"authType": "bearer", "token": ""}, {"authType": "none"}])
+def test_an_update_to_another_endpoint_drops_the_stored_credentials(auth):
+    installed = _record("local-bearer", "Bearer", {"authType": "bearer", "token": "kept-token"})
+    target = FakeTable([installed])
+    document = _export([RECORDS[1]])
+    document["servers"][0]["serverUrl"] = "https://mcp.example.com/moved"
+    document["servers"][0]["auth"] = auth
+    result = _run(target, "importMCPServerLibrary", ADMIN, library=json.dumps(document))
+    updated = target.items["local-bearer"]
+    assert updated["ServerUrl"] == "https://mcp.example.com/moved"
+    assert "AuthConfig" not in updated
+    needs = auth["authType"] != "none"
+    assert result["Servers"][0]["CredentialsRequired"] is needs
+    assert bool(updated.get("CredentialsRequired")) is needs
+
+
+def test_a_package_server_moved_to_another_package_drops_its_credentials():
+    target = FakeTable([RECORDS[3]])
+    document = _export([RECORDS[3]])
+    document["servers"][0]["package"] = "another-mcp-server==2.0"
+    _run(target, "importMCPServerLibrary", ADMIN, library=json.dumps(document))
+    updated = target.items["env-server"]
+    assert "AuthConfig" not in updated and updated["CredentialsRequired"] is True
+
+
+@pytest.mark.parametrize(
+    "auth_config, message",
+    [
+        (json.dumps("a string"), "known authType"),
+        (json.dumps({"authType": "none"}), "known authType"),
+        (json.dumps({"authType": "custom_headers", "headers": {"X": "v"}}), "needs bearer"),
+    ],
+)
+def test_entered_credentials_must_be_an_object_of_the_type_the_server_needs(auth_config, message):
+    waiting = _record("waiting", "Waiting", CredentialsRequired=True, RequiredAuthType="bearer")
+    target = FakeTable([waiting])
+    result = _run(
+        target,
+        "updateMCPServerCredentials",
+        ADMIN,
+        input={"ServerId": "waiting", "AuthConfig": auth_config},
+    )
+    assert result["Success"] is False and message in result["Message"]
+    assert target.items["waiting"]["CredentialsRequired"] is True
 
 
 def test_an_update_to_another_authentication_type_drops_the_stored_credentials():
@@ -485,6 +532,7 @@ def test_a_package_server_import_starts_its_layer_build(monkeypatch):
     )
     assert result["Servers"][0]["Message"] == "Layer build started (build-x)"
     assert target.items["env-server"]["Status"] == "INSTALLING"
+    assert target.items["env-server"]["BuildId"] == "build-x"
 
 
 def test_reimporting_an_unchanged_package_server_starts_no_build(monkeypatch):
@@ -519,7 +567,8 @@ def test_an_entry_without_authentication_keeps_a_servers_credentials_and_clears_
     installed = _record("local", "Bearer", {"authType": "bearer", "token": "kept-token"})
     waiting = _record("waiting", "Waiting", CredentialsRequired=True, RequiredAuthType="bearer")
     target = FakeTable([installed, waiting])
-    document = _export([_record("x", "Bearer"), _record("y", "Waiting")])
+    # The same endpoints, now without authentication.
+    document = _export([_record("local", "Bearer"), _record("waiting", "Waiting")])
     result = _run(target, "importMCPServerLibrary", ADMIN, library=json.dumps(document))
     assert [r["CredentialsRequired"] for r in result["Servers"]] == [False, False]
     assert target.items["local"]["AuthConfig"]["token"] == "kept-token"

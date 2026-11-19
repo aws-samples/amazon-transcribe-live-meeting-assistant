@@ -110,6 +110,7 @@ def test_the_profile_instructions_are_applied_to_an_answer(stack, meeting_assist
 
 def test_a_server_flagged_off_for_in_meeting_requests_is_not_offered_to_one(stack, meeting_assist):
     from assistant_profile_probe import (
+        APPLY_TIMEOUT_SECONDS,
         account_id,
         active_mcp_servers,
         assistant_log_group,
@@ -129,7 +130,7 @@ def test_a_server_flagged_off_for_in_meeting_requests_is_not_offered_to_one(stac
     )
     log_group = assistant_log_group(stack.session, stack.name)
 
-    deadline = time.monotonic() + 420
+    deadline = time.monotonic() + APPLY_TIMEOUT_SECONDS
     seen = None
     while time.monotonic() < deadline:
         started = int(time.time() * 1000) - 1000

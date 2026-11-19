@@ -354,6 +354,20 @@ def _imported(entry: Any, validate_package: Callable[[str, str], str]) -> Import
     )
 
 
+def _endpoint(package_type: str, package: Any, server_url: Any) -> tuple:
+    # A remote server is reached at its URL; a package server is its package.
+    if package_type == "streamable-http":
+        return (package_type, str(server_url or package or ""))
+    return (package_type, str(package or ""))
+
+
+def endpoint_of(server: Mapping[str, Any]) -> tuple:
+    """A stored server's endpoint, as an import compares it."""
+    return _endpoint(
+        str(server.get("PackageType") or "pypi"), server.get("NpmPackage"), server.get("ServerUrl")
+    )
+
+
 def plan_import(
     document: Any,
     installed: Sequence[Mapping[str, Any]],
@@ -364,8 +378,9 @@ def plan_import(
 
     Matched by name: an entry whose name an installed server has updates that
     server, keeping its server id, and keeps its stored credentials when the
-    entry's authentication type is the one the server already has (or none);
-    otherwise the credentials are dropped and must be entered again. An entry no
+    entry has the server's endpoint (package type, package and URL) and its
+    authentication type (or none); otherwise the credentials are dropped and,
+    where the entry's type needs them, must be entered again. An entry no
     installed server is named for creates a server, under the entry's server id
     unless another server already uses it, up to ``max_servers`` servers in all.
     An entry that cannot be read is skipped, with the reason, and the others are
@@ -396,8 +411,14 @@ def plan_import(
         existing = by_name.get(server.name)
         if existing is not None:
             current = stored_auth_type(existing)
-            keep = server.auth_type == AUTH_NONE or (
-                current == server.auth_type and not existing.get("CredentialsRequired")
+            # Stored credentials stay only with the endpoint they were entered
+            # for: a changed package, package type or URL is a new endpoint.
+            same_endpoint = endpoint_of(existing) == _endpoint(
+                server.package_type, server.package, server.server_url
+            )
+            keep = same_endpoint and (
+                server.auth_type == AUTH_NONE
+                or (current == server.auth_type and not existing.get("CredentialsRequired"))
             )
             plan.steps.append(
                 ImportStep(
