@@ -87,6 +87,8 @@ SECRET_KEYS = {
     "USER_ACCESS_TOKEN",
     "USER_ID_TOKEN",
     "USER_REFRESH_TOKEN",
+    # Not a FIELD_MAP key: the VP reads its meeting password from its record at
+    # startup. Kept so redaction still covers the name wherever it is logged.
     "MEETING_PASSWORD",
     *INTEGRATION_SECRET_NAMES,
 }

@@ -12,7 +12,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveMeetingPassword, type MeetingPasswordRow } from './meeting-password-source.js';
+import {
+  PASSWORD_UNREADABLE_TRIGGER,
+  failLaunchIfPasswordUnreadable,
+  resolveMeetingPassword,
+  type MeetingPasswordRow,
+} from './meeting-password-source.js';
 
 const LAUNCHED = { VIRTUAL_PARTICIPANT_ID: 'vp-1', VP_TABLE_NAME: 'stack-VirtualParticipant' };
 const noSleep = async (): Promise<void> => {};
@@ -155,4 +160,37 @@ test('without a VP id or table, or in a local run, there is no record to read', 
     assert.deepEqual(result, { ok: true, password: '', origin: 'none' });
     assert.equal(calls.length, 0);
   }
+});
+
+function launchFailure(setFailed: (message: string, endTrigger: string) => Promise<unknown>) {
+  const exits: number[] = [];
+  const errors: string[] = [];
+  const deps = { setFailed, exit: (code: number) => exits.push(code), logError: (m: string) => errors.push(m) };
+  return { deps, exits, errors };
+}
+
+test('an unreadable password marks the VP FAILED with its endTrigger and exits non-zero', async () => {
+  const failed: Array<[string, string]> = [];
+  const { deps, exits } = launchFailure(async (message, endTrigger) => failed.push([message, endTrigger]));
+  await failLaunchIfPasswordUnreadable({ ok: false, error: 'AccessDeniedException' }, deps);
+  assert.equal(failed.length, 1);
+  assert.match(failed[0][0], /Could not read the meeting password/);
+  assert.equal(failed[0][1], PASSWORD_UNREADABLE_TRIGGER);
+  assert.equal(PASSWORD_UNREADABLE_TRIGGER, 'startup:meeting-password-unreadable');
+  assert.deepEqual(exits, [1]);
+});
+
+test('the launch still exits when the FAILED status cannot be recorded', async () => {
+  const { deps, exits, errors } = launchFailure(async () => {
+    throw new Error('AppSync down');
+  });
+  await failLaunchIfPasswordUnreadable({ ok: false, error: 'x' }, deps);
+  assert.deepEqual(exits, [1]);
+  assert.match(errors[0], /AppSync down/);
+});
+
+test('a password that was read lets the launch go on', async () => {
+  const { deps, exits } = launchFailure(async () => assert.fail('not called'));
+  await failLaunchIfPasswordUnreadable({ ok: true, password: '', origin: 'none' }, deps);
+  assert.deepEqual(exits, []);
 });

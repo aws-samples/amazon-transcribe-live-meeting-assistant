@@ -104,3 +104,34 @@ export async function resolveMeetingPassword({
   const reason = lastError instanceof Error ? lastError.message : String(lastError);
   return environmentOr({ ok: false, error: reason });
 }
+
+/** The status detail of a launch that failed because the password could not be read. */
+export const PASSWORD_UNREADABLE_MESSAGE =
+  "Could not read the meeting password from this Virtual Participant's record, so it did not start. Try again.";
+/** Its endTrigger. */
+export const PASSWORD_UNREADABLE_TRIGGER = 'startup:meeting-password-unreadable';
+
+/**
+ * Fail the launch when the startup read gave no password: the VP is marked
+ * FAILED with a reason and the process exits non-zero, before any join.
+ * Joining without the password would fail at the meeting's passcode prompt, or
+ * join with no password where one was given. Does nothing when the read
+ * succeeded. A failure to record the status is logged and the process still
+ * exits.
+ */
+export async function failLaunchIfPasswordUnreadable(
+  result: MeetingPasswordResult,
+  deps: {
+    setFailed: (message: string, endTrigger: string) => Promise<unknown>;
+    exit: (code: number) => void;
+    logError: (message: string) => void;
+  },
+): Promise<void> {
+  if (result.ok) return;
+  try {
+    await deps.setFailed(PASSWORD_UNREADABLE_MESSAGE, PASSWORD_UNREADABLE_TRIGGER);
+  } catch (statusError) {
+    deps.logError(`Failed to record the startup failure: ${statusError}`);
+  }
+  deps.exit(1);
+}
