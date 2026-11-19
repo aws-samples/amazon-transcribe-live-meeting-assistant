@@ -1201,5 +1201,129 @@ class TestTruncatedNoteWording(unittest.TestCase):
         self.assertEqual(sum(call["Limit"] for call in table.query_calls[:-1]), 50)
 
 
+class TestLimitArgument(unittest.TestCase):
+    """The tool schema says ``number``, so a client may send 20.0 or "20"."""
+
+    def table(self, count=30):
+        return FakeTable([meeting(f"m{i}") for i in range(count)])
+
+    def test_a_whole_float_is_a_limit(self):
+        result = run(self.table(), limit=5.0)
+
+        self.assertEqual((len(result["meetings"]), result["count"]), (5, 5))
+
+    def test_the_float_of_the_default_is_a_limit(self):
+        self.assertEqual(run(self.table(), limit=20.0)["count"], 20)
+
+    def test_a_numeric_string_is_a_limit(self):
+        for text in ("5", " 5 ", "5.0"):
+            with self.subTest(text=text):
+                self.assertEqual(run(self.table(), limit=text)["count"], 5)
+
+    def test_no_limit_means_the_default(self):
+        self.assertEqual(run(self.table(), limit=None)["count"], 20)
+
+    def test_a_missing_limit_means_the_default(self):
+        table = self.table()
+        resource = type("Resource", (), {"Table": lambda self, name: table})()
+
+        with patch.object(list_meetings.boto3, "resource", return_value=resource):
+            result = list_meetings.execute(user_id=ME, is_admin=False)
+
+        self.assertEqual(result["count"], 20)
+
+    def test_anything_that_is_not_a_whole_number_is_refused(self):
+        for value in (True, False, 2.5, float("nan"), float("inf"), "abc", "", "2.5", [], {}, (3,)):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError) as caught:
+                    run(self.table(), limit=value)
+
+                self.assertEqual(str(caught.exception), "limit must be an integer")
+
+    def test_a_refusal_does_not_read_the_table(self):
+        table = self.table()
+
+        with self.assertRaises(ValueError):
+            run(table, limit=True)
+
+        self.assertEqual(table.requests, 0)
+
+    def test_a_limit_below_one_is_read_as_one(self):
+        for value in (0, -3, 0.0, "0"):
+            with self.subTest(value=value):
+                self.assertEqual(run(self.table(), limit=value)["count"], 1)
+
+    def test_a_limit_above_the_most_a_walk_can_read_is_read_as_that_most(self):
+        seen = []
+        real = list_meetings.walk_date_range
+
+        def spy(table, start, end, limit, include=None):
+            seen.append(limit)
+            return real(table, start, end, limit, include)
+
+        with patch.object(list_meetings, "walk_date_range", spy):
+            for value in (1000, 1001, 10**9, 5e6, "99999"):
+                run(self.table(3), limit=value)
+
+        self.assertEqual(seen, [1000] * 5)
+        self.assertEqual(list_meetings.MAX_LIMIT, list_meetings.MAX_PAGES * 100)
+
+    def test_the_walk_gets_a_whole_number(self):
+        seen = []
+        real = list_meetings.walk_date_range
+
+        def spy(table, start, end, limit, include=None):
+            seen.append(limit)
+            return real(table, start, end, limit, include)
+
+        with patch.object(list_meetings, "walk_date_range", spy):
+            run(self.table(), limit=7.0)
+            run(self.table(), limit="7")
+
+        self.assertEqual(seen, [7, 7])
+        self.assertTrue(all(type(value) is int for value in seen))
+
+    def test_an_unfiltered_walk_with_a_float_limit_reads_the_same_rows(self):
+        result = run(self.table(), user_id="admin", is_admin=True, limit=4.0)
+
+        self.assertEqual(ids(result), ["m0", "m1", "m2", "m3"])
+
+
+class TestWalkResult(unittest.TestCase):
+    def test_the_result_has_names(self):
+        found = list_meetings.walk_date_range(
+            FakeTable([meeting("a")]), "2026-11-01", "2026-11-18", 5, lambda m: True
+        )
+
+        self.assertEqual(
+            found._fields, ("rows", "unreadable", "truncated", "failed"), "named fields"
+        )
+        self.assertEqual([row["CallId"] for row in found.rows], ["a"])
+        self.assertEqual((found.unreadable, found.truncated, found.failed), (0, False, False))
+
+    def test_it_still_unpacks_as_four_values(self):
+        rows, unreadable, truncated, failed = list_meetings.walk_date_range(
+            FakeTable([meeting("a")]), "2026-11-01", "2026-11-18", 5
+        )
+
+        self.assertEqual((len(rows), unreadable, truncated, failed), (1, 0, False, False))
+
+    def test_a_failed_page_is_named_failed(self):
+        table = FakeTable([meeting("a")])
+        table.query = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
+
+        found = list_meetings.walk_date_range(table, "2026-11-01", "2026-11-18", 5, lambda m: True)
+
+        self.assertIs(found.failed, True)
+        self.assertEqual(found.rows, [])
+
+    def test_the_wrapper_still_returns_a_list(self):
+        rows = list_meetings.query_by_date_range(
+            FakeTable([meeting("a")]), "2026-11-01", "2026-11-18", 5
+        )
+
+        self.assertIs(type(rows), list)
+
+
 if __name__ == "__main__":
     unittest.main()

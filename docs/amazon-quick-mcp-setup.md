@@ -339,7 +339,11 @@ Common parameters for the most-used tools.
   or `TRANSCRIBING`), `STARTED`, `TRANSCRIBING`, `ERRORED`, or `ENDED`. The value
   is not case sensitive, and a blank value means `ALL`; any other value is refused
   with the list of accepted ones
-- `limit` — default 20
+- `limit` — a whole number from 1 to 1,000, default 20 (a number such as `20.0`
+  or the text `"20"` is accepted; a larger number is read as 1,000, a smaller one
+  as 1, and anything that is not a whole number is refused with "limit must be an
+  integer"). A call never looks at more than 1,000 meetings, so it cannot return
+  more
 
 Your access and `status` are applied while the meetings are read, so `limit`
 counts only the meetings you can see that match: other people's newer meetings,

@@ -11,7 +11,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, Tuple
 
 import boto3
 
@@ -33,6 +33,10 @@ STATUS_FILTERS: Dict[str, Optional[FrozenSet[str]]] = {
 
 # The index is walked at most this many pages, whatever the filters leave.
 MAX_PAGES = 10
+DEFAULT_LIMIT = 20
+# The most meetings a call can return: a walk reads at most MAX_PAGES pages of
+# 100 index rows, so a larger ``limit`` could never be filled.
+MAX_LIMIT = 1000
 # A walk that filters rows reads index pages this large; one that does not
 # keeps asking for as many rows as the caller wants.
 FILTERED_PAGE_SIZE = 100
@@ -78,6 +82,45 @@ DECISION_PROJECTION: Dict[str, Any] = {
 }
 
 
+def limit_from(limit: Any) -> int:
+    """The number of meetings a ``limit`` argument asks for, from 1 to MAX_LIMIT.
+
+    The tool schema says ``number``, so a client may send ``20.0`` or ``"20"``.
+    None (or no value) means the default. A boolean, a fraction, text that is
+    not a whole number, or any other type is refused.
+    """
+    if limit is None:
+        return DEFAULT_LIMIT
+    value = None
+    if isinstance(limit, int) and not isinstance(limit, bool):
+        value = limit
+    elif isinstance(limit, float):
+        value = int(limit) if limit.is_integer() else None
+    elif isinstance(limit, str):
+        try:
+            number = float(limit.strip())
+        except ValueError:
+            number = None
+        if number is not None and number.is_integer():
+            value = int(number)
+    if value is None:
+        raise ValueError("limit must be an integer")
+    return max(1, min(value, MAX_LIMIT))
+
+
+class WalkResult(NamedTuple):
+    """What ``walk_date_range`` found."""
+
+    # The meeting rows, newest first.
+    rows: List[Dict]
+    # How many rows could not be read.
+    unreadable: int
+    # Whether the page cap ended the walk with index rows still left.
+    truncated: bool
+    # Whether an index page could not be read (the walk then ended early).
+    failed: bool
+
+
 def execute(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -98,7 +141,8 @@ def execute(
         status: Meeting status filter: 'ALL' (or None), 'IN_PROGRESS' (started or
             transcribing), 'STARTED', 'TRANSCRIBING', 'ERRORED' or 'ENDED'; not
             case sensitive
-        limit: Maximum number of meetings to return
+        limit: Maximum number of meetings to return: a whole number from 1 to
+            1,000 (more is read as 1,000); None means 20
         user_id: User ID for access control
         is_admin: Whether user is admin
 
@@ -106,6 +150,7 @@ def execute(
         Dict with list of meetings and metadata
     """
     statuses = statuses_for(status)
+    limit = limit_from(limit)
 
     dynamodb = boto3.resource("dynamodb")
     table_name = os.environ.get("CALLS_TABLE")
@@ -128,7 +173,13 @@ def execute(
             # Query last 7 days to ensure we find meetings
             start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
             end = today.strftime("%Y-%m-%d")
-        meetings, unreadable, truncated, failed = walk_date_range(table, start, end, limit, include)
+        found = walk_date_range(table, start, end, limit, include)
+        meetings, unreadable, truncated, failed = (
+            found.rows,
+            found.unreadable,
+            found.truncated,
+            found.failed,
+        )
 
         # Format response
         result = {
@@ -217,7 +268,7 @@ def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> Li
     and paginates via LastEvaluatedKey — no shard fan-out.  ``execute`` calls
     ``walk_date_range``, which does the work and takes a row filter.
     """
-    return walk_date_range(table, start_date, end_date, limit)[0]
+    return walk_date_range(table, start_date, end_date, limit).rows
 
 
 def walk_date_range(
@@ -226,13 +277,13 @@ def walk_date_range(
     end_date: str,
     limit: int,
     include: Optional[Callable[[Dict[str, Any]], bool]] = None,
-) -> Tuple[List[Dict], int, bool, bool]:
+) -> WalkResult:
     """
     Walk the TypeDateIndex GSI, newest first, and collect up to ``limit`` meetings.
 
-    Returns the meeting rows, how many rows could not be read, and whether the
-    page cap ended the walk with index rows still left, and whether an index
-    page could not be read (the walk then ends early).
+    Returns a ``WalkResult``: the meeting rows, how many rows could not be read,
+    whether the page cap ended the walk with index rows still left, and whether
+    an index page could not be read (the walk then ends early).
 
     The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
     "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
@@ -386,7 +437,7 @@ def walk_date_range(
             "walk_date_range: hit MAX_PAGES=%d cap (collected=%d)", MAX_PAGES, len(meetings)
         )
         truncated = rows_left(table, query_kwargs, last_key)
-    return meetings[:limit], unreadable, truncated, page_failed
+    return WalkResult(meetings[:limit], unreadable, truncated, page_failed)
 
 
 def rows_left(table, query_kwargs: Dict[str, Any], last_key: Dict[str, Any]) -> bool:
