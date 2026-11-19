@@ -51,6 +51,9 @@ describe('useMeetingNotifications', () => {
     expect(subscription.query).toMatch(/\bSharedWith\b/);
     const list = state.requests.find((request) => request.query.includes('listMeetingNotifications('));
     expect(list.variables.callId).toBe('m1');
+    // Newest first, so a meeting with more than the page loads keeps its latest.
+    expect(list.variables.newestFirst).toBe(true);
+    expect(list.query).toContain('NewestFirst: $newestFirst');
   });
 
   it('adds live notifications in time order and replaces an update in place', async () => {

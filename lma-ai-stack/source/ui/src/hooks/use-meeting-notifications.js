@@ -95,7 +95,8 @@ const useMeetingNotifications = (callId, { client: injected, now: nowForTests } 
           // eslint-disable-next-line no-await-in-loop
           const response = await client.graphql({
             query: listMeetingNotifications,
-            variables: { callId, limit: PAGE_SIZE, nextToken },
+            // Newest first, so that past MAX_LOADED the oldest are the ones left out.
+            variables: { callId, limit: PAGE_SIZE, nextToken, newestFirst: true },
           });
           const page = response?.data?.listMeetingNotifications || {};
           const items = (page.Items || []).filter(Boolean);

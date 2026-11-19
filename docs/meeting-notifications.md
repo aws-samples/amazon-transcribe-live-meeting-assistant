@@ -60,8 +60,9 @@ Bodies are rendered as Markdown without raw HTML and without pictures, so a
 notification never makes the browser load anything from an address in its text.
 Links open in a new tab.
 
-An embedded meeting page, which has no drawers, shows the same feed above the
-meeting's tabs in a section that can be folded.
+A meeting shown without the drawer -- an embedded meeting or Virtual
+Participant page, or the meeting list's preview of a selected meeting -- shows
+the same feed above the meeting's tabs, in a section that can be folded.
 
 **The count in the top navigation.** The bell in the top navigation counts the
 notifications that arrived **during the current visit to LMA**, for meetings
@@ -292,7 +293,8 @@ function.
 
 - The count in the top navigation covers the current visit only, as described
   [above](#on-the-meeting-page).
-- The meeting page loads at most 1000 of a meeting's notifications.
+- The meeting page loads at most the 1000 most recent of a meeting's
+  notifications; older ones are still returned over MCP.
 - After a share is removed, a page that user already had open keeps what it had
   loaded until it is reloaded.
 - No `MUTATION` button action is offered yet; only `COPY` buttons can be

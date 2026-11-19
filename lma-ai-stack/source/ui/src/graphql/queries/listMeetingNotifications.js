@@ -13,6 +13,7 @@ export default /* GraphQL */ `
     $since: AWSDateTime
     $limit: Int
     $nextToken: String
+    $newestFirst: Boolean
   ) {
     listMeetingNotifications(
       CallId: $callId
@@ -20,6 +21,7 @@ export default /* GraphQL */ `
       Since: $since
       Limit: $limit
       NextToken: $nextToken
+      NewestFirst: $newestFirst
     ) {
       Items {
         CallId

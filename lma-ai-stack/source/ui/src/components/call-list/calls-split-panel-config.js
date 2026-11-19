@@ -44,6 +44,9 @@ const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId, g
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+        // The meeting list has no Notifications drawer, so the selected
+        // meeting's notifications show above its tabs.
+        notificationsInline
       />
     ),
   };

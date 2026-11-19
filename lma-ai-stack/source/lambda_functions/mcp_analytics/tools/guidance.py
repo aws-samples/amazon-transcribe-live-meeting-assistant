@@ -121,4 +121,11 @@ def list_items(caller: Caller, meeting_id: str, limit: Any = None) -> Dict[str, 
         for row in page.get("Items") or []
         if row
     ]
-    return {"meetingId": call_id, "guidance": items, "count": len(items)}
+    # Set when more of the meeting's notifications were not read; the newest
+    # guidance is first, so the items returned are always the most recent.
+    return {
+        "meetingId": call_id,
+        "guidance": items,
+        "count": len(items),
+        "hasMore": bool(page.get("NextToken")),
+    }

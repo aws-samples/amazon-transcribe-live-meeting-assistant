@@ -440,6 +440,8 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
               // otherwise as on the meeting page (open on a live meeting the
               // first time, then as the user last left it).
               assistantDefaultOpen={showChat ? true : undefined}
+              // An embed has no drawers, so the meeting's notifications show above the tabs.
+              notificationsInline
             />
           </div>
         )}

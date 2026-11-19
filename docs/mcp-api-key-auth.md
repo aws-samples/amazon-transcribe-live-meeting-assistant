@@ -202,7 +202,7 @@ Lines are returned in the order they end on the meeting's timeline, each with it
 
 Guidance may quote the meeting, so it is kept as long as the meeting's transcript: it is deleted with the transcript, by the Retention section's **Delete the transcript after the summary** setting or when the transcript expires, and with the meeting when the meeting is deleted. A meeting whose transcript has been deleted has no guidance left.
 
-`list_meeting_guidance(meeting_id, limit?)` returns the meeting's guidance newest first, including guidance other features publish (its `type` says which), each with `guidanceId`, `createdAt`, `createdBy`, `source`, `type`, `level`, `title` and `text`. `list_meeting_notifications` returns the same items with every field, and the meeting's other categories.
+`list_meeting_guidance(meeting_id, limit?)` returns the meeting's most recent guidance newest first (`hasMore` is true when it stopped before reading all of the meeting's notifications), including guidance other features publish (its `type` says which), each with `guidanceId`, `createdAt`, `createdBy`, `source`, `type`, `level`, `title` and `text`. `list_meeting_notifications` returns the same items with every field, and the meeting's other categories.
 
 ### Meeting Record Links
 

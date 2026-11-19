@@ -974,9 +974,21 @@ MCP_TOOLS_DIR = AI_STACK / "source" / "lambda_functions" / "mcp_analytics" / "to
 _PY_OPERATION = re.compile(r'"""\s*((?:query|mutation)\s+\w+\s*[({].*?)"""', re.S)
 
 
+# The publish helper the MCP tools call (guidance.push) sends its mutation from
+# the configuration layer, with the MCP server function's role.
+NOTIFICATIONS_HELPER = (
+    AI_STACK
+    / "source"
+    / "lambda_layers"
+    / "configuration_layer"
+    / "lma_notifications"
+    / "__init__.py"
+)
+
+
 def _mcp_operations() -> list[tuple[str, str]]:
     operations = []
-    for path in sorted(MCP_TOOLS_DIR.glob("*.py")):
+    for path in [*sorted(MCP_TOOLS_DIR.glob("*.py")), NOTIFICATIONS_HELPER]:
         if path.name.startswith("test_"):
             continue
         for body in _PY_OPERATION.findall(path.read_text()):
@@ -993,6 +1005,7 @@ def test_mcp_operations_were_found() -> None:
     names = {label.split("::")[1] for label, _ in MCP_OPERATIONS}
     for name in (
         "ListMeetingNotifications",
+        "PublishMeetingNotification",
         "UpdateCallAgenda",
         "UpdateScheduledVirtualParticipant",
         "EndVirtualParticipant",
@@ -1110,9 +1123,10 @@ def test_mutation_actions_are_the_same_on_the_server_and_in_the_page() -> None:
     page_names = re.findall(r"^\s*(\w+): \{", page, re.M)
     assert sorted(server_names) == sorted(page_names)
     # A name inherited by every object is never taken for an action.
-    assert "Object.keys(MUTATION_ACTIONS).includes(name)" in (
-        APPSYNC_DIR / "notificationPublishMeeting.js"
-    ).read_text()
+    assert (
+        "Object.keys(MUTATION_ACTIONS).includes(name)"
+        in (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    )
 
 
 def test_the_user_view_is_keyed_by_the_callers_identity() -> None:

@@ -665,3 +665,12 @@ def test_guidance_is_listed_past_other_categories(calls_table, monkeypatch):
     )
     listed = guidance.list_items(caller(), "m1")
     assert [item["guidanceId"] for item in listed["guidance"]] == ["g"]
+    assert listed["hasMore"] is False
+
+
+def test_guidance_says_when_it_stopped_before_the_end(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    pages = [{"Items": [], "NextToken": f"t{i}"} for i in range(notifications.MAX_PAGES)]
+    _paged(monkeypatch, pages)
+    listed = guidance.list_items(caller(), "m1")
+    assert listed["count"] == 0 and listed["hasMore"] is True
