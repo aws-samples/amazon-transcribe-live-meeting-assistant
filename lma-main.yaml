@@ -2465,6 +2465,13 @@ Resources:
             Status: Enabled
             Prefix: "lma-video-keyframes/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
+          # Chat attachments (docs/virtual-participant.md). Their items carry
+          # the transcript's DynamoDB TTL, and the files are kept for the same
+          # number of days as the transcript.
+          - Id: ChatAttachmentRetention
+            Status: Enabled
+            Prefix: "lma-chat-attachments/"
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
           # Consent evidence images (docs/meeting-consent.md), kept for as many
           # days as the key frames. The transcript's retention rather than the
           # meeting record's because a lifecycle rule takes whole days, which the

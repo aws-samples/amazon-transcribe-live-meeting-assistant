@@ -46,6 +46,9 @@ What is deleted, for the meeting:
 * every version of the transcript files in the recordings bucket: the text
   file the summary step writes for the transcript knowledge base, its metadata
   file, and an uploaded meeting's Amazon Transcribe output;
+* the meeting's chat attachments, which belong to the chat lines of the
+  transcript: their items (``att#<CallId>``) and every version of every file in
+  the meeting's attachments folder (``lma-chat-attachments/<CallId>/``);
 * the transcript knowledge base's entries for those files.
 
 The meeting record is then stamped with when its transcript was deleted, and
@@ -90,6 +93,7 @@ CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 TRANSCRIPT_PREFIX = os.environ.get("TRANSCRIPT_PREFIX", "lma-transcripts/")
+ATTACHMENTS_PREFIX = os.environ.get("ATTACHMENTS_PREFIX", "lma-chat-attachments/")
 TRANSCRIPT_KB_ID = os.environ.get("TRANSCRIPT_KB_ID", "")
 SCHEDULE_GROUP_NAME = os.environ.get("SCHEDULE_GROUP_NAME", "")
 SCHEDULER_ROLE_ARN = os.environ.get("SCHEDULER_ROLE_ARN", "")
@@ -306,6 +310,56 @@ def delete_files(call_id: str) -> List[str]:
     return deleted
 
 
+def _attachment_items(call_id: str) -> Iterable[Dict[str, Any]]:
+    """Every chat attachment item of the meeting, a page at a time."""
+    query: Dict[str, Any] = {
+        "KeyConditionExpression": Key("PK").eq(f"att#{call_id}"),
+        "ProjectionExpression": "PK, SK",
+        "ConsistentRead": True,
+    }
+    while True:
+        page = _table().query(**query)
+        yield from page.get("Items", [])
+        if not page.get("LastEvaluatedKey"):
+            return
+        query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def delete_attachments(call_id: str) -> int:
+    """Delete the meeting's chat attachments: their items, and every version of their files.
+
+    The files are found by the meeting's folder, with a trailing slash so one
+    meeting's folder never matches another whose id merely begins the same way.
+    Returns the number of files that had any version.
+    """
+    with _table().batch_writer() as batch:
+        for item in _attachment_items(call_id):
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+    if not RECORDINGS_BUCKET:
+        return 0
+    folder = f"{ATTACHMENTS_PREFIX}{posixify_filename(call_id)}/"
+    entries: List[Dict[str, str]] = []
+    keys = set()
+    paginator = _client("s3").get_paginator("list_object_versions")
+    for page in paginator.paginate(Bucket=RECORDINGS_BUCKET, Prefix=folder):
+        for entry in page.get("Versions", []) + page.get("DeleteMarkers", []):
+            if entry.get("Key", "").startswith(folder):
+                entries.append({"Key": entry["Key"], "VersionId": entry["VersionId"]})
+                keys.add(entry["Key"])
+    for start in range(0, len(entries), 1000):
+        response = _client("s3").delete_objects(
+            Bucket=RECORDINGS_BUCKET,
+            Delete={"Objects": entries[start : start + 1000], "Quiet": True},
+        )
+        errors = response.get("Errors") or []
+        if errors:
+            raise RuntimeError(
+                f"could not delete {len(errors)} version(s) of the chat attachments: "
+                + "; ".join(f"{e.get('Code')}: {e.get('Message')}" for e in errors[:3])
+            )
+    return len(keys)
+
+
 def _s3_data_sources() -> List[str]:
     """The ids of the transcript knowledge base's S3 data sources."""
     agent = _client("bedrock-agent")
@@ -369,7 +423,8 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     segments = delete_segments(call_id)
     keys = delete_files(call_id)
     remove_from_knowledge_base(keys)
-    record_deletion(call_id, trigger, segments, len(keys))
+    attachments = delete_attachments(call_id)
+    record_deletion(call_id, trigger, segments, len(keys) + attachments)
     LOGGER.info(
         json.dumps(
             {
@@ -378,10 +433,15 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
                 "trigger": trigger,
                 "segmentsDeleted": segments,
                 "filesDeleted": len(keys),
+                "attachmentFilesDeleted": attachments,
             }
         )
     )
-    return {"action": "deleted", "segmentsDeleted": segments, "filesDeleted": len(keys)}
+    return {
+        "action": "deleted",
+        "segmentsDeleted": segments,
+        "filesDeleted": len(keys) + attachments,
+    }
 
 
 # ── scheduling ──────────────────────────────────────────────────────────────

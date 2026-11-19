@@ -208,6 +208,13 @@ How it is built:
   the shortest time are left out), with each frame's text cut at 1,500
   characters and its speech at 3,000 (the fetch-transcript function sends no
   more than that).
+- A model occasionally writes a frame's id on its own line instead of copying
+  the picture reference: the bare id (`0000434311-a84ebc`), `keyframe:<id>`,
+  either of those in parentheses or backticks, or the reference without its
+  leading `!`. The summarizer replaces such a line
+  with the reference listed for that frame, so it still shows as a thumbnail.
+  Only ids of frames the prompt listed are replaced, and only where the id is
+  all the line holds; an id the model miscopied stays as text.
 - The meeting page's **Summary** tab shows each picture reference as the
   frame's thumbnail, inside a section that starts closed, so the summary of a
   long presentation is not a column of slides until it is opened; the frames

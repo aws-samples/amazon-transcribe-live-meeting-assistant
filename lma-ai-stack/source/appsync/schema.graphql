@@ -368,6 +368,9 @@ type Mutation @aws_iam {
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
 	# like addTranscriptSegment. See docs/meeting-video.md.
 	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
+	# Written by the call event processor for an ADD_CHAT_ATTACHMENT event; IAM
+	# only, like addTranscriptSegment. See docs/virtual-participant.md.
+	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment
 	deleteCall(input: DeleteCallInput!): DeleteCallOutput
 	shareCall(input: ShareCallInput!): ShareCallOutput
 	unshareCall(input: UnshareCallInput!): UnshareCallOutput
@@ -476,6 +479,10 @@ type Query @aws_cognito_user_pools
 	# 100 frames, in the order named, each once, leaving out any that do not
 	# exist, likewise without the paging arguments.
 	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID, frameIds: [ID]): VideoKeyframeList
+	# A meeting's chat attachments in time order, with signed links to their
+	# content, valid for an hour. Answered to the callers getCall answers.
+	# attachmentId returns just that attachment, with fresh links.
+	getChatAttachments(callId: ID!, attachmentId: ID, nextToken: String): ChatAttachmentList
 	# The meeting's consent record with hour-long signed links to its evidence
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
@@ -1050,6 +1057,82 @@ input AddVideoKeyframeInput {
 	Owner: String
 	SharedWith: String
 }
+# An image or file shared in the meeting chat, beside the chat message that
+# carried it (SegmentId). Stored under the meeting (PK "att#<CallId>") with the
+# transcript's retention and the meeting's Owner and SharedWith, and deleted
+# with the transcript. See docs/virtual-participant.md.
+type ChatAttachment implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	# Zero-padded milliseconds on the transcript timeline plus a suffix.
+	AttachmentId: ID!
+	# The MEETING_CHAT segment of the message that carried it.
+	SegmentId: ID!
+	# Seconds on the transcript timeline: the chat segment's StartTime.
+	Timestamp: Float!
+	# IMAGE or DOCUMENT.
+	Kind: String!
+	FileName: String!
+	# The meeting platform the Virtual Participant read it from.
+	Platform: String
+	# STORED, or NOT_STORED when only its name was recorded.
+	Status: String!
+	# Why it was not stored: NOT_DOWNLOADABLE, TOO_LARGE, TYPE_NOT_ALLOWED or
+	# UNAVAILABLE.
+	NotStoredReason: String
+	# The type read from its content; only on a stored attachment.
+	ContentType: String
+	Size: Float
+	# The object key in the recordings bucket; only on a stored attachment.
+	S3Key: String
+	# Whether it is to get an AI title and summary.
+	Summarize: Boolean
+	# The AI title and summary, once read: a few words, and a sentence or two.
+	Title: String
+	Summary: String
+	# DONE, FAILED or SKIPPED once the title and summary have been tried;
+	# absent until then.
+	SummaryState: String
+	Owner: String
+	SharedWith: String
+	# Filled in only by getChatAttachments. DownloadUrl serves the content as a
+	# download; PreviewUrl, for a PNG, JPEG, GIF or WebP image only, serves it
+	# inline for a thumbnail. Both are valid for an hour.
+	DownloadUrl: String
+	PreviewUrl: String
+}
+
+type ChatAttachmentList @aws_cognito_user_pools
+@aws_iam {
+	ChatAttachments: [ChatAttachment]
+	nextToken: String
+}
+
+input AddChatAttachmentInput {
+	CallId: ID!
+	AttachmentId: ID!
+	SegmentId: ID!
+	Timestamp: Float!
+	Kind: String!
+	FileName: String!
+	Platform: String
+	Status: String!
+	NotStoredReason: String
+	ContentType: String
+	Size: Float
+	S3Key: String
+	Summarize: Boolean
+	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Owner: String
+	SharedWith: String
+}
+
 input UpdateAgentInput {
 	CallId: ID!
 	AgentId: String!

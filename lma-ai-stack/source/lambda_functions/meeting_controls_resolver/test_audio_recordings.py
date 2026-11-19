@@ -85,6 +85,11 @@ def test_deleting_a_meeting_deletes_the_audio_named_on_its_record(monkeypatch) -
     monkeypatch.setattr(index, "delete_recordings_transcripts", lambda callid: None)
     monkeypatch.setattr(index, "delete_metering_records", lambda callid: 0)
     monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
+    # A meeting continued by a rejoin keeps one CallId, so its attachments
+    # (keyed on the CallId) are deleted with every session's recordings.
+    monkeypatch.setattr(
+        index, "delete_chat_attachments", lambda callid: calls.append(("attachments", callid))
+    )
     monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
     monkeypatch.setattr(
         index,
@@ -115,7 +120,9 @@ def test_deleting_a_meeting_deletes_the_audio_named_on_its_record(monkeypatch) -
             return {}
 
     index.delete_meeting(_Session(), _Field(), "m1", "cls#x", "x", "owner@example.com")
+    # The attachments go in the parallel preparation, the recordings after it.
     assert calls == [
+        ("attachments", "m1"),
         ("audio", "m1", audio_url, earlier_audio),
         ("video", "m1", video_url, earlier_video),
     ]

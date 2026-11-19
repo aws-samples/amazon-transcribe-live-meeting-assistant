@@ -1,0 +1,7 @@
+## The attachment as written. No subscription publishes it: the meeting page
+## reads a meeting's attachments with getChatAttachments, whose resolver checks
+## the caller's access to the meeting and signs the links.
+#if( $ctx.error )
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+$util.toJson($ctx.result)
