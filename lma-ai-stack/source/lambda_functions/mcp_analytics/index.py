@@ -6,8 +6,8 @@
 """
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access
-Provides 7 tools: search, get transcript, get summary, list meetings, schedule meeting, start
-meeting, get virtual participant status
+Provides 8 tools: search, get transcript, get summary, list meetings, list active meetings (API
+key endpoint only), schedule meeting, start meeting, get virtual participant status
 """
 
 import json
@@ -20,6 +20,7 @@ from tools import (
     get_summary,
     get_transcript,
     get_virtual_participant_status,
+    list_active_meetings,
     list_meetings,
     schedule_meeting,
     search_meetings,
@@ -300,6 +301,28 @@ MCP_TOOLS = [
         "annotations": {"readOnlyHint": True},
     },
     {
+        "name": "list_active_meetings",
+        "description": (
+            "List the meetings that are running now (status STARTED or TRANSCRIBING, started "
+            "in the last 24 hours) and that the caller can read: the caller's own, the ones "
+            "shared with the caller, or all of them for an Admin. Returns meetingId, "
+            "meetingName, status, startedAt, lastActivityAt, owner, consent, meetingUrl and "
+            "virtualParticipantUrl for each, newest first. A meeting whose lastActivityAt is "
+            "long ago may have ended without being closed. When the answer has truncated=true "
+            "the search stopped early and an older running meeting may be missing."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of meetings to return (1 to 50, default 10)",
+                },
+            },
+        },
+        "annotations": {"readOnlyHint": True},
+    },
+    {
         "name": "schedule_meeting",
         "description": "Schedule a future meeting with virtual participant",
         "inputSchema": {
@@ -500,6 +523,12 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 participant=arguments.get("participant"),
                 status=arguments.get("status", "ALL"),
                 limit=arguments.get("limit", 20),
+                user_id=user_id,
+                is_admin=is_admin,
+            )
+        elif tool_name == "list_active_meetings":
+            result = list_active_meetings.execute(
+                limit=arguments.get("limit"),
                 user_id=user_id,
                 is_admin=is_admin,
             )

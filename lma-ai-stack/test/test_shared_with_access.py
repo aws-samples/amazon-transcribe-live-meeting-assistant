@@ -689,6 +689,7 @@ PYTHON_READERS = [
     "agenda_deriver/index.py",
     "call_cost_resolver/index.py",
     "list_calls_gsi_resolver/index.py",
+    "mcp_analytics/tools/access_helper.py",
     "mcp_analytics/tools/get_virtual_participant_status.py",
     "meeting_consent_resolver/index.py",
     "meeting_controls_resolver/index.py",

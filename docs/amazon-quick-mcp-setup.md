@@ -13,7 +13,8 @@ Quick products:
 | **Amazon Quick Desktop** | Native macOS / Windows app | API key (Bearer) | Individual users wanting scheduled agents and a personal knowledge graph |
 
 Both expose the same seven LMA tools (search, transcript, summary, list,
-schedule, start-now, VP status). Pick the path below that matches the product
+schedule, start-now, VP status); the API key path offers an eighth,
+`list_active_meetings`. Pick the path below that matches the product
 you're connecting.
 
 > **Looking for ways to use LMA from Quick Desktop?** Once you've completed
@@ -64,7 +65,8 @@ auth path Quick uses.
 
 ## Available LMA Tools
 
-Both auth paths expose the same set of tools. Read-only tools are annotated
+Both auth paths expose the same set of tools, except that `list_active_meetings`
+is offered on the API key endpoint only. Read-only tools are annotated
 with `readOnlyHint: true` so MCP clients (including Quick Desktop scheduled
 agents) classify them correctly.
 
@@ -74,6 +76,7 @@ agents) classify them correctly.
 | `get_meeting_transcript` | ✅ | Full transcript in `text`, `json`, or `srt` format |
 | `get_meeting_summary` | ✅ | AI-generated summary with action items and topics |
 | `list_meetings` | ✅ | Filter by date range or status |
+| `list_active_meetings` | ✅ | The meetings running now (API key endpoint only) |
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
@@ -113,7 +116,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools. See
+> the user's identity on every request and exposes the same seven tools, and one more. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -265,7 +268,7 @@ architecture.
      - **Value**: your API key from Step 1
 6. Click **Connect**
 
-Quick Desktop will discover the seven LMA tools and confirm the connection.
+Quick Desktop will discover the eight LMA tools and confirm the connection.
 
 > **Note**: Quick Desktop authenticates the API-key path with a custom
 > `x-api-key` header rather than a Bearer-token field. LMA's MCP API Gateway
@@ -352,6 +355,33 @@ the `note` says so ("Some meetings could not be read; try again."), and if the
 search itself stopped early because the date index could not be read, it says
 "The search could not be completed; try again." The sentences are joined when
 more than one applies. `truncated` and `note` are absent otherwise.
+
+### `list_active_meetings`
+
+Available on the API key endpoint only (Path B), not on the OAuth path.
+
+- `limit` — default 10, from 1 to 50; a number outside the range is moved to the
+  nearest end, and a value that is not a whole number is refused
+
+Returns the meetings that are running now (`STARTED` or `TRANSCRIBING`, created
+in the last 24 hours) that you own or that are shared with you; an Admin sees
+all of them. Each has `meetingId`, `meetingName`, `status`, `startedAt`,
+`lastActivityAt`, `owner`, `consent` (`mode`, `status`, `captureAllowed`, or
+`null`), `meetingUrl` and `virtualParticipantUrl`; there is no transcript text.
+Use the `meetingId` with the other tools.
+
+- `lastActivityAt` is when the meeting's record last changed. A meeting that
+  stopped long ago but was never closed is still listed until LMA ends it
+  (after several hours by default), so an old `lastActivityAt` marks one that
+  has probably finished.
+- `truncated: true` with a `note` means the search reached its limit of the
+  1,000 most recent meetings of the last 24 hours with more left, so a running
+  meeting that started earlier may not be listed.
+- Uploaded recordings that are still being processed are not listed.
+
+Meetings shared with you are listed here although `list_meetings`,
+`get_meeting_transcript` and `get_meeting_summary` show only the meetings you
+own. See [MCP API Key Authentication](mcp-api-key-auth.md#list_active_meetings).
 
 ### `schedule_meeting`
 

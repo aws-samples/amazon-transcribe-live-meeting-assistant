@@ -4,7 +4,7 @@ title: "Amazon Quick Desktop: LMA Workflows"
 
 # Amazon Quick Desktop: LMA Workflows
 
-Once LMA is connected to Amazon Quick Desktop as an MCP server, the seven
+Once LMA is connected to Amazon Quick Desktop as an MCP server, the eight
 LMA tools become first-class capabilities that Quick can compose with
 **any other tool you've connected** — your calendar, Slack, task trackers,
 the knowledge graph, web search, and other MCP servers. That composability
@@ -43,12 +43,13 @@ This guide shows three layers of usage:
 
 ## Available LMA tools
 
-LMA exposes seven tools, of which five are read-only (annotated
+LMA exposes eight tools, of which six are read-only (annotated
 `readOnlyHint: true` so Quick Desktop classifies them correctly for scheduled
 agents — no `allow_unscoped_write_tools` required for read-only flows):
 
 - **Read-only:** `search_lma_meetings`, `get_meeting_transcript`,
-  `get_meeting_summary`, `list_meetings`, `get_virtual_participant_status`
+  `get_meeting_summary`, `list_meetings`, `list_active_meetings` (meetings
+  running now), `get_virtual_participant_status`
 - **Write:** `schedule_meeting`, `start_meeting_now`
 
 All responses include `meetingUrl` and (where applicable)
@@ -424,8 +425,9 @@ LMA enforces UBAC — non-admin users only see their own meetings:
 ### Write-tool prompts asking for `allow_unscoped_write_tools`
 
 LMA's read-only tools (`search_lma_meetings`, `get_meeting_transcript`,
-`get_meeting_summary`, `list_meetings`, `get_virtual_participant_status`)
-are annotated `readOnlyHint: true` and should not require this flag.
+`get_meeting_summary`, `list_meetings`, `list_active_meetings`,
+`get_virtual_participant_status`) are annotated `readOnlyHint: true` and should
+not require this flag.
 
 If you're seeing the prompt, it's because your tool policy includes a
 **write tool** (`schedule_meeting` or `start_meeting_now`). For read-only

@@ -74,7 +74,7 @@ MCP client connects to REST API Gateway endpoint
     → Routes to MCP protocol handler:
       - initialize → returns server capabilities + protocolVersion
       - notifications/initialized → empty 200 acknowledgment
-      - tools/list → returns 7 tool definitions with inputSchema
+      - tools/list → returns 8 tool definitions with inputSchema
       - tools/call → routes to tool implementation, returns MCP result
       - ping → returns empty result
     → User context from authorizer enforces UBAC on tool calls
@@ -117,7 +117,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 |--------|-------------|
 | `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
 | `notifications/initialized` | Client acknowledgment, returns empty 200 |
-| `tools/list` | Returns all 7 tool definitions with inputSchema |
+| `tools/list` | Returns all 8 tool definitions with inputSchema |
 | `tools/call` | Executes a tool by name with arguments, returns MCP content result |
 | `ping` | Health check, returns empty result |
 
@@ -129,9 +129,37 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 | `get_meeting_transcript` | Get full transcript (json, text, or srt format) |
 | `get_meeting_summary` | Get AI summary with action items and topics |
 | `list_meetings` | List meetings with date and status filters |
+| `list_active_meetings` | List the meetings that are running now (API key endpoint only) |
 | `schedule_meeting` | Schedule a future meeting with virtual participant |
 | `start_meeting_now` | Start a meeting immediately with virtual participant |
 | `get_virtual_participant_status` | Poll the status of a virtual participant launched by `start_meeting_now` |
+
+### `list_active_meetings`
+
+Lists the meetings that are running now, so that a client knows which meeting to ask about. It is offered by the API key endpoint only: the OAuth gateway keeps its seven tools.
+
+| Argument | Description |
+|----------|-------------|
+| `limit` | How many meetings to return. Default 10, from 1 to 50; a number outside that range is moved to the nearest end. A whole number, a numeric string such as `"5"`, or a float with no fraction is accepted. A boolean, text that is not a number, a fraction and a value that is not finite are refused with `limit must be an integer`. |
+
+A meeting is listed when its status is `STARTED` or `TRANSCRIBING`, it was created in the last 24 hours, and the caller may read it. An uploaded recording is `TRANSCRIBING` while it is processed; it is not a meeting that is being held and is not listed. The newest meeting comes first. Each meeting has:
+
+| Field | Value |
+|-------|-------|
+| `meetingId` | The id to pass to other tools |
+| `meetingName` | The meeting's name |
+| `status` | `STARTED` or `TRANSCRIBING` |
+| `startedAt` | When the meeting was created |
+| `lastActivityAt` | When the meeting's record was last updated, or `startedAt` when it never was. A meeting whose last activity is long ago may have ended without being closed; LMA ends such a meeting after several hours |
+| `owner` | The meeting's owner |
+| `consent` | `{mode, status, captureAllowed}` from the meeting's consent record, or `null` when it has none or when the record holds none of those three fields |
+| `meetingUrl`, `virtualParticipantUrl` | Links into the LMA web app |
+
+No transcript text is returned. The answer is `{"meetings": [...], "count": n}`.
+
+**Who sees what.** An Admin sees every running meeting. Anyone else sees the meetings they own (named as the meeting's owner or its agent, as `list_meetings` decides) and the meetings shared with them. This is wider than `list_meetings`, `get_meeting_transcript` and `get_meeting_summary`, which show a person only the meetings they own.
+
+**When the list may be incomplete.** At most 1,000 of the most recent meetings of the last 24 hours are checked. When that limit ended the search and there were more meetings left, the answer has `"truncated": true` and a `note`; a running meeting that started earlier in the window may then be missing. When some meetings could not be read the `note` says "Some meetings could not be read; try again.". If the lookup fails, the error is `Failed to list active meetings`. A meeting whose start time was stamped by a device with a clock ahead of the server's is listed only once the server's clock reaches that time.
 
 ## DynamoDB Table Schema
 

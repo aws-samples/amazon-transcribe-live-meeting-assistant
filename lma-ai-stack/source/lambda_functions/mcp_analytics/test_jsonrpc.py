@@ -24,6 +24,7 @@ for mod_name in [
     "tools.get_transcript",
     "tools.get_summary",
     "tools.list_meetings",
+    "tools.list_active_meetings",
     "tools.schedule_meeting",
     "tools.start_meeting_now",
 ]:
@@ -83,18 +84,19 @@ class TestMCPToolsList(unittest.TestCase):
     """Test MCP tools/list method."""
 
     def test_tools_list_returns_all_tools(self):
-        """tools/list returns all 7 tools."""
+        """tools/list returns all 8 tools."""
         body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
         result = index.lambda_handler(api_gw_event(body), None)
 
         resp = json.loads(result["body"])
         tools = resp["result"]["tools"]
-        self.assertEqual(len(tools), 7)
+        self.assertEqual(len(tools), 8)
         tool_names = [t["name"] for t in tools]
         self.assertIn("search_lma_meetings", tool_names)
         self.assertIn("get_meeting_transcript", tool_names)
         self.assertIn("get_meeting_summary", tool_names)
         self.assertIn("list_meetings", tool_names)
+        self.assertIn("list_active_meetings", tool_names)
         self.assertIn("schedule_meeting", tool_names)
         self.assertIn("start_meeting_now", tool_names)
         self.assertIn("get_virtual_participant_status", tool_names)
@@ -175,6 +177,75 @@ class TestMCPToolCall(unittest.TestCase):
         resp = json.loads(result["body"])
         self.assertIn("content", resp["result"])
         search_meetings.execute.assert_called_once()
+
+    def test_tools_call_list_active_meetings(self):
+        """tools/call routes to list_active_meetings with the caller's identity."""
+        from tools import list_active_meetings
+
+        list_active_meetings.execute = MagicMock(return_value={"meetings": [], "count": 0})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {"name": "list_active_meetings", "arguments": {"limit": 5}},
+        }
+        result = index.lambda_handler(
+            api_gw_event(body, user_id="u1", username="U One", is_admin="true"), None
+        )
+
+        resp = json.loads(result["body"])
+        self.assertEqual(json.loads(resp["result"]["content"][0]["text"])["count"], 0)
+        list_active_meetings.execute.assert_called_once_with(limit=5, user_id="u1", is_admin=True)
+
+    def test_tools_call_list_active_meetings_without_arguments_passes_no_limit(self):
+        from tools import list_active_meetings
+
+        list_active_meetings.execute = MagicMock(return_value={"meetings": [], "count": 0})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": "list_active_meetings"},
+        }
+        index.lambda_handler(api_gw_event(body), None)
+
+        list_active_meetings.execute.assert_called_once_with(
+            limit=None, user_id="testuser", is_admin=False
+        )
+
+    def test_tools_call_list_active_meetings_does_not_run_list_meetings(self):
+        from tools import list_active_meetings, list_meetings
+
+        list_active_meetings.execute = MagicMock(return_value={})
+        list_meetings.execute = MagicMock(return_value={})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {"name": "list_active_meetings", "arguments": {}},
+        }
+        index.lambda_handler(api_gw_event(body), None)
+
+        list_meetings.execute.assert_not_called()
+
+    def test_a_refused_limit_is_reported_as_a_tool_error(self):
+        from tools import list_active_meetings
+
+        list_active_meetings.execute = MagicMock(side_effect=ValueError("limit must be an integer"))
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {"name": "list_active_meetings", "arguments": {"limit": True}},
+        }
+        resp = json.loads(index.lambda_handler(api_gw_event(body), None)["body"])
+
+        self.assertTrue(resp["result"]["isError"])
+        self.assertIn("limit must be an integer", resp["result"]["content"][0]["text"])
 
     def test_tools_call_unknown_tool(self):
         """tools/call with unknown tool returns error."""
@@ -258,6 +329,18 @@ class TestPathDetection(unittest.TestCase):
             else call_kwargs[1].get("user_id"),
             "user123",
         )
+
+    def test_bedrock_path_never_runs_list_active_meetings(self):
+        """Tool input on the gateway path is read by its shape, and no shape is this tool's."""
+        from tools import list_active_meetings, list_meetings
+
+        list_active_meetings.execute = MagicMock(return_value={})
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+
+        for tool_input in ({"limit": 5}, {}, {"status": "STARTED"}, {"limit": 5, "active": True}):
+            index.lambda_handler(bedrock_event(tool_input, claims={"sub": "user123"}), None)
+
+        list_active_meetings.execute.assert_not_called()
 
     def test_bedrock_path_without_identity_is_rejected(self):
         """A request with no caller identity is answered with 403."""
@@ -374,6 +457,7 @@ class TestReadOnlyHintAnnotations(unittest.TestCase):
         "get_meeting_transcript",
         "get_meeting_summary",
         "list_meetings",
+        "list_active_meetings",
     }
     WRITE_TOOLS = {"schedule_meeting", "start_meeting_now"}
 
