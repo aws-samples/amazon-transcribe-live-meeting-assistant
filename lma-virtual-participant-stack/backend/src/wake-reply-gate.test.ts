@@ -190,6 +190,161 @@ test('nova: a lookup asked for as the reply to an unaddressed turn is not run', 
 });
 
 // ---------------------------------------------------------------------------
+// Addressed by name, split utterances, and a withheld reply after a tool call
+// ---------------------------------------------------------------------------
+
+const lookup = (id: string) => [
+    chunk({ contentStart: { type: 'TOOL', role: 'TOOL' } }),
+    chunk({ toolUse: { toolName: 'strands_agent', toolUseId: id, content: '{"query":"weather in herndon"}' } }),
+    chunk({ contentEnd: { type: 'TOOL' } }),
+];
+
+/** A Nova agent with a lookup tool whose invocations and tool results are recorded. */
+function novaWithLookup(): { a: any; played: Buffer[]; invoked: unknown[]; results: string[] } {
+    const { a, played } = nova();
+    a.strandsLambdaArn = 'strands';
+    const invoked: unknown[] = [];
+    const results: string[] = [];
+    a.invokeStrandsAgent = async (content: unknown) => { invoked.push(content); return { message: 'Sunny, 18 degrees.' }; };
+    a.sendToolResult = async (toolUseId: string) => { results.push(toolUseId); };
+    activated(a);
+    return { a, played, invoked, results };
+}
+
+test('gate: a turn addressed only together with the turn before it is answered', () => {
+    const gate = new WakeReplyGate();
+    gate.noteActivated(0);
+    const addresses = (text: string) => /\bok computer\b/.test(text);
+    assert.deepEqual(gate.noteUserUtterance('turn the lights off ok', addresses, 60_000), { audible: false, reason: 'not-addressed' });
+    assert.deepEqual(gate.noteUserUtterance('computer and the fan', addresses, 62_000), { audible: true, reason: 'split-utterance' });
+    // Not when the two turns are further apart than one utterance.
+    const apart = new WakeReplyGate();
+    apart.noteUserUtterance('turn the lights off ok', addresses, 60_000);
+    assert.equal(apart.noteUserUtterance('computer and the fan', addresses, 64_000).audible, false);
+});
+
+test('gate: the participants transcript addressing the assistant answers the same utterance in either order', () => {
+    // Transcript first: Nova's turn of the same speech arrives just after.
+    const first = new WakeReplyGate();
+    first.noteActivated(0);
+    first.noteAddressedTranscript(true, 60_000);
+    assert.deepEqual(first.noteUserTurn(false, 61_000), { audible: true, reason: 'transcript-addressed' });
+    // Nova first: its withheld turn is released, if nothing of the reply is withheld yet.
+    const second = new WakeReplyGate();
+    second.noteActivated(0);
+    assert.equal(second.noteUserTurn(false, 60_000).audible, false);
+    assert.equal(second.noteAddressedTranscript(true, 60_300), true);
+    assert.equal(second.answerOwed(), true);
+    // Never part-way through a reply that has started being withheld.
+    const late = new WakeReplyGate();
+    late.noteActivated(0);
+    late.noteUserTurn(false, 60_000);
+    assert.equal(late.noteAddressedTranscript(false, 60_300), false);
+});
+
+test('nova: a turn addressed by name is answered and its lookup runs', async () => {
+    const { a, played, invoked } = novaWithLookup();
+    await stream(a, [
+        ...userTurn('alex can you tell me the weather this afternoon in herndon'),
+        ...lookup('lookup-1'),
+        ...reply('Let me search for that information. This may take a moment.'),
+    ]);
+    assert.equal(invoked.length, 1, 'the lookup was not run');
+    assert.equal(played.length, 1, 'the reply was not played');
+    assert.ok(!logs.some((l) => l.includes('[wake-gate] action=withheld-reply')));
+});
+
+test('nova: a turn that only mentions the name is not addressed', async () => {
+    const { a, played, invoked } = novaWithLookup();
+    await stream(a, [
+        ...userTurn('i told alex about the weather in herndon yesterday'),
+        ...lookup('lookup-1'),
+        ...reply('Let me search for that information.'),
+    ]);
+    assert.equal(invoked.length, 0);
+    assert.equal(played.length, 0);
+    assert.ok(logs.some((l) => l.includes('[wake-gate] action=withheld-reply reason=not-addressed')));
+});
+
+test('nova: an utterance split across turns is addressed when the address straddles them', async () => {
+    const saved = process.env.VOICE_ASSISTANT_WAKE_PHRASES;
+    // Two wake phrases with no name in common, and a prompt with no name: only
+    // the wake phrase addresses the assistant, and it falls across the turns.
+    process.env.VOICE_ASSISTANT_WAKE_PHRASES = 'hey alex,ok computer';
+    try {
+        const { a, played } = novaWithLookup();
+        a.systemPrompt = 'You are an AI meeting assistant.';
+        await stream(a, [
+            ...userTurn('what is the weather this afternoon ok'),
+            ...userTurn('computer in herndon'),
+            ...reply('It is sunny in Herndon.'),
+        ]);
+        assert.equal(played.length, 1);
+        assert.ok(logs.some((l) => l.includes('[wake-gate] action=answered reason=split-utterance')));
+    } finally {
+        if (saved === undefined) delete process.env.VOICE_ASSISTANT_WAKE_PHRASES;
+        else process.env.VOICE_ASSISTANT_WAKE_PHRASES = saved;
+    }
+});
+
+test('nova: a split utterance is addressed when the participants transcript of it is', async () => {
+    // The live meeting: two Nova turns, neither addressed on its own, then the
+    // participants' transcript of the whole utterance, then the lookup.
+    const { a, played, invoked } = novaWithLookup();
+    await stream(a, [...userTurn('awesome so'), ...userTurn('tell me the weather this afternoon in herndon')]);
+    a.noteParticipantUtterance('Awesome. Alex, can you tell me the weather this afternoon in Herndon?');
+    await stream(a, [...lookup('lookup-1'), ...reply('Let me search for that information.')]);
+    assert.equal(invoked.length, 1, 'the lookup was refused');
+    assert.equal(played.length, 1);
+    assert.ok(logs.some((l) => l.includes('[wake-gate] action=released-reply reason=transcript-addressed')));
+});
+
+test('nova: the participants transcript arriving first answers the Nova turn of the same speech', async () => {
+    const { a, played } = novaWithLookup();
+    a.noteParticipantUtterance("What's the weather this afternoon, Alex?");
+    await stream(a, [...userTurn('what is the weather this afternoon'), ...reply('Sunny, 18 degrees.')]);
+    assert.equal(played.length, 1);
+});
+
+test('nova: an unaddressed turn produces no audio, even after its refused lookup', async () => {
+    // The live meeting's sequence: the turn is withheld, the lookup refused,
+    // and the model then answers twice - the preamble, ending its own turn,
+    // and a second response to the refusal's tool result.
+    const { a, played, invoked, results } = novaWithLookup();
+    await stream(a, [
+        ...userTurn('tell me the weather this afternoon in herndon'),
+        ...lookup('lookup-1'),
+        ...reply('Let me search for that information. This may take a moment.'),
+        ...reply("Sorry, I can't provide real-time weather updates."),
+    ]);
+    assert.equal(invoked.length, 0, 'the lookup ran');
+    assert.deepEqual(results, ['lookup-1'], 'the model was not answered');
+    assert.equal(played.length, 0, 'audio was played after the refused lookup');
+    assert.ok(!a.conversationHistory.some((t: any) => t.role === 'ASSISTANT'));
+    // A reply that has begun to be withheld is not released part-way.
+    a.noteParticipantUtterance('Alex, can you tell me the weather this afternoon in Herndon?');
+    await stream(a, reply('It is sunny.'));
+    assert.equal(played.length, 0);
+    assert.ok(logs.some((l) => l.includes('[wake-gate] action=kept-withheld reason=reply-already-withheld')));
+    // The next addressed turn is answered as usual.
+    await stream(a, [...userTurn('alex what is the weather in herndon'), ...reply('It is sunny.')]);
+    assert.equal(played.length, 1);
+});
+
+test('nova: a withheld reply does not carry over into the next activation', async () => {
+    const { a, played } = novaWithLookup();
+    await stream(a, [...userTurn('tell me the weather in herndon'), ...reply('Let me check.')]);
+    assert.equal(a.session.dropTurn, true);
+    a._isActivated = false;
+    a.isActivating = false;
+    await a.activate(30, 'hey alex what is the weather');
+    assert.equal(a.session.dropTurn, false);
+    await stream(a, reply('Sunny.'));
+    assert.equal(played.length, 1);
+    a.deactivate?.();
+});
+
+// ---------------------------------------------------------------------------
 // The prompt for the state
 // ---------------------------------------------------------------------------
 
@@ -200,7 +355,9 @@ function systemPrompt(a: any): string {
 test('the wake-phrase assistant prompt says to answer only addressed requests, and asks for no acknowledgements', () => {
     const prompt = systemPrompt(nova('normal', 'wake_phrase').a);
     assert.ok(prompt.includes(WAKE_PHRASE_MODE_PROMPT));
-    assert.match(prompt, /Answer only a request that is addressed to you with your wake phrase/);
+    assert.match(prompt, /Answer only a request that is addressed to you - with your wake phrase, or by your name/);
+    assert.match(prompt, /only mentions your name is not addressed to you/);
+    assert.match(prompt, /If a lookup comes back as not run, say nothing at all/);
     assert.match(prompt, /When you have answered, stop and stay silent/);
     // The general block asks for "Okay" on every interruption, which in a
     // meeting is an "Okay" to every participant who talks over the assistant.

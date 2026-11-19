@@ -150,6 +150,8 @@ The following tools are available to the Strands agent without installing any ad
 
 These built-in tools give the meeting assistant access to your meeting history and the ability to manage Virtual Participant sessions without any additional configuration.
 
+LMA's hosted MCP server, which external MCP clients reach with a per-user API key, serves these tools and a set of meeting tools: a live transcript to poll, guidance pushed to the meeting page, the meeting assistant, the full meeting record with time-limited download links, sharing, agenda changes, ending and deleting meetings, and Virtual Participant management. Each API key has a **Read only** or **Read and write** scope. See [MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed).
+
 When `start_meeting_now` returns a VP id, the agent should poll `get_virtual_participant_status` periodically until the status reaches `ACTIVE` (success) or `FAILED` (with `errorMessage`) or `MANUAL_ACTION_REQUIRED` (in which case the agent should surface the `manualActionMessage` and `virtualParticipantUrl` to the user so they can complete the challenge). See [Virtual Participant › Status Lifecycle](virtual-participant.md#status-lifecycle) and [Manual Action Required](virtual-participant.md#manual-action-required-captcha-2fa-sso) for the full state machine.
 
 ## MCP Layer Rebuild

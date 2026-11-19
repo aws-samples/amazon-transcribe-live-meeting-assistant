@@ -537,7 +537,7 @@ Most values are one of these fixed strings:
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `pre-join:meet-refused`, `pre-join:meet-denied`, `pre-join:meet-invalid-code`, `pre-join:meet-ended`, `pre-join:passcode-not-entered`, `pre-join:zoom-link-unresolved`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave in chat | `chat` |
 | Left after a participant objected to recording ([Meeting Consent](meeting-consent.md#objections)) | `consent-objection` |
-| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| The meeting ended | `post-meeting-screen`, `dialog-watchdog` (also for a removal), `meeting-ended-text`, `meet-ended-screen`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
 | Everyone else left, or the VP was removed | `meet-removed-screen`, `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
 | Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `meet-left-screen`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
 | The join threw, and the message matched one of the container's six classes | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
@@ -570,7 +570,7 @@ A VP that joins before anybody else waits for the first attendee. Until the atte
 
 On Zoom (browser join) and Amazon Chime, the VP no longer leaves as alone on a single reading of the attendee counter: the counter's change events leave only once it has stayed at one or fewer — the VP by itself — for 60 seconds (Zoom's separate participants check, two samples 30 seconds apart, still applies); any higher reading in that time cancels it, so a counter that redraws for a moment does not end the meeting. On Chime, the page counts as gone only after 15 failed checks in a row (about 30 seconds), not after one.
 
-Zoom's participants check, every 30 seconds, also ends the meeting as a removal (`participants-ui:counter-gone` or `participants-ui:page-dead`) when the attendee counter is missing from the page, or the page cannot be read. That now needs four checks in a row (about 2 minutes) with no participant activity in the last 10 minutes (the activity described below for Teams); while participants are speaking, a missing counter is not counted, because a hidden or redrawn toolbar takes the counter with it in a meeting that is still running. Zoom's own end and removal dialogs are the prompt signal: the VP leaves on the dialog that says the meeting has ended or that it was removed (`ZOOM_END_DIALOG`). Only those dialogs count, recognised by their text; a primary button elsewhere on the page does not.
+Zoom's participants check, every 30 seconds, also ends the meeting as a removal (`participants-ui:counter-gone` or `participants-ui:page-dead`) when the attendee counter is missing from the page, or the page cannot be read. That now needs four checks in a row (about 2 minutes) with no participant activity in the last 10 minutes (the activity described below for Teams); while participants are speaking, a missing counter is not counted, because a hidden or redrawn toolbar takes the counter with it in a meeting that is still running. Zoom's own end and removal dialogs are the prompt signal: the VP leaves on the dialog that says the meeting has ended or that it was removed (`ZOOM_END_DIALOG`). Only those dialogs count, recognised by their text; a primary button elsewhere on the page does not. When the AI dialog watchdog reads a removal or meeting-ended notice first, the VP ends the meeting as removed or ended by the host (`dialog-watchdog`) rather than asking for manual action; on the other platforms such a notice is left to the handler's own end detection.
 
 On Webex the end signal is the text of Webex's end screen (*"This meeting has ended"*, *"You have left the meeting"*, *"Meeting disconnected"*), checked every 2 seconds. Text in chat messages, captions and transcripts is not read, and the phrase ends the meeting only once Webex's in-meeting controls (the microphone, camera, participants and leave buttons) are gone. If the phrase stays on the page for 2 minutes with a control still visible and no participant has spoken in the last 10 minutes, the VP leaves as well, so an end screen that leaves a control behind does not keep it until the meeting timeout.
 
@@ -615,6 +615,8 @@ When the VP can't proceed without a human (Zoom 2FA passcode, CAPTCHA, SSO redir
 Open the live VNC viewer for the affected VP, complete the challenge (type the passcode, solve the CAPTCHA, sign in via SSO, click the consent button — whatever the banner says), and the VP picks up automatically. The default timeout is 3 minutes; if no human response arrives, the VP fails the meeting cleanly.
 
 The banner is dismissible — dismissed alerts are remembered in `localStorage` (per VP id) so the banner doesn't reappear on every page refresh after you've dealt with it.
+
+Being removed from the meeting, or the meeting ending, is never a manual action: a dialog that says so ends the meeting as that exit. Once the VP's meeting has ended, or its end-of-meeting work has begun, the dialog watchdog stops reading dialogs, so nothing during the VP's teardown sets `MANUAL_ACTION_REQUIRED`.
 
 ## AI-driven self-healing
 
@@ -1148,6 +1150,15 @@ Each message with attachments names them in its transcript line,
 know what was shared even without the content. A message of attachments alone
 becomes a line of its own.
 
+An attachment can appear after its message's text: a pasted screenshot is
+shown while it is still uploading, and its image arrives a few seconds later.
+So the VP keeps watching each message it added for 60 seconds, and an
+attachment that appears on it in that time is added to the same line (the line
+is written again with the attachment named) and stored like the others. An
+image is taken only once the platform has loaded it; on Zoom, one that has not
+loaded when the 60 seconds are up is recorded by name. On Teams a message's
+attachments have a line of their own, so a late image joins that line.
+
 ### What is stored
 
 - **Images and files up to 25 MB, of these types only:** PNG, JPEG, GIF and
@@ -1180,7 +1191,11 @@ never held up by it, and is metered in the meeting's cost estimate under
 *Chat attachments* (see
 [Meeting Cost Estimate](meeting-cost-estimate.md)). A PowerPoint file, which
 Converse has no document format for, an image over 3.75 MB and a document over
-4.5 MB are not read, and are shown by their file name. A model that reads no
+4.5 MB are not read, and are shown by their file name. The model is asked for a
+low reasoning effort where it takes one, and is given room for its reasoning as
+well as the answer (2,048 output tokens); an answer cut off at that ceiling, or
+one with no text, is asked for once more with 8,192, and both calls are
+metered. Each call may take up to 45 seconds to answer. A model that reads no
 images or documents (Amazon Nova Micro) gives no title, and the attachment is
 shown by its file name. The model is told that
 the file name and the content are material to describe, not instructions; the

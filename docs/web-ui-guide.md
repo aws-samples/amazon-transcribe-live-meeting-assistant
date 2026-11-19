@@ -391,7 +391,9 @@ pass over chat messages, since they were typed rather than heard.
   marked rather than the other segments hidden, so each is read with what was
   said around it. The search reads the segments as transcribed, not their
   translations.
-  Chat messages are searched too, and their matching words highlighted.
+  Chat messages are searched too, and their matching words highlighted. The
+  search reads only the lines shown, so with **Speech only** or **Chat only**
+  (below) it finds matches in the speech or in the chat alone.
 - **Speaker chips** — **All** and one chip for each speaker, by the names shown
   in the transcript. Choosing speakers shows only their segments (and hides the
   assistant's answers); choosing **All** shows everything again. The search
@@ -429,11 +431,24 @@ pass over chat messages, since they were typed rather than heard.
   already one speaker, so it does not offer that for them. It writes the same names as the **Speakers** panel on the
   **Details** tab, which remains the place to paste an attendee list, confirm
   or reject a suggested name, or lock a name.
-- **Chat** — shown when the transcript holds meeting chat messages. On by
-  default; turning it off hides every chat message, and turning it on shows
-  them again. It works on its own, whichever speakers are chosen: with a
-  speaker chosen and **Chat** on, the transcript shows that speaker's segments
-  and all the chat.
+- **Speech and chat / Speech only / Chat only** — shown after the speaker
+  chips when the transcript holds meeting chat messages, and chooses which
+  lines are shown:
+  - **Speech and chat** (the default) shows every line.
+  - **Speech only** hides every chat message and shows everything else.
+  - **Chat only** shows the chat messages alone, in time order, each with its
+    sender, time, attachments and copyable links as in the full transcript.
+    The spoken lines and the assistant's answers are hidden.
+
+  The view works on its own, whichever speakers are chosen: with a speaker
+  chosen and **Speech and chat**, the transcript shows that speaker's segments
+  and all the chat. In **Chat only** the speaker chips are shown as names that
+  do not filter (a name can still be edited from its chip), and the speakers
+  chosen before apply again on switching back. The search finds matches only
+  in the lines the view shows. The choice lasts while the meeting page is
+  open; it is not saved, so the page opens on **Speech and chat**. The
+  downloads in the page header's **Download** menu always hold the whole
+  transcript, chat included, whichever view is chosen.
 
 During a live meeting with a Virtual Participant, the VP's **live view** (a
 real-time VNC viewer of the VP's browser) appears at the top of this tab when it

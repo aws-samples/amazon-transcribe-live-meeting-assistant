@@ -51,7 +51,7 @@ import {
     TEAMS_ATTACHMENT_SELECTORS,
     teamsAttachmentChats,
 } from './chat-attachments-page.js';
-import { IncomingChat, MeetingChatCapture, chatTranscriptWithAttachments } from './meeting-chat.js';
+import { IncomingChat, LATE_ATTACHMENT_GRACE_MS, LATE_ATTACHMENT_WINDOW_MS, MeetingChatCapture, chatTranscriptWithAttachments } from './meeting-chat.js';
 import { OwnChatLedger } from './meeting-chat.js';
 import type { TranscriptSegment } from './kinesis-stream.js';
 import { captureLogs, setLogLevel } from './logger.js';
@@ -384,7 +384,7 @@ test('attachments are handled one at a time, in the order offered', async () => 
 // ---------------------------------------------------------------------------
 
 function chatHarness() {
-    const state = { settingOn: true, redacting: false as boolean | undefined, capturing: true, started: true };
+    const state = { settingOn: true, redacting: false as boolean | undefined, capturing: true, started: true, now: 0 };
     const sent: TranscriptSegment[] = [];
     const taken: Array<{ segmentId: string; names: string[] }> = [];
     const capture = new MeetingChatCapture({
@@ -398,8 +398,8 @@ function chatHarness() {
         },
         ownIdentities: () => ['LMA'],
         ownName: () => 'LMA',
-        ledger: new OwnChatLedger(() => 0),
-        now: () => 0,
+        ledger: new OwnChatLedger(() => state.now),
+        now: () => state.now,
         attachments: (segmentId, _platform, _at, list) => {
             taken.push({ segmentId, names: list.map((a) => a.name) });
         },
@@ -455,6 +455,71 @@ test('attachments of a private message, or one already in the chat, are not take
 test('a message with neither text nor attachments is still empty', () => {
     const h = chatHarness();
     assert.equal(h.offer({ id: 'm1', attachments: [] }), 'empty');
+});
+
+// ---------------------------------------------------------------------------
+// Attachments that appear after their message was read
+// ---------------------------------------------------------------------------
+
+const SHOT: IncomingChatAttachment = { kind: 'image', name: 'Screenshot.png' };
+
+test('an attachment that appears after its message was added is added to the same line, once', () => {
+    const h = chatHarness();
+    assert.equal(h.offer({ id: 'm1', text: 'Screenshot pasted:' }), 'captured');
+    assert.deepEqual(h.taken, []);
+    h.state.now += 5_000;
+    assert.equal(h.offer({ id: 'm1', text: 'Screenshot pasted:' }), 'duplicate');
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'Screenshot pasted:', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'attachments-added');
+    assert.equal(h.sent.length, 2, 'the line is written again');
+    assert.equal(h.sent[1].segmentId, h.sent[0].segmentId, 'under the same segment id');
+    assert.equal(h.sent[1].startTime, h.sent[0].startTime);
+    assert.equal(h.sent[1].transcript, 'Screenshot pasted: (attachment: Screenshot.png)');
+    assert.deepEqual(h.taken, [{ segmentId: h.sent[0].segmentId, names: ['Screenshot.png'] }]);
+});
+
+test('a late attachment is not taken once the message’s window has passed', () => {
+    const h = chatHarness();
+    h.offer({ id: 'm1', text: 'see below' });
+    h.state.now += LATE_ATTACHMENT_WINDOW_MS + LATE_ATTACHMENT_GRACE_MS + 1;
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'see below', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'duplicate');
+    assert.deepEqual(h.taken, []);
+    assert.equal(h.sent.length, 1);
+});
+
+test('an image the page reports as never loaded when its window closes is still recorded on its line', () => {
+    const h = chatHarness();
+    h.offer({ id: 'm1', text: 'here' });
+    h.state.now += LATE_ATTACHMENT_WINDOW_MS + 2_000;
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'here', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'attachments-added');
+    assert.equal(h.taken.length, 1);
+});
+
+test('a late attachment is not taken while the meeting is paused, nor for a message left out', () => {
+    const h = chatHarness();
+    h.offer({ id: 'm1', text: 'hi' });
+    h.state.capturing = false;
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'hi', audience: 'everyone', attachments: [SHOT] }), 'paused');
+    h.state.capturing = true;
+    assert.equal(h.offer({ id: 'm2', text: 'private', audience: 'direct' }), 'direct');
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm2', text: 'private', audience: 'direct', attachments: [SHOT] }), 'duplicate');
+    assert.deepEqual(h.taken, []);
+});
+
+test('a message first read with nothing in it is added once its attachment appears', () => {
+    const h = chatHarness();
+    assert.equal(h.offer({ id: 'm1', text: '' }), 'empty');
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: '', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'captured');
+    assert.equal(h.sent[0].transcript, '(attachment: Screenshot.png)');
+    assert.equal(h.taken.length, 1);
+});
+
+test('a second Teams image on a message is added to the line its first one made', () => {
+    const h = chatHarness();
+    const teams = (name: string): IncomingChat => ({ platform: 'teams', id: 'mid-attachments', text: '', sender: 'A', audience: 'everyone', attachments: [{ kind: 'image', name }] });
+    assert.equal(h.capture.offerLateAttachments(teams('one.png')), 'captured');
+    assert.equal(h.capture.offerLateAttachments(teams('two.png')), 'attachments-added');
+    assert.equal(h.sent[1].transcript, '(attachment: one.png) (attachment: two.png)');
+    assert.deepEqual(h.taken.map((t) => t.names), [['one.png'], ['two.png']]);
 });
 
 // ---------------------------------------------------------------------------

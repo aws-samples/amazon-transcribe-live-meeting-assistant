@@ -342,6 +342,9 @@ type Mutation @aws_iam {
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
 	# like addTranscriptSegment. See docs/meeting-video.md.
 	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
+	# Written by the hosted MCP server's push_meeting_guidance tool, which sets
+	# Owner and SharedWith from the meeting; IAM only, like addVideoKeyframe.
+	addMeetingGuidance(input: AddMeetingGuidanceInput!): MeetingGuidance
 	# Written by the call event processor for an ADD_CHAT_ATTACHMENT event; IAM
 	# only, like addTranscriptSegment. See docs/virtual-participant.md.
 	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment
@@ -398,7 +401,8 @@ type Mutation @aws_iam {
 	importMCPServerLibrary(library: AWSJSON!): ImportMCPServerLibraryOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
+	# scope is "read" (the default) or "read-write"; see type MCPApiKey.
+	generateMCPApiKey(scope: String): GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -835,6 +839,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
 		@aws_subscribe(mutations: ["addVideoKeyframe"])
+	onAddMeetingGuidance(CallId: ID): MeetingGuidance
+		@aws_subscribe(mutations: ["addMeetingGuidance"])
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
@@ -984,6 +990,51 @@ input AddVideoKeyframeInput {
 	ShareDetected: Boolean
 	ChangeScore: Float
 	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Owner: String
+	SharedWith: String
+}
+
+# How prominently the meeting page shows a guidance item.
+enum MeetingGuidanceLevel {
+	INFO
+	WARNING
+	URGENT
+}
+
+# A note of guidance an external agent left on a meeting through the hosted MCP
+# server (push_meeting_guidance), for the people following it in LMA. Stored
+# under the meeting (PK "gd#<CallId>", SK "g#<CreatedAt>#<GuidanceId>") with the
+# meeting's Owner, SharedWith and ExpiresAfter, and shown on the meeting page;
+# never posted to the meeting's chat. See docs/mcp-api-key-auth.md.
+type MeetingGuidance implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	GuidanceId: ID!
+	Title: String
+	Text: String!
+	Level: MeetingGuidanceLevel!
+	# Where it came from: "mcp".
+	Source: String
+	# The user the MCP API key belongs to.
+	CreatedBy: String
+	Owner: String
+	SharedWith: String
+}
+
+input AddMeetingGuidanceInput {
+	CallId: ID!
+	GuidanceId: ID!
+	Title: String
+	Text: String!
+	Level: MeetingGuidanceLevel!
+	Source: String
+	CreatedBy: String
 	ExpiresAfter: AWSTimestamp
 	Owner: String
 	SharedWith: String
@@ -2287,12 +2338,18 @@ type MCPApiKey @aws_cognito_user_pools {
 	keyPrefix: String!
 	createdAt: String!
 	enabled: Boolean!
+	# "read": the hosted MCP server answers the key only for the tools that
+	# change nothing. "read-write": every tool. "legacy": a key created before
+	# keys had a scope, answered for the server's original tools and the tools
+	# that change nothing.
+	scope: String
 }
 
 type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
 	keyValue: String!
 	keyPrefix: String!
 	createdAt: String!
+	scope: String
 }
 
 # User Management (Admin-only)
