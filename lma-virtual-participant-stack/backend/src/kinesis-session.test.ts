@@ -65,6 +65,15 @@ describe('a VP that was not rejoined', () => {
         assert.equal(row.EndTime, 4.25);
         assert.equal(kinesisStreamManager.sessionOffsetSeconds, 0);
     });
+
+    it('names session 1 on its recording links', async () => {
+        await kinesisStreamManager.sendCallRecording('https://bucket/recordings/a.wav');
+        await kinesisStreamManager.sendCallVideoRecording('https://bucket/video/a.mp4');
+        assert.deepEqual(
+            sent.map((record) => record.SessionNumber),
+            [1, 1],
+        );
+    });
 });
 
 describe('a rejoined VP', () => {
@@ -121,6 +130,19 @@ describe('a rejoined VP', () => {
         assert.equal(kinesisStreamManager.useSession(3, 70), false);
         assert.equal(kinesisStreamManager.sessionOffsetSeconds, 50);
         assert.equal(kinesisStreamManager.useSession(2, 50), true, 'the same session again is fine');
+    });
+
+    it('names its session on its recording links, so each is played at its place', async () => {
+        kinesisStreamManager.useSession(3, 640);
+        await kinesisStreamManager.sendCallRecording('https://bucket/recordings/session-3.wav');
+        await kinesisStreamManager.sendCallVideoRecording('https://bucket/video/session-3.mp4');
+        assert.deepEqual(
+            sent.map((record) => [record.EventType, record.SessionNumber]),
+            [
+                ['ADD_S3_RECORDING_URL', 3],
+                ['ADD_S3_VIDEO_RECORDING_URL', 3],
+            ],
+        );
     });
 
     it('ignores a session number that is not one', () => {

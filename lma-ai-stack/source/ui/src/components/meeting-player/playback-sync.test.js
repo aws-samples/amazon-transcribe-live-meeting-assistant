@@ -15,13 +15,21 @@ import {
   currentSegmentId,
   defaultMediaPreference,
   formatClock,
+  inSession,
+  nextSession,
   offsetAtTranscript,
+  playbackSessions,
   playerShortcut,
   recordingSecondsForFrame,
   sameAnchors,
   screenShareMarkers,
+  sessionAnchors,
+  sessionAtTranscript,
+  sessionClock,
+  sessionLabel,
   toRecordingSeconds,
   toTranscriptSeconds,
+  withinSession,
 } from './playback-sync';
 
 // A Virtual Participant's video: 20 s in the lobby before transcription began,
@@ -307,5 +315,189 @@ describe('defaultMediaPreference', () => {
     expect(defaultMediaPreference({ ...vp, hasBoth: false }).prefer).toBe('video');
     // Not before the key frames have been read.
     expect(defaultMediaPreference({ ...vp, framesLoaded: false }).prefer).toBe('video');
+  });
+});
+
+// A meeting rejoined twice: session 2 starts at 317 s, session 3 at 905 s on
+// the transcript's clock, and each session is recorded in a file of its own.
+const CONTINUED = {
+  recordingUrl: 'https://b/a3.wav',
+  videoRecordingUrl: 'https://b/v3.mp4',
+  recordingUrls: ['https://b/a1.wav', 'https://b/a2.wav', 'https://b/a3.wav'],
+  recordingUrlSessions: [1, 2, 3],
+  videoRecordingUrls: ['https://b/v1.mp4', 'https://b/v3.mp4'],
+  videoRecordingUrlSessions: [1, 3],
+  sessions: [
+    { SessionNumber: 2, OffsetSeconds: 317, StartedAt: '2026-11-19T10:10:00Z' },
+    { SessionNumber: 3, OffsetSeconds: 905, StartedAt: '2026-11-19T10:30:00Z' },
+  ],
+  sessionNumber: 3,
+  sessionOffsetSeconds: 905,
+  sessionStartedNumber: 3,
+};
+
+describe("a meeting's capture sessions", () => {
+  it("are one session at 0 with the meeting's recordings when it was never continued", () => {
+    const meeting = { recordingUrl: 'https://b/a.wav', videoRecordingUrl: 'https://b/v.mp4' };
+    expect(playbackSessions(meeting)).toEqual([
+      { number: 1, offset: 0, end: Infinity, recordingUrl: 'https://b/a.wav', videoRecordingUrl: 'https://b/v.mp4' },
+    ]);
+    // The lists a single session also has change nothing.
+    expect(
+      playbackSessions({ ...meeting, recordingUrls: ['https://b/a.wav'], recordingUrlSessions: [1] }),
+    ).toHaveLength(1);
+  });
+
+  it("give each session its own recordings, its start and the next one's", () => {
+    expect(playbackSessions(CONTINUED)).toEqual([
+      { number: 1, offset: 0, end: 317, recordingUrl: 'https://b/a1.wav', videoRecordingUrl: 'https://b/v1.mp4' },
+      { number: 2, offset: 317, end: 905, recordingUrl: 'https://b/a2.wav', videoRecordingUrl: null },
+      {
+        number: 3,
+        offset: 905,
+        end: Infinity,
+        recordingUrl: 'https://b/a3.wav',
+        videoRecordingUrl: 'https://b/v3.mp4',
+      },
+    ]);
+  });
+
+  it('leave out a session with no recording, and close the gap', () => {
+    const meeting = {
+      ...CONTINUED,
+      recordingUrls: ['https://b/a1.wav', 'https://b/a3.wav'],
+      recordingUrlSessions: [1, 3],
+      videoRecordingUrls: [],
+      videoRecordingUrlSessions: [],
+    };
+    expect(playbackSessions(meeting).map(({ number, offset, end }) => [number, offset, end])).toEqual([
+      [1, 0, 905],
+      [3, 905, Infinity],
+    ]);
+  });
+
+  it('take a link written twice once, and a link with no session not at all', () => {
+    const meeting = {
+      ...CONTINUED,
+      recordingUrls: ['https://b/a1.wav', 'https://b/a1.wav', 'https://b/x.wav', 'https://b/a2.wav'],
+      recordingUrlSessions: [1, 1, null, 2],
+      videoRecordingUrls: [],
+      videoRecordingUrlSessions: [],
+    };
+    expect(playbackSessions(meeting).map((s) => [s.number, s.recordingUrl])).toEqual([
+      [1, 'https://b/a1.wav'],
+      [2, 'https://b/a2.wav'],
+    ]);
+  });
+
+  it('pair links stored without their sessions in order, when there is one per session', () => {
+    const meeting = { ...CONTINUED, recordingUrlSessions: undefined, videoRecordingUrls: undefined };
+    expect(playbackSessions(meeting).map((s) => s.recordingUrl)).toEqual([
+      'https://b/a1.wav',
+      'https://b/a2.wav',
+      'https://b/a3.wav',
+    ]);
+  });
+
+  it("play the latest recording at the latest session's start when the sessions cannot be told apart", () => {
+    const meeting = {
+      ...CONTINUED,
+      recordingUrls: ['https://b/a1.wav', 'https://b/a3.wav'],
+      recordingUrlSessions: undefined,
+      videoRecordingUrls: undefined,
+    };
+    expect(playbackSessions(meeting)).toEqual([
+      {
+        number: 3,
+        offset: 905,
+        end: Infinity,
+        recordingUrl: 'https://b/a3.wav',
+        videoRecordingUrl: 'https://b/v3.mp4',
+      },
+    ]);
+  });
+
+  it('know the latest session from the record when Sessions does not list it', () => {
+    const meeting = {
+      recordingUrl: 'https://b/a2.wav',
+      recordingUrls: ['https://b/a1.wav', 'https://b/a2.wav'],
+      recordingUrlSessions: [1, 2],
+      sessionNumber: 2,
+      sessionOffsetSeconds: 317,
+      sessionStartedNumber: 2,
+    };
+    expect(playbackSessions(meeting).map((s) => [s.number, s.offset])).toEqual([
+      [1, 0],
+      [2, 317],
+    ]);
+    // Not when a later session was allowed since: that offset is not this session's.
+    expect(playbackSessions({ ...meeting, sessionNumber: 3, sessionOffsetSeconds: 700 })).toHaveLength(1);
+  });
+
+  it('find the session a transcript time falls in, and the next one', () => {
+    const sessions = playbackSessions(CONTINUED);
+    expect(sessionAtTranscript(sessions, 20).number).toBe(1);
+    expect(sessionAtTranscript(sessions, 317).number).toBe(2);
+    expect(sessionAtTranscript(sessions, 904.9).number).toBe(2);
+    expect(sessionAtTranscript(sessions, 2000).number).toBe(3);
+    expect(sessionAtTranscript(sessions, null).number).toBe(1);
+    expect(sessionAtTranscript([], 5)).toBeNull();
+    expect(nextSession(sessions, sessions[0]).number).toBe(2);
+    expect(nextSession(sessions, sessions[2])).toBeNull();
+    expect(inSession(sessions[1], 316.9)).toBe(false);
+    expect(inSession(sessions[1], 317)).toBe(true);
+    expect(inSession(sessions[1], 905)).toBe(false);
+  });
+
+  it("map a later session's transcript time to its own file at t - offset, and back", () => {
+    const [, second] = playbackSessions(CONTINUED);
+    const clock = sessionClock('audio', second, []);
+    expect(toRecordingSeconds(clock, 330)).toBe(13);
+    expect(toTranscriptSeconds(clock, 13)).toBe(330);
+    // The follow-along highlight reads the transcript time back.
+    expect(currentSegmentId([{ id: 's3', startTime: 330, endTime: 340 }], toTranscriptSeconds(clock, 15))).toBe('s3');
+  });
+
+  it("line a session's video up on its own key frames, not on another session's", () => {
+    const [first, second, third] = playbackSessions(CONTINUED);
+    // Session 3's Virtual Participant waited 40 s in the lobby; session 1's 20 s.
+    const anchors = [
+      { transcript: 60, recording: 80 },
+      { transcript: 1000, recording: 135 },
+    ];
+    expect(sessionAnchors(third, anchors)).toEqual([{ transcript: 1000, recording: 135 }]);
+    const clock = sessionClock('video', third, anchors);
+    expect(toRecordingSeconds(clock, 1000)).toBe(135);
+    expect(toTranscriptSeconds(clock, 40)).toBe(905);
+    expect(toRecordingSeconds(sessionClock('video', first, anchors), 60)).toBe(80);
+    // A session's video without key frames starts where its session does.
+    expect(toRecordingSeconds(sessionClock('video', second, anchors), 400)).toBe(83);
+  });
+
+  it('keep the clock of a meeting of one session exactly as it was', () => {
+    const [only] = playbackSessions({ recordingUrl: 'https://b/a.wav' });
+    expect(sessionClock('audio', only, VP_CLOCK.anchors)).toBe(IDENTITY_CLOCK);
+    expect(sessionClock('video', only, VP_CLOCK.anchors)).toEqual(clockFor('video', VP_CLOCK.anchors));
+    const items = [{ s: -1 }, { s: 5 }, { s: 99999 }];
+    expect(withinSession(items, only, (item) => item.s)).toBe(items);
+  });
+
+  it("mark on a session's seek bar only what falls within it", () => {
+    const [, second] = playbackSessions(CONTINUED);
+    const chapters = [{ seconds: 0 }, { seconds: 320 }, { seconds: 910 }];
+    expect(withinSession(chapters, second, (chapter) => chapter.seconds)).toEqual([{ seconds: 320 }]);
+    const clock = sessionClock('audio', second, []);
+    expect(chapterMarkers([{ seconds: 320, title: 'Budget', label: '05:20' }], 600, clock)[0].recordingSeconds).toBe(3);
+  });
+
+  it('are named in order, with where each starts', () => {
+    const sessions = playbackSessions({
+      ...CONTINUED,
+      recordingUrls: ['https://b/a1.wav', 'https://b/a3.wav'],
+      recordingUrlSessions: [1, 3],
+      videoRecordingUrls: [],
+      videoRecordingUrlSessions: [],
+    });
+    expect(sessions.map((s) => sessionLabel(sessions, s))).toEqual(['Session 1 (from 0:00)', 'Session 2 (from 15:05)']);
   });
 });

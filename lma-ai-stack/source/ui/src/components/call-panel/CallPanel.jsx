@@ -95,13 +95,19 @@ import { frameIdSeconds, scrollTranscriptToTime } from '../common/video-keyframe
 import {
   SEEK_STEP_SECONDS,
   chooseMeetingMedia,
-  clockFor,
   defaultMediaPreference,
   currentSegmentId,
+  nextSession,
+  playbackSessions,
   playerShortcut,
   recordingSecondsForFrame,
   sameAnchors,
+  sessionAnchors,
+  sessionAtTranscript,
+  sessionClock,
+  sessionLabel,
   toRecordingSeconds,
+  withinSession,
 } from '../meeting-player/playback-sync';
 import { usePlaybackSelector, usePlaybackStore } from '../meeting-player/playback-store';
 import MeetingPlayer from '../meeting-player';
@@ -2049,21 +2055,49 @@ export const CallPanel = ({
   const [clockAnchors, setClockAnchors] = useState([]);
   // The viewer's own choice of recording; null until they make one.
   const [chosenMedia, setChosenMedia] = useState(null);
+  // A continued meeting is recorded in one file per capture session, each at
+  // its session's place on the transcript's timeline (playbackSessions). The
+  // player plays one session's recording at a time: the first, until the
+  // viewer chooses another or plays on, or a seek lands in another session.
+  // A meeting never continued is one session at 0.
+  const [chosenSession, setChosenSession] = useState(null);
   useEffect(() => {
     setClockAnchors([]);
     setChosenMedia(null);
+    setChosenSession(null);
   }, [item.callId]);
+  const sessions = useMemo(
+    () => playbackSessions(item),
+    [
+      item.recordingUrl,
+      item.videoRecordingUrl,
+      item.recordingUrls,
+      item.recordingUrlSessions,
+      item.videoRecordingUrls,
+      item.videoRecordingUrlSessions,
+      item.sessions,
+      item.sessionNumber,
+      item.sessionOffsetSeconds,
+      item.sessionStartedNumber,
+    ],
+  );
+  const session = sessions.find((s) => s.number === chosenSession) || sessions[0];
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const anchorsOfSession = useMemo(() => sessionAnchors(session, clockAnchors), [session, clockAnchors]);
   // Without a choice, a Virtual Participant's video with no key frames to
   // line it up gives way to the audio recording (defaultMediaPreference).
   const mediaDefault = defaultMediaPreference({
-    hasBoth: Boolean(item.recordingUrl && item.videoRecordingUrl),
+    hasBoth: Boolean(session?.recordingUrl && session?.videoRecordingUrl),
     isVirtualParticipant: Boolean(meetingVp),
     framesLoaded: keyframes.loaded,
-    hasAnchors: clockAnchors.length > 0,
+    hasAnchors: anchorsOfSession.length > 0,
   });
   const media = chooseMeetingMedia({
-    recordingUrl: item.recordingUrl,
-    videoRecordingUrl: item.videoRecordingUrl,
+    recordingUrl: session?.recordingUrl,
+    videoRecordingUrl: session?.videoRecordingUrl,
     isLive,
     prefer: chosenMedia || mediaDefault.prefer,
   });
@@ -2076,18 +2110,30 @@ export const CallPanel = ({
   const onClockAnchors = useCallback((anchors) => {
     setClockAnchors((previous) => (sameAnchors(previous, anchors) ? previous : anchors));
   }, []);
-  const clock = useMemo(() => clockFor(mediaKind, clockAnchors), [mediaKind, clockAnchors]);
+  const clock = useMemo(() => sessionClock(mediaKind, session, clockAnchors), [mediaKind, session, clockAnchors]);
   const clockRef = useRef(clock);
   clockRef.current = clock;
+  // Set by a request that changes the recording, and carried out once the new
+  // one is shown (see the effect on media?.url below).
+  const pendingSwitchRef = useRef(null);
 
   /**
    * Move the player to a time on the transcript's clock (or to a key frame's
-   * own place in the video recording), and play from there when `play`.
+   * own place in the video recording), and play from there when `play`. A
+   * time in another capture session's part of the transcript switches to that
+   * session's recording first.
    */
   const seekPlayer = useCallback(
     ({ transcriptSeconds = null, frame = null, play = false }) => {
       const player = playerRef.current;
       if (!player || !mediaKind) return;
+      const at = frame ? Number(frame.Timestamp) : transcriptSeconds;
+      const target = sessionAtTranscript(sessionsRef.current, at);
+      if (target && sessionRef.current && target.number !== sessionRef.current.number) {
+        pendingSwitchRef.current = { seconds: at, frame, playing: play };
+        setChosenSession(target.number);
+        return;
+      }
       const seconds = frame
         ? recordingSecondsForFrame(frame, { kind: mediaKind, clock: clockRef.current })
         : toRecordingSeconds(clockRef.current, transcriptSeconds);
@@ -2195,26 +2241,30 @@ export const CallPanel = ({
     [seekPlayer],
   );
   // The Details tab's "Play" on a recording: the Transcript tab, playing that
-  // recording from where the player is.
-  // A change of recording -- chosen, or the default settling -- keeps the
-  // place. Read here, while rendering: the player resets the position when
-  // its recording changes, and its effects run before this component's.
-  const pendingSwitchRef = useRef(null);
+  // recording from where the player is. `sessionNumber` names one capture
+  // session's recording, of a meeting with more than one, which is played
+  // from the session's start.
   const playOnTranscriptTab = useCallback(
-    (kind) => {
+    (kind, sessionNumber = null) => {
       setActiveTab(TAB_TRANSCRIPT);
+      const target = sessionsRef.current.find((s) => s.number === sessionNumber);
       const state = playback.get();
-      const seconds = state.engaged ? state.seconds : 0;
-      if (kind && kind !== mediaKind) {
-        // Played once the other recording has loaded, from the same place.
+      const where = state.engaged ? state.seconds : 0;
+      const seconds = target ? target.offset : where;
+      if ((target && target.number !== sessionRef.current?.number) || (kind && kind !== mediaKind)) {
+        // Played once the other recording has loaded.
         pendingSwitchRef.current = { seconds, playing: true };
-        setChosenMedia(kind);
+        if (target) setChosenSession(target.number);
+        if (kind) setChosenMedia(kind);
         return;
       }
       playerRef.current?.seek(toRecordingSeconds(clockRef.current, seconds), { play: true });
     },
     [setActiveTab, playback, mediaKind],
   );
+  // A change of recording -- chosen, or the default settling -- keeps the
+  // place. Read here, while rendering: the player resets the position when
+  // its recording changes, and its effects run before this component's.
   const shownMediaRef = useRef({ callId: item.callId, url: media?.url });
   if (shownMediaRef.current.url !== media?.url) {
     const { seconds, playing, engaged } = playback.get();
@@ -2229,8 +2279,47 @@ export const CallPanel = ({
   useEffect(() => {
     const pending = pendingSwitchRef.current;
     pendingSwitchRef.current = null;
-    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, play: pending.playing });
+    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, frame: pending.frame, play: pending.playing });
   }, [media?.url]);
+
+  // The session selector: that session's recording, from its start, playing
+  // if the player was.
+  const selectSession = useCallback(
+    (id) => {
+      const target = sessionsRef.current.find((s) => String(s.number) === id);
+      if (!target || target.number === sessionRef.current?.number) return;
+      pendingSwitchRef.current = { seconds: target.offset, playing: playback.get().playing };
+      setChosenSession(target.number);
+    },
+    [playback],
+  );
+  // A session's recording played to its end: on to the next session's.
+  const playNextSession = useCallback(() => {
+    const next = nextSession(sessionsRef.current, sessionRef.current);
+    if (!next) return;
+    pendingSwitchRef.current = { seconds: next.offset, playing: true };
+    setChosenSession(next.number);
+  }, []);
+  const attributeSessions = useMemo(
+    () =>
+      sessions.length > 1
+        ? sessions.map((s, i) => ({ ...s, label: sessionLabel(sessions, s), name: `session ${i + 1}` }))
+        : [],
+    [sessions],
+  );
+  const sessionOptions = useMemo(
+    () => sessions.map((s) => ({ id: String(s.number), label: sessionLabel(sessions, s) })),
+    [sessions],
+  );
+  // The seek bar marks what falls within the recording being played.
+  const sessionChapters = useMemo(
+    () => withinSession(chapters, session, (chapter) => chapter.seconds),
+    [chapters, session],
+  );
+  const sessionScreenShares = useMemo(
+    () => withinSession(screenShares, session, (share) => share.Timestamp),
+    [screenShares, session],
+  );
 
   // Nothing plays out of sight: leaving the Transcript tab pauses the player.
   useEffect(() => {
@@ -2510,12 +2599,16 @@ export const CallPanel = ({
               kind={media.kind}
               url={media.url}
               clock={clock}
-              chapters={chapters}
-              screenShares={screenShares}
+              chapters={sessionChapters}
+              screenShares={sessionScreenShares}
               store={playback}
               alternative={media.alternative}
               onSwitch={setChosenMedia}
               hint={audioDefaultReason}
+              sessions={sessionOptions}
+              sessionId={session ? String(session.number) : null}
+              onSessionChange={selectSession}
+              onEnded={playNextSession}
             />
           ) : null
         }
@@ -2543,6 +2636,7 @@ export const CallPanel = ({
         platform={platform}
         onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
         audioDefaultReason={audioDefaultReason}
+        sessions={attributeSessions}
       />
       <CaptureContextPanel
         item={item}
