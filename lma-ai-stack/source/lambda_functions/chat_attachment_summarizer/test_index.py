@@ -115,11 +115,15 @@ class FakeBedrock:
         self.answer = answer
         self.calls: List[Dict[str, Any]] = []
         self.error = None
+        #: Responses returned before the normal one, in order (a cut-off answer, say).
+        self.first: List[Dict[str, Any]] = []
 
     def converse(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
+        if self.first:
+            return self.first.pop(0)
         return {
             "output": {"message": {"content": [{"text": self.answer}]}},
             "usage": {"inputTokens": 1500, "outputTokens": 40, "totalTokens": 1540},
@@ -281,3 +285,108 @@ def test_the_fallback_model_is_the_meeting_assistants_shipped_default():
         ).read_text()
     )
     assert index.FALLBACK_MODEL_ID == defaults["language_models"]["meetingAssistModelId"]["default"]
+
+
+# ── an answer cut off at the output budget ──────────────────────────────────
+
+#: What a reasoning model returns when it spent the whole budget reasoning.
+REASONED_ONLY = {
+    "output": {"message": {"content": [{"reasoningContent": {"reasoningText": {"text": "..."}}}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "max_tokens",
+}
+#: An answer cut off part way through its JSON.
+CUT_OFF = {
+    "output": {"message": {"content": [{"text": '{"title": "Rollout'}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "max_tokens",
+}
+
+
+@pytest.mark.parametrize("first", [REASONED_ONLY, CUT_OFF], ids=["no text", "cut off"])
+def test_an_answer_cut_off_at_the_budget_is_asked_for_once_more_with_a_larger_one(fakes, first):
+    bedrock = FakeBedrock()
+    bedrock.first = [first]
+    dynamo, _s3, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "done"}
+    budgets = [call["inferenceConfig"]["maxTokens"] for call in bedrock.calls]
+    assert budgets == [index.MAX_OUTPUT_TOKENS, index.RETRY_OUTPUT_TOKENS]
+    assert index.RETRY_OUTPUT_TOKENS > index.MAX_OUTPUT_TOKENS
+    assert len(metering.records) == 2, "both calls are metered"
+    assert "Whiteboard sketch" in _values(dynamo.updates[0]).values()
+
+
+def test_a_second_cut_off_answer_marks_the_attachment_failed_after_two_calls(fakes):
+    bedrock = FakeBedrock()
+    bedrock.first = [REASONED_ONLY, REASONED_ONLY]
+    dynamo, _s3, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "no answer"}
+    assert len(bedrock.calls) == 2 and len(metering.records) == 2
+    assert "FAILED" in _values(dynamo.updates[0]).values()
+
+
+def test_an_answer_that_was_not_cut_off_is_not_asked_for_again(fakes):
+    dynamo, _s3, bedrock, metering = fakes(bedrock=FakeBedrock("no json here"))
+    assert index.handler(dict(EVENT), None)["reason"] == "no answer"
+    assert len(bedrock.calls) == 1 and len(metering.records) == 1
+
+
+def test_a_reasoning_model_is_asked_for_a_low_effort_and_others_get_no_effort(fakes, monkeypatch):
+    _d, _s, bedrock, _m = fakes()
+    index.handler(dict(EVENT), None)
+    assert bedrock.calls[0]["additionalModelRequestFields"] == {"output_config": {"effort": "low"}}
+
+    _d, _s, bedrock, _m = fakes()
+    monkeypatch.setattr(index, "model_id", lambda: "amazon.nova-lite-v1:0")
+    index.handler(dict(EVENT), None)
+    assert "additionalModelRequestFields" not in bedrock.calls[0]
+
+
+def test_the_first_budget_leaves_room_for_reasoning():
+    assert index.MAX_OUTPUT_TOKENS >= 2048
+
+
+#: A text block with nothing in it, at the budget.
+EMPTY_TEXT = {
+    "output": {"message": {"content": [{"text": ""}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "end_turn",
+}
+
+
+def test_an_empty_text_block_is_asked_for_once_more(fakes):
+    bedrock = FakeBedrock()
+    bedrock.first = [EMPTY_TEXT]
+    _d, _s, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "done"}
+    assert len(bedrock.calls) == 2 and len(metering.records) == 2
+
+
+def test_no_third_call_is_announced_or_made_after_the_retry(fakes, caplog):
+    bedrock = FakeBedrock()
+    bedrock.first = [EMPTY_TEXT, EMPTY_TEXT]
+    fakes(bedrock=bedrock)
+    with caplog.at_level("WARNING"):
+        assert index.handler(dict(EVENT), None)["reason"] == "no answer"
+    assert len(bedrock.calls) == 2
+    assert sum("asking once more" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_the_model_calls_fit_the_functions_timeout():
+    """Two calls, each of at most CALL_ATTEMPTS attempts of connect plus read, with room left."""
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    template = HERE.parents[2] / "deployment" / "lma-ai-stack.yaml"
+    resources = yaml.load(template.read_text(), Loader=Loader)["Resources"]
+    timeout = resources["ChatAttachmentSummarizerFunction"]["Properties"]["Timeout"]
+    worst = 2 * index.CALL_ATTEMPTS * (index.CONNECT_TIMEOUT_SECONDS + index.READ_TIMEOUT_SECONDS)
+    # The object read, the item writes and botocore's backoff need time too.
+    assert worst <= timeout - 30, (worst, timeout)
+    config = index.BEDROCK.meta.config
+    assert config.read_timeout == index.READ_TIMEOUT_SECONDS
+    assert config.connect_timeout == index.CONNECT_TIMEOUT_SECONDS
+    assert config.retries["total_max_attempts"] == index.CALL_ATTEMPTS

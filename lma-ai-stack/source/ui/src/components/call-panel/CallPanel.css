@@ -86,8 +86,8 @@
   gap: 4px;
 }
 
-/* The Chat chip, set apart from the speakers': it shows or hides the meeting
-   chat whichever speakers are chosen. */
+/* The transcript view control, set apart from the speakers': it shows, hides or
+   shows alone the meeting chat, whichever speakers are chosen. */
 .transcript-chat-filter {
   display: inline-flex;
 }

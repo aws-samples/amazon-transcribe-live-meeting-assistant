@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+// Guidance an MCP client pushed to the meeting (push_meeting_guidance). Owner and
+// SharedWith are required by the subscription's access filter (subscription.js).
+export default /* GraphQL */ `
+  subscription OnAddMeetingGuidance($callId: ID) {
+    onAddMeetingGuidance(CallId: $callId) {
+      CallId
+      GuidanceId
+      Title
+      Text
+      Level
+      Source
+      CreatedBy
+      CreatedAt
+      Owner
+      SharedWith
+    }
+  }
+`;

@@ -14,6 +14,12 @@
  * separate admission check); and the VP reporting JOINED or ACTIVE
  * (status-manager.ts updateStatus), whether or not that status write lands.
  *
+ * Whether the meeting is over for the VP: it has seen its meeting end (the
+ * handler's wait for the end returned: removed, ended by the host, left, a
+ * chat command), or its end-of-meeting work has begun (meeting-teardown.ts,
+ * which also covers a stop signal). From then on nothing on the page needs a
+ * human, so the dialog watchdog stands down.
+ *
  * A VP process handles one meeting, so nothing clears it except the tests. A
  * VP that a platform sends back to its lobby after admission therefore keeps
  * treating unclassified dialogs as in-meeting, on purpose: it has already been
@@ -22,6 +28,7 @@
  */
 
 let joined = false;
+let over = false;
 
 /** The VP has been admitted to the meeting. */
 export function noteMeetingJoined(): void {
@@ -33,7 +40,18 @@ export function meetingJoined(): boolean {
     return joined;
 }
 
-/** Forget the join (tests). */
+/** The meeting is over for the VP: it has ended, or the VP's teardown has begun. */
+export function noteMeetingOver(): void {
+    over = true;
+}
+
+/** Whether the meeting is over for the VP; see noteMeetingOver. */
+export function meetingOver(): boolean {
+    return over;
+}
+
+/** Forget the join and the end (tests). */
 export function resetMeetingPhase(): void {
     joined = false;
+    over = false;
 }

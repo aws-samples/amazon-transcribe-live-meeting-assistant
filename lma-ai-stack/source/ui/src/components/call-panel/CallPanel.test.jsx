@@ -19,7 +19,7 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
-const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null }));
+const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null, attachments: [] }));
 // The calls context, which a test can give the writers the page offers controls for.
 const callsContext = vi.hoisted(() => ({ value: { calls: [] } }));
 // What useMeetingConsent answers; nothing read yet unless a test says otherwise.
@@ -34,6 +34,9 @@ vi.mock('aws-amplify/api', () => {
       return { data: { getVideoKeyframes: { VideoKeyframes: responses.frames, nextToken: null } } };
     }
     if (query.includes('getCallCost')) return { data: { getCallCost: responses.cost } };
+    if (query.includes('getChatAttachments')) {
+      return { data: { getChatAttachments: { ChatAttachments: responses.attachments, nextToken: null } } };
+    }
     return { data: {} };
   };
   const graphql = (options) => {
@@ -162,6 +165,7 @@ beforeEach(() => {
   responses.frames = [];
   responses.cost = null;
   responses.vps = [];
+  responses.attachments = [];
   callsContext.value = { calls: [] };
   consentState.value = { consent: null };
   // Which summary sections a viewer opened is remembered between visits.
@@ -395,22 +399,98 @@ describe('a message typed in the meeting chat', () => {
     expect(within(rowOf('+1')).getByText('00:03.0')).toBeTruthy();
   });
 
-  it('offers no chat sender as a speaker, and shows or hides the chat with its own chip', () => {
+  // The transcript view control and its three choices.
+  const viewControl = () => screen.getByRole('toolbar', { name: 'Transcript lines' });
+  const chooseView = (name) => fireEvent.click(within(viewControl()).getByRole('button', { name }));
+  const chosenView = () =>
+    within(viewControl())
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent);
+
+  it('offers no chat sender as a speaker, and a view control beside the chips that starts on speech and chat', () => {
     renderPage({ transcript: WITH_CHAT });
     const filter = screen.getByRole('group', { name: 'Show speakers' });
     expect(within(filter).queryByRole('button', { name: 'Bo Chen' })).toBeNull();
+    // The view control is the filter's last part. (Cloudscape also renders a
+    // Select for narrow screens beside it, which CSS hides at other widths.)
     expect(
       within(filter)
         .getAllByRole('button')
+        .filter((b) => !b.closest('.transcript-chat-filter'))
         .map((b) => b.textContent),
-    ).toEqual(['All', 'Sarah Lee', 'Bob Chen', 'Chat']);
-    const chip = within(filter).getByRole('button', { name: 'Chat messages' });
-    expect(chip.getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(chip);
-    expect(document.querySelectorAll('.chat-segment')).toHaveLength(0);
-    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
-    fireEvent.click(chip);
+    ).toEqual(['All', 'Sarah Lee', 'Bob Chen']);
+    expect(filter.querySelector('.transcript-chat-filter').contains(viewControl())).toBe(true);
+    expect(
+      within(viewControl())
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Speech and chat', 'Speech only', 'Chat only']);
+    expect(chosenView()).toEqual(['Speech and chat']);
     expect(document.querySelectorAll('.chat-segment')).toHaveLength(3);
+    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
+  });
+
+  it('hides every chat message and nothing else in speech only, and shows them again in speech and chat', () => {
+    renderPage({ transcript: WITH_CHAT });
+    chooseView('Speech only');
+    expect(chosenView()).toEqual(['Speech only']);
+    expect(document.querySelectorAll('.chat-segment')).toHaveLength(0);
+    expect(rows()).toHaveLength(3);
+    chooseView('Speech and chat');
+    expect(document.querySelectorAll('.chat-segment')).toHaveLength(3);
+    expect(rows()).toHaveLength(6);
+  });
+
+  it('shows only the chat messages in chat only, in time order with their times and copyable links', () => {
+    renderPage({ transcript: WITH_CHAT });
+    chooseView('Chat only');
+    expect(chosenView()).toEqual(['Chat only']);
+    expect(screen.queryByText('Thanks, Sarah.')).toBeNull();
+    expect(screen.queryByText('Welcome to the budget review.')).toBeNull();
+    expect(rows().map((row) => row.querySelector('.chat-segment-text')?.textContent)).toEqual([
+      '**not bold** [the doc](https://example.com/doc)',
+      '+1',
+      'Budget sheet: https://example.com/budget.',
+    ]);
+    expect(labels()).toEqual(['Bo Chen · chat', 'Bo Chen · chat', 'Sarah Lee · chat']);
+    expect(within(rowOf('+1')).getByText('00:03.0')).toBeTruthy();
+    expect(within(rowOf('**not bold**')).getByRole('button', { name: 'Copy https://example.com/doc' })).toBeTruthy();
+  });
+
+  it('keeps a chat message attachment on its line in chat only', async () => {
+    responses.attachments = [
+      { CallId: ITEM.callId, AttachmentId: 'a1', SegmentId: 'chat-file', FileName: 'plan.pdf', Status: 'NOT_STORED' },
+    ];
+    const transcript = {
+      [ITEM.callId]: {
+        ...WITH_CHAT[ITEM.callId],
+        MEETING_CHAT: {
+          segments: [...WITH_CHAT[ITEM.callId].MEETING_CHAT.segments, chat('chat-file', '(attachment: plan.pdf)', 28)],
+        },
+      },
+    };
+    renderPage({ transcript });
+    chooseView('Chat only');
+    const row = rowOf('(attachment: plan.pdf)');
+    await waitFor(() => expect(within(row).getByTestId('chat-attachment').textContent).toContain('plan.pdf'));
+  });
+
+  it('shows the chat in chat only whichever speakers were chosen, and keeps the choice for speech and chat', () => {
+    renderPage({ transcript: WITH_CHAT });
+    const filter = screen.getByRole('group', { name: 'Show speakers' });
+    fireEvent.click(within(filter).getByRole('button', { name: 'Bob Chen' }));
+    chooseView('Chat only');
+    expect(labels()).toHaveLength(3);
+    expect(rows()).toHaveLength(3);
+    // The chips name the speakers but do not filter while no spoken line is shown.
+    expect(within(filter).queryByRole('button', { name: 'All speakers' })).toBeNull();
+    expect(within(filter).queryByRole('button', { name: 'Bob Chen' })).toBeNull();
+    expect(within(filter).getByText('Bob Chen')).toBeTruthy();
+    chooseView('Speech and chat');
+    expect(screen.queryByText('Welcome to the budget review.')).toBeNull();
+    expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
+    expect(labels()).toHaveLength(3);
   });
 
   it("keeps the chat beside a chosen speaker's lines, not the speaker's chat alone", () => {
@@ -420,12 +500,12 @@ describe('a message typed in the meeting chat', () => {
     expect(screen.queryByText('Welcome to the budget review.')).toBeNull();
     expect(screen.getByText('Thanks, Sarah.')).toBeTruthy();
     expect(labels()).toHaveLength(3);
-    fireEvent.click(within(filter).getByRole('button', { name: 'Chat messages' }));
+    chooseView('Speech only');
     expect(labels()).toHaveLength(0);
     expect(rows()).toHaveLength(1);
   });
 
-  it('offers the Chat chip with a single speaker, and says why nothing is shown with only chat hidden', () => {
+  it('offers the view control with a single speaker, and says why nothing is shown with only chat hidden', () => {
     renderPage({
       transcript: {
         [ITEM.callId]: {
@@ -435,8 +515,27 @@ describe('a message typed in the meeting chat', () => {
     });
     const filter = screen.getByRole('group', { name: 'Show speakers' });
     expect(within(filter).queryByRole('button', { name: 'All speakers' })).toBeNull();
-    fireEvent.click(within(filter).getByRole('button', { name: 'Chat messages' }));
+    chooseView('Speech only');
     expect(screen.getByText('No lines to show with the chat hidden.')).toBeTruthy();
+  });
+
+  it('offers no view control when the transcript holds no chat', () => {
+    renderPage();
+    expect(screen.queryByRole('toolbar', { name: 'Transcript lines' })).toBeNull();
+    expect(screen.getByText('Hello everyone.')).toBeTruthy();
+  });
+
+  it('searches only the lines the view shows', () => {
+    renderPage({ transcript: WITH_CHAT });
+    const search = screen.getByRole('searchbox', { name: 'Search the transcript' });
+    fireEvent.change(search, { target: { value: 'budget' } });
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 2');
+    chooseView('Chat only');
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 1');
+    expect(rowOf('Budget sheet').className).toContain('transcript-row-match');
+    chooseView('Speech only');
+    expect(screen.getByTestId('transcript-search-count').textContent).toBe('1 of 1');
+    expect(rowOf('Welcome to the budget review.').className).toContain('transcript-row-match');
   });
 
   it('is found by the search, with its words marked in the plain text', () => {

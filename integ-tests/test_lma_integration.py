@@ -238,6 +238,50 @@ def test_meeting_chat_segment_is_stored_read_and_deleted(client: LMAClient) -> N
         probe.cleanup()
 
 
+def test_chat_attachment_is_summarized_and_deleted_with_the_transcript(client: LMAClient) -> None:
+    """A chat attachment, stored and announced as a Virtual Participant does, end to end.
+
+    Puts a synthetic START, a MEETING_CHAT segment, a Markdown file in the
+    meeting's attachments folder and the ADD_CHAT_ATTACHMENT event naming it,
+    and checks that the call event processor stores the attachment's item with
+    the transcript's expiry, that the summarizer gives it a title and summary
+    (SummaryState DONE) with the meeting assistant's model, and that the
+    transcript deletion removes the item and every version of the file. One
+    small model call. See integ-tests/meeting_chat_probe.py. Self-cleaning.
+    """
+    from meeting_chat_probe import ChatProbe, wait_for
+
+    probe = ChatProbe.for_stack(client.stack_name, region=client.region)
+    try:
+        probe.send_start()
+        assert wait_for(probe.meeting, 90), f"no meeting record for {probe.call_id} within 90s"
+        probe.send_chat_segment()
+        assert wait_for(probe.stored_segment, 60), "the chat segment was not stored within 60s"
+        probe.send_attachment()
+
+        stored = wait_for(probe.attachment_item, 60)
+        assert stored, (
+            f"the chat attachment {probe.attachment_id} was not stored for {probe.call_id} within "
+            "60s; check the CallEventProcessor logs for a dropped ADD_CHAT_ATTACHMENT"
+        )
+        assert stored["Status"] == "STORED" and stored["S3Key"] == probe.attachment_key()
+        assert stored.get("ExpiresAfter"), "a chat attachment must expire with the transcript"
+
+        summarized = wait_for(probe.summarized_attachment, 180, interval=5)
+        assert summarized, "the summarizer wrote no SummaryState within 180s; check its log group"
+        assert summarized["SummaryState"] == "DONE", (
+            f"the summarizer gave up ({summarized['SummaryState']}); its log says why"
+        )
+        assert (summarized.get("Title") or "").strip(), "a summarized attachment has a title"
+
+        result = probe.delete_transcript()
+        assert result.get("action") == "deleted", result
+        assert probe.attachment_item() is None, "the attachment item survived the transcript deletion"
+        assert probe.attachment_files() == [], "a version of the attachment survived the transcript deletion"
+    finally:
+        probe.cleanup()
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # 3c. WebSocket transcriber front door (Fastify 5 / @fastify/websocket 11 upgrade)
 # ────────────────────────────────────────────────────────────────────────────

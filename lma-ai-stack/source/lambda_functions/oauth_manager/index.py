@@ -423,7 +423,12 @@ def handle_oauth_callback(event: Dict[str, Any], context: Any) -> Dict[str, Any]
             logger.info(f"Updating existing server {server_id} with OAuth tokens")
             servers_table.update_item(
                 Key={"AccountId": account_id, "ServerId": server_id},
-                UpdateExpression="SET AuthConfig = :config, UpdatedAt = :updated",
+                # An imported server waits for its credentials until now
+                # (mcp_server_manager's library import).
+                UpdateExpression=(
+                    "SET AuthConfig = :config, UpdatedAt = :updated "
+                    "REMOVE CredentialsRequired, RequiredAuthType, ImportedAuth"
+                ),
                 ExpressionAttributeValues={
                     ":config": json.dumps(auth_config),
                     ":updated": datetime.utcnow().isoformat(),

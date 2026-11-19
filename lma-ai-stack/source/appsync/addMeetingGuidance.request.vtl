@@ -1,0 +1,40 @@
+## One note of guidance on a meeting, from the hosted MCP server's
+## push_meeting_guidance tool. Written only by that function (the mutation is
+## IAM-only), which reads the meeting first, checks the caller may see it, and
+## sets Owner, SharedWith and ExpiresAfter from it. The sort key orders a
+## meeting's guidance by when it was added, so a reader queries the partition
+## in time order.
+#set( $maxTextChars = 2000 )
+#set( $maxTitleChars = 200 )
+#if( $util.isNullOrBlank($ctx.args.input.Text) )
+  $util.error("Text is required", "BadRequest")
+#end
+#if( $ctx.args.input.Text.length() > $maxTextChars )
+  $util.error("Text is longer than ${maxTextChars} characters", "BadRequest")
+#end
+#if( $ctx.args.input.Title && $ctx.args.input.Title.length() > $maxTitleChars )
+  $util.error("Title is longer than ${maxTitleChars} characters", "BadRequest")
+#end
+
+#set( $CreatedAt = $util.time.nowISO8601() )
+$util.qr($ctx.args.input.put("CreatedAt", $CreatedAt))
+$util.qr($ctx.args.input.put("UpdatedAt", $CreatedAt))
+
+#set( $PK = "gd#${ctx.args.input.CallId}" )
+#set( $SK = "g#${CreatedAt}#${ctx.args.input.GuidanceId}" )
+
+{
+  "version" : "2018-05-29",
+  "operation": "PutItem",
+  "key" : {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($SK),
+  },
+  "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args.input),
+  "condition": {
+    "expression": "attribute_not_exists(#PK)",
+    "expressionNames": {
+      "#PK": "PK",
+    },
+  },
+}

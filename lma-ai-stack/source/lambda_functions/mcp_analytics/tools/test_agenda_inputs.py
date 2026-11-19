@@ -196,7 +196,9 @@ class TestBothDispatchersForwardTheAgenda(unittest.TestCase):
             args = {**arguments, "agenda": "Budget"}
             sent = self._forwarded(
                 tool,
-                lambda t=tool, a=args: self.index.execute_tool_call(1, t, a, "u", "u", False),
+                lambda t=tool, a=args: self.index.execute_tool_call(
+                    1, t, a, "u", "u", False, "read-write"
+                ),
             )
             self.assertEqual(sent, "Budget", tool)
 

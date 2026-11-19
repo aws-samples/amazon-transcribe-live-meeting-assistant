@@ -150,6 +150,17 @@ ADMIN_ONLY_FIELDS = [
     ("Mutation", "installMCPServer"),
     ("Mutation", "uninstallMCPServer"),
     ("Mutation", "updateMCPServer"),
+    ("Mutation", "updateMCPServerCredentials"),
+    # The MCP server library. Both fields also accept IAM-signed callers (the
+    # LMA SDK and CLI): the export as getNovaSonicConfig does, since it carries
+    # no credentials; the import by design, for an operator's principal granted
+    # appsync:GraphQL on the deployment's API (who may call it is documented in
+    # docs/mcp-servers.md, "Exporting and Importing the Server Library"). The
+    # stack's own roles with broad grants are denied it;
+    # test_mcp_library_import_scope.py holds that.
+    # mcp_server_manager re-checks the Admin group for a user-pool caller.
+    ("Query", "exportMCPServerLibrary"),
+    ("Mutation", "importMCPServerLibrary"),
     ("Mutation", "initOAuthFlow"),
     ("Mutation", "handleOAuthCallback"),
     ("Mutation", "createUser"),
@@ -231,6 +242,9 @@ OTHER_FIELDS = [
     ("Mutation", "addTranscriptSegment"),
     ("Mutation", "addVideoKeyframe"),
     ("Mutation", "addChatAttachment"),
+    # Written by the hosted MCP server's push_meeting_guidance tool with SigV4,
+    # after it has checked the MCP caller may see the meeting.
+    ("Mutation", "addMeetingGuidance"),
     ("Mutation", "addChatToken"),
     # One meeting at a time, authorized per meeting by the resolver against its
     # owner and share list rather than by group.
@@ -825,3 +839,94 @@ def test_ui_operation_validates_against_the_schema(body: str, schema) -> None:
     """Each UI document selects only fields, arguments and types the schema declares."""
     errors = validate(schema, parse(body))
     assert not errors, "\n".join(error.message for error in errors)
+
+
+# ── operations the hosted MCP server sends ──────────────────────────────────
+
+MCP_TOOLS_DIR = AI_STACK / "source" / "lambda_functions" / "mcp_analytics" / "tools"
+
+# A triple-quoted Python string whose content opens with an operation keyword
+# and a name: the GraphQL documents the MCP tools send to AppSync.
+_PY_OPERATION = re.compile(r'"""\s*((?:query|mutation)\s+\w+\s*[({].*?)"""', re.S)
+
+
+def _mcp_operations() -> list[tuple[str, str]]:
+    operations = []
+    for path in sorted(MCP_TOOLS_DIR.glob("*.py")):
+        if path.name.startswith("test_"):
+            continue
+        for body in _PY_OPERATION.findall(path.read_text()):
+            named = re.search(r"\b(?:query|mutation)\s+(\w+)", body)
+            operations.append((f"{path.name}::{named.group(1)}", body))
+    return operations
+
+
+MCP_OPERATIONS = _mcp_operations()
+
+
+def test_mcp_operations_were_found() -> None:
+    """Guards the extractor: the meeting tools send at least these."""
+    names = {label.split("::")[1] for label, _ in MCP_OPERATIONS}
+    for name in (
+        "AddMeetingGuidance",
+        "UpdateCallAgenda",
+        "UpdateScheduledVirtualParticipant",
+        "EndVirtualParticipant",
+        "GetCallCost",
+        "GetVideoKeyframes",
+        "GetChatAttachments",
+        "GetMeetingConsent",
+    ):
+        assert name in names, name
+
+
+@pytest.mark.parametrize(
+    "body", [body for _, body in MCP_OPERATIONS], ids=[label for label, _ in MCP_OPERATIONS]
+)
+def test_mcp_operation_validates_against_the_schema(body: str, schema) -> None:
+    """Each MCP tool document selects only fields, arguments and types the schema declares."""
+    errors = validate(schema, parse(body))
+    assert not errors, "\n".join(error.message for error in errors)
+
+
+def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
+    """Every mutation an MCP tool sends is named in the function's appsync:GraphQL grant."""
+    block = next(
+        b
+        for b in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
+        if b.startswith("MCPServerAnalyticsFunction:")
+    )
+    granted = set(re.findall(r"/types/Mutation/fields/(\w+)", block))
+    sent = set()
+    for _, body in MCP_OPERATIONS:
+        if body.lstrip().startswith("mutation"):
+            sent.update(re.findall(r"\{\s*(\w+)\s*\(", body)[:1])
+    assert sent, "no mutations found in the MCP tools"
+    assert sent <= granted, f"sent but not granted: {sorted(sent - granted)}"
+
+
+# ── meeting guidance reaches the meeting page as the meeting's messages do ──
+
+
+def test_meeting_guidance_is_filtered_on_owner_and_shared_with() -> None:
+    """onAddMeetingGuidance uses subscription.js, and the page selects both fields."""
+    subscription = _resolver("Subscription", "onAddMeetingGuidance")
+    assert "CodeS3Location: ../source/appsync/subscription.js" in subscription.block
+    mutation = _resolver("Mutation", "addMeetingGuidance")
+    # The response template that publishes SharedWith in the "[a, b]" form.
+    assert mutation.files[-1].endswith("dDbPutCondition.response.vtl")
+    page = (UI_SRC / "graphql" / "queries" / "onAddMeetingGuidance.js").read_text()
+    selection = page[page.index("onAddMeetingGuidance(") :]
+    assert re.search(r"\bOwner\b", selection) and re.search(r"\bSharedWith\b", selection)
+    assert "CallId: $callId" in page
+
+
+def test_meeting_guidance_is_written_by_backend_roles_only(field_nodes) -> None:
+    """The mutation carries no Cognito directive, so a signed-in user cannot call it."""
+    assert _cognito_groups(field_nodes[("Mutation", "addMeetingGuidance")]) is None
+
+
+def test_enum_bodies_carry_no_comments(schema_sdl: str) -> None:
+    """AppSync rejects a # comment inside an enum body that graphql-core accepts."""
+    for match in re.finditer(r"^enum (\w+)\s*\{(.*?)^\}", schema_sdl, re.M | re.S):
+        assert "#" not in match.group(2), f"enum {match.group(1)} has a comment in its body"

@@ -125,7 +125,8 @@ export function skippedLookupLogLine(reason: LookupSkipReason, meetingMode: stri
 export const UNADDRESSED_LOOKUP_RESULT = {
     status: 'skipped',
     instruction: 'Not run: nobody asked you anything. The participants are talking to each other. '
-        + 'Stay silent, do not answer, and do not request another lookup until someone says your wake phrase.',
+        + 'Say nothing at all - no apology and no answer of your own - and do not request another lookup '
+        + 'until someone addresses you by your wake phrase or your name.',
 };
 
 /** The tool result to return for a lookup skipped for `reason`. */

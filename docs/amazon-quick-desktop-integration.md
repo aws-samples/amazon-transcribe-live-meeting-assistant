@@ -51,6 +51,13 @@ agents — no `allow_unscoped_write_tools` required for read-only flows):
   `get_meeting_summary`, `list_meetings`, `get_virtual_participant_status`
 - **Write:** `schedule_meeting`, `start_meeting_now`
 
+The write tools need an API key generated with the **Read and write** scope; a
+**Read only** key (the default) is offered the read-only tools only. A key
+created before keys had scopes is listed as **Legacy (original tools)** and keeps
+all seven tools above. The API key
+endpoint serves further meeting tools too, listed in
+[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed).
+
 All responses include `meetingUrl` and (where applicable)
 `virtualParticipantUrl` deep-links so agents can post clickable references
 back into the LMA UI.
