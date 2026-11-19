@@ -125,7 +125,7 @@ def test_every_signed_in_user_can_read(table):
     call("createSkill", input=SKILL)
     assert [s["Name"] for s in call("listSkills", USER)] == ["launch-review"]
     assert call("getSkill", USER, skillId="launch-review")["Instructions"] == SKILL["Instructions"]
-    assert json.loads(call("exportSkill", USER, skillId="launch-review"))["fileName"] == "SKILL.md"
+    assert call("exportSkill", USER, skillId="launch-review")["fileName"] == "SKILL.md"
 
 
 def test_a_user_pool_token_with_a_user_arn_is_not_taken_for_an_iam_caller(table):
@@ -148,7 +148,7 @@ def test_create_stores_the_skill_with_who_and_when(table):
     assert skill["Files"] == [
         {"Path": "reference/checklist.md", "Content": "- Pricing\n", "Size": 10}
     ]
-    assert json.loads(skill["Metadata"]) == {"trigger": "review the launch"}
+    assert skill["Metadata"] == {"trigger": "review the launch"}
     assert skill["CreatedAt"] == skill["UpdatedAt"]
     assert skill["SourceFormat"] == "manual"
 
@@ -271,9 +271,9 @@ def test_an_import_of_bad_base64_or_a_bad_file_fails_cleanly(table):
 
 def test_export_as_skill_md_and_as_zip(table):
     call("createSkill", input=SKILL)
-    md = json.loads(call("exportSkill", skillId="launch-review", format="skill-md"))
+    md = call("exportSkill", skillId="launch-review", format="skill-md")
     assert md["encoding"] == "utf-8" and md["content"].startswith("---\nname: launch-review")
-    packed = json.loads(call("exportSkill", skillId="launch-review", format="zip"))
+    packed = call("exportSkill", skillId="launch-review", format="zip")
     assert packed["fileName"] == "launch-review.zip" and packed["encoding"] == "base64"
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(packed["content"]))) as archive:
         assert "launch-review/reference/checklist.md" in archive.namelist()
@@ -289,7 +289,7 @@ def test_export_as_skill_md_and_as_zip(table):
 def test_a_library_round_trip_updates_every_skill_and_changes_none(table):
     call("createSkill", input=SKILL)
     call("createSkill", input={**SKILL, "Name": "second", "Files": []})
-    before = json.loads(call("exportSkillLibrary", IAM))
+    before = call("exportSkillLibrary", IAM)
     stored = {k: dict(v) for k, v in table.items.items()}
     result = call("importSkillLibrary", IAM, library=json.dumps(before))
     assert result["Success"] is True
@@ -297,7 +297,7 @@ def test_a_library_round_trip_updates_every_skill_and_changes_none(table):
         ("launch-review", "unchanged"),
         ("second", "unchanged"),
     }
-    after = json.loads(call("exportSkillLibrary", IAM))
+    after = call("exportSkillLibrary", IAM)
     assert after["skills"] == before["skills"]
     # Not written at all: the source and audit fields are those of before.
     assert table.items == stored
@@ -305,7 +305,7 @@ def test_a_library_round_trip_updates_every_skill_and_changes_none(table):
 
 def test_a_library_entry_that_differs_updates_its_skill(table):
     call("createSkill", input=SKILL)
-    document = json.loads(call("exportSkillLibrary"))
+    document = call("exportSkillLibrary")
     document["skills"][0]["description"] = "A new description."
     result = call("importSkillLibrary", IAM, library=json.dumps(document))
     assert [s["Action"] for s in result["Skills"]] == ["updated"]
@@ -314,9 +314,10 @@ def test_a_library_entry_that_differs_updates_its_skill(table):
     assert stored["UpdatedBy"] == IAM["userArn"] and stored["SourceFormat"] == "library"
 
 
-def test_the_library_export_keeps_non_ascii_text_unescaped(table):
+def test_the_library_export_keeps_non_ascii_text(table):
     call("createSkill", input={**SKILL, "Instructions": "Résumé — 会议纪要"})
-    assert "会议纪要" in call("exportSkillLibrary")
+    (entry,) = call("exportSkillLibrary")["skills"]
+    assert entry["instructions"] == "Résumé — 会议纪要"
 
 
 def test_a_create_that_loses_a_race_for_its_id_says_the_name_is_taken(table, monkeypatch):
