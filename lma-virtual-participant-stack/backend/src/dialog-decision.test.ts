@@ -12,6 +12,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import type { DialogAnalysis } from './ai-dom-resolver.js';
 import {
     decideAfterClickFailure,
@@ -239,7 +240,7 @@ test('a dialog saying the VP was removed by the host ends the meeting as a remov
 });
 
 test('a dialog saying the meeting has ended ends it as ended by the host, never as a manual action', () => {
-    for (const message of ['This meeting has been ended by host', 'The host has ended this meeting', 'Meeting ended']) {
+    for (const message of ['This meeting has been ended by host', 'The host has ended this meeting', 'The meeting has ended']) {
         assert.deepEqual(decideDialogAction(removed({ message }), 'ZOOM', null, true), { kind: 'meeting-over', reason: 'host-ended' }, message);
     }
 });
@@ -255,4 +256,28 @@ test('no dialog is escalated or clicked once the meeting is over for the VP', ()
     assert.deepEqual(decideDialogAction(blocking, 'ZOOM', null, true, true), { kind: 'ignore' });
     assert.deepEqual(decideDialogAction(removed(), 'ZOOM', null, true, true), { kind: 'ignore' });
     assert.deepEqual(decideDialogAction(consent(), 'TEAMS', 'Allow', true, true), { kind: 'ignore' });
+});
+
+test('an in-meeting notice about something else ending, or someone else removed, does not end the VP’s meeting', () => {
+    for (const message of [
+        'The host has ended screen sharing',
+        'The host has ended the poll',
+        'Breakout rooms have ended',
+        'The host ended the breakout rooms',
+        'Alice has been removed from the meeting',
+        'A participant was removed from the meeting by the host',
+    ]) {
+        for (const type of ['OTHER', 'BLOCKED'] as const) {
+            assert.equal(meetingOverReason({ type, message }), null, `${type}: ${message}`);
+            assert.notEqual(decideDialogAction(removed({ type, message, needsHuman: false }), 'ZOOM', null, true).kind, 'meeting-over', message);
+        }
+    }
+});
+
+test('before the join a removal notice is neither escalated nor handed to the handler', () => {
+    assert.equal(decideDialogAction(removed(), 'ZOOM', null, false).kind, 'meeting-over');
+    // The handler is told only after the join: the join paths have their own
+    // error-screen detection.
+    const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
+    assert.match(watchdog, /if \(meetingJoined\(\)\) opts\.onMeetingOver\?\.\(decision\.reason\)/);
 });

@@ -52,12 +52,20 @@ export function isMediaPermissionDialog(
     return MEDIA_PERMISSION_TEXT.test(analysis.message || '');
 }
 
-/** Text of a dialog saying the VP was removed from the meeting. */
+/*
+ * The text matched is the model's description of the dialog (DialogAnalysis
+ * message), not the dialog's own words, so these are stricter than Zoom's
+ * fixed end-dialog phrases (end-signals.ts ZOOM_END_DIALOG_PHRASES), which
+ * are read from Zoom's own dialogs: an in-meeting notice that another
+ * participant was removed, or that screen sharing, a poll or the breakout
+ * rooms ended, must not end the VP's meeting.
+ */
+/** Text of a dialog saying the VP itself was removed from the meeting. */
 const REMOVED_TEXT =
-    /\b(?:been\s+)?removed\s+(?:you\s+)?from\s+(?:the|this)\s+(?:meeting|call)\b|\bremoved\s+by\s+(?:the\s+)?(?:host|organi[sz]er)\b/i;
-/** Text of a dialog saying the meeting has ended. */
+    /\b(?:you|user)\s+(?:have|has|were|was)\s+(?:been\s+)?removed\b|\bremoved\s+you\b/i;
+/** Text of a dialog saying the meeting itself has ended. */
 const ENDED_TEXT =
-    /\b(?:meeting|call)\s+(?:has\s+)?(?:been\s+)?ended\b|\b(?:host|organi[sz]er)\s+(?:has\s+)?ended\b|\bended\s+(?:the|this)\s+(?:meeting|call)\b/i;
+    /\b(?:meeting|call)\s+(?:has|was)\s+(?:been\s+)?ended\b|\bended\s+(?:the|this)\s+(?:meeting|call)\b/i;
 
 /** Dialog types a removal or end notice can be classified as. */
 const MEETING_OVER_TYPES: ReadonlySet<string> = new Set(['BLOCKED', 'OTHER']);
