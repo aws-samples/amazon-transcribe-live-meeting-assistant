@@ -369,6 +369,12 @@ voice does not rename a chat sender, and a chat sender is not offered as a
 speaker to name. Chat messages have no sentiment and are left out of the
 sentiment charts.
 
+When the Virtual Participant also stored the message's attachments (see
+[Chat Attachments](virtual-participant.md#chat-attachments)), each is shown
+under the message: an image as a thumbnail, a file as a file chip with its
+size, each with its AI title and summary. Clicking one downloads it. An
+attachment that was not stored is shown by name, with the reason.
+
 With a recording, a chat message's time plays the recording from there, as a
 spoken line's does. The highlight and the scrolling that follow the recording
 pass over chat messages, since they were typed rather than heard.

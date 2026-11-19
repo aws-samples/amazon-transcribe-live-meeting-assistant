@@ -1,0 +1,40 @@
+## One chat attachment, stored under the meeting. Written only by the call
+## event processor (the mutation is IAM-only), which sets Owner and SharedWith
+## from the meeting. An update rather than a put, so a redelivered event, which
+## carries the same AttachmentId and the same values, keeps the title and
+## summary already written for it: they are not in the input.
+#set( $PK = "att#${ctx.args.input.CallId}" )
+#set( $SK = "a#${ctx.args.input.AttachmentId}" )
+
+#set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
+$util.qr($ctx.args.input.put("CreatedAt", ${CreatedAt}))
+$util.qr($ctx.args.input.put("UpdatedAt", $util.time.nowISO8601()))
+
+#set( $expNames = {} )
+#set( $expValues = {} )
+#set( $expression = "" )
+#foreach( $entry in $ctx.args.input.entrySet() )
+  #if( !$util.isNull($entry.value) )
+    #if( $expression == "" )
+      #set( $expression = "SET #${entry.key} = :${entry.key}" )
+    #else
+      #set( $expression = "${expression}, #${entry.key} = :${entry.key}" )
+    #end
+    $util.qr( $expNames.put("#${entry.key}", "${entry.key}") )
+    $util.qr( $expValues.put(":${entry.key}", $util.dynamodb.toDynamoDB($entry.value)) )
+  #end
+#end
+
+{
+  "version" : "2018-05-29",
+  "operation": "UpdateItem",
+  "key" : {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($SK),
+  },
+  "update": {
+    "expression": "$expression",
+    "expressionNames": $util.toJson($expNames),
+    "expressionValues": $util.toJson($expValues),
+  },
+}

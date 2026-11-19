@@ -131,6 +131,8 @@ import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import { isChatChannel, isSpeechChannel } from '../common/channels';
 import { meetingLanguages, segmentLanguageMark } from '../common/detected-languages';
 import ChatSegment from '../chat-segment/ChatSegment';
+import { ChatAttachmentsContext } from '../chat-segment/ChatAttachments';
+import useChatAttachments, { ATTACHMENT_NOTE } from '../../hooks/use-chat-attachments';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -1086,6 +1088,18 @@ const CallInProgressTranscript = ({
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
   const transcriptChannels = Object.keys(transcriptsForThisCallId);
 
+  // The chat lines that name an attachment, and the attachments themselves,
+  // shown on their lines (ChatAttachments.jsx).
+  const chatSegments = transcriptsForThisCallId.MEETING_CHAT?.segments;
+  const segmentIdsWithAttachments = useMemo(
+    () =>
+      (chatSegments || [])
+        .filter((s) => typeof s?.transcript === 'string' && s.transcript.includes(ATTACHMENT_NOTE))
+        .map((s) => s.segmentId),
+    [chatSegments],
+  );
+  const chatAttachments = useChatAttachments(callId, segmentIdsWithAttachments);
+
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
       .map((c) => {
@@ -1468,7 +1482,7 @@ const CallInProgressTranscript = ({
   if (userHasScrolled && followPlayback) pausedNotice = 'Following the recording is paused';
 
   return (
-    <>
+    <ChatAttachmentsContext.Provider value={chatAttachments}>
       <TranscriptToolbar
         query={query}
         onQueryChange={setQuery}
@@ -1566,7 +1580,7 @@ const CallInProgressTranscript = ({
           </ColumnLayout>
         </div>
       </div>
-    </>
+    </ChatAttachmentsContext.Provider>
   );
 };
 

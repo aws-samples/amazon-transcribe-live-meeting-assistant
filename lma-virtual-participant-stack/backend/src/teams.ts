@@ -17,6 +17,14 @@ import { anyVisible, captureMeetingPanels, clickFirstVisible } from './consent-e
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import type { IncomingChat } from './meeting-chat.js';
+import { captureChatAttachmentsSetting } from './chat-attachments.js';
+import {
+    pageBlobFetcher,
+    readTeamsChatAttachmentsInPage,
+    TEAMS_ATTACHMENT_SELECTORS,
+    teamsAttachmentChats,
+} from './chat-attachments-page.js';
 import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
@@ -2553,6 +2561,18 @@ export default class Teams {
                 const fresh = isLightMeetingsUrl(page.url()) ? chatCopies.merge(scraped) : scraped;
                 const history = firstRead;
                 firstRead = false;
+                // The images and file cards of the messages, while "Capture chat
+                // attachments" is on (chat-attachments.ts). Each message's
+                // attachments are offered as a line of their own, beside the
+                // line the message's text is added as.
+                const attachmentChats: IncomingChat[] = [];
+                if (captureChatAttachmentsSetting()) {
+                    const attachmentRows = await page
+                        .evaluate(readTeamsChatAttachmentsInPage, TEAMS_ATTACHMENT_SELECTORS)
+                        .catch(() => []);
+                    attachmentChats.push(...teamsAttachmentChats(attachmentRows, history, (src) => pageBlobFetcher(page, src)));
+                }
+                for (const chat of attachmentChats) meetingChat.offer(chat);
                 if (fresh.length) {
                     emptyStreak = 0;
                     for (const { text, ...row } of fresh) {

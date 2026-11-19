@@ -15,9 +15,19 @@
  * `data-id` is Zoom's message id. The row's own id carries the row's position
  * in the list, not the message id, so the message id is preferred as the key.
  *
+ * A row's attachments (chat-attachments.ts) are read with it. Measured with
+ * the VP signed in to Zoom (web client, November 2026): a pasted image is an
+ * `img.chat-image-preview-img` whose `src` is a `blob:` address, its file name
+ * in `alt`; a shared file is a `div.chat-file-item` card with its name in
+ * `.chat-file-item__name` (and the card's aria-label), its size in
+ * `.chat-file-item__size`, and no link: clicking it makes Zoom hand the file to
+ * the browser as a download. Every row also holds Zoom's emoji reaction icons
+ * as `<img>` elements, which is why only those two classes are read.
+ *
  * Nothing here imports Playwright: the in-page functions are passed whole to
  * page.evaluate, and the rest is plain logic, so both are unit-tested.
  */
+import type { AttachmentFetchResult, IncomingChatAttachment } from './chat-attachments.js';
 
 /** Selectors the in-page functions use, most specific first. */
 export const ZOOM_CHAT_SELECTORS = {
@@ -34,13 +44,36 @@ export const ZOOM_CHAT_SELECTORS = {
     openButton: 'button[aria-label^="open the chat panel" i]',
     /** The same button while the panel is open. */
     closeButton: 'button[aria-label^="close the chat panel" i]',
+    /** A pasted image in a row; not the emoji reaction icons, which are images too. */
+    imagePreview: 'img.chat-image-preview-img',
+    /** A shared file's card in a row, and its name and size. */
+    fileCard: '.chat-file-item',
+    fileName: '.chat-file-item__name',
+    fileSize: '.chat-file-item__size',
 } as const;
 
 export type ZoomChatSelectors = {
     lists: readonly string[];
     rows: readonly string[];
     container: string;
+    /** The attachment selectors; a row's attachments are not read without them. */
+    imagePreview?: string;
+    fileCard?: string;
+    fileName?: string;
+    fileSize?: string;
 };
+
+/** One attachment of a chat row, as read from the page. */
+export interface ZoomChatAttachmentRaw {
+    kind: 'image' | 'document';
+    name: string;
+    /** The image's address (a `blob:` one when Zoom has loaded it). */
+    src?: string;
+    /** The size Zoom shows on a file card ("204 KB"). */
+    sizeText?: string | null;
+    /** The file card's position among the row's cards, for clicking it. */
+    index: number;
+}
 
 /** One chat row as read from the page. */
 export interface ZoomChatRaw {
@@ -49,6 +82,10 @@ export interface ZoomChatRaw {
     /** Zoom's message id when the row carries one, else the row element's id suffix, else null. */
     id: string | null;
     links: string[];
+    /** Zoom's message id (the container's `data-id`) alone, or null; a file card is clicked through it. */
+    messageId?: string | null;
+    /** The row's images and file cards. */
+    attachments?: ZoomChatAttachmentRaw[];
 }
 
 export interface ZoomChatReading {
@@ -117,9 +154,71 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
             .map((a) => (a as HTMLAnchorElement).href)
             .filter(Boolean);
         const id = messageId || (rowId ? rowId.replace(/^chat-message-content-?/, '') || rowId : null);
-        out.push({ label, id, links });
+        const attachments: ZoomChatAttachmentRaw[] = [];
+        if (sels.imagePreview) {
+            Array.from(scope.querySelectorAll(sels.imagePreview)).forEach((img, index) => {
+                const src = (img as HTMLImageElement).currentSrc || img.getAttribute('src') || '';
+                attachments.push({ kind: 'image', name: (img.getAttribute('alt') || '').trim(), src, index });
+            });
+        }
+        if (sels.fileCard) {
+            Array.from(scope.querySelectorAll(sels.fileCard)).forEach((card, index) => {
+                const named = sels.fileName ? card.querySelector(sels.fileName) : null;
+                const sized = sels.fileSize ? card.querySelector(sels.fileSize) : null;
+                const name = ((named?.textContent || '').trim() || (card.getAttribute('aria-label') || '').trim()).replace(/\s+/g, ' ');
+                attachments.push({ kind: 'document', name, sizeText: (sized?.textContent || '').trim() || null, index });
+            });
+        }
+        out.push({ label, id, links, messageId, ...(attachments.length ? { attachments } : {}) });
     }
     return { listFound: true, baseline, rows: out };
+}
+
+/** How a Zoom row's attachments are fetched; zoom.ts gives the page-bound halves. */
+export interface ZoomAttachmentFetchers {
+    /** For an image with a `blob:` address. */
+    blob: (src: string) => (maxBytes: number) => Promise<AttachmentFetchResult>;
+    /** For the `index`-th file card of the message whose container has `data-id` `messageId`. */
+    fileCard: (messageId: string, index: number) => (maxBytes: number) => Promise<AttachmentFetchResult>;
+}
+
+/** A message id that can be put in an attribute selector as it is. */
+const SELECTOR_SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * The attachments of a row, for the chat capture: an image with a `blob:`
+ * address is fetched in the page, and one without is recorded as unavailable;
+ * a file card is fetched by clicking it, only when the row has a message id
+ * that names its container exactly, and is otherwise offered by name alone.
+ */
+export function zoomChatAttachments(row: ZoomChatRaw, fetchers: ZoomAttachmentFetchers): IncomingChatAttachment[] {
+    return (row.attachments ?? []).map((raw) => {
+        if (raw.kind === 'image') {
+            const src = raw.src ?? '';
+            // An image Zoom has not loaded yet has no blob: address: it could
+            // not be read, rather than not be downloadable.
+            const unavailable = async (): Promise<AttachmentFetchResult> => ({ ok: false, reason: 'unavailable' });
+            return { kind: 'image', name: raw.name, fetch: /^blob:/i.test(src) ? fetchers.blob(src) : unavailable };
+        }
+        const messageId = row.messageId ?? '';
+        return {
+            kind: 'document',
+            name: raw.name,
+            size: parseShownSize(raw.sizeText),
+            ...(SELECTOR_SAFE_ID.test(messageId) ? { fetch: fetchers.fileCard(messageId, raw.index) } : {}),
+        };
+    });
+}
+
+const SIZE_UNITS: Record<string, number> = { b: 1, bytes: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 };
+
+/** The bytes of a size as Zoom shows it on a file card ("204 KB", "1.5 MB"), or null. */
+export function parseShownSize(text: string | null | undefined): number | null {
+    const match = /^\s*([\d.,]+)\s*(b|bytes|kb|mb|gb)\s*$/i.exec(text ?? '');
+    if (!match) return null;
+    const value = Number(match[1].replace(/,/g, ''));
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * SIZE_UNITS[match[2].toLowerCase()]);
 }
 
 /** Whether the toolbar shows the chat panel open, closed, or neither (the toolbar is hidden or renamed). */

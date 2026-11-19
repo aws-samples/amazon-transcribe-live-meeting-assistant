@@ -57,10 +57,18 @@
  * transcript was paused stays out after it resumes, because it is marked seen
  * like any other.
  *
+ * A message's attachments (images and files shared in the chat; see
+ * chat-attachments.ts) are named in its transcript text, "(attachment: <file
+ * name>)" for each, and a message with attachments and no text is added like
+ * any other. When the message is added, its attachments are handed to the
+ * `attachments` dependency, which stores them when "Capture chat attachments"
+ * is on. They are taken only from a message that is added, so every rule above
+ * applies to them as well.
+ *
  * The VP logs no message text and no sender name here. Each message offered
  * gets one debug line with what the platform gave for it (a sender, an id, a
- * time, a recipient, how many links), so a live run can tell what each
- * platform's chat actually exposes.
+ * time, a recipient, how many links and attachments), so a live run can tell
+ * what each platform's chat actually exposes.
  *
  * Pure apart from the logger: the transcript writer, the clock and the meeting
  * state are passed in, and meeting-chat-runtime.ts wires them to this VP.
@@ -73,6 +81,7 @@ import { classifyChatReply, normalizeReplyText } from './consent-matcher.js';
 import { MEETING_CHAT_CHANNEL } from './channels.js';
 import { withoutVpAddress } from './vp-handle.js';
 import type { TranscriptSegment } from './kinesis-stream.js';
+import { attachmentNote, displayFileName, errorName, type IncomingChatAttachment } from './chat-attachments.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('meeting-chat');
@@ -129,6 +138,8 @@ export interface IncomingChat {
     audience?: ChatAudience;
     /** The addresses of the links in the message. */
     links?: readonly string[];
+    /** The images and files shared with the message; see chat-attachments.ts. */
+    attachments?: readonly IncomingChatAttachment[];
     /** Read from what the chat panel already held when the VP first read it. */
     history?: boolean;
     /**
@@ -304,6 +315,20 @@ export function chatTranscript(text: string, links?: readonly string[]): string 
     return added.length ? `${body} ${added.map((href) => `(link: ${href})`).join(' ')}` : body;
 }
 
+/**
+ * The transcript text of a message with attachments: its text and links, as
+ * `chatTranscript` makes them, then a note naming each attachment.
+ */
+export function chatTranscriptWithAttachments(
+    text: string,
+    links?: readonly string[],
+    attachments?: readonly IncomingChatAttachment[],
+): string {
+    const body = chatTranscript(text, links);
+    const notes = (attachments ?? []).map((a) => attachmentNote(displayFileName(a.name, a.kind)));
+    return [body, ...notes].filter(Boolean).join(' ');
+}
+
 /** The speaker of a message: its sender, or `UNKNOWN_CHAT_SENDER`, never empty. */
 export function chatSpeaker(sender: string | null | undefined): string {
     const name = (sender ?? '').replace(/\s+/g, ' ').trim();
@@ -358,6 +383,17 @@ export interface MeetingChatDeps {
     ownIdentities: () => readonly string[];
     /** The VP's display name, the speaker of its own answers (`offerAnswer`). */
     ownName: () => string;
+    /**
+     * Takes the attachments of a message that has been added, as segment
+     * `segmentId` at `timelineSeconds` (chat-attachments.ts). Optional: without
+     * it, attachments are only named in the text.
+     */
+    attachments?: (
+        segmentId: string,
+        platform: ChatPlatform,
+        timelineSeconds: number,
+        attachments: readonly IncomingChatAttachment[],
+    ) => void;
     ledger?: OwnChatLedger;
     now?: () => number;
 }
@@ -438,8 +474,11 @@ export class MeetingChatCapture {
 
     private decide(chat: IncomingChat): ChatOutcome {
         const text = (chat.text ?? '').trim();
-        if (!text) return 'empty';
-        if (this.alreadySeen(chat, text)) return 'duplicate';
+        const attachments = chat.attachments ?? [];
+        if (!text && !attachments.length) return 'empty';
+        // A message of attachments alone is told apart from others by them.
+        const seenAs = text || chatTranscriptWithAttachments('', undefined, attachments);
+        if (this.alreadySeen(chat, seenAs)) return 'duplicate';
         if (this.isOwn(chat.sender, text)) return 'own';
         if (isLmaChatCommand(text) || (chat.commandText && isLmaChatCommand(chat.commandText))) return 'command';
         if (chat.audience === 'direct') return 'direct';
@@ -465,7 +504,7 @@ export class MeetingChatCapture {
         if (!this.deps.meetingStarted()) return 'not-started';
         if (this.flooded()) return 'flood';
 
-        this.write(chat.platform, chat.id, chatSpeaker(chat.sender), text, chat.links);
+        this.write(chat.platform, chat.id, chatSpeaker(chat.sender), text, chat.links, attachments);
         // A question for the meeting assistant: its answer may now be added too.
         if (parseChatQuestion(text, true)?.question) this.openQuestions.set(questionKey(chat), this.now());
         return 'captured';
@@ -478,17 +517,22 @@ export class MeetingChatCapture {
         speaker: string,
         text: string,
         links?: readonly string[],
+        attachments: readonly IncomingChatAttachment[] = [],
     ): void {
-        const occurrenceKey = `${speaker}|${text}`;
+        const transcript = chatTranscriptWithAttachments(text, links, attachments);
+        // The text as typed, or for a message of attachments alone, the notes naming them.
+        const identity = text || transcript;
+        const occurrenceKey = `${speaker}|${identity}`;
         const occurrence = (this.occurrences.get(occurrenceKey) ?? 0) + 1;
         this.occurrences.set(occurrenceKey, occurrence);
         const at = Math.max(0, this.deps.timelineSeconds());
+        const segmentId = chatSegmentId(platform, id, speaker, identity, occurrence);
         const segment: TranscriptSegment = {
             channel: MEETING_CHAT_CHANNEL,
-            segmentId: chatSegmentId(platform, id, speaker, text, occurrence),
+            segmentId,
             startTime: at,
             endTime: at,
-            transcript: chatTranscript(text, links),
+            transcript,
             isPartial: false,
             speaker,
         };
@@ -499,6 +543,13 @@ export class MeetingChatCapture {
             log.info(`[meeting-chat] adding the meeting chat to the transcript (platform=${platform})`);
         }
         void this.deps.send(segment).catch((error) => log.warn('[meeting-chat] could not write a chat segment:', error));
+        if (attachments.length && this.deps.attachments) {
+            try {
+                this.deps.attachments(segmentId, platform, at, attachments);
+            } catch (error) {
+                log.warn(`[meeting-chat] could not take the attachments of a chat message (${errorName(error)})`);
+            }
+        }
     }
 
     /** Marks the message seen, and says whether it was already. */
@@ -556,6 +607,7 @@ export class MeetingChatCapture {
                 `sender=${chat.sender ? 'yes' : 'no'} id=${chat.id ? 'yes' : 'no'} ` +
                 `time=${chat.platformTime !== undefined && chat.platformTime !== null && chat.platformTime !== '' ? 'yes' : 'no'} ` +
                 `recipient=${chat.audience ?? 'unknown'} links=${chat.links?.length ?? 0} ` +
+                `attachments=${chat.attachments?.length ?? 0} ` +
                 `chars=${(chat.text ?? '').length}${chat.history ? ' history=yes' : ''}`,
         );
     }

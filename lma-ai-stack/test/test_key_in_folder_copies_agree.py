@@ -25,6 +25,9 @@ COPIES = [
     FUNCTIONS / "keyframe_text_extractor" / "pure.py",
     FUNCTIONS / "meeting_consent_resolver" / "index.py",
     FUNCTIONS / "consent_evidence_verifier" / "index.py",
+    FUNCTIONS / "call_event_processor" / "attachment_input.py",
+    FUNCTIONS / "chat_attachments_resolver" / "index.py",
+    FUNCTIONS / "chat_attachment_summarizer" / "pure.py",
 ]
 
 # A meeting folder whose name, like a posixified CallId, keeps a run of dots.
