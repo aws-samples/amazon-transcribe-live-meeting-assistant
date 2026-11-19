@@ -404,3 +404,13 @@ def test_only_the_setting_no_longer_offered_is_left_out():
     assert schema.offered_settings("retention", {"transcriptionExpirationInDays": 3}) == {
         "transcriptionExpirationInDays": 3
     }
+
+
+def test_the_mcp_live_context_switch_ships_off_and_reads_what_is_stored():
+    assert parameters.shipped_setting_defaults()["meeting_assist"]["mcpLiveContext"] is False
+    assert parameters.read_setting("meeting_assist", "mcpLiveContext", default=False) is False
+    stored = _Store({"meeting_assist": {"mcpLiveContext": True}})
+    assert (
+        parameters.read_setting("meeting_assist", "mcpLiveContext", default=False, store=stored)
+        is True
+    )

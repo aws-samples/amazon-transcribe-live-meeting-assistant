@@ -307,3 +307,19 @@ def test_a_limit_the_baseline_does_not_hold_reports_nothing():
     retention = schema.section_schema("retention")
     assert schema.limit_problems(retention, {"meetingRecordExpirationInDays": 900}, {}) == []
     assert schema.limit_problems(retention, {"meetingRecordExpirationInDays": 900}, None) == []
+
+
+def test_the_mcp_live_context_switch_is_a_boolean_after_the_other_meeting_assist_settings():
+    """It does not depend on In-meeting requests: it is about the MCP server."""
+    properties = schema.section_schema("meeting_assist")["properties"]
+    declared = properties["mcpLiveContext"]
+    assert declared["type"] == "boolean"
+    assert declared["title"] == "MCP server: live meeting context"
+    assert "dependsOn" not in declared
+    assert declared["order"] > max(
+        spec["order"] for name, spec in properties.items() if name != "mcpLiveContext"
+    )
+    assert "within about five minutes" in declared["description"]
+    schema.validate_section("meeting_assist", {"mcpLiveContext": True})
+    with pytest.raises(errors.InvalidConfiguration):
+        schema.validate_section("meeting_assist", {"mcpLiveContext": "yes"})

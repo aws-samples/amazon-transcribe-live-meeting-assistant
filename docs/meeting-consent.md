@@ -82,6 +82,12 @@ A meeting with no consent record is judged by the deployment's mode: in a
 deployment whose mode is opt-in it may not be captured until its consent has
 been started and granted, because the absence of a record is not consent.
 
+LMA's MCP server applies the same rule to its `get_live_context` tool: a meeting
+that may not be captured now, or whose consent settings could not be read, is
+refused and none of its transcript is returned. That gate covers the new MCP
+tools only; `get_meeting_transcript` and `get_meeting_summary` do not apply it,
+as before.
+
 Every change of status, or of whether the meeting may be captured, is added to
 the record's **status history** with the time and a short reason ("1
 participant objected", "every participant consented"), so the record shows when
@@ -1478,8 +1484,8 @@ also holds the reply classifier described above.
   supplied (typed on the meeting page, given when the Virtual Participant was
   started or scheduled, or passed by an MCP client), so an agenda read from the
   transcript is withheld from a meeting whose settings do not allow capture.
-  `get_meeting_frames` always applies them. `get_meeting_transcript` and
-  `get_meeting_summary` do not apply them, as before.
+  `get_meeting_frames` and `get_live_context` always apply them.
+  `get_meeting_transcript` and `get_meeting_summary` do not apply them, as before.
 
 ## Related
 

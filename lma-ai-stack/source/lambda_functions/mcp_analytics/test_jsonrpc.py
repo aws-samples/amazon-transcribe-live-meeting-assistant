@@ -27,6 +27,7 @@ for mod_name in [
     "tools.list_active_meetings",
     "tools.get_meeting_agenda",
     "tools.get_meeting_frames",
+    "tools.get_live_context",
     "tools.schedule_meeting",
     "tools.start_meeting_now",
 ]:
@@ -395,6 +396,131 @@ class TestMCPToolCall(unittest.TestCase):
         resp = json.loads(result["body"])
         self.assertTrue(resp["result"].get("isError"))
         self.assertIn("Error", resp["result"]["content"][0]["text"])
+
+
+class TestGetLiveContextRouting(unittest.TestCase):
+    """get_live_context is listed only while its setting is on, and only on this endpoint."""
+
+    def setUp(self):
+        from tools import get_live_context
+
+        saved = {name: getattr(get_live_context, name) for name in ("ON", "live_context_state")}
+        self.addCleanup(lambda: [setattr(get_live_context, k, v) for k, v in saved.items()])
+        get_live_context.ON = "on"
+        get_live_context.execute = MagicMock(return_value={"lines": [], "truncated": False})
+
+    def _listed(self, state):
+        from tools import get_live_context
+
+        get_live_context.live_context_state = MagicMock(return_value=state)
+        body = {"jsonrpc": "2.0", "id": 20, "method": "tools/list", "params": {}}
+        tools = json.loads(index.lambda_handler(api_gw_event(body), None)["body"])["result"][
+            "tools"
+        ]
+        return [tool["name"] for tool in tools]
+
+    def test_tools_list_offers_it_while_the_setting_is_on(self):
+        names = self._listed("on")
+        self.assertIn("get_live_context", names)
+        self.assertEqual(len(names), len(index.MCP_TOOLS))
+
+    def test_tools_list_hides_it_while_the_setting_is_off_or_unreadable(self):
+        for state in ("off", "unreadable"):
+            with self.subTest(state=state):
+                names = self._listed(state)
+                self.assertNotIn("get_live_context", names)
+                self.assertEqual(len(names), len(index.MCP_TOOLS) - 1)
+
+    def test_the_listed_tool_is_read_only_and_states_its_limits(self):
+        tool = {t["name"]: t for t in index.MCP_TOOLS}["get_live_context"]
+        self.assertTrue(tool["annotations"]["readOnlyHint"])
+        self.assertEqual(tool["inputSchema"]["required"], ["meetingId"])
+        for phrase in ("5 seconds", "segmentId", "truncated", "nextCursor", "60 seconds", "2,000"):
+            self.assertIn(phrase, tool["description"])
+        self.assertIn("get_meeting_transcript", tool["description"])
+
+    def test_tools_call_routes_every_argument_and_the_caller(self):
+        from tools import get_live_context
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "get_live_context",
+                "arguments": {
+                    "meetingId": "m-1",
+                    "cursor": "abc",
+                    "maxLines": 20,
+                    "includeChat": False,
+                },
+            },
+        }
+        resp = json.loads(
+            index.lambda_handler(api_gw_event(body, user_id="u1", is_admin="true"), None)["body"]
+        )
+
+        self.assertEqual(json.loads(resp["result"]["content"][0]["text"])["truncated"], False)
+        get_live_context.execute.assert_called_once_with(
+            meeting_id="m-1",
+            cursor="abc",
+            max_lines=20,
+            include_chat=False,
+            user_id="u1",
+            is_admin=True,
+        )
+
+    def test_tools_call_without_arguments_passes_nothing_in(self):
+        from tools import get_live_context
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {"name": "get_live_context"},
+        }
+        index.lambda_handler(api_gw_event(body), None)
+
+        get_live_context.execute.assert_called_once_with(
+            meeting_id=None,
+            cursor=None,
+            max_lines=None,
+            include_chat=None,
+            user_id="testuser",
+            is_admin=False,
+        )
+
+    def test_a_refusal_is_a_tool_error(self):
+        from tools import get_live_context
+
+        get_live_context.execute = MagicMock(
+            side_effect=PermissionError("Access denied to this meeting")
+        )
+        body = {
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {"name": "get_live_context", "arguments": {"meetingId": "m-1"}},
+        }
+        resp = json.loads(index.lambda_handler(api_gw_event(body), None)["body"])
+
+        self.assertTrue(resp["result"]["isError"])
+        self.assertEqual(
+            resp["result"]["content"][0]["text"], "Error: Access denied to this meeting"
+        )
+
+    def test_the_gateway_path_never_runs_it(self):
+        from tools import get_live_context, list_meetings
+
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+        for tool_input in (
+            {"meetingId": "m-1"},
+            {"meetingId": "m-1", "cursor": "c"},
+            {"maxLines": 5},
+        ):
+            index.lambda_handler(bedrock_event(tool_input, claims={"sub": "user123"}), None)
+
+        get_live_context.execute.assert_not_called()
 
 
 class TestUnknownMethod(unittest.TestCase):

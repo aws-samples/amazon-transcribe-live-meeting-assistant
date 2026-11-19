@@ -10,7 +10,9 @@ Retrieve full transcript from S3 with speaker attribution
 import json
 import logging
 import os
-from typing import Any, Dict
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, Mapping, Optional
 
 import boto3
 
@@ -86,6 +88,11 @@ def execute(
             continue
 
     if not transcript_data:
+        meeting = meeting_state(meeting_id)
+        if meeting.get("Status") in RUNNING_STATUSES:
+            raise ValueError(RUNNING_MESSAGE)
+        if transcript_may_be_coming(meeting, time.time()):
+            raise ValueError(PREPARING_MESSAGE)
         raise ValueError(f"Transcript not found for meeting {meeting_id}")
 
     # Format based on requested format
@@ -108,6 +115,76 @@ def execute(
 
     result["meetingUrl"] = get_meeting_url(meeting_id)
     return result
+
+
+# The transcript file is written by the summary job after a meeting ends.
+RUNNING_STATUSES = ("STARTED", "TRANSCRIBING")
+RUNNING_MESSAGE = (
+    "This meeting is still running, so its transcript is not available yet; it is written "
+    "when the meeting ends. If live meeting context is switched on for this deployment, "
+    "use get_live_context to read the transcript while the meeting runs."
+)
+# Between the end of a meeting and the summary job writing the file.
+ENDED_STATUS = "ENDED"
+PREPARING_MESSAGE = (
+    "This meeting has ended and its transcript is being prepared; try again in a minute, "
+    "or use get_meeting_summary later."
+)
+# The file is written within minutes of the end. An ENDED meeting whose record
+# last changed longer ago than this, or whose transcript was deleted (the
+# transcript deletion job sets TranscriptDeletedAt), will not get one, so it is
+# answered as before instead of being told to try again.
+PREPARING_SECONDS = 2 * 3600
+# An UpdatedAt this far ahead of the Lambda's clock is still believed.
+CLOCK_SKEW_SECONDS = 300
+
+
+def meeting_state(meeting_id: str) -> Dict[str, Any]:
+    """Status, UpdatedAt and TranscriptDeletedAt of the meeting row; empty when it cannot be read."""
+    try:
+        table = boto3.resource("dynamodb").Table(os.environ.get("CALLS_TABLE"))
+        response = table.get_item(
+            Key={"PK": f"c#{meeting_id}", "SK": f"c#{meeting_id}"},
+            ProjectionExpression="#s, UpdatedAt, TranscriptDeletedAt",
+            ExpressionAttributeNames={"#s": "Status"},
+        )
+    except Exception as e:
+        logger.warning(f"Could not read the meeting status: {type(e).__name__}")
+        return {}
+    item = response.get("Item")
+    return item if isinstance(item, dict) else {}
+
+
+def transcript_may_be_coming(meeting: Mapping[str, Any], now: float) -> bool:
+    """Whether an ended meeting's transcript file can still be on its way.
+
+    True only for an ENDED meeting whose transcript was not deleted and whose
+    record changed in the last PREPARING_SECONDS (``now`` is seconds since the
+    epoch). A meeting with no UpdatedAt that can be read does not qualify.
+    """
+    if meeting.get("Status") != ENDED_STATUS or meeting.get("TranscriptDeletedAt"):
+        return False
+    updated = epoch_seconds(meeting.get("UpdatedAt"))
+    return updated is not None and -CLOCK_SKEW_SECONDS <= now - updated <= PREPARING_SECONDS
+
+
+def epoch_seconds(value: Any) -> Optional[float]:
+    """An ISO 8601 time as seconds since the epoch (UTC when it has no offset), or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    try:
+        return moment.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:

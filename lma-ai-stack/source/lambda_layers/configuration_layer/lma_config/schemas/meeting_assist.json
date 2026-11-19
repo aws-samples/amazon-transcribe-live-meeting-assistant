@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_assist",
   "title": "Meeting assistant",
-  "description": "When a transcript wakes the meeting assistant, whether its answers use Amazon Bedrock prompt caching, how much its model reasons before answering, and what a request made in the meeting is answered from. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
+  "description": "When a transcript wakes the meeting assistant, whether its answers use Amazon Bedrock prompt caching, how much its model reasons before answering, what a request made in the meeting is answered from, and whether LMA's MCP server offers the transcript of a running meeting. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
   "sectionLabel": "Meeting Assistant",
   "appliesText": "A saved change applies within about five minutes, to transcript segments processed and answers started after that.",
   "order": 9,
@@ -84,6 +84,12 @@
       "type": "boolean",
       "title": "In-meeting requests: Virtual Participant controls",
       "description": "With In-meeting requests set to Selected tools, offer the Virtual Participant's VNC preview and browser controls to requests made in the meeting."
+    },
+    "mcpLiveContext": {
+      "order": 9,
+      "type": "boolean",
+      "title": "MCP server: live meeting context",
+      "description": "Offer the get_live_context tool on LMA's MCP server (the API key endpoint), so an MCP client such as Amazon Quick or Claude Desktop can read the transcript of a meeting while it runs: what was said, the meeting assistant's answers and the meeting chat. A client reads only meetings its user owns or that are shared with them (an Admin reads every meeting), and only when the meeting's consent settings allow capture. Off: the tool is not listed and a call to it is refused. A change reaches a running deployment within about five minutes."
     }
   },
   "additionalProperties": false

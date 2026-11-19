@@ -4,8 +4,8 @@ title: "Amazon Quick Desktop: LMA Workflows"
 
 # Amazon Quick Desktop: LMA Workflows
 
-Once LMA is connected to Amazon Quick Desktop as an MCP server, the ten
-LMA tools become first-class capabilities that Quick can compose with
+Once LMA is connected to Amazon Quick Desktop as an MCP server, the LMA
+tools (10, or 11 while live meeting context is on) become first-class capabilities that Quick can compose with
 **any other tool you've connected** — your calendar, Slack, task trackers,
 the knowledge graph, web search, and other MCP servers. That composability
 is what makes the integration powerful: it isn't a fixed feature set, it's
@@ -43,14 +43,17 @@ This guide shows three layers of usage:
 
 ## Available LMA tools
 
-LMA exposes ten tools, of which eight are read-only (annotated
+LMA exposes 10 tools, of which eight are read-only, and an 11th, read-only too,
+`get_live_context`, while the Configuration page setting **Meeting Assistant ›
+MCP server: live meeting context** is on (read-only tools are annotated
 `readOnlyHint: true` so Quick Desktop classifies them correctly for scheduled
 agents — no `allow_unscoped_write_tools` required for read-only flows):
 
 - **Read-only:** `search_lma_meetings`, `get_meeting_transcript`,
   `get_meeting_summary`, `list_meetings`, `list_active_meetings` (meetings
   running now), `get_meeting_agenda`, `get_meeting_frames` (the agenda and the
-  shared-screen key frames, as text), `get_virtual_participant_status`
+  shared-screen key frames, as text), `get_virtual_participant_status`,
+  `get_live_context` (the transcript of a running meeting, while the setting is on)
 - **Write:** `schedule_meeting`, `start_meeting_now`
 
 All responses include `meetingUrl` and (where applicable)
@@ -427,8 +430,8 @@ LMA enforces UBAC — non-admin users only see their own meetings:
 
 LMA's read-only tools (`search_lma_meetings`, `get_meeting_transcript`,
 `get_meeting_summary`, `list_meetings`, `list_active_meetings`,
-`get_meeting_agenda`, `get_meeting_frames`, `get_virtual_participant_status`)
-are annotated `readOnlyHint: true` and should
+`get_meeting_agenda`, `get_meeting_frames`, `get_virtual_participant_status`,
+`get_live_context`) are annotated `readOnlyHint: true` and should
 not require this flag.
 
 If you're seeing the prompt, it's because your tool policy includes a

@@ -8,7 +8,8 @@ MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access
 Provides 10 tools: search, get transcript, get summary, list meetings, list active meetings, get
 meeting agenda, get meeting frames (the last three on the API key endpoint only), schedule
-meeting, start meeting, get virtual participant status
+meeting, start meeting, get virtual participant status; and get_live_context (API key
+endpoint only) while the live meeting context setting is on
 """
 
 import json
@@ -18,6 +19,7 @@ from typing import Any, Dict
 
 # Import tool implementations
 from tools import (
+    get_live_context,
     get_meeting_agenda,
     get_meeting_frames,
     get_summary,
@@ -383,6 +385,54 @@ MCP_TOOLS = [
         "annotations": {"readOnlyHint": True},
     },
     {
+        "name": "get_live_context",
+        "description": (
+            "Read the transcript of a meeting while it runs: what was said, the meeting "
+            "assistant's answers and, unless includeChat is false, the meeting chat, each line "
+            "with its time from the start of the meeting (t), speaker, channel and segmentId. "
+            "Call it first without a cursor for the newest lines, then pass the nextCursor of "
+            "each answer to get the lines written since, polling no faster than every 5 "
+            "seconds. Each answer also repeats the lines written in the 60 seconds before the "
+            "cursor, about 15 lines per poll when someone speaks every 4 seconds, so a line "
+            "that was revised comes again: keep one line per segmentId, replace its text when "
+            "it changes, and skip a repeat with the same text. When truncated is true more "
+            "lines are waiting (an answer is kept under about 100 KB): call again at once with "
+            "nextCursor. A line longer than 2,000 characters is cut and ends in [...]. "
+            "Limits: a line is missed only if LMA stores it more than about 60 seconds after "
+            "the write time it stamps on the line when it starts processing it, and a "
+            "difference between clocks counts against those 60 seconds. A first call without "
+            "a cursor returns only the newest maxLines lines. A speaker renamed later is not "
+            "sent again under the new name. A line with no readable write time (no LMA writer "
+            "produces one today) is placed by its time in the meeting, and is missed if it is "
+            "stored more than about 60 seconds after it ends. Only callers the meeting is "
+            "owned by or shared with, or an Admin, can read it, and only when its consent "
+            "settings allow. After the meeting (ended=true), get_meeting_transcript returns "
+            "the full transcript once it is ready, usually within a minute."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
+                "cursor": {
+                    "type": "string",
+                    "description": (
+                        "The nextCursor of the previous answer; omit it for the newest lines"
+                    ),
+                },
+                "maxLines": {
+                    "type": "integer",
+                    "description": "Most lines in one answer (1 to 1000, default 200)",
+                },
+                "includeChat": {
+                    "type": "boolean",
+                    "description": "Include the meeting chat (default true)",
+                },
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": {"readOnlyHint": True},
+    },
+    {
         "name": "schedule_meeting",
         "description": "Schedule a future meeting with virtual participant",
         "inputSchema": {
@@ -513,6 +563,13 @@ MCP_TOOLS = [
 ]
 
 
+def listed_tools():
+    """The tools offered now: get_live_context only while its setting is on."""
+    if get_live_context.live_context_state() == get_live_context.ON:
+        return MCP_TOOLS
+    return [tool for tool in MCP_TOOLS if tool["name"] != "get_live_context"]
+
+
 def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
     """Handle MCP JSON-RPC 2.0 protocol messages."""
     method = msg.get("method")
@@ -536,7 +593,7 @@ def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
         return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
 
     if method == "tools/list":
-        return jsonrpc_response(msg_id, {"tools": MCP_TOOLS})
+        return jsonrpc_response(msg_id, {"tools": listed_tools()})
 
     if method == "tools/call":
         tool_name = params.get("name")
@@ -604,6 +661,15 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 last=arguments.get("last"),
                 from_seconds=arguments.get("fromSeconds"),
                 to_seconds=arguments.get("toSeconds"),
+                user_id=user_id,
+                is_admin=is_admin,
+            )
+        elif tool_name == "get_live_context":
+            result = get_live_context.execute(
+                meeting_id=arguments.get("meetingId"),
+                cursor=arguments.get("cursor"),
+                max_lines=arguments.get("maxLines"),
+                include_chat=arguments.get("includeChat"),
                 user_id=user_id,
                 is_admin=is_admin,
             )

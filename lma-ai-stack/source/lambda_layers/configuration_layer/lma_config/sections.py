@@ -321,7 +321,8 @@ VIRTUAL_PARTICIPANT = register(
 #: The phrase that wakes the meeting assistant, as a regular expression matched
 #: against each finished transcript segment by the call event processor; and
 #: whether the Strands meeting assistant marks its prompt for Amazon Bedrock
-#: prompt caching, read by it once per answer.
+#: prompt caching, read by it once per answer; and whether the MCP server offers
+#: get_live_context, read by it on each tools/list and get_live_context call.
 #:
 #: Standard tier: the processor reads the phrase once per batch of segments and
 #: the assistant reads the switch once per answer, nobody is waiting on a
@@ -331,8 +332,9 @@ MEETING_ASSIST = register(
         name="meeting_assist",
         cache_tier=CacheTier.STANDARD,
         description=(
-            "The phrase that wakes the meeting assistant in a transcript, and whether its "
-            "answers use Amazon Bedrock prompt caching."
+            "The phrase that wakes the meeting assistant in a transcript, whether its "
+            "answers use Amazon Bedrock prompt caching, and whether LMA's MCP server offers "
+            "the transcript of a running meeting."
         ),
     )
 )

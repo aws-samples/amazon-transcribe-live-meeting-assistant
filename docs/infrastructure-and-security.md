@@ -394,6 +394,8 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 | **Throttling** | Rate limiting at 100 req/sec with burst limit of 50 |
 | **Metrics** | CloudWatch metrics enabled for monitoring |
 
+The `get_live_context` tool on this API returns the transcript of a running meeting. It is off until an Admin turns on **Meeting Assistant › MCP server: live meeting context**, answers only a meeting's owner, the people it is shared with and Admins, applies the meeting's consent settings, reads with the MCP function's existing read access to the event-sourcing table (no new IAM permission), and logs a meeting id only as a short digest, never transcript text or names.
+
 ## CloudFront CDN
 
 - Configurable **price class**: PriceClass_100 (North America and Europe), PriceClass_200 (adds Asia, Africa, Middle East), or PriceClass_All (all edge locations)

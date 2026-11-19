@@ -109,6 +109,10 @@
     "inMeetingVpControls": {
       "type": "boolean",
       "default": false
+    },
+    "mcpLiveContext": {
+      "type": "boolean",
+      "default": false
     }
   },
   "meeting_processing": {

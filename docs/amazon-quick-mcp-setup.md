@@ -13,9 +13,11 @@ Quick products:
 | **Amazon Quick Desktop** | Native macOS / Windows app | API key (Bearer) | Individual users wanting scheduled agents and a personal knowledge graph |
 
 Both expose the same seven LMA tools (search, transcript, summary, list,
-schedule, start-now, VP status); the API key path offers three more,
-`list_active_meetings`, `get_meeting_agenda` and `get_meeting_frames`. Pick the
-path below that matches the product you're connecting.
+schedule, start-now, VP status). The API key path offers 10: those seven and
+`list_active_meetings`, `get_meeting_agenda` and `get_meeting_frames`; and 11 while the
+Configuration page setting **Meeting Assistant › MCP server: live meeting context**
+is on, which adds `get_live_context`. Pick the path below that matches the product
+you're connecting.
 
 > **Looking for ways to use LMA from Quick Desktop?** Once you've completed
 > the Quick Desktop setup below, see
@@ -65,8 +67,8 @@ auth path Quick uses.
 
 ## Available LMA Tools
 
-Both auth paths expose the same set of tools, except that `list_active_meetings`,
-`get_meeting_agenda` and `get_meeting_frames` are offered on the API key endpoint only. Read-only tools are annotated
+Both auth paths expose the same set of tools, except that the tools marked "API
+key endpoint only" are offered on the API key endpoint alone. Read-only tools are annotated
 with `readOnlyHint: true` so MCP clients (including Quick Desktop scheduled
 agents) classify them correctly.
 
@@ -79,6 +81,7 @@ agents) classify them correctly.
 | `list_active_meetings` | ✅ | The meetings running now (API key endpoint only) |
 | `get_meeting_agenda` | ✅ | The agenda of a meeting, as numbered items (API key endpoint only) |
 | `get_meeting_frames` | ✅ | The shared-screen key frames of a meeting, as text (API key endpoint only) |
+| `get_live_context` | ✅ | The transcript of a running meeting, as it grows (API key endpoint only; listed only while live meeting context is on) |
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
@@ -118,7 +121,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools, and three more. See
+> the user's identity on every request and exposes the same seven tools, and the ones offered on that endpoint only. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -270,7 +273,8 @@ architecture.
      - **Value**: your API key from Step 1
 6. Click **Connect**
 
-Quick Desktop will discover the ten LMA tools and confirm the connection.
+Quick Desktop will discover the LMA tools (10, or 11 while live meeting context
+is on) and confirm the connection.
 
 > **Note**: Quick Desktop authenticates the API-key path with a custom
 > `x-api-key` header rather than a Bearer-token field. LMA's MCP API Gateway
@@ -472,6 +476,87 @@ returned.
   reads); if that read fails, the tool refuses with "try again" and returns nothing.
 
 See [MCP API Key Authentication](mcp-api-key-auth.md#get_meeting_agenda).
+
+### `get_live_context`
+
+Available on the API key endpoint only (Path B), and only while an Admin has
+switched on **Meeting Assistant › MCP server: live meeting context** on the
+Configuration page (off by default; a change reaches a running deployment
+within about five minutes). While it is off the tool is not listed, and a call
+is refused with a sentence that says where to turn it on.
+
+- `meetingId` (required) — the meeting `CallId`, for example from
+  `list_active_meetings`
+- `cursor` — the `nextCursor` of the previous answer; omit it (or pass an empty
+  value) for the newest lines. A cursor that is not valid, belongs to another
+  meeting or was made by an older version is refused; call again without one
+- `maxLines` — most lines in one answer, default 200, from 1 to 1,000; read
+  like `limit` of `list_active_meetings`
+- `includeChat` — `true` (default) or `false`: whether the messages typed in
+  the meeting chat are among the lines
+
+The answer has `meetingId`, `status`, `ended`, `lines`, `nextCursor`,
+`truncated` and sometimes a `note`. Each line has `t` (the time from the start
+of the meeting, `MM:SS`, or `H:MM:SS` from one hour on), `speaker` (named as
+the meeting page names them; `MeetingAssistant` for the assistant's answers,
+the sender for a chat message), `channel`, `segmentId` and `text`. A chat
+message is one line, its line breaks shown as " / ". A line longer than 2,000
+characters is cut and ends in `[...]`.
+
+How to follow a meeting:
+
+1. Call without a cursor: you get the newest lines (up to `maxLines`).
+2. Wait at least 5 seconds, then call with the `nextCursor` of the last answer.
+   You get every line written since, and again the lines written in the 60
+   seconds before the cursor, so that a line LMA revised, or stored a little
+   late (an assistant answer, a corrected phrase), reaches you. Keep one line
+   per `segmentId`: replace its text when it changed, and skip a repeat with
+   the same text. The repeats are the price of catching late lines: when
+   someone speaks every 4 seconds, about 15 lines of each answer are repeats.
+3. When `truncated` is `true`, more lines are waiting: call again at once with
+   `nextCursor`. It goes on after the last line you got, with no gap and no
+   repeat. An answer holds at most `maxLines` lines and is kept under about
+   100 KB whatever the language: the tool counts an ASCII character as 1
+   (3 for a quotation mark, a backslash or a control character, which are
+   escaped), another character as 3 (6 for an emoji), and 60 more for the JSON
+   around each line, up to 30,000 per answer. That is about 130 lines of 120
+   English characters, or about 60 of Chinese.
+4. When `ended` is `true` the meeting is over; the lines are still returned.
+   The summary job writes the full transcript shortly after the meeting ends:
+   until then `get_meeting_transcript` answers that the transcript is being
+   prepared and to try again in a minute (or to use `get_meeting_summary`
+   later). It says so only in the two hours after the meeting's record last
+   changed and only while its transcript has not been deleted; otherwise it
+   answers "Transcript not found", and the `note` of `get_live_context` no
+   longer says to try again.
+
+Limits: a line is missed only if LMA stores it more than about 60 seconds after
+the write time it stamps on the line when it starts processing it, and a
+difference between clocks counts against those 60 seconds. A first call without
+a cursor returns only the newest `maxLines` lines. A speaker renamed later is
+not sent again under the new name. A line with no readable write time (no LMA
+writer produces one today) is placed by its time in the meeting, and is missed
+if it is stored more than about 60 seconds after it ends.
+
+A deployment with a Transcript Lambda Hook (`TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN`)
+runs the hook between stamping a line and storing it, so a slow hook uses up
+those 60 seconds. Each call reads the meeting's whole live transcript, so its
+cost grows with the meeting: about 90 read units for 1,000 lines and 1,700 for
+20,000, which is why a client should poll no faster than every 5 seconds. A
+meeting too large to read and answer within 20 seconds is refused with a
+message that says to use `get_meeting_transcript` after the meeting.
+
+**Who can read a meeting live.** The owner, the people the meeting is shared
+with, and Admins; and only when the meeting's consent settings allow capture
+(see [Meeting Consent](meeting-consent.md)). A meeting shared with you can be
+read live although `get_meeting_transcript` and `list_meetings` show only the
+meetings you own. A meeting that does not exist and one you cannot read get the
+same answer, `Access denied to this meeting`.
+
+While a meeting runs, `get_meeting_transcript` answers that it is still running
+and, if live meeting context is on, to use `get_live_context`; after it ends and
+before the transcript file is written, that the transcript is being prepared
+(within two hours of the end, unless the transcript was deleted).
 
 ### `schedule_meeting`
 

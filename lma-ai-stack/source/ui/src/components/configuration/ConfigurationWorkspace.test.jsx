@@ -484,6 +484,24 @@ describe('the editor', () => {
     });
   });
 
+  it('offers the MCP live meeting context switch for Meeting Assistant, off by default, and saves it on', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Meeting Assistant'));
+    const assistant = section('Meeting Assistant');
+    const toggle = within(assistant).getByRole('checkbox', { name: /MCP server: live meeting context/ });
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      meeting_assist: { mcpLiveContext: true },
+    });
+  });
+
   it('shows the redacted entity types only while redaction is on', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();

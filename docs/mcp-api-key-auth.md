@@ -74,7 +74,7 @@ MCP client connects to REST API Gateway endpoint
     → Routes to MCP protocol handler:
       - initialize → returns server capabilities + protocolVersion
       - notifications/initialized → empty 200 acknowledgment
-      - tools/list → returns 10 tool definitions with inputSchema
+      - tools/list → returns 10 tool definitions with inputSchema (11 while live meeting context is on)
       - tools/call → routes to tool implementation, returns MCP result
       - ping → returns empty result
     → User context from authorizer enforces UBAC on tool calls
@@ -117,7 +117,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 |--------|-------------|
 | `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
 | `notifications/initialized` | Client acknowledgment, returns empty 200 |
-| `tools/list` | Returns all 10 tool definitions with inputSchema |
+| `tools/list` | Returns the 10 tool definitions with inputSchema, and `get_live_context` as an 11th while the **MCP server: live meeting context** setting is on |
 | `tools/call` | Executes a tool by name with arguments, returns MCP content result |
 | `ping` | Health check, returns empty result |
 
@@ -135,6 +135,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 | `schedule_meeting` | Schedule a future meeting with virtual participant |
 | `start_meeting_now` | Start a meeting immediately with virtual participant |
 | `get_virtual_participant_status` | Poll the status of a virtual participant launched by `start_meeting_now` |
+| `get_live_context` | Read the transcript of a running meeting as it grows (API key endpoint only; listed only while the **Meeting Assistant › MCP server: live meeting context** setting is on). Arguments, polling and limits: [Amazon Quick MCP setup](amazon-quick-mcp-setup.md#get_live_context) |
 
 ### `list_active_meetings`
 
@@ -201,7 +202,7 @@ The answer has `meetingId`, `count`, `totalFrames` (frames of shared content), `
 
 ### Tools that apply the consent settings
 
-The tools that return content captured from a meeting check the meeting's consent settings, by the rule the capture clients apply, before they answer. Today these are `get_meeting_frames` (always) and `get_meeting_agenda` (for an agenda that a person did not supply). `get_meeting_transcript` and `get_meeting_summary` do not apply them, as before. See [Meeting Consent](meeting-consent.md).
+The tools that return content captured from a meeting check the meeting's consent settings, by the rule the capture clients apply, before they answer. Today these are `get_meeting_frames` and `get_live_context` (always) and `get_meeting_agenda` (for an agenda that a person did not supply). `get_meeting_transcript` and `get_meeting_summary` do not apply them, as before. See [Meeting Consent](meeting-consent.md).
 
 ## DynamoDB Table Schema
 
