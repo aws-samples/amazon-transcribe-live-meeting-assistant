@@ -373,7 +373,7 @@ def test_no_third_call_is_announced_or_made_after_the_retry(fakes, caplog):
 
 
 def test_the_model_calls_fit_the_functions_timeout():
-    """Two calls, each of at most CALL_ATTEMPTS attempts of the read timeout, within 240 s."""
+    """Two calls, each of at most CALL_ATTEMPTS attempts of connect plus read, with room left."""
     import yaml
 
     class Loader(yaml.SafeLoader):
@@ -383,7 +383,10 @@ def test_the_model_calls_fit_the_functions_timeout():
     template = HERE.parents[2] / "deployment" / "lma-ai-stack.yaml"
     resources = yaml.load(template.read_text(), Loader=Loader)["Resources"]
     timeout = resources["ChatAttachmentSummarizerFunction"]["Properties"]["Timeout"]
-    assert 2 * index.CALL_ATTEMPTS * index.READ_TIMEOUT_SECONDS < timeout
+    worst = 2 * index.CALL_ATTEMPTS * (index.CONNECT_TIMEOUT_SECONDS + index.READ_TIMEOUT_SECONDS)
+    # The object read, the item writes and botocore's backoff need time too.
+    assert worst <= timeout - 30, (worst, timeout)
     config = index.BEDROCK.meta.config
     assert config.read_timeout == index.READ_TIMEOUT_SECONDS
+    assert config.connect_timeout == index.CONNECT_TIMEOUT_SECONDS
     assert config.retries["total_max_attempts"] == index.CALL_ATTEMPTS

@@ -88,17 +88,20 @@ S3 = boto3.client("s3", config=CLIENT_CONFIG)
 #: one call, the first included. The key frame text extractor allows 50
 #: attempts for bursts of throttling, but botocore retries a read timeout the
 #: same way, and a retried call is a model call the metering never sees. So the
-#: attempts are few, sized with the read timeout to fit the function's timeout
-#: (240 s in the template): two calls (the second with the larger budget), each
-#: of at most CALL_ATTEMPTS attempts of READ_TIMEOUT_SECONDS. A call still
-#: throttled after them marks the attachment FAILED.
-READ_TIMEOUT_SECONDS = 55
+#: attempts are few, sized with the timeouts to fit the function's timeout
+#: (240 s in the template) with room to spare for the object read, the item
+#: writes and botocore's backoff: two calls (the second with the larger
+#: budget), each of at most CALL_ATTEMPTS attempts of CONNECT_TIMEOUT_SECONDS
+#: plus READ_TIMEOUT_SECONDS, at most 4 x 50 = 200 s. A call still throttled
+#: after them marks the attachment FAILED.
+CONNECT_TIMEOUT_SECONDS = 5
+READ_TIMEOUT_SECONDS = 45
 CALL_ATTEMPTS = 2
 BEDROCK = boto3.client(
     "bedrock-runtime",
     region_name=REGION,
     config=Config(
-        connect_timeout=5,
+        connect_timeout=CONNECT_TIMEOUT_SECONDS,
         read_timeout=READ_TIMEOUT_SECONDS,
         retries={"mode": "adaptive", "total_max_attempts": CALL_ATTEMPTS},
     ),

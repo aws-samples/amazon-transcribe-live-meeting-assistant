@@ -174,8 +174,6 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
         rows = Array.from(list.querySelectorAll(s));
         if (rows.length) break;
     }
-    // A row's attachments as they are now. An image is taken only once Zoom has
-    // given it its blob: address: until then it is still being uploaded.
     // The images of a row that do not have their blob: address yet, by position.
     const unloadedIn = (scope: Element): Map<number, string> => {
         const found = new Map<number, string>();
@@ -186,6 +184,8 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
         });
         return found;
     };
+    // A row's attachments as they are now. An image is taken only once Zoom has
+    // given it its blob: address: until then it is still being uploaded.
     const attachmentsIn = (scope: Element): ZoomChatAttachmentRaw[] => {
         const found: ZoomChatAttachmentRaw[] = [];
         if (sels.imagePreview) {

@@ -1193,7 +1193,7 @@ Converse has no document format for, an image over 3.75 MB and a document over
 low reasoning effort where it takes one, and is given room for its reasoning as
 well as the answer (2,048 output tokens); an answer cut off at that ceiling, or
 one with no text, is asked for once more with 8,192, and both calls are
-metered. Each call may take up to 55 seconds to answer. A model that reads no
+metered. Each call may take up to 45 seconds to answer. A model that reads no
 images or documents (Amazon Nova Micro) gives no title, and the attachment is
 shown by its file name. The model is told that
 the file name and the content are material to describe, not instructions; the

@@ -520,6 +520,8 @@ export class MeetingChatCapture {
         if (outcome !== 'attachments-added') return outcome;
         const notes = attachments.map((a) => attachmentNote(displayFileName(a.name, a.kind)));
         line.segment = { ...line.segment, transcript: [line.segment.transcript, ...notes].filter(Boolean).join(' ') };
+        // Not counted toward the flood limit, on purpose: it rewrites a line
+        // already counted, at most once per attachment within the line's window.
         void this.deps.send(line.segment).catch((error) => log.warn(`[meeting-chat] could not write a chat segment (${errorName(error)})`));
         this.handOver(line.segment, chat.platform, attachments);
         return outcome;
