@@ -51,6 +51,7 @@ import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
+import { launchStateMachineInput } from './launch-request';
 import {
   CONTINUE_SETTINGS_NOTE,
   JOIN_MODE_CONTINUE,
@@ -708,12 +709,12 @@ const VirtualParticipantList = () => {
 
           const sfnParams = {
             stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
-            input: JSON.stringify({
-              apiInfo: { httpMethod: 'POST' },
-              data: {
+            // No meeting password: it is saved on the record above, and the
+            // Virtual Participant reads it from there when it starts.
+            input: JSON.stringify(
+              launchStateMachineInput({
                 meetingPlatform: createForm.meetingPlatform,
                 meetingID: effectiveMeetingId,
-                meetingPassword: effectivePassword,
                 meetingName: createForm.meetingName,
                 meetingTime: '',
                 userName,
@@ -725,8 +726,8 @@ const VirtualParticipantList = () => {
                 accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
                 idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
                 rereshToken: '', // Amplify v6 does not expose refresh tokens directly
-              },
-            }),
+              }),
+            ),
           };
 
           const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));

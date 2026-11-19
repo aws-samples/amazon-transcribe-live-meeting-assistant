@@ -118,6 +118,7 @@ class _ToolHarness(unittest.TestCase):
             patch("requests.post", side_effect=post),
         ):
             module.execute(**kwargs)
+        self.sfn = sfn
         return sent[0]["variables"]["input"]
 
 
@@ -131,6 +132,14 @@ class TestStartMeetingNow(_ToolHarness):
     def test_without_an_agenda_the_row_is_written_as_before(self):
         vp_input = self.run_tool(start_meeting_now, **self.BASE)
         self.assertNotIn("agenda", vp_input)
+
+    def test_launch_input_carries_no_meeting_password(self):
+        vp_input = self.run_tool(start_meeting_now, **self.BASE, meeting_password="Row1234")
+        # Saved on the row, which the VP reads at startup; not sent to the launcher.
+        self.assertEqual(vp_input["meetingPassword"], "Row1234")
+        sent = self.sfn.start_sync_execution.call_args.kwargs["input"]
+        self.assertNotIn("meetingPassword", json.loads(sent)["data"])
+        self.assertNotIn("Row1234", sent)
 
 
 class TestScheduleMeeting(_ToolHarness):

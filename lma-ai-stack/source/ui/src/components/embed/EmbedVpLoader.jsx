@@ -61,6 +61,7 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import awsExports from '../../aws-exports';
 import { googleMeetCode } from '../virtual-participant-layout/google-meet';
+import { launchStateMachineInput } from '../virtual-participant-layout/launch-request';
 import {
   StatusDetails as VPStatusDetails,
   ConnectionDetails as VPConnectionDetails,
@@ -272,12 +273,12 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
 
         const sfnParams = {
           stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
-          input: JSON.stringify({
-            apiInfo: { httpMethod: 'POST' },
-            data: {
+          // No meeting password: it is saved on the record above, and the
+          // Virtual Participant reads it from there when it starts.
+          input: JSON.stringify(
+            launchStateMachineInput({
               meetingPlatform: effectivePlatform,
               meetingID: submittedMeetingId,
-              meetingPassword: submittedPassword,
               meetingName: effectiveName,
               meetingTime: '',
               userName,
@@ -285,8 +286,8 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
               accessToken: authSession?.tokens?.accessToken?.toString() || '',
               idToken: authSession?.tokens?.idToken?.toString() || '',
               rereshToken: '',
-            },
-          }),
+            }),
+          ),
         };
 
         const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
