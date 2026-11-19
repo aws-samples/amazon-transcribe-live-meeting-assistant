@@ -109,18 +109,23 @@ def active_mcp_servers(session: Any, table: str, account_id: str) -> list:
     ]
 
 
+def _stack_resource(cfn: Any, stack_name: str, logical_id: str) -> str:
+    """A resource's physical id, read from every page of the stack's resources.
+
+    describe_stack_resources returns at most 100 resources, and the AI stack has
+    several hundred, so the listing is paged.
+    """
+    for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name):
+        for resource in page["StackResourceSummaries"]:
+            if resource["LogicalResourceId"] == logical_id:
+                return resource["PhysicalResourceId"]
+    raise LookupError(f"stack {stack_name} has no resource {logical_id}")
+
+
 def mcp_servers_table(session: Any, stack_name: str) -> str:
     cfn = session.client("cloudformation")
-    ai_stack = next(
-        r["PhysicalResourceId"]
-        for r in cfn.describe_stack_resources(StackName=stack_name)["StackResources"]
-        if r["LogicalResourceId"] == "AISTACK"
-    )
-    return next(
-        r["PhysicalResourceId"]
-        for r in cfn.describe_stack_resources(StackName=ai_stack)["StackResources"]
-        if r["LogicalResourceId"] == "MCPServersTable"
-    )
+    ai_stack = _stack_resource(cfn, stack_name, "AISTACK")
+    return _stack_resource(cfn, ai_stack, "MCPServersTable")
 
 
 def account_id(session: Any) -> str:

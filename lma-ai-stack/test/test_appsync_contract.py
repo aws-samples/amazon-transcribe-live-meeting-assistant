@@ -35,7 +35,14 @@ import pytest
 # `make setup-cli-dev`. Imported unconditionally on purpose: skipping the whole
 # module when it is absent would let CI report green without having checked
 # anything.
-from graphql import build_ast_schema, parse, validate
+from graphql import (
+    GraphQLObjectType,
+    GraphQLScalarType,
+    build_ast_schema,
+    get_named_type,
+    parse,
+    validate,
+)
 from graphql.language.ast import (
     InterfaceTypeDefinitionNode,
     ObjectTypeDefinitionNode,
@@ -542,6 +549,84 @@ def test_resolver_mapping_template_files_exist(resolver: Resolver) -> None:
     for location in resolver.files:
         path = (TEMPLATE.parent / location).resolve()
         assert path.is_file(), f"{resolver.logical_id} references missing file {location}"
+
+
+#: Fields served by a Lambda whose result holds an AWSJSON value, and the test
+#: that runs the handler and checks each such value reaches the client encoded
+#: once. AppSync serializes an AWSJSON value as JSON whatever it is, so a handler
+#: that returns the value's JSON text, under `$util.toJson($ctx.result)`, has it
+#: arrive encoded twice: the client's one parse gives text, not the object.
+LAMBDA_AWSJSON_FIELDS = {
+    ("Query", "exportMCPServerLibrary"): "mcp_server_manager/test_awsjson_encoding.py",
+    ("Query", "listInstalledMCPServers"): "mcp_server_manager/test_awsjson_encoding.py",
+    ("Query", "getMCPServer"): "mcp_server_manager/test_awsjson_encoding.py",
+}
+
+
+def _template_resources(kind: str) -> dict[str, str]:
+    return {
+        block.split(":", 1)[0].strip(): block
+        for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
+        if f"Type: {kind}" in block
+    }
+
+
+def _lambda_backed(resolver: Resolver) -> bool:
+    """Whether a Lambda data source serves the resolver, directly or in its pipeline."""
+    lambdas = {
+        logical_id
+        for logical_id, block in _template_resources("AWS::AppSync::DataSource").items()
+        if re.search(r"^      Type: AWS_LAMBDA$", block, re.M)
+    }
+    functions = _template_resources("AWS::AppSync::FunctionConfiguration")
+    blocks = [resolver.block] + [
+        functions[function_id]
+        for function_id in re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
+        if function_id in functions
+    ]
+    return any(
+        source in lambdas
+        for block in blocks
+        for source in re.findall(r"DataSourceName: !GetAtt (\w+)\.Name", block)
+    )
+
+
+def _holds_awsjson(graphql_type, seen: tuple[str, ...] = ()) -> bool:
+    named = get_named_type(graphql_type)
+    if isinstance(named, GraphQLScalarType):
+        return named.name == "AWSJSON"
+    if isinstance(named, GraphQLObjectType) and named.name not in seen:
+        return any(
+            _holds_awsjson(field.type, seen + (named.name,)) for field in named.fields.values()
+        )
+    return False
+
+
+def test_every_lambda_backed_awsjson_field_has_an_encoding_test(schema) -> None:
+    """A Lambda field whose result holds AWSJSON is run through its template in a test.
+
+    The static view cannot tell an object from its JSON text in a handler's
+    return value, so the check is the evaluated one named here; this test makes
+    sure a new field of that kind gets one.
+    """
+    found = {
+        (resolver.type_name, resolver.field_name)
+        for resolver in RESOLVERS
+        if _lambda_backed(resolver)
+        and _holds_awsjson(schema.type_map[resolver.type_name].fields[resolver.field_name].type)
+    }
+    assert found, "found no Lambda field holding AWSJSON; the data source parser is broken"
+    assert found == set(LAMBDA_AWSJSON_FIELDS), (
+        "for a new Lambda field whose result holds AWSJSON, add a test that runs the "
+        "handler and parses each AWSJSON value once (as in "
+        "mcp_server_manager/test_awsjson_encoding.py), and list it in LAMBDA_AWSJSON_FIELDS"
+    )
+    functions = AI_STACK / "source" / "lambda_functions"
+    for (type_name, field_name), test_file in LAMBDA_AWSJSON_FIELDS.items():
+        text = (functions / test_file).read_text()
+        assert f'("{type_name}", "{field_name}")' in text, (
+            f"{test_file} has no case for {type_name}.{field_name}"
+        )
 
 
 def test_resolvers_reading_the_input_argument_were_found() -> None:
