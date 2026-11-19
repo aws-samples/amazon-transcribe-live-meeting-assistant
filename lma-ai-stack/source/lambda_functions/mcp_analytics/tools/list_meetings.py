@@ -40,8 +40,12 @@ FILTERED_PAGE_SIZE = 100
 # Whole meeting rows are read in batches. A walk without a filter reads batches
 # as large as the rows still needed, but never below BATCH_GET_MIN and never
 # above BATCH_GET_MAX (the most keys one BatchGetItem accepts). A filtered walk
-# decides on a whole index page per request (only a few attributes are read),
-# then reads the whole rows of the matches, no more than still needed.
+# decides on a whole index page per request, asking for only a few attributes
+# (this keeps each response small; DynamoDB still reads, and bills, whole
+# items), then reads the whole rows of the matches, no more than still needed.
+# A call that filters therefore reads at least one index page (100 rows) and, if
+# few rows match, up to MAX_PAGES pages (1,000 rows); a non-admin caller's call
+# always filters.
 BATCH_GET_MIN = 25
 BATCH_GET_MAX = 100
 # Keys DynamoDB hands back unprocessed are asked for again this many times in
@@ -57,9 +61,10 @@ TRUNCATED_NOTE = (
 )
 SEARCH_FAILED_NOTE = "The search could not be completed; try again."
 
-# A filtered walk first reads only the attributes its filters look at (and the
-# key, to match each row to its meeting); full rows are read for the matches
-# only. Owner and Status are reserved words, hence the names.
+# A filtered walk first asks for only the attributes its filters look at (and the
+# key, to match each row to its meeting), which keeps the response small; full
+# rows are asked for the matches only. Owner and Status are reserved words,
+# hence the names.
 DECISION_PROJECTION: Dict[str, Any] = {
     "ProjectionExpression": "#pk, #id, #owner, #agent, #status, #participants",
     "ExpressionAttributeNames": {
@@ -125,9 +130,6 @@ def execute(
             end = today.strftime("%Y-%m-%d")
         meetings, unreadable, truncated, failed = walk_date_range(table, start, end, limit, include)
 
-        # Limit results
-        meetings = meetings[:limit]
-
         # Format response
         result = {
             "meetings": [format_meeting(m) for m in meetings],
@@ -188,7 +190,11 @@ def build_filter(
         return None
 
     def include(meeting: Dict[str, Any]) -> bool:
-        if not is_admin and user_id not in (meeting.get("Owner"), meeting.get("AgentId")):
+        # No identity, no meetings: an empty or missing user id must not match
+        # a row whose Owner or AgentId is empty or missing.
+        if not is_admin and (
+            not user_id or user_id not in (meeting.get("Owner"), meeting.get("AgentId"))
+        ):
             return False
         if participant and not participant_in_meeting(meeting, participant):
             return False
@@ -202,21 +208,16 @@ def build_filter(
     return include
 
 
-def query_by_date_range(
-    table,
-    start_date: str,
-    end_date: str,
-    limit: int,
-    include: Optional[Callable[[Dict[str, Any]], bool]] = None,
-) -> List[Dict]:
+def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> List[Dict]:
     """
     Query meetings by date range using the TypeDateIndex GSI.
 
-    ``include`` is an optional test of a meeting row. Only the rows that pass it
-    count toward ``limit``, so a filter applied here never leaves the caller
-    with fewer meetings than exist; without it every row counts.
+    The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
+    "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
+    and paginates via LastEvaluatedKey — no shard fan-out.  ``execute`` calls
+    ``walk_date_range``, which does the work and takes a row filter.
     """
-    return walk_date_range(table, start_date, end_date, limit, include)[0]
+    return walk_date_range(table, start_date, end_date, limit)[0]
 
 
 def walk_date_range(
@@ -238,9 +239,11 @@ def walk_date_range(
     and paginates via LastEvaluatedKey — no shard fan-out.  The index carries
     only a few attributes of a meeting (not AgentId, not Status), so every
     meeting row is read before ``include`` decides on it: first only the
-    attributes in DECISION_PROJECTION, one request per index page, then, in
-    full and in index order, the rows that match, no more than still needed.
-    Without ``include`` the rows are read in full at once.
+    attributes in DECISION_PROJECTION (a smaller response; DynamoDB still reads
+    and bills whole items), one request per index page, then, in full and in
+    index order, the rows that match, no more than still needed.  Without
+    ``include`` the rows are read in full at once.  At most ``limit`` rows are
+    returned.
     """
     from datetime import timedelta
 
@@ -353,8 +356,8 @@ def walk_date_range(
                     if len(meetings) >= limit:
                         break
         else:
-            # The attributes the filters read are small, so one request decides a
-            # whole page (up to 100 rows).
+            # The response holds only the few attributes the filters read, so
+            # one request decides a whole page (up to 100 rows).
             for position in range(0, len(page_ids), BATCH_GET_MAX):
                 batch = page_ids[position : position + BATCH_GET_MAX]
                 decided, failed = read_meeting_rows(table, batch, DECISION_PROJECTION)
@@ -380,7 +383,7 @@ def walk_date_range(
     truncated = False
     if last_key and pages >= MAX_PAGES and len(meetings) < limit:
         logger.info(
-            "query_by_date_range: hit MAX_PAGES=%d cap (collected=%d)", MAX_PAGES, len(meetings)
+            "walk_date_range: hit MAX_PAGES=%d cap (collected=%d)", MAX_PAGES, len(meetings)
         )
         truncated = rows_left(table, query_kwargs, last_key)
     return meetings[:limit], unreadable, truncated, page_failed
@@ -485,8 +488,8 @@ def read_meeting_rows(
 
 
 # NOTE: `scan_recent_meetings` was removed.  The callers that used it now go
-# through `query_by_date_range` (GSI-backed, O(matched items)); direct scans
-# don't scale and are no longer acceptable once the tracking table grows.
+# through `walk_date_range` (GSI-backed); direct scans don't scale and are no
+# longer acceptable once the tracking table grows.
 
 
 def participant_in_meeting(meeting: Dict[str, Any], participant_name: str) -> bool:
