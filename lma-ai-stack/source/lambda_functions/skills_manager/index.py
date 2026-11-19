@@ -185,6 +185,16 @@ def _put(skill_id: str, skill: skill_formats.Skill, who: str, existing: Optional
 # ── the GraphQL shape ───────────────────────────────────────────────────────
 
 
+def _awsjson(value: Any) -> Any:
+    """A value for an AWSJSON field: plain JSON types, as an object, never as text.
+
+    AppSync encodes an AWSJSON value itself, so JSON text here would reach the
+    client encoded twice. Values JSON has no type for (DynamoDB numbers, dates)
+    become strings, as before.
+    """
+    return json.loads(json.dumps(value, default=str))
+
+
 def to_graphql(item: Optional[Dict[str, Any]], summary: bool = False) -> Optional[Dict[str, Any]]:
     """A stored skill as the GraphQL ``Skill`` type; ``summary`` leaves out its text."""
     if not item:
@@ -207,7 +217,7 @@ def to_graphql(item: Optional[Dict[str, Any]], summary: bool = False) -> Optiona
         "DisplayName": item.get("DisplayName") or None,
         "Description": item.get("Description") or "",
         "Files": files,
-        "Metadata": json.dumps(item.get("Metadata") or {}, default=str),
+        "Metadata": _awsjson(item.get("Metadata") or {}),
         "SourceFormat": item.get("SourceFormat") or None,
         "CreatedAt": item.get("CreatedAt"),
         "CreatedBy": item.get("CreatedBy"),
@@ -282,7 +292,7 @@ def get_skill(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return to_graphql(_get(skill_id)) if skill_id else None
 
 
-def export_skill(event: Dict[str, Any]) -> str:
+def export_skill(event: Dict[str, Any]) -> Dict[str, Any]:
     """One skill as a file: SKILL.md text, or a zip of its folder in base64."""
     arguments = event.get("arguments") or {}
     file_format = arguments.get("format") or "skill-md"
@@ -300,15 +310,16 @@ def export_skill(event: Dict[str, Any]) -> str:
             "encoding": "utf-8",
             "content": skill_formats.render_skill_md(item),
         }
-    return json.dumps({"format": file_format, **answer})
+    return {"format": file_format, **answer}
 
 
-def export_skill_library(_event: Dict[str, Any]) -> str:
+def export_skill_library(_event: Dict[str, Any]) -> Dict[str, Any]:
     document = skill_formats.export_library(_stored())
     LOGGER.info("Exported a skill library of %s skills", len(document["skills"]))
-    # Non-ASCII text unescaped, so a library in any script stays near its text's
-    # size (see the sizes in skill_formats.py).
-    return json.dumps(document, default=str, ensure_ascii=False)
+    # An object (see _awsjson). The Python 3.12 runtime writes the response
+    # without escaping non-ASCII text, so a library in any script stays near its
+    # text's size (see the sizes in skill_formats.py).
+    return _awsjson(document)
 
 
 def create_skill(event: Dict[str, Any]) -> Dict[str, Any]:

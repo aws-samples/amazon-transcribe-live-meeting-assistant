@@ -61,9 +61,9 @@ MAX_DESCRIPTION = 1024
 #: Sizes, in bytes of UTF-8. A skill is stored as one DynamoDB item (at most
 #: 400 KB), and the library export of every skill is one AppSync response (at
 #: most 5 MB). MAX_SKILLS skills of MAX_SKILL_BYTES are 2.5 MB of text; the
-#: export writes it without escaping non-ASCII characters (ensure_ascii=False),
-#: so text in any script stays near that size, and the AWSJSON string escapes
-#: only quotes, backslashes and control characters.
+#: Python 3.12 Lambda runtime writes the export without escaping non-ASCII
+#: characters, so text in any script stays near that size, and the AWSJSON
+#: string escapes only quotes, backslashes and control characters.
 MAX_INSTRUCTIONS_BYTES = 48 * 1024
 MAX_FILE_BYTES = 32 * 1024
 MAX_SKILL_BYTES = 64 * 1024
