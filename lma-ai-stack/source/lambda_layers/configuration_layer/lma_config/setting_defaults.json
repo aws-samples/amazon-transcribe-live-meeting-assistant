@@ -182,6 +182,14 @@
     "captureMeetingChat": {
       "type": "boolean",
       "default": true
+    },
+    "captureChatAttachments": {
+      "type": "boolean",
+      "default": false
+    },
+    "chatAttachmentSummaries": {
+      "type": "boolean",
+      "default": true
     }
   },
   "meeting_agenda": {

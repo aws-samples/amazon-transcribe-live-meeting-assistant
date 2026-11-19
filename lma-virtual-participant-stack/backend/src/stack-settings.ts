@@ -87,6 +87,8 @@ export const VIRTUAL_PARTICIPANT_SETTINGS: readonly SettingTarget[] = [
     { section: 'virtual_participant', setting: 'pollsBeforeEnd', envVar: 'VP_POLLS_BEFORE_END', type: 'integer' },
     { section: 'virtual_participant', setting: 'pollsBeforeEndMissing', envVar: 'VP_POLLS_BEFORE_END_MISSING', type: 'integer' },
     { section: 'virtual_participant', setting: 'captureMeetingChat', envVar: 'CAPTURE_MEETING_CHAT', type: 'boolean' },
+    { section: 'virtual_participant', setting: 'captureChatAttachments', envVar: 'CAPTURE_CHAT_ATTACHMENTS', type: 'boolean' },
+    { section: 'virtual_participant', setting: 'chatAttachmentSummaries', envVar: 'CHAT_ATTACHMENT_SUMMARIES', type: 'boolean' },
 ];
 
 /**

@@ -8,6 +8,7 @@ import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
 import type { AsrEngineName } from './asr-microvm-client.js';
+import type { ChatAttachmentEvent } from './chat-attachments.js';
 
 const log = createLogger('kinesis-stream');
 
@@ -385,6 +386,25 @@ class KinesisStreamManager {
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
     };
     await this.sendRecord(record, { rethrow: true });
+  }
+
+  /**
+   * ADD_CHAT_ATTACHMENT: an image or file shared in the meeting chat, stored
+   * beside the chat segment that carried it, or named when its content was not
+   * stored (see chat-attachments.ts). The call_event_processor stores it on the
+   * meeting and queues its AI title and summary.
+   */
+  async sendChatAttachment(attachment: ChatAttachmentEvent): Promise<void> {
+    const record: any = {
+      EventType: 'ADD_CHAT_ATTACHMENT',
+      CallId: this.callId,
+      ...attachment,
+      CreatedAt: new Date().toISOString(),
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
   }
 
   // Returns the highest absolute segment EndTime (seconds) written by this call

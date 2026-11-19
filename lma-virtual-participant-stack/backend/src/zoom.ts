@@ -28,9 +28,13 @@ import {
     readZoomChatInPage,
     ZOOM_CHAT_SELECTORS,
     ZoomChatPanelKeeper,
+    zoomChatAttachments,
     zoomChatPanelStateInPage,
     type ZoomChatPanelState,
+    type ZoomChatRaw,
 } from './zoom-chat-page.js';
+import { captureChatAttachmentsSetting, type IncomingChatAttachment } from './chat-attachments.js';
+import { downloadFetcher, pageBlobFetcher } from './chat-attachments-page.js';
 import { dismissZoomOverlaysInPage, ZOOM_OVERLAY_SPEC, zoomOverlayCheckDelayMs } from './zoom-overlays.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
@@ -1970,7 +1974,33 @@ export default class Zoom {
         }
 
         // Set up message monitoring with LMA features
-        const onChatRow = async (message: string, messageId?: string | null, links?: string[]): Promise<void> => {
+        // A row's images and file cards, for the chat capture, while "Capture
+        // chat attachments" is on (chat-attachments.ts). An image is fetched
+        // in the page; a file card is clicked, and the download Zoom starts is
+        // read back (measured with the VP signed in to Zoom). Nothing is
+        // fetched until the message has been added to the transcript.
+        const attachmentsOf = (row: ZoomChatRaw): IncomingChatAttachment[] | undefined => {
+            if (!row.attachments?.length || !captureChatAttachmentsSetting()) return undefined;
+            return zoomChatAttachments(row, {
+                blob: (src) => pageBlobFetcher(page, src),
+                fileCard: (messageId, index) =>
+                    downloadFetcher(async () => {
+                        const card = page.locator(`[data-id="${messageId}"] ${ZOOM_CHAT_SELECTORS.fileCard}`).nth(index);
+                        const [download] = await Promise.all([
+                            page.waitForEvent('download', { timeout: 20_000 }),
+                            card.click({ timeout: 5_000 }),
+                        ]);
+                        return download;
+                    }),
+            });
+        };
+
+        const onChatRow = async (
+            message: string,
+            messageId?: string | null,
+            links?: string[],
+            attachments?: IncomingChatAttachment[],
+        ): Promise<void> => {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
             const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
@@ -1988,6 +2018,7 @@ export default class Zoom {
                     platformTime: time,
                     audience: zoomChatAudience(recipient),
                     links,
+                    attachments,
                 });
                 return;
             }
@@ -2057,6 +2088,7 @@ export default class Zoom {
                     platformTime: time,
                     audience: zoomChatAudience(recipient),
                     links,
+                    attachments,
                 });
             }
         };
@@ -2072,6 +2104,10 @@ export default class Zoom {
             lists: [...ZOOM_CHAT_SELECTORS.lists] as string[],
             rows: [...ZOOM_CHAT_SELECTORS.rows],
             container: ZOOM_CHAT_SELECTORS.container,
+            imagePreview: ZOOM_CHAT_SELECTORS.imagePreview,
+            fileCard: ZOOM_CHAT_SELECTORS.fileCard,
+            fileName: ZOOM_CHAT_SELECTORS.fileName,
+            fileSize: ZOOM_CHAT_SELECTORS.fileSize,
             settleMs: ZOOM_CHAT_BASELINE_SETTLE_MS,
         };
         const listOnPage = async (): Promise<boolean> =>
@@ -2147,7 +2183,7 @@ export default class Zoom {
                 // slow reply (help, the exit messages) delays the next row and
                 // the panel keeper, and keeps the replies in order.
                 for (const row of reading.rows) {
-                    await onChatRow(row.label, row.id, row.links);
+                    await onChatRow(row.label, row.id, row.links, attachmentsOf(row));
                 }
             } catch {
                 /* the page is navigating or closing; read again next tick */
