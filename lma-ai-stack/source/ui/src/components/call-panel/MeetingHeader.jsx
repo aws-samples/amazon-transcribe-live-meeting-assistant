@@ -190,8 +190,11 @@ const MeetingHeader = ({
   const onDownload = async ({ detail }) => {
     const [kind, id] = detail.id.split(':');
     let done = true;
-    if (kind === 'summary') done = await runSummaryAction(id, item, consent);
-    else if (kind === 'transcript') done = await runTranscriptDownload(id, callTranscriptPerCallId, item, consent);
+    if (kind === 'summary') {
+      done = await runSummaryAction(id, item, consent, { participants: speakers.map((speaker) => speaker.label) });
+    } else if (kind === 'transcript') {
+      done = await runTranscriptDownload(id, callTranscriptPerCallId, item, consent);
+    }
     if (id === 'copy') {
       const what = kind === 'summary' ? 'Summary' : 'Transcript';
       setCopied(

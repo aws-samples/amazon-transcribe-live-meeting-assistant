@@ -33,7 +33,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient } from '@aws-sdk/client-translate';
 import markdownRehypePlugins from '../common/markdown-plugins';
-import { getMarkdownSummary, getSummarySection, summarySections } from '../common/summary';
+import { getMarkdownSummary, getSummarySection, orderSummarySections, summarySections } from '../common/summary';
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
@@ -364,9 +364,14 @@ export const CallSummary = ({
 
   // The meeting page shows some sections in their own place -- the chapters as
   // a list, the agenda coverage under the agenda -- and leaves them out here.
-  // The downloads are in the page header's Download menu.
+  // The rest are in the reading order every download uses
+  // (orderSummarySections). The downloads, which hold every section, are in
+  // the page header's Download menu.
   const omitKey = omitSections.join('|');
-  const sections = useMemo(() => summarySections(item.callSummaryText, omitSections), [item.callSummaryText, omitKey]);
+  const sections = useMemo(
+    () => orderSummarySections(summarySections(item.callSummaryText, omitSections)),
+    [item.callSummaryText, omitKey],
+  );
 
   return (
     <Container
