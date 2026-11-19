@@ -394,6 +394,8 @@ type Mutation @aws_iam {
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	updateMCPServerCredentials(input: UpdateMCPServerCredentialsInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	importMCPServerLibrary(library: AWSJSON!): ImportMCPServerLibraryOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
@@ -494,6 +496,7 @@ type Query @aws_cognito_user_pools
 	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
+	exportMCPServerLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
@@ -2158,7 +2161,10 @@ input ToggleVNCPreviewInput {
 # AuthConfig is write-only: it is supplied through InstallMCPServerInput and is
 # read at runtime straight from DynamoDB by the meeting-assist function, so it is
 # deliberately absent from this type. HasAuthConfig reports whether a server has
-# stored credentials without exposing them.
+# stored credentials without exposing them. CredentialsRequired is set on a
+# server imported from an MCP server library whose credentials have not been
+# entered on this deployment; the meeting assistant does not load it until they
+# are (updateMCPServerCredentials), and RequiredAuthType names what is needed.
 type MCPServer @aws_cognito_user_pools @aws_iam {
 	ServerId: ID!
 	AccountId: String!
@@ -2175,6 +2181,30 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	BuildId: String
 	ErrorMessage: String
 	ServerUrl: String
+	Description: String
+	CredentialsRequired: Boolean
+	RequiredAuthType: String
+}
+
+input UpdateMCPServerCredentialsInput {
+	ServerId: ID!
+	AuthConfig: AWSJSON!
+}
+
+# What an MCP server library import did with each server it lists. Action is
+# created, updated, skipped or failed.
+type ImportMCPServerLibraryServer @aws_cognito_user_pools @aws_iam {
+	Name: String!
+	ServerId: String
+	Action: String!
+	CredentialsRequired: Boolean
+	Message: String
+}
+
+type ImportMCPServerLibraryOutput @aws_cognito_user_pools @aws_iam {
+	Success: Boolean!
+	Message: String
+	Servers: [ImportMCPServerLibraryServer]
 }
 
 input InstallMCPServerInput {

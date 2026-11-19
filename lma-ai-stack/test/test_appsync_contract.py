@@ -150,6 +150,12 @@ ADMIN_ONLY_FIELDS = [
     ("Mutation", "installMCPServer"),
     ("Mutation", "uninstallMCPServer"),
     ("Mutation", "updateMCPServer"),
+    ("Mutation", "updateMCPServerCredentials"),
+    # The MCP server library: also open to IAM-signed callers (the LMA SDK and
+    # CLI), as getNovaSonicConfig is; the export carries no credentials, and
+    # mcp_server_manager re-checks the Admin group for a user-pool caller.
+    ("Query", "exportMCPServerLibrary"),
+    ("Mutation", "importMCPServerLibrary"),
     ("Mutation", "initOAuthFlow"),
     ("Mutation", "handleOAuthCallback"),
     ("Mutation", "createUser"),

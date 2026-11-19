@@ -23,6 +23,9 @@ import {
 } from '@cloudscape-design/components';
 import PublicRegistryTab from './PublicRegistryTab';
 import CustomServersTab from './CustomServersTab';
+import AuthConfigModal from './AuthConfigModal';
+import McpLibraryActions from './McpLibraryActions';
+import { updateCredentialsMutation } from './mcp-library';
 import useUserGroups from '../../hooks/use-user-groups';
 import './mcp-servers.css';
 
@@ -46,6 +49,8 @@ const MCPServersContent = ({ vpData = null }) => {
   const [uninstalling, setUninstalling] = useState({});
   const [updating, setUpdating] = useState({});
   const [registryVersions, setRegistryVersions] = useState({});
+  // The imported server whose credentials are being entered, if any.
+  const [credentialsFor, setCredentialsFor] = useState(null);
 
   const fetchRegistryVersions = useCallback(async (servers) => {
     // Fetch latest versions from registry for each installed server
@@ -108,6 +113,9 @@ const MCPServersContent = ({ vpData = null }) => {
             UpdatedAt
             RequiresAuth
             Transport
+            ServerUrl
+            CredentialsRequired
+            RequiredAuthType
           }
         }
       `;
@@ -226,6 +234,29 @@ const MCPServersContent = ({ vpData = null }) => {
     }
   };
 
+  // Credentials for a server imported from an MCP server library, which waits
+  // for them (CredentialsRequired) before the meeting assistant uses it.
+  const handleCredentials = async (authConfig) => {
+    const server = credentialsFor;
+    setInstalledError(null);
+    try {
+      const result = await client.graphql({
+        query: updateCredentialsMutation,
+        variables: { input: { ServerId: server.ServerId, AuthConfig: JSON.stringify(authConfig) } },
+      });
+      const response = result.data.updateMCPServerCredentials;
+      if (!response.Success) {
+        setInstalledError(response.Message || 'The credentials were not saved');
+        return;
+      }
+      setCredentialsFor(null);
+      fetchInstalledServers();
+    } catch (err) {
+      logger.error('Error saving MCP server credentials:', err);
+      setInstalledError(err.message || 'The credentials were not saved');
+    }
+  };
+
   const tabs = [
     {
       label: 'Active Servers',
@@ -341,6 +372,16 @@ const MCPServersContent = ({ vpData = null }) => {
                 completed meetings. They don&apos;t require a Virtual Participant.
               </Alert>
 
+              {isAdmin && (
+                <SpaceBetween size="xs">
+                  <Box color="text-body-secondary">
+                    Export the installed servers to a file without their credentials, or import such a file from another
+                    deployment. An imported server that needs credentials is not used until they are entered.
+                  </Box>
+                  <McpLibraryActions onImported={fetchInstalledServers} />
+                </SpaceBetween>
+              )}
+
               {loadingInstalled && (
                 <Box textAlign="center" padding="l">
                   <Spinner size="large" />
@@ -391,6 +432,7 @@ const MCPServersContent = ({ vpData = null }) => {
                               {server.Status === 'FAILED' && <Badge color="red">Failed</Badge>}
                               {hasUpdate && <Badge color="blue">Update Available</Badge>}
                               {server.RequiresAuth && <Badge color="blue">Requires Auth</Badge>}
+                              {server.CredentialsRequired && <Badge color="red">Needs credentials</Badge>}
                             </SpaceBetween>
                           </Box>
 
@@ -427,8 +469,20 @@ const MCPServersContent = ({ vpData = null }) => {
                             </Box>
                           </ColumnLayout>
 
+                          {server.CredentialsRequired && (
+                            <Alert type="warning">
+                              This server was imported and its credentials have not been entered on this deployment. The
+                              meeting assistant does not use it until they are.
+                            </Alert>
+                          )}
+
                           <Box float="right">
                             <SpaceBetween direction="horizontal" size="xs">
+                              {isAdmin && server.CredentialsRequired && (
+                                <Button variant="primary" onClick={() => setCredentialsFor(server)}>
+                                  Enter credentials
+                                </Button>
+                              )}
                               {isAdmin && hasUpdate && (
                                 <Button
                                   variant="primary"
@@ -480,7 +534,25 @@ const MCPServersContent = ({ vpData = null }) => {
     );
   }
 
-  return <Tabs tabs={tabs} />;
+  return (
+    <>
+      <Tabs tabs={tabs} />
+      {credentialsFor && (
+        <AuthConfigModal
+          visible
+          onDismiss={() => setCredentialsFor(null)}
+          onSubmit={handleCredentials}
+          server={{
+            id: credentialsFor.ServerId,
+            name: credentialsFor.Name,
+            serverUrl: credentialsFor.ServerUrl || undefined,
+            packageType: credentialsFor.PackageType || undefined,
+            transport: Array.isArray(credentialsFor.Transport) ? credentialsFor.Transport : undefined,
+          }}
+        />
+      )}
+    </>
+  );
 };
 
 MCPServersContent.propTypes = {

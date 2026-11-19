@@ -16,13 +16,16 @@ Authorization is enforced at two independent layers, mirroring the
      resolver directive is never the only control
 """
 
+import json
 import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import boto3
+import mcp_library
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger()
@@ -41,7 +44,14 @@ ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 
 # Installed servers are account-wide and their packages are baked into the shared
 # meeting-assist Lambda layer, so changing them is an administrator operation.
-ADMIN_ONLY_FIELDS = frozenset({"installMCPServer", "uninstallMCPServer", "updateMCPServer"})
+ADMIN_ONLY_FIELDS = frozenset(
+    {"installMCPServer", "uninstallMCPServer", "updateMCPServer", "updateMCPServerCredentials"}
+)
+
+# The library export and import (see mcp_library.py): for the Admin group, and
+# for an IAM-signed caller, which is how the LMA SDK and CLI call AppSync. The
+# export carries no credentials, and an import stores none.
+LIBRARY_FIELDS = frozenset({"exportMCPServerLibrary", "importMCPServerLibrary"})
 
 # AuthConfig holds the credential material for servers that require
 # authentication (bearer tokens, OAuth client credentials, custom headers and
@@ -110,6 +120,17 @@ def _get_caller_identity(event: Dict[str, Any]) -> Dict[str, Any]:
         "groups": list(groups),
         "is_admin": ADMIN_GROUP in groups,
     }
+
+
+def _is_iam_caller(event: Dict[str, Any]) -> bool:
+    """The request is IAM-signed: it carries the signing principal's ARN and no user-pool claims.
+
+    AppSync builds the identity block itself, so a client cannot make a
+    user-pool request look like one. Kept apart from _get_caller_identity,
+    which oauth_manager holds an identical copy of.
+    """
+    identity = event.get("identity") or {}
+    return bool(identity.get("userArn")) and not identity.get("claims")
 
 
 def _require_admin(caller: Dict[str, Any]) -> None:
@@ -596,6 +617,270 @@ def get_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return None
 
 
+def _validated_package(package: Any, package_type: str) -> str:
+    """validate_package_specifier, raising the library's error for an import entry."""
+    try:
+        return validate_package_specifier(package, package_type)
+    except ValidationError as exc:
+        raise mcp_library.LibraryError(str(exc)) from None
+
+
+def _installed(table: Any, account_id: str) -> list:
+    response = table.query(
+        KeyConditionExpression="AccountId = :accountId",
+        ExpressionAttributeValues={":accountId": account_id},
+    )
+    return response.get("Items", [])
+
+
+def export_mcp_server_library(event: Dict[str, Any], context: Any) -> str:
+    """The installed servers as a library document (AWSJSON), with no credentials."""
+    del event, context
+    account_id = ACCOUNT_ID or os.environ.get("AWS_ACCOUNT_ID", "unknown")
+    servers = _installed(dynamodb.Table(MCP_SERVERS_TABLE), account_id) if MCP_SERVERS_TABLE else []
+    document = mcp_library.export_library(servers)
+    logger.info("Exported an MCP server library of %s servers", len(document["servers"]))
+    return json.dumps(document)
+
+
+def _start_build(account_id: str, server_id: str, action: str) -> Optional[str]:
+    if not CODEBUILD_PROJECT:
+        return None
+    response = codebuild.start_build(
+        projectName=CODEBUILD_PROJECT,
+        environmentVariablesOverride=[
+            {"name": "ACCOUNT_ID", "value": account_id, "type": "PLAINTEXT"},
+            {"name": "ACTION", "value": action, "type": "PLAINTEXT"},
+            {"name": "SERVER_ID", "value": server_id, "type": "PLAINTEXT"},
+        ],
+    )
+    return response["build"]["id"]
+
+
+def _definition(server: "mcp_library.ImportedServer") -> Dict[str, Any]:
+    item: Dict[str, Any] = {
+        "Name": server.name,
+        "NpmPackage": server.package,
+        "PackageType": server.package_type,
+        "Version": server.version,
+        "Transport": server.transport,
+        "RequiresAuth": server.requires_auth,
+    }
+    if server.server_url:
+        item["ServerUrl"] = server.server_url
+    if server.description:
+        item["Description"] = server.description
+    return item
+
+
+def _create_item(account_id: str, step: "mcp_library.ImportStep", now: str) -> Dict[str, Any]:
+    server = step.server
+    assert server is not None
+    item = {
+        "AccountId": account_id,
+        "ServerId": step.server_id,
+        **_definition(server),
+        "InstalledAt": now,
+        "UpdatedAt": now,
+        "Status": "ACTIVE" if server.package_type == "streamable-http" else "INSTALLING",
+    }
+    # No AuthConfig: the credentials are entered on this deployment. The
+    # settings that are not credentials (header names, OAuth client settings)
+    # are kept as ImportedAuth, so a later export still lists them.
+    if server.needs_credentials:
+        item["CredentialsRequired"] = True
+        item["RequiredAuthType"] = server.auth_type
+        item["ImportedAuth"] = json.dumps(server.auth)
+    return item
+
+
+def _update_request(
+    existing: Dict[str, Any], step: "mcp_library.ImportStep", now: str
+) -> Tuple[Dict[str, Any], bool]:
+    """The update_item arguments for an import that updates a server, and whether to rebuild."""
+    server = step.server
+    assert server is not None
+    definition = _definition(server)
+    names = {f"#{k}": k for k in definition}
+    values: Dict[str, Any] = {f":{k}": v for k, v in definition.items()}
+    values[":updatedAt"] = now
+    sets = [f"#{k} = :{k}" for k in definition] + ["UpdatedAt = :updatedAt"]
+    removes = [
+        k
+        for k, present in (("ServerUrl", server.server_url), ("Description", server.description))
+        if not present
+    ]
+    if server.needs_credentials and not step.keep_credentials:
+        # The stored credentials are for another type of authentication.
+        sets += [
+            "CredentialsRequired = :required",
+            "RequiredAuthType = :authType",
+            "ImportedAuth = :importedAuth",
+        ]
+        values[":required"] = True
+        values[":authType"] = server.auth_type
+        values[":importedAuth"] = json.dumps(server.auth)
+        removes.append("AuthConfig")
+    changed = any(existing.get(k) != v for k, v in definition.items() if k != "Name")
+    rebuild = server.package_type != "streamable-http" and changed
+    if rebuild:
+        sets.append("#status = :status")
+        names["#status"] = "Status"
+        values[":status"] = "UPDATING"
+    expression = "SET " + ", ".join(sets) + (" REMOVE " + ", ".join(removes) if removes else "")
+    return (
+        {
+            "UpdateExpression": expression,
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
+        },
+        rebuild,
+    )
+
+
+def _apply_step(table: Any, account_id: str, step: "mcp_library.ImportStep") -> Dict[str, Any]:
+    """Carry out one create or update of an import; the result reported for it."""
+    server = step.server
+    assert server is not None
+    now = datetime.utcnow().isoformat() + "Z"
+    key = {"AccountId": account_id, "ServerId": step.server_id}
+    if step.action == "create":
+        table.put_item(
+            Item=_create_item(account_id, step, now),
+            ConditionExpression="attribute_not_exists(ServerId)",
+        )
+        rebuild = server.package_type != "streamable-http"
+        needs_credentials = server.needs_credentials
+    else:
+        existing = table.get_item(Key=key).get("Item", {})
+        request, rebuild = _update_request(existing, step, now)
+        table.update_item(Key=key, **request)
+        needs_credentials = (server.needs_credentials and not step.keep_credentials) or bool(
+            existing.get("CredentialsRequired")
+        )
+    result = {
+        "Name": step.name,
+        "ServerId": step.server_id,
+        "Action": "created" if step.action == "create" else "updated",
+        "CredentialsRequired": needs_credentials,
+        "Message": "",
+    }
+    if rebuild:
+        try:
+            build_id = _start_build(
+                account_id,
+                step.server_id,
+                "INSTALL_MCP_SERVER" if step.action == "create" else "UPDATE_MCP_SERVER",
+            )
+            result["Message"] = f"Layer build started ({build_id})" if build_id else ""
+        except Exception as build_error:  # pylint: disable=broad-except
+            logger.error("Failed to start CodeBuild for %s: %s", step.server_id, build_error)
+            table.update_item(
+                Key=key,
+                UpdateExpression="SET #status = :status, ErrorMessage = :error",
+                ExpressionAttributeNames={"#status": "Status"},
+                ExpressionAttributeValues={":status": "FAILED", ":error": str(build_error)},
+            )
+            result["Message"] = f"Failed to start build: {build_error}"
+    return result
+
+
+def _skipped(name: str, server_id: str, action: str, message: str) -> Dict[str, Any]:
+    return {
+        "Name": name,
+        "ServerId": server_id,
+        "Action": action,
+        "CredentialsRequired": False,
+        "Message": message,
+    }
+
+
+def import_mcp_server_library(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Create or update the servers a library document lists, matched by name.
+
+    No credential is stored, whatever the document holds: a server that needs
+    credentials is marked CredentialsRequired, which the meeting assistant does
+    not load, until an Admin enters them (updateMCPServerCredentials).
+    """
+    del context
+    account_id = ACCOUNT_ID or os.environ.get("AWS_ACCOUNT_ID", "unknown")
+    if not MCP_SERVERS_TABLE:
+        return {"Success": False, "Message": "MCP Servers table not configured", "Servers": []}
+    table = dynamodb.Table(MCP_SERVERS_TABLE)
+    library = event.get("arguments", {}).get("library")
+    try:
+        plan = mcp_library.plan_import(
+            library, _installed(table, account_id), _validated_package, MAX_SERVERS_PER_ACCOUNT
+        )
+    except mcp_library.LibraryError as exc:
+        return {"Success": False, "Message": str(exc), "Servers": []}
+    results = []
+    for step in plan.steps:
+        if step.action == "skip":
+            results.append(_skipped(step.name, "", "skipped", step.message))
+            continue
+        try:
+            results.append(_apply_step(table, account_id, step))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("Import of MCP server %s failed: %s", step.name, exc)
+            results.append(_skipped(step.name, step.server_id, "failed", str(exc)))
+    logger.info("Imported an MCP server library: %s", {r["Name"]: r["Action"] for r in results})
+    failed = [r for r in results if r["Action"] == "failed"]
+    return {
+        "Success": not failed,
+        "Message": f"{len(results) - len(failed)} of {len(results)} servers processed",
+        "Servers": results,
+    }
+
+
+def update_mcp_server_credentials(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Store an installed server's credentials, and clear CredentialsRequired."""
+    del context
+    input_data = event.get("arguments", {}).get("input", {}) or {}
+    server_id = input_data.get("ServerId")
+    auth_config = input_data.get("AuthConfig")
+    account_id = ACCOUNT_ID or os.environ.get("AWS_ACCOUNT_ID", "unknown")
+    if not server_id or not auth_config:
+        return {
+            "ServerId": server_id or "unknown",
+            "Success": False,
+            "Message": "ServerId and AuthConfig are required",
+        }
+    if mcp_library.stored_auth_type({"AuthConfig": auth_config}) == mcp_library.AUTH_UNKNOWN:
+        return {
+            "ServerId": server_id,
+            "Success": False,
+            "Message": "AuthConfig has an unknown authType",
+        }
+    if not MCP_SERVERS_TABLE:
+        return {
+            "ServerId": server_id,
+            "Success": False,
+            "Message": "MCP Servers table not configured",
+        }
+    table = dynamodb.Table(MCP_SERVERS_TABLE)
+    try:
+        table.update_item(
+            Key={"AccountId": account_id, "ServerId": server_id},
+            UpdateExpression=(
+                "SET AuthConfig = :config, RequiresAuth = :requires, UpdatedAt = :updated "
+                "REMOVE CredentialsRequired, RequiredAuthType, ImportedAuth"
+            ),
+            ConditionExpression="attribute_exists(ServerId)",
+            ExpressionAttributeValues={
+                ":config": auth_config,
+                ":requires": True,
+                ":updated": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return {"ServerId": server_id, "Success": False, "Message": "Server not found"}
+        raise
+    logger.info("Stored credentials for MCP server %s", server_id)
+    return {"ServerId": server_id, "Success": True, "Message": "Credentials saved"}
+
+
 def handler(event: Dict[str, Any], context: Any) -> Any:
     """
     Main Lambda handler - routes to appropriate function based on field name
@@ -612,6 +897,13 @@ def handler(event: Dict[str, Any], context: Any) -> Any:
             # rather than a generic operation result.
             raise Exception(f"Unauthorized: {exc}") from exc
 
+    if field_name in LIBRARY_FIELDS:
+        if not _is_iam_caller(event):
+            try:
+                _require_admin(_get_caller_identity(event))
+            except ForbiddenError as exc:
+                raise Exception(f"Unauthorized: {exc}") from exc
+
     if field_name == "installMCPServer":
         return install_mcp_server(event, context)
     elif field_name == "uninstallMCPServer":
@@ -622,6 +914,12 @@ def handler(event: Dict[str, Any], context: Any) -> Any:
         return list_installed_servers(event, context)
     elif field_name == "getMCPServer":
         return get_mcp_server(event, context)
+    elif field_name == "exportMCPServerLibrary":
+        return export_mcp_server_library(event, context)
+    elif field_name == "importMCPServerLibrary":
+        return import_mcp_server_library(event, context)
+    elif field_name == "updateMCPServerCredentials":
+        return update_mcp_server_credentials(event, context)
     else:
         logger.error(f"Unknown field name: {field_name}")
         return {"Success": False, "Message": f"Unknown operation: {field_name}"}
