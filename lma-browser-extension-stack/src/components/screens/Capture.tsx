@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect } from 'react';
 import logo from './logo.svg';
 import './Capture.css'
-import { Box, Button, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Icon, Input, Link, Modal, SpaceBetween } from '@cloudscape-design/components';
+import { Alert, Box, Button, Checkbox, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Icon, Input, Link, Modal, SpaceBetween } from '@cloudscape-design/components';
 import UserMessage from '../views/UserMessage';
 import OtherMessage from '../views/OtherMessage';
 import { useNavigation } from '../../context/NavigationContext';
@@ -17,12 +17,17 @@ import { useIntegration } from '../../context/ProviderIntegrationContext';
 import { useSettings } from '../../context/SettingsContext';
 import { nameFromIdToken } from '../../lib/identity';
 import { prefillField } from '../../lib/capture';
+import { INVALID_MEETING_ID, meetingIdFrom } from '../../lib/continue-meeting';
 
 function Capture() {
   const { navigate } = useNavigation();
   const { user, logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, startError, setStartError } = useIntegration();
+  // "Continue an existing meeting…" (lib/continue-meeting.ts).
+  const [continuing, setContinuing] = React.useState(false);
+  const [continueInput, setContinueInput] = React.useState("");
+  const [continueErrorText, setContinueErrorText] = React.useState("");
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -82,14 +87,20 @@ function Capture() {
     } else {
       setNameErrorText("");
     }
-    if (topic === undefined || topic.trim().length === 0) {
+    if (!continuing && (topic === undefined || topic.trim().length === 0)) {
       setMeetingTopicErrorText("Topic required.")
       isValid = false;
     } else {
       setMeetingTopicErrorText("");
     }
+    if (continuing && !meetingIdFrom(continueInput)) {
+      setContinueErrorText(INVALID_MEETING_ID);
+      isValid = false;
+    } else {
+      setContinueErrorText("");
+    }
     return isValid;
-  }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText]);
+  }, [topic, agentName, continuing, continueInput, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText]);
 
   const startListening = useCallback(() => {
     // eslint-disable-next-line no-useless-escape
@@ -109,8 +120,8 @@ function Capture() {
   }, [settings, validateForm, showDisclaimer]);
 
   const disclaimerConfirmed = useCallback(() => {
-    startTranscription(user, agentName, topic);
-  }, [user, agentName, topic, startTranscription])
+    startTranscription(user, agentName, topic, continuing ? continueInput : undefined);
+  }, [user, agentName, topic, continuing, continueInput, startTranscription])
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -187,7 +198,11 @@ function Capture() {
             <>
               <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
-              <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
+              {currentCall.sessionNumber ?
+                <ValueWithLabel label="Continuing meeting:">{`${currentCall.callId} (session ${currentCall.sessionNumber})`}</ValueWithLabel>
+                :
+                <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
+              }
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
               {
                 paused === true ?
@@ -211,14 +226,39 @@ function Capture() {
               >
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
-              <FormField
-                stretch={true}
-                constraintText=""
-                errorText={meetingTopicErrorText}
-                label="Meeting Topic:"
+              {!continuing && (
+                <FormField
+                  stretch={true}
+                  constraintText=""
+                  errorText={meetingTopicErrorText}
+                  label="Meeting Topic:"
+                >
+                  <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
+                </FormField>
+              )}
+              <Checkbox
+                checked={continuing}
+                onChange={({ detail }) => { setContinuing(detail.checked); setStartError(""); }}
+                description="Add to a meeting that already exists, even one shown as Done, on the same transcript. For the meeting's owner and Admins."
               >
-                <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
-              </FormField>
+                Continue an existing meeting…
+              </Checkbox>
+              {continuing && (
+                <FormField
+                  stretch={true}
+                  errorText={continueErrorText}
+                  label="Meeting ID or link:"
+                  description="The meeting ID, or the link to the meeting's page in LMA."
+                >
+                  <Input
+                    value={continueInput}
+                    onChange={({ detail }) => { setContinueInput(detail.value); setStartError(""); }}
+                    placeholder='Meeting ID or https://…/#/calls/…'
+                    ariaLabel='Meeting ID or link'
+                  ></Input>
+                </FormField>
+              )}
+              {startError && <Alert type="error">{startError}</Alert>}
               <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>
             </>
           )}

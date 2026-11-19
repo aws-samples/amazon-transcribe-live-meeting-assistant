@@ -10,6 +10,8 @@ type Settings = {
   clientId: string,
   cognitoDomain: string,
   cloudfrontEndpoint: string,
+  // LMA's AppSync endpoint, for "Continue an existing meeting…" (reopenMeeting).
+  graphqlEndpoint?: string,
   recordingDisclaimer: string,
   recordingMessage: string,
   stopRecordingMessage: string

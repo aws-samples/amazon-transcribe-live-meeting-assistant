@@ -10,6 +10,7 @@ import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
+import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -22,6 +23,9 @@ type Call = {
   callId: string,
   samplingRate: number,
   activeSpeaker: string,
+  // Only to continue an existing meeting: the capture session reopenMeeting
+  // allowed, with the meeting's own ID as callId.
+  sessionNumber?: number,
 }
 
 const initialIntegration = {
@@ -32,7 +36,12 @@ const initialIntegration = {
   paused: false,
   setPaused: (pauseValue: boolean) => { },
   fetchMetadata: () => { },
-  startTranscription: (user: any, userName: string, meetingTopic: string) => { },
+  // `continueMeeting`: the meeting ID or link of an existing meeting to continue.
+  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => { },
+  // Why capture did not start, or stopped: a reopenMeeting refusal, or the
+  // transcriber's. Empty otherwise.
+  startError: "",
+  setStartError: (message: string) => { },
   stopTranscription: () => { },
   metadata: { userName: "", meetingTopic: "" } as MeetingMetadata,
   platform: "n/a",
@@ -55,6 +64,7 @@ function IntegrationProvider({ children }: any) {
   const [shouldConnect, setShouldConnect] = useState(false);
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [startError, setStartError] = useState("");
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -64,6 +74,12 @@ function IntegrationProvider({ children }: any) {
     },
     onOpen: (event) => {
       console.log(event);
+    },
+    onMessage: (event) => {
+      // A START refused for the meeting it names, or capture the transcriber
+      // stopped; it then closes the connection.
+      const refusal = refusalMessage(event.data);
+      if (refusal) setStartError(refusal);
     },
     onClose: (event) => {
       console.log(event);
@@ -176,20 +192,34 @@ function IntegrationProvider({ children }: any) {
     return {};
   }, [settings]);
 
-  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => {
     if (await checkTokenExpired(user)) {
       login();
       return;
     }
+    setStartError("");
+
+    // Continuing a meeting: allowed now, just before streaming. A session that
+    // never starts leaves the meeting as it was.
+    let session = undefined;
+    if (continueMeeting !== undefined) {
+      const result = await reopenMeeting(settings.graphqlEndpoint, user.id_token, continueMeeting);
+      if (result.error !== undefined) {
+        setStartError(result.error);
+        return;
+      }
+      session = result.session;
+    }
 
     setShouldConnect(true);
-    const callMetadata = {
+    const callMetadata: Call = {
       callEvent: 'START',
       clientType: 'BROWSER_EXTENSION',
       localSpeakerName: userName,
-      callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
+      callId: session ? session.callId : `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
-      activeSpeaker: 'n/a'
+      activeSpeaker: 'n/a',
+      ...(session ? { sessionNumber: session.sessionNumber } : {}),
     }
 
     setCurrentCall(callMetadata);
@@ -205,7 +235,7 @@ function IntegrationProvider({ children }: any) {
     } catch (exception) {
       alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
-  }, [setShouldConnect, setCurrentCall]);
+  }, [setShouldConnect, setCurrentCall, settings]);
 
   const stopTranscription = useCallback(() => {
     if (isTranscribing) {
@@ -286,7 +316,7 @@ function IntegrationProvider({ children }: any) {
     <IntegrationContext.Provider value={{
       currentCall, isTranscribing, muted, setMuted, paused, setPaused,
       fetchMetadata, startTranscription, stopTranscription, metadata, platform,
-      activeSpeaker, sendRecordingMessage
+      activeSpeaker, sendRecordingMessage, startError, setStartError
     }}>
       {children}
     </IntegrationContext.Provider>
