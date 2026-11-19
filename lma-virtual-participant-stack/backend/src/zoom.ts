@@ -2,6 +2,7 @@ import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { noteMeetingJoined } from './meeting-phase.js';
 import { LEAVE_PLANS, leaveByClicking } from './meeting-leave.js';
 import { ALONE_HOLD_MS, AloneDebounce } from './alone-debounce.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 import {
     decideZoomCounterAction,
     ZOOM_COUNTER_POLL_MS,
@@ -1630,16 +1631,19 @@ export default class Zoom {
 
         // Set up attendee change monitoring
         // Leaves only once the count has stayed at one or fewer for
-        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts).
+        // ALONE_HOLD_MS, not on the first such reading (alone-debounce.ts),
+        // and, until somebody else has been counted, not before the
+        // first-attendee wait is over (first-attendee-wait.ts).
+        const firstAttendee = new FirstAttendeeWait();
         const aloneDebounce = new AloneDebounce(() => {
             log.info(`LMA Virtual Participant got lonely and left (one attendee or fewer for ${ALONE_HOLD_MS / 1000} s).`);
             details.start = false;
             this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
-        });
+        }, ALONE_HOLD_MS, firstAttendee);
         page.once('close', () => aloneDebounce.cancel());
         await page.exposeFunction('attendeeChange', async (number: number) => {
             meetingConsent.noteAttendeeCount(number);
-            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${ALONE_HOLD_MS / 1000} s unless somebody is still here`);
+            if (number <= 1 && !aloneDebounce.pending) log.info(`[attendees] count ${number}: leaving in ${Math.round(Math.max(ALONE_HOLD_MS, firstAttendee.remainingMs()) / 1000)} s unless somebody is still here`);
             aloneDebounce.note(number);
         });
 
@@ -1708,6 +1712,7 @@ export default class Zoom {
             const counterSelector = attendeeCounterSelector;
             const counterState: ZoomCounterState = { consecutiveMissing: 0, consecutiveLonely: 0 };
             let vetoReported = false;
+            let firstAttendeeWaitReported = false;
             const watchdogTimer = setInterval(async () => {
                 if (page.isClosed()) {
                     clearInterval(watchdogTimer);
@@ -1727,9 +1732,19 @@ export default class Zoom {
                 }
                 if (result.state === 'OK') {
                     meetingConsent.noteAttendeeCount(result.count);
+                    firstAttendee.note(result.count);
                     vetoReported = false;
                 }
                 const action = decideZoomCounterAction(result, counterState, participantsActiveWithin());
+                if (action === 'end-alone' && !firstAttendee.mayLeaveAlone()) {
+                    if (!firstAttendeeWaitReported) {
+                        firstAttendeeWaitReported = true;
+                        log.info(
+                            `[participants-watchdog] only ${result.state === 'OK' ? result.count : '?'} attendee(s) and nobody else has joined yet — waiting up to ${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee`,
+                        );
+                    }
+                    return;
+                }
                 if (action === 'vetoed' && !vetoReported) {
                     vetoReported = true;
                     log.info(

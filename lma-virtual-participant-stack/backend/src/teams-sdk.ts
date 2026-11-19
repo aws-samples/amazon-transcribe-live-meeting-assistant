@@ -17,6 +17,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
 import { createLogger } from './logger.js';
 import { ACS_FALLBACK_SUBCODES, AcsJoinRefusedError, acsRefusalFallsBack, reportTeamsJoined } from './teams-join-method.js';
+import { FirstAttendeeWait } from './first-attendee-wait.js';
 
 const log = createLogger('teams-sdk');
 
@@ -455,6 +456,10 @@ export default class TeamsSdk {
             let lastSpeaker = '';
             let consecutiveLonely = 0;
             const POLLS_BEFORE_LONELY = 2;
+            // Until somebody else has been counted, a lonely count does not end the
+            // meeting before the first-attendee wait is over (first-attendee-wait.ts).
+            const firstAttendee = new FirstAttendeeWait();
+            let firstAttendeeWaitReported = false;
             let pollsSinceLonelyCheck = 0;
             const monitorTimer = setInterval(async () => {
                 if (this.ended || page.isClosed()) return;
@@ -612,9 +617,15 @@ export default class TeamsSdk {
                             .evaluate(() => (window as any).__lmaParticipantNames?.() ?? null)
                             .catch(() => null),
                     );
+                    firstAttendee.note(snap.count);
                     if (snap.count >= 0 && snap.count <= 1) {
                         consecutiveLonely += 1;
-                        if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
+                        if (consecutiveLonely >= POLLS_BEFORE_LONELY && !firstAttendee.mayLeaveAlone()) {
+                            if (!firstAttendeeWaitReported) {
+                                firstAttendeeWaitReported = true;
+                                log.info(`[teams-sdk] nobody else has joined yet (count=${snap.count}) — waiting up to ${Math.round(firstAttendee.remainingMs() / 1000)} s more for the first attendee`);
+                            }
+                        } else if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
                             log.info(`[teams-sdk] alone in meeting (count=${snap.count}) — leaving`);
                             details.start = false;
                             this.requestEnd({ reason: 'alone-in-meeting', trigger: 'acs-participants' });
