@@ -27,6 +27,7 @@
  * leave follows it.
  */
 
+import { noteMeetingOver } from './meeting-phase.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('meeting-teardown');
@@ -133,6 +134,8 @@ export class MeetingTeardown {
     private async runSteps({ stopping, leaveReason }: TeardownOptions): Promise<void> {
         const s = this.steps;
         log.info(`[teardown] start (${stopping ? 'stop signal' : 'meeting ended'})`);
+        // From here nothing on the page needs a human (the dialog watchdog).
+        noteMeetingOver();
 
         if (stopping && leaveReason) await this.step('leave', () => s.leaveMeeting(leaveReason));
 
