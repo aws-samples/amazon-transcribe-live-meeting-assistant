@@ -180,7 +180,9 @@ export const summarySections = (callSummaryText, omit = []) => {
  * the shipped prompt templates write, with the other names it is known by (an
  * older name, such as SLIDES PRESENTED, or a common rewording an Admin may
  * have given the template). A section matching none of them -- a custom
- * template -- comes after all of these, in its configured order.
+ * template -- comes after all of these, in its configured order. The short
+ * names (AGENDA, CHAT, SLIDES, SCREEN SHARE) are taken on purpose: a template
+ * an Admin called just that is read as the shipped section it names.
  */
 export const SUMMARY_SECTION_ORDER = [
   { name: 'SUMMARY', aliases: ['SUMMARY', 'MEETING SUMMARY', 'EXECUTIVE SUMMARY'] },

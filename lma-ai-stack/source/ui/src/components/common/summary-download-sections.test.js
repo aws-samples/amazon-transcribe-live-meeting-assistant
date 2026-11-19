@@ -226,7 +226,7 @@ describe('every summary format holds every section, in reading order', () => {
     shownByTab.forEach((title) => {
       expect(markdown).toContain(`## ${title}`);
       expect(docHeadings).toContain(title);
-      expect(html).toContain(`<h2>${title.replace('&', '&amp;')}</h2>`);
+      expect(html).toContain(`<h2>${title.replaceAll('&', '&amp;')}</h2>`);
       expect(text).toContain(`${title}\n\n`);
     });
   });

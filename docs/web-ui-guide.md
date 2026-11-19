@@ -636,7 +636,9 @@ else to keep beside it:
   browser so as well.
 - Each picture of the shared screen is embedded in the file, from the same
   thumbnails as the Word and PDF downloads (at most 40; the others are written as
-  their caption).
+  their caption). A picture written within a line of text, which only a summary
+  edited by hand has, is embedded here and written as its caption in Word and
+  PDF.
 - A list of the sections at the top links to each one, and each section can be
   closed and opened again. Sections start open, so the page prints whole, and
   the page is laid out to print cleanly.
