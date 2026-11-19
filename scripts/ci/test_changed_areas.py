@@ -250,6 +250,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
     [
         # The transcriber compares its detector with the VP's copy.
         ("lma-virtual-participant-stack/backend/src/keyframe-detector.ts", "transcriber"),
+        # The skills manager's tests import the Amazon Quick skills pack's skills.
+        ("amazon-quick-desktop-skills-pack/skills/lma-live-coach.md", "lambdas"),
         ("lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts", "transcriber"),
         # The call event processor holds its chat attachment types to the VP's.
         ("lma-virtual-participant-stack/backend/src/chat-attachments.ts", "lambdas"),

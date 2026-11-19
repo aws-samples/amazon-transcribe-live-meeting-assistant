@@ -343,6 +343,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # helpers (speaker modes, channels, summary state) to keep the two sides equal.
     (f"{UI}/src/graphql/**", "lambdas"),
     (f"{UI}/src/components/common/**", "lambdas"),
+    # The skills manager's tests import every Amazon Quick skill in the skills pack.
+    ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests read the runtime's catalogue.
     (f"{ASR}/source/catalog.json", "lambdas"),
     (f"{ASR}/template.yaml", "lambdas"),
