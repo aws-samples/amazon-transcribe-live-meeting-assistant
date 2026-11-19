@@ -18,7 +18,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import boto3
 
 from tools.access_helper import can_read_meeting
-from tools.list_meetings import BATCH_GET_MAX, UNREADABLE_NOTE, failure_class, read_meeting_rows
+from tools.list_meetings import (
+    BATCH_GET_MAX,
+    UNREADABLE_NOTE,
+    failure_class,
+    read_meeting_rows,
+    rows_left,
+)
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 
 logger = logging.getLogger()
@@ -244,21 +250,6 @@ def is_open(status: Any) -> bool:
     fail the whole call.
     """
     return isinstance(status, str) and status in OPEN_STATUSES
-
-
-def rows_left(table, query_kwargs: Dict[str, Any], last_key: Dict[str, Any]) -> bool:
-    """Whether the index has a row after ``last_key``.
-
-    DynamoDB returns a key after a page that ends exactly at the end of the
-    range, so the key alone does not say. When the check itself fails the answer
-    is yes: the list may be incomplete.
-    """
-    try:
-        probe = dict(query_kwargs, Limit=1, ExclusiveStartKey=last_key)
-        return bool(table.query(**probe).get("Items"))
-    except Exception as e:
-        logger.warning("Could not check for more index rows (%s)", failure_class(e))
-        return True
 
 
 def upload_jobs(table, call_ids: List[str]) -> Set[str]:

@@ -9,6 +9,7 @@ The table is a stand-in that pages like the TypeDateIndex (newest first,
 ``Limit``, ``LastEvaluatedKey``) and counts every request made to it.
 """
 
+import inspect
 import json
 import logging
 import os
@@ -222,6 +223,42 @@ class TestFiltersBeforeTheLimit(unittest.TestCase):
         table = FakeTable([meeting("x", owner=OTHER), older])
 
         self.assertEqual(ids(run(table, limit=1)), ["old-row"])
+
+    def test_a_caller_without_an_identity_sees_nothing(self):
+        # An empty or missing id must not match a row whose owner is empty or missing.
+        ownerless = meeting("none", owner=None)
+        del ownerless["Owner"]
+        rows = [
+            ownerless,
+            meeting("empty", owner=""),
+            meeting("null", owner=None),
+            meeting("agent-empty", owner=OTHER, AgentId=""),
+            meeting("mine"),
+        ]
+
+        for user_id in (None, ""):
+            with self.subTest(user_id=user_id):
+                result = run(FakeTable(rows), user_id=user_id)
+
+                self.assertEqual(result["meetings"], [])
+                self.assertEqual(result["count"], 0)
+
+    def test_a_caller_without_an_identity_sees_nothing_with_every_filter_set(self):
+        rows = [meeting("empty", owner="", Participants=["Ann"], status="STARTED")]
+
+        for user_id in (None, ""):
+            result = run(
+                FakeTable(rows), user_id=user_id, status="STARTED", participant="ann", limit=5
+            )
+
+            self.assertEqual(result["meetings"], [])
+
+    def test_an_admin_without_an_identity_still_sees_every_meeting(self):
+        table = FakeTable([meeting("a", owner=OTHER), meeting("b", owner="")])
+
+        result = run(table, user_id=None, is_admin=True)
+
+        self.assertEqual(ids(result), ["a", "b"])
 
     def test_admin_sees_every_meeting_and_the_limit_still_applies(self):
         table = FakeTable([meeting(f"o{i}", owner=OTHER) for i in range(10)])
@@ -623,7 +660,7 @@ class TestFallbackToSingleReads(unittest.TestCase):
 
 
 class TestCallersWithoutAFilter(unittest.TestCase):
-    """query_by_date_range without ``include`` behaves as before."""
+    """query_by_date_range behaves as before; walk_date_range takes the row filter."""
 
     def test_every_row_counts_toward_the_limit(self):
         table = FakeTable([meeting(f"o{i}", owner=OTHER) for i in range(10)])
@@ -641,16 +678,41 @@ class TestCallersWithoutAFilter(unittest.TestCase):
         self.assertIsInstance(rows, list)
         self.assertEqual(rows[0]["MeetingTopic"], "topic a")
 
+    def test_the_wrapper_has_its_original_signature(self):
+        parameters = inspect.signature(list_meetings.query_by_date_range).parameters
+
+        self.assertEqual(list(parameters), ["table", "start_date", "end_date", "limit"])
+
     def test_an_include_function_decides_which_rows_count(self):
         table = FakeTable(
             [meeting(f"m{i}", Status="ENDED" if i % 3 else "STARTED") for i in range(30)]
         )
 
-        rows = list_meetings.query_by_date_range(
-            table, "2026-11-01", "2026-11-18", 2, include=lambda m: m["Status"] == "STARTED"
-        )
+        rows = list_meetings.walk_date_range(
+            table, "2026-11-01", "2026-11-18", 2, lambda m: m["Status"] == "STARTED"
+        )[0]
 
         self.assertEqual([row["CallId"] for row in rows], ["m0", "m3"])
+
+    def test_a_walk_returns_at_most_the_limit_with_or_without_a_filter(self):
+        rows = [meeting(f"m{i}") for i in range(150)]
+
+        for include in (None, lambda m: True):
+            for limit in (1, 7, 100, 120):
+                with self.subTest(filtered=include is not None, limit=limit):
+                    found = list_meetings.walk_date_range(
+                        FakeTable(rows), "2026-11-01", "2026-11-18", limit, include
+                    )[0]
+
+                    self.assertEqual(len(found), limit)
+
+    def test_the_answer_of_execute_holds_at_most_the_limit(self):
+        table = FakeTable([meeting(f"m{i}") for i in range(150)])
+
+        for limit in (1, 7, 100):
+            result = run(table, limit=limit)
+
+            self.assertEqual((len(result["meetings"]), result["count"]), (limit, limit))
 
     def test_the_sort_key_bounds_are_unchanged(self):
         table = FakeTable([])
@@ -692,7 +754,7 @@ class TestAnswerShape(unittest.TestCase):
 
 
 class TestTwoStepReads(unittest.TestCase):
-    """A filtered walk decides on a few attributes and reads whole rows of matches only."""
+    """A filtered walk asks for a few attributes first and for whole rows of matches only."""
 
     def big(self, call_id, owner=OTHER, **extra):
         return meeting(call_id, owner=owner, Summary="x" * 4000, **extra)
@@ -705,8 +767,9 @@ class TestTwoStepReads(unittest.TestCase):
         self.assertEqual(result["meetings"], [])
         self.assertEqual(table.full_batches(), [])
         self.assertEqual(len(table.decision_batches()), 10)
-        # 1,000 whole rows would be over 4 MB; the attributes the filters need are
-        # well under 100 bytes a row.
+        # The response of 1,000 whole rows would be over 4 MB; the attributes the
+        # filters need are well under 100 bytes a row. (DynamoDB still reads, and
+        # bills, the whole items; only the size of the response shrinks.)
         self.assertLess(table.bytes_read, 100 * 1000)
 
     def test_the_first_read_names_only_what_the_filters_and_the_key_need(self):
