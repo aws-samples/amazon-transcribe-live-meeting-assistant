@@ -290,6 +290,16 @@ export interface ChatAttachmentDeps {
     upload: (key: string, body: Buffer, contentType: string) => Promise<void>;
     emit: (event: ChatAttachmentEvent) => Promise<void>;
     newId?: (timelineSeconds: number) => string;
+    /**
+     * The chat line's segment id and time as the meeting stores them. A
+     * rejoined VP's session prefixes its segment ids and moves its times by the
+     * session's offset (kinesis-stream.ts useSession), so an attachment names
+     * its chat line the same way. Its id, and so its object key, comes from the
+     * moved time: a session's offset follows everything earlier sessions
+     * recorded, so no earlier attachment can have the same time prefix.
+     * Omitted, the VP's own values are used.
+     */
+    onMeetingTimeline?: (segmentId: string, timelineSeconds: number) => { segmentId: string; timelineSeconds: number };
 }
 
 interface Pending {
@@ -323,6 +333,11 @@ export class ChatAttachmentCapture {
      */
     capture(segmentId: string, platform: string, timestamp: number, attachments: readonly IncomingChatAttachment[]): number {
         if (!attachments.length || !this.deps.settingOn()) return 0;
+        if (this.deps.onMeetingTimeline) {
+            const moved = this.deps.onMeetingTimeline(segmentId, timestamp);
+            segmentId = moved.segmentId;
+            timestamp = moved.timelineSeconds;
+        }
         let taken = 0;
         for (const attachment of attachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE)) {
             if (this.taken >= MAX_ATTACHMENTS_PER_MEETING) {
