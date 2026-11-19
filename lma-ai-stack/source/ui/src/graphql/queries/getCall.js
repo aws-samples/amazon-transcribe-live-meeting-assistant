@@ -30,6 +30,8 @@ export default /* GraphQL */ `
       UpdatedAt
       RecordingUrl
       VideoRecordingUrl
+      RecordingUrls
+      VideoRecordingUrls
       CaptureSource
       TranscriptionEngine
       TranscriptionLanguage

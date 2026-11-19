@@ -197,6 +197,7 @@ describe('downloadMenuItems', () => {
 describe('recordingSessions', () => {
   it('lists every session, the current one last and once', () => {
     expect(recordingSessions('c', ['a', 'b', 'c'])).toEqual(['a', 'b', 'c']);
+    expect(recordingSessions('c', ['a', 'a', 'c'])).toEqual(['a', 'c']);
     expect(recordingSessions('c', ['a'])).toEqual(['a', 'c']);
     expect(recordingSessions('c', undefined)).toEqual(['c']);
     expect(recordingSessions(null, null)).toEqual([]);

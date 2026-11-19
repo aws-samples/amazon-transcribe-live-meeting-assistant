@@ -15,7 +15,7 @@
  * summary can also be sent as an email.
  *
  * The menu (downloadMenuItems) has a group for each kind of file: Summary,
- * Transcript, Recordings (the audio and video recordings), Screen share (the
+ * Transcript, Recordings (each session's audio and video), Screen share (the
  * slide deck, printed by the browser, and the key frames as a .zip), Chat
  * attachments (each file, and all of them as a .zip), and Everything (.zip).
  * An entry with nothing behind it is disabled with the reason. The .zip
@@ -144,12 +144,14 @@ export const runTranscriptDownload = async (id, callTranscriptPerCallId, item, c
 };
 
 /**
- * A meeting's recording links: the list the meeting record names, when it has
- * one (nothing in this repository writes it yet), then the current link.
+ * A meeting's recording links, one per session: the list a meeting joined
+ * again keeps (every session's file), then the current link if it is not in it.
  */
 export const recordingSessions = (current, earlier) => {
-  const urls = (Array.isArray(earlier) ? earlier : []).filter((url) => typeof url === 'string' && url);
-  if (typeof current === 'string' && current && !urls.includes(current)) urls.push(current);
+  const urls = [];
+  [...(Array.isArray(earlier) ? earlier : []), current].forEach((url) => {
+    if (typeof url === 'string' && url && !urls.includes(url)) urls.push(url);
+  });
   return urls;
 };
 
@@ -177,7 +179,7 @@ const recordingItems = (kind, label, urls) => {
 /**
  * The Download menu's items, as nested groups. `meeting` holds what the page
  * knows: whether there is a summary (and why not), whether the transcript can
- * be downloaded (and why not), the recording links, how many key
+ * be downloaded (and why not), each session's recording links, how many key
  * frames the meeting has, and its stored chat attachments.
  */
 export const downloadMenuItems = ({

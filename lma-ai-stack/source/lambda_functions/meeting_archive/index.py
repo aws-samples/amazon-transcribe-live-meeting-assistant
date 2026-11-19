@@ -371,15 +371,15 @@ def recording_key(url: Any, prefix: str) -> Optional[str]:
 
 
 def session_urls(meeting: Mapping[str, Any], single: str, many: str) -> List[str]:
-    """Every recording URL the meeting record names: the ``many`` list, when the
-    record has one (nothing in this repository writes it yet), then the current one."""
-    urls: List[str] = []
+    """Every session's recording URL, each once: the ``many`` list (RecordingUrls,
+    VideoRecordingUrls), which a meeting the Virtual Participant joined again
+    keeps and which can name one twice, then the current ``single`` one, as
+    meeting deletion reads them."""
     listed = meeting.get(many)
-    if isinstance(listed, list):
-        urls.extend(u for u in listed if isinstance(u, str))
-    current = meeting.get(single)
-    if isinstance(current, str) and current not in urls:
-        urls.append(current)
+    urls: List[str] = []
+    for url in [*(listed if isinstance(listed, list) else []), meeting.get(single)]:
+        if isinstance(url, str) and url and url not in urls:
+            urls.append(url)
     return urls
 
 
@@ -698,7 +698,7 @@ def transcript_html(title: str, facts, rows) -> str:
 
 #: The meeting record attributes meeting.json holds: fields of the schema's Call
 #: type that getCall answers (lma-ai-stack/test/test_meeting_archive_template.py
-#: holds the list to it), and the recording lists a record may carry. The
+#: holds the list to it), with the session lists of a meeting joined again. The
 #: keys, the summary (in summary/) and the consent record (in consent/, for the
 #: owner and Admins) are not among them, nor is any attribute added later.
 DETAILS_FIELDS = (

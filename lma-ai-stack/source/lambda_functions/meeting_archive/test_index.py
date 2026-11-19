@@ -438,7 +438,7 @@ def test_transcript_is_left_out_once_deleted_under_retention(fakes):
 def test_every_session_recording_is_included(fakes):
     earlier = f"{HOST}/lma-audio-recordings/{POSIX}-first.wav"
     meeting = meeting_item(
-        RecordingUrls={"L": [s(earlier), s(f"{HOST}/lma-audio-recordings/{POSIX}.wav")]}
+        RecordingUrls={"L": [s(earlier), s(earlier), s(f"{HOST}/lma-audio-recordings/{POSIX}.wav")]}
     )
     objects = {**OBJECTS, f"lma-audio-recordings/{POSIX}-first.wav": 1000}
     s3, answer, _ready = build_for(fakes, OWNER, meeting=meeting, objects=objects)

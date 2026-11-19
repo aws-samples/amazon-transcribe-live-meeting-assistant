@@ -38,9 +38,9 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
-      // A list of every session's recordings, read when the meeting record has
-      // one. Nothing in this repository writes these lists yet, and the getCall
-      // query does not ask for them, so they are absent until it does.
+      // The links of every session's recordings, for a meeting the Virtual
+      // Participant joined again (Join again); only getCall asks for them, so an
+      // update from the meeting's subscription keeps the ones already read.
       RecordingUrls: recordingUrls,
       VideoRecordingUrls: videoRecordingUrls,
       // How the meeting was captured and transcribed, as its START recorded it;
@@ -169,6 +169,8 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
     transcriptionPause: keep('transcriptionPause'),
+    recordingUrls: keep('recordingUrls'),
+    videoRecordingUrls: keep('videoRecordingUrls'),
   };
 };
 
