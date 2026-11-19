@@ -15,7 +15,7 @@ Turn your Live Meeting Assistant into an AI-powered meeting intelligence system 
 
 - [LMA](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant) deployed with MCP enabled (v0.2.23+)
 - Amazon Quick Desktop installed
-- An LMA API key (generated from LMA UI → Settings → MCP Servers Configuration)
+- An LMA API key (generated from LMA UI → Settings → MCP Servers Configuration) with the **Read and write** scope: the Live Call Coach skill and the pre-meeting brief and action items agents call `start_meeting_now` or `schedule_meeting`, which a **Read only** key cannot. A key created before keys had scopes (listed as **Legacy (original tools)**) works as well. See [Key scopes](../docs/mcp-api-key-auth.md#key-scopes).
 
 ## Quick Install
 

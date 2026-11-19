@@ -217,5 +217,50 @@ class TestListKeys(unittest.TestCase):
         self.assertFalse(result[0]["enabled"])
 
 
+class TestKeyScope(unittest.TestCase):
+    """A key is read unless read-write is asked for; a key stored without one is listed as legacy."""
+
+    def _generate(self, mock_dynamo, arguments):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamo.Table.return_value = mock_table
+        result = index.handler(make_event("generateMCPApiKey", arguments=arguments), None)
+        return result, mock_table
+
+    @patch.object(index, "dynamodb")
+    def test_a_new_key_is_read_by_default(self, mock_dynamo):
+        for arguments in ({}, {"scope": None}, {"scope": ""}):
+            result, table = self._generate(mock_dynamo, arguments)
+            self.assertEqual(result["scope"], "read")
+            self.assertEqual(table.put_item.call_args[1]["Item"]["Scope"], "read")
+
+    @patch.object(index, "dynamodb")
+    def test_a_read_write_key_is_stored_as_read_write(self, mock_dynamo):
+        result, table = self._generate(mock_dynamo, {"scope": "read-write"})
+        self.assertEqual(result["scope"], "read-write")
+        self.assertEqual(table.put_item.call_args[1]["Item"]["Scope"], "read-write")
+
+    @patch.object(index, "dynamodb")
+    def test_an_unknown_scope_is_refused_and_nothing_is_stored(self, mock_dynamo):
+        for scope in ("admin", "write", "READ-WRITE"):
+            with self.assertRaises(Exception) as ctx:
+                self._generate(mock_dynamo, {"scope": scope})
+            self.assertIn("scope must be one of", str(ctx.exception))
+        mock_dynamo.Table.return_value.put_item.assert_not_called()
+
+    @patch.object(index, "dynamodb")
+    def test_listed_keys_show_their_scope_and_an_older_key_is_legacy(self, mock_dynamo):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"KeyPrefix": "lma_older000", "CreatedAt": "2025-01-01", "Enabled": "true"},
+                {"KeyPrefix": "lma_rw000000", "Enabled": "true", "Scope": "read-write"},
+            ]
+        }
+        mock_dynamo.Table.return_value = mock_table
+        result = index.handler(make_event("listMCPApiKeys", username="alice"), None)
+        self.assertEqual([key["scope"] for key in result], ["legacy", "read-write"])
+
+
 if __name__ == "__main__":
     unittest.main()
