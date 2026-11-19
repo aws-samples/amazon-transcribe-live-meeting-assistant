@@ -51,8 +51,10 @@ class _Table:
         account = kwargs["ExpressionAttributeValues"][":account"]
         items = [dict(v) for (a, _), v in sorted(self.items.items()) if a == account]
         if "ProjectionExpression" in kwargs:
-            dropped = ("Instructions", "Files")
-            items = [{k: v for k, v in i.items() if k not in dropped} for i in items]
+            aliases = kwargs["ExpressionAttributeNames"]
+            kept = {aliases[a.strip()] for a in kwargs["ProjectionExpression"].split(",")}
+            assert "Instructions" not in kept and "Files" not in kept
+            items = [{k: v for k, v in i.items() if k in kept} for i in items]
         return {"Items": items}
 
     def get_item(self, Key):

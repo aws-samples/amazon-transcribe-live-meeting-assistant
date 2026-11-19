@@ -129,11 +129,22 @@ def _stored(projection: bool = False) -> List[Dict[str, Any]]:
         "ExpressionAttributeValues": {":account": _account()},
     }
     if projection:
-        kwargs["ProjectionExpression"] = (
-            "SkillId, #name, DisplayName, Description, Metadata, SourceFormat, "
-            "CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, FileSizes"
+        # Every name aliased, so none can collide with a DynamoDB reserved word.
+        names = (
+            "SkillId",
+            "Name",
+            "DisplayName",
+            "Description",
+            "Metadata",
+            "SourceFormat",
+            "CreatedAt",
+            "CreatedBy",
+            "UpdatedAt",
+            "UpdatedBy",
+            "FileSizes",
         )
-        kwargs["ExpressionAttributeNames"] = {"#name": "Name"}
+        kwargs["ProjectionExpression"] = ", ".join(f"#a{i}" for i in range(len(names)))
+        kwargs["ExpressionAttributeNames"] = {f"#a{i}": n for i, n in enumerate(names)}
     items: List[Dict[str, Any]] = []
     while True:
         response = _table().query(**kwargs)

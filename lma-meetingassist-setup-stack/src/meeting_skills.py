@@ -98,8 +98,15 @@ def load_catalog(table: Any = None, now: Optional[float] = None) -> List[SkillSu
         kwargs: Dict[str, Any] = {
             "KeyConditionExpression": "AccountId = :account",
             "ExpressionAttributeValues": {":account": AWS_ACCOUNT_ID},
-            "ProjectionExpression": "SkillId, #name, Description, DisplayName, UpdatedAt",
-            "ExpressionAttributeNames": {"#name": "Name"},
+            # Every name aliased, so none can collide with a DynamoDB reserved word.
+            "ProjectionExpression": "#i, #n, #d, #dn, #u",
+            "ExpressionAttributeNames": {
+                "#i": "SkillId",
+                "#n": "Name",
+                "#d": "Description",
+                "#dn": "DisplayName",
+                "#u": "UpdatedAt",
+            },
         }
         items: List[Dict[str, Any]] = []
         while True:

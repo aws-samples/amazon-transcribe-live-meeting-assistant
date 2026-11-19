@@ -287,7 +287,7 @@ class _Table:
         self.queries += 1
         if self.fail:
             raise RuntimeError("throttled")
-        assert "Instructions" not in kwargs["ProjectionExpression"]
+        assert "Instructions" not in kwargs["ExpressionAttributeNames"].values()
         return {"Items": [dict(i) for i in self.items]}
 
     def get_item(self, Key):
