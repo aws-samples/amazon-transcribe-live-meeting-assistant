@@ -2017,6 +2017,52 @@ def test_a_failed_summary_marks_the_summary_failed_and_stores_no_text(
     assert state["updatedAt"]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nothing to summarise: the meeting has no transcript",
+        "  nothing to summarise: the meeting has no transcript.  ",
+    ],
+)
+def test_a_meeting_with_nothing_to_summarise_marks_the_summary_empty_and_stores_no_text(
+    schema, emitted, monkeypatch, text
+):
+    """The summariser's answer for a meeting with no transcript is recorded as
+    its own outcome, not as a failure, and is not stored as the summary."""
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    written = store_summary(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": text},
+        monkeypatch,
+    )
+    assert written["CallSummaryText"] == ""
+    state = json.loads(written["CallSummaryState"])
+    assert state["status"] == "empty"
+    assert state["trigger"] == "meeting-end"
+    assert state["source"] == "generated"
+    assert state["message"] == "Nothing to summarise: the meeting has no transcript"
+    assert state["updatedAt"]
+
+
+def test_a_meeting_with_nothing_to_summarise_does_not_start_the_summary_deletion_delay(
+    schema, emitted, monkeypatch
+):
+    """No summary was written, so the transcript deletion is not told one was."""
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    hook = run_with(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": "Nothing to summarise: the meeting has no transcript",
+        },
+        monkeypatch,
+        TRANSCRIPT_DELETION_FUNCTION_ARN="arn:aws:lambda:us-east-1:123456789012:function:deletion",
+        POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN="",
+    )
+    assert hook.invocations == []
+
+
 def test_the_shared_update_template_writes_no_blank_value():
     """What a failed summary's write relies on to leave the stored text alone."""
     template = (SOURCE / "appsync" / "updateCall.request.vtl").read_text(encoding="utf-8")

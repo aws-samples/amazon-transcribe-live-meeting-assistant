@@ -109,6 +109,14 @@ MAX_LISTED_LINKS = 50
 #: What a chat section ends with when nobody shared a link.
 NO_LINKS_SHARED = "No links were shared in the chat."
 
+# The answer for a meeting with nothing to summarise: no speech, no chat and no
+# text read from the shared screen. Returned without calling the model. The
+# end-of-meeting pipeline (call_event_processor) and the summary regenerator
+# read this exact text: they store no summary for it, and record the summary's
+# state as "empty" rather than "failed". Each holds its own copy, and
+# lma-ai-stack/test/test_summary_empty_outcome.py holds the copies to this one.
+EMPTY_SUMMARY_TEXT = "Nothing to summarise: the meeting has no transcript"
+
 # Sent as the system prompt of every summary request. The user message holds
 # the prompt template with the meeting's content inserted: what was said, what
 # was typed in the chat and what was read from the shared screen, all of it
@@ -865,6 +873,18 @@ def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
     )
 
 
+def has_content(transcript_json):
+    """Whether the meeting has anything to summarise: speech, chat or screen text."""
+    for field in ("transcript", "chat"):
+        value = transcript_json.get(field)
+        if isinstance(value, str) and value.strip():
+            return True
+    return any(
+        isinstance(frame, dict) and str(frame.get("SlideText") or "").strip()
+        for frame in transcript_json.get("keyframes") or []
+    )
+
+
 def handler(event, context):
     print("Received event: ", json.dumps(event))
     callId = event["CallId"]
@@ -876,6 +896,12 @@ def handler(event, context):
         prompt_override = None
         if "Prompt" in event:
             prompt_override = event["Prompt"]
+        # The meeting's summary (at its end, or regenerated) only: a caller's own
+        # prompt is answered by the model as before.
+        if not prompt_override and not has_content(transcript_json):
+            # No model call, and no Knowledge Base copy of an empty meeting.
+            print(f"Nothing to summarise for {callId}: no speech, chat or screen text")
+            return {"summary": EMPTY_SUMMARY_TEXT}
         # The Regenerate button's invoke sets this, because the panel promises
         # that pressing it uses the prompt templates as they are now. An
         # end-of-meeting run does not, and is served from the cache.
