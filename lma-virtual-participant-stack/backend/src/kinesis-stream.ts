@@ -721,15 +721,29 @@ class KinesisStreamManager {
     return { SessionNumber: this.session.number };
   }
 
+  /**
+   * A segment id as it is stored on the meeting: prefixed with the session from
+   * session 2 on (see useSession). Anything that names a segment it sends --
+   * a chat attachment naming its chat line -- names it this way.
+   */
+  meetingSegmentId(segmentId: string): string {
+    return this.session.number <= 1 ? segmentId : `s${this.session.number}-${segmentId}`;
+  }
+
+  /** A time on this VP's own clock, moved onto the meeting's transcript timeline. */
+  meetingSeconds(seconds: number): number {
+    const value = Number(seconds) || 0;
+    return this.session.number <= 1 ? value : value + this.session.offsetSeconds;
+  }
+
   /** A transcript segment record moved onto the meeting's timeline (see useSession). */
   private onMeetingTimeline(record: any): any {
     if (this.session.number <= 1) return record;
-    const offset = this.session.offsetSeconds;
     return {
       ...record,
-      SegmentId: `s${this.session.number}-${record.SegmentId}`,
-      StartTime: (Number(record.StartTime) || 0) + offset,
-      EndTime: (Number(record.EndTime) || 0) + offset,
+      SegmentId: this.meetingSegmentId(record.SegmentId),
+      StartTime: this.meetingSeconds(record.StartTime),
+      EndTime: this.meetingSeconds(record.EndTime),
     };
   }
 
