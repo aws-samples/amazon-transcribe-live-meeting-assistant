@@ -38,6 +38,11 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
+      // Every session's recordings, for a meeting continued after the Virtual
+      // Participant rejoined it; absent otherwise, and on a query that does not
+      // ask for them.
+      RecordingUrls: recordingUrls,
+      VideoRecordingUrls: videoRecordingUrls,
       // How the meeting was captured and transcribed, as its START recorded it;
       // absent on a meeting started before these were stored (meeting-context.js).
       CaptureSource: captureSource,
@@ -97,6 +102,8 @@ const mapCallsAttributes = (calls) => {
       updatedAt,
       recordingUrl,
       videoRecordingUrl,
+      recordingUrls,
+      videoRecordingUrls,
       captureSource,
       transcriptionEngine,
       transcriptionLanguage,

@@ -13,6 +13,15 @@
  * thumbnails of the key frames it names. Every summary format holds every
  * section of the summary, in one reading order (downloadSummarySections). The
  * summary can also be sent as an email.
+ *
+ * The menu (downloadMenuItems) has a group for each kind of file: Summary,
+ * Transcript, Recordings (each session's audio and video), Screen share (the
+ * slide deck, printed by the browser, and the key frames as a .zip), Chat
+ * attachments (each file, and all of them as a .zip), and Everything (.zip).
+ * An entry with nothing behind it is disabled with the reason. The .zip
+ * archives are built on the server (use-meeting-archive.js); every file is
+ * fetched through a time-limited signed link, after the same access check as
+ * the meeting.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -36,10 +45,10 @@ import {
 const logger = new ConsoleLogger('MeetingDownloads');
 
 const FORMAT_ITEMS = [
-  { text: 'Markdown (.md)', id: 'markdown', iconName: 'file' },
   { text: 'Word (.docx)', id: 'docx', iconName: 'file' },
   { text: 'PDF (.pdf)', id: 'pdf', iconName: 'file' },
   { text: 'Web page (.html)', id: 'html', iconName: 'file' },
+  { text: 'Markdown (.md)', id: 'markdown', iconName: 'file' },
   { text: 'Plain text (.txt)', id: 'text', iconName: 'file' },
 ];
 const COPY_ITEM = { text: 'Copy to clipboard (Markdown)', id: 'copy', iconName: 'copy' };
@@ -132,4 +141,134 @@ export const runTranscriptDownload = async (id, callTranscriptPerCallId, item, c
     return copyText(transcriptDownloadMarkdown(callTranscriptPerCallId, item));
   }
   return true;
+};
+
+/** A meeting's recording links, one per session: the list a continued meeting keeps, then the current one. */
+export const recordingSessions = (current, earlier) => {
+  const urls = (Array.isArray(earlier) ? earlier : []).filter((url) => typeof url === 'string' && url);
+  if (typeof current === 'string' && current && !urls.includes(current)) urls.push(current);
+  return urls;
+};
+
+const NO_SHARED_SCREEN = 'Nothing was shared on screen in this meeting.';
+const NO_ATTACHMENTS = 'No chat attachments were captured for this meeting.';
+
+const recordingItems = (kind, label, urls) => {
+  if (!urls.length) {
+    return [
+      {
+        id: `recording:${kind}:0`,
+        text: label,
+        disabled: true,
+        disabledReason: `This meeting has no ${kind} recording.`,
+      },
+    ];
+  }
+  return urls.map((_url, index) => ({
+    id: `recording:${kind}:${index}`,
+    text: urls.length > 1 ? `${label}, session ${index + 1}` : label,
+    iconName: 'file',
+  }));
+};
+
+/**
+ * The Download menu's items, as nested groups. `meeting` holds what the page
+ * knows: whether there is a summary (and why not), whether the transcript can
+ * be downloaded (and why not), each session's recording links, how many key
+ * frames the meeting has, and its stored chat attachments.
+ */
+export const downloadMenuItems = ({
+  hasSummary,
+  summaryReason,
+  canDownloadTranscript,
+  transcriptReason,
+  audioUrls = [],
+  videoUrls = [],
+  keyframeCount = 0,
+  attachments = [],
+}) => {
+  const stored = (attachments || []).filter((attachment) => attachment?.Status === 'STORED' && attachment.AttachmentId);
+  return [
+    {
+      text: 'Summary',
+      items: SUMMARY_ACTION_ITEMS.map((entry) => ({
+        ...entry,
+        id: `summary:${entry.id}`,
+        ariaLabel: `Summary: ${entry.text}`,
+        disabled: !hasSummary,
+        disabledReason: hasSummary ? undefined : summaryReason,
+      })),
+    },
+    {
+      text: 'Transcript',
+      items: TRANSCRIPT_DOWNLOAD_ITEMS.map((entry) => ({
+        ...entry,
+        id: `transcript:${entry.id}`,
+        ariaLabel: `Transcript: ${entry.text}`,
+        disabled: !canDownloadTranscript,
+        disabledReason: canDownloadTranscript ? undefined : transcriptReason,
+      })),
+    },
+    {
+      text: 'Recordings',
+      items: [...recordingItems('audio', 'Audio', audioUrls), ...recordingItems('video', 'Video', videoUrls)],
+    },
+    {
+      text: 'Screen share',
+      items: [
+        { id: 'slides:deck', text: 'Slides (PDF)', iconName: 'file' },
+        { id: 'archive:KEY_FRAMES', text: 'Key frames (.zip)', iconName: 'download' },
+      ].map((entry) => ({
+        ...entry,
+        disabled: keyframeCount === 0,
+        disabledReason: keyframeCount === 0 ? NO_SHARED_SCREEN : undefined,
+      })),
+    },
+    {
+      text: 'Chat attachments',
+      items: [
+        ...stored.map((attachment) => ({
+          id: `attachment:${attachment.AttachmentId}`,
+          text: attachment.FileName || 'Attachment',
+          iconName: 'file',
+        })),
+        {
+          id: 'archive:CHAT_ATTACHMENTS',
+          text: 'All attachments (.zip)',
+          iconName: 'download',
+          disabled: !stored.length,
+          disabledReason: stored.length ? undefined : NO_ATTACHMENTS,
+        },
+      ],
+    },
+    { id: 'archive:EVERYTHING', text: 'Everything (.zip)', iconName: 'download' },
+  ];
+};
+
+/** A menu item id as its kind and the rest: 'attachment:a:b' is ['attachment', 'a:b']. */
+export const parseMenuId = (id) => {
+  const text = String(id ?? '');
+  const at = text.indexOf(':');
+  return at < 0 ? [text, ''] : [text.slice(0, at), text.slice(at + 1)];
+};
+
+/**
+ * Opens a file whose link is signed on demand in a new tab. The tab is opened
+ * within the click, before any await, because a browser blocks one opened
+ * after; a link signed for download (an attachment, an archive) saves the
+ * file rather than showing it. Resolves to whether the file was reached.
+ */
+export const openSignedFile = async (signLink, { open = window.open } = {}) => {
+  const tab = open('', '_blank');
+  if (tab) tab.opener = null;
+  try {
+    const url = await signLink();
+    if (!url) throw new Error('no link');
+    if (tab) tab.location.href = url;
+    return true;
+  } catch (error) {
+    logger.error('could not open the file', error);
+    if (tab) tab.close();
+    return false;
+  }
 };

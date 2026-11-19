@@ -63,16 +63,16 @@ import {
 } from '../common/video-keyframes';
 import { chapterTitlesByFrame } from '../common/chapters';
 import { clockAnchorsFromFrames } from '../meeting-player/playback-sync';
-import { openDeckTab as defaultOpenDeckTab, printDeck as defaultPrintDeck } from '../common/slide-deck';
+import {
+  loadEveryKeyframe,
+  openDeckTab as defaultOpenDeckTab,
+  printDeck as defaultPrintDeck,
+} from '../common/slide-deck';
 import './VideoTimeline.css';
 
 const logger = new ConsoleLogger('VideoTimeline');
 
 export const PAGE_SIZE = 100;
-// The resolver's largest page, for reading every frame at once for the deck.
-const EXPORT_PAGE_SIZE = 500;
-// A meeting keeps at most 1,000 frames; the bound stops a looping token.
-const MAX_EXPORT_PAGES = 10;
 const RELOAD_AFTER_MS = 60 * 1000;
 
 const defaultLoadFrames = async (variables) => {
@@ -390,17 +390,7 @@ const VideoTimeline = ({
     }
     setExporting(true);
     try {
-      let all = [];
-      let token = null;
-      let pages = 0;
-      do {
-        // eslint-disable-next-line no-await-in-loop
-        const page = await loadFrames({ callId, limit: EXPORT_PAGE_SIZE, nextToken: token, afterFrameId: null });
-        const incoming = page?.VideoKeyframes || [];
-        all = mergeKeyframes(all, incoming);
-        token = (incoming.length && page?.nextToken) || null;
-        pages += 1;
-      } while (token && pages < MAX_EXPORT_PAGES);
+      const all = await loadEveryKeyframe(callId, loadFrames);
       await printDeck(tab, { title: title || callId, frames: all, chapters });
     } catch (e) {
       logger.error('could not export the key frames', e);

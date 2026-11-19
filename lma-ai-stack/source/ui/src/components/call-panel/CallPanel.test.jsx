@@ -1190,25 +1190,50 @@ describe('the Download menu', () => {
   const openMenu = () => fireEvent.click(screen.getByRole('button', { name: 'Download' }));
   const menuItems = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
 
+  // An expandable group positions its submenu against an ancestor that clips
+  // overflow, which jsdom's default styles never give it.
+  const expandGroup = (name) => {
+    [...document.body.children].forEach((child) => {
+      // eslint-disable-next-line no-param-reassign -- the test's own render container
+      child.style.overflow = 'hidden';
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name }));
+  };
+  const GROUPS = ['Summary', 'Transcript', 'Recordings', 'Screen share', 'Chat attachments', 'Everything (.zip)'];
+  const FORMATS = ['Word (.docx)', 'PDF (.pdf)', 'Web page (.html)', 'Markdown (.md)', 'Plain text (.txt)'];
+
+  it('offers each kind of file in its own group', () => {
+    renderPage();
+    openMenu();
+    expect(menuItems()).toEqual(GROUPS);
+  });
+
   it('offers the summary and the transcript in the same formats, and a copy of each as Markdown', () => {
     renderPage();
     openMenu();
+    expandGroup('Summary');
     expect(menuItems()).toEqual([
-      'Markdown (.md)',
-      'Word (.docx)',
-      'PDF (.pdf)',
-      'Web page (.html)',
-      'Plain text (.txt)',
+      'Summary',
+      ...FORMATS,
       'Copy to clipboard (Markdown)',
       'Email summary (beta)',
-      'Markdown (.md)',
-      'Word (.docx)',
-      'PDF (.pdf)',
-      'Web page (.html)',
-      'Plain text (.txt)',
-      'Excel (.xlsx)',
-      'Copy to clipboard (Markdown)',
+      ...GROUPS.slice(1),
     ]);
+    expandGroup('Transcript');
+    const shown = menuItems();
+    const transcript = shown.slice(shown.indexOf('Transcript') + 1, shown.indexOf('Recordings'));
+    expect(transcript).toEqual([...FORMATS, 'Excel (.xlsx)', 'Copy to clipboard (Markdown)']);
+  });
+
+  it('disables the screen share downloads, with the reason, for a meeting nothing was shared in', () => {
+    renderPage();
+    openMenu();
+    expandGroup('Screen share');
+    ['Slides (PDF)', 'Key frames (.zip)'].forEach((name) => {
+      expect(
+        screen.getByRole('menuitem', { name: new RegExp(name.replace(/[()]/g, '\\$&')) }).getAttribute('aria-disabled'),
+      ).toBe('true');
+    });
   });
 
   it('copies the summary as Markdown, and says so', async () => {
@@ -1216,6 +1241,7 @@ describe('the Download menu', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     renderPage();
     openMenu();
+    expandGroup('Summary');
     fireEvent.click(screen.getAllByRole('menuitem', { name: /Copy to clipboard/ })[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0][0]).toMatch(/^# Weekly sync\n/);

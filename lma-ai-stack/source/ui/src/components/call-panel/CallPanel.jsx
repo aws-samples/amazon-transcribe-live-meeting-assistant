@@ -2659,6 +2659,8 @@ export const CallPanel = ({
             consentState={meetingConsent}
             onShowConsent={showConsent}
             callTranscriptPerCallId={callTranscriptPerCallId}
+            keyframeCount={keyframes.count}
+            chapters={chapters}
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             setToolsOpen={setToolsOpen}
             onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}

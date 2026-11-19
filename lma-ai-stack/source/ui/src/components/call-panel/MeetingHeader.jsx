@@ -20,13 +20,14 @@
  *
  * The actions are the meeting's: Assistant, which opens and closes the
  * meeting assistant's panel (when the assistant is enabled), Share, Download
- * (the summary and the transcript, each as Markdown, Word or text, the
- * transcript as Excel too, or copied as Markdown), Diagnose (the troubleshooting
+ * (MeetingDownloadMenu.jsx: the summary and transcript in each format, the
+ * recordings, the screen share, the chat attachments, and everything as one
+ * .zip), Diagnose (the troubleshooting
  * agent's diagnosis of this meeting, for Admins; troubleshooting/DiagnoseButton.jsx)
  * and, under the "more" menu, Delete. Share and Delete are the meeting list's own
  * dialogs (common/meeting-controls.js).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import {
   Badge,
@@ -45,22 +46,12 @@ import {
 import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import { InfoLink } from '../common/info-link';
-import { DONE_STATUS } from '../common/get-recording-status';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import { formatDuration, formatMeetingStart, meetingTitle } from '../common/meeting-header';
 import { consentSummary } from '../common/meeting-context';
-import { parseSummaryState, summaryStatusText } from '../common/summary-state';
 import { CallCostBreakdown, costSummaryText } from './CallCostPanel';
 import { ASSISTANT_PANEL_ID } from './MeetingAssistantPanel';
-import {
-  SUMMARY_ACTION_ITEMS,
-  TRANSCRIPT_DOWNLOAD_ITEMS,
-  runSummaryAction,
-  runTranscriptDownload,
-} from './meeting-downloads';
-
-/** How long the outcome of a copy to the clipboard stays beside the Download menu. */
-const COPIED_VISIBLE_MS = 4000;
+import MeetingDownloadMenu from './MeetingDownloadMenu';
 
 /** How many speakers are named in the header before the rest are counted. */
 export const MAX_SPEAKER_CHIPS = 6;
@@ -132,6 +123,8 @@ const MeetingHeader = ({
   consentState = null,
   onShowConsent = undefined,
   callTranscriptPerCallId,
+  keyframeCount = 0,
+  chapters = [],
   getCallDetailsFromCallIds = undefined,
   setToolsOpen = undefined,
   onShowSpeakers = undefined,
@@ -146,65 +139,6 @@ const MeetingHeader = ({
 
   const title = meetingTitle(item.callId);
   const started = formatMeetingStart(item.initiationTimeStamp);
-  const hasSummary = Boolean(item.callSummaryText);
-  const summaryUnavailableReason =
-    summaryStatusText(parseSummaryState(item.callSummaryState)) || 'This meeting has no summary yet.';
-  // As before the move: a transcript is offered for download once the meeting
-  // has ended, and not after the Retention section has deleted it.
-  const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
-  let transcriptReason;
-  if (item.transcriptDeletedAt) transcriptReason = 'The transcript was deleted.';
-  else if (!canDownloadTranscript) transcriptReason = 'Available once the meeting has ended.';
-
-  const downloadItems = [
-    {
-      text: 'Summary',
-      items: SUMMARY_ACTION_ITEMS.map((entry) => ({
-        ...entry,
-        id: `summary:${entry.id}`,
-        ariaLabel: `Summary: ${entry.text}`,
-        disabled: !hasSummary,
-        disabledReason: hasSummary ? undefined : summaryUnavailableReason,
-      })),
-    },
-    {
-      text: 'Transcript',
-      items: TRANSCRIPT_DOWNLOAD_ITEMS.map((entry) => ({
-        ...entry,
-        id: `transcript:${entry.id}`,
-        ariaLabel: `Transcript: ${entry.text}`,
-        disabled: !canDownloadTranscript,
-        disabledReason: transcriptReason,
-      })),
-    },
-  ];
-
-  // What a copy to the clipboard came to, shown beside the menu for a moment.
-  const [copied, setCopied] = useState(null);
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timer = setTimeout(() => setCopied(null), COPIED_VISIBLE_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  const onDownload = async ({ detail }) => {
-    const [kind, id] = detail.id.split(':');
-    let done = true;
-    if (kind === 'summary') {
-      done = await runSummaryAction(id, item, consent, { participants: speakers.map((speaker) => speaker.label) });
-    } else if (kind === 'transcript') {
-      done = await runTranscriptDownload(id, callTranscriptPerCallId, item, consent);
-    }
-    if (id === 'copy') {
-      const what = kind === 'summary' ? 'Summary' : 'Transcript';
-      setCopied(
-        done
-          ? { type: 'success', text: `${what} copied as Markdown` }
-          : { type: 'error', text: `${what} could not be copied` },
-      );
-    }
-  };
-
   const shownSpeakers = speakers.slice(0, MAX_SPEAKER_CHIPS);
   const hiddenSpeakers = speakers.length - shownSpeakers.length;
 
@@ -234,14 +168,14 @@ const MeetingHeader = ({
                 </ToggleButton>
               )}
               {shareModal({ ...controls, triggerText: 'Share' })}
-              {copied && (
-                <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
-                  <StatusIndicator type={copied.type}>{copied.text}</StatusIndicator>
-                </Box>
-              )}
-              <ButtonDropdown items={downloadItems} onItemClick={onDownload}>
-                Download
-              </ButtonDropdown>
+              <MeetingDownloadMenu
+                item={item}
+                consent={consent}
+                speakers={speakers}
+                callTranscriptPerCallId={callTranscriptPerCallId}
+                keyframeCount={keyframeCount}
+                chapters={chapters}
+              />
               <DiagnoseButton callId={item.callId} resourceLabel={title} />
               <ButtonDropdown
                 variant="icon"
@@ -374,6 +308,11 @@ MeetingHeader.propTypes = {
   onShowConsent: PropTypes.func,
   // eslint-disable-next-line react/forbid-prop-types
   callTranscriptPerCallId: PropTypes.object.isRequired,
+  /** How many key frames the meeting has, for the Screen share downloads. */
+  keyframeCount: PropTypes.number,
+  /** The meeting's chapters, which label the slide deck. */
+  // eslint-disable-next-line react/forbid-prop-types
+  chapters: PropTypes.array,
   getCallDetailsFromCallIds: PropTypes.func,
   setToolsOpen: PropTypes.func,
   onShowSpeakers: PropTypes.func,
