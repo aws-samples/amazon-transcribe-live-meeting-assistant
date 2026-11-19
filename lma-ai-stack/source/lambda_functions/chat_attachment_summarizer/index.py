@@ -32,7 +32,12 @@ from typing import Any, Dict, Optional
 
 import boto3
 import pure
-from bedrock_compat import build_inference_config, extract_text
+from bedrock_compat import (
+    TRUNCATED_STOP_REASON,
+    additional_request_fields,
+    build_inference_config,
+    extract_text,
+)
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -59,8 +64,17 @@ ATTACHMENTS_PREFIX = os.environ.get("ATTACHMENTS_PREFIX", "lma-chat-attachments/
 FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-#: Room for a title and two sentences of JSON.
-MAX_OUTPUT_TOKENS = 400
+#: The output budgets, first try and retry. The answer itself is a title and
+#: two sentences of JSON, under 150 tokens, but a reasoning model (the meeting
+#: assistant's model may be one) spends its reasoning from the same budget
+#: before it writes anything: at 400 a Claude 5 model was seen to stop at the
+#: ceiling with no answer. maxTokens is a ceiling, not a reservation, so a model
+#: that does not reason is billed for its short answer whichever is offered.
+MAX_OUTPUT_TOKENS = 2048
+RETRY_OUTPUT_TOKENS = 8192
+#: Asked of the models that take a reasoning effort: naming and summarizing one
+#: file needs little reasoning.
+REASONING_EFFORT = "low"
 
 #: The context the model call is metered under, in the meeting's cost estimate.
 METERING_CONTEXT = "ChatAttachments"
@@ -136,11 +150,10 @@ def record(call_id: str, attachment_id: str, state: str, extra: Dict[str, str]) 
     return state.lower()
 
 
-def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id: str, model: str):
-    """The attachment's title and summary, from the model, metered against the meeting."""
-    response = BEDROCK.converse(
-        modelId=model,
-        messages=[
+def _converse(content_type: str, file_name: Optional[str], body: bytes, model: str, budget: int):
+    request: Dict[str, Any] = {
+        "modelId": model,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -149,12 +162,50 @@ def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id:
                 ],
             }
         ],
-        inferenceConfig=build_inference_config(model, MAX_OUTPUT_TOKENS),
-    )
-    METERING.record(
-        call_id, METERING_CONTEXT, bedrock_service(model), bedrock_usage(response.get("usage"))
-    )
-    return pure.read_answer(extract_text(response))
+        "inferenceConfig": build_inference_config(model, budget),
+    }
+    extra = additional_request_fields(model, REASONING_EFFORT)
+    if extra:
+        request["additionalModelRequestFields"] = extra
+    return BEDROCK.converse(**request)
+
+
+def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id: str, model: str):
+    """The attachment's title and summary, from the model, metered against the meeting.
+
+    An answer cut off at the output budget, and an answer with no text at all,
+    is asked for once more with a larger budget. Each call is metered. A second
+    failure raises ValueError, as any answer without a title or summary does.
+    """
+    for attempt, budget in enumerate((MAX_OUTPUT_TOKENS, RETRY_OUTPUT_TOKENS)):
+        response = _converse(content_type, file_name, body, model, budget)
+        METERING.record(
+            call_id, METERING_CONTEXT, bedrock_service(model), bedrock_usage(response.get("usage"))
+        )
+        # Worth asking again: an answer cut off at the budget, or one with no
+        # text at all (a reasoning model that spent the budget reasoning).
+        retry = response.get("stopReason") == TRUNCATED_STOP_REASON
+        try:
+            text = extract_text(response)
+        except ValueError:
+            if attempt:
+                raise
+            retry = True
+            text = ""
+        if text or not retry:
+            try:
+                return pure.read_answer(text)
+            except ValueError:
+                if not retry or attempt:
+                    raise
+        LOGGER.warning(
+            "The answer for a chat attachment of %s was cut off or empty at %d output "
+            "tokens; asking once more with %d",
+            call_id,
+            budget,
+            RETRY_OUTPUT_TOKENS,
+        )
+    raise ValueError("no answer within the output budget")  # not reached
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:

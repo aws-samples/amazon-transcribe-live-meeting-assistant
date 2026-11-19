@@ -5338,8 +5338,9 @@ Resources:
       Description: Gives a stored chat attachment its AI title and summary, once
       # Up to a 4.5 MB document read into memory and sent to the model.
       MemorySize: 512
-      # One object read and one model call.
-      Timeout: 120
+      # One object read and up to two model calls (a retry with a larger
+      # output budget when the first answer is cut off).
+      Timeout: 240
       Tracing: Active
       # An attachment whose summary could not be written keeps none; the
       # function is not run again for it, so a model call is never repeated

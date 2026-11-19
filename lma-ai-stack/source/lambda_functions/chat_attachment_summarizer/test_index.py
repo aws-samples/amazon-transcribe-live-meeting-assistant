@@ -115,11 +115,15 @@ class FakeBedrock:
         self.answer = answer
         self.calls: List[Dict[str, Any]] = []
         self.error = None
+        #: Responses returned before the normal one, in order (a cut-off answer, say).
+        self.first: List[Dict[str, Any]] = []
 
     def converse(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
+        if self.first:
+            return self.first.pop(0)
         return {
             "output": {"message": {"content": [{"text": self.answer}]}},
             "usage": {"inputTokens": 1500, "outputTokens": 40, "totalTokens": 1540},
@@ -281,3 +285,62 @@ def test_the_fallback_model_is_the_meeting_assistants_shipped_default():
         ).read_text()
     )
     assert index.FALLBACK_MODEL_ID == defaults["language_models"]["meetingAssistModelId"]["default"]
+
+
+# ── an answer cut off at the output budget ──────────────────────────────────
+
+#: What a reasoning model returns when it spent the whole budget reasoning.
+REASONED_ONLY = {
+    "output": {"message": {"content": [{"reasoningContent": {"reasoningText": {"text": "..."}}}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "max_tokens",
+}
+#: An answer cut off part way through its JSON.
+CUT_OFF = {
+    "output": {"message": {"content": [{"text": '{"title": "Rollout'}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "max_tokens",
+}
+
+
+@pytest.mark.parametrize("first", [REASONED_ONLY, CUT_OFF], ids=["no text", "cut off"])
+def test_an_answer_cut_off_at_the_budget_is_asked_for_once_more_with_a_larger_one(fakes, first):
+    bedrock = FakeBedrock()
+    bedrock.first = [first]
+    dynamo, _s3, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "done"}
+    budgets = [call["inferenceConfig"]["maxTokens"] for call in bedrock.calls]
+    assert budgets == [index.MAX_OUTPUT_TOKENS, index.RETRY_OUTPUT_TOKENS]
+    assert index.RETRY_OUTPUT_TOKENS > index.MAX_OUTPUT_TOKENS
+    assert len(metering.records) == 2, "both calls are metered"
+    assert "Whiteboard sketch" in _values(dynamo.updates[0]).values()
+
+
+def test_a_second_cut_off_answer_marks_the_attachment_failed_after_two_calls(fakes):
+    bedrock = FakeBedrock()
+    bedrock.first = [REASONED_ONLY, REASONED_ONLY]
+    dynamo, _s3, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "no answer"}
+    assert len(bedrock.calls) == 2 and len(metering.records) == 2
+    assert "FAILED" in _values(dynamo.updates[0]).values()
+
+
+def test_an_answer_that_was_not_cut_off_is_not_asked_for_again(fakes):
+    dynamo, _s3, bedrock, metering = fakes(bedrock=FakeBedrock("no json here"))
+    assert index.handler(dict(EVENT), None)["reason"] == "no answer"
+    assert len(bedrock.calls) == 1 and len(metering.records) == 1
+
+
+def test_a_reasoning_model_is_asked_for_a_low_effort_and_others_get_no_effort(fakes, monkeypatch):
+    _d, _s, bedrock, _m = fakes()
+    index.handler(dict(EVENT), None)
+    assert bedrock.calls[0]["additionalModelRequestFields"] == {"output_config": {"effort": "low"}}
+
+    _d, _s, bedrock, _m = fakes()
+    monkeypatch.setattr(index, "model_id", lambda: "amazon.nova-lite-v1:0")
+    index.handler(dict(EVENT), None)
+    assert "additionalModelRequestFields" not in bedrock.calls[0]
+
+
+def test_the_first_budget_leaves_room_for_reasoning():
+    assert index.MAX_OUTPUT_TOKENS >= 2048
