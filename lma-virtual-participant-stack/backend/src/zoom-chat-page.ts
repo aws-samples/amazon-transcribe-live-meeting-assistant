@@ -28,7 +28,8 @@
  * row is then read with no image. So a row is watched for `watchMs` after it is
  * first read, and an attachment that appears on it meanwhile is returned once,
  * in `late`, to be added to the chat line the row became. An image is not
- * taken until it has its `blob:` address.
+ * taken until it has its `blob:` address; one still without it when the window
+ * closes is returned then, with no address, so it is recorded by name.
  *
  * Nothing here imports Playwright: the in-page functions are passed whole to
  * page.evaluate, and the rest is plain logic, so both are unit-tested.
@@ -137,12 +138,12 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
     const state: {
         seen: Set<string>;
         listFirstSeenAt: number | null;
-        watched?: Map<string, { at: number; attachments: Set<string> }>;
+        watched?: Map<string, { at: number; attachments: Set<string>; row: { label: string; id: string | null; messageId: string | null }; unloaded: Map<number, string> }>;
     } = (w.__lmaZoomChat ||= {
         seen: new Set<string>(),
         listFirstSeenAt: null,
     });
-    const watched = (state.watched ||= new Map<string, { at: number; attachments: Set<string> }>());
+    const watched = (state.watched ||= new Map<string, { at: number; attachments: Set<string>; row: { label: string; id: string | null; messageId: string | null }; unloaded: Map<number, string> }>());
     let list: Element | null = null;
     for (const s of sels.lists) {
         list = document.querySelector(s);
@@ -151,8 +152,19 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
     if (!list) return { listFound: false, baseline: state.listFirstSeenAt === null, rows: [], late: [] };
     const now = Date.now();
     const watchMs = sels.watchMs ?? 0;
+    const late: ZoomChatRaw[] = [];
+    // A row whose window has closed: an image it still shows without a blob:
+    // address never loaded, and is returned by name, with no address.
     for (const [key, entry] of watched) {
-        if (now - entry.at >= watchMs) watched.delete(key);
+        if (now - entry.at < watchMs) continue;
+        watched.delete(key);
+        if (entry.unloaded.size) {
+            late.push({
+                ...entry.row,
+                links: [],
+                attachments: Array.from(entry.unloaded, ([index, name]) => ({ kind: 'image' as const, name, src: '', index })),
+            });
+        }
     }
     const firstRead = state.listFirstSeenAt === null;
     if (firstRead) state.listFirstSeenAt = now;
@@ -164,6 +176,16 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
     }
     // A row's attachments as they are now. An image is taken only once Zoom has
     // given it its blob: address: until then it is still being uploaded.
+    // The images of a row that do not have their blob: address yet, by position.
+    const unloadedIn = (scope: Element): Map<number, string> => {
+        const found = new Map<number, string>();
+        if (!sels.imagePreview) return found;
+        Array.from(scope.querySelectorAll(sels.imagePreview)).forEach((img, index) => {
+            const src = (img as HTMLImageElement).currentSrc || img.getAttribute('src') || '';
+            if (!/^blob:/i.test(src)) found.set(index, (img.getAttribute('alt') || '').trim());
+        });
+        return found;
+    };
     const attachmentsIn = (scope: Element): ZoomChatAttachmentRaw[] => {
         const found: ZoomChatAttachmentRaw[] = [];
         if (sels.imagePreview) {
@@ -185,7 +207,6 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
     };
     const attachmentKey = (a: ZoomChatAttachmentRaw): string => (a.kind === 'image' ? `img:${a.src}` : `file:${a.index}:${a.name}`);
     const out: ZoomChatRaw[] = [];
-    const late: ZoomChatRaw[] = [];
     for (const row of rows) {
         const label = (row.getAttribute('aria-label') || '').trim();
         // No label yet: the row is filled in by a later render, so it is not
@@ -202,6 +223,7 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
             // since (a pasted image finishing its upload after the text).
             const entry = watched.get(key);
             if (!entry) continue;
+            entry.unloaded = unloadedIn(scope);
             const added = attachmentsIn(scope).filter((a) => !entry.attachments.has(attachmentKey(a)));
             if (!added.length) continue;
             added.forEach((a) => entry.attachments.add(attachmentKey(a)));
@@ -215,7 +237,14 @@ export function readZoomChatInPage(sels: ZoomChatSelectors & { settleMs: number 
             .map((a) => (a as HTMLAnchorElement).href)
             .filter(Boolean);
         const attachments = attachmentsIn(scope);
-        if (watchMs > 0) watched.set(key, { at: now, attachments: new Set(attachments.map(attachmentKey)) });
+        if (watchMs > 0) {
+            watched.set(key, {
+                at: now,
+                attachments: new Set(attachments.map(attachmentKey)),
+                row: { label, id, messageId },
+                unloaded: unloadedIn(scope),
+            });
+        }
         out.push({ label, id, links, messageId, ...(attachments.length ? { attachments } : {}) });
     }
     return { listFound: true, baseline, rows: out, late };

@@ -37,6 +37,7 @@ test_lma_integration.py, and can be run standalone:
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -175,8 +176,6 @@ class ChatProbe:
 
     def attachment_folder(self) -> str:
         """The meeting's attachments folder, named as chat-attachments.ts names it."""
-        import re
-
         name = re.sub(r"_+$", "", re.sub(r"^_+", "", re.sub(r"[^a-zA-Z0-9_.]", "_", self.call_id)))
         return f"{ATTACHMENTS_PREFIX}{name}/"
 

@@ -51,7 +51,7 @@ import {
     TEAMS_ATTACHMENT_SELECTORS,
     teamsAttachmentChats,
 } from './chat-attachments-page.js';
-import { IncomingChat, LATE_ATTACHMENT_WINDOW_MS, MeetingChatCapture, chatTranscriptWithAttachments } from './meeting-chat.js';
+import { IncomingChat, LATE_ATTACHMENT_GRACE_MS, LATE_ATTACHMENT_WINDOW_MS, MeetingChatCapture, chatTranscriptWithAttachments } from './meeting-chat.js';
 import { OwnChatLedger } from './meeting-chat.js';
 import type { TranscriptSegment } from './kinesis-stream.js';
 import { captureLogs, setLogLevel } from './logger.js';
@@ -480,10 +480,18 @@ test('an attachment that appears after its message was added is added to the sam
 test('a late attachment is not taken once the message’s window has passed', () => {
     const h = chatHarness();
     h.offer({ id: 'm1', text: 'see below' });
-    h.state.now += LATE_ATTACHMENT_WINDOW_MS + 1;
+    h.state.now += LATE_ATTACHMENT_WINDOW_MS + LATE_ATTACHMENT_GRACE_MS + 1;
     assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'see below', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'duplicate');
     assert.deepEqual(h.taken, []);
     assert.equal(h.sent.length, 1);
+});
+
+test('an image the page reports as never loaded when its window closes is still recorded on its line', () => {
+    const h = chatHarness();
+    h.offer({ id: 'm1', text: 'here' });
+    h.state.now += LATE_ATTACHMENT_WINDOW_MS + 2_000;
+    assert.equal(h.capture.offerLateAttachments({ platform: 'zoom', id: 'm1', text: 'here', sender: 'Bo Chen', audience: 'everyone', attachments: [SHOT] }), 'attachments-added');
+    assert.equal(h.taken.length, 1);
 });
 
 test('a late attachment is not taken while the meeting is paused, nor for a message left out', () => {

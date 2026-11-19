@@ -576,6 +576,30 @@ test('a row is no longer watched for attachments once its window has passed', ()
     });
 });
 
+test('an image that never loads within the window is returned once the window closes, with no address, to be recorded by name', () => {
+    withClock((clock) => {
+        withPage((page) => {
+            const { panel, list } = chatPanel(message(0, 'm-intro', INTRO));
+            page.body.append(panel);
+            page.read(0, 60_000);
+            list.append(
+                message(1, 'm-stuck', 'Alice Example to Everyone, 4:20 PM, here', {
+                    extra: [el('img', { class: 'chat-image-preview-img', src: '', alt: 'stuck.png' })],
+                }),
+            );
+            assert.equal(page.read(0, 60_000).rows[0].attachments, undefined);
+            clock.now += 30_000;
+            assert.deepEqual(page.read(0, 60_000).late, []);
+            clock.now += 31_000;
+            const closed = page.read(0, 60_000).late;
+            assert.equal(closed?.length, 1);
+            assert.equal(closed?.[0].messageId, 'm-stuck');
+            assert.deepEqual(closed?.[0].attachments, [{ kind: 'image', name: 'stuck.png', src: '', index: 0 }]);
+            assert.deepEqual(page.read(0, 60_000).late, [], 'and only once');
+        });
+    });
+});
+
 test('rows are not watched for late attachments unless asked to be', () => {
     withPage((page) => {
         const { panel, list } = chatPanel(message(0, 'm-intro', INTRO));

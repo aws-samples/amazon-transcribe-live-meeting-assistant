@@ -1153,7 +1153,9 @@ shown while it is still uploading, and its image arrives a few seconds later.
 So the VP keeps watching each message it added for 60 seconds, and an
 attachment that appears on it in that time is added to the same line (the line
 is written again with the attachment named) and stored like the others. An
-image is taken only once the platform has loaded it.
+image is taken only once the platform has loaded it; on Zoom, one that has not
+loaded when the 60 seconds are up is recorded by name. On Teams a message's
+attachments have a line of their own, so a late image joins that line.
 
 ### What is stored
 
@@ -1191,7 +1193,7 @@ Converse has no document format for, an image over 3.75 MB and a document over
 low reasoning effort where it takes one, and is given room for its reasoning as
 well as the answer (2,048 output tokens); an answer cut off at that ceiling, or
 one with no text, is asked for once more with 8,192, and both calls are
-metered. A model that reads no
+metered. Each call may take up to 55 seconds to answer. A model that reads no
 images or documents (Amazon Nova Micro) gives no title, and the attachment is
 shown by its file name. The model is told that
 the file name and the content are material to describe, not instructions; the

@@ -5339,12 +5339,14 @@ Resources:
       # Up to a 4.5 MB document read into memory and sent to the model.
       MemorySize: 512
       # One object read and up to two model calls (a retry with a larger
-      # output budget when the first answer is cut off).
+      # output budget when the first answer is cut off), each with a bounded
+      # read timeout (READ_TIMEOUT_SECONDS in index.py).
       Timeout: 240
       Tracing: Active
-      # An attachment whose summary could not be written keeps none; the
-      # function is not run again for it, so a model call is never repeated
-      # and metered twice.
+      # Lambda does not run the function again for an attachment whose summary
+      # could not be written, so no invocation repeats the model calls. The
+      # function's own single retry with a larger budget is deliberate, and
+      # both calls are metered.
       EventInvokeConfig:
         MaximumRetryAttempts: 0
       Environment:

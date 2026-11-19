@@ -117,6 +117,12 @@ export const MAX_SEEN_IDS = 5000;
  * uploading after the message's text is shown.
  */
 export const LATE_ATTACHMENT_WINDOW_MS = 60_000;
+/**
+ * How much longer than the window a line is kept for late attachments: a
+ * reader returns an image that never loaded when the window closes, at its
+ * first read after that, and it is still to be recorded by name on its line.
+ */
+export const LATE_ATTACHMENT_GRACE_MS = 30_000;
 /** Lines remembered for late attachments, oldest forgotten first. */
 const MAX_LATE_LINES = 500;
 /**
@@ -487,7 +493,7 @@ export class MeetingChatCapture {
     /**
      * Attachments that appeared on a message after it was offered (a pasted
      * image that finished uploading after its text was read). When the message
-     * was added, within `LATE_ATTACHMENT_WINDOW_MS`, its line is written again
+     * was added, within `LATE_ATTACHMENT_WINDOW_MS` (and its grace), its line is written again
      * with the attachments named, under the same segment id, and they are
      * handed over as the message's own would have been. A message not offered
      * before, or one offered with no text and nothing attached (left out as
@@ -499,7 +505,7 @@ export class MeetingChatCapture {
         if (!attachments.length) return 'empty';
         const at = this.now();
         for (const [key, line] of this.lines) {
-            if (at - line.addedAt >= LATE_ATTACHMENT_WINDOW_MS) this.lines.delete(key);
+            if (at - line.addedAt >= LATE_ATTACHMENT_WINDOW_MS + LATE_ATTACHMENT_GRACE_MS) this.lines.delete(key);
         }
         const line = chat.id ? this.lines.get(`${chat.platform}:${chat.id}`) : undefined;
         if (!line) return this.offer(chat);

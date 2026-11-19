@@ -344,3 +344,46 @@ def test_a_reasoning_model_is_asked_for_a_low_effort_and_others_get_no_effort(fa
 
 def test_the_first_budget_leaves_room_for_reasoning():
     assert index.MAX_OUTPUT_TOKENS >= 2048
+
+
+#: A text block with nothing in it, at the budget.
+EMPTY_TEXT = {
+    "output": {"message": {"content": [{"text": ""}]}},
+    "usage": {"inputTokens": 1500, "outputTokens": 2048},
+    "stopReason": "end_turn",
+}
+
+
+def test_an_empty_text_block_is_asked_for_once_more(fakes):
+    bedrock = FakeBedrock()
+    bedrock.first = [EMPTY_TEXT]
+    _d, _s, _b, metering = fakes(bedrock=bedrock)
+    assert index.handler(dict(EVENT), None) == {"status": "done"}
+    assert len(bedrock.calls) == 2 and len(metering.records) == 2
+
+
+def test_no_third_call_is_announced_or_made_after_the_retry(fakes, caplog):
+    bedrock = FakeBedrock()
+    bedrock.first = [EMPTY_TEXT, EMPTY_TEXT]
+    fakes(bedrock=bedrock)
+    with caplog.at_level("WARNING"):
+        assert index.handler(dict(EVENT), None)["reason"] == "no answer"
+    assert len(bedrock.calls) == 2
+    assert sum("asking once more" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_the_model_calls_fit_the_functions_timeout():
+    """Two calls, each of at most CALL_ATTEMPTS attempts of the read timeout, within 240 s."""
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    template = HERE.parents[2] / "deployment" / "lma-ai-stack.yaml"
+    resources = yaml.load(template.read_text(), Loader=Loader)["Resources"]
+    timeout = resources["ChatAttachmentSummarizerFunction"]["Properties"]["Timeout"]
+    assert 2 * index.CALL_ATTEMPTS * index.READ_TIMEOUT_SECONDS < timeout
+    config = index.BEDROCK.meta.config
+    assert config.read_timeout == index.READ_TIMEOUT_SECONDS
+    assert config.retries["total_max_attempts"] == index.CALL_ATTEMPTS

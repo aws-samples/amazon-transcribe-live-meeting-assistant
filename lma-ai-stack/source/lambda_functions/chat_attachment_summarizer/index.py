@@ -84,11 +84,24 @@ DONE, FAILED, SKIPPED = "DONE", "FAILED", "SKIPPED"
 CLIENT_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 3})
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
 S3 = boto3.client("s3", config=CLIENT_CONFIG)
-# As the key frame text extractor: inference profiles throttle in bursts.
+#: Seconds a model call may take to answer, and the attempts botocore makes for
+#: one call, the first included. The key frame text extractor allows 50
+#: attempts for bursts of throttling, but botocore retries a read timeout the
+#: same way, and a retried call is a model call the metering never sees. So the
+#: attempts are few, sized with the read timeout to fit the function's timeout
+#: (240 s in the template): two calls (the second with the larger budget), each
+#: of at most CALL_ATTEMPTS attempts of READ_TIMEOUT_SECONDS. A call still
+#: throttled after them marks the attachment FAILED.
+READ_TIMEOUT_SECONDS = 55
+CALL_ATTEMPTS = 2
 BEDROCK = boto3.client(
     "bedrock-runtime",
     region_name=REGION,
-    config=Config(retries={"mode": "adaptive", "max_attempts": 50}),
+    config=Config(
+        connect_timeout=5,
+        read_timeout=READ_TIMEOUT_SECONDS,
+        retries={"mode": "adaptive", "total_max_attempts": CALL_ATTEMPTS},
+    ),
 )
 METERING = MeteringWriter(source="chat-attachment-summarizer")
 
@@ -183,21 +196,23 @@ def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id:
             call_id, METERING_CONTEXT, bedrock_service(model), bedrock_usage(response.get("usage"))
         )
         # Worth asking again: an answer cut off at the budget, or one with no
-        # text at all (a reasoning model that spent the budget reasoning).
+        # text (a reasoning model that spent the budget reasoning, or an empty
+        # text block).
         retry = response.get("stopReason") == TRUNCATED_STOP_REASON
         try:
             text = extract_text(response)
         except ValueError:
-            if attempt:
-                raise
-            retry = True
             text = ""
-        if text or not retry:
+        if not text.strip():
+            retry = True
+        else:
             try:
                 return pure.read_answer(text)
             except ValueError:
-                if not retry or attempt:
+                if not retry:
                     raise
+        if attempt:
+            raise ValueError("no title or summary within the larger output budget")
         LOGGER.warning(
             "The answer for a chat attachment of %s was cut off or empty at %d output "
             "tokens; asking once more with %d",
@@ -205,7 +220,7 @@ def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id:
             budget,
             RETRY_OUTPUT_TOKENS,
         )
-    raise ValueError("no answer within the output budget")  # not reached
+    raise ValueError("no title or summary within the output budget")
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
