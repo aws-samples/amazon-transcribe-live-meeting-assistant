@@ -159,7 +159,7 @@ assistant is a panel beside the tabs, on every tab; see
 - **Share**, **Download** and the **⋮** menu — **Download** is the one place a
   meeting is taken away from. It offers the summary and, once the meeting has
   ended, the transcript, each as **Markdown (.md)**, **Word (.docx)**, **PDF
-  (.pdf)** and **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
+  (.pdf)**, **Web page (.html)** and **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each can
   be copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
   header confirms the copy). The summary can also be sent with **Email summary
   (beta)**. See [Transcript Downloads](#transcript-downloads). **Delete
@@ -192,7 +192,8 @@ recording that began before transcription can be longer than either.
   **Regenerate** and **Edit**; its downloads are in the header's **Download**
   menu. Each section of the summary (**SUMMARY**, **DETAILS**, **ACTIONS**,
   **SCREEN SHARE SUMMARY** and so on, one per prompt template) opens and closes
-  on its own. A line of links above them opens a section and moves to it, with
+  on its own. The sections are listed in the
+  [reading order](#summary-section-order) the downloads use. A line of links above them opens a section and moves to it, with
   **Expand all** and **Collapse all** beside it. **SUMMARY** starts open and the
   others closed; the sections you open or close are remembered in your browser,
   by section name, for every meeting. A summary edited by hand is split into
@@ -205,8 +206,9 @@ recording that began before transcription can be longer than either.
   meeting whose frames have not loaded on the strip, the full-size picture); a
   frame that can no longer be read shows as its caption. The **CHAPTERS**
   section is shown once, as the **Chapters** list beside the summary, and the
-  **AGENDA COVERAGE** section under the agenda it describes. Downloads and copies
-  of the summary still include every section. See
+  **AGENDA COVERAGE** section under the agenda it describes. Every download and
+  copy of the summary still includes every section, these two and any custom
+  section among them. See
   [Transcript Summarization](transcript-summarization.md).
 - **Chapters** — the meeting's chapters; selecting one opens the **Transcript**
   tab at its time and, after the meeting, plays the recording from there in the
@@ -583,18 +585,72 @@ page's header once the meeting has ended:
 - **Word (.docx)** — Word document format
 - **PDF (.pdf)** — the Word transcript's content, with the meeting's ID, date
   and duration at the top and its consent record at the end when it has one
+- **Web page (.html)** — the PDF's content as one self-contained web page
+  (see [The web page download](#the-web-page-download))
 - **Plain text (.txt)** — Plain text format
 - **Excel (.xlsx)** — Spreadsheet format with structured columns
 - **Copy to clipboard (Markdown)** — the Markdown document, copied
 
-The summary is offered in the same formats (Excel aside): Markdown, Word and PDF
-keep its sections as headings, and the consent record is at the end when the
-meeting has one. In the Word and PDF files each picture of the shared screen is
-a thumbnail, under its title and time; in Markdown and plain text it is written
-as its caption. At most 40 thumbnails are embedded, and a picture that cannot be
+The summary is offered in the same formats (Excel aside): Markdown, Word, PDF
+and the web page keep its sections as headings, and the consent record is at
+the end when the meeting has one. Every format holds every section the summary
+has, including **CHAPTERS**, **AGENDA COVERAGE** and the sections of custom
+prompt templates, in the order below. The meeting's name, date, participants
+(the speakers the page's header lists) and duration come first. In the Word, PDF
+and web page files each picture of the shared screen is a thumbnail, under its
+title and time; in Markdown and plain text it is written as its caption. At most 40 thumbnails are embedded, and a picture that cannot be
 fetched (its meeting's retention has removed it, for example) is written as its
 caption, so the download still completes. See
 [Meeting Video](meeting-video.md).
+
+### Summary section order
+
+The Summary tab and every summary download (Markdown and its copy, Word, PDF, web
+page, plain text and email) put the sections in this order:
+
+1. **SUMMARY**
+2. **ACTIONS**
+3. **AGENDA COVERAGE**
+4. **DETAILS**
+5. **CHAPTERS**
+6. **SCREEN SHARE SUMMARY** (**SLIDES PRESENTED** in a summary written by a
+   0.4.0 pre-release)
+7. **CHAT & SHARED LINKS**
+8. Any other section, such as one from a custom prompt template, in the order
+   of the prompt templates
+
+A section is recognised by its name, whatever its case, spacing or punctuation
+(`Action Items`, `chat_and_shared_links` and `**Chapters:**` are all
+recognised), and by a few common rewordings. A summary edited by hand is split
+at its headings and ordered the same way. In its plain-text download and email
+each section keeps its heading line as written, and a summary whose sections
+are already in this order is written exactly as it was typed.
+
+### The web page download
+
+**Web page (.html)** saves one file that opens in any browser, with nothing
+else to keep beside it:
+
+- Its styles are inside the file. It has no script, and loads no font,
+  stylesheet or picture from anywhere; its Content-Security-Policy tells the
+  browser so as well.
+- Each picture of the shared screen is embedded in the file, from the same
+  thumbnails as the Word and PDF downloads (at most 40; the others are written as
+  their caption).
+- A list of the sections at the top links to each one, and each section can be
+  closed and opened again. Sections start open, so the page prints whole, and
+  the page is laid out to print cleanly.
+- The summary's Markdown is shown as the Summary tab shows it (headings, lists,
+  emphasis, code and quotes). HTML in the summary's text is shown as text. A key
+  frame is the only picture; any other picture is shown as its caption. Links
+  to web pages and email addresses open in a new tab, and any other kind of link
+  is shown as its text alone.
+
+The transcript's web page lists each segment as the other transcript downloads
+do, with the consent record at the end when the meeting has one.
+
+A web page is suggested over a single-file web archive (MHTML), which opens
+properly only in Chromium-based browsers.
 
 The PDF files are built in the browser, and their text can be selected and
 searched. They are set in the standard PDF fonts, which cover Western European
