@@ -48,6 +48,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Status: CallStatus
 	RecordingUrl: String
 	VideoRecordingUrl: String
+	# Every recording link the meeting has been given, oldest first, written
+	# beside RecordingUrl and VideoRecordingUrl (which name the latest). A
+	# meeting continued by a Virtual Participant rejoin has one file per
+	# session; deleting the meeting deletes every one. Absent on a meeting
+	# recorded before they were kept.
+	RecordingUrls: [String]
+	VideoRecordingUrls: [String]
 	TotalConversationDurationMillis: Float
 	AgentId: String
 	Metadatajson: String

@@ -25,6 +25,20 @@ $util.qr( $ctx.args.input.put("UpdatedAt", $UpdatedAt ) )
         #end
     #end
 #end
+## Every recording link a meeting has been given, kept beside the current one:
+## a meeting continued by a Virtual Participant rejoin is recorded in one file
+## per session, and the link above names the latest only. Deleting the meeting
+## reads these lists to delete every session's files. A redelivered update can
+## append a link twice; the deletion reads each link once.
+#foreach( $field in ["RecordingUrl", "VideoRecordingUrl"] )
+    #if( !$util.isNullOrBlank($ctx.args.input.get($field)) && !${expSet.isEmpty()} )
+        #set( $listName = "${field}s" )
+        #set( $expression = "${expression}, #${listName} = list_append(if_not_exists(#${listName}, :emptyList), :${listName})" )
+        $util.qr( $expNames.put("#${listName}", "${listName}") )
+        $util.qr( $expValues.put(":${listName}", $util.dynamodb.toDynamoDB([$ctx.args.input.get($field)])) )
+        $util.qr( $expValues.put(":emptyList", $util.dynamodb.toDynamoDB([])) )
+    #end
+#end
 {
   "version" : "2018-05-29",
   "operation" : "UpdateItem",
