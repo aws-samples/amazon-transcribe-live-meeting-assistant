@@ -220,6 +220,38 @@ test('nova: an addressed set_mode is confirmed, then switched once the confirmat
     assert.ok(logs.some((l) => l === '[voice-mode] action=switch after=confirmed'));
 });
 
+test('nova: in wake-phrase assistant mode a set_mode asked for by name is acted on', async () => {
+    const { a } = nova('normal', 'wake_phrase');
+    // Activated long enough ago that the wake phrase no longer counts.
+    a.lastAddressedAt = Date.now() - 60_000;
+    a.replyGate.noteActivated(Date.now() - 60_000);
+    await stream(a, [...userTurn('alex switch to translator mode'), ...setMode('translator')]);
+    assert.equal(toolResults(a)[0].status, 'applied');
+    assert.notEqual(a.session.dropTurn, true, 'the confirmation would not be heard');
+});
+
+test('nova: a refused set_mode reply stays withheld when the participants transcript arrives after it', async () => {
+    const { a, requests, played } = nova('normal', 'wake_phrase');
+    a.lastAddressedAt = Date.now() - 60_000;
+    a.replyGate.noteActivated(Date.now() - 60_000);
+    // Nova heard only the second half of "Alex, switch to translator mode" and called the tool.
+    await stream(a, [...userTurn('switch to translator mode'), ...setMode('translator')]);
+    assert.equal(toolResults(a)[0].status, 'not_done');
+    a.noteParticipantUtterance('Alex, switch to translator mode.');
+    await stream(a, spoken());
+    assert.equal(played.length, 0, 'the reply after the refusal was heard');
+    assert.equal(requests.length, 0);
+});
+
+test('nova: outside wake-phrase assistant mode an unaddressed set_mode drops only that audio turn', async () => {
+    const { a, played } = nova('normal', 'always_active');
+    await stream(a, [...userTurn('we should try translator mode next week'), ...setMode('translator'), ...spoken()]);
+    assert.equal(played.length, 0);
+    // A later answer without a new participant turn in between is heard.
+    await stream(a, spoken());
+    assert.equal(played.length, 1);
+});
+
 test('nova: the switch is made anyway if no confirmation is spoken', async () => {
     const { a, requests } = nova();
     a.VOICE_MODE_SWITCH_MAX_WAIT_MS = 10;

@@ -104,6 +104,7 @@ def test_the_meeting_record_is_kept_when_its_recording_is_not_deleted(monkeypatc
     monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
     monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
     monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: 0)
+    monkeypatch.setattr(index, "delete_meeting_guidance", lambda callid: 0)
     executed = []
 
     class _Session:

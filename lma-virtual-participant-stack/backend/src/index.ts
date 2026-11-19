@@ -61,6 +61,7 @@ import { bindLogContext, createLogger, logMeetingPlatform } from './logger.js';
 import { meetingConsent, prepareMeetingConsent } from './consent-runtime.js';
 import { leaveWithinBudget, shouldLeaveAfterExit } from './meeting-leave.js';
 import { MeetingTeardown } from './meeting-teardown.js';
+import { noteMeetingOver } from './meeting-phase.js';
 
 const log = createLogger('main');
 
@@ -1010,6 +1011,8 @@ const main = async (): Promise<void> => {
             }
         };
         exitInfo = await Promise.race([joinMeeting(), pageCrashLatch]);
+        // The meeting is over for the VP: the dialog watchdog stands down.
+        noteMeetingOver();
 
         const exitDetailParts = [
             `reason=${exitInfo.reason}`,

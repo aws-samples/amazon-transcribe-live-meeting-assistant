@@ -21,6 +21,13 @@
  *                                  the VP is in the meeting, and only when
  *                                  the model says a human is needed; once it
  *                                  has joined, left alone (dialog-decision.ts).
+ *   - a removal or meeting-ended notice (classified BLOCKED or OTHER) → the
+ *                                  end of the meeting, never a manual action;
+ *                                  the handler is told through onMeetingOver.
+ *
+ * Once the meeting is over for the VP (meeting-phase.ts meetingOver: it has
+ * ended, or its teardown has begun), the watchdog stands down: it classifies
+ * nothing, and a classification already under way escalates nothing.
  *
  * Used by every platform handler (Zoom, Teams, Webex, Chime, Google Meet). The
  * platform-specific dialog selectors are passed in so we cover platform-
@@ -28,14 +35,14 @@
  * for Teams, etc.).
  */
 import { Page } from 'playwright-core';
-import { meetingJoined } from './meeting-phase.js';
+import { meetingJoined, meetingOver } from './meeting-phase.js';
 import {
     analyzeUnknownDialog,
     isResolverEnabled,
     readActionText,
     scrollIntoViewAndClick,
 } from './ai-dom-resolver.js';
-import { details } from './details.js';
+import { details, type ExitReasonCode } from './details.js';
 import { decideAfterClickFailure, decideDialogAction } from './dialog-decision.js';
 import { createLogger } from './logger.js';
 
@@ -65,6 +72,12 @@ interface WatchdogOpts {
     quietChecksBeforeBackoff?: number;
     stableChecksRequired?: number;
     manualActionTimeoutSec?: number;
+    /**
+     * Told when, after the join, a dialog says the VP was removed or the
+     * meeting ended, so the handler can end as that exit. Optional: the
+     * handlers' own end detection sees the same end.
+     */
+    onMeetingOver?: (reason: Extract<ExitReasonCode, 'removed-from-meeting' | 'host-ended'>) => void;
 }
 
 /**
@@ -103,6 +116,7 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
     // One scan iteration. Returns true if a dialog was present this tick
     // (used to drive the adaptive cadence: any dialog → stay/return to fast).
     const tick = async (): Promise<boolean> => {
+        if (meetingOver()) return false;
         const dialogs = await page.evaluate((sels: string[]) => {
             const set = new Set<Element>();
             for (const s of sels) document.querySelectorAll(s).forEach((e) => set.add(e));
@@ -140,6 +154,11 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         log.info(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
 
         const escalate = async (message: string): Promise<void> => {
+            // The classification takes seconds; the meeting may have ended meanwhile.
+            if (meetingOver()) {
+                log.info(`[dialog-watchdog ${opts.platform}] the meeting is over; not escalating ${analysis.type}`);
+                return;
+            }
             log.info(`[dialog-watchdog ${opts.platform}] escalating ${analysis.type}: ${message}`);
             if (!details.invite.virtualParticipantId) return;
             const { createStatusManager } = await import('./status-manager.js');
@@ -154,8 +173,11 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
         const actionText = analysis.primaryActionSelector
             ? await readActionText(page, analysis.primaryActionSelector)
             : null;
-        const decision = decideDialogAction(analysis, opts.platform, actionText, meetingJoined());
-        if (decision.kind === 'click') {
+        const decision = decideDialogAction(analysis, opts.platform, actionText, meetingJoined(), meetingOver());
+        if (decision.kind === 'meeting-over') {
+            log.info(`[dialog-watchdog ${opts.platform}] the dialog ends the meeting (${decision.reason}); not a manual action`);
+            if (meetingJoined()) opts.onMeetingOver?.(decision.reason);
+        } else if (decision.kind === 'click') {
             const ok = await scrollIntoViewAndClick(page, decision.selector);
             if (ok) {
                 log.info(

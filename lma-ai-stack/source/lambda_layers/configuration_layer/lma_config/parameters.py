@@ -32,6 +32,7 @@ variable; then the caller's default; then the shipped default.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -56,7 +57,11 @@ SETTING_DEFAULTS_FILE = Path(__file__).resolve().parent / "setting_defaults.json
 #: The value types a parameter-backed setting can have. CloudFormation passes
 #: every custom resource property and every environment variable as text, so
 #: each one is read back into its type the same way on both paths.
-VALUE_TYPES = ("string", "integer", "number", "boolean")
+#:
+#: ``object`` is for a shipped setting that holds a structure of its own, such
+#: as the meeting assistant's per-item tool selection. No stack parameter backs
+#: one, so an object is never read from an environment variable.
+VALUE_TYPES = ("string", "integer", "number", "boolean", "object")
 
 
 class ParameterDefault(NamedTuple):
@@ -106,7 +111,10 @@ def _setting_defaults() -> Dict[str, Dict[str, Dict[str, Any]]]:
 def shipped_setting_defaults() -> Dict[str, Dict[str, Any]]:
     """The shipped default of each setting no stack parameter backs, by section."""
     return {
-        section: {setting: spec["default"] for setting, spec in settings.items()}
+        # Copied: an object default is otherwise the cached file's own, and a
+        # caller that changed the baseline it builds would change it for every
+        # later caller in the process.
+        section: {setting: copy.deepcopy(spec["default"]) for setting, spec in settings.items()}
         for section, settings in _setting_defaults().items()
     }
 
@@ -169,6 +177,11 @@ def coerce(value_type: str, raw: Any) -> Any:
         if text in ("true", "false"):
             return text == "true"
         raise ValueError(f"{raw!r} is not true or false")
+    if value_type == "object":
+        # Never read from text: no stack parameter backs an object setting.
+        if isinstance(raw, Mapping):
+            return copy.deepcopy(dict(raw))
+        raise ValueError(f"{raw!r} is not an object")
     raise ValueError(f"unknown value type {value_type!r}")
 
 
@@ -289,7 +302,7 @@ def read_setting(
     if value is None:
         shipped = _shipped(section, setting)
         if shipped is not None:
-            return shipped["default"]
+            return copy.deepcopy(shipped["default"])
     return value
 
 
