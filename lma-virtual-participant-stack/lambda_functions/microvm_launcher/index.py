@@ -39,7 +39,9 @@ dynamodb = boto3.client("dynamodb")
 
 # Must stay in sync with PER_MEETING_KEYS in the container's
 # src/launch-mode.ts. Anything not listed here is ignored by the
-# container, so adding a value needs a change in both places.
+# container, so adding a value needs a change in both places. The meeting
+# password is not staged: the VP reads it from its record at startup, so a
+# meetingPassword in the event is not forwarded.
 FIELD_MAP = {
     "VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),
     "MEETING_PLATFORM": ("meetingPlatform",),
@@ -49,7 +51,6 @@ FIELD_MAP = {
     # EMPTY meeting id (and a misleading "Invalid meeting ID" from Zoom) because
     # only the lowercase spelling was checked.
     "MEETING_ID": ("meetingID", "meetingId"),
-    "MEETING_PASSWORD": ("meetingPassword",),
     "MEETING_NAME": ("meetingName",),
     "MEETING_TIME": ("meetingTime",),
     "LMA_USER": ("userName", "owner"),

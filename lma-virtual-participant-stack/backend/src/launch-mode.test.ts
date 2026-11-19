@@ -64,7 +64,7 @@ test('buildRunHookPayload round-trips through parseRunHookPayload', () => {
 test('buildRunHookPayload omits empty values so app-side defaults still apply', () => {
     const payload = buildRunHookPayload({
         VIRTUAL_PARTICIPANT_ID: 'vp-1',
-        MEETING_PASSWORD: '',
+        MEETING_ID: '',
         MEETING_NAME: undefined,
     });
     const parsed = JSON.parse(payload) as Record<string, string>;
@@ -103,7 +103,6 @@ test('three real JWTs would NOT fit inline, which is why config is staged', () =
         VIRTUAL_PARTICIPANT_ID: 'vp-abc',
         MEETING_PLATFORM: 'Zoom',
         MEETING_ID: '999 888 7777',
-        MEETING_PASSWORD: 'secret',
         MEETING_NAME: 'Quarterly review with a fairly long meeting name',
         MEETING_TIME: '1786129399',
         LMA_USER: 'someone@example.com',
@@ -213,8 +212,9 @@ test('redactPerMeetingConfig hides tokens and passwords but keeps shape', () => 
         USER_ACCESS_TOKEN: 'aaa.bbb.ccc',
         USER_ID_TOKEN: 'ddd',
         USER_REFRESH_TOKEN: 'eee',
-    });
+    } as never);
     assert.equal(red.MEETING_ID, '42');
+    // Not a per-meeting key; still redacted in a config an earlier release staged.
     assert.equal(red.MEETING_PASSWORD, '<redacted:7>');
     assert.equal(red.USER_ACCESS_TOKEN, '<redacted:11>');
     assert.ok(!JSON.stringify(red).includes('hunter2'));
@@ -247,7 +247,6 @@ test('PER_MEETING_KEYS covers every value the ECS launchers override', () => {
         'VIRTUAL_PARTICIPANT_ID',
         'MEETING_PLATFORM',
         'MEETING_ID',
-        'MEETING_PASSWORD',
         'MEETING_NAME',
         'MEETING_TIME',
         'LMA_USER',
@@ -263,6 +262,11 @@ test('PER_MEETING_KEYS covers every value the ECS launchers override', () => {
             `${k} missing from PER_MEETING_KEYS`,
         );
     }
+});
+
+test('the meeting password is not a per-meeting launch value', () => {
+    // The VP reads it from its record at startup (startup-meeting-password.ts).
+    assert.ok(!(PER_MEETING_KEYS as readonly string[]).includes('MEETING_PASSWORD'));
 });
 
 test('microvmVncEndpoint accepts an already-wss endpoint from the registry', () => {
