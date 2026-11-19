@@ -588,6 +588,103 @@ async def execute_start_call_session_mutation(
     )
 
 
+#: Why a rejoined Virtual Participant is ended when its session cannot start.
+TRANSCRIPT_DELETED_END_REASON = (
+    "The meeting's transcript was deleted before the rejoined session started, "
+    "so the meeting was not reopened."
+)
+
+
+async def end_rejoined_vp_of_deleted_meeting(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> bool:
+    """End the Virtual Participant whose rejoined session was refused because the
+    meeting's transcript had been deleted in the meantime. Returns whether it did.
+
+    The rejoin refuses a meeting whose transcript is deleted, but a scheduled
+    deletion can still run between the rejoin and the session's START, and the
+    relaunched Virtual Participant would then go on capturing a meeting that
+    keeps no transcript. The Virtual Participant is named by the START event; it
+    is ended only if its row is the one that rejoined this meeting as this
+    session, through the same end path as the End button. Nothing here fails the
+    record: segments of a meeting whose transcript is deleted are not written in
+    any case (see the ADD_TRANSCRIPT_SEGMENT branch).
+    """
+    vp_id = message.get("VirtualParticipantId")
+    call_id = message.get("CallId")
+    if not vp_id or not call_id or not appsync_session.client.schema:
+        return False
+    schema = DSLSchema(appsync_session.client.schema)
+    try:
+        meeting = await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLQuery(
+                    schema.Query.getCall.args(CallId=call_id).select(
+                        schema.Call.CallId, schema.Call.TranscriptDeletedAt
+                    )
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        if not ((meeting or {}).get("getCall") or {}).get("TranscriptDeletedAt"):
+            return False
+        row = await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLQuery(
+                    schema.Query.getVirtualParticipant.args(id=vp_id).select(
+                        schema.VirtualParticipant.id,
+                        schema.VirtualParticipant.CallId,
+                        schema.VirtualParticipant.sessionNumber,
+                    )
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        vp = (row or {}).get("getVirtualParticipant") or {}
+        if vp.get("CallId") != call_id or session_number_of(
+            vp, "sessionNumber"
+        ) != session_number_of(message):
+            return False
+        await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLMutation(
+                    schema.Mutation.endVirtualParticipant.args(
+                        input={"id": vp_id, "endReason": TRANSCRIPT_DELETED_END_REASON}
+                    ).select(schema.VirtualParticipant.id)
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+        # The status line the Virtual Participant page shows.
+        await execute_gql_query_with_retries(
+            dsl_gql(
+                DSLMutation(
+                    schema.Mutation.updateVirtualParticipant.args(
+                        input={"id": vp_id, "errorMessage": TRANSCRIPT_DELETED_END_REASON}
+                    ).select(schema.VirtualParticipant.id)
+                )
+            ),
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "START: could not end the rejoined Virtual Participant of a meeting whose "
+            "transcript was deleted",
+            extra=dict(call_id=call_id),
+        )
+        return False
+    LOGGER.info(
+        "START: ended the rejoined Virtual Participant; the meeting's transcript was deleted",
+        extra=dict(call_id=call_id),
+    )
+    return True
+
+
 def was_session_started(start_call_session_result: Any) -> bool:
     """Whether a startCallSession result is the session starting, rather than
     :data:`SESSION_NOT_STARTED`."""
@@ -1542,6 +1639,7 @@ async def get_call_details(
         DSLQuery(
             schema.Query.getCall.args(CallId=message["CallId"]).select(
                 *call_fields(schema),
+                schema.Call.TranscriptDeletedAt,
             )
         )
     )
@@ -1568,7 +1666,7 @@ async def get_call_details(
     call_summary = call.get("CallSummaryText", "")
     people_can_access = call.get("SharedWith", None)
 
-    return dict(
+    details = dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
@@ -1577,6 +1675,10 @@ async def get_call_details(
         SharedWith=people_can_access,
         DetectedLanguages=call.get("DetectedLanguages"),
     )
+    # Only when set, so the post-call hook's payload is unchanged otherwise.
+    if call.get("TranscriptDeletedAt"):
+        details["TranscriptDeletedAt"] = call["TranscriptDeletedAt"]
+    return details
 
 
 ##########################################################################
@@ -1703,6 +1805,10 @@ async def execute_process_event_api_mutation(
                 "the meeting is live again" if session_started else "the session was not started",
                 extra=dict(call_id=message.get("CallId")),
             )
+            if not session_started:
+                await end_rejoined_vp_of_deleted_meeting(
+                    message=message, appsync_session=appsync_session
+                )
 
         # The meeting is being captured again, so a transcript deletion
         # scheduled when it last ended is cancelled now -- not when the rejoin
@@ -1785,10 +1891,11 @@ async def execute_process_event_api_mutation(
 
         # The END of an earlier capture session, arriving after a rejoin has
         # started a later one (a redelivery, or the earlier participant still
-        # shutting down), must not end the live session. Only an END that names
-        # its session can be told apart. One that names none is taken to be the
-        # current session's: the first session's END names none, and neither do
-        # the ENDs of the streaming clients or of the stale meeting reaper.
+        # shutting down), must not end the live session. The Virtual
+        # Participant and the End button name the session in every END, the
+        # first session's included. One that names none -- from a streaming
+        # client, the stale meeting reaper, or a Virtual Participant of an
+        # earlier release -- is taken to be the current session's.
         if "SessionNumber" in message and session_number_of(message) < started_session:
             LOGGER.info(
                 "END event for capture session %s of a meeting now in session %s; ignored",
@@ -1885,7 +1992,11 @@ async def execute_process_event_api_mutation(
             # batch processor attributes it to this record's sequence number,
             # and the record is redelivered with the meeting still open.
             # A rejoined meeting's later sessions end it again, but it is still
-            # one meeting, counted once as it was once as started.
+            # one meeting, counted once as it was once as started. Known gap: a
+            # meeting whose first session never ended (its Virtual Participant
+            # crashed without an END) and which was then rejoined is not
+            # counted as ended at all; nothing records whether an earlier
+            # session's END was processed.
             if not was_already_ended and started_session == 1:
                 METRICS.count(metric_names.MEETINGS_ENDED)
 
@@ -1973,6 +2084,7 @@ async def execute_process_event_api_mutation(
 
         add_transcript_tasks = []
         add_transcript_sentiment_tasks = []
+        dropped_for_deletion: List[Dict[str, Any]] = []
         # At most one per language new to the meeting; see language_to_record.
         detected_language_tasks = []
 
@@ -1984,6 +2096,18 @@ async def execute_process_event_api_mutation(
             payload = await get_call_details(
                 message=normalized_message, appsync_session=appsync_session
             )
+
+            # A meeting whose transcript has been deleted keeps none: a segment
+            # that still arrives (an engine's late correction, or a capture
+            # client still running) is dropped rather than written, since no
+            # later deletion would remove it.
+            if payload.get("TranscriptDeletedAt"):
+                LOGGER.info(
+                    "Segment for a meeting whose transcript was deleted; not written",
+                    extra=dict(call_id=normalized_message.get("CallId")),
+                )
+                dropped_for_deletion.append(normalized_message)
+                continue
 
             # The Owner the event itself carried, before the segment takes the
             # meeting's: the agent assist request below is made as before, and
@@ -2056,7 +2180,11 @@ async def execute_process_event_api_mutation(
         # can normalize into several final segments, and the last one need not
         # end latest, so the duration is given the latest end of all of them.
         update_call_aggregation_tasks = []
-        final_messages = [m for m in normalized_messages if not m["IsPartial"]]
+        final_messages = [
+            m
+            for m in normalized_messages
+            if not m["IsPartial"] and not any(m is d for d in dropped_for_deletion)
+        ]
         if final_messages:
             update_call_aggregation_tasks = await get_call_aggregation_tasks(
                 message=final_messages[-1],

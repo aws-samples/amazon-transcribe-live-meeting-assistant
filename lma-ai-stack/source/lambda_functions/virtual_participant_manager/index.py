@@ -17,6 +17,7 @@ import boto3
 from access import NotAuthorizedError, caller_may_change
 from alb_cleanup import ALBCleanupManager
 from ecs_manager import ECSTaskManager
+from microvm_client import MicrovmError
 from microvm_manager import MicrovmManager
 from rejoin import RejoinRefused, rejoin_virtual_participant
 
@@ -196,6 +197,44 @@ class VirtualParticipantManager:
             self.cleanup_registry_entry(vp_id)
         return terminated, alb_cleaned_up
 
+    def registered_host_running(self, vp_id: str) -> bool:
+        """Whether a host the task registry holds for this VP may still be running.
+
+        A host that is gone -- an ECS task that has STOPPED or is not found, a
+        MicroVM that is TERMINATED, FAILED or not found -- is not, and its stale
+        registry entry is removed. A host whose state cannot be read is taken to
+        be running. An entry that names no host (the MicroVM launcher's staged
+        configuration alone) is not a host.
+        """
+        task_details = self.get_task_details_from_registry(vp_id)
+        if not task_details:
+            return False
+        microvm_id = task_details.get("microvmId")
+        task_arn = task_details.get("taskArn")
+        if not microvm_id and not task_arn:
+            return False
+        try:
+            if microvm_id:
+                try:
+                    state = self.microvm_manager.client.get_microvm(microvm_id).get("state")
+                except MicrovmError as error:
+                    if error.status != 404:
+                        raise
+                    state = "TERMINATED"
+                gone = state in ("TERMINATED", "FAILED")
+            else:
+                described = self.ecs_manager.ecs_client.describe_tasks(
+                    cluster=task_details.get("clusterArn"), tasks=[task_arn]
+                )
+                tasks = described.get("tasks") or []
+                gone = not tasks or all(t.get("lastStatus") == "STOPPED" for t in tasks)
+        except Exception:  # noqa: BLE001 - unknown is treated as running
+            logger.exception(f"VP {vp_id}: could not read the state of its registered host")
+            return True
+        if gone:
+            self.cleanup_registry_entry(vp_id)
+        return not gone
+
     def send_end_meeting_event(self, call_id: str, vp: Dict[str, Any]) -> bool:
         """Send END event to Kinesis to close the meeting transcript"""
         try:
@@ -216,11 +255,9 @@ class VirtualParticipantManager:
                 "IdToken": "",
                 "RefreshToken": "",
             }
-            # A rejoined VP's END names its capture session, so the call event
-            # processor can tell it from the END of an earlier one.
-            session_number = int(vp.get("sessionNumber") or 1)
-            if session_number > 1:
-                end_call_event["SessionNumber"] = session_number
+            # The END names the VP's capture session, the first one's too, so
+            # the call event processor can tell it from the END of another.
+            end_call_event["SessionNumber"] = max(int(vp.get("sessionNumber") or 1), 1)
 
             kinesis.put_record(
                 StreamName=kinesis_stream_name,

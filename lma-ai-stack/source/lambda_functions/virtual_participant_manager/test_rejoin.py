@@ -164,6 +164,7 @@ def world(monkeypatch):
         meeting: Dict[str, Any] | None = None,
         end_times: List[Any] | None = None,
         launch_fails: bool = False,
+        host_running: bool = False,
     ) -> SimpleNamespace:
         vp_row = vp if vp is not None else ended_vp()
         meeting_row = (
@@ -189,20 +190,18 @@ def world(monkeypatch):
             {"events": events, "stepfunctions": state_machine},
         )
         monkeypatch.setenv("VP_STATE_MACHINE_ARN", STATE_MACHINE)
-        terminated: List[str] = []
+        checked: List[str] = []
         manager = SimpleNamespace(
             table=vp_table,
             get_virtual_participant=lambda vp_id: dict(vp_table.row) if vp_id == "vp-1" else None,
-            terminate_registered_host=lambda vp_id, reason: (
-                terminated.append(vp_id) or (False, False)
-            ),
+            registered_host_running=lambda vp_id: checked.append(vp_id) or host_running,
         )
         return SimpleNamespace(
             manager=manager,
             vp_table=vp_table,
             events=events,
             state_machine=state_machine,
-            terminated=terminated,
+            checked=checked,
         )
 
     return build
@@ -242,7 +241,7 @@ def test_the_owner_rejoins_an_ended_virtual_participant_into_the_same_meeting(wo
     assert data["userSub"] == "sub-owner"
     assert data["userZoomSub"] == ""
     assert data["enableVideoRecording"] == "true"
-    assert w.terminated == ["vp-1"], "a host the registry still holds is stopped first"
+    assert w.checked == ["vp-1"], "the registry is checked for a host still running"
 
 
 def test_each_rejoin_is_a_new_session_with_a_new_launch_token(world):
@@ -438,4 +437,83 @@ def test_the_end_of_a_rejoined_virtual_participant_names_its_session(monkeypatch
         assert manager.send_end_meeting_event(CALL_ID, {})
     first, second = (json.loads(c.kwargs["Data"]) for c in kinesis.put_record.call_args_list)
     assert first["SessionNumber"] == 2
-    assert "SessionNumber" not in second
+    assert second["SessionNumber"] == 1, "the first session's END names it too"
+
+
+def test_a_virtual_participant_still_shutting_down_is_not_rejoined(world):
+    """Its host would record its own end on the new run if it were stopped now."""
+    w = world(host_running=True)
+    with pytest.raises(rejoin.RejoinRefused, match="still shutting down"):
+        rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.vp_table.updates == [] and w.events.updates == []
+    assert w.state_machine.executions == []
+
+
+# ── whether a registered host may still be running ──────────────────────────
+
+
+@pytest.fixture
+def host_manager():
+    with (
+        mock.patch.object(index.dynamodb, "Table"),
+        mock.patch.object(index, "ECSTaskManager") as ecs,
+        mock.patch.object(index, "ALBCleanupManager"),
+        mock.patch.object(index, "MicrovmManager") as microvm,
+    ):
+        manager = index.VirtualParticipantManager("table")
+        manager.cleaned = []
+        manager.cleanup_registry_entry = lambda vp_id: manager.cleaned.append(vp_id) or True
+        manager.ecs_client = ecs.return_value.ecs_client
+        manager.microvm_client = microvm.return_value.client
+        yield manager
+
+
+ECS_ENTRY = {"vpId": "vp-1", "taskArn": "arn:task", "clusterArn": "arn:cluster"}
+
+
+@pytest.mark.parametrize(
+    "described,running",
+    [
+        ({"tasks": [{"lastStatus": "RUNNING"}]}, True),
+        ({"tasks": [{"lastStatus": "DEPROVISIONING"}]}, True),
+        ({"tasks": [{"lastStatus": "STOPPED"}]}, False),
+        ({"tasks": [], "failures": [{"reason": "MISSING"}]}, False),
+    ],
+)
+def test_an_ecs_host_runs_until_it_has_stopped(host_manager, described, running):
+    host_manager.get_task_details_from_registry = lambda vp_id: dict(ECS_ENTRY)
+    host_manager.ecs_client.describe_tasks.return_value = described
+    assert host_manager.registered_host_running("vp-1") is running
+    assert host_manager.cleaned == ([] if running else ["vp-1"]), "a stale entry is removed"
+
+
+@pytest.mark.parametrize(
+    "answer,running",
+    [
+        ({"state": "RUNNING"}, True),
+        ({"state": "TERMINATING"}, True),
+        ({"state": "TERMINATED"}, False),
+        ({"state": "FAILED"}, False),
+        (index.MicrovmError("not found", status=404), False),
+    ],
+)
+def test_a_microvm_host_runs_until_it_has_terminated(host_manager, answer, running):
+    host_manager.get_task_details_from_registry = lambda vp_id: {"vpId": "vp-1", "microvmId": "m-1"}
+    if isinstance(answer, Exception):
+        host_manager.microvm_client.get_microvm.side_effect = answer
+    else:
+        host_manager.microvm_client.get_microvm.return_value = answer
+    assert host_manager.registered_host_running("vp-1") is running
+
+
+def test_a_host_whose_state_cannot_be_read_is_taken_to_be_running(host_manager):
+    host_manager.get_task_details_from_registry = lambda vp_id: dict(ECS_ENTRY)
+    host_manager.ecs_client.describe_tasks.side_effect = RuntimeError("throttled")
+    assert host_manager.registered_host_running("vp-1") is True
+    assert host_manager.cleaned == []
+
+
+@pytest.mark.parametrize("entry", [None, {"vpId": "vp-1", "vpConfig": "{}"}])
+def test_no_registered_host_is_not_a_running_one(host_manager, entry):
+    host_manager.get_task_details_from_registry = lambda vp_id: entry
+    assert host_manager.registered_host_running("vp-1") is False

@@ -245,6 +245,9 @@ class KinesisStreamManager {
       CaptureSource: 'VIRTUAL_PARTICIPANT',
       ...(this.transcriptionContext ?? {}),
       ...this.sessionField(),
+      // Names this VP, so the call event processor can end it when its rejoined
+      // session cannot reopen the meeting (the transcript was deleted).
+      ...(details.invite.virtualParticipantId ? { VirtualParticipantId: details.invite.virtualParticipantId } : {}),
     };
 
     await this.sendRecord(record);
@@ -663,9 +666,9 @@ class KinesisStreamManager {
    * segment is moved by the offset, so it follows the earlier sessions' instead
    * of overlapping them, and its SegmentId is prefixed with the session, because
    * the ids the engines give restart with each run and a repeated id would
-   * replace an earlier session's segment. START and END name the session, which
-   * is what lets the call event processor reopen the meeting and tell this
-   * session's END from an earlier one's.
+   * replace an earlier session's segment. START and END name the session (every
+   * VP's, the first session's too), which is what lets the call event processor
+   * reopen the meeting and tell this session's END from an earlier one's.
    *
    * Only before START, like useCallId; refused, and false returned, after it.
    */
@@ -685,9 +688,12 @@ class KinesisStreamManager {
     return this.session.offsetSeconds;
   }
 
-  /** SessionNumber, for the START and END of a later session; nothing for the first. */
-  private sessionField(): { SessionNumber?: number } {
-    return this.session.number > 1 ? { SessionNumber: this.session.number } : {};
+  /**
+   * SessionNumber, for START and END: sent for the first session too, so that a
+   * late END of session 1 is told apart once a rejoined session has started.
+   */
+  private sessionField(): { SessionNumber: number } {
+    return { SessionNumber: this.session.number };
   }
 
   /** A transcript segment record moved onto the meeting's timeline (see useSession). */

@@ -31,10 +31,14 @@ What a rejoin does, in order:
    deletion. A rejoin whose session never starts -- the launch fails, or the
    Virtual Participant is not admitted -- leaves the meeting, and its deletion
    schedule, as they were.
-6. Stops any host the task registry still holds for the Virtual Participant, and
-   starts the launcher state machine, as the Create button does, with a launch
+6. Starts the launcher state machine, as the Create button does, with a launch
    token unique to the session: a launch is idempotent on its token, and the
    first launch used the Virtual Participant's id.
+
+Before the claim, a rejoin is refused while a host the task registry holds for
+the Virtual Participant may still be running (a failed run waiting to be
+acknowledged, or one still shutting down). Stopping it under a row already
+claimed would let its shutdown record its own end on the new run.
 
 When a step after the claim fails, the row is marked FAILED with the reason, so
 it does not wait at INITIALIZING for a launch that is not coming, and the user
@@ -389,6 +393,12 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
     if meeting.get("TranscriptDeletedAt"):
         raise RejoinRefused("The meeting's transcript has been deleted, so it cannot be reopened.")
 
+    if manager.registered_host_running(vp_id):
+        raise RejoinRefused(
+            "The Virtual Participant's earlier run is still shutting down; try again shortly. "
+            "If it shows a failure, acknowledge it first."
+        )
+
     session = next_session_number(vp, meeting)
     offset = next_session_offset(transcript_end_times(call_id), meeting)
     rejoined_by = who(identity)
@@ -399,7 +409,6 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
     claimed = claim(manager.table, vp, session, offset, rejoined_by)
     try:
         allow_session(call_id, session, offset, rejoined_by)
-        manager.terminate_registered_host(vp_id, "Virtual Participant rejoining its meeting")
         start_launch(vp, session, identity)
     except RejoinRefused as refused:
         release(manager.table, vp_id, str(refused))

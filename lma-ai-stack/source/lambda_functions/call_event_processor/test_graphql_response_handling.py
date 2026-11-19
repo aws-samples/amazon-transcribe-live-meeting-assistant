@@ -2349,3 +2349,101 @@ def test_the_end_of_a_session_that_never_started_leaves_the_deletion_alone(
     )
     assert _deletion_payloads(deletion_function) == []
     assert metric_names.MEETINGS_ENDED not in emitted.counts
+
+
+# ── a rejoined session that cannot reopen a meeting whose transcript is deleted ──
+#
+# A scheduled deletion that runs between the rejoin and the session's START makes
+# startCallSession refuse. The relaunched Virtual Participant is then ended, and
+# any segment that still arrives for the meeting is not written.
+
+DELETED_AT = "2026-11-18T11:00:00+00:00"
+REJOINED_START_WITH_VP = {**REJOINED_START, "VirtualParticipantId": "vp-1"}
+
+
+def _refused_start(schema, meeting, vp_row, monkeypatch) -> QueuedSession:
+    session = QueuedSession(
+        schema,
+        [
+            ALREADY_EXISTS,
+            SESSION_REFUSED,
+            {"getCall": {"CallId": "call-1", **meeting}},
+            {"getVirtualParticipant": vp_row},
+            {"endVirtualParticipant": {"id": "vp-1"}},
+            {"updateVirtualParticipant": {"id": "vp-1"}},
+        ],
+    )
+    process_start_with_hook(session, dict(REJOINED_START_WITH_VP), monkeypatch)
+    return session
+
+
+def test_a_session_refused_because_the_transcript_was_deleted_ends_its_virtual_participant(
+    schema, emitted, monkeypatch
+):
+    session = _refused_start(
+        schema,
+        {"TranscriptDeletedAt": DELETED_AT},
+        {"id": "vp-1", "CallId": "call-1", "sessionNumber": 2},
+        monkeypatch,
+    )
+    assert mutation_inputs(session, "endVirtualParticipant") == [
+        {"id": "vp-1", "endReason": cep.TRANSCRIPT_DELETED_END_REASON}
+    ]
+    assert mutation_inputs(session, "updateVirtualParticipant") == [
+        {"id": "vp-1", "errorMessage": cep.TRANSCRIPT_DELETED_END_REASON}
+    ]
+
+
+def test_a_redelivered_start_of_a_live_meeting_ends_no_virtual_participant(
+    schema, emitted, monkeypatch
+):
+    session = _refused_start(
+        schema, {}, {"id": "vp-1", "CallId": "call-1", "sessionNumber": 2}, monkeypatch
+    )
+    assert mutation_inputs(session, "endVirtualParticipant") == []
+
+
+@pytest.mark.parametrize(
+    "vp_row",
+    [
+        {"id": "vp-1", "CallId": "another-call", "sessionNumber": 2},
+        {"id": "vp-1", "CallId": "call-1", "sessionNumber": 3},
+        None,
+    ],
+)
+def test_only_the_virtual_participant_that_rejoined_as_this_session_is_ended(
+    schema, emitted, vp_row, monkeypatch
+):
+    session = _refused_start(schema, {"TranscriptDeletedAt": DELETED_AT}, vp_row, monkeypatch)
+    assert mutation_inputs(session, "endVirtualParticipant") == []
+
+
+def test_a_segment_for_a_meeting_whose_transcript_was_deleted_is_not_written(
+    schema, emitted, monkeypatch
+):
+    session = segment_session(schema, _meeting_record(TranscriptDeletedAt=DELETED_AT))
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    assert mutation_inputs(session, "addTranscriptSegment") == []
+    assert mutation_inputs(session, "updateCallAggregation") == []
+    assert metric_names.TRANSCRIPT_SEGMENTS_WRITTEN not in emitted.counts
+
+
+def test_a_segment_for_a_meeting_with_its_transcript_is_written(schema, emitted, monkeypatch):
+    session = segment_session(schema, _meeting_record())
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+    assert len(mutation_inputs(session, "addTranscriptSegment")) == 1
+
+
+def test_a_late_end_of_the_first_session_leaves_a_rejoined_meeting_live(
+    schema, emitted, deletion_function, monkeypatch
+):
+    """The Virtual Participant names session 1 in its END too, so this is told apart."""
+    session = QueuedSession(
+        schema,
+        [{"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 2}}],
+    )
+    process_event(
+        session, {"EventType": "END", "CallId": "call-1", "SessionNumber": 1}, monkeypatch
+    )
+    assert mutation_inputs(session, "updateCallStatus") == []
+    assert _deletion_payloads(deletion_function) == []

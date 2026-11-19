@@ -48,13 +48,15 @@ beforeEach(() => {
 });
 
 describe('a VP that was not rejoined', () => {
-    it('sends its events as it always has', async () => {
+    it('names session 1 in START and END, and sends its segments as they are', async () => {
         await kinesisStreamManager.sendStartMeeting();
         await kinesisStreamManager.sendAsrTranscriptSegment(segment() as any);
         await kinesisStreamManager.sendEndMeeting();
         const [start, row, end] = sent;
-        assert.equal('SessionNumber' in start, false);
-        assert.equal('SessionNumber' in end, false);
+        // So a late END of this session is dropped once a rejoined one has started.
+        assert.equal(start.SessionNumber, 1);
+        assert.equal(end.SessionNumber, 1);
+        assert.equal('SessionNumber' in row, false);
         assert.equal(row.SegmentId, 'vp-remote-r0-g0-s0');
         assert.equal(row.StartTime, 1.5);
         assert.equal(row.EndTime, 4.25);
@@ -69,6 +71,7 @@ describe('a rejoined VP', () => {
         await kinesisStreamManager.sendEndMeeting();
         assert.equal(sent[0].EventType, 'START');
         assert.equal(sent[0].SessionNumber, 2);
+        assert.ok(sent[0].VirtualParticipantId, 'START names the VP, so it can be ended if the session is refused');
         assert.equal(sent[1].EventType, 'END');
         assert.equal(sent[1].SessionNumber, 2);
     });
