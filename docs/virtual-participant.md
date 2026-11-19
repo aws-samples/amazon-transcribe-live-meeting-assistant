@@ -1150,6 +1150,15 @@ Each message with attachments names them in its transcript line,
 know what was shared even without the content. A message of attachments alone
 becomes a line of its own.
 
+An attachment can appear after its message's text: a pasted screenshot is
+shown while it is still uploading, and its image arrives a few seconds later.
+So the VP keeps watching each message it added for 60 seconds, and an
+attachment that appears on it in that time is added to the same line (the line
+is written again with the attachment named) and stored like the others. An
+image is taken only once the platform has loaded it; on Zoom, one that has not
+loaded when the 60 seconds are up is recorded by name. On Teams a message's
+attachments have a line of their own, so a late image joins that line.
+
 ### What is stored
 
 - **Images and files up to 25 MB, of these types only:** PNG, JPEG, GIF and
@@ -1182,7 +1191,11 @@ never held up by it, and is metered in the meeting's cost estimate under
 *Chat attachments* (see
 [Meeting Cost Estimate](meeting-cost-estimate.md)). A PowerPoint file, which
 Converse has no document format for, an image over 3.75 MB and a document over
-4.5 MB are not read, and are shown by their file name. A model that reads no
+4.5 MB are not read, and are shown by their file name. The model is asked for a
+low reasoning effort where it takes one, and is given room for its reasoning as
+well as the answer (2,048 output tokens); an answer cut off at that ceiling, or
+one with no text, is asked for once more with 8,192, and both calls are
+metered. Each call may take up to 45 seconds to answer. A model that reads no
 images or documents (Amazon Nova Micro) gives no title, and the attachment is
 shown by its file name. The model is told that
 the file name and the content are material to describe, not instructions; the

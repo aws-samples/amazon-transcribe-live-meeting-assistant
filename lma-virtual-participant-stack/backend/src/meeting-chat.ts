@@ -112,6 +112,20 @@ export const ANSWER_WAIT_MS = 5 * 60_000;
 /** Platform message ids remembered, oldest forgotten first. */
 export const MAX_SEEN_IDS = 5000;
 /**
+ * How long after a message is added an attachment that appears on it later is
+ * still added to its line (`offerLateAttachments`): a pasted image can finish
+ * uploading after the message's text is shown.
+ */
+export const LATE_ATTACHMENT_WINDOW_MS = 60_000;
+/**
+ * How much longer than the window a line is kept for late attachments: a
+ * reader returns an image that never loaded when the window closes, at its
+ * first read after that, and it is still to be recorded by name on its line.
+ */
+export const LATE_ATTACHMENT_GRACE_MS = 30_000;
+/** Lines remembered for late attachments, oldest forgotten first. */
+const MAX_LATE_LINES = 500;
+/**
  * For a platform that gives no message id: the same sender and text read again
  * within this long is the same message delivered twice (a re-rendered row).
  */
@@ -168,7 +182,9 @@ export type ChatOutcome =
     | 'not-started'
     | 'flood'
     /** A platform the capture does not cover; read for the diagnostics only. */
-    | 'not-covered';
+    | 'not-covered'
+    /** Attachments added to the line of a message added earlier (`offerLateAttachments`). */
+    | 'attachments-added';
 
 /**
  * Whether a chat message is one of the LMA chat commands, in any state of the
@@ -409,6 +425,8 @@ export class MeetingChatCapture {
     private readonly addedAt: number[] = [];
     /** Captured questions awaiting their answer, by `questionKey`, with when they were captured. */
     private readonly openQuestions = new Map<string, number>();
+    /** The lines of messages added with a platform id, by that id, for late attachments. */
+    private readonly lines = new Map<string, { segment: TranscriptSegment; addedAt: number }>();
     private added = 0;
     private floodNoticeAt = -Infinity;
     private offNoticeLogged = false;
@@ -472,6 +490,43 @@ export class MeetingChatCapture {
         return added;
     }
 
+    /**
+     * Attachments that appeared on a message after it was offered (a pasted
+     * image that finished uploading after its text was read). When the message
+     * was added, within `LATE_ATTACHMENT_WINDOW_MS` (and its grace), its line is written again
+     * with the attachments named, under the same segment id, and they are
+     * handed over as the message's own would have been. A message not offered
+     * before, or one offered with no text and nothing attached (left out as
+     * empty), is offered now as it is. One left out for any other reason stays
+     * out, its attachments with it.
+     */
+    offerLateAttachments(chat: IncomingChat): ChatOutcome {
+        const attachments = chat.attachments ?? [];
+        if (!attachments.length) return 'empty';
+        const at = this.now();
+        for (const [key, line] of this.lines) {
+            if (at - line.addedAt >= LATE_ATTACHMENT_WINDOW_MS + LATE_ATTACHMENT_GRACE_MS) this.lines.delete(key);
+        }
+        const line = chat.id ? this.lines.get(`${chat.platform}:${chat.id}`) : undefined;
+        if (!line) return this.offer(chat);
+        // The same gates as a message, read again now.
+        const settingOn = this.deps.settingOn();
+        const redacting = this.deps.redacting();
+        let outcome: ChatOutcome = 'attachments-added';
+        if (!settingOn || redacting !== false) outcome = 'disabled';
+        else if (!this.deps.capturing()) outcome = 'paused';
+        else if (!this.deps.meetingStarted()) outcome = 'not-started';
+        this.diagnose(chat, outcome);
+        if (outcome !== 'attachments-added') return outcome;
+        const notes = attachments.map((a) => attachmentNote(displayFileName(a.name, a.kind)));
+        line.segment = { ...line.segment, transcript: [line.segment.transcript, ...notes].filter(Boolean).join(' ') };
+        // Not counted toward the flood limit, on purpose: it rewrites a line
+        // already counted, at most once per attachment within the line's window.
+        void this.deps.send(line.segment).catch((error) => log.warn(`[meeting-chat] could not write a chat segment (${errorName(error)})`));
+        this.handOver(line.segment, chat.platform, attachments);
+        return outcome;
+    }
+
     private decide(chat: IncomingChat): ChatOutcome {
         const text = (chat.text ?? '').trim();
         const attachments = chat.attachments ?? [];
@@ -504,7 +559,14 @@ export class MeetingChatCapture {
         if (!this.deps.meetingStarted()) return 'not-started';
         if (this.flooded()) return 'flood';
 
-        this.write(chat.platform, chat.id, chatSpeaker(chat.sender), text, chat.links, attachments);
+        const segment = this.write(chat.platform, chat.id, chatSpeaker(chat.sender), text, chat.links, attachments);
+        if (chat.id) {
+            this.lines.set(`${chat.platform}:${chat.id}`, { segment, addedAt: this.now() });
+            if (this.lines.size > MAX_LATE_LINES) {
+                const oldest = this.lines.keys().next().value;
+                if (oldest !== undefined) this.lines.delete(oldest);
+            }
+        }
         // A question for the meeting assistant: its answer may now be added too.
         if (parseChatQuestion(text, true)?.question) this.openQuestions.set(questionKey(chat), this.now());
         return 'captured';
@@ -518,7 +580,7 @@ export class MeetingChatCapture {
         text: string,
         links?: readonly string[],
         attachments: readonly IncomingChatAttachment[] = [],
-    ): void {
+    ): TranscriptSegment {
         const transcript = chatTranscriptWithAttachments(text, links, attachments);
         // The text as typed, or for a message of attachments alone, the notes naming them.
         const identity = text || transcript;
@@ -543,12 +605,17 @@ export class MeetingChatCapture {
             log.info(`[meeting-chat] adding the meeting chat to the transcript (platform=${platform})`);
         }
         void this.deps.send(segment).catch((error) => log.warn('[meeting-chat] could not write a chat segment:', error));
-        if (attachments.length && this.deps.attachments) {
-            try {
-                this.deps.attachments(segmentId, platform, at, attachments);
-            } catch (error) {
-                log.warn(`[meeting-chat] could not take the attachments of a chat message (${errorName(error)})`);
-            }
+        this.handOver(segment, platform, attachments);
+        return segment;
+    }
+
+    /** Hands a line's attachments to the attachment capture. */
+    private handOver(segment: TranscriptSegment, platform: ChatPlatform, attachments: readonly IncomingChatAttachment[]): void {
+        if (!attachments.length || !this.deps.attachments) return;
+        try {
+            this.deps.attachments(segment.segmentId, platform, segment.startTime, attachments);
+        } catch (error) {
+            log.warn(`[meeting-chat] could not take the attachments of a chat message (${errorName(error)})`);
         }
     }
 

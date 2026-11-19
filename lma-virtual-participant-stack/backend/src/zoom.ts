@@ -21,7 +21,7 @@ import { chatHelpMessages } from './chat-help.js';
 import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
-import { noteSentChat } from './meeting-chat.js';
+import { LATE_ATTACHMENT_WINDOW_MS, noteSentChat } from './meeting-chat.js';
 import { meetingChat } from './meeting-chat-runtime.js';
 import { chatAddressing } from './chat-addressing.js';
 import {
@@ -2115,6 +2115,7 @@ export default class Zoom {
             fileCard: ZOOM_CHAT_SELECTORS.fileCard,
             fileName: ZOOM_CHAT_SELECTORS.fileName,
             fileSize: ZOOM_CHAT_SELECTORS.fileSize,
+            watchMs: LATE_ATTACHMENT_WINDOW_MS,
             settleMs: ZOOM_CHAT_BASELINE_SETTLE_MS,
         };
         const listOnPage = async (): Promise<boolean> =>
@@ -2191,6 +2192,22 @@ export default class Zoom {
                 // the panel keeper, and keeps the replies in order.
                 for (const row of reading.rows) {
                     await onChatRow(row.label, row.id, row.links, attachmentsOf(row));
+                }
+                // Attachments that appeared on a row after it was read (a pasted
+                // image still uploading then), added to the line it became.
+                for (const row of reading.late ?? []) {
+                    const attachments = attachmentsOf(row);
+                    if (!attachments?.length) continue;
+                    const { sender, recipient, body, time } = parseZoomChatLabel(row.label);
+                    meetingChat.offerLateAttachments({
+                        platform: 'zoom',
+                        text: body,
+                        sender,
+                        id: row.id,
+                        platformTime: time,
+                        audience: zoomChatAudience(recipient),
+                        attachments,
+                    });
                 }
             } catch {
                 /* the page is navigating or closing; read again next tick */

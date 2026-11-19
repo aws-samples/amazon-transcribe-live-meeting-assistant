@@ -32,7 +32,12 @@ from typing import Any, Dict, Optional
 
 import boto3
 import pure
-from bedrock_compat import build_inference_config, extract_text
+from bedrock_compat import (
+    TRUNCATED_STOP_REASON,
+    additional_request_fields,
+    build_inference_config,
+    extract_text,
+)
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -59,8 +64,17 @@ ATTACHMENTS_PREFIX = os.environ.get("ATTACHMENTS_PREFIX", "lma-chat-attachments/
 FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-#: Room for a title and two sentences of JSON.
-MAX_OUTPUT_TOKENS = 400
+#: The output budgets, first try and retry. The answer itself is a title and
+#: two sentences of JSON, under 150 tokens, but a reasoning model (the meeting
+#: assistant's model may be one) spends its reasoning from the same budget
+#: before it writes anything: at 400 a Claude 5 model was seen to stop at the
+#: ceiling with no answer. maxTokens is a ceiling, not a reservation, so a model
+#: that does not reason is billed for its short answer whichever is offered.
+MAX_OUTPUT_TOKENS = 2048
+RETRY_OUTPUT_TOKENS = 8192
+#: Asked of the models that take a reasoning effort: naming and summarizing one
+#: file needs little reasoning.
+REASONING_EFFORT = "low"
 
 #: The context the model call is metered under, in the meeting's cost estimate.
 METERING_CONTEXT = "ChatAttachments"
@@ -70,11 +84,27 @@ DONE, FAILED, SKIPPED = "DONE", "FAILED", "SKIPPED"
 CLIENT_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 3})
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
 S3 = boto3.client("s3", config=CLIENT_CONFIG)
-# As the key frame text extractor: inference profiles throttle in bursts.
+#: Seconds a model call may take to answer, and the attempts botocore makes for
+#: one call, the first included. The key frame text extractor allows 50
+#: attempts for bursts of throttling, but botocore retries a read timeout the
+#: same way, and a retried call is a model call the metering never sees. So the
+#: attempts are few, sized with the timeouts to fit the function's timeout
+#: (240 s in the template) with room to spare for the object read, the item
+#: writes and botocore's backoff: two calls (the second with the larger
+#: budget), each of at most CALL_ATTEMPTS attempts of CONNECT_TIMEOUT_SECONDS
+#: plus READ_TIMEOUT_SECONDS, at most 4 x 50 = 200 s. A call still throttled
+#: after them marks the attachment FAILED.
+CONNECT_TIMEOUT_SECONDS = 5
+READ_TIMEOUT_SECONDS = 45
+CALL_ATTEMPTS = 2
 BEDROCK = boto3.client(
     "bedrock-runtime",
     region_name=REGION,
-    config=Config(retries={"mode": "adaptive", "max_attempts": 50}),
+    config=Config(
+        connect_timeout=CONNECT_TIMEOUT_SECONDS,
+        read_timeout=READ_TIMEOUT_SECONDS,
+        retries={"mode": "adaptive", "total_max_attempts": CALL_ATTEMPTS},
+    ),
 )
 METERING = MeteringWriter(source="chat-attachment-summarizer")
 
@@ -136,11 +166,10 @@ def record(call_id: str, attachment_id: str, state: str, extra: Dict[str, str]) 
     return state.lower()
 
 
-def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id: str, model: str):
-    """The attachment's title and summary, from the model, metered against the meeting."""
-    response = BEDROCK.converse(
-        modelId=model,
-        messages=[
+def _converse(content_type: str, file_name: Optional[str], body: bytes, model: str, budget: int):
+    request: Dict[str, Any] = {
+        "modelId": model,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -149,12 +178,52 @@ def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id:
                 ],
             }
         ],
-        inferenceConfig=build_inference_config(model, MAX_OUTPUT_TOKENS),
-    )
-    METERING.record(
-        call_id, METERING_CONTEXT, bedrock_service(model), bedrock_usage(response.get("usage"))
-    )
-    return pure.read_answer(extract_text(response))
+        "inferenceConfig": build_inference_config(model, budget),
+    }
+    extra = additional_request_fields(model, REASONING_EFFORT)
+    if extra:
+        request["additionalModelRequestFields"] = extra
+    return BEDROCK.converse(**request)
+
+
+def summarize(content_type: str, file_name: Optional[str], body: bytes, call_id: str, model: str):
+    """The attachment's title and summary, from the model, metered against the meeting.
+
+    An answer cut off at the output budget, and an answer with no text at all,
+    is asked for once more with a larger budget. Each call is metered. A second
+    failure raises ValueError, as any answer without a title or summary does.
+    """
+    for attempt, budget in enumerate((MAX_OUTPUT_TOKENS, RETRY_OUTPUT_TOKENS)):
+        response = _converse(content_type, file_name, body, model, budget)
+        METERING.record(
+            call_id, METERING_CONTEXT, bedrock_service(model), bedrock_usage(response.get("usage"))
+        )
+        # Worth asking again: an answer cut off at the budget, or one with no
+        # text (a reasoning model that spent the budget reasoning, or an empty
+        # text block).
+        retry = response.get("stopReason") == TRUNCATED_STOP_REASON
+        try:
+            text = extract_text(response)
+        except ValueError:
+            text = ""
+        if not text.strip():
+            retry = True
+        else:
+            try:
+                return pure.read_answer(text)
+            except ValueError:
+                if not retry:
+                    raise
+        if attempt:
+            raise ValueError("no title or summary within the larger output budget")
+        LOGGER.warning(
+            "The answer for a chat attachment of %s was cut off or empty at %d output "
+            "tokens; asking once more with %d",
+            call_id,
+            budget,
+            RETRY_OUTPUT_TOKENS,
+        )
+    raise ValueError("no title or summary within the output budget")
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
