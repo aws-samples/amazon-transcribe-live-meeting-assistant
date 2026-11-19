@@ -1,6 +1,17 @@
 #set( $PK = "c#${ctx.args.input.CallId}" )
 #set( $UpdatedAt = $util.defaultIfNull($ctx.args.input.UpdatedAt, $util.time.nowISO8601() ) )
 $util.qr( $ctx.args.input.put("UpdatedAt", $UpdatedAt ) )
+## The capture session a recording link belongs to (RecordingUrlSession on
+## updateRecordingUrl, VideoRecordingUrlSession on updateVideoRecordingUrl).
+## Kept in the session lists below, beside the link, and not written as an
+## attribute of its own. Read only for the link field the input carries.
+#set( $linkSessions = {} )
+#foreach( $field in ["RecordingUrl", "VideoRecordingUrl"] )
+    #if( !$util.isNullOrBlank($ctx.args.input.get($field)) && $util.isNumber($ctx.args.input.get("${field}Session")) )
+        $util.qr( $linkSessions.put($field, $ctx.args.input.get("${field}Session")) )
+    #end
+    $util.qr( $ctx.args.input.remove("${field}Session") )
+#end
 ## Set up some space to keep track of things we're updating **
 #set( $expNames = {} )
 #set( $expValues = {} )
@@ -30,12 +41,25 @@ $util.qr( $ctx.args.input.put("UpdatedAt", $UpdatedAt ) )
 ## per session, and the link above names the latest only. Deleting the meeting
 ## reads these lists to delete every session's files. A redelivered update can
 ## append a link twice; the deletion reads each link once.
+##
+## Beside each list, in the same update so the two stay in step, the session
+## the link was recorded in (null when the writer did not say): the meeting
+## page's player plays each session's file at its place on the transcript
+## timeline (Call.Sessions).
 #foreach( $field in ["RecordingUrl", "VideoRecordingUrl"] )
     #if( !$util.isNullOrBlank($ctx.args.input.get($field)) && !${expSet.isEmpty()} )
         #set( $listName = "${field}s" )
+        #set( $sessionsName = "${field}Sessions" )
         #set( $expression = "${expression}, #${listName} = list_append(if_not_exists(#${listName}, :emptyList), :${listName})" )
+        #set( $expression = "${expression}, #${sessionsName} = list_append(if_not_exists(#${sessionsName}, :emptyList), :${sessionsName})" )
         $util.qr( $expNames.put("#${listName}", "${listName}") )
+        $util.qr( $expNames.put("#${sessionsName}", "${sessionsName}") )
         $util.qr( $expValues.put(":${listName}", $util.dynamodb.toDynamoDB([$ctx.args.input.get($field)])) )
+        #if( $linkSessions.containsKey($field) )
+            $util.qr( $expValues.put(":${sessionsName}", $util.dynamodb.toDynamoDB([$linkSessions.get($field)])) )
+        #else
+            $util.qr( $expValues.put(":${sessionsName}", {"L": [{"NULL": true}]}) )
+        #end
         $util.qr( $expValues.put(":emptyList", $util.dynamodb.toDynamoDB([])) )
     #end
 #end

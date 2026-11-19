@@ -357,6 +357,9 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // The session the file was recorded in, stored with its link so the
+      // meeting page plays it at the session's place on the transcript timeline.
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);
@@ -375,6 +378,9 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // The session the file was recorded in, stored with its link so the
+      // meeting page plays it at the session's place on the transcript timeline.
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);

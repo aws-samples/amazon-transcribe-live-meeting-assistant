@@ -48,6 +48,42 @@ def _detected_languages(schema: DSLSchema) -> Tuple[DSLField, ...]:
     return ()
 
 
+#: The fields the meeting page's player reads to play each capture session's
+#: recording at its place on the transcript timeline: every session's links,
+#: the session of each, and where each session starts.
+SESSION_PLAYBACK_FIELDS = (
+    "RecordingUrls",
+    "RecordingUrlSessions",
+    "VideoRecordingUrls",
+    "VideoRecordingUrlSessions",
+    "SessionNumber",
+    "SessionOffsetSeconds",
+    "SessionStartedNumber",
+)
+
+
+def _session_playback(schema: DSLSchema) -> Tuple[DSLField, ...]:
+    """The session playback fields the schema the API is running declares.
+
+    Selected so that the write which stores a session's recording link
+    publishes every session's links to onUpdateCall, and a meeting page left
+    open while a continued meeting ends plays the new session's recording.
+    Conditional for the reason _summary_state is.
+    """
+    # pylint: disable-next=protected-access
+    declared = schema.Call._type.fields
+    selected = [getattr(schema.Call, name) for name in SESSION_PLAYBACK_FIELDS if name in declared]
+    if "Sessions" in declared:
+        selected.append(
+            schema.Call.Sessions.select(
+                schema.CallSession.SessionNumber,
+                schema.CallSession.OffsetSeconds,
+                schema.CallSession.StartedAt,
+            )
+        )
+    return tuple(selected)
+
+
 def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
     """Call type field selector"""
     overall_sentiment_select = schema.SentimentAggregation.OverallSentiment.select(
@@ -83,6 +119,7 @@ def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.Call.SystemPhoneNumber,
         schema.Call.RecordingUrl,
         schema.Call.VideoRecordingUrl,
+        *_session_playback(schema),
         schema.Call.Owner,
         schema.Call.SharedWith,
         schema.Call.TotalConversationDurationMillis,
