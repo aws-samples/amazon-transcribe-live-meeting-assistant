@@ -37,10 +37,12 @@ import { getMarkdownSummary, getSummarySection, summarySections } from '../commo
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
+  SUMMARY_EMPTY_TEXT,
   SUMMARY_IN_PROGRESS_TEXT,
   SUMMARY_OVERDUE_TEXT,
   isHandEdited,
   isRegenerating,
+  isSummaryEmpty,
   isSummaryInProgress,
   isSummaryOverdue,
   msUntilSummaryOverdue,
@@ -188,7 +190,17 @@ const GENERATING_REASON = 'Available once the summary being generated for this m
  * instead: the end-of-meeting summary on its way, a run that failed or is
  * overdue (with the way out, when the viewer can take it), or "Not available".
  */
-const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating, overdue, failed, canRegenerate }) => {
+const SummaryBody = ({
+  callId,
+  sections,
+  keyframes,
+  onKeyframeSelect,
+  generating,
+  overdue,
+  failed,
+  empty,
+  canRegenerate,
+}) => {
   if (!sections.length && generating) {
     return (
       <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
@@ -198,6 +210,11 @@ const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating
         </Box>
       </Box>
     );
+  }
+  // A statement about the meeting, not an error: nothing was said, typed or
+  // shown, so there is nothing to retry.
+  if (!sections.length && empty) {
+    return <Box color="text-body-secondary">{SUMMARY_EMPTY_TEXT}</Box>;
   }
   if (!sections.length && (failed || overdue)) {
     return (
@@ -254,6 +271,8 @@ export const CallSummary = ({
   const generating = !starting && isSummaryInProgress(summaryState);
   const overdue = !starting && isSummaryOverdue(summaryState);
   const failure = startError || regenerationFailure(summaryState);
+  // The last run found no transcript to summarise.
+  const empty = !starting && !failure && isSummaryEmpty(summaryState);
   const handEdited = isHandEdited(summaryState);
   // Editing waits until the meeting has ended, and then until its
   // end-of-meeting summary has been written. That write replaces the text
@@ -362,6 +381,11 @@ export const CallSummary = ({
               {generating && sections.length > 0 && (
                 <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
               )}
+              {/* In the header only beside text already shown (a summary
+                  kept from before); otherwise the body says it. */}
+              {!regenerating && empty && sections.length > 0 && (
+                <StatusIndicator type="info">{SUMMARY_EMPTY_TEXT}</StatusIndicator>
+              )}
               {!regenerating && overdue && !failure && (
                 <StatusIndicator type="warning">{SUMMARY_OVERDUE_TEXT}</StatusIndicator>
               )}
@@ -469,6 +493,7 @@ export const CallSummary = ({
           generating={generating}
           overdue={overdue && !regenerating}
           failed={Boolean(failure) && !regenerating}
+          empty={empty && !regenerating}
           canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
       )}
