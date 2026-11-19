@@ -68,6 +68,11 @@ function IntegrationProvider({ children }: any) {
   // The meeting ID or link to continue, from startTranscription until the
   // capture has started.
   const continueMeetingRef = useRef<string | undefined>(undefined);
+  // Whether this capture's START has been sent: the tab's audio is held back
+  // until it has, since the transcriber drops audio that arrives before START
+  // (the tab starts sending once it reports its sampling rate, and a continued
+  // meeting is reopened between the two).
+  const startSentRef = useRef(false);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -206,6 +211,7 @@ function IntegrationProvider({ children }: any) {
     // starts leaves no session allowed (reopenMeeting holds the meeting for an
     // allowed session for 15 minutes).
     continueMeetingRef.current = continueMeeting;
+    startSentRef.current = false;
 
     setShouldConnect(true);
     const callMetadata: Call = {
@@ -279,10 +285,11 @@ function IntegrationProvider({ children }: any) {
           currentCall.samplingRate = request.samplingRate;
           currentCall.callEvent = 'START';
           sendMessage(JSON.stringify(currentCall));
+          startSentRef.current = true;
           setIsTranscribing(true);
           sendRecordingMessage();
         } else if (request.action === "AudioData") {
-          if (readyState === ReadyState.OPEN) {
+          if (readyState === ReadyState.OPEN && startSentRef.current) {
             const audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }

@@ -68,9 +68,9 @@ does not start. The extension reopens the meeting only once the tab's capture
 has started, just before streaming. After a reopen, LMA waits up to 15 minutes
 for that session to start before it reopens the meeting again, so if streaming
 fails after this point, continuing the same meeting is refused as still being
-captured until then. The option needs an extension package downloaded from a
-deployment that includes it, because the package carries the address of LMA's
-API; an older package says so. See
+captured until then. A package from before this option has no
+**Continue an existing meeting…**, and one built without the address of LMA's
+API says it cannot continue meetings; download the extension again from LMA. See
 [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 
 ## How meeting speakers are named

@@ -218,7 +218,8 @@ def vp_rejoin_cmd(ctx, stack_name, region, vp_id, as_json):
 
     It continues the same LMA meeting as a further capture session, as Join
     again > Continue meeting does on the Virtual Participant page. Needs an
-    assumed-role profile (SSO or role); the launch joins as a guest.
+    assumed-role profile (SSO or role); the launch joins as a guest unless
+    the Virtual Participant was scheduled by its owner.
     """
     from lma_sdk.exceptions import LMAError
 

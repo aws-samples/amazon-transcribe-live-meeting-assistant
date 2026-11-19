@@ -2769,11 +2769,14 @@ Resources:
               # The MCP server library import is for administrators (the Admin
               # group, or an operator's IAM principal through the SDK and CLI),
               # not for the stack's own function roles.
+              # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
               - Effect: Allow
                 Action:
                   - appsync:EventConnect
@@ -3023,11 +3026,14 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
             # The MCP server library import is for administrators, not for the
             # stack's own function roles.
+            # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
             - Effect: Deny
               Action:
                 - appsync:GraphQL
               Resource:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
             - Effect: Allow
               Action:
                 - comprehend:DetectSentiment
@@ -3941,11 +3947,14 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
               # The MCP server library import is for administrators, not for
               # the stack's own function roles.
+              # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
               - Effect: Allow
                 Action:
                   - "s3:GetObject"

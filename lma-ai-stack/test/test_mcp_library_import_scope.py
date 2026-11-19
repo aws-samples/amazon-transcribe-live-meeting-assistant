@@ -117,3 +117,26 @@ def test_a_role_granted_every_mutation_is_denied_the_library_import(document: di
         for text in _texts(resource)
     ]
     assert any(text.endswith(FIELD) for text in denied), denied
+
+
+#: Mutations that accept IAM callers for operators (the lma CLI and SDK), as a
+#: backend role that may act on any meeting, and so are denied to the stack's
+#: own broadly granted roles as the library import is.
+OPERATOR_FIELDS = (
+    "types/Mutation/fields/rejoinVirtualParticipant",
+    "types/Mutation/fields/reopenMeeting",
+)
+
+
+@pytest.mark.parametrize("document", BROAD_GRANTS)
+@pytest.mark.parametrize("field", OPERATOR_FIELDS)
+def test_a_role_granted_every_mutation_is_denied_rejoin_and_reopen(document: dict, field: str) -> None:
+    denied = [
+        text
+        for statement in document["Statement"]
+        if isinstance(statement, dict) and statement.get("Effect") == "Deny"
+        and "appsync:GraphQL" in _listed(statement.get("Action"))
+        for resource in _listed(statement.get("Resource"))
+        for text in _texts(resource)
+    ]
+    assert any(text.endswith(field) for text in denied), denied

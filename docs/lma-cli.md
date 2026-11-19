@@ -239,7 +239,7 @@ does on the Virtual Participant page (see
 [Rejoin](virtual-participant.md#rejoin)). It prints the row's new status, the
 meeting ID, the session number and where the session starts on the transcript
 timeline. The launch joins as a guest, without its owner's saved browser
-profile. The server's refusal (the Virtual Participant has not left, never
+profile, unless the Virtual Participant was scheduled by its owner. The server's refusal (the Virtual Participant has not left, never
 started a meeting, or the meeting's transcript was deleted) is printed, and the
 command exits with status 1.
 

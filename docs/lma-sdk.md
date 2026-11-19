@@ -148,7 +148,7 @@ Python SDK (no Cognito login required). The lifecycle is:
 | `has_zoom_credentials(user_sub, required=False)` | Whether the user has stored Zoom credentials | `bool` |
 | `get(vp_id)` | Fetch a VP row by id | `VpRow` |
 | `end(vp_id, reason="SDK requested termination", ended_by="SDK")` | End (stop) a running VP | `VpRow` |
-| `rejoin(vp_id)` | Send a VP that has left back into the same meeting, as a further capture session ([Rejoin](virtual-participant.md#rejoin)); the launch joins as a guest | `VpRow` (with `sessionNumber`, `sessionTimeOffset`) |
+| `rejoin(vp_id)` | Send a VP that has left back into the same meeting, as a further capture session ([Rejoin](virtual-participant.md#rejoin)); the launch joins as a guest unless the VP was scheduled by its owner | `VpRow` (with `sessionNumber`, `sessionTimeOffset`) |
 | `list()` | List VPs visible to the calling IAM principal | `list[VpRow]` |
 | `wait_for_launch(vp_id, timeout_s=120.0, poll_interval_s=2.0)` | Poll until status leaves `INITIALIZING` | `VpRow` |
 | `scheduler_state_machine_arn` (property) | Resolved ARN of the VP scheduler state machine (auto-derived from the stack) | `str` |

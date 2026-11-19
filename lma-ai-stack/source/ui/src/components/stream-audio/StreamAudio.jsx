@@ -480,6 +480,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
           [displayStream.current, micStream.current].forEach((stream) =>
             stream?.getTracks().forEach((track) => track.stop()),
           );
+          audioContext.current?.close?.();
           setStartError(error);
           setRecording(false);
           return;

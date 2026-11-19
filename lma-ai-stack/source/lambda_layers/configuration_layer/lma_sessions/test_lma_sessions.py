@@ -135,7 +135,7 @@ def test_an_other_write_failure_is_raised_as_it_is() -> None:
         (None, False),
         # A backend role (the lma CLI and SDK) may reopen any meeting.
         ({"userArn": "arn:aws:sts::123456789012:assumed-role/Operator/session"}, True),
-        # Nor is a caller with Cognito claims, whatever else it carries.
+        # A caller with Cognito claims is not a backend role, whatever else it carries.
         (
             {
                 "userArn": "arn:aws:sts::123456789012:assumed-role/Operator/session",

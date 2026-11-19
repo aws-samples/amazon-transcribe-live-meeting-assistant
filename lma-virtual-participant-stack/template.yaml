@@ -1372,10 +1372,14 @@ Resources:
                 Resource: "*"
               # The MCP server library import is for administrators, not for
               # the Virtual Participant.
+              # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
                   - "appsync:GraphQL"
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/importMCPServerLibrary"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/rejoinVirtualParticipant"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/reopenMeeting"
         - PolicyName: VirtualParticipantTablePolicy
           PolicyDocument:
             Version: 2012-10-17

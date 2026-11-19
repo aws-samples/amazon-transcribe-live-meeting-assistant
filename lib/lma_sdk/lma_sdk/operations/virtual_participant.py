@@ -623,7 +623,8 @@ class VirtualParticipantOperations:
         ``LMAAppSyncError`` with the server's message. Signed with IAM, the
         call needs an assumed role (an SSO or role profile), which may rejoin
         any VP; the launch joins as a guest, without its owner's browser
-        profile. See docs/virtual-participant.md#rejoin.
+        profile, unless the VP was scheduled by its owner. See
+        docs/virtual-participant.md#rejoin.
         """
         data = self._client.appsync.graphql(
             query=_REJOIN_MUTATION, variables={"input": {"id": vp_id}}
