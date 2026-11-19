@@ -2236,34 +2236,30 @@ export const CallPanel = ({
     [seekPlayer],
   );
   // The Details tab's "Play" on a recording: the Transcript tab, playing that
-  // recording from where the player is.
-  // A change of recording -- chosen, or the default settling -- keeps the
-  // place. Read here, while rendering: the player resets the position when
-  // its recording changes, and its effects run before this component's.
-  // `sessionNumber` names a capture session's recording, which is played from
-  // the session's start.
+  // recording from where the player is. `sessionNumber` names one capture
+  // session's recording, of a meeting with more than one, which is played
+  // from the session's start.
   const playOnTranscriptTab = useCallback(
     (kind, sessionNumber = null) => {
       setActiveTab(TAB_TRANSCRIPT);
       const target = sessionsRef.current.find((s) => s.number === sessionNumber);
-      if (target && target.number !== sessionRef.current?.number) {
-        pendingSwitchRef.current = { seconds: target.offset, playing: true };
-        setChosenSession(target.number);
-        if (kind) setChosenMedia(kind);
-        return;
-      }
       const state = playback.get();
-      const seconds = state.engaged ? state.seconds : 0;
-      if (kind && kind !== mediaKind) {
-        // Played once the other recording has loaded, from the same place.
+      const where = state.engaged ? state.seconds : 0;
+      const seconds = target ? target.offset : where;
+      if ((target && target.number !== sessionRef.current?.number) || (kind && kind !== mediaKind)) {
+        // Played once the other recording has loaded.
         pendingSwitchRef.current = { seconds, playing: true };
-        setChosenMedia(kind);
+        if (target) setChosenSession(target.number);
+        if (kind) setChosenMedia(kind);
         return;
       }
       playerRef.current?.seek(toRecordingSeconds(clockRef.current, seconds), { play: true });
     },
     [setActiveTab, playback, mediaKind],
   );
+  // A change of recording -- chosen, or the default settling -- keeps the
+  // place. Read here, while rendering: the player resets the position when
+  // its recording changes, and its effects run before this component's.
   const shownMediaRef = useRef({ callId: item.callId, url: media?.url });
   if (shownMediaRef.current.url !== media?.url) {
     const { seconds, playing, engaged } = playback.get();

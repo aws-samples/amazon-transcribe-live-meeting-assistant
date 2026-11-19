@@ -722,6 +722,8 @@ class KinesisStreamManager {
   /**
    * SessionNumber, for START and END: sent for the first session too, so that a
    * late END of session 1 is told apart once a rejoined session has started.
+   * Also on the recording link events, where the call event processor stores
+   * it as the link's session (Call.RecordingUrlSessions).
    */
   private sessionField(): { SessionNumber: number } {
     return { SessionNumber: this.session.number };

@@ -1008,6 +1008,19 @@ describe('the player of a meeting continued in a second session', () => {
     expect(media().currentTime).toBe(0);
     expect(media().paused).toBe(false);
   });
+
+  it("plays the loaded session's recording from its start from the Details tab, not from where it was", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(13);
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play the session 2 audio recording' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
 });
 
 describe('the meeting assistant panel', () => {
