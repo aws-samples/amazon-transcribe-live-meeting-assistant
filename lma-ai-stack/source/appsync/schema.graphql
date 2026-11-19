@@ -57,8 +57,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	VideoRecordingUrls: [String]
 	# The capture session each link in RecordingUrls and VideoRecordingUrls was
 	# recorded in, at the same index; null where the writer did not know it.
-	# Written with the link, in the same update, so the lists stay in step.
-	# Absent on a meeting recorded before they were kept.
+	# Written with the link, in the same update. Absent, or shorter than the
+	# link list, on a meeting recorded by a pre-release build of the rejoin
+	# feature; the meeting page then pairs them only where it can.
 	RecordingUrlSessions: [Int]
 	VideoRecordingUrlSessions: [Int]
 	TotalConversationDurationMillis: Float
@@ -1290,8 +1291,8 @@ input AddCallDetectedLanguageInput {
 input StartCallSessionInput {
 	CallId: ID!
 	SessionNumber: Int!
-	# Where the session starts on the transcript timeline, as the rejoin or
-	# reopen that allowed it recorded (Call.SessionOffsetSeconds). Given, the
+	# Where the session starts on the transcript timeline, as the rejoin that
+	# allowed it recorded (Call.SessionOffsetSeconds). Given, the
 	# session is appended to Call.Sessions.
 	SessionOffsetSeconds: Float
 }

@@ -39,7 +39,7 @@ def test_each_sessions_recording_is_stored_with_its_session_and_offset(client: L
         ], f"session 2 is not listed with its offset: {sessions}"
 
         # Session 2's link, from an event that does not name its session (as a
-        # streaming client's transcriber sends it): the meeting's current one.
+        # streaming transcriber sends it): the meeting's current one.
         probe.send_recording(2, name_the_session=False)
         meeting = wait_for(
             probe.meeting, lambda m: len(m.get("RecordingUrlSessions") or []) >= 2, 90

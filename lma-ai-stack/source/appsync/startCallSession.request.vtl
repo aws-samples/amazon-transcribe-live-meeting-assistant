@@ -28,7 +28,7 @@
 } )
 ## The session, with where it starts on the transcript timeline, appended to
 ## Call.Sessions for the meeting page's player: only when the call event
-## processor could read the offset the rejoin or reopen recorded. The condition
+## processor could read the offset the rejoin recorded. The condition
 ## below lets this write succeed once per session, so the list names each
 ## session once.
 #if( $util.isNumber($ctx.args.input.SessionOffsetSeconds) )

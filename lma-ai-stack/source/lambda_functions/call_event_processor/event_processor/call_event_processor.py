@@ -598,9 +598,9 @@ async def read_allowed_session_offset(
 ) -> Optional[float]:
     """Where the session the START event names starts on the transcript timeline.
 
-    The rejoin or reopen that allowed the session wrote it on the meeting record
+    The rejoin that allowed the session wrote it on the meeting record
     (SessionOffsetSeconds, beside SessionNumber), and it is fixed for that
-    session number: a later reopen allows a higher number. None when the record
+    session number: a later rejoin allows a higher number. None when the record
     names another session, has no usable offset, or cannot be read; the session
     then starts without being added to Call.Sessions, and the meeting page's
     player falls back to the record's latest session and offset.
@@ -1249,11 +1249,12 @@ async def recording_session_field(
     the transcript timeline, so each link is stored with its session
     (Call.RecordingUrlSessions, Call.VideoRecordingUrlSessions). A writer that
     names the session in the event (the Virtual Participant) is taken at its
-    word. For one that does not (a streaming client's transcriber), the link is
-    taken to belong to the session the meeting is in: a recording is uploaded as
-    its session ends, and a later session is started by its owner after that.
-    Empty when the meeting could not be read, which stores the link with no
-    session rather than a guessed one.
+    word. For one that does not -- a streaming client's transcriber, whose
+    meetings have one session, or a Virtual Participant image that predates
+    naming it -- the link is taken to belong to the session the meeting is in:
+    a recording is uploaded as its session ends, before a rejoin can start the
+    next. Empty when the meeting could not be read, which stores the link with
+    no session rather than a guessed one.
     """
     field = f"{link_field}Session"
     if not input_declares(appsync_session, f"Update{link_field}Input", field):

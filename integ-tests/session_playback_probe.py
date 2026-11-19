@@ -10,13 +10,13 @@ the deployed call event processor and AppSync resolvers:
 
 1. a recording link stored with its session (``RecordingUrlSessions`` beside
    ``RecordingUrls``), for an event that names the session, as a Virtual
-   Participant's does, and for one that does not, as a streaming client's
+   Participant's does, and for one that does not, as the streaming
    transcriber's does, which takes the meeting's current session;
 2. a later session listed with its offset (``Sessions``) when its START reopens
    the meeting.
 
-Session 2 is allowed on the meeting record the way a rejoin or a reopen allows
-it, by writing ``SessionNumber`` and ``SessionOffsetSeconds``, so the probe
+Session 2 is allowed on the meeting record the way a Virtual Participant
+rejoin allows it, by writing ``SessionNumber`` and ``SessionOffsetSeconds``, so the probe
 needs no Virtual Participant, no Cognito user and no setting change. The links
 name no object; nothing is uploaded. Used by
 test_session_playback.py, and can be run standalone:
@@ -119,7 +119,10 @@ class SessionPlaybackProbe:
 
     def allow_session(self, session_number: int, offset: int) -> None:
         """Record on the meeting the session its next START may open, as
-        lma_sessions.allow_session does for a rejoin or a reopen."""
+        allow_session in virtual_participant_manager/rejoin.py does for a
+        rejoin. Not an exact copy: the rejoin's write is also conditional on
+        a lower allowed session and a kept transcript, which a fresh synthetic
+        meeting has."""
         self.session.resource("dynamodb").Table(self.table).update_item(
             Key={"PK": f"c#{self.call_id}", "SK": f"c#{self.call_id}"},
             UpdateExpression=(

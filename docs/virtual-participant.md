@@ -689,6 +689,7 @@ The meeting page's player plays one session's recording at a time, at that sessi
 
 #### Limitations of rejoin
 
+- **Meetings recorded before rejoin.** A meeting recorded by a release without rejoin keeps only its latest recording link. If it is continued after an upgrade, its first session's recording link is replaced by the continued session's, so the meeting page plays the continued session only; the first session's files stay in the recordings bucket.
 - **An earlier session's summary.** If the earlier session's summary is still being generated when the rejoined session starts, it is shown on the meeting page when it arrives, until the rejoined session ends and the summary over the whole meeting replaces it. It does not delete or schedule the deletion of the transcript (see [Transcript deletion](transcript-deletion.md)).
 - **Voice labels.** With speaker separation on, the speech engine numbers the voices it hears afresh in each session (`spk_0`, `spk_1`, …), and a name given to a voice on the meeting page applies to that label throughout the meeting. A voice named in one session can therefore carry its name onto a different person's voice in the next; check the names after a rejoin. Rows named from the meeting platform's roster are not affected.
 - **Retention.** A rejoined meeting keeps the expiry it was created with, which is also when it leaves the meeting list.

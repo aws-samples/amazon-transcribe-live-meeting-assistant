@@ -3,7 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 """The meeting record's per-session playback fields, as the resolvers write them.
 
-A meeting continued by a rejoin or a reopen is recorded in one file per capture
+A meeting continued by a Virtual Participant rejoin is recorded in one file per capture
 session. The meeting page's player plays each session's file at the session's
 place on the transcript timeline, and reads three things from the record:
 

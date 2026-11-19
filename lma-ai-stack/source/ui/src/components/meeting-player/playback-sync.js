@@ -289,8 +289,7 @@ export const playerShortcut = (event) => {
 
 /*
  * Capture sessions. A meeting is captured in one session unless it is
- * continued (a Virtual Participant rejoin, or a streaming client's "Continue
- * an existing meeting"), which adds another. The transcript holds every
+ * continued by a Virtual Participant rejoin, which adds another. The transcript holds every
  * session on one timeline -- each later session starts at its offset, after
  * the earlier ones -- while each session is recorded in a file of its own that
  * starts at 0. A session's recording is therefore on a clock offset by where
@@ -308,8 +307,9 @@ const sessionNumberOf = (value) => {
 };
 
 // Where each session starts: the first at 0, each later one as Call.Sessions
-// lists it. A session that started before Sessions was kept is known only when
-// it is the latest (Call.SessionOffsetSeconds).
+// lists it. A session the call event processor could not list (it could not
+// read the session's offset when the session started) is known only when it is
+// the latest (Call.SessionOffsetSeconds).
 const sessionOffsets = (meeting) => {
   const offsets = new Map([[1, 0]]);
   (Array.isArray(meeting?.sessions) ? meeting.sessions : []).forEach((entry) => {
@@ -334,8 +334,9 @@ const sessionOffsets = (meeting) => {
 
 // Each session's link of one kind: the links paired with the sessions stored
 // beside them, the last link of a session winning (a redelivered write repeats
-// one). Links stored without their sessions -- a meeting recorded before they
-// were kept -- are paired in order when there is exactly one per session.
+// one). Links stored without their sessions -- only by pre-release builds of
+// the rejoin feature -- are paired in order when there is exactly one per
+// session.
 const linksBySession = (urls, tags, numbers) => {
   const links = new Map();
   if (!Array.isArray(urls) || !urls.length) return links;
