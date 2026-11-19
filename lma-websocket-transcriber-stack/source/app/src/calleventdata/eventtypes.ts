@@ -34,6 +34,8 @@ export type CallStartEvent = CallEventBase<'START'> & Partial<CaptureContext> & 
     CustomerPhoneNumber: string,
     SystemPhoneNumber: string,
     AgentId: string | undefined,
+    /** The capture session, when one is named (meeting-session.ts). */
+    SessionNumber?: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -50,6 +52,8 @@ export type CallCaptureContextEvent = CallEventBase<'UPDATE_CAPTURE_CONTEXT'> & 
 export type CallEndEvent = CallEventBase<'END'> & {
     CustomerPhoneNumber: string,
     SystemPhoneNumber: string,
+    /** The capture session, when one is named (meeting-session.ts). */
+    SessionNumber?: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -225,6 +229,20 @@ export type CallMetaData = {
      * docs/meeting-consent.md). Absent from clients without one.
      */
     consent?: unknown,
+    /**
+     * START: the capture session the client asks to capture, from the
+     * reopenMeeting mutation, when it continues an existing meeting. Once the
+     * START is checked (meeting-session.ts), the session the meeting record
+     * allows, or 1 for a new meeting, or absent when none is named; the client's
+     * value is never kept unchecked.
+     */
+    sessionNumber?: number,
+    /**
+     * Server-managed (never taken from a client): where this session starts on
+     * the meeting's transcript timeline, in seconds, read from the meeting
+     * record. Added to every segment's and key frame's time.
+     */
+    sessionOffsetSeconds?: number,
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,

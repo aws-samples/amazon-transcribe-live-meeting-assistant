@@ -313,11 +313,17 @@ const muxedFileName = (callId: string): string => {
  * `audioPositionSeconds` is where the meeting's audio timeline is when the
  * stream starts (calleventdata/session-lifecycle.ts recordedAudioSeconds); a
  * stream that restarts with a fresh encoder has its key frames placed there.
+ * `sessionOffsetSeconds` is where the audio session's capture session starts
+ * on the meeting's transcript timeline (calleventdata/meeting-session.ts): 0
+ * for a meeting's first session, and after the earlier sessions for one that
+ * continues a meeting. It moves the key frames' place on the transcript's
+ * clock, not their place in the recording.
  */
 export const startVideoSession = (
     callMetaData: CallMetaData,
     server: FastifyInstance,
-    audioPositionSeconds?: number
+    audioPositionSeconds?: number,
+    sessionOffsetSeconds = 0
 ): VideoSession => {
     const callId = callMetaData.callId;
     let session = videoSessions.get(callId);
@@ -371,7 +377,7 @@ export const startVideoSession = (
             // end to end, is not known.
             stopKeyframes(session, server);
             if (audioPositionSeconds !== undefined && Number.isFinite(audioPositionSeconds)) {
-                startKeyframes(session, Math.max(0, audioPositionSeconds), null, server);
+                startKeyframes(session, sessionOffsetSeconds + Math.max(0, audioPositionSeconds), null, server);
             }
             server.log.info(
                 `[START_VIDEO]: [${callId}] - Video stream restarted; starting part ${
@@ -412,7 +418,7 @@ export const startVideoSession = (
         // transcript's clock and, because the mux shifts it by the same
         // offset, in the recording.
         const base = session.videoTimeOffsetMs / 1000;
-        startKeyframes(session, base, base, server);
+        startKeyframes(session, sessionOffsetSeconds + base, base, server);
     }
 
     const segPath = path.resolve(

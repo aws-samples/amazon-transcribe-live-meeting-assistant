@@ -690,3 +690,25 @@ test('an END from the client leaves its connection for the client to close, and 
     assert.deepEqual(effects.errors, [], 'no duplicate end is reported');
     assert.equal(sessions.heldCount, 0);
 });
+
+test('the END names the capture session the START was given, whatever the END frame carries', async () => {
+    const written: CallMetaData[] = [];
+    const { sessions } = lifecycle({
+        writeCallEndEvent: async (meta) => {
+            written.push(meta);
+        },
+    });
+    const ws = new FakeSocket('only');
+    const meeting = session();
+    meeting.callMetadata.sessionNumber = 3;
+    meeting.callMetadata.sessionOffsetSeconds = 1807;
+    sessions.register(ws, meeting);
+
+    const endFrame = { ...meeting.callMetadata, callEvent: 'END', sessionNumber: 9, sessionOffsetSeconds: 0 };
+    await sessions.end(ws, meeting, endFrame as CallMetaData);
+
+    assert.equal(written.length, 1);
+    assert.equal(written[0]?.sessionNumber, 3);
+    assert.equal(written[0]?.sessionOffsetSeconds, 1807);
+    assert.equal(written[0]?.callEvent, 'END');
+});

@@ -53,6 +53,11 @@ export interface ConsentSessionDeps {
      * this connection. The step is recorded only on a meeting that user owns.
      */
     readonly callerUsername: string | undefined;
+    /**
+     * Whether the caller is an Admin, who may add to any meeting (see
+     * calleventdata/meeting-session.ts) and so record its consent step on it.
+     */
+    readonly callerIsAdmin?: boolean;
     /** Stores an evidence image in the recordings bucket. */
     readonly putEvidence: (key: string, bytes: Buffer, contentType: string) => Promise<void>;
     /** The recordings bucket's evidence prefix, ending in "/". */
@@ -360,7 +365,8 @@ export class ConsentSession {
         if (owner === undefined) {
             return undefined;
         }
-        if (!this.deps.callerUsername || owner !== this.deps.callerUsername) {
+        const callerOwns = Boolean(this.deps.callerUsername) && owner === this.deps.callerUsername;
+        if (!callerOwns && !this.deps.callerIsAdmin) {
             this.notOwned = true;
             this.deps.log.warn(`[CONSENT]: [${this.callId}] - the meeting is not owned by the caller; not recording consent`);
             this.deps.send(this.frame({ captureAllowed: false, code: 'MEETING_NOT_OWNED', message: MEETING_NOT_OWNED_MESSAGE }));

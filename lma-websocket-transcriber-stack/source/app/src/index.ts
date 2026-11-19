@@ -81,10 +81,16 @@ import {
 } from './videorecording';
 
 import { ConsentApi, createSignedGraphqlCaller } from './consent/appsync';
-import { MEETING_NOT_OWNED_MESSAGE, decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
+import { decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
 import { ConsentSession } from './consent/session';
 import { PendingConsentFrames } from './consent/pending-frames';
 import { readConsentSettings } from './consent/settings';
+import {
+    MeetingAccess,
+    decideMeetingAccess,
+    meetingRefusal,
+    readMeetingRecordWithRetries,
+} from './calleventdata/meeting-session';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME =
@@ -122,9 +128,8 @@ const s3Client = new S3Client({ region: AWS_REGION });
 // endpoint no consent can be recorded, so an opt-in meeting is not captured.
 const GRAPHQL_ENDPOINT = process.env['GRAPHQL_ENDPOINT'] || '';
 const CONSENT_EVIDENCE_PREFIX = process.env['CONSENT_EVIDENCE_PREFIX'] || 'lma-consent-evidence/';
-const consentApi = GRAPHQL_ENDPOINT
-    ? new ConsentApi(createSignedGraphqlCaller(GRAPHQL_ENDPOINT, AWS_REGION))
-    : undefined;
+const graphqlCaller = GRAPHQL_ENDPOINT ? createSignedGraphqlCaller(GRAPHQL_ENDPOINT, AWS_REGION) : undefined;
+const consentApi = graphqlCaller ? new ConsentApi(graphqlCaller) : undefined;
 
 /** A JSON frame to the client. Clients that predate these frames ignore them. */
 const sendFrame = (ws: WebSocket, frame: Record<string, unknown>): void => {
@@ -444,6 +449,44 @@ const writeSessionAudio = (socketData: SocketCallData, data: Uint8Array): void =
     }
 };
 
+/** Whether a START has been seen without the meeting record API (logged once). */
+let warnedNoMeetingApi = false;
+
+/**
+ * What a START may do with the meeting it names (calleventdata/meeting-session.ts):
+ * create it, add to it as its owner or an Admin, continue it in the session
+ * reopenMeeting allowed, or nothing. A record that cannot be read after the
+ * retries refuses the START, since it cannot be checked.
+ */
+const checkMeetingAccess = async (
+    clientIP: string,
+    callMetaData: CallMetaData,
+    request: FastifyRequest
+): Promise<MeetingAccess> => {
+    const caller = getAuthenticatedCaller(request);
+    if (!graphqlCaller) {
+        // A transcriber deployed without the AppSync API (LMA's own stack always
+        // passes it) cannot read the meeting record: it captures as it did
+        // before the check, and cannot continue a meeting.
+        if (!warnedNoMeetingApi) {
+            warnedNoMeetingApi = true;
+            server.log.warn('[START]: No GRAPHQL_ENDPOINT; meeting ownership is not checked and meetings cannot be continued.');
+        }
+        return callMetaData.sessionNumber === undefined || callMetaData.sessionNumber === null
+            ? { kind: 'append', offsetSeconds: 0 }
+            : meetingRefusal('SESSION_NOT_ALLOWED');
+    }
+    try {
+        const record = await readMeetingRecordWithRetries(graphqlCaller, callMetaData.callId);
+        return decideMeetingAccess(record, caller, callMetaData.sessionNumber);
+    } catch (error) {
+        server.log.error(
+            `[START]: [${clientIP}][${callMetaData.callId}] - Could not read the meeting record: ${normalizeErrorForLogging(error)}`
+        );
+        return meetingRefusal('MEETING_NOT_CHECKED');
+    }
+};
+
 /**
  * Start transcription for a call with the engine it asked for.
  *
@@ -628,36 +671,30 @@ const onTextMessage = async (
             ws.close(1008, 'meeting consent required');
             return;
         }
-        // A consent step is recorded only on the caller's own meeting: a START
-        // naming an existing meeting of somebody else's is refused before
-        // anything is written for it. (A meeting created between this read and
-        // the session's own is caught there.)
-        if (consentDecision.kind === 'consent' && consentApi) {
-            let owner: string | null | undefined;
-            try {
-                owner = await consentApi.meetingOwner(callMetaData.callId);
-            } catch (error) {
-                server.log.warn(
-                    `[CONSENT]: [${clientIP}][${callMetaData.callId}] - Could not read the meeting's owner at START: ${normalizeErrorForLogging(error)}`
-                );
-            }
-            if (typeof owner === 'string' && owner !== getAuthenticatedCaller(request)?.username) {
-                server.log.warn(
-                    `[CONSENT]: [${clientIP}][${callMetaData.callId}] - The meeting belongs to another user; not capturing it.`
-                );
-                sendFrame(ws, {
-                    event: 'CONSENT_STATE',
-                    callId: callMetaData.callId,
-                    captureAllowed: false,
-                    code: 'MEETING_NOT_OWNED',
-                    message: MEETING_NOT_OWNED_MESSAGE,
-                });
-                pendingConsentFrames.drop(ws);
-                sessions.dropAudio(ws);
-                ws.close(1008, 'meeting consent required');
-                return;
-            }
+        // A START that names an existing meeting adds to it, so it is accepted
+        // from the meeting's owner or an Admin; one that continues a meeting
+        // must name the session reopenMeeting allowed on it. Checked before anything is written for the meeting
+        // (calleventdata/meeting-session.ts). The session's number and offset
+        // come from the meeting record, never from the client.
+        const access = await checkMeetingAccess(clientIP, callMetaData, request);
+        if (access.kind === 'refuse') {
+            server.log.warn(
+                `[START]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${access.code}).`
+            );
+            sendFrame(ws, {
+                event: 'CONSENT_STATE',
+                callId: callMetaData.callId,
+                captureAllowed: false,
+                code: access.code,
+                message: access.message,
+            });
+            pendingConsentFrames.drop(ws);
+            sessions.dropAudio(ws);
+            ws.close(1008, 'meeting not available to this caller');
+            return;
         }
+        callMetaData.sessionNumber = access.sessionNumber;
+        callMetaData.sessionOffsetSeconds = access.offsetSeconds;
         if (consentDecision.kind === 'capture' && consentDecision.warning) {
             server.log.warn(`[CONSENT]: [${clientIP}][${callMetaData.callId}] - ${consentDecision.warning}`);
             sendFrame(ws, {
@@ -734,7 +771,11 @@ const onTextMessage = async (
                 // object is a WHITELIST copy, so a field omitted here is silently
                 // dropped and the feature would appear to do nothing.
                 diarizeSystemChannel: callMetaData.diarizeSystemChannel,
-                diarizeMicChannel: callMetaData.diarizeMicChannel
+                diarizeMicChannel: callMetaData.diarizeMicChannel,
+                // The capture session and its place on the meeting's timeline,
+                // as checked above against the meeting record.
+                sessionNumber: callMetaData.sessionNumber,
+                sessionOffsetSeconds: callMetaData.sessionOffsetSeconds,
             },
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,
@@ -756,6 +797,7 @@ const onTextMessage = async (
             socketCallMap.consent = new ConsentSession(callMetaData.callId, consentDecision, clientConsent, {
                 api: consentApi,
                 callerUsername: getAuthenticatedCaller(request)?.username,
+                callerIsAdmin: (getAuthenticatedCaller(request)?.groups ?? []).includes('Admin'),
                 putEvidence: putConsentEvidence,
                 evidencePrefix: CONSENT_EVIDENCE_PREFIX,
                 send: (frame) => sendFrame(connection.ws, frame),
@@ -875,7 +917,14 @@ const onTextMessage = async (
         // Where the meeting's timeline is now, by the audio received: a video
         // stream that restarts is placed there, which leaves out any time the
         // audio connection was down, as the recording and transcript do.
-        const session = startVideoSession(callMetaData, server, recordedAudioSeconds(audioSession));
+        // A later session of a continued meeting is placed after the earlier
+        // ones on the timeline, as its transcript is.
+        const session = startVideoSession(
+            callMetaData,
+            server,
+            recordedAudioSeconds(audioSession),
+            audioSession.callMetadata.sessionOffsetSeconds ?? 0
+        );
         videoSocketMap.set(ws, session);
     } else if (callMetaData.callEvent === 'END_VIDEO') {
         const session = videoSocketMap.get(ws);
