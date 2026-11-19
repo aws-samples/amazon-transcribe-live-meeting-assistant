@@ -339,7 +339,10 @@ The server takes the session's offset from the meeting record, not from the
 client. It names the session on the meeting's START and END events, adds the
 offset to the start and end time of every transcript segment and screen key
 frame, and prefixes the session's segment ids with `s<n>-`, because the speech
-engines' ids restart with each session. The meeting stays as it is until the
+engines' ids restart with each session. A session transcribed by an ASR
+MicroVM is given a MicroVM of its own. The session's audio recording is stored
+under a name of its own and linked on the meeting, replacing the earlier
+session's link, and the meeting record keeps every session's links. The meeting stays as it is until the
 session's START event is processed; it is then shown as in progress again, and
 when the session ends the end-of-meeting work runs again, including the summary
 over the whole transcript. The details, and what is kept from the earlier

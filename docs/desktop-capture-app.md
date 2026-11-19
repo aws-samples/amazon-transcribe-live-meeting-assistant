@@ -607,13 +607,15 @@ deployment does not show it; download the app again after updating the stack.
 
 Limitations:
 
-- **Recordings.** A meeting has one audio recording link and one screen video
-  link. The continued recording's audio is stored beside the meeting's first
-  recording (as `<meeting ID>_<time>.wav` under the recordings prefix), and the
-  meeting page keeps playing the first one. A continued screen video replaces
-  the meeting's video link; the earlier video stays in the recordings bucket.
-  Lines of the continued transcript therefore do not line up with the audio
-  player on the meeting page.
+- **Recordings.** The meeting page shows one audio recording and one screen
+  video. The continued recording's audio (stored as `<meeting ID>_<time>.wav`
+  under the recordings prefix) and video are uploaded as files of their own,
+  and their links replace the earlier recording's on the page. The earlier files
+  stay in the recordings bucket, and the meeting record keeps the links of every
+  recording (`RecordingUrls` and `VideoRecordingUrls`), so deleting the meeting
+  deletes all of them. The player starts the continued recording at 0, while
+  its transcript follows the earlier one, so the player's times do not match
+  the continued transcript's.
 - **Voice labels.** With **Identify speakers** on, the voices are numbered
   afresh in each recording (`spk_0`, `spk_1`, …), so a name given to a voice on
   the meeting page applies to that label in both recordings. Check the names
