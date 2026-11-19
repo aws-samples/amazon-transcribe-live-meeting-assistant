@@ -60,9 +60,15 @@ export function isMediaPermissionDialog(
  * participant was removed, or that screen sharing, a poll or the breakout
  * rooms ended, must not end the VP's meeting.
  */
-/** Text of a dialog saying the VP itself was removed from the meeting. */
+/**
+ * Text of a dialog saying the VP itself was removed from the meeting: "you",
+ * "the user" or "this user" was removed, "removed you", or "User" at the start
+ * of a sentence, as the model described Zoom's notice in a live meeting ("User
+ * has been removed from the meeting by the host"). Not "a user", which is
+ * someone else.
+ */
 const REMOVED_TEXT =
-    /\b(?:you|user)\s+(?:have|has|were|was)\s+(?:been\s+)?removed\b|\bremoved\s+you\b/i;
+    /(?:^\s*|[.!?:]\s+|\b(?:the|this)\s+)user\s+(?:have|has|were|was)\s+(?:been\s+)?removed\b|\byou\s+(?:have|has|were|was)\s+(?:been\s+)?removed\b|\bremoved\s+you\b/i;
 /** Text of a dialog saying the meeting itself has ended. */
 const ENDED_TEXT =
     /\b(?:meeting|call)\s+(?:has|was)\s+(?:been\s+)?ended\b|\bended\s+(?:the|this)\s+(?:meeting|call)\b/i;

@@ -266,6 +266,8 @@ test('an in-meeting notice about something else ending, or someone else removed,
         'The host ended the breakout rooms',
         'Alice has been removed from the meeting',
         'A participant was removed from the meeting by the host',
+        'A user has been removed from the meeting by the host',
+        'Another user was removed from the call',
     ]) {
         for (const type of ['OTHER', 'BLOCKED'] as const) {
             assert.equal(meetingOverReason({ type, message }), null, `${type}: ${message}`);
@@ -280,4 +282,17 @@ test('before the join a removal notice is neither escalated nor handed to the ha
     // error-screen detection.
     const watchdog = readFileSync(new URL('../src/dialog-watchdog.ts', import.meta.url), 'utf8');
     assert.match(watchdog, /if \(meetingJoined\(\)\) opts\.onMeetingOver\?\.\(decision\.reason\)/);
+});
+
+test('a removal notice naming the VP as you, the user or this user is read as its own removal', () => {
+    for (const message of [
+        'User has been removed from the meeting by the host',
+        'Dialog shown. User has been removed from the meeting.',
+        'The user was removed from this meeting',
+        'This user has been removed by the host',
+        'You have been removed from the meeting',
+        'The host removed you from the meeting',
+    ]) {
+        assert.equal(meetingOverReason({ type: 'BLOCKED', message }), 'removed-from-meeting', message);
+    }
 });
