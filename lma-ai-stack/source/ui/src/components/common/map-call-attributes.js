@@ -181,8 +181,10 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
     transcriptionPause: keep('transcriptionPause'),
-    // Only the pipeline's writes carry these; a write from the page (the
-    // agenda, speaker names, the summary text) publishes them empty.
+    // The session playback fields: every write published to onUpdateCall
+    // selects them, but the meeting list's copy comes from listCallsDateRange,
+    // which does not, and a Lambda or schema older than these fields publishes
+    // them as null. Either would otherwise clear what getCall read.
     recordingUrls: keep('recordingUrls'),
     recordingUrlSessions: keep('recordingUrlSessions'),
     videoRecordingUrls: keep('videoRecordingUrls'),
