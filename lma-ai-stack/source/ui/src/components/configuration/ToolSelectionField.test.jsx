@@ -7,10 +7,10 @@
 /**
  * Meeting Assistant › Tool selection on the Configuration page, against the
  * section schema as the configuration layer ships it. What is asserted: each
- * installed server is listed with its three flags; a change stores only the
- * flag that differs from the default, and a server left with none is removed;
- * a server the profile names that is not installed is shown so it can be
- * removed; and a read-only profile offers no change.
+ * installed server and each skill is listed with its three flags; a change
+ * stores only the flag that differs from the default, and an item left with
+ * none is removed; an item the profile names that this deployment does not have
+ * is shown so it can be removed; and a read-only profile offers no change.
  */
 import React from 'react';
 import { readFileSync } from 'fs';
@@ -36,12 +36,18 @@ const SERVERS = [
   { ServerId: 'beta', Name: 'Beta', Status: 'ACTIVE', CredentialsRequired: true },
 ];
 
-const renderField = ({ values = DEFAULTS, readOnly = false, servers = SERVERS } = {}) => {
+const SKILLS = [
+  { SkillId: 'launch-review', Name: 'launch-review', DisplayName: 'Launch review' },
+  { SkillId: 'incident-notes', Name: 'incident-notes' },
+];
+
+const renderField = ({ values = DEFAULTS, readOnly = false, servers = SERVERS, skills = SKILLS } = {}) => {
   const onChange = vi.fn();
   const loadServers = vi.fn(() => Promise.resolve(servers));
+  const loadSkills = vi.fn(() => Promise.resolve(skills));
   // eslint-disable-next-line react/prop-types
   const Field = ({ schema, path, label }) => (
-    <ToolSelectionField schema={schema} path={path} label={label} loadServers={loadServers} />
+    <ToolSelectionField schema={schema} path={path} label={label} loadServers={loadServers} loadSkills={loadSkills} />
   );
   render(
     <SectionProvider
@@ -55,10 +61,10 @@ const renderField = ({ values = DEFAULTS, readOnly = false, servers = SERVERS } 
       <SchemaNode schema={TOOL_SCHEMA} path={['toolSelection']} label="Tool selection" />
     </SectionProvider>,
   );
-  return { onChange, loadServers };
+  return { onChange, loadServers, loadSkills };
 };
 
-const stored = (onChange) => onChange.mock.calls.at(-1)[0].toolSelection.mcpServers;
+const stored = (onChange, kind = 'mcpServers') => onChange.mock.calls.at(-1)[0].toolSelection[kind];
 
 describe('Tool selection', () => {
   it('is the control the schema names for the field', () => {
@@ -111,6 +117,50 @@ describe('Tool selection', () => {
   it('says so when no server is installed', async () => {
     renderField({ servers: [] });
     await waitFor(() => expect(screen.getByText(/No MCP servers are installed/)).toBeTruthy());
+  });
+});
+
+describe('Tool selection for skills', () => {
+  it('the skills member is shown, with the same three flags as the servers', () => {
+    const { skills } = TOOL_SCHEMA.properties;
+    expect(skills.hidden).toBeUndefined();
+    expect(Object.keys(skills.additionalProperties.properties)).toEqual(['enabled', 'inMeetingRequests', 'alwaysOn']);
+  });
+
+  it('lists every skill by its display name and name', async () => {
+    renderField();
+    expect(await screen.findByText('Launch review (launch-review)')).toBeTruthy();
+    expect(screen.getByText('incident-notes')).toBeTruthy();
+    expect(screen.getByLabelText('Enabled: incident-notes').checked).toBe(true);
+  });
+
+  it('turning a skill off stores only enabled false for it, by skill id', async () => {
+    const { onChange } = renderField();
+    fireEvent.click(await screen.findByLabelText('Enabled: incident-notes'));
+    expect(stored(onChange, 'skills')).toEqual({ 'incident-notes': { enabled: false } });
+  });
+
+  it('the always-on flag is stored for a skill and cleared again', async () => {
+    const { onChange } = renderField({
+      values: { toolSelection: { mcpServers: {}, skills: { 'launch-review': { alwaysOn: true } } } },
+    });
+    fireEvent.click(await screen.findByLabelText('Always on: Launch review (launch-review)'));
+    expect(stored(onChange, 'skills')).toEqual({});
+  });
+
+  it('a skill the profile names that this deployment does not have can be removed', async () => {
+    const { onChange } = renderField({
+      values: { toolSelection: { mcpServers: {}, skills: { gone: { inMeetingRequests: false } } } },
+    });
+    expect(await screen.findByText('No such skill')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Remove gone'));
+    expect(stored(onChange, 'skills')).toEqual({});
+  });
+
+  it('says so when no skill is defined, and a read-only profile offers no change', async () => {
+    renderField({ skills: [], readOnly: true });
+    await waitFor(() => expect(screen.getByText(/No skills are defined/)).toBeTruthy());
+    expect((await screen.findByLabelText('Enabled: Alpha')).disabled).toBe(true);
   });
 });
 

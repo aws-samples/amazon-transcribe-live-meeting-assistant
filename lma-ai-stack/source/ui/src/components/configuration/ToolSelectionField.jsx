@@ -4,14 +4,15 @@
  * See the LICENSE file in the project root for full license information.
  */
 
-// Meeting Assistant › Tool selection: per installed MCP server, whether the
-// meeting assistant may use it at all, whether requests made in the meeting may,
-// and the reserved always-on flag. The servers themselves, with their
-// credentials, are installed on the MCP Servers page and stay in their own
-// table; this edits only the active profile's flags, keyed by server id
-// (meeting_assist.toolSelection.mcpServers). A server with no entry behaves as
-// it did before the profile could name it, so the profile stores only what an
-// administrator changed.
+// Meeting Assistant › Tool selection: per installed MCP server and per skill,
+// whether the meeting assistant may use it at all, whether requests made in the
+// meeting may, and the reserved always-on flag. The servers, with their
+// credentials, are installed on the MCP Servers page, and the skills are written
+// on the Skills page; each stays in its own table. This edits only the active
+// profile's flags, keyed by server id (meeting_assist.toolSelection.mcpServers)
+// and by skill id (meeting_assist.toolSelection.skills). An item with no entry
+// behaves as it did before the profile could name it, so the profile stores only
+// what an administrator changed.
 
 import React, { useContext, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -35,117 +36,155 @@ export const listServersQuery = `
   }
 `;
 
+export const listSkillsQuery = `
+  query ListSkills {
+    listSkills {
+      SkillId
+      Name
+      DisplayName
+    }
+  }
+`;
+
 const defaultLoadServers = async () => {
   const response = await generateClient().graphql({ query: listServersQuery });
   return response.data.listInstalledMCPServers || [];
 };
 
-const IN_MEETING_OPTIONS = [
-  { value: 'default', label: 'As In-meeting requests sets for every server' },
+const defaultLoadSkills = async () => {
+  const response = await generateClient().graphql({ query: listSkillsQuery });
+  return response.data.listSkills || [];
+};
+
+/**
+ * `entries` with one flag of one item set to `value`, or removed when `value`
+ * is undefined; an item left with no flag is removed, so it behaves as an
+ * unlisted one.
+ */
+export const withFlag = (entries, itemId, flag, value) => {
+  const next = { ...(isObject(entries) ? entries : {}) };
+  const flags = { ...(isObject(next[itemId]) ? next[itemId] : {}) };
+  if (value === undefined) delete flags[flag];
+  else flags[flag] = value;
+  if (Object.keys(flags).length) next[itemId] = flags;
+  else delete next[itemId];
+  return next;
+};
+
+// The two kinds of item the profile names, and how each is listed.
+const KINDS = {
+  mcpServers: {
+    noun: 'server',
+    column: 'Server',
+    idOf: (item) => item.ServerId,
+    nameOf: (item) => item.Name,
+    loadingText: 'Loading the installed MCP servers',
+    loadError: 'Could not list the installed MCP servers',
+    empty: 'No MCP servers are installed. Install them on the MCP Servers page.',
+    missing: 'Not installed',
+  },
+  skills: {
+    noun: 'skill',
+    column: 'Skill',
+    idOf: (item) => item.SkillId,
+    nameOf: (item) => (item.DisplayName ? `${item.DisplayName} (${item.Name})` : item.Name),
+    loadingText: 'Loading the skills',
+    loadError: 'Could not list the skills',
+    empty: 'No skills are defined. Write or import them on the Skills page.',
+    missing: 'No such skill',
+  },
+};
+
+const inMeetingOptions = (noun) => [
+  { value: 'default', label: `As In-meeting requests sets for every ${noun}` },
   { value: 'true', label: 'Allowed' },
   { value: 'false', label: 'Not allowed' },
 ];
 
-/**
- * `entries` with one flag of one server set to `value`, or removed when `value`
- * is undefined; a server left with no flag is removed, so it behaves as an
- * unlisted one.
- */
-export const withFlag = (entries, serverId, flag, value) => {
-  const next = { ...(isObject(entries) ? entries : {}) };
-  const flags = { ...(isObject(next[serverId]) ? next[serverId] : {}) };
-  if (value === undefined) delete flags[flag];
-  else flags[flag] = value;
-  if (Object.keys(flags).length) next[serverId] = flags;
-  else delete next[serverId];
-  return next;
-};
-
-const ToolSelectionField = ({ schema, path, label = '', loadServers = defaultLoadServers }) => {
+/** The flags of one kind of item, as a table of the items the stack lists. */
+export const ItemSelectionTable = ({ kind, path, schema, load }) => {
   const { values, defaults, set, readOnly, problemsAt } = useContext(SectionContext);
-  const [servers, setServers] = useState(null);
+  const spec = KINDS[kind];
+  const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
-  const serversPath = [...path, 'mcpServers'];
-  const entries = getAt(values, serversPath) || {};
+  const itemsPath = [...path, kind];
+  const entries = getAt(values, itemsPath) || {};
+  const options = inMeetingOptions(spec.noun);
 
   useEffect(() => {
     let cancelled = false;
-    loadServers()
-      .then((found) => !cancelled && setServers(found))
+    load()
+      .then((found) => !cancelled && setItems(found))
       .catch((err) => {
-        logger.error('Could not list the installed MCP servers', err);
-        if (!cancelled) setError(err.message || 'Could not list the installed MCP servers');
+        logger.error(spec.loadError, err);
+        if (!cancelled) setError(err.message || spec.loadError);
       });
     return () => {
       cancelled = true;
     };
-  }, [loadServers]);
+  }, [load, spec.loadError]);
 
-  const setFlag = (serverId, flag, value) => set(serversPath, withFlag(entries, serverId, flag, value));
-  const installedIds = new Set((servers || []).map((server) => server.ServerId));
+  const setFlag = (itemId, flag, value) => set(itemsPath, withFlag(entries, itemId, flag, value));
+  const knownIds = new Set((items || []).map(spec.idOf));
   const rows = [
-    ...(servers || []).map((server) => ({ ...server, installed: true })),
-    // Named in the profile but not installed here, as after an import from
-    // another deployment: kept until removed, and unused.
+    ...(items || []).map((item) => ({ id: spec.idOf(item), name: spec.nameOf(item), item, known: true })),
+    // Named in the profile but not on this deployment, as after an import from
+    // another one: kept until removed, and unused.
     ...Object.keys(entries)
-      .filter((id) => !installedIds.has(id))
+      .filter((id) => !knownIds.has(id))
       .sort()
-      .map((id) => ({ ServerId: id, Name: id, installed: false })),
+      .map((id) => ({ id, name: id, item: {}, known: false })),
   ];
-  const mcpSchema = schema.properties?.mcpServers || {};
-  const problems = problemsAt(serversPath);
-  const changed = differsAt(defaults, values, serversPath);
+  const problems = problemsAt(itemsPath);
+  const changed = differsAt(defaults, values, itemsPath);
 
   return (
     <div className={changed ? 'lma-config-field lma-config-field-changed' : 'lma-config-field'}>
       <FormField
         label={
           <SpaceBetween direction="horizontal" size="xs">
-            <span>{label || schema.title}</span>
+            <span>{schema.title}</span>
             {changed && <Badge color="blue">Changed</Badge>}
           </SpaceBetween>
         }
-        description={`${schema.description || ''} ${mcpSchema.description || ''}`.trim()}
+        description={schema.description}
         errorText={problems.length ? problems.join(' ') : error || undefined}
         stretch
       >
         <Table
           variant="embedded"
-          loading={servers === null && !error}
-          loadingText="Loading the installed MCP servers"
+          loading={items === null && !error}
+          loadingText={spec.loadingText}
           items={rows}
-          trackBy="ServerId"
-          empty={
-            <Box color="text-status-inactive">No MCP servers are installed. Install them on the MCP Servers page.</Box>
-          }
+          trackBy="id"
+          empty={<Box color="text-status-inactive">{spec.empty}</Box>}
           columnDefinitions={[
             {
               id: 'name',
-              header: 'Server',
+              header: spec.column,
               // A render callback the table calls for each row, not a component.
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => (
                 <SpaceBetween direction="horizontal" size="xs">
-                  <span>{row.Name}</span>
-                  {!row.installed && <Badge color="grey">Not installed</Badge>}
-                  {row.CredentialsRequired && <Badge color="red">Needs credentials</Badge>}
+                  <span>{row.name}</span>
+                  {!row.known && <Badge color="grey">{spec.missing}</Badge>}
+                  {row.item.CredentialsRequired && <Badge color="red">Needs credentials</Badge>}
                 </SpaceBetween>
               ),
             },
             {
               id: 'enabled',
               header: 'Enabled',
-              // A render callback the table calls for each row, not a component.
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => {
-                const on = entries[row.ServerId]?.enabled !== false;
+                const on = entries[row.id]?.enabled !== false;
                 return (
                   <Toggle
                     checked={on}
                     disabled={readOnly}
-                    ariaLabel={`Enabled: ${row.Name}`}
+                    ariaLabel={`Enabled: ${row.name}`}
                     // On is the default, so it is stored by leaving the flag out.
-                    onChange={({ detail }) => setFlag(row.ServerId, 'enabled', detail.checked ? undefined : false)}
+                    onChange={({ detail }) => setFlag(row.id, 'enabled', detail.checked ? undefined : false)}
                   >
                     {on ? 'On' : 'Off'}
                   </Toggle>
@@ -155,22 +194,19 @@ const ToolSelectionField = ({ schema, path, label = '', loadServers = defaultLoa
             {
               id: 'inMeetingRequests',
               header: 'In-meeting requests',
-              // A render callback the table calls for each row, not a component.
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => {
-                const flag = entries[row.ServerId]?.inMeetingRequests;
-                const selected = IN_MEETING_OPTIONS.find(
-                  (o) => o.value === (flag === undefined ? 'default' : `${flag}`),
-                );
+                const flag = entries[row.id]?.inMeetingRequests;
+                const selected = options.find((o) => o.value === (flag === undefined ? 'default' : `${flag}`));
                 return (
                   <Select
                     selectedOption={selected}
-                    options={IN_MEETING_OPTIONS}
+                    options={options}
                     disabled={readOnly}
-                    ariaLabel={`In-meeting requests: ${row.Name}`}
+                    ariaLabel={`In-meeting requests: ${row.name}`}
                     onChange={({ detail }) => {
                       const chosen = detail.selectedOption.value;
-                      setFlag(row.ServerId, 'inMeetingRequests', chosen === 'default' ? undefined : chosen === 'true');
+                      setFlag(row.id, 'inMeetingRequests', chosen === 'default' ? undefined : chosen === 'true');
                     }}
                   />
                 );
@@ -179,16 +215,15 @@ const ToolSelectionField = ({ schema, path, label = '', loadServers = defaultLoa
             {
               id: 'alwaysOn',
               header: 'Always on (not yet used)',
-              // A render callback the table calls for each row, not a component.
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => (
                 <Toggle
-                  checked={entries[row.ServerId]?.alwaysOn === true}
+                  checked={entries[row.id]?.alwaysOn === true}
                   disabled={readOnly}
-                  ariaLabel={`Always on: ${row.Name}`}
-                  onChange={({ detail }) => setFlag(row.ServerId, 'alwaysOn', detail.checked ? true : undefined)}
+                  ariaLabel={`Always on: ${row.name}`}
+                  onChange={({ detail }) => setFlag(row.id, 'alwaysOn', detail.checked ? true : undefined)}
                 >
-                  {entries[row.ServerId]?.alwaysOn === true ? 'On' : 'Off'}
+                  {entries[row.id]?.alwaysOn === true ? 'On' : 'Off'}
                 </Toggle>
               ),
             },
@@ -197,17 +232,17 @@ const ToolSelectionField = ({ schema, path, label = '', loadServers = defaultLoa
               header: '',
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) =>
-                !readOnly && Object.prototype.hasOwnProperty.call(entries, row.ServerId) ? (
+                !readOnly && Object.prototype.hasOwnProperty.call(entries, row.id) ? (
                   <Button
                     variant="inline-link"
-                    ariaLabel={`${row.installed ? 'Reset' : 'Remove'} ${row.Name}`}
+                    ariaLabel={`${row.known ? 'Reset' : 'Remove'} ${row.name}`}
                     onClick={() => {
                       const next = { ...entries };
-                      delete next[row.ServerId];
-                      set(serversPath, next);
+                      delete next[row.id];
+                      set(itemsPath, next);
                     }}
                   >
-                    {row.installed ? 'Reset' : 'Remove'}
+                    {row.known ? 'Reset' : 'Remove'}
                   </Button>
                 ) : null,
             },
@@ -218,16 +253,54 @@ const ToolSelectionField = ({ schema, path, label = '', loadServers = defaultLoa
   );
 };
 
+ItemSelectionTable.propTypes = {
+  kind: PropTypes.oneOf(Object.keys(KINDS)).isRequired,
+  path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
+  schema: PropTypes.shape({ title: PropTypes.string, description: PropTypes.string }).isRequired,
+  load: PropTypes.func.isRequired,
+};
+
+const ToolSelectionField = ({
+  schema,
+  path,
+  label = '',
+  loadServers = defaultLoadServers,
+  loadSkills = defaultLoadSkills,
+}) => (
+  <SpaceBetween size="m">
+    <Box>
+      <Box variant="awsui-key-label">{label || schema.title}</Box>
+      {schema.description && <Box color="text-body-secondary">{schema.description}</Box>}
+    </Box>
+    <ItemSelectionTable
+      kind="mcpServers"
+      path={path}
+      schema={schema.properties?.mcpServers || { title: 'MCP servers' }}
+      load={loadServers}
+    />
+    <ItemSelectionTable
+      kind="skills"
+      path={path}
+      schema={schema.properties?.skills || { title: 'Skills' }}
+      load={loadSkills}
+    />
+  </SpaceBetween>
+);
+
 ToolSelectionField.propTypes = {
   schema: PropTypes.shape({
     title: PropTypes.string,
     description: PropTypes.string,
-    properties: PropTypes.shape({ mcpServers: PropTypes.shape({ description: PropTypes.string }) }),
+    properties: PropTypes.shape({
+      mcpServers: PropTypes.shape({ title: PropTypes.string, description: PropTypes.string }),
+      skills: PropTypes.shape({ title: PropTypes.string, description: PropTypes.string }),
+    }),
   }).isRequired,
   path: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])).isRequired,
   label: PropTypes.string,
-  // Lists the installed servers; replaced in tests.
+  // List the installed servers and the skills; replaced in tests.
   loadServers: PropTypes.func,
+  loadSkills: PropTypes.func,
 };
 
 export default ToolSelectionField;

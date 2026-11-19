@@ -16,6 +16,7 @@ import {
   BROWSER_EXTENSION_PATH,
   DESKTOP_CAPTURE_APP_PATH,
   MCP_SERVERS_PATH,
+  SKILLS_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   VOICE_ENROLLMENT_PATH,
@@ -118,6 +119,13 @@ export const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'MCP Servers',
           href: `#${MCP_SERVERS_PATH}`,
+        },
+        // The meeting assistant's skills: instructions an administrator writes
+        // for particular kinds of request.
+        {
+          type: 'link',
+          text: 'Skills',
+          href: `#${SKILLS_PATH}`,
         },
         {
           type: 'link',
