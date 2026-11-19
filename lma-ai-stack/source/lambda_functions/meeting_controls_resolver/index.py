@@ -42,6 +42,9 @@ S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
 # prefix, one folder per meeting, and items under PK kf#<CallId>.
 S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
 S3_CONSENT_EVIDENCE_PREFIX = environ.get("S3_CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
+# Archives of a meeting's files prepared for download (meeting_archive): one
+# folder per meeting, removed with the meeting as well as by their lifecycle rule.
+S3_MEETING_ARCHIVES_PREFIX = environ.get("S3_MEETING_ARCHIVES_PREFIX", "lma-meeting-archives/")
 # Chat attachments (docs/virtual-participant.md): files under this prefix, one
 # folder per meeting, and items under PK att#<CallId>.
 S3_CHAT_ATTACHMENTS_PREFIX = environ.get("S3_CHAT_ATTACHMENTS_PREFIX", "lma-chat-attachments/")
@@ -132,13 +135,17 @@ def delete_recordings_transcripts(callid):
     filename = posixify_filename(f"{callid}")
     recordings_prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
     transcripts_prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
+    # The trailing slash keeps one meeting's folder from matching another whose
+    # id merely begins the same way.
+    archives_prefix = f"{S3_MEETING_ARCHIVES_PREFIX}{filename}/"
 
-    # Run the two prefix-scans in parallel: they hit different key spaces
-    # (recordings vs transcripts) so there's no contention.
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    # Run the prefix-scans in parallel: they hit different key spaces
+    # (recordings, transcripts, download archives) so there's no contention.
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
             pool.submit(_batch_delete_prefix, S3_BUCKET_NAME, recordings_prefix): "recordings",
             pool.submit(_batch_delete_prefix, S3_BUCKET_NAME, transcripts_prefix): "transcripts",
+            pool.submit(_batch_delete_prefix, S3_BUCKET_NAME, archives_prefix): "download archives",
         }
         for fut in as_completed(futures):
             kind = futures[fut]

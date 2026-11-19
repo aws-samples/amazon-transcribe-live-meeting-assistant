@@ -295,6 +295,10 @@ OTHER_FIELDS = [
     ("Mutation", "attestMeetingConsent"),
     ("Mutation", "addMeetingConsentEvidence"),
     ("Mutation", "verifyMeetingConsentEvidence"),
+    # An archive of one meeting's files: a Lambda resolver applying getCall's
+    # rule, which reads an archive back only for the caller who started it.
+    ("Mutation", "prepareMeetingArchive"),
+    ("Query", "getMeetingArchive"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),

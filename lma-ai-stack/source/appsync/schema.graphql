@@ -356,6 +356,10 @@ type Mutation @aws_iam {
 	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
+	# Starts building a ZIP archive of the meeting's files and returns at once;
+	# the archive is read with getMeetingArchive. Answered to the callers getCall
+	# answers. See docs/web-ui-guide.md.
+	prepareMeetingArchive(CallId: ID!, Contents: MeetingArchiveContents): MeetingArchive @aws_cognito_user_pools @aws_iam
 	# Starts a diagnosis by the troubleshooting agent and returns at once; the
 	# answer is read with getTroubleshootingJob. For the Admin group, and
 	# re-checked in the resolver Lambda. See docs/troubleshooting-agent.md.
@@ -498,6 +502,9 @@ type Query @aws_cognito_user_pools
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
 	getMeetingConsent(CallId: ID!): MeetingConsentState
+	# An archive prepareMeetingArchive started, for the caller who started it
+	# (or an Admin): its status and, once READY, a link valid for an hour.
+	getMeetingArchive(CallId: ID!, ArchiveId: ID!): MeetingArchive
 	# The deployment's consent mode and rule, and whether a meeting may choose a
 	# less strict one, for the Create Virtual Participant form to show which
 	# choices apply. Read by every signed-in user, before any meeting exists.
@@ -1168,6 +1175,32 @@ type ChatAttachment implements DynamoDbBase @aws_cognito_user_pools
 	# inline for a thumbnail. Both are valid for an hour.
 	DownloadUrl: String
 	PreviewUrl: String
+}
+
+enum MeetingArchiveContents {
+	EVERYTHING
+	KEY_FRAMES
+	CHAT_ATTACHMENTS
+}
+
+enum MeetingArchiveStatus {
+	PREPARING
+	READY
+	FAILED
+}
+
+type MeetingArchive @aws_cognito_user_pools
+@aws_iam {
+	CallId: ID!
+	ArchiveId: ID!
+	Contents: MeetingArchiveContents
+	Status: MeetingArchiveStatus
+	FileName: String
+	Size: Float
+	DownloadUrl: String
+	Message: String
+	CreatedAt: AWSDateTime
+	UpdatedAt: AWSDateTime
 }
 
 type ChatAttachmentList @aws_cognito_user_pools

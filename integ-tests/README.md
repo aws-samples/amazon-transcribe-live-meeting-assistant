@@ -211,6 +211,21 @@ AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TES
     .venv/bin/python -m pytest integ-tests/test_transcript_deletion.py --stack-name lma-integtest1 -s
 ```
 
+## A meeting archive (Download > Everything)
+
+`test_meeting_archive.py` writes a synthetic meeting of its own (a meeting
+record with a summary, one transcript segment and one key frame with its
+picture), asks for its archive with `prepareMeetingArchive`, reads
+`getMeetingArchive` until it is ready, downloads the ZIP through the signed link
+and checks its files and `README.md` manifest. It deletes the meeting's items,
+the key frame and the archive afterwards. It is opt-in, and needs an assumed
+role, which AppSync treats as the backend.
+
+```bash
+AWS_PROFILE=default LMA_TEST_MEETING_ARCHIVE=1 \
+    .venv/bin/python -m pytest integ-tests/test_meeting_archive.py --stack-name lma-integtest1 -s
+```
+
 ## A Virtual Participant in a Google Meet meeting
 
 `test_meet_end_to_end.py` starts a scripted guest in a real Google Meet meeting

@@ -1397,6 +1397,15 @@ def test_the_skills_log_line_reader_reads_the_assistants_line() -> None:
     assert assistant_profile_probe.OFFERED_LINE.search("MCP servers: offered=a not offered=none")
 
 
+def test_the_meeting_archive_test_is_an_opt_in_optional_feature() -> None:
+    """It needs LMA_TEST_MEETING_ARCHIVE=1, and writes a synthetic meeting of its own."""
+    import test_meeting_archive
+
+    names = [m.name for m in test_meeting_archive.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 class _FakeConfigurationStore:
     """The parts of lma_config.ConfigurationStore the consent override uses."""
 

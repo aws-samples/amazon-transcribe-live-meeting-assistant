@@ -696,6 +696,7 @@ PYTHON_READERS = [
     "chat_attachments_resolver/index.py",
     "list_calls_gsi_resolver/index.py",
     "mcp_analytics/tools/get_virtual_participant_status.py",
+    "meeting_archive/index.py",
     "meeting_consent_resolver/index.py",
     "meeting_controls_resolver/index.py",
     "microvm_vnc_token/vp_access.py",

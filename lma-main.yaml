@@ -2484,6 +2484,16 @@ Resources:
             Status: Enabled
             Prefix: "lma-uploads-pending/"
             ExpirationInDays: 7
+          # Archives of a meeting's files prepared for download (Download >
+          # Everything, and the key frame and attachment archives): temporary
+          # copies, removed a day after they were written, with any multipart
+          # upload a build left unfinished.
+          - Id: MeetingArchiveCleanup
+            Status: Enabled
+            Prefix: "lma-meeting-archives/"
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
           # The bucket is versioned, so an expiry above or a deletion by LMA
           # turns the current version into a noncurrent one (or adds a delete
           # marker). Noncurrent versions of every object are removed one day
