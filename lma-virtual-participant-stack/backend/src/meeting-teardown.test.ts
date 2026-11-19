@@ -19,6 +19,7 @@ import {
     type MeetingTeardownSteps,
 } from './meeting-teardown.js';
 import { LEAVE_BUDGET_MS } from './meeting-leave.js';
+import { meetingOver, resetMeetingPhase } from './meeting-phase.js';
 import { TERMINATE_WAIT_MS } from './microvm-supervisor.js';
 
 const never = (): Promise<never> => new Promise<never>(() => {});
@@ -158,4 +159,18 @@ test("the stop signal's fixed waits leave room in the MicroVM terminate wait", (
     // Leave, evidence and consent video are the bounded waits ahead of the
     // uploads; together they must leave most of the terminate wait to them.
     assert.ok(LEAVE_BUDGET_MS + STOP_EVIDENCE_WAIT_MS + STOP_CONSENT_VIDEO_WAIT_MS <= TERMINATE_WAIT_MS * 0.7);
+});
+
+test('the meeting is over for the VP from the moment its teardown begins, so the dialog watchdog stands down', async () => {
+    resetMeetingPhase();
+    let overAtFirstStep: boolean | null = null;
+    const { steps } = recorder({
+        stopPageMonitors: () => {
+            overAtFirstStep = meetingOver();
+        },
+    });
+    assert.equal(meetingOver(), false);
+    await new MeetingTeardown(steps, fast).run({ stopping: true, leaveReason: 'stopped by SIGTERM' });
+    assert.equal(overAtFirstStep, true);
+    resetMeetingPhase();
 });

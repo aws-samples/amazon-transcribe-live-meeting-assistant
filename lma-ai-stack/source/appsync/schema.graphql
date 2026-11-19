@@ -368,6 +368,9 @@ type Mutation @aws_iam {
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
 	# like addTranscriptSegment. See docs/meeting-video.md.
 	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
+	# Written by the hosted MCP server's push_meeting_guidance tool, which sets
+	# Owner and SharedWith from the meeting; IAM only, like addVideoKeyframe.
+	addMeetingGuidance(input: AddMeetingGuidanceInput!): MeetingGuidance
 	# Written by the call event processor for an ADD_CHAT_ATTACHMENT event; IAM
 	# only, like addTranscriptSegment. See docs/virtual-participant.md.
 	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment
@@ -431,9 +434,12 @@ type Mutation @aws_iam {
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	updateMCPServerCredentials(input: UpdateMCPServerCredentialsInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	importMCPServerLibrary(library: AWSJSON!): ImportMCPServerLibraryOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
+	# scope is "read" (the default) or "read-write"; see type MCPApiKey.
+	generateMCPApiKey(scope: String): GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -531,6 +537,7 @@ type Query @aws_cognito_user_pools
 	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
+	exportMCPServerLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
@@ -904,6 +911,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
 		@aws_subscribe(mutations: ["addVideoKeyframe"])
+	onAddMeetingGuidance(CallId: ID): MeetingGuidance
+		@aws_subscribe(mutations: ["addMeetingGuidance"])
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
@@ -1053,6 +1062,51 @@ input AddVideoKeyframeInput {
 	ShareDetected: Boolean
 	ChangeScore: Float
 	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Owner: String
+	SharedWith: String
+}
+
+# How prominently the meeting page shows a guidance item.
+enum MeetingGuidanceLevel {
+	INFO
+	WARNING
+	URGENT
+}
+
+# A note of guidance an external agent left on a meeting through the hosted MCP
+# server (push_meeting_guidance), for the people following it in LMA. Stored
+# under the meeting (PK "gd#<CallId>", SK "g#<CreatedAt>#<GuidanceId>") with the
+# meeting's Owner, SharedWith and ExpiresAfter, and shown on the meeting page;
+# never posted to the meeting's chat. See docs/mcp-api-key-auth.md.
+type MeetingGuidance implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	GuidanceId: ID!
+	Title: String
+	Text: String!
+	Level: MeetingGuidanceLevel!
+	# Where it came from: "mcp".
+	Source: String
+	# The user the MCP API key belongs to.
+	CreatedBy: String
+	Owner: String
+	SharedWith: String
+}
+
+input AddMeetingGuidanceInput {
+	CallId: ID!
+	GuidanceId: ID!
+	Title: String
+	Text: String!
+	Level: MeetingGuidanceLevel!
+	Source: String
+	CreatedBy: String
 	ExpiresAfter: AWSTimestamp
 	Owner: String
 	SharedWith: String
@@ -2235,7 +2289,13 @@ input ToggleVNCPreviewInput {
 # AuthConfig is write-only: it is supplied through InstallMCPServerInput and is
 # read at runtime straight from DynamoDB by the meeting-assist function, so it is
 # deliberately absent from this type. HasAuthConfig reports whether a server has
-# stored credentials without exposing them.
+# stored credentials without exposing them. CredentialsRequired is set on a
+# server imported from an MCP server library whose credentials have not been
+# entered on this deployment; the meeting assistant does not load it until they
+# are (updateMCPServerCredentials), and RequiredAuthType names what is needed.
+# ImportedAuthSettings holds, for such a server, the settings the library kept
+# for its form (header and variable names, OAuth client settings), never a
+# credential.
 type MCPServer @aws_cognito_user_pools @aws_iam {
 	ServerId: ID!
 	AccountId: String!
@@ -2252,6 +2312,31 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	BuildId: String
 	ErrorMessage: String
 	ServerUrl: String
+	Description: String
+	CredentialsRequired: Boolean
+	RequiredAuthType: String
+	ImportedAuthSettings: AWSJSON
+}
+
+input UpdateMCPServerCredentialsInput {
+	ServerId: ID!
+	AuthConfig: AWSJSON!
+}
+
+# What an MCP server library import did with each server it lists. Action is
+# created, updated, skipped or failed.
+type ImportMCPServerLibraryServer @aws_cognito_user_pools @aws_iam {
+	Name: String!
+	ServerId: String
+	Action: String!
+	CredentialsRequired: Boolean
+	Message: String
+}
+
+type ImportMCPServerLibraryOutput @aws_cognito_user_pools @aws_iam {
+	Success: Boolean!
+	Message: String
+	Servers: [ImportMCPServerLibraryServer]
 }
 
 input InstallMCPServerInput {
@@ -2330,12 +2415,18 @@ type MCPApiKey @aws_cognito_user_pools {
 	keyPrefix: String!
 	createdAt: String!
 	enabled: Boolean!
+	# "read": the hosted MCP server answers the key only for the tools that
+	# change nothing. "read-write": every tool. "legacy": a key created before
+	# keys had a scope, answered for the server's original tools and the tools
+	# that change nothing.
+	scope: String
 }
 
 type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
 	keyValue: String!
 	keyPrefix: String!
 	createdAt: String!
+	scope: String
 }
 
 # User Management (Admin-only)

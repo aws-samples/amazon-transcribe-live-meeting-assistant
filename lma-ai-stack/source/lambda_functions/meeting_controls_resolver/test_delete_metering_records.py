@@ -70,6 +70,52 @@ def test_every_metering_record_of_the_meeting_is_deleted(monkeypatch) -> None:
     assert len(table.queries) == 3
 
 
+def test_every_guidance_item_of_the_meeting_is_deleted(monkeypatch) -> None:
+    keys = [{"PK": "gd#m-1", "SK": f"g#2026-11-19T10:0{i}:00Z#id{i}"} for i in range(3)]
+    table = FakeTable(keys)
+    monkeypatch.setattr(index, "ddbTable", table)
+    assert index.delete_meeting_guidance("m-1") == 3
+    assert table.deleted == keys
+    assert {q["ExpressionAttributeValues"][":pk"] for q in table.queries} == {"gd#m-1"}
+
+
+def test_deleting_a_meeting_deletes_its_guidance(monkeypatch) -> None:
+    deleted = []
+    for step in (
+        "cleanup_virtual_participants",
+        "delete_transcript_items",
+        "delete_recordings_transcripts",
+        "delete_metering_records",
+        "delete_keyframes",
+        "delete_consent_evidence",
+        "delete_chat_attachments",
+    ):
+        monkeypatch.setattr(index, step, lambda callid: 0)
+    monkeypatch.setattr(index, "get_call_details", lambda *a: {"getCall": {}})
+    monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url, _earlier: None)
+    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: None)
+    monkeypatch.setattr(index, "delete_meeting_guidance", deleted.append)
+    monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
+    monkeypatch.setattr(index, "DSLMutation", lambda *a: None)
+
+    class Schema:
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *a, **k):
+            return self
+
+        def args(self, **_k):
+            return self
+
+        def select(self, *a):
+            return self
+
+    session = types.SimpleNamespace(execute=lambda *_a: None)
+    index.delete_meeting(session, Schema(), "m-1", "cls#x", "ts#x", "owner")
+    assert deleted == ["m-1"]
+
+
 def test_a_meeting_with_no_metering_records_deletes_nothing(monkeypatch) -> None:
     table = FakeTable([])
     monkeypatch.setattr(index, "ddbTable", table)

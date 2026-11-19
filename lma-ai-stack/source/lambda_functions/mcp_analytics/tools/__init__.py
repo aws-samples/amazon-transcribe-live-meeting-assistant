@@ -4,7 +4,8 @@
 
 """
 MCP Analytics Tools Package
-Implements 4 core tools for LMA meeting data access
+The tool implementations for LMA meeting data access; index.py imports each
+module it routes to.
 """
 
 from . import get_summary, get_transcript, list_meetings, search_meetings

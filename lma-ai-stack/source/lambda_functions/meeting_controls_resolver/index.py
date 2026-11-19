@@ -766,7 +766,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
         #  7. Deletion of the meeting's consent evidence images
         #  8. Deletion of the meeting's chat attachments (PK att#<CallId>, and files)
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        #  9. Deletion of the guidance pushed to it through the MCP server (PK gd#<CallId>)
+        with ThreadPoolExecutor(max_workers=9) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(delete_transcript_items, callid)
             details_future = pool.submit(get_call_details, appsync_session, schema, callid)
@@ -776,6 +777,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             keyframes_future = pool.submit(delete_keyframes, callid)
             evidence_future = pool.submit(delete_consent_evidence, callid)
             attachments_future = pool.submit(delete_chat_attachments, callid)
+            guidance_future = pool.submit(delete_meeting_guidance, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -786,6 +788,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             keyframes_future.result()
             evidence_future.result()
             attachments_future.result()
+            guidance_future.result()
 
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")
@@ -840,7 +843,20 @@ def delete_metering_records(callid):
     which this function is already granted: a meeting has tens of these, not
     thousands.
     """
-    pk = f"mtr#{callid}"
+    return _delete_partition(f"mtr#{callid}", "metering record", callid)
+
+
+def delete_meeting_guidance(callid):
+    """Delete the guidance pushed to the meeting through the MCP server (PK ``gd#<CallId>``).
+
+    Each note expires with the meeting, so without this a deleted meeting's
+    notes would remain until then. A meeting has a handful of them.
+    """
+    return _delete_partition(f"gd#{callid}", "guidance item", callid)
+
+
+def _delete_partition(pk, kind, callid):
+    """Delete every item under one partition key, item by item, across pages."""
     kwargs = {
         "KeyConditionExpression": "PK = :pk",
         "ExpressionAttributeValues": {":pk": pk},
@@ -857,7 +873,7 @@ def delete_metering_records(callid):
             break
         kwargs["ExclusiveStartKey"] = last
     if deleted:
-        logger.info("Deleted %d metering record(s) for %s", deleted, callid)
+        logger.info("Deleted %d %s(s) for %s", deleted, kind, callid)
     return deleted
 
 
