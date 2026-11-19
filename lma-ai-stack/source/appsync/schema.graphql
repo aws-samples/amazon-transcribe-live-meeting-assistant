@@ -447,6 +447,11 @@ type Mutation @aws_iam {
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateMCPServerCredentials(input: UpdateMCPServerCredentialsInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	importMCPServerLibrary(library: AWSJSON!): ImportMCPServerLibraryOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	createSkill(input: SkillInput!): SkillOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	updateSkill(skillId: ID!, input: SkillInput!): SkillOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	deleteSkill(skillId: ID!): SkillOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	importSkill(fileName: String!, content: String!, encoding: String, overwrite: Boolean): ImportSkillOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	importSkillLibrary(library: AWSJSON!): ImportSkillLibraryOutput @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# scope is "read" (the default) or "read-write"; see type MCPApiKey.
@@ -549,6 +554,10 @@ type Query @aws_cognito_user_pools
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	exportMCPServerLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	listSkills: [Skill] @aws_cognito_user_pools @aws_iam
+	getSkill(skillId: ID!): Skill @aws_cognito_user_pools @aws_iam
+	exportSkill(skillId: ID!, format: String): AWSJSON @aws_cognito_user_pools @aws_iam
+	exportSkillLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
@@ -2396,6 +2405,88 @@ type UpdateMCPServerOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 	Message: String
 	BuildId: String
+}
+
+# Meeting assistant skills (skills_manager). A skill is an administrator's
+# guidance for the meeting assistant: a name (lowercase letters, digits and
+# hyphens), a description the assistant chooses it by, Markdown instructions,
+# and text reference files. listSkills leaves out Instructions and each file's
+# Content; getSkill returns them. Metadata holds the front-matter fields kept
+# from an imported file (trigger, icon, inputs, license, compatibility,
+# metadata). exportSkill returns {format, fileName, encoding, content}, the
+# content of a zip in base64. importSkill reads a SKILL.md, an Amazon Quick
+# skill .md, or a zip of a skill folder (encoding base64), and lists in Skipped
+# the files a skill does not hold.
+type Skill @aws_cognito_user_pools @aws_iam {
+	SkillId: ID!
+	Name: String!
+	DisplayName: String
+	Description: String!
+	Instructions: String
+	Files: [SkillFile]
+	Metadata: AWSJSON
+	SourceFormat: String
+	CreatedAt: AWSDateTime
+	CreatedBy: String
+	UpdatedAt: AWSDateTime
+	UpdatedBy: String
+}
+
+type SkillFile @aws_cognito_user_pools @aws_iam {
+	Path: String!
+	Content: String
+	Size: Int
+}
+
+input SkillFileInput {
+	Path: String!
+	Content: String!
+}
+
+input SkillInput {
+	Name: String!
+	DisplayName: String
+	Description: String!
+	Instructions: String!
+	Files: [SkillFileInput]
+	Metadata: AWSJSON
+}
+
+type SkillOutput @aws_cognito_user_pools @aws_iam {
+	SkillId: ID
+	Success: Boolean!
+	Message: String
+	Skill: Skill
+}
+
+type SkippedSkillFile @aws_cognito_user_pools @aws_iam {
+	Path: String!
+	Reason: String!
+}
+
+type ImportSkillOutput @aws_cognito_user_pools @aws_iam {
+	Success: Boolean!
+	Message: String
+	SkillId: ID
+	Name: String
+	Action: String
+	Skipped: [SkippedSkillFile]
+	Notes: [String]
+}
+
+# What a skill library import did with each skill it lists. Action is created,
+# updated, unchanged (already stored as listed, so not written), skipped or failed.
+type ImportSkillLibrarySkill @aws_cognito_user_pools @aws_iam {
+	Name: String!
+	SkillId: ID
+	Action: String!
+	Message: String
+}
+
+type ImportSkillLibraryOutput @aws_cognito_user_pools @aws_iam {
+	Success: Boolean!
+	Message: String
+	Skills: [ImportSkillLibrarySkill]
 }
 
 # OAuth 2.1 Flow Types

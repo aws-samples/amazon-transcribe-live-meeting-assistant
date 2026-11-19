@@ -505,9 +505,27 @@ FAILED_SUMMARY_TEXTS = frozenset(
 )
 
 
+# What the Bedrock summariser answers for a meeting with nothing to summarise
+# (its EMPTY_SUMMARY_TEXT, which lma-ai-stack/test/test_summary_empty_outcome.py
+# holds this copy to). Like a failed run's placeholder it is not stored as the
+# summary, but the state records it as "empty", with this text as its message.
+EMPTY_SUMMARY_TEXT = "Nothing to summarise: the meeting has no transcript"
+
+
+def summary_is_empty_outcome(text: Any) -> bool:
+    """Whether the summariser reported that the meeting had nothing to summarise."""
+    return isinstance(text, str) and (
+        text.strip().rstrip(".").lower() == EMPTY_SUMMARY_TEXT.lower()
+    )
+
+
 def summary_was_produced(text: Any) -> bool:
-    """Whether a stored summary is one, rather than a failed run's placeholder."""
-    return isinstance(text, str) and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+    """Whether a stored summary is one, rather than a placeholder for no summary."""
+    return (
+        isinstance(text, str)
+        and text.strip().lower() not in FAILED_SUMMARY_TEXTS
+        and not summary_is_empty_outcome(text)
+    )
 
 
 # The summary state (Call.CallSummaryState) the end-of-meeting run writes: one
@@ -517,6 +535,7 @@ def summary_was_produced(text: Any) -> bool:
 # for this one sooner.
 SUMMARY_TRIGGER_MEETING_END = "meeting-end"
 SUMMARY_FAILED_MESSAGE = "the summary could not be generated"
+SUMMARY_STATUS_EMPTY = "empty"
 
 
 def _now_iso() -> str:
@@ -541,7 +560,17 @@ def summary_queued_state() -> str:
 
 
 def summary_outcome_state(text: Any) -> str:
-    """The state written beside the end-of-meeting summary: done, or failed."""
+    """The state written beside the end-of-meeting summary: done, empty, or failed."""
+    if summary_is_empty_outcome(text):
+        return json.dumps(
+            {
+                "source": "generated",
+                "status": SUMMARY_STATUS_EMPTY,
+                "trigger": SUMMARY_TRIGGER_MEETING_END,
+                "message": EMPTY_SUMMARY_TEXT,
+                "updatedAt": _now_iso(),
+            }
+        )
     if summary_was_produced(text):
         return json.dumps(
             {
@@ -1509,11 +1538,12 @@ async def execute_add_call_summary_text_mutation(
 ) -> Dict:
     """Store the end-of-meeting summary, and the outcome of the run beside it.
 
-    A run that produced nothing usable -- the summariser's placeholder text, or
-    none -- stores no text. The input field is required, so it is sent blank,
+    A run that produced nothing usable -- the summariser's placeholder text, its
+    answer for a meeting with nothing to summarise, or none -- stores no text. The input field is required, so it is sent blank,
     and updateCall.request.vtl writes no attribute for a blank value: whatever
     the meeting already holds stays, and the state says the run failed, which
-    is what the meeting page shows alongside its Regenerate action.
+    is what the meeting page shows alongside its Regenerate action; or, for a
+    meeting with nothing to summarise, that the summary is empty.
     """
     calltext = message.get("CallSummaryText", None)
     call_summary_text = ""

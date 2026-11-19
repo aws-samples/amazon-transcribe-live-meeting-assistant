@@ -17,11 +17,12 @@ password is copied onto the new row. A password the user typed is used instead.
 For another meeting nothing is copied. Only the source's owner or an Admin may
 join again from it.
 
-Because the copied password is on the server only, an immediate launch is
-started here, with the launcher state machine input that rejoin builds
-(rejoin.start_launch), rather than from the browser. A scheduled one is launched
-at its time by the scheduler, which reads the row, as for any scheduled
-Virtual Participant. See docs/virtual-participant.md#join-again.
+An immediate launch is started here, with the launcher state machine input that
+rejoin builds (rejoin.start_launch), rather than from the browser. Like every
+launch it carries no meeting password: the new Virtual Participant reads the
+password from its own row when it starts. A scheduled one is launched at its
+time by the scheduler, as for any scheduled Virtual Participant. See
+docs/virtual-participant.md#join-again.
 """
 
 import logging

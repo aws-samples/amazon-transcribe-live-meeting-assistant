@@ -12,6 +12,8 @@ export const VIRTUAL_PARTICIPANT_PATH = '/virtual-participant';
 export const BROWSER_EXTENSION_PATH = '/browser-extension';
 export const DESKTOP_CAPTURE_APP_PATH = '/desktop-capture-app';
 export const MCP_SERVERS_PATH = '/configuration/mcp-servers';
+// The meeting assistant's skills library.
+export const SKILLS_PATH = '/configuration/skills';
 // The pages that each edited one section of the configuration. Each now
 // redirects to its section of the Configuration page, so bookmarks keep working.
 export const NOVA_SONIC_CONFIG_PATH = '/configuration/nova-sonic';

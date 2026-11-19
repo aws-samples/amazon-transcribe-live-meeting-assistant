@@ -578,6 +578,49 @@ def test_a_run_that_produced_nothing_leaves_the_stored_summary_alone(
     assert written[0]["state"]["message"]
 
 
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "Nothing to summarise: the meeting has no transcript",
+        " nothing to summarise: the meeting has no transcript. ",
+    ],
+)
+def test_a_meeting_with_nothing_to_summarise_is_recorded_as_empty_not_failed(
+    monkeypatch: pytest.MonkeyPatch, summary
+) -> None:
+    """The summariser's answer for a meeting with no transcript is its own
+    outcome: the stored summary and its source are kept, and the state says
+    there was nothing to summarise rather than that the run failed."""
+    ended = row_with_state({"source": index.SOURCE_MANUAL}, Status={"S": "ENDED"})
+    _, _, _, written = install(monkeypatch, meeting=ended, summary=summary)
+    assert index.handler(RUN_EVENT, FakeContext()) == {"ok": False, "reason": "empty"}
+    assert len(written) == 1
+    assert written[0]["text"] is None
+    assert written[0]["state"]["status"] == index.STATUS_EMPTY == "empty"
+    assert written[0]["state"]["message"] == "Nothing to summarise: the meeting has no transcript"
+    assert written[0]["state"]["source"] == index.SOURCE_MANUAL
+    assert written[0]["state"]["updatedAt"]
+
+
+def test_an_empty_run_the_meeting_outlived_leaves_the_end_of_meeting_state_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """As for a failed run: once the meeting has ended, its own summary owns the state."""
+    live = {**MEETING_ROW, "Status": {"S": "STARTED"}}
+    ended = row_with_state(
+        {"status": "running", "trigger": "meeting-end", "startedAt": "2026-11-19T19:00:00Z"},
+        Status={"S": "ENDED"},
+    )
+    _, _, _, written = install(
+        monkeypatch,
+        meeting=live,
+        then=ended,
+        summary="Nothing to summarise: the meeting has no transcript",
+    )
+    assert index.handler(RUN_EVENT, FakeContext()) == {"ok": False, "reason": "superseded"}
+    assert written == []
+
+
 def test_a_summariser_that_raises_leaves_the_stored_summary_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

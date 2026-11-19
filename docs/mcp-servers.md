@@ -126,7 +126,7 @@ A stored type the release does not recognise is exported as `unknown`, with none
 }
 ```
 
-`kind` and `version` name the document's type and format version. A library of skills will follow the same pattern with a `kind` of its own.
+`kind` and `version` name the document's type and format version. The meeting assistant's skills have a library of the same pattern, with the `kind` `lma-skill-library`; see [The Skill Library](meeting-assistant-skills.md#the-skill-library).
 
 **An import matches servers by name.** A server whose name is installed is updated, keeping its server id; its stored credentials are kept only when the file gives the same endpoint (the package type, and the URL of a remote server or the package of an installed one) and the same authentication type, and are removed otherwise, so they are never sent anywhere other than where they were entered. An entry with authentication type `none` keeps the credentials a server already stores at the same endpoint, and clears **Needs credentials** if the server had it, since the file says none are needed. A server whose name is not installed is created under the file's server id, up to the limit of five servers per account. A package server that is created, or whose package, package type or version changes, starts a layer build as an install does; re-importing an unchanged server starts none. An entry that cannot be read (a package specifier that is not accepted, an id another server uses) is skipped with the reason, and the rest are imported. The import never stores a credential, whatever the file holds in a credential field.
 

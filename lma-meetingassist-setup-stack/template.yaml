@@ -75,6 +75,11 @@ Parameters:
     Default: ""
     Description: The DynamoDB table name for MCP server configurations
 
+  SkillsTableName:
+    Type: String
+    Default: ""
+    Description: The DynamoDB table name for the meeting assistant's skills (empty for none)
+
   FetchTranscriptFunctionArn:
     Type: String
     Description: ARN of Fetch Transcript function
@@ -208,6 +213,7 @@ Parameters:
 
 Conditions:
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
+  HasSkillsTable: !Not [!Equals [!Ref SkillsTableName, ""]]
   ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
   ShouldUseStrandsBedrockWithKBExisting: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Use Existing)"]
   ShouldUseStrandsBedrockWithKB: !Or [
@@ -360,6 +366,16 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
+              # Read-only, on the skills table: the skills this answer may use.
+              - !If
+                - HasSkillsTable
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:Query"
+                    - "dynamodb:GetItem"
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SkillsTableName}"
+                - !Ref AWS::NoValue
               # Read-only, on the shared configuration table: the agent's and
               # the knowledge bases' models are read from it. KMSPolicy below
               # covers decrypting it.
@@ -514,6 +530,7 @@ Resources:
           EVENT_API_HTTP_URL: !Ref EventApiHttpUrl
           ENABLE_STREAMING: "true"
           MCP_SERVERS_TABLE: !Ref MCPServersTableName
+          SKILLS_TABLE: !Ref SkillsTableName
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
           BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId

@@ -5,12 +5,20 @@
 """
 Tool 5: schedule_meeting
 Schedule a future meeting with virtual participant
+
+A meeting the caller has already scheduled is updated rather than scheduled a
+second time: when the caller has a Virtual Participant that waits for its
+scheduled launch, with the same meeting name (compared trimmed and ignoring
+case) and a scheduled time within MATCH_WINDOW_SECONDS of the new one, that VP
+is given the new meeting details through updateScheduledVirtualParticipant, the
+write the VP page's Edit form makes, so that resolver's rules apply (among them,
+no change within five minutes of the launch). Only the caller's own VPs are
+matched. ``allow_duplicate`` schedules a second VP anyway.
 """
 
 import json
 import logging
 import os
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -20,8 +28,76 @@ from tools.agenda_helper import normalize_agenda
 from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, normalize_platform
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
+from tools.virtual_participants import pending_scheduled_vps_of_owner, update_scheduled_vp
 
 logger = logging.getLogger()
+
+# How far apart two scheduled times may be and still name the same meeting.
+MATCH_WINDOW_SECONDS = 60
+
+
+def _same_name(a: Any, b: Any) -> bool:
+    return str(a or "").strip().casefold() == str(b or "").strip().casefold()
+
+
+def find_scheduled_match(
+    user_id: str, meeting_name: str, scheduled_timestamp: int
+) -> Optional[Dict[str, Any]]:
+    """The caller's VP waiting to launch for the same meeting name and time, or None."""
+    for row in pending_scheduled_vps_of_owner(user_id):
+        try:
+            meeting_time = int(row.get("meetingTime"))
+        except (TypeError, ValueError):
+            continue
+        if (
+            _same_name(row.get("meetingName"), meeting_name)
+            and abs(meeting_time - scheduled_timestamp) <= MATCH_WINDOW_SECONDS
+        ):
+            return row
+    return None
+
+
+def update_scheduled_match(  # pylint: disable=too-many-arguments
+    vp: Dict[str, Any],
+    meeting_platform: str,
+    meeting_id: str,
+    meeting_password: Optional[str],
+    agenda: Optional[str],
+    scheduled_time: str,
+) -> Dict[str, Any]:
+    """Give a matching scheduled VP the new meeting details instead of creating another."""
+    changes: Dict[str, Any] = {"meetingPlatform": meeting_platform, "meetingId": meeting_id}
+    if meeting_password:
+        changes["meetingPassword"] = meeting_password
+    elif meeting_id != vp.get("meetingId"):
+        # The stored password belongs to the meeting being replaced.
+        changes["clearMeetingPassword"] = True
+    if agenda:
+        changes["agenda"] = agenda
+    vp_id = vp["id"]
+    try:
+        updated = update_scheduled_vp(vp_id, changes)
+    except Exception as e:
+        logger.error("Error updating scheduled virtual participant %s: %s", vp_id, e)
+        raise ValueError(
+            f"Virtual Participant {vp_id} is already scheduled for this meeting and could not "
+            f"be updated: {e}. Pass allowDuplicate=true to schedule a second one."
+        ) from e
+    return {
+        "virtualParticipantId": vp_id,
+        "action": "updated",
+        "meetingName": updated.get("meetingName") or vp.get("meetingName"),
+        "meetingPlatform": updated.get("meetingPlatform") or meeting_platform,
+        "meetingId": updated.get("meetingId") or meeting_id,
+        "scheduledFor": updated.get("scheduledFor") or vp.get("scheduledFor") or scheduled_time,
+        "status": updated.get("status") or vp.get("status"),
+        "owner": vp.get("Owner"),
+        "virtualParticipantUrl": get_virtual_participant_url(vp_id),
+        "message": (
+            "This meeting was already scheduled, so its Virtual Participant was updated with "
+            "the new meeting details instead of scheduling a second one."
+        ),
+    }
 
 
 def execute(
@@ -34,6 +110,7 @@ def execute(
     is_admin: bool = False,
     use_stored_zoom_credentials: bool = True,
     agenda: Optional[str] = None,
+    allow_duplicate: bool = False,
 ) -> Dict[str, Any]:
     """
     Schedule a future meeting with virtual participant.
@@ -58,9 +135,13 @@ def execute(
         agenda: Optional meeting agenda, one item per line (for example the
             agenda from a calendar invite). Stored on the Virtual Participant
             and carried onto the meeting record when the meeting starts.
+        allow_duplicate: Schedule a new VP even when the caller already has one
+            waiting for the same meeting name and time (by default that one is
+            updated instead).
 
     Returns:
-        Dict with scheduled virtual participant details
+        Dict with scheduled virtual participant details; ``action`` is
+        "created" for a new VP and "updated" for an existing one
     """
     if not meeting_name or not meeting_platform or not meeting_id or not scheduled_time:
         raise ValueError(
@@ -94,9 +175,13 @@ def execute(
     if not appsync_url:
         raise ValueError("APPSYNC_GRAPHQL_URL environment variable not set")
 
-    # Generate unique VP ID
-    str(uuid.uuid4())
-    datetime.now(timezone.utc).isoformat()
+    if user_id and not allow_duplicate:
+        match = find_scheduled_match(user_id, meeting_name, scheduled_timestamp)
+        if match is not None:
+            logger.info("MCP schedule matches scheduled VP %s; updating it", match["id"])
+            return update_scheduled_match(
+                match, meeting_platform, meeting_id, meeting_password, agenda, scheduled_time
+            )
 
     # Prepare GraphQL mutation
     mutation = """
@@ -198,6 +283,7 @@ def execute(
         call_id = vp_data.get("CallId")
         return {
             "virtualParticipantId": vp_id,
+            "action": "created",
             "meetingName": vp_data["meetingName"],
             "meetingPlatform": vp_data["meetingPlatform"],
             "meetingId": vp_data["meetingId"],

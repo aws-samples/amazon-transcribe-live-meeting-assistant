@@ -27,9 +27,11 @@ import { CallSummary } from './CallPanel';
 import {
   MEETING_END_PATIENCE_MS,
   SOURCE_MANUAL,
+  STATUS_EMPTY,
   STATUS_FAILED,
   STATUS_IDLE,
   STATUS_RUNNING,
+  SUMMARY_EMPTY_TEXT,
   SUMMARY_IN_PROGRESS_TEXT,
   TRIGGER_MEETING_END,
 } from '../common/summary-state';
@@ -359,6 +361,38 @@ describe('CallSummary — the end-of-meeting summary on its way', () => {
     expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
     expect(screen.getAllByText(/taking longer than expected/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+  });
+
+  it('says plainly, not as an error, that a meeting with no transcript had nothing to summarise', () => {
+    const { container } = renderPanel({
+      item: ended(
+        endOfMeeting({
+          status: STATUS_EMPTY,
+          message: 'Nothing to summarise: the meeting has no transcript',
+          updatedAt: new Date(Date.now() - 86400000).toISOString(),
+        }),
+        null,
+      ),
+    });
+    expect(screen.getByText(SUMMARY_EMPTY_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be generated/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no summary is available/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/try again/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/taking longer than expected/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY_IN_PROGRESS_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText('Not available')).not.toBeInTheDocument();
+    // No error indicator anywhere in the panel.
+    expect(container.querySelector('[class*="status-error"]')).toBeNull();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+  });
+
+  it('keeps a stored summary on screen when a later run found nothing to summarise', () => {
+    renderPanel({
+      item: ended({ source: SOURCE_MANUAL, status: STATUS_EMPTY, updatedAt: new Date().toISOString() }, GENERATED),
+    });
+    expect(screen.getByText(/migration plan/)).toBeInTheDocument();
+    expect(screen.getByText(SUMMARY_EMPTY_TEXT)).toBeInTheDocument();
+    expect(screen.getByText('Edited')).toBeInTheDocument();
   });
 
   it('falls back to Regenerate on its own when no outcome ever arrives', () => {

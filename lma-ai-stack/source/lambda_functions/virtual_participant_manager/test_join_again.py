@@ -160,13 +160,14 @@ def test_the_owner_joins_the_same_meeting_again_with_the_stored_password(world):
     assert row["agenda"] == "Budget\nHiring" and row["agendaSource"] == "scheduled"
     assert (row["consentMode"], row["consentRule"]) == ("opt_in", "owner_attests")
 
-    # Launched from here, since only the server has the password.
+    # Launched from here, without the password: the VP reads it from the new row.
     data = _launched(w)
     assert w.state_machine.executions[0]["stateMachineArn"] == STATE_MACHINE
     assert data["virtualParticipantId"] == row["id"]
     assert data["launchToken"] == row["id"], "the row's first launch"
     assert data["meetingID"] == "123456789"
-    assert data["meetingPassword"] == STORED_PASSWORD
+    assert "meetingPassword" not in data
+    assert STORED_PASSWORD not in json.dumps(w.state_machine.executions[0]["input"])
     assert data["meetingTime"] == ""
     assert data["userSub"] == "sub-owner", "the launching user's browser profile"
     assert data["enableVideoRecording"] == "false"
@@ -222,7 +223,7 @@ def test_a_typed_password_wins_over_the_stored_one(world):
     w = world()
     join_again.join_again_virtual_participant(w.manager, form(meetingPassword="typed-pw"), OWNER)
     assert _new_row(w)["meetingPassword"] == "typed-pw"
-    assert _launched(w)["meetingPassword"] == "typed-pw"
+    assert "meetingPassword" not in _launched(w)
 
 
 @pytest.mark.parametrize(
@@ -238,7 +239,7 @@ def test_another_meeting_gets_no_stored_password(world, change):
     join_again.join_again_virtual_participant(w.manager, form(**change), OWNER)
     row = _new_row(w)
     assert "meetingPassword" not in row
-    assert _launched(w)["meetingPassword"] == ""
+    assert "meetingPassword" not in _launched(w)
 
 
 def test_another_meeting_uses_a_typed_password(world):
@@ -332,7 +333,7 @@ def test_a_scheduled_join_again_is_left_to_the_scheduler(world):
     assert row["status"] == "SCHEDULED" and row["isScheduled"] is True
     assert row["meetingTime"] == meeting_time
     assert row["scheduledFor"].endswith("Z")
-    assert row["meetingPassword"] == STORED_PASSWORD, "read by the scheduler at launch time"
+    assert row["meetingPassword"] == STORED_PASSWORD, "read by the VP from its row at startup"
     assert row["userSub"] == row["userZoomSub"] == "sub-owner"
     assert row["useStoredZoomAccount"] is True
     assert row["scheduledTimeZone"] == "Europe/Paris"

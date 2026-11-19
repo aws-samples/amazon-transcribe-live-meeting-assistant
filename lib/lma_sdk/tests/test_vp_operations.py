@@ -92,6 +92,18 @@ class TestLaunchWithoutUser:
             )
         services["appsync"].graphql.assert_not_called()
 
+    def test_launch_input_carries_no_meeting_password(self, client, services):
+        client.vp.create(
+            meeting_name="m", platform="ZOOM", meeting_id="1",
+            meeting_password="pw-for-the-row", wait=False,
+        )
+
+        # Saved on the row, which the VP reads at startup; not sent to the launcher.
+        assert _vp_input(services)["meetingPassword"] == "pw-for-the-row"
+        assert "meetingPassword" not in _sfn_data(services)
+        call = services["sfn"].start_sync_execution.call_args
+        assert "pw-for-the-row" not in call.kwargs["input"]
+
 
 # The table of Meet inputs every implementation of the Meet code rule runs.
 SHARED_MEET_CASES = json.loads(

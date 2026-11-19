@@ -106,6 +106,13 @@ UNUSABLE_SUMMARIES = frozenset(
     }
 )
 
+# What the Bedrock summariser answers for a meeting with nothing to summarise:
+# no speech, no chat and no text read from the shared screen (its
+# EMPTY_SUMMARY_TEXT; lma-ai-stack/test/test_summary_empty_outcome.py holds this
+# copy to it). Not a summary, so the stored one is kept, but not a failure
+# either: the state records it as STATUS_EMPTY, with this text as its message.
+EMPTY_SUMMARY_TEXT = "Nothing to summarise: the meeting has no transcript"
+
 # The meeting Status the pipeline writes when a meeting ends, after which it
 # produces the end-of-meeting summary. Same literal the Kinesis consumer uses.
 STATUS_MEETING_ENDED = "ENDED"
@@ -115,6 +122,7 @@ SOURCE_MANUAL = "manual"
 STATUS_RUNNING = "running"
 STATUS_FAILED = "failed"
 STATUS_IDLE = "idle"
+STATUS_EMPTY = "empty"
 
 # The `trigger` the call event processor writes into the state when a meeting
 # ends and its summary is queued; a regeneration writes none.
@@ -319,6 +327,13 @@ def end_of_meeting_run_owns_state(meeting):
     return state.get("trigger") == TRIGGER_MEETING_END
 
 
+def summary_is_empty_outcome(summary):
+    """Whether the summariser reported that the meeting had nothing to summarise."""
+    return isinstance(summary, str) and (
+        summary.strip().rstrip(".").lower() == EMPTY_SUMMARY_TEXT.lower()
+    )
+
+
 def summary_is_usable(summary):
     """Whether this is a summary worth replacing the stored one with.
 
@@ -326,7 +341,7 @@ def summary_is_usable(summary):
     catches everything and returns a fixed string -- so this is the only place
     a failed run can be recognised.
     """
-    if not isinstance(summary, str):
+    if not isinstance(summary, str) or summary_is_empty_outcome(summary):
         return False
     return summary.strip().lower() not in UNUSABLE_SUMMARIES
 
@@ -543,7 +558,11 @@ def run(call_id):
         summary = None
 
     if not summary_is_usable(summary):
-        LOGGER.warning("Keeping the stored summary for %s: the run produced nothing", call_id)
+        empty = summary_is_empty_outcome(summary)
+        if empty:
+            LOGGER.info("Keeping the stored summary for %s: nothing to summarise", call_id)
+        else:
+            LOGGER.warning("Keeping the stored summary for %s: the run produced nothing", call_id)
         if was_live:
             current = read_meeting(call_id) or {}
             if current.get("Status") == STATUS_MEETING_ENDED and end_of_meeting_run_owns_state(
@@ -551,7 +570,18 @@ def run(call_id):
             ):
                 return {"ok": False, "reason": "superseded"}
         # No CallSummaryText in this write. That is the whole point: the stored
-        # summary survives a failed run.
+        # summary survives a failed run, and a run with nothing to summarise.
+        if empty:
+            write_summary(
+                call_id,
+                state={
+                    "source": previous_source,
+                    "status": STATUS_EMPTY,
+                    "message": EMPTY_SUMMARY_TEXT,
+                    "updatedAt": now,
+                },
+            )
+            return {"ok": False, "reason": "empty"}
         write_summary(
             call_id,
             state={

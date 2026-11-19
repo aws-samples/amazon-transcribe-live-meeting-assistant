@@ -1,12 +1,13 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""Helpers for test_assistant_profile.py: ask the meeting assistant, and read what it offered.
+"""Helpers for test_assistant_profile.py and test_assistant_skills.py: ask the assistant, read what it offered.
 
 The assistant is invoked directly, as the Virtual Participant and the desktop
-video test invoke it. What it offered a request is read from its own log line
-``MCP servers: offered=<ids> not offered=<ids>``, found by the invocation's
-request id in the function's log group.
+video test invoke it. What it offered a request is read from its own log lines
+``MCP servers: offered=<ids> not offered=<ids>`` and
+``Skills: offered=<ids> not offered=<ids>``, found by the invocation's request
+id in the function's log group.
 """
 
 from __future__ import annotations
@@ -27,7 +28,12 @@ SECTION = "meeting_assist"
 APPLY_TIMEOUT_SECONDS = 420
 APPLY_POLL_SECONDS = 20
 
-OFFERED_LINE = re.compile(r"MCP servers: offered=(?P<offered>.*?) not offered=(?P<not_offered>.*)$")
+def _offered_line(label: str) -> "re.Pattern[str]":
+    return re.compile(rf"{label}: offered=(?P<offered>.*?) not offered=(?P<not_offered>.*)$")
+
+
+OFFERED_LINE = _offered_line("MCP servers")
+SKILLS_LINE = _offered_line("Skills")
 
 
 def assistant_function_name(stack_name: str) -> str:
@@ -76,16 +82,31 @@ def offered_mcp_servers(session: Any, log_group: str, request_id: str, started_m
     None when the request logged no such line (the request was not allowed MCP
     servers at all, or none is installed).
     """
+    return _offered(session, log_group, request_id, started_ms, timeout_s, "MCP servers", OFFERED_LINE)
+
+
+def offered_skills(session: Any, log_group: str, request_id: str, started_ms: int,
+                   timeout_s: int = 90) -> Optional[Dict[str, set]]:
+    """The skill ids the assistant offered one request, and those it did not.
+
+    None when the request logged no such line (it was not allowed skills at
+    all, or no skill is defined).
+    """
+    return _offered(session, log_group, request_id, started_ms, timeout_s, "Skills", SKILLS_LINE)
+
+
+def _offered(session: Any, log_group: str, request_id: str, started_ms: int, timeout_s: int,
+             label: str, line: "re.Pattern[str]") -> Optional[Dict[str, set]]:
     logs = session.client("logs")
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         events = logs.filter_log_events(
             logGroupName=log_group,
             startTime=started_ms,
-            filterPattern=f'"{request_id}" "MCP servers: offered="',
+            filterPattern=f'"{request_id}" "{label}: offered="',
         ).get("events", [])
         for event in events:
-            match = OFFERED_LINE.search(event["message"].strip())
+            match = line.search(event["message"].strip())
             if match:
                 def ids(text: str) -> set:
                     return set() if text.strip() == "none" else {i.strip() for i in text.split(",") if i.strip()}
@@ -109,18 +130,23 @@ def active_mcp_servers(session: Any, table: str, account_id: str) -> list:
     ]
 
 
+def _stack_resource(cfn: Any, stack_name: str, logical_id: str) -> str:
+    """A resource's physical id, read from every page of the stack's resources.
+
+    describe_stack_resources returns at most 100 resources, and the AI stack has
+    several hundred, so the listing is paged.
+    """
+    for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack_name):
+        for resource in page["StackResourceSummaries"]:
+            if resource["LogicalResourceId"] == logical_id:
+                return resource["PhysicalResourceId"]
+    raise LookupError(f"stack {stack_name} has no resource {logical_id}")
+
+
 def mcp_servers_table(session: Any, stack_name: str) -> str:
     cfn = session.client("cloudformation")
-    ai_stack = next(
-        r["PhysicalResourceId"]
-        for r in cfn.describe_stack_resources(StackName=stack_name)["StackResources"]
-        if r["LogicalResourceId"] == "AISTACK"
-    )
-    return next(
-        r["PhysicalResourceId"]
-        for r in cfn.describe_stack_resources(StackName=ai_stack)["StackResources"]
-        if r["LogicalResourceId"] == "MCPServersTable"
-    )
+    ai_stack = _stack_resource(cfn, stack_name, "AISTACK")
+    return _stack_resource(cfn, ai_stack, "MCPServersTable")
 
 
 def account_id(session: Any) -> str:

@@ -19,7 +19,9 @@ meeting record ``c#<CallId>`` in the EventSourcing table. Then:
     Leaves the VP alone. Its attendee watchdog ends the meeting after about a
     minute: the row must reach ``COMPLETED`` with the ``attendees-left``
     trigger, and the meeting record ``ENDED``. A VP that stays in an empty
-    meeting runs, and bills, until its duration limit.
+    meeting runs, and bills, until its duration limit. Then, with nothing said
+    or shown in the meeting, its summary must end ``empty`` (nothing to
+    summarise) rather than ``failed``; see ``_check_summary_outcome``.
 ``test_vp_ended_from_lma_leaves_the_meeting``
     Ends the VP as the End button does (``endVirtualParticipant``): the row
     must show the test's end reason and a clean terminal status, and the
@@ -55,6 +57,7 @@ the test did. The meeting link is never printed: failure messages pass through
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import boto3
@@ -91,6 +94,9 @@ MEETING_RECORD_TIMEOUT_S = 90.0
 # participant the platform still shows for a while after it has gone.
 ALONE_EXIT_TIMEOUT_S = 300.0
 END_TIMEOUT_S = 180.0
+# The END event to the summary's outcome: the speaker-naming pass (bounded at 75
+# seconds), then the summariser, which answers at once for an empty meeting.
+SUMMARY_OUTCOME_TIMEOUT_S = 240.0
 POLL_S = 5.0
 
 
@@ -237,6 +243,66 @@ def _check_meeting_ended(vp: _Participant, event_table: tuple[Any, str], call_id
         )
 
 
+def _count(event_table: tuple[Any, str], pk: str) -> int:
+    ddb, table = event_table
+    return ddb.query(
+        TableName=table,
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": {"S": pk}},
+        Select="COUNT",
+        ConsistentRead=True,
+    )["Count"]
+
+
+def _summary_state(event_table: tuple[Any, str], call_id: str) -> dict[str, Any]:
+    raw = (live_meeting.read_meeting(*event_table, call_id) or {}).get("CallSummaryState")
+    try:
+        state = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _check_summary_outcome(vp: _Participant, event_table: tuple[Any, str], call_id: str) -> None:
+    """A meeting nobody spoke, typed or shared a screen in is reported as having
+    nothing to summarise, not as a failed summary.
+
+    Decided from what the meeting holds when the outcome lands: with no
+    transcript segments (speech and chat are both stored as ``trs#`` rows) and no
+    key frames the status must be ``empty``; with segments it must not be. Key
+    frames with no segments are left unjudged, because a frame's text is read
+    after the frame is stored and may not have been there when the summary ran.
+    With summaries switched off for the deployment no state is written at all,
+    and there is nothing to check.
+    """
+    state = wait_for(
+        lambda: (st := _summary_state(event_table, call_id))
+        and st.get("status") not in (None, "running")
+        and st,
+        timeout=SUMMARY_OUTCOME_TIMEOUT_S,
+        interval=POLL_S,
+    ) or _summary_state(event_table, call_id)
+    if not state:
+        print(f"meeting {call_id} has no summary state: summaries are off for this deployment")
+        return
+    status = state.get("status")
+    if status == "running":
+        vp.fail(
+            f"the summary of meeting {call_id} was still running {int(SUMMARY_OUTCOME_TIMEOUT_S)}s "
+            "after the meeting ended; see the AsyncTranscriptSummaryOrchestrator logs"
+        )
+    segments = _count(event_table, f"trs#{call_id}")
+    frames = _count(event_table, f"kf#{call_id}")
+    print(f"summary outcome {status!r} for {segments} segment(s) and {frames} key frame(s)")
+    if segments == 0 and frames == 0 and status != "empty":
+        vp.fail(
+            f"meeting {call_id} has no transcript, chat or key frames, yet its summary state is "
+            f"{status!r} ({state.get('message')!r}), not 'empty'"
+        )
+    if segments > 0 and status == "empty":
+        vp.fail(f"meeting {call_id} has {segments} transcript segment(s) but was summarised as empty")
+
+
 def test_vp_leaves_a_meeting_it_is_alone_in(
     client: LMAClient, meeting: LiveMeeting, event_table: tuple[Any, str]
 ) -> None:
@@ -252,6 +318,7 @@ def test_vp_leaves_a_meeting_it_is_alone_in(
         if problem:
             vp.fail(f"{problem}; last: {live_meeting.describe(row, meeting)}")
         _check_meeting_ended(vp, event_table, call_id)
+        _check_summary_outcome(vp, event_table, call_id)
     finally:
         vp.close("integ-test live meeting cleanup")
 

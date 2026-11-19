@@ -16,8 +16,8 @@ individual tools by kind and id, each with three flags::
 - ``mcpServers`` is keyed by the ServerId of an installed MCP server. The
   registry itself, with each server's credentials, stays in the MCP servers
   table; the profile holds only these flags.
-- ``skills`` has the same shape and is reserved for skills, which are not yet
-  offered. Nothing reads it.
+- ``skills`` has the same shape, keyed by the SkillId of a skill in the skills
+  table (see meeting_skills.py). The skills themselves stay in that table.
 
 The flags, each optional:
 
@@ -25,8 +25,8 @@ The flags, each optional:
 - ``inMeetingRequests``: the item may be used for a request made in the meeting
   (the meeting chat, the voice assistant, the wake phrase). Absent means the
   request's own default: the In-meeting requests setting's default for the kind
-  (for MCP servers, Unrestricted, or the ``inMeetingMcpServers`` switch under
-  Selected tools). Never used under Current meeting only, which offers nothing
+  (Unrestricted, or under Selected tools the kind's switch: ``inMeetingMcpServers``
+  for MCP servers, ``inMeetingSkills`` for skills). Never used under Current meeting only, which offers nothing
   beyond the current meeting.
 - ``alwaysOn``: reserved for a later always-on mode. Stored, and validated by
   the section schema, but not read.
