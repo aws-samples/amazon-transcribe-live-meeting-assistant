@@ -50,7 +50,7 @@ import {
   startBlockedReason,
 } from './consent';
 import { CONNECTION_LOST_MESSAGE } from './transcriber-stream';
-import { MEETING_REFUSALS, meetingIdFrom, reopenMeeting } from './continue-meeting';
+import { INVALID_MEETING_ID, MEETING_REFUSALS, meetingIdFrom, reopenMeeting } from './continue-meeting';
 import { formatClock } from '../meeting-player/playback-sync';
 
 let SOURCE_SAMPLING_RATE;
@@ -450,7 +450,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     console.log(`
       DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
     `);
-    const recordingCallMetaData = getFinalCallMetadata();
     try {
       // 16 kHz is the ASR models' native rate, so capturing there means no
       // resampling anywhere in the chain. Other rates still work (the
@@ -469,6 +468,26 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       });
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
+      // Continuing a meeting: reopened only now that the tab and microphone
+      // are shared, just before START, so a start abandoned at the browser's
+      // prompts leaves no session allowed that never starts (reopenMeeting
+      // holds the meeting for an allowed session for 15 minutes).
+      if (continuing) {
+        setReopening(true);
+        const { session, error } = await reopenMeeting(appsyncClient, continueInput);
+        setReopening(false);
+        if (error) {
+          [displayStream.current, micStream.current].forEach((stream) =>
+            stream?.getTracks().forEach((track) => track.stop()),
+          );
+          setStartError(error);
+          setRecording(false);
+          return;
+        }
+        continueSessionRef.current = session;
+        setContinueSession(session);
+      }
+      const recordingCallMetaData = getFinalCallMetadata();
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
       recordingCallMetaData.callEvent = 'START';
 
@@ -557,13 +576,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     toggleRecording();
   }, [recording]);
 
-  const handleRecording = async () => {
+  const handleRecording = () => {
     if (!recording) {
       const blocked =
         startBlockedReason(consentSettings, consentStep) ||
-        (continuing && !meetingIdFrom(continueInput)
-          ? "Paste the meeting ID, or the link to the meeting's page in LMA."
-          : '');
+        (continuing && !meetingIdFrom(continueInput) ? INVALID_MEETING_ID : '');
       setStartError(blocked);
       if (blocked) return recording;
       // eslint-disable-next-line no-restricted-globals
@@ -576,19 +593,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         }
         continueSessionRef.current = null;
         setContinueSession(null);
-        if (continuing) {
-          // Allowed now, just before streaming: a session that never starts
-          // leaves the meeting as it was, and the next continuation asks again.
-          setReopening(true);
-          const { session, error } = await reopenMeeting(appsyncClient, continueInput);
-          setReopening(false);
-          if (error) {
-            setStartError(error);
-            return recording;
-          }
-          continueSessionRef.current = session;
-          setContinueSession(session);
-        }
         setRecording(!recording);
       }
     } else {

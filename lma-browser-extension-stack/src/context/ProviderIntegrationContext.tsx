@@ -65,6 +65,9 @@ function IntegrationProvider({ children }: any) {
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [startError, setStartError] = useState("");
+  // The meeting ID or link to continue, from startTranscription until the
+  // capture has started.
+  const continueMeetingRef = useRef<string | undefined>(undefined);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -198,28 +201,20 @@ function IntegrationProvider({ children }: any) {
       return;
     }
     setStartError("");
-
-    // Continuing a meeting: allowed now, just before streaming. A session that
-    // never starts leaves the meeting as it was.
-    let session = undefined;
-    if (continueMeeting !== undefined) {
-      const result = await reopenMeeting(settings.graphqlEndpoint, user.id_token, continueMeeting);
-      if (result.error !== undefined) {
-        setStartError(result.error);
-        return;
-      }
-      session = result.session;
-    }
+    // Continuing a meeting: reopened once the tab's capture has started, just
+    // before START (the SamplingRate message below), so a capture that never
+    // starts leaves no session allowed (reopenMeeting holds the meeting for an
+    // allowed session for 15 minutes).
+    continueMeetingRef.current = continueMeeting;
 
     setShouldConnect(true);
     const callMetadata: Call = {
       callEvent: 'START',
       clientType: 'BROWSER_EXTENSION',
       localSpeakerName: userName,
-      callId: session ? session.callId : `${meetingTopic} - ${formatTimestamp(new Date())}`,
+      callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
       activeSpeaker: 'n/a',
-      ...(session ? { sessionNumber: session.sessionNumber } : {}),
     }
 
     setCurrentCall(callMetadata);
@@ -235,7 +230,7 @@ function IntegrationProvider({ children }: any) {
     } catch (exception) {
       alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
-  }, [setShouldConnect, setCurrentCall, settings]);
+  }, [setShouldConnect, setCurrentCall]);
 
   const stopTranscription = useCallback(() => {
     if (isTranscribing) {
@@ -268,6 +263,19 @@ function IntegrationProvider({ children }: any) {
           );
         } else if (request.action === "SamplingRate") {
           // This event should only bubble up once at the start of recording in the injected code
+          const continueMeeting = continueMeetingRef.current;
+          continueMeetingRef.current = undefined;
+          if (continueMeeting !== undefined) {
+            const result = await reopenMeeting(settings.graphqlEndpoint, user.id_token, continueMeeting);
+            if (result.error !== undefined) {
+              setStartError(result.error);
+              chrome.runtime.sendMessage({ action: "StopTranscription" });
+              setShouldConnect(false);
+              return;
+            }
+            currentCall.callId = result.session.callId;
+            currentCall.sessionNumber = result.session.sessionNumber;
+          }
           currentCall.samplingRate = request.samplingRate;
           currentCall.callEvent = 'START';
           sendMessage(JSON.stringify(currentCall));
@@ -294,7 +302,8 @@ function IntegrationProvider({ children }: any) {
     // `metadata` is deliberately absent: the handler no longer reads it, and
     // including it re-registered the listener on every reader report.
   }, [currentCall, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
-    setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata
+    setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata,
+    settings, user
   ]);
 
   // Follow the user to another meeting tab. Needed because reports from tabs the

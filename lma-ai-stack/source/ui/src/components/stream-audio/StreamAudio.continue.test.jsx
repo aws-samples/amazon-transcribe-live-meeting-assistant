@@ -73,8 +73,7 @@ const openSocket = () => {
 const startFrame = (target) => target.sent.find((f) => f.callEvent === 'START');
 
 // Answers the reopen; anything else the page reads (the ASR engine) is empty.
-const answering = (reopen) =>
-  vi.fn(async ({ query }) => (query.includes('reopenMeeting') ? reopen() : { data: {} }));
+const answering = (reopen) => vi.fn(async ({ query }) => (query.includes('reopenMeeting') ? reopen() : { data: {} }));
 
 const continueMeeting = (value) => {
   fireEvent.click(screen.getByText('Continue an existing meeting…'));
@@ -104,7 +103,7 @@ describe('StreamAudio: continue an existing meeting', () => {
     vi.restoreAllMocks();
   });
 
-  it("reopens the meeting, then streams under its ID naming the session the server allowed", async () => {
+  it('reopens the meeting, then streams under its ID naming the session the server allowed', async () => {
     render(<StreamAudio mode="stream" />);
     const target = openSocket();
     continueMeeting(`https://lma.example/#/calls/${encodeURIComponent(CALL_ID)}`);
@@ -119,11 +118,15 @@ describe('StreamAudio: continue an existing meeting', () => {
     );
   });
 
-  it("shows the server's refusal and does not stream", async () => {
+  it("shows the server's refusal, stops the shared tab and microphone, and does not stream", async () => {
     api.graphql = answering(async () => {
       // eslint-disable-next-line no-throw-literal
       throw { errors: [{ errorType: 'MeetingInProgress', message: 'This meeting is still being captured.' }] };
     });
+    const stop = vi.fn();
+    const shared = () => ({ ...fakeStream(), getTracks: () => [{ stop }] });
+    window.navigator.mediaDevices.getDisplayMedia.mockResolvedValue(shared());
+    window.navigator.mediaDevices.getUserMedia.mockResolvedValue(shared());
     render(<StreamAudio mode="stream" />);
     const target = openSocket();
     continueMeeting(CALL_ID);
@@ -131,7 +134,19 @@ describe('StreamAudio: continue an existing meeting', () => {
 
     expect(await screen.findByText('This meeting is still being captured.')).toBeTruthy();
     expect(startFrame(target)).toBeUndefined();
-    expect(window.navigator.mediaDevices.getDisplayMedia).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Start Streaming' })).toBeTruthy();
+  });
+
+  it('reopens the meeting only once the tab is shared, so a cancelled share reopens nothing', async () => {
+    window.navigator.mediaDevices.getDisplayMedia.mockRejectedValue(new Error('Permission denied'));
+    vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    continueMeeting(CALL_ID);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Streaming' }));
+    await waitFor(() => expect(window.alert).toHaveBeenCalled());
+    expect(api.graphql.mock.calls.some(([{ query }]) => query.includes('reopenMeeting'))).toBe(false);
   });
 
   it('asks for a meeting ID before calling the server', async () => {

@@ -93,7 +93,12 @@ Only the meeting's owner or an Admin can continue a meeting; being one of the
 people it is shared with is not enough. LMA does not reopen a meeting that is
 still being captured, one whose transcript has been deleted, or a meeting ID it
 does not know, and the page shows LMA's reason under the Start button without
-starting. Each time you continue, the meeting is reopened again for a new
+starting. The page reopens the meeting only once you have shared the tab and
+the microphone, just before streaming starts. After a reopen, LMA waits up to
+15 minutes for that session to start before it reopens the meeting again, so
+if the stream fails to start after this point (the connection to LMA fails, for
+example), continuing the same meeting is refused as still being captured until
+then. Each time you continue, the meeting is reopened again for a new
 session; a dropped connection reconnects to the same session (see below). See
 [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 

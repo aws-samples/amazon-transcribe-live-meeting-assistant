@@ -64,7 +64,11 @@ timeline. While listening, the panel shows the meeting and its session number.
 Only the meeting's owner or an Admin can continue a meeting. LMA does not
 reopen a meeting that is still being captured, one whose transcript has been
 deleted, or a meeting ID it does not know; the panel shows LMA's reason, and
-does not start. The option needs an extension package downloaded from a
+does not start. The extension reopens the meeting only once the tab's capture
+has started, just before streaming. After a reopen, LMA waits up to 15 minutes
+for that session to start before it reopens the meeting again, so if streaming
+fails after this point, continuing the same meeting is refused as still being
+captured until then. The option needs an extension package downloaded from a
 deployment that includes it, because the package carries the address of LMA's
 API; an older package says so. See
 [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).

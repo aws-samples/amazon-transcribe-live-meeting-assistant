@@ -176,7 +176,9 @@ def is_backend_role(identity: Optional[Mapping[str, Any]]) -> bool:
     to the API (the stack's Lambdas, the lma CLI and SDK run by an operator).
     """
     caller: Mapping[str, Any] = identity or {}
-    return ":assumed-role/" in str(caller.get("userArn") or "")
+    # Without Cognito claims, as the call cost, consent and chat attachment
+    # resolvers require too: a user pool caller is never a backend role.
+    return not caller.get("claims") and ":assumed-role/" in str(caller.get("userArn") or "")
 
 
 def caller_owns_meeting(

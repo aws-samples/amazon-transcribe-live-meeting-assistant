@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 import boto3
 import pytest
 
-from kds_pipeline_probe import _event_sourcing_table, _stream_name
+from kds_pipeline_probe import _event_sourcing_table, _stream_name, cleanup
 from lma_sdk import LMAClient
 from lma_sdk.exceptions import LMAAppSyncError
 
@@ -104,4 +104,4 @@ def test_an_ended_meeting_is_reopened_for_its_next_session(client: LMAClient) ->
             client.meetings.reopen(f"{call_id}-no-such-meeting")
         assert missing.value.error_type == "MeetingNotFound"
     finally:
-        ddb.delete_item(TableName=table, Key=key)
+        cleanup(client.stack_name, call_id, region=client.region)
