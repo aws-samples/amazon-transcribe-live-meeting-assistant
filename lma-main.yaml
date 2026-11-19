@@ -3017,6 +3017,7 @@ Resources:
         AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         EventApiHttpUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiHttpUrl
         MCPServersTableName: !GetAtt AISTACK.Outputs.MCPServersTableName
+        SkillsTableName: !GetAtt AISTACK.Outputs.SkillsTableName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         BedrockGuardrailId: !Ref BedrockGuardrailId

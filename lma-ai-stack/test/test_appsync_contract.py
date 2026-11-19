@@ -161,6 +161,17 @@ ADMIN_ONLY_FIELDS = [
     # mcp_server_manager re-checks the Admin group for a user-pool caller.
     ("Query", "exportMCPServerLibrary"),
     ("Mutation", "importMCPServerLibrary"),
+    # The meeting assistant's skills library: every write, and the export of the
+    # whole library. Each also accepts IAM-signed callers (the LMA SDK and CLI),
+    # as the MCP server library does, and skills_manager re-checks the Admin
+    # group for a user-pool caller. The stack's own roles with broad grants are
+    # denied the writes; test_mcp_library_import_scope.py holds that.
+    ("Mutation", "createSkill"),
+    ("Mutation", "updateSkill"),
+    ("Mutation", "deleteSkill"),
+    ("Mutation", "importSkill"),
+    ("Mutation", "importSkillLibrary"),
+    ("Query", "exportSkillLibrary"),
     ("Mutation", "initOAuthFlow"),
     ("Mutation", "handleOAuthCallback"),
     ("Mutation", "createUser"),
@@ -206,6 +217,10 @@ ADMIN_ONLY_FIELDS = [
 #   managing them is what belongs to the Admin group. `redact_server` in
 #   mcp_server_manager projects AuthConfig away on this path, and
 #   test_mcp_server_manager.py pins both that and the open read.
+# * listSkills / getSkill / exportSkill -- the meeting assistant's skills, as
+#   listInstalledMCPServers is: account-wide guidance that shapes the answers
+#   every user gets, holding no credential. Writing them belongs to the Admin
+#   group. test_skills_manager.py pins the open read.
 # * getMeetingConsentDefaults -- the Create Virtual Participant form reads the
 #   deployment's consent mode, rule and per-meeting-choice switch to show which
 #   consent choices apply. It returns those three values only.
@@ -215,6 +230,9 @@ UNRESTRICTED_READS = [
     ("Query", "getMeetingConsentDefaults"),
     ("Query", "listInstalledMCPServers"),
     ("Query", "getMCPServer"),
+    ("Query", "listSkills"),
+    ("Query", "getSkill"),
+    ("Query", "exportSkill"),
 ]
 
 # Everything else the schema declares. Listed so that the three lists together
