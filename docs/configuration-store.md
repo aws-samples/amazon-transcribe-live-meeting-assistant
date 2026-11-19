@@ -1263,8 +1263,11 @@ by the Configuration page's export and import with the rest of the section.
   tools default (see
   [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile)).
   The shipped value names
-  nothing, and an item the profile does not name behaves as it did before the
-  setting existed. See
+  nothing. An MCP server the profile does not name behaves as it did before the
+  setting existed; a skill it does not name is enabled for the owner's own
+  requests, and for in-meeting requests it follows the In-meeting requests setting
+  (under Selected tools, `inMeetingSkills` decides).
+  See
   [Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one).
 
   The Configuration page lists the installed servers (`listInstalledMCPServers`)

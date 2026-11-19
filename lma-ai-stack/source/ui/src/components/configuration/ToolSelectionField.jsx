@@ -11,8 +11,10 @@
 // on the Skills page; each stays in its own table. This edits only the active
 // profile's flags, keyed by server id (meeting_assist.toolSelection.mcpServers)
 // and by skill id (meeting_assist.toolSelection.skills). An item with no entry
-// behaves as it did before the profile could name it, so the profile stores only
-// what an administrator changed.
+// takes its default (an MCP server as it did before the profile could name it; a
+// skill as enabled for the owner's own requests, and for in-meeting requests as
+// the In-meeting requests setting decides, inMeetingSkills under Selected tools),
+// so the profile stores only what an administrator changed.
 
 import React, { useContext, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
