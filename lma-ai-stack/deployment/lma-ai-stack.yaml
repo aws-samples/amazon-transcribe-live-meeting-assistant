@@ -2766,6 +2766,14 @@ Resources:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/*"
+              # The MCP server library import is for administrators (the Admin
+              # group, or an operator's IAM principal through the SDK and CLI),
+              # not for the stack's own function roles.
+              - Effect: Deny
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
               - Effect: Allow
                 Action:
                   - appsync:EventConnect
@@ -3013,6 +3021,13 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+            # The MCP server library import is for administrators, not for the
+            # stack's own function roles.
+            - Effect: Deny
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
             - Effect: Allow
               Action:
                 - comprehend:DetectSentiment
@@ -3924,6 +3939,13 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+              # The MCP server library import is for administrators, not for
+              # the stack's own function roles.
+              - Effect: Deny
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
               - Effect: Allow
                 Action:
                   - "s3:GetObject"
@@ -10895,6 +10917,87 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # The MCP server library: export (no credentials) and import, for the Admin
+  # group and for IAM-signed callers (the LMA SDK and CLI); and entering the
+  # credentials of an imported server, for the Admin group.
+  ExportMCPServerLibraryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: exportMCPServerLibrary
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "exportMCPServerLibrary"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ImportMCPServerLibraryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: importMCPServerLibrary
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "importMCPServerLibrary"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UpdateMCPServerCredentialsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMCPServerCredentials
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "updateMCPServerCredentials"
             }
           }
         }

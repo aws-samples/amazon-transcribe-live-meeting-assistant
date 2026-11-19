@@ -150,6 +150,17 @@ ADMIN_ONLY_FIELDS = [
     ("Mutation", "installMCPServer"),
     ("Mutation", "uninstallMCPServer"),
     ("Mutation", "updateMCPServer"),
+    ("Mutation", "updateMCPServerCredentials"),
+    # The MCP server library. Both fields also accept IAM-signed callers (the
+    # LMA SDK and CLI): the export as getNovaSonicConfig does, since it carries
+    # no credentials; the import by design, for an operator's principal granted
+    # appsync:GraphQL on the deployment's API (who may call it is documented in
+    # docs/mcp-servers.md, "Exporting and Importing the Server Library"). The
+    # stack's own roles with broad grants are denied it;
+    # test_mcp_library_import_scope.py holds that.
+    # mcp_server_manager re-checks the Admin group for a user-pool caller.
+    ("Query", "exportMCPServerLibrary"),
+    ("Mutation", "importMCPServerLibrary"),
     ("Mutation", "initOAuthFlow"),
     ("Mutation", "handleOAuthCallback"),
     ("Mutation", "createUser"),

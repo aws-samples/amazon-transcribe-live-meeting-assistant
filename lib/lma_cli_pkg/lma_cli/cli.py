@@ -86,6 +86,7 @@ def main(ctx, region, profile, stack_name, verbose):
 
 from lma_cli.commands.publish import check_prereqs_cmd, publish_cmd
 from lma_cli.commands.stack import delete_cmd, deploy_cmd, logs_cmd, outputs_cmd, status_cmd
+from lma_cli.commands.mcp import mcp_cmd
 from lma_cli.commands.vp import vp_cmd
 
 main.add_command(publish_cmd)
@@ -96,6 +97,7 @@ main.add_command(delete_cmd)
 main.add_command(logs_cmd)
 main.add_command(check_prereqs_cmd)
 main.add_command(vp_cmd)
+main.add_command(mcp_cmd)
 
 
 # ── Optional plugins (entry-point group "lma_cli.plugins") ──────

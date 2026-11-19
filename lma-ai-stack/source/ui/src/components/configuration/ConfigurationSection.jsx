@@ -11,10 +11,14 @@ import { Alert, Badge, Button, ExpandableSection, SpaceBetween } from '@cloudsca
 import { appliesText, changedCount, clone, deepEqual } from './config-model';
 import { SchemaNode, SectionProvider } from './fields';
 import PriceTable from './PriceTable';
+import ToolSelectionField from './ToolSelectionField';
 import SectionNotice from './section-notices';
 import { formatPath } from './schema-validation';
 
 export const sectionElementId = (name) => `configuration-section-${name}`;
+
+// The controls a field can name with its schema's `widget`.
+const FIELD_WIDGETS = { toolSelection: ToolSelectionField };
 
 /** One section of the configuration: its heading, its markers and its form. */
 const ConfigurationSection = ({
@@ -81,6 +85,7 @@ const ConfigurationSection = ({
             settings={settings}
             problems={problems}
             readOnly={readOnly}
+            widgets={FIELD_WIDGETS}
             onChange={onChange}
           >
             {/* A section can name a control of its own; the prices are a table. */}

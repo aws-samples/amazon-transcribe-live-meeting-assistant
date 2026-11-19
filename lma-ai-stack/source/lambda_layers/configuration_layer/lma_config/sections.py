@@ -331,8 +331,9 @@ MEETING_ASSIST = register(
         name="meeting_assist",
         cache_tier=CacheTier.STANDARD,
         description=(
-            "The phrase that wakes the meeting assistant in a transcript, and whether its "
-            "answers use Amazon Bedrock prompt caching."
+            "The phrase that wakes the meeting assistant in a transcript, whether its "
+            "answers use Amazon Bedrock prompt caching, its instructions, and which "
+            "tools it may use."
         ),
     )
 )

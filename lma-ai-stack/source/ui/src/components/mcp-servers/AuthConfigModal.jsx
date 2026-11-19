@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { generateClient } from 'aws-amplify/api';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
   Alert,
@@ -24,7 +24,7 @@ const client = generateClient();
  * Generic Authentication Configuration Modal
  * Supports multiple auth types: Bearer Token, Custom Headers, OAuth 2.1
  */
-const AuthConfigModal = ({ visible, onDismiss, onSubmit, server = null }) => {
+const AuthConfigModal = ({ visible, onDismiss, onSubmit, server = null, initialSettings = null }) => {
   const [authType, setAuthType] = useState({ value: 'bearer', label: 'Bearer Token' });
   const [bearerToken, setBearerToken] = useState('');
   const [customHeaders, setCustomHeaders] = useState('{\n  "X-API-Key": "your-key-here"\n}');
@@ -126,6 +126,18 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server = null }) => {
         { value: 'oauth_client_credentials', label: 'OAuth Client Credentials (HTTP servers only)', disabled: true },
       ];
 
+  // OAuth settings to put back after the provider's presets are applied: those
+  // of an imported server (initialSettings), which the provider effect below
+  // would otherwise overwrite with the preset's.
+  const prefilledOauth = useRef(null);
+
+  const applyOauthSettings = (oauth) => {
+    if (oauth.clientId) setOauthClientId(oauth.clientId);
+    if (oauth.authorizationUrl) setOauthAuthUrl(oauth.authorizationUrl);
+    if (oauth.tokenUrl) setOauthTokenUrl(oauth.tokenUrl);
+    if (Array.isArray(oauth.scopes)) setOauthScopes(oauth.scopes.join(' '));
+  };
+
   // Update OAuth URLs when provider changes
   useEffect(() => {
     if (oauthProvider && OAUTH_PROVIDERS[oauthProvider]) {
@@ -133,8 +145,34 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server = null }) => {
       setOauthAuthUrl(provider.authorizationUrl);
       setOauthTokenUrl(provider.tokenUrl);
       setOauthScopes(provider.defaultScopes);
+      if (prefilledOauth.current) applyOauthSettings(prefilledOauth.current);
     }
   }, [oauthProvider]);
+
+  // A server imported from an MCP server library: open on the type it needs,
+  // with the settings the library kept (header and variable names, OAuth client
+  // settings). The credentials themselves are always empty.
+  useEffect(() => {
+    if (!initialSettings?.authType) return;
+    const option = authTypeOptions.find((o) => o.value === initialSettings.authType && !o.disabled);
+    if (option) setAuthType(option);
+    const names = (values) =>
+      JSON.stringify(Object.fromEntries(Object.keys(values || {}).map((name) => [name, ''])), null, 2);
+    if (initialSettings.headers && Object.keys(initialSettings.headers).length) {
+      setCustomHeaders(names(initialSettings.headers));
+    }
+    if (initialSettings.env && Object.keys(initialSettings.env).length) {
+      // The environment variable editor shares the headers text (see handleSubmit).
+      setCustomHeaders(names(initialSettings.env));
+    }
+    const oauth = initialSettings.oauth || {};
+    if (Object.keys(oauth).length) {
+      prefilledOauth.current = oauth;
+      const provider = OAUTH_PROVIDERS[oauth.provider] ? oauth.provider : 'custom';
+      setOauthProvider(provider);
+      applyOauthSettings(oauth);
+    }
+  }, [initialSettings]);
 
   // OAuth authorization handler
   const handleOAuthAuthorize = async () => {
@@ -613,6 +651,21 @@ AuthConfigModal.propTypes = {
     homepage: PropTypes.string,
     transport: PropTypes.arrayOf(PropTypes.string),
     packageType: PropTypes.string,
+  }),
+  // The non-credential settings of a server imported from an MCP server
+  // library (MCPServer.ImportedAuthSettings): its type, header or variable
+  // names, and OAuth client settings.
+  initialSettings: PropTypes.shape({
+    authType: PropTypes.string,
+    headers: PropTypes.objectOf(PropTypes.string),
+    env: PropTypes.objectOf(PropTypes.string),
+    oauth: PropTypes.shape({
+      provider: PropTypes.string,
+      clientId: PropTypes.string,
+      authorizationUrl: PropTypes.string,
+      tokenUrl: PropTypes.string,
+      scopes: PropTypes.arrayOf(PropTypes.string),
+    }),
   }),
 };
 
