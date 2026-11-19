@@ -121,7 +121,8 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools, and the ones offered on that endpoint only. See
+> the user's identity on every request and exposes the same seven tools plus the ones marked
+> "API key endpoint only" in the table above. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -353,7 +354,12 @@ Common parameters for the most-used tools.
 Your access and `status` are applied while the meetings are read, so `limit`
 counts only the meetings you can see that match: other people's newer meetings,
 or a `status` that fits an older meeting, no longer leave the list short or empty.
-At most 1,000 of the most recent meetings in the date range are looked at. When
+At most 1,000 of the most recent meetings in the date range are looked at: a call
+that filters, as every call by a non-admin does, reads at least one page of 100
+meetings, and up to ten pages (1,000) when few of them match. The first read of
+each page asks only for the few fields the filters need, which makes the response
+smaller; DynamoDB still reads whole items, so the read capacity used is that of
+the meetings read. When
 that limit ends the search with older meetings still in the range, the answer
 carries `truncated: true` and a `note` saying that older matching meetings may not
 be listed; narrow the date range to see them. If some meetings could not be read,

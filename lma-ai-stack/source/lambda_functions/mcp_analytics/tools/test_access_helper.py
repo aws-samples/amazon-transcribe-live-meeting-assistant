@@ -41,7 +41,6 @@ class TestCanReadMeeting(unittest.TestCase):
     def test_the_rule_is_the_one_list_meetings_applies(self):
         from tools import list_meetings
 
-        include = list_meetings.build_filter(OWNER, False, None, None)
         rows = [
             {"Owner": OWNER},
             {"AgentId": OWNER},
@@ -49,11 +48,19 @@ class TestCanReadMeeting(unittest.TestCase):
             {"Owner": OWNER, "AgentId": OTHER},
             {"Owner": OTHER},
             {"AgentId": OTHER},
+            {"Owner": ""},
+            {"AgentId": ""},
+            {"Owner": "", "AgentId": ""},
+            {"Owner": None, "AgentId": None},
             {},
         ]
-        for row in rows:
-            with self.subTest(row=row):
-                self.assertEqual(can_read_meeting(row, OWNER), include(row))
+        # A caller with no identity (None or "") is held to the same rule: it
+        # matches no row, not even one whose owner is empty or missing.
+        for user_id in (OWNER, OTHER, None, ""):
+            include = list_meetings.build_filter(user_id, False, None, None)
+            for row in rows:
+                with self.subTest(user_id=user_id, row=row):
+                    self.assertEqual(can_read_meeting(row, user_id), include(row))
 
     def test_someone_else_cannot_read(self):
         self.assertFalse(can_read_meeting({"Owner": OWNER}, OTHER))

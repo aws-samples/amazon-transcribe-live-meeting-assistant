@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
 
-from tools import get_virtual_participant_status  # noqa: E402
+from tools import access_helper, get_virtual_participant_status  # noqa: E402
 
 OWNER = "owner@example.com"
 LISTED = "bob@example.com"
@@ -64,6 +64,13 @@ class VirtualParticipantStatusAccessTest(unittest.TestCase):
             with self.subTest(shared_with=shared_with, caller=caller):
                 with self.assertRaises(PermissionError):
                     _run(shared_with, caller)
+
+
+class TestOneReadingOfSharedWith(unittest.TestCase):
+    def test_the_tool_reads_the_entries_with_the_shared_helper(self):
+        self.assertIs(
+            get_virtual_participant_status.shared_with_entries, access_helper.shared_with_entries
+        )
 
 
 if __name__ == "__main__":

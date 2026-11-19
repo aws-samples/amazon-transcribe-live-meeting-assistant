@@ -11286,7 +11286,10 @@ Resources:
                         Description: "ISO 8601 end date"
                       participant:
                         Type: string
-                        Description: "Filter by participant name"
+                        Description: >-
+                          Matches a name in a participant list stored on the
+                          meeting record; LMA does not record one today, so
+                          this usually matches nothing.
                       status:
                         Type: string
                         Description: >-
