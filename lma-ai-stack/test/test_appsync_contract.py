@@ -578,6 +578,13 @@ LAMBDA_AWSJSON_FIELDS = {
     ("Query", "exportMCPServerLibrary"): "mcp_server_manager/test_awsjson_encoding.py",
     ("Query", "listInstalledMCPServers"): "mcp_server_manager/test_awsjson_encoding.py",
     ("Query", "getMCPServer"): "mcp_server_manager/test_awsjson_encoding.py",
+    ("Mutation", "createSkill"): "skills_manager/test_awsjson_encoding.py",
+    ("Mutation", "updateSkill"): "skills_manager/test_awsjson_encoding.py",
+    ("Mutation", "deleteSkill"): "skills_manager/test_awsjson_encoding.py",
+    ("Query", "listSkills"): "skills_manager/test_awsjson_encoding.py",
+    ("Query", "getSkill"): "skills_manager/test_awsjson_encoding.py",
+    ("Query", "exportSkill"): "skills_manager/test_awsjson_encoding.py",
+    ("Query", "exportSkillLibrary"): "skills_manager/test_awsjson_encoding.py",
 }
 
 
