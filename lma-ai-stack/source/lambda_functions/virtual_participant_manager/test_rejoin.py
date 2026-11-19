@@ -357,6 +357,14 @@ def test_a_launch_that_cannot_be_started_leaves_the_transcript_deletion_in_place
     assert "lambda" not in rejoin._clients, "no function is asked to cancel the deletion"
 
 
+def test_a_rejoin_records_on_the_meeting_that_a_rejoin_allowed_the_session(world):
+    """So reopenMeeting never hands a rejoin's pending session to a streaming client."""
+    w = world()
+    rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    (update,) = w.events.updates
+    assert update["ExpressionAttributeValues"][":via"] == "rejoinVirtualParticipant"
+
+
 def test_a_second_rejoin_of_the_same_row_is_refused(world):
     w = world()
     stale = dict(w.vp_table.row)

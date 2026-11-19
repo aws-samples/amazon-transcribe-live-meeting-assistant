@@ -85,6 +85,7 @@ class Table:
             SessionOffsetSeconds=values[":offset"],
             ReopenedAt=values[":now"],
             ReopenedBy=values[":by"],
+            ReopenedVia=values[":via"],
         )
         return {}
 
@@ -207,7 +208,14 @@ def _minutes_ago(minutes: float) -> str:
 
 def test_a_session_allowed_moments_ago_that_has_not_started_is_not_overtaken(table) -> None:
     # A Virtual Participant rejoin, still joining: session 2 allowed, not started.
-    fake = table(ended_meeting(SessionNumber=2, ReopenedAt=_minutes_ago(2)))
+    fake = table(
+        ended_meeting(
+            SessionNumber=2,
+            ReopenedAt=_minutes_ago(2),
+            ReopenedBy="owner@example.com",
+            ReopenedVia="rejoinVirtualParticipant",
+        )
+    )
     assert call(OWNER)["errorType"] == "MeetingInProgress"
     assert fake.updates == []
 
@@ -220,3 +228,29 @@ def test_a_session_allowed_long_ago_that_never_started_is_taken_as_abandoned(tab
 def test_a_session_that_started_does_not_hold_the_next_reopen(table) -> None:
     table(ended_meeting(SessionNumber=2, SessionStartedNumber=2, ReopenedAt=_minutes_ago(1)))
     assert call(OWNER)["SessionNumber"] == 3
+
+
+def test_the_callers_own_pending_reopen_is_answered_again_not_held_off(table) -> None:
+    fake = table()
+    first = call(OWNER)
+    # Its START never got through (refused, connection failed, app closed): ask again.
+    again = call(OWNER)
+    assert again["SessionNumber"] == first["SessionNumber"] == 2
+    assert again["SessionOffsetSeconds"] == first["SessionOffsetSeconds"]
+    assert len(fake.updates) == 1, "the same session is answered, nothing new is allowed"
+
+
+def test_another_users_pending_reopen_is_not_handed_out(table) -> None:
+    table()
+    assert call(OWNER)["SessionNumber"] == 2
+    assert call(ADMIN)["errorType"] == "MeetingInProgress"
+
+
+def test_a_reopen_time_slightly_ahead_of_this_clock_still_holds_the_meeting(table) -> None:
+    fake = table(
+        ended_meeting(
+            SessionNumber=2, ReopenedAt=_minutes_ago(-1), ReopenedVia="rejoinVirtualParticipant"
+        )
+    )
+    assert call(OWNER)["errorType"] == "MeetingInProgress"
+    assert fake.updates == []

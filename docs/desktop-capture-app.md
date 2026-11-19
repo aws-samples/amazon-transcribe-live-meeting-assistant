@@ -589,8 +589,11 @@ Who can continue a meeting, and when:
   whose recording stopped unexpectedly may take a minute to show as **Done**.
 - Not within 15 minutes of another reopen of the meeting whose capture has not
   started yet, such as a Virtual Participant [rejoin](virtual-participant.md#rejoin)
-  that is still joining. After 15 minutes that reopen is taken to have been
-  abandoned.
+  that is still joining, or another user's continuation. After 15 minutes that
+  reopen is taken to have been abandoned. Your own continuation is not held off
+  this way: if its recording did not start (it was refused, the connection
+  failed, or the app was closed), **Continue Meeting** continues in the same
+  session.
 - Not once the meeting's transcript has been deleted by the Retention settings.
 
 If the meeting cannot be continued, the panel says why under the field and
@@ -602,6 +605,7 @@ nothing is recorded:
 | *Only the meeting's owner or an Admin can continue this meeting.* | Ask the owner to continue it, or start a new meeting. |
 | *This meeting's transcript has been deleted…* | Start a new meeting. |
 | *This meeting is still being captured…* | Wait until the meeting shows as **Done** in LMA, then try again. |
+| *This meeting was reopened a few minutes ago…* | A Virtual Participant rejoin, or another user, reopened the meeting and that capture has not started. Wait until it has ended, or 15 minutes. Your own earlier **Continue Meeting** does not hold you off: pressing it again after a failed start continues in the same session. |
 
 **Continue an existing meeting…** is shown only by a download that includes
 LMA's API endpoint (`graphqlEndpoint` in `lma-config.json`), which packages

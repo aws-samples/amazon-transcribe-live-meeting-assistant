@@ -327,7 +327,7 @@ and the same mechanism a Virtual Participant
    | `MeetingNotFound` | No meeting has this `callId`. |
    | `Unauthorized` | The caller is not the meeting's owner or an Admin. Being one of the users the meeting is shared with is not enough. |
    | `TranscriptDeleted` | The meeting's transcript has been deleted by the Retention settings. |
-   | `MeetingInProgress` | The meeting is still being captured (status `STARTED` or `TRANSCRIBING`), or a session allowed on it in the last 15 minutes (by a Virtual Participant rejoin or another `reopenMeeting`) has not started yet. |
+   | `MeetingInProgress` | The meeting is still being captured (status `STARTED` or `TRANSCRIBING`), or a session allowed on it in the last 15 minutes by a Virtual Participant rejoin, or by another user's `reopenMeeting`, has not started yet. A session the same caller allowed with `reopenMeeting` that has not started is answered again instead, so a client whose START did not get through can call `reopenMeeting` again and retry. |
    | `MeetingChanged` | The meeting record changed during the call. Try again. |
    | `BadRequest` | The `CallId` is missing or not usable. |
 

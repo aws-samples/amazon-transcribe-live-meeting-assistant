@@ -75,7 +75,29 @@ def pending_session(meeting: Mapping[str, Any], now: Optional[datetime] = None) 
     if reopened_at.tzinfo is None:
         reopened_at = reopened_at.replace(tzinfo=timezone.utc)
     elapsed = ((now or datetime.now(timezone.utc)) - reopened_at).total_seconds()
-    return 0 <= elapsed < PENDING_SESSION_SECONDS
+    # A time a little ahead of this clock (another writer's clock) is still
+    # recent; one far ahead is not read as holding the meeting indefinitely.
+    return -PENDING_SESSION_SECONDS < elapsed < PENDING_SESSION_SECONDS
+
+
+def own_pending_session(meeting: Mapping[str, Any], identity: Mapping[str, Any]) -> bool:
+    """Whether the pending session is one this caller allowed with reopenMeeting.
+
+    A client whose START did not get through (refused, the connection failed,
+    the app was closed) asks again; it is given the same session rather than
+    being held off by its own. A Virtual Participant rejoin's pending session,
+    or another user's, is never handed out.
+    """
+    return meeting.get("ReopenedVia") == lma_sessions.VIA_REOPEN_MEETING and meeting.get(
+        "ReopenedBy"
+    ) == lma_sessions.who(identity)
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 #: The longest CallId accepted; LMA's own are a meeting name and a timestamp.
@@ -140,10 +162,19 @@ def reopen_meeting(identity: Mapping[str, Any], call_id: Any) -> Dict[str, Any]:
             "This meeting is still being captured. Continue it once it shows as Done in LMA.",
         )
     if pending_session(meeting):
+        if own_pending_session(meeting, identity):
+            LOGGER.info("reopenMeeting: answered the caller's own pending capture session again")
+            return {
+                "CallId": call_id,
+                "SessionNumber": lma_sessions.session_number(meeting.get("SessionNumber")),
+                "SessionOffsetSeconds": _number(meeting.get("SessionOffsetSeconds")),
+                "ReopenedAt": str(meeting.get("ReopenedAt")),
+            }
         return refusal(
             "MeetingInProgress",
-            "This meeting was reopened a few minutes ago and that capture has not started yet. "
-            "Try again once it has started and ended, or in a few minutes.",
+            "This meeting was reopened a few minutes ago, by a Virtual Participant rejoin or by "
+            "another user, and that capture has not started yet. Try again once it has ended, "
+            "or in 15 minutes.",
         )
 
     session = lma_sessions.next_session_number(
@@ -155,7 +186,13 @@ def reopen_meeting(identity: Mapping[str, Any], call_id: Any) -> Dict[str, Any]:
     reopened_at = lma_sessions.now_iso()
     try:
         lma_sessions.allow_session(
-            table, call_id, session, offset, lma_sessions.who(identity), now=reopened_at
+            table,
+            call_id,
+            session,
+            offset,
+            lma_sessions.who(identity),
+            via=lma_sessions.VIA_REOPEN_MEETING,
+            now=reopened_at,
         )
     except lma_sessions.SessionNotAllowed:
         return refusal(

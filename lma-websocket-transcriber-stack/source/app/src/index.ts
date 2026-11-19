@@ -470,7 +470,10 @@ const checkMeetingAccess = async (
         // START is taken as it comes, and no meeting can be continued.
         if (!warnedNoMeetingApi) {
             warnedNoMeetingApi = true;
-            server.log.warn('[START]: No GRAPHQL_ENDPOINT: meeting records are not read at START, and meetings cannot be continued.');
+            server.log.warn(
+                '[START]: No GRAPHQL_ENDPOINT: meeting records are not read at START, ' +
+                    'and meetings cannot be continued.'
+            );
         }
         return callMetaData.sessionNumber === undefined || callMetaData.sessionNumber === null
             ? { kind: 'append', offsetSeconds: 0 }
@@ -1216,9 +1219,12 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
                 recordingStore,
                 {
                     prefix: RECORDING_FILE_PREFIX,
-                    // Per session, so each session links its own first recording
-                    // (calleventdata/meeting-session.ts recordingBaseName).
-                    baseName: recordingBaseName(posixifyFilename(callMetaData.callId), socketData.callMetadata),
+                    // Per session, so each session links its own first
+                    // recording (calleventdata/meeting-session.ts).
+                    baseName: recordingBaseName(
+                        posixifyFilename(callMetaData.callId),
+                        socketData.callMetadata
+                    ),
                     wavPath,
                     rawPath,
                 },

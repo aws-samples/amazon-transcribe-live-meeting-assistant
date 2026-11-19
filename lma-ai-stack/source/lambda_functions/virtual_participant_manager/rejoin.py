@@ -211,7 +211,9 @@ def release(table: Any, vp_id: str, reason: str) -> None:
 def allow_session(call_id: str, session: int, offset: int, rejoined_by: str) -> None:
     """Record on the meeting the session its next START may open."""
     try:
-        lma_sessions.allow_session(_events_table(), call_id, session, offset, rejoined_by)
+        lma_sessions.allow_session(
+            _events_table(), call_id, session, offset, rejoined_by, via=lma_sessions.VIA_REJOIN
+        )
     except lma_sessions.SessionNotAllowed as error:
         raise RejoinRefused(
             "The meeting changed while it was being reopened; refresh the page and try again."
