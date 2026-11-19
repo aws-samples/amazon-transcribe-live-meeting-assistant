@@ -193,6 +193,19 @@ def test_update_of_a_missing_skill_or_to_a_taken_name_is_refused(table):
     assert result["Success"] is False and "Another skill" in result["Message"]
 
 
+def test_an_update_of_a_skill_deleted_meanwhile_reports_it_missing(table, monkeypatch):
+    call("createSkill", input=SKILL)
+    original = table.put_item
+
+    def deleted_first(Item, ConditionExpression):
+        table.items.pop((Item["AccountId"], Item["SkillId"]), None)
+        return original(Item=Item, ConditionExpression=ConditionExpression)
+
+    monkeypatch.setattr(table, "put_item", deleted_first)
+    result = call("updateSkill", skillId="launch-review", input=SKILL)
+    assert result["Success"] is False and result["Message"] == "Skill not found"
+
+
 def test_delete_removes_the_skill_and_reports_a_missing_one(table):
     call("createSkill", input=SKILL)
     assert call("deleteSkill", skillId="launch-review")["Success"] is True

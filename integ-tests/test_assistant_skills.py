@@ -15,9 +15,11 @@ Three behaviours, each from the outside:
   tools, the skills switch on, and the probe skill's ``inMeetingRequests`` set to
   false, a meeting-chat request is not offered the probe skill while the owner's
   own request still is, as the assistant's ``Skills: offered=`` log line records.
-- **The skill library round-trips.** ``client.skills.export_library()`` imported
-  back with ``client.skills.import_library()`` finds every skill unchanged and
-  writes none of them: their source and audit fields stay as they were.
+- **The skill library round-trips.** The probe skill's entry from
+  ``client.skills.export_library()``, imported back with
+  ``client.skills.import_library()``, is found unchanged and not written: its
+  source and audit fields stay as they were. Only the probe's entry is sent, so
+  no other skill on the stack can be rewritten by the test.
 
 Opt-in. It runs only with ``LMA_TEST_ASSISTANT_SKILLS=1``, because it changes
 deployment-wide settings while it runs (put back in teardown), takes several
@@ -157,10 +159,11 @@ def test_a_skill_library_round_trip_changes_no_skill(client, probe_skill):
     before = client.skills.export_library()
     assert before["kind"] == "lma-skill-library" and before["version"] == 1
     assert PROBE_NAME in {s["name"] for s in before["skills"]}
+    probe_only = {**before, "skills": [s for s in before["skills"] if s["name"] == PROBE_NAME]}
     audit = {s["SkillId"]: (s["UpdatedAt"], s["SourceFormat"]) for s in client.skills.list()}
-    result = client.skills.import_library(before)
+    result = client.skills.import_library(probe_only)
     assert result["Success"] is True, result
-    assert {s["Action"] for s in result["Skills"]} == {"unchanged"}, result
+    assert [(s["Name"], s["Action"]) for s in result["Skills"]] == [(PROBE_NAME, "unchanged")], result
     after = client.skills.export_library()
     assert after["skills"] == before["skills"]
     assert {s["SkillId"]: (s["UpdatedAt"], s["SourceFormat"]) for s in client.skills.list()} == audit

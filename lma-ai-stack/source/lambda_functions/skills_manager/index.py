@@ -316,6 +316,9 @@ def create_skill(event: Dict[str, Any]) -> Dict[str, Any]:
         skill = _skill_from_input((event.get("arguments") or {}).get("input"))
     except skill_formats.SkillError as exc:
         return _output(False, str(exc))
+    # The name and count checks read before they write, so two creates at the
+    # same moment can both pass them: the conditional put guards the id only.
+    # MAX_SKILLS is a size bound for the library export, not an exact quota.
     stored = _stored(projection=True)
     if any(s.get("Name") == skill.name for s in stored):
         return _output(False, f"A skill named {skill.name} already exists.")
@@ -347,7 +350,13 @@ def update_skill(event: Dict[str, Any]) -> Dict[str, Any]:
         return _output(False, str(exc), skill_id)
     if _name_taken(skill.name, other_than=skill_id):
         return _output(False, f"Another skill is named {skill.name}.", skill_id)
-    _put(skill_id, skill, _caller(event)["who"], existing)
+    try:
+        _put(skill_id, skill, _caller(event)["who"], existing)
+    except ClientError as exc:
+        # Deleted between the read above and this write.
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return _output(False, "Skill not found", skill_id)
+        raise
     LOGGER.info("Updated skill %s", skill_id)
     return _output(True, "Skill updated", skill_id, _get(skill_id))
 

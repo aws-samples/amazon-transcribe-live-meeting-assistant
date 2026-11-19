@@ -106,7 +106,7 @@
       "order": 11,
       "type": "object",
       "title": "Tool selection",
-      "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one. A server or skill not listed here behaves as before: it is used for the meeting owner's own requests, and for requests made in the meeting as In-meeting requests allows. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",
+      "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one. A server or skill not listed here follows the defaults: it is used for the meeting owner's own requests, and for requests made in the meeting as In-meeting requests (and, under Selected tools, its kind's switch) allows; for an MCP server that is how it behaved before this setting existed. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",
       "widget": "toolSelection",
       "properties": {
         "mcpServers": {
