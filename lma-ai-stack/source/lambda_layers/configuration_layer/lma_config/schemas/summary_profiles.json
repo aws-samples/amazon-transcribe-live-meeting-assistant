@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/summary_profiles",
+  "title": "Summary profiles",
+  "description": "Named sets of summary sections that a meeting can be summarised with instead of the Transcript Summary prompts. A meeting with no summary profile, or the profile default, is summarised with the Transcript Summary prompts exactly as before. Each profile's sections use the same form: a title, with a number in front that orders the sections, and a prompt that uses the same placeholders ({transcript}, {timed_transcript}, {agenda}, {context}, {checklist} and the others). Choose a meeting's profile when starting or scheduling a Virtual Participant, on the meeting page, or when regenerating its summary.",
+  "sectionLabel": "Summary Profiles",
+  "appliesText": "A saved change applies to summaries generated within about five minutes of the save; Regenerate on a meeting page uses it at once.",
+  "order": 1,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "keyLabel": "Profile name",
+  "listLabel": "Summary profiles",
+  "itemLabel": "Summary profile",
+  "type": "object",
+  "maxProperties": 50,
+  "propertyNames": {
+    "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+  },
+  "patternProperties": {
+    "^[a-z0-9][a-z0-9-]{0,62}$": {
+      "type": "object",
+      "title": "Summary profile",
+      "properties": {
+        "label": {
+          "order": 0,
+          "type": "string",
+          "title": "Label",
+          "description": "The name people see when they choose the profile.",
+          "maxLength": 80
+        },
+        "description": {
+          "order": 1,
+          "type": "string",
+          "title": "Description",
+          "description": "What kind of meeting the profile is for.",
+          "maxLength": 500,
+          "format": "textarea",
+          "rows": 2
+        },
+        "structuredActionItems": {
+          "order": 2,
+          "type": "boolean",
+          "title": "Structured action items",
+          "description": "Make one more model call that lists the meeting's action items, each with its owner and due date as said in the meeting, and show them as a table on the meeting page."
+        },
+        "prompts": {
+          "order": 3,
+          "type": "object",
+          "title": "Summary sections",
+          "description": "The sections of a summary written with this profile. Use {transcript} or {timed_transcript} where the transcript goes. A section that names {agenda}, {context}, {checklist}, {slides} or {chat} is written only for a meeting that has one.",
+          "numberedKeys": true,
+          "keyLabel": "Section title",
+          "listLabel": "Summary sections",
+          "itemLabel": "Summary section",
+          "disabledValue": "NONE",
+          "patternProperties": {
+            "^[0-9]+#.+$": {
+              "type": "string",
+              "title": "Prompt",
+              "description": "Use {transcript} or {timed_transcript} where the meeting transcript goes.",
+              "format": "textarea",
+              "rows": 8
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

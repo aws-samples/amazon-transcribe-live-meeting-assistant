@@ -34,7 +34,7 @@ ON_UPDATE_CALL = AI_STACK / "source" / "ui" / "src" / "graphql" / "queries" / "o
 GATEWAY_KEYS = {"Type", "Description", "Properties", "Items", "Required"}
 # The arguments schedule_meeting and start_meeting_now take on the API key
 # endpoint only (index.PREPARATION_ARGUMENTS).
-GATEWAY_WITHOUT = ("labels", "audience", "context", "checklist", "shareWith")
+GATEWAY_WITHOUT = ("labels", "audience", "context", "checklist", "shareWith", "summaryProfile")
 
 
 class _CfnLoader(yaml.SafeLoader):

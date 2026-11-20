@@ -107,7 +107,7 @@ class TestMCPToolsList(unittest.TestCase):
             "get_meeting_consent",
         ):
             self.assertIn(name, tool_names)
-        self.assertEqual(len(tool_names), 29)
+        self.assertEqual(len(tool_names), 31)
         for removed in ("get_live_transcript", "unshare_meeting"):
             self.assertNotIn(removed, tool_names)
 
@@ -766,7 +766,7 @@ class TestLegacyKeyPreparationArguments(unittest.TestCase):
         start_meeting_now.execute = MagicMock(return_value={"virtualParticipantId": "vp2"})
         base = {"meetingName": "W", "meetingPlatform": "ZOOM", "meetingId": "1"}
         for name in ("schedule_meeting", "start_meeting_now"):
-            for argument in ("shareWith", "labels", "context", "checklist", "audience"):
+            for argument in index.PREPARATION_ARGUMENTS:
                 with self.subTest(tool=name, argument=argument):
                     result = self._call(name, {**base, argument: "x"}, scope=None)
                     self.assertTrue(result["isError"])

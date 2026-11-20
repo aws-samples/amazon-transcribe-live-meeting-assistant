@@ -30,6 +30,7 @@ import { useCollection } from '@cloudscape-design/collection-hooks';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
 import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
+import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import useLocalStorage from '../common/local-storage';
@@ -207,6 +208,8 @@ const VirtualParticipantList = () => {
   // Read each time the form opens. Null until read, or when it cannot be:
   // every choice is then offered, and the VP still applies the deployment's rule.
   const consentDefaults = useMeetingConsentDefaults(showCreateModal);
+  // The summary profiles the form offers, read when it opens.
+  const summaryProfiles = useSummaryProfiles(showCreateModal);
   // A choice the selected platform cannot support, or the deployment would not
   // use, goes back to the default.
   useEffect(() => {
@@ -1039,6 +1042,7 @@ const VirtualParticipantList = () => {
               consentChoice={meetingConsentChoice}
               onConsentChoiceChange={setMeetingConsentChoice}
               consentDefaults={consentDefaults}
+              summaryProfiles={summaryProfiles}
               enableVideoRecording={enableVideoRecording}
               onEnableVideoRecordingChange={setEnableVideoRecording}
             />

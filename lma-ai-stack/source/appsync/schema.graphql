@@ -120,6 +120,20 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# At most 100 items, and at most 128 KB stored.
 	Checklist: [ChecklistItem]
 	ChecklistUpdatedAt: AWSDateTime
+	# The summary profile the meeting is summarised with: a name from the
+	# summary_profiles configuration section, or absent for the default (the
+	# Transcript Summary prompts). Set when a Virtual Participant creates the
+	# meeting and through updateCallSummaryProfile. The profile that wrote the
+	# stored summary is CallSummaryState's "profile", which a regeneration can
+	# choose differently. See docs/transcript-summarization.md#summary-profiles.
+	SummaryProfile: String
+	# The action items listed with the stored summary, when the profile that
+	# wrote it lists structured action items; [] when a later summary did not.
+	ActionItems: [ActionItem]
+	# The meeting platform a Virtual Participant joined (Zoom, Teams, Chime,
+	# Webex, Google Meet), written when it creates the meeting. Absent for
+	# other capture sources and for meetings created before it was recorded.
+	MeetingPlatform: String
 	# The meeting's consent record: the mode and rule it runs in, its status,
 	# whether it may be recorded and transcribed now, and the notices, replies,
 	# attestation and evidence behind that. Absent on a meeting whose consent was
@@ -277,6 +291,8 @@ input CreateCallInput {
 	MeetingContextUpdatedAt: AWSDateTime
 	Checklist: [ChecklistItemStateInput]
 	ChecklistUpdatedAt: AWSDateTime
+	SummaryProfile: String
+	MeetingPlatform: String
 	# How the meeting is captured and transcribed; see these fields on Call.
 	CaptureSource: String
 	TranscriptionEngine: String
@@ -404,6 +420,9 @@ type Mutation @aws_iam {
 	updateCallChecklistItem(input: UpdateCallChecklistItemInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallLabels(input: UpdateCallLabelsInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallAudience(input: UpdateCallAudienceInput!): Call @aws_cognito_user_pools @aws_iam
+	# Sets or clears the meeting's summary profile, on the updateCallAgenda access
+	# rule. A name the configuration does not hold is refused.
+	updateCallSummaryProfile(input: UpdateCallSummaryProfileInput!): Call @aws_cognito_user_pools @aws_iam
 	# The meeting consent record (Call.Consent). One Lambda resolver applies the
 	# access rule of each; see the Meeting consent section below and
 	# docs/meeting-consent.md.
@@ -548,6 +567,9 @@ input OverallSentimentInput {
 type Query @aws_cognito_user_pools
 @aws_iam {
 	getCall(CallId: ID!): Call
+	# The summary profiles a meeting can name, default first, for the forms that
+	# choose one. Names, labels and descriptions only; no prompts.
+	listSummaryProfiles: [SummaryProfileOption] @aws_cognito_user_pools @aws_iam
 	# What the enrollment portal shows its visitor about their own enrollment,
 	# including the terms text whose hash is stored with a consent.
 	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
@@ -699,6 +721,9 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemDefinition]
+	# The summary profile the meeting it creates is summarised with; absent for
+	# the default. Put on the meeting like the inputs above.
+	summaryProfile: String
 	# The people the meeting is to be shared with once the VP creates it, as
 	# comma-separated email addresses. Only the meetingSharedWith input sets it,
 	# and it does not share the Virtual Participant itself (that is SharedWith).
@@ -816,6 +841,9 @@ input CreateVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
 	# Optional: email addresses the meeting is shared with when the VP creates
 	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
 	# Participant itself is not shared.
@@ -886,6 +914,9 @@ input UpdateScheduledVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
 	# Replaces who the meeting is shared with when the VP creates it; sent
 	# empty, removes it.
 	meetingSharedWith: [String!]
@@ -925,6 +956,9 @@ input JoinAgainVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
@@ -1041,7 +1075,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -1374,10 +1408,15 @@ type ChatAttachment implements DynamoDbBase @aws_cognito_user_pools
 	PreviewUrl: String
 }
 
+# EXPORT is the meeting export alone, one JSON file linked for ten minutes
+# (docs/meeting-export.md); EVERYTHING also holds it as meeting-export.json.
+# (AppSync's schema parser refuses a comment between enum values, so this one
+# sits above the enum.)
 enum MeetingArchiveContents {
 	EVERYTHING
 	KEY_FRAMES
 	CHAT_ATTACHMENTS
+	EXPORT
 }
 
 enum MeetingArchiveStatus {
@@ -1446,6 +1485,8 @@ input AddCallSummaryTextInput {
 	# The end-of-meeting run's outcome, written with its text. Same shape as
 	# Call.CallSummaryState.
 	CallSummaryState: String
+	# The action items listed with the summary, when its profile lists them.
+	ActionItems: [ActionItemInput]
 }
 
 input UpdateCallAggregationInput {
@@ -1590,6 +1631,29 @@ input UpdateSpeakerIdentitiesInput {
 # with -- and each enforces it rather than relying on the client.
 # ----------------------------------------------------------------------------
 
+# One action item of a summary (Call.ActionItems). Owner is a name as said
+# in the meeting, never inferred; DueDate is YYYY-MM-DD when a date was said,
+# and DueText how it was said. StartTime is seconds on the transcript
+# timeline, and SegmentId the segment at that time.
+type ActionItem @aws_cognito_user_pools
+@aws_iam {
+	Text: String!
+	Owner: String
+	DueDate: String
+	DueText: String
+	StartTime: Float
+	SegmentId: String
+}
+
+input ActionItemInput {
+	Text: String!
+	Owner: String
+	DueDate: String
+	DueText: String
+	StartTime: Float
+	SegmentId: String
+}
+
 input UpdateCallSummaryTextInput {
 	CallId: ID!
 	# The summary text to store. Optional so the same mutation can record a state
@@ -1598,6 +1662,9 @@ input UpdateCallSummaryTextInput {
 	# one of CallSummaryText and CallSummaryState must be supplied.
 	CallSummaryText: String
 	CallSummaryState: String
+	# The action items listed with this summary text; only with
+	# CallSummaryText. An empty list clears them.
+	ActionItems: [ActionItemInput]
 }
 
 # ----------------------------------------------------------------------------
@@ -1770,6 +1837,20 @@ input UpdateCallChecklistItemInput {
 	StatusSource: String
 	# Backend roles only, as in UpdateCallMeetingContextInput.
 	UpdatedBy: String
+}
+
+input UpdateCallSummaryProfileInput {
+	CallId: ID!
+	# A profile name; null, empty or "default" clears it.
+	SummaryProfile: String
+}
+
+type SummaryProfileOption @aws_cognito_user_pools
+@aws_iam {
+	Name: String!
+	Label: String!
+	Description: String
+	StructuredActionItems: Boolean
 }
 
 input UpdateCallLabelsInput {
@@ -2071,6 +2152,9 @@ type DeriveCallAgendaOutput @aws_cognito_user_pools
 
 input RegenerateCallSummaryInput {
 	CallId: ID!
+	# The summary profile to write this summary with; omitted, the meeting's
+	# SummaryProfile. The meeting's SummaryProfile is not changed.
+	SummaryProfile: String
 }
 
 type RegenerateCallSummaryOutput @aws_cognito_user_pools

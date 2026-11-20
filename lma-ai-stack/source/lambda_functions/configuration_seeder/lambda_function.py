@@ -97,6 +97,7 @@ from lma_config import (  # from the configuration layer
     MEETING_CONSENT,
     NOVA_SONIC_CONFIG,
     RETENTION,
+    SUMMARY_PROFILES,
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
     ConfigurationStore,
@@ -178,6 +179,13 @@ MEETING_CONSENT_DEFAULTS_FILE = "MeetingConsent.json"
 # The Retention settings with no stack parameter. The two periods in days are
 # added to the same section from their parameters (apply_parameter_defaults).
 RETENTION_DEFAULTS_FILE = "Retention.json"
+#: The summary profiles a release ships, besides ``default`` (the Transcript
+#: Summary prompts): each with its label, description, whether it lists
+#: structured action items, and its prompts, given in the file or named by
+#: ``promptsFile`` (the healthcare profile is the healthcare prompt set). Part of
+#: the baseline, so every deployment can choose them per meeting whatever its
+#: Domain. See docs/transcript-summarization.md#summary-profiles.
+SUMMARY_PROFILES_DEFAULTS_FILE = "SummaryProfiles.json"
 
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
@@ -213,6 +221,24 @@ def numbered_prompts(prompts: Mapping[str, str]) -> Dict[str, str]:
     return {f"{index}#{title}": prompt for index, (title, prompt) in enumerate(prompts.items(), 1)}
 
 
+def shipped_summary_profiles() -> Dict[str, Any]:
+    """The shipped summary profiles, each with its prompts numbered as "N#Title"."""
+    shipped = json.loads(
+        (DEFAULTS_DIR / SUMMARY_PROFILES_DEFAULTS_FILE).read_text(encoding="utf-8")
+    )
+    profiles: Dict[str, Any] = {}
+    for name, entry in shipped.items():
+        profile = {
+            key: value for key, value in entry.items() if key not in ("prompts", "promptsFile")
+        }
+        prompts = entry.get("prompts")
+        if "promptsFile" in entry:
+            prompts = json.loads((DEFAULTS_DIR / entry["promptsFile"]).read_text(encoding="utf-8"))
+        profile["prompts"] = numbered_prompts(prompts or {})
+        profiles[name] = profile
+    return profiles
+
+
 def shipped_default_body(domain: str) -> Dict[str, Any]:
     """The baseline document for ``domain``, read from the shipped JSON.
 
@@ -237,6 +263,7 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
         ASR_ENGINE.name: asr_engine,
         MEETING_CONSENT.name: consent,
         RETENTION.name: retention,
+        SUMMARY_PROFILES.name: shipped_summary_profiles(),
     }
     # The settings that used to be stack parameters, at their shipped defaults
     # (lma_config/setting_defaults.json).

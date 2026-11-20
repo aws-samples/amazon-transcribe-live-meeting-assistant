@@ -11,7 +11,7 @@
  * The archive is a temporary copy, deleted a day after it was written. See
  * docs/web-ui-guide.md.
  *
- * `Contents` is EVERYTHING, KEY_FRAMES or CHAT_ATTACHMENTS.
+ * `Contents` is EVERYTHING, KEY_FRAMES, CHAT_ATTACHMENTS or EXPORT (the meeting export, one JSON file).
  */
 import { generateClient } from 'aws-amplify/api';
 

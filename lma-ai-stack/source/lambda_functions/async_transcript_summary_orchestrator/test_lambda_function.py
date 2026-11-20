@@ -109,6 +109,97 @@ def test_a_summary_is_written_to_the_stream(monkeypatch) -> None:
     ]
 
 
+def test_a_summary_profile_and_its_action_items_are_carried_on_the_event(monkeypatch) -> None:
+    items = [{"Text": "Send the plan", "Owner": None, "StartTime": 3.0, "SegmentId": "s1"}]
+    records = run_orchestrator(
+        monkeypatch,
+        FakeSummaryFunction(
+            {
+                "summary": '{"SUMMARY": "ok"}',
+                "summaryProfile": "discovery-session",
+                "actionItemsStatus": "generated",
+                "actionItems": [*items, "not an item"],
+                "unknown": "left out",
+            }
+        ),
+    )
+    assert records == [
+        {
+            "CallId": "call-1",
+            "EventType": "ADD_SUMMARY",
+            "ExpiresAfter": 1234567890,
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryProfileUsed": "discovery-session",
+            "ActionItemsStatus": "generated",
+            "ActionItems": [
+                {
+                    "Text": "Send the plan",
+                    "Owner": None,
+                    "DueDate": None,
+                    "DueText": None,
+                    "SegmentId": "s1",
+                    "StartTime": 3.0,
+                }
+            ],
+        }
+    ]
+
+
+def test_a_hooks_junk_action_items_are_dropped_and_the_summary_still_written(monkeypatch) -> None:
+    """A customer's summary function is not trusted with the ActionItemInput shape."""
+    records = run_orchestrator(
+        monkeypatch,
+        FakeSummaryFunction(
+            {
+                "summary": '{"SUMMARY": "ok"}',
+                "actionItems": [
+                    {"Text": "  Send the plan  ", "Owner": 7, "StartTime": "12", "Extra": "x"},
+                    {"Text": ""},
+                    {"Owner": "Priya"},
+                    {"Text": ["not", "text"]},
+                    "a string",
+                    {
+                        "Text": "Book a room",
+                        "StartTime": True,
+                        "SegmentId": "s9",
+                        "DueDate": "2026-12-01",
+                    },
+                ],
+            }
+        ),
+    )
+    (record,) = records
+    assert record["CallSummaryText"] == '{"SUMMARY": "ok"}'
+    assert record["ActionItems"] == [
+        {
+            "Text": "Send the plan",
+            "Owner": None,
+            "DueDate": None,
+            "DueText": None,
+            "SegmentId": None,
+            "StartTime": None,
+        },
+        {
+            "Text": "Book a room",
+            "Owner": None,
+            "DueDate": "2026-12-01",
+            "DueText": None,
+            "SegmentId": "s9",
+            "StartTime": None,
+        },
+    ]
+
+
+def test_a_hook_that_answers_action_items_of_the_wrong_type_still_stores_its_summary(
+    monkeypatch,
+) -> None:
+    records = run_orchestrator(
+        monkeypatch, FakeSummaryFunction({"summary": "text", "actionItems": {"Text": "a dict"}})
+    )
+    assert records[0]["CallSummaryText"] == "text"
+    assert "ActionItems" not in records[0]
+
+
 @pytest.mark.parametrize(
     "outcome",
     [

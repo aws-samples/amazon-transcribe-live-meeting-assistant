@@ -295,6 +295,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("lma-virtual-participant-stack/backend/src/bedrock-inference-catalog.json", "ai_stack"),
         # The VP unit tests read these.
         ("docs/virtual-participant.md", "vp"),
+        # The meeting archive's tests validate the export against its schema.
+        ("docs/schemas/meeting-export-v1.schema.json", "lambdas"),
         (
             "lma-ai-stack/source/ui/src/components/virtual-participant-layout/ManualActionAlerts.jsx",
             "vp",

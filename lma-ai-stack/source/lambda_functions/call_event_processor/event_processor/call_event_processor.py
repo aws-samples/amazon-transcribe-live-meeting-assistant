@@ -560,8 +560,28 @@ def summary_queued_state() -> str:
     )
 
 
-def summary_outcome_state(text: Any) -> str:
-    """The state written beside the end-of-meeting summary: done, empty, or failed."""
+def summary_outcome_state(text: Any, message: Optional[Mapping[str, Any]] = None) -> str:
+    """The state written beside the end-of-meeting summary: done, empty, or failed.
+
+    A summary written with a summary profile also records the profile
+    (``profile``, and ``requestedProfile`` when the one the meeting named could
+    not be used) and whether its structured action items were listed
+    (``actionItems``: generated or failed). A summary from the default profile
+    records none of them, as before.
+    """
+    state = json.loads(_summary_outcome_state(text))
+    extras = message or {}
+    if summary_was_produced(text):
+        if isinstance(extras.get("SummaryProfileUsed"), str):
+            state["profile"] = extras["SummaryProfileUsed"]
+        if isinstance(extras.get("SummaryProfileFallback"), str):
+            state["requestedProfile"] = extras["SummaryProfileFallback"]
+        if extras.get("ActionItemsStatus") in ("generated", "failed"):
+            state["actionItems"] = extras["ActionItemsStatus"]
+    return json.dumps(state)
+
+
+def _summary_outcome_state(text: Any) -> str:
     if summary_is_empty_outcome(text):
         return json.dumps(
             {
@@ -1639,6 +1659,11 @@ async def execute_add_call_summary_text_mutation(
     call_summary_text = ""
     if summary_was_produced(calltext):
         call_summary_text = calltext
+    # Action items belong to the summary they were listed with: none is stored
+    # without it.
+    inputs = {key: value for key, value in message.items() if key != "ActionItems"}
+    if call_summary_text and isinstance(message.get("ActionItems"), list):
+        inputs["ActionItems"] = message["ActionItems"]
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
@@ -1648,9 +1673,9 @@ async def execute_add_call_summary_text_mutation(
         DSLMutation(
             schema.Mutation.addCallSummaryText.args(
                 input={
-                    **message,
+                    **inputs,
                     "CallSummaryText": call_summary_text,
-                    "CallSummaryState": summary_outcome_state(calltext),
+                    "CallSummaryState": summary_outcome_state(calltext, message),
                 }
             ).select(*call_fields(schema))
         )

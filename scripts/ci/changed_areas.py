@@ -341,6 +341,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
         "lambdas",
     ),
     ("docs/virtual-participant.md", "vp"),
+    # The meeting archive's tests validate the meeting export against its
+    # published schema.
+    ("docs/schemas/**", "lambdas"),
     # ...and the VP stack's own template: the IntroMessage default
     # (chat-commands.test.ts) and the MicroVM terminate-hook timeout
     # (microvm-supervisor.test.ts).

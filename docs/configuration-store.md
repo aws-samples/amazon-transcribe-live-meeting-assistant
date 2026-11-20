@@ -232,6 +232,7 @@ Today's sections and their tiers:
 | Section | Tier | Why |
 |---|---|---|
 | `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
+| `summary_profiles` | `standard` | The same reader and the same reasons, for a meeting that names a [summary profile](transcript-summarization.md#summary-profiles) |
 | `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
 | `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
@@ -372,6 +373,7 @@ so a release cannot ship a default its own save would refuse.
 | Section | What the schema holds it to |
 |---|---|
 | `summary_prompt_templates` | Keys of the form `N#Title`, with `N` in the digits 0–9 and a title that is not empty, each a text prompt; `NONE` turns a shipped section off |
+| `summary_profiles` | At most 50 profiles, each named by 1 to 63 lower-case letters, digits and `-`; each with a `label` (at most 80 characters), a `description` (at most 500), `structuredActionItems` (true or false) and `prompts` in the form of `summary_prompt_templates`. `default` is never read from it |
 | `chat_buttons` | Keys of the form `N#Label`, each a text prompt |
 | `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
 | `asr_engine` | The three switches, each `true` or `false`, nothing else |

@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -25,6 +26,10 @@ from typing import Any, Dict, List
 import pytest
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer the deployed function carries (export.py reads it).
+for _path in (HERE, HERE.parents[1] / "lambda_layers" / "configuration_layer"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ["EVENT_SOURCING_TABLE"] = "calls"
 os.environ["RECORDINGS_BUCKET"] = "rec-bucket"
@@ -385,7 +390,11 @@ def test_consent_record_and_evidence_are_left_out_for_everyone_else(fakes, ident
     archive = archive_of(s3, answer)
     assert not [n for n in archive.namelist() if n.startswith("consent/")]
     assert "Consent" not in json.loads(archive.read("meeting.json"))
-    assert "Consent record and evidence" in archive.read("README.md").decode()
+    readme = archive.read("README.md").decode()
+    assert "Consent record and evidence" in readme
+    # The export in the archive carries the consent summary, and the README says so.
+    assert "meeting-export.json holds the consent summary" in readme
+    assert json.loads(archive.read("meeting-export.json"))["consent"]["evidence"]["exists"]
 
 
 def test_everything_holds_summary_transcript_recordings_frames_attachments_and_details(fakes):

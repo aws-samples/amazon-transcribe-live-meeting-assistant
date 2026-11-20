@@ -60,6 +60,16 @@ export default /* GraphQL */ `
         UpdatedAt
       }
       ChecklistUpdatedAt
+      SummaryProfile
+      ActionItems {
+        Text
+        Owner
+        DueDate
+        DueText
+        StartTime
+        SegmentId
+      }
+      MeetingPlatform
       Status
       UpdatedAt
       CreatedAt

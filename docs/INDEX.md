@@ -58,6 +58,7 @@ title: "LMA Documentation"
 ### MCP Server Integration
 
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
+- [Meeting Export](meeting-export.md) — One structured JSON record of a meeting (schema version 1): what it holds, `include`, participants and where their names come from, retention, large exports, and the Download menu, Everything archive and MCP routes to it
 - [Meeting Notifications](meeting-notifications.md) — Items shown live in a meeting's Notifications panel to the people who can see the meeting (guidance is one category): who sees them, dismissing and muting, buttons, retention, reading them over MCP, and publishing one from a backend function
 - [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, key scopes (read only, read and write), JSON-RPC 2.0 protocol support, and every hosted MCP tool: the transcript read page by page, meeting preparation, meeting guidance and notifications, the meeting record, consent, the meeting assistant and meeting management
 - [MCP Tools Reference](mcp-tools-reference.md) — Every tool the hosted MCP server offers, with an example request and answer for those an AI assistant uses to prepare, follow and close a meeting: scheduling with meeting preparation, transcript paging, agenda, context, checklist, labels, sharing, consent and ending

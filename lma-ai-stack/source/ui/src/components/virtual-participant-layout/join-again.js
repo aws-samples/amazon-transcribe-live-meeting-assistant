@@ -236,6 +236,7 @@ export const joinAgainInputFrom = (sourceVpId, vpInput, { useStoredZoomAccount =
     'audience',
     'meetingContext',
     'checklist',
+    'summaryProfile',
     'consentMode',
     'consentRule',
   ].forEach((field) => {

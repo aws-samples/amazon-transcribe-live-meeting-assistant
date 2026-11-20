@@ -31,6 +31,7 @@ from tools.access import (
 from tools.appsync_client import graphql
 from tools.get_virtual_participant_status import shared_with_entries
 from tools.recipients import recipients
+from tools.summary_profiles import DEFAULT_PROFILE, existing_profile
 from tools.url_helper import get_meeting_url
 from tools.virtual_participants import active_vps_of_meeting, end_vp
 
@@ -166,11 +167,24 @@ def change_sharing(caller: Caller, meeting_id: Any, users: Any, share: bool) -> 
     return {"meetingId": call_id, "sharedWith": wanted}
 
 
-def regenerate_summary(caller: Caller, meeting_id: str) -> Dict[str, Any]:
-    """Start a new summary of the meeting; it replaces the stored one when it finishes."""
+def regenerate_summary(
+    caller: Caller, meeting_id: str, summary_profile: Any = None
+) -> Dict[str, Any]:
+    """Start a new summary of the meeting; it replaces the stored one when it finishes.
+
+    ``summary_profile`` writes this summary with that profile; the meeting's own
+    SummaryProfile is not changed. Checked against the configuration here, as the
+    regenerator only checks a name's form.
+    """
+    profile = None
+    if summary_profile is not None:
+        profile = existing_profile(summary_profile) or DEFAULT_PROFILE
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or str(meeting_id).strip()
-    event = {"arguments": {"input": {"CallId": call_id}}, "identity": resolver_identity(caller)}
+    inputs: Dict[str, Any] = {"CallId": call_id}
+    if profile:
+        inputs["SummaryProfile"] = profile
+    event = {"arguments": {"input": inputs}, "identity": resolver_identity(caller)}
     outcome = invoke_function(os.environ.get("SUMMARY_REGENERATOR_FUNCTION", ""), event, 60)
     if not isinstance(outcome, dict) or not outcome.get("Success"):
         message = outcome.get("Message") if isinstance(outcome, dict) else None
@@ -178,6 +192,7 @@ def regenerate_summary(caller: Caller, meeting_id: str) -> Dict[str, Any]:
     return {
         "meetingId": call_id,
         "started": True,
+        "summaryProfile": profile or meeting.get("SummaryProfile") or DEFAULT_PROFILE,
         "message": "A new summary is being generated. It replaces the current one when it is "
         "done, usually within a few minutes; read it with get_meeting_summary.",
     }

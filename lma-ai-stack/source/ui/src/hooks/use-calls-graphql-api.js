@@ -29,6 +29,7 @@ import updateCallChecklist from '../graphql/queries/updateCallChecklist';
 import updateCallChecklistItem from '../graphql/queries/updateCallChecklistItem';
 import updateCallLabels from '../graphql/queries/updateCallLabels';
 import updateCallAudience from '../graphql/queries/updateCallAudience';
+import updateCallSummaryProfile from '../graphql/queries/updateCallSummaryProfile';
 import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
@@ -50,6 +51,7 @@ export const PREPARATION_MUTATIONS = {
   checklistItem: ['updateCallChecklistItem', updateCallChecklistItem],
   labels: ['updateCallLabels', updateCallLabels],
   audience: ['updateCallAudience', updateCallAudience],
+  summaryProfile: ['updateCallSummaryProfile', updateCallSummaryProfile],
 };
 
 /** The server's own words for a refused write, which name the limit that was broken. */
@@ -825,12 +827,14 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * Nothing is patched into state here: the run outlives the request, and the
    * new summary arrives through onUpdateCall like an end-of-meeting one does.
    * Returns the backend's own answer so the caller can say what happened.
+   * `summaryProfile` writes this summary with that profile; omitted, the
+   * meeting's own.
    */
-  const sendRegenerateCallSummary = useCallback(async (callId) => {
+  const sendRegenerateCallSummary = useCallback(async (callId, summaryProfile = undefined) => {
     try {
       const response = await client.graphql({
         query: regenerateCallSummary,
-        variables: { input: { CallId: callId } },
+        variables: { input: { CallId: callId, ...(summaryProfile ? { SummaryProfile: summaryProfile } : {}) } },
       });
       return response?.data?.regenerateCallSummary ?? { Success: false, Message: 'no answer from the server' };
     } catch (error) {

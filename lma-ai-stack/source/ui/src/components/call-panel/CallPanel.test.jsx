@@ -1332,7 +1332,15 @@ describe('the Download menu', () => {
     });
     fireEvent.click(screen.getByRole('menuitem', { name }));
   };
-  const GROUPS = ['Summary', 'Transcript', 'Recordings', 'Screen share', 'Chat attachments', 'Everything (.zip)'];
+  const GROUPS = [
+    'Summary',
+    'Transcript',
+    'Recordings',
+    'Screen share',
+    'Chat attachments',
+    'Meeting export (.json)',
+    'Everything (.zip)',
+  ];
   const FORMATS = ['Word (.docx)', 'PDF (.pdf)', 'Web page (.html)', 'Markdown (.md)', 'Plain text (.txt)'];
 
   it('offers each kind of file in its own group', () => {

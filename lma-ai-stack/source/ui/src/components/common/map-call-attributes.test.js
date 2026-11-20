@@ -66,6 +66,35 @@ describe('adoptMeetingCopy', () => {
     expect(next.transcriptionEngine).toBe('transcribe');
   });
 
+  it('keeps the summary profile and action items from a copy that did not select them', () => {
+    const shown = { ...onScreen, summaryProfile: 'discovery-session', actionItems: [{ Text: 'Send it' }] };
+    const fromList = { callId: 'c1', summaryProfile: undefined, actionItems: undefined };
+    expect(adoptMeetingCopy(shown, fromList)).toMatchObject({
+      summaryProfile: 'discovery-session',
+      actionItems: [{ Text: 'Send it' }],
+    });
+    // A write that cleared the profile selects it as null, which is kept.
+    expect(adoptMeetingCopy(shown, { callId: 'c1', summaryProfile: null }).summaryProfile).toBeNull();
+  });
+
+  it('maps the summary profile, the action items and the platform', () => {
+    const [mapped] = mapCallsAttributes([
+      {
+        CallId: 'c1',
+        CreatedAt: '2026-11-08T15:00:00Z',
+        UpdatedAt: '2026-11-08T15:30:00Z',
+        SummaryProfile: 'discovery-session',
+        ActionItems: [{ Text: 'a' }],
+        MeetingPlatform: 'Zoom',
+      },
+    ]);
+    expect(mapped).toMatchObject({
+      summaryProfile: 'discovery-session',
+      actionItems: [{ Text: 'a' }],
+      meetingPlatform: 'Zoom',
+    });
+  });
+
   it('takes the agenda from a copy that carries one, including a cleared agenda', () => {
     const cleared = { callId: 'c1', agenda: '', agendaSource: 'ui', agendaUpdatedAt: '2026-11-08T15:30:00Z' };
     expect(adoptMeetingCopy(onScreen, cleared)).toMatchObject({ agenda: '', agendaSource: 'ui' });

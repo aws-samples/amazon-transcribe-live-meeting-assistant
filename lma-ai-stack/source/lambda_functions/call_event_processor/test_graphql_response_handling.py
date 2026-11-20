@@ -1429,6 +1429,82 @@ def test_a_stored_summary_tells_the_transcript_deletion(
     ]
 
 
+def test_a_profiles_summary_is_stored_with_its_action_items_and_profile(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryProfileUsed": "discovery-session",
+            "ActionItemsStatus": "generated",
+            "ActionItems": [{"Text": "Send the plan", "Owner": "Priya", "StartTime": 3.5}],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert print_ast(sent["ActionItems"]) == (
+        '[{Text: "Send the plan", Owner: "Priya", StartTime: 3.5}]'
+    )
+    state = json.loads(sent["CallSummaryState"])
+    assert state["profile"] == "discovery-session"
+    assert state["actionItems"] == "generated"
+    assert "SummaryProfileUsed" not in sent
+
+
+def test_a_default_summary_records_no_profile(schema, emitted, deletion_function, monkeypatch):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": '{"SUMMARY": "ok"}'},
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    state = json.loads(sent["CallSummaryState"])
+    assert set(state) == {"source", "status", "trigger", "updatedAt"}
+    assert "ActionItems" not in sent
+
+
+def test_a_summary_without_action_items_clears_the_ones_an_earlier_summary_left(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "ActionItems": [],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert print_ast(sent["ActionItems"]) == "[]"
+
+
+def test_action_items_are_not_stored_without_their_summary(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": "An error occurred.",
+            "ActionItems": [{"Text": "x"}],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert "ActionItems" not in sent
+    assert "profile" not in json.loads(sent["CallSummaryState"])
+
+
 def test_a_summary_is_stored_even_if_the_transcript_deletion_cannot_be_told(
     schema, emitted, monkeypatch
 ):

@@ -6,7 +6,7 @@
 
 /**
  * The meeting preparation a Virtual Participant carries onto the meeting it
- * records: labels, audience, meeting context and checklist.
+ * records: labels, audience, meeting context, checklist and summary profile.
  *
  * Given when the VP is started or scheduled and stored on its own row, checked
  * there by the meeting preparation resolver. The VP reads them from that row
@@ -34,6 +34,8 @@ export interface VpPreparation {
   audience: 'internal' | 'external' | null;
   meetingContext: string;
   checklist: ChecklistDefinition[];
+  /** The summary profile the meeting is summarised with; null for the default. */
+  summaryProfile: string | null;
   /** Who the meeting is shared with when it is created (the row's meetingSharedWith). */
   meetingSharedWith: string[];
 }
@@ -44,6 +46,24 @@ export const MAX_CONTEXT_CHARS = 20000;
 export const MAX_CHECKLIST_ITEMS = 100;
 
 const isString = (value: unknown): value is string => typeof value === 'string';
+
+/** A summary profile name, as the meeting preparation resolver checked it. */
+const SUMMARY_PROFILE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** The meeting platforms by the names the meeting record gives them (Call.MeetingPlatform). */
+const PLATFORM_NAMES: Record<string, string> = {
+  CHIME: 'Chime',
+  ZOOM: 'Zoom',
+  TEAMS: 'Teams',
+  WEBEX: 'Webex',
+  GOOGLE_MEET: 'Google Meet',
+};
+
+/** The meeting platform as the meeting record names it, or null when it is not one LMA joins. */
+export function meetingPlatformName(platform: unknown): string | null {
+  if (!isString(platform)) return null;
+  return PLATFORM_NAMES[platform.trim().toUpperCase().replace(/[\s-]+/g, '_')] ?? null;
+}
 
 /** The most people a meeting is shared with at creation, as the resolver allows. */
 export const MAX_MEETING_SHARED_WITH = 50;
@@ -71,7 +91,14 @@ function sharedWithEntries(value: unknown): string[] {
  */
 export function preparationFromVpRow(
   row:
-    | { labels?: unknown; audience?: unknown; meetingContext?: unknown; checklist?: unknown; meetingSharedWith?: unknown }
+    | {
+        labels?: unknown;
+        audience?: unknown;
+        meetingContext?: unknown;
+        checklist?: unknown;
+        summaryProfile?: unknown;
+        meetingSharedWith?: unknown;
+      }
     | null
     | undefined,
 ): VpPreparation | null {
@@ -91,10 +118,28 @@ export function preparationFromVpRow(
       return definition;
     });
   const meetingSharedWith = sharedWithEntries(row?.meetingSharedWith);
-  if (!labels.length && !audience && !meetingContext.trim() && !checklist.length && !meetingSharedWith.length) {
+  const summaryProfile =
+    isString(row?.summaryProfile) && row.summaryProfile !== 'default' && SUMMARY_PROFILE_NAME.test(row.summaryProfile)
+      ? row.summaryProfile
+      : null;
+  if (
+    !labels.length &&
+    !audience &&
+    !meetingContext.trim() &&
+    !checklist.length &&
+    !summaryProfile &&
+    !meetingSharedWith.length
+  ) {
     return null;
   }
-  return { labels, audience, meetingContext: meetingContext.trim() ? meetingContext : '', checklist, meetingSharedWith };
+  return {
+    labels,
+    audience,
+    meetingContext: meetingContext.trim() ? meetingContext : '',
+    checklist,
+    summaryProfile,
+    meetingSharedWith,
+  };
 }
 
 /**
@@ -130,6 +175,7 @@ export function preparationStartFields(
     }));
     fields.ChecklistUpdatedAt = at;
   }
+  if (preparation.summaryProfile) fields.SummaryProfile = preparation.summaryProfile;
   // Only a VP started or scheduled with meetingSharedWith creates its meeting
   // shared; sharing the VP itself (its SharedWith) does not share the meeting.
   if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');

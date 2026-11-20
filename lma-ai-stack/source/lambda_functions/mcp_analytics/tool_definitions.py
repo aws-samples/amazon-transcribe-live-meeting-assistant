@@ -100,6 +100,13 @@ AGENDA = {
     "type": "string",
     "description": "The agenda, one item per line (at most 10000 characters)",
 }
+SUMMARY_PROFILE = {
+    "type": "string",
+    "description": (
+        "The summary profile the meeting is summarised with, for example discovery-session "
+        "(list_summary_profiles lists them); default, or an empty string, for the default"
+    ),
+}
 
 MEETING_TOOLS: List[Dict[str, Any]] = [
     {
@@ -288,12 +295,19 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "update_meeting_metadata",
         "description": (
-            "Replace a meeting's labels, set its audience, or both. The labels given replace "
-            "all of the meeting's labels; pass {} to clear them. Requires a read-write API key."
+            "Replace a meeting's labels, set its audience, set its summary profile, or any of "
+            "them. The labels given replace all of the meeting's labels; pass {} to clear them. "
+            "The summary profile applies to the summary written when the meeting ends and to "
+            "later regenerations. Requires a read-write API key."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"meetingId": MEETING_ID, "labels": LABELS, "audience": AUDIENCE},
+            "properties": {
+                "meetingId": MEETING_ID,
+                "labels": LABELS,
+                "audience": AUDIENCE,
+                "summaryProfile": SUMMARY_PROFILE,
+            },
             "required": ["meetingId"],
         },
         "annotations": DESTRUCTIVE_IDEMPOTENT,
@@ -318,8 +332,8 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "name": "update_scheduled_meeting",
         "description": (
             "Change a Virtual Participant that is waiting for its scheduled launch: its "
-            "scheduled time, meeting name, agenda, labels, audience, context, checklist, or "
-            "who the meeting is shared with once it starts. Each argument given replaces "
+            "scheduled time, meeting name, agenda, labels, audience, context, checklist, "
+            "summary profile, or who the meeting is shared with once it starts. Each argument given replaces "
             "that setting; an empty value removes it. Refused within 5 minutes of the start, "
             "and a new time must be at least 5 minutes away. Only its owner or an Admin may "
             "change it. Requires a read-write API key."
@@ -335,6 +349,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "audience": AUDIENCE,
                 "context": CONTEXT,
                 "checklist": CHECKLIST,
+                "summaryProfile": SUMMARY_PROFILE,
                 "shareWith": SHARE_WITH,
             },
             "required": ["virtualParticipantId"],
@@ -461,6 +476,51 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "annotations": READ_ONLY,
     },
     {
+        "name": "get_meeting_export",
+        "description": (
+            "Get one structured record of a meeting (the LMA meeting export, schemaVersion 1, "
+            "published as docs/schemas/meeting-export-v1.schema.json): the meeting's details "
+            "and labels, its participants and where each name came from (a name is null when "
+            "nobody gave or confirmed one), consent, agenda, context and checklist, the "
+            "transcript with speech, chat and text read from the shared screen, links shared "
+            "in the chat, key frames as alt text, the summary by section, structured action "
+            "items with owners and due dates, and the guidance given. Once the transcript was "
+            "deleted under the Retention settings it is left out and meeting.transcriptRetained "
+            "is false. A large export is answered with {exportUrl, expiresAt, sizeBytes} instead: a link "
+            "that works for anyone holding it for ten minutes; do not share it. The answer "
+            "contains SENSITIVE meeting content."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "transcript",
+                            "chat",
+                            "summary",
+                            "checklist",
+                            "consent",
+                            "actionItems",
+                            "keyframes",
+                            "guidance",
+                        ],
+                    },
+                    "description": (
+                        "Parts to include (default all): transcript, chat, summary, checklist, "
+                        "consent, actionItems, keyframes, guidance. The meeting, its agenda and "
+                        "its context are always included"
+                    ),
+                },
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
         "name": "share_meeting",
         "description": (
             "Change who a meeting is shared with (by email address): action add (the "
@@ -492,14 +552,27 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Generate the meeting's summary again from its transcript. The new summary "
             "REPLACES the current one, including any edits made to it, when it finishes "
-            "(usually within a few minutes). Requires a read-write API key."
+            "(usually within a few minutes). Pass summaryProfile to write this summary with "
+            "another profile; the meeting's own summary profile is not changed. Requires a "
+            "read-write API key."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"meetingId": MEETING_ID},
+            "properties": {"meetingId": MEETING_ID, "summaryProfile": SUMMARY_PROFILE},
             "required": ["meetingId"],
         },
         "annotations": DESTRUCTIVE,
+    },
+    {
+        "name": "list_summary_profiles",
+        "description": (
+            "List the summary profiles a meeting can be summarised with: each one's name (the "
+            "value summaryProfile takes), label, description and whether it lists structured "
+            "action items with owners and due dates. default is the deployment's standard "
+            "summary."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": READ_ONLY,
     },
     {
         "name": "get_meeting_cost",

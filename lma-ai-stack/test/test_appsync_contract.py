@@ -234,6 +234,10 @@ ADMIN_ONLY_FIELDS = [
 # * getMeetingConsentDefaults -- the Create Virtual Participant form reads the
 #   deployment's consent mode, rule and per-meeting-choice switch to show which
 #   consent choices apply. It returns those three values only.
+# * listSummaryProfiles -- the forms that choose a meeting's summary profile list
+#   the profiles a meeting may name: each one's name, label, description and
+#   whether it lists structured action items. Never its prompts.
+#   meeting_preparation_resolver/test_index.py pins the shape.
 UNRESTRICTED_READS = [
     ("Query", "getChatButtonConfig"),
     ("Query", "getAsrConfig"),
@@ -243,6 +247,7 @@ UNRESTRICTED_READS = [
     ("Query", "listSkills"),
     ("Query", "getSkill"),
     ("Query", "exportSkill"),
+    ("Query", "listSummaryProfiles"),
 ]
 
 # Everything else the schema declares. Listed so that the three lists together
@@ -296,6 +301,7 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallChecklistItem"),
     ("Mutation", "updateCallLabels"),
     ("Mutation", "updateCallAudience"),
+    ("Mutation", "updateCallSummaryProfile"),
     # The consent record of one meeting: one Lambda resolver applies each
     # operation's rule against the meeting's owner and share list, and the
     # evidence mutation accepts backend roles only.

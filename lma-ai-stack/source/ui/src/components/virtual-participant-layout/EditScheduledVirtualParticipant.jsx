@@ -10,6 +10,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { Alert, Box, Button, Checkbox, Form, FormField, Modal, SpaceBetween } from '@cloudscape-design/components';
 
 import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
+import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import { meetingConsentChoiceAvailable } from './meeting-consent-options';
@@ -40,6 +41,7 @@ export const updateScheduledVirtualParticipantMutation = /* GraphQL */ `
       }
       audience
       meetingContext
+      summaryProfile
       checklist {
         ItemId
         Text
@@ -81,6 +83,8 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
   }, [visible]);
 
   const consentDefaults = useMeetingConsentDefaults(visible);
+  // The summary profiles the form offers, read when it opens.
+  const summaryProfiles = useSummaryProfiles(visible);
   // A consent choice the platform cannot support, or the deployment would not
   // use, goes back to the default.
   useEffect(() => {
@@ -184,6 +188,7 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
             consentChoice={state.consentChoice}
             onConsentChoiceChange={(value) => setState((prev) => ({ ...prev, consentChoice: value }))}
             consentDefaults={consentDefaults}
+            summaryProfiles={summaryProfiles}
             enableVideoRecording={state.enableVideoRecording}
             onEnableVideoRecordingChange={(checked) => setState((prev) => ({ ...prev, enableVideoRecording: checked }))}
           />

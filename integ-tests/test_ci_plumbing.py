@@ -1472,6 +1472,14 @@ def test_the_skills_log_line_reader_reads_the_assistants_line() -> None:
     assert assistant_profile_probe.OFFERED_LINE.search("MCP servers: offered=a not offered=none")
 
 
+def test_the_meeting_export_test_runs_by_default() -> None:
+    """It writes and cleans up meetings of its own, so it needs no opt-in variable."""
+    import test_meeting_export
+
+    assert not getattr(test_meeting_export, "pytestmark", None)
+    assert test_meeting_export.SUMMARY_TIMEOUT_S >= 10 * 60
+
+
 def test_the_meeting_archive_test_is_an_opt_in_optional_feature() -> None:
     """It needs LMA_TEST_MEETING_ARCHIVE=1, and writes a synthetic meeting of its own."""
     import test_meeting_archive

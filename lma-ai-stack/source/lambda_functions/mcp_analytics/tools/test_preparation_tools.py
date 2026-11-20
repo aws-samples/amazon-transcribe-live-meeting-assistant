@@ -280,8 +280,34 @@ def test_labels_and_audience_are_written_with_their_own_mutations(meeting, appsy
         "meetingId": "m1",
         "labels": {"team": "web"},
         "audience": "internal",
+        "summaryProfile": "default",
         "updatedAt": "2026-11-20T10:00:00Z",
     }
+
+
+def test_the_summary_profile_is_written_with_its_own_mutation(meeting, appsync):
+    appsync.answers["updateCallSummaryProfile"] = {
+        "updateCallSummaryProfile": {"SummaryProfile": "discovery-session"}
+    }
+    answer = preparation.update_metadata(caller(SHARED), "m1", summary_profile="discovery-session")
+    ((query, variables),) = appsync.calls
+    assert "mutation UpdateCallSummaryProfile" in query
+    assert variables["input"] == {"CallId": "m1", "SummaryProfile": "discovery-session"}
+    assert answer["summaryProfile"] == "discovery-session"
+
+
+@pytest.mark.parametrize("cleared", ["", "default"])
+def test_the_default_summary_profile_clears_it(meeting, appsync, cleared):
+    appsync.answers["updateCallSummaryProfile"] = {"updateCallSummaryProfile": {}}
+    answer = preparation.update_metadata(caller(), "m1", summary_profile=cleared)
+    assert appsync.calls[0][1]["input"] == {"CallId": "m1", "SummaryProfile": None}
+    assert answer["summaryProfile"] == "default"
+
+
+def test_a_malformed_summary_profile_is_refused_before_anything_is_written(meeting, appsync):
+    with pytest.raises(ValueError, match="summaryProfile"):
+        preparation.update_metadata(caller(), "m1", labels={}, summary_profile="Not A Name")
+    assert appsync.calls == []
 
 
 def test_only_the_input_given_is_written_and_empty_values_clear(meeting, appsync):
@@ -295,7 +321,7 @@ def test_only_the_input_given_is_written_and_empty_values_clear(meeting, appsync
 @pytest.mark.parametrize(
     "kwargs,message",
     [
-        ({}, "Give labels, audience or both"),
+        ({}, "Give labels, audience, summaryProfile or a combination"),
         ({"labels": [{"Key": "a", "Value": "b"}]}, "object"),
         ({"labels": {"Bad Key": "x"}}, "label Key"),
         ({"labels": {"a": 5}}, "must have a Value"),
