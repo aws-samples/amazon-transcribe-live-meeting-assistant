@@ -499,6 +499,10 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
                 },
+                "guidance": {
+                    "type": "boolean",
+                    "description": "Optional: live guidance on (true) or off (false) for the meeting, which marks its checklist items covered and offers guidance to the people running it, each run a model call billed to the meeting. Omitted, the deployment's setting decides (off unless an administrator changed it)",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
@@ -623,6 +627,10 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
                 },
+                "guidance": {
+                    "type": "boolean",
+                    "description": "Optional: live guidance on (true) or off (false) for the meeting, which marks its checklist items covered and offers guidance to the people running it, each run a model call billed to the meeting. Omitted, the deployment's setting decides (off unless an administrator changed it)",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
@@ -732,6 +740,7 @@ PREPARATION_ARGUMENTS = (
     "checklist",
     "shareWith",
     "summaryProfile",
+    "guidance",
 )
 
 
@@ -757,6 +766,7 @@ def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Di
         a.get("checklist"),
         a.get("shareWith"),
         a.get("summaryProfile"),
+        guidance=a.get("guidance"),
     )
 
 
@@ -835,6 +845,9 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         title=a.get("title"),
         level=a.get("level"),
     ),
+    "request_meeting_digest": lambda caller, a: guidance.request_digest(
+        _meeting(caller), a.get("meeting_id")
+    ),
     "list_meeting_guidance": lambda caller, a: guidance.list_items(
         _meeting(caller), a.get("meeting_id"), limit=a.get("limit")
     ),
@@ -877,6 +890,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         labels=a.get("labels"),
         audience=a.get("audience"),
         summary_profile=a.get("summaryProfile"),
+        guidance=a.get("guidance"),
     ),
     "get_meeting_consent": lambda caller, a: consent.execute(_meeting(caller), a.get("meetingId")),
     "update_scheduled_meeting": lambda caller, a: scheduled_meeting.execute(
@@ -891,6 +905,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         checklist=a.get("checklist"),
         share_with=a.get("shareWith"),
         summary_profile=a.get("summaryProfile"),
+        guidance=a.get("guidance"),
     ),
     "end_meeting": lambda caller, a: meeting_actions.end_meeting(
         _meeting(caller), a.get("meetingId"), reason=a.get("reason")

@@ -465,6 +465,14 @@ def update_audience(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     )
 
 
+def update_guidance(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Live guidance on or off for the meeting (docs/live-guidance.md)."""
+    enabled = data.get("GuidanceEnabled")
+    if not isinstance(enabled, bool):
+        raise BadRequestError("GuidanceEnabled must be true or false")
+    return write_once(caller, _call_id(data), {"GuidanceEnabled": enabled})
+
+
 def change_source(caller: Mapping[str, Any], data: Mapping[str, Any]) -> str:
     """Who a checklist change is from: a signed-in user's is always ``user``; a
     backend role names it (``user`` when it acts for a person)."""
@@ -557,6 +565,7 @@ MUTATIONS = {
     "updateCallLabels": update_labels,
     "updateCallAudience": update_audience,
     "updateCallSummaryProfile": update_summary_profile,
+    "updateCallGuidance": update_guidance,
 }
 
 

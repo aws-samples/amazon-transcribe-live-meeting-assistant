@@ -80,13 +80,14 @@ client connects, and the API key scopes, are in
 | `update_meeting_metadata` | yes | |
 | `share_meeting` | yes | owner and Admin |
 | `push_meeting_guidance` | yes | |
+| `request_meeting_digest` | yes | |
 | `ask_meeting_assistant` | yes | |
 | `regenerate_meeting_summary` | yes | |
 | `end_meeting` | yes | the Virtual Participant's owner and Admin |
 | `end_virtual_participant` | yes | the Virtual Participant's owner and Admin |
 | `delete_meeting` | yes | owner and Admin |
 
-That is 31 tools. The examples below show the `arguments` of a `tools/call`
+That is 32 tools. The examples below show the `arguments` of a `tools/call`
 request and the JSON of the answer, shortened where marked.
 
 ## Before the meeting
@@ -101,8 +102,9 @@ optional and checked with the limits in
 `context` (Markdown), `checklist` (items of `itemId`, `text`, `kind`, and
 optionally `priority` and `source`; each starts `open`), `summaryProfile` (the
 [summary profile](transcript-summarization.md#summary-profiles) the meeting is
-summarized with, from `list_summary_profiles`) and `shareWith` (email
-addresses). The Virtual Participant stores them and puts them on the meeting
+summarized with, from `list_summary_profiles`), `guidance` (true or false:
+[live guidance](live-guidance.md) for the meeting; omitted, the deployment's
+setting decides) and `shareWith` (email addresses). The Virtual Participant stores them and puts them on the meeting
 when it creates it; the meeting is then shared with the `shareWith` addresses.
 The Virtual Participant itself is not shared. Calling it again for a meeting
 already scheduled updates that Virtual Participant
@@ -156,8 +158,8 @@ joined; its answer then carries the LMA `meetingId` the meeting tools take.
 
 Changes a Virtual Participant that waits for its scheduled launch: any of
 `scheduledTime`, `meetingName`, `agenda`, `labels`, `audience`, `context`,
-`checklist`, `summaryProfile` and `shareWith`. Each one given replaces that setting, and an empty
-value removes it. It is refused within 5 minutes of the start ("starts in less
+`checklist`, `summaryProfile`, `guidance` and `shareWith`. Each one given replaces that
+setting, and an empty value removes it. It is refused within 5 minutes of the start ("starts in less
 than 5 minutes, so it can no longer be changed"), and a new time must be at least
 5 minutes away. Once the Virtual Participant has started, change the meeting
 with the meeting tools instead.
@@ -305,9 +307,11 @@ the meeting assistant does not change it afterwards.
 ### update_meeting_metadata
 
 Replaces the meeting's labels (`{}` clears them), sets its audience (`""`
-clears it), sets its `summaryProfile` (`default` or `""` for the default), or
-any of them. Answers `{labels, audience, summaryProfile}`. A summary profile
-the configuration does not hold is refused, with the names it does.
+clears it), sets its `summaryProfile` (`default` or `""` for the default),
+turns its [live guidance](live-guidance.md) on or off (`guidance`, true or
+false), or any of them. Answers `{labels, audience, summaryProfile, guidance}`.
+A summary profile the configuration does not hold is refused, with the names it
+does.
 
 ```json
 {"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session"}
@@ -315,6 +319,22 @@ the configuration does not hold is refused, with the names it does.
 
 ```json
 {"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session", "updatedAt": "2026-12-01T15:31:00Z"}
+```
+
+### request_meeting_digest
+
+Makes a short digest of a meeting so far (a summary, what is covered and still
+open, the decisions and the actions) and publishes it to the meeting's
+notifications as guidance of type `meeting_digest`, for the people who can see
+the meeting. Answers with its text. One model call, billed to the meeting; see
+[Live Guidance](live-guidance.md#the-digest).
+
+```json
+{"meeting_id": "e3b9…"}
+```
+
+```json
+{"meetingId": "e3b9…", "digest": "The renewal price and term are agreed. …\n\n**Still open**\n- Who signs off on the budget", "guidanceId": "6f0c…", "delivered": "Shown on the meeting page to its owner and the people it is shared with."}
 ```
 
 ### list_summary_profiles

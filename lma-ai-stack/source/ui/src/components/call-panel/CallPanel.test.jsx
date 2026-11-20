@@ -1851,6 +1851,22 @@ describe('the meeting preparation', () => {
     );
   });
 
+  it('sends live guidance on as an updateCallGuidance change while the meeting is in progress', async () => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send, sendRequestMeetingDigest: vi.fn() };
+    renderPage({ item: { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS }, url: '/calls/m?tab=summary' });
+    fireEvent.click(within(screen.getAllByTestId('live-guidance-panel')[0]).getByRole('checkbox'));
+    await waitFor(() => expect(send).toHaveBeenCalledWith(ITEM.callId, 'guidance', { GuidanceEnabled: true }));
+  });
+
+  it('asks for a digest of the meeting from its Live guidance panel', async () => {
+    const digest = vi.fn(async () => ({ Success: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn(), sendRequestMeetingDigest: digest };
+    renderPage({ item: ITEM, url: '/calls/m?tab=summary' });
+    fireEvent.click(within(screen.getByTestId('live-guidance-panel')).getByRole('button', { name: 'Digest so far' }));
+    await waitFor(() => expect(digest).toHaveBeenCalledWith(ITEM.callId));
+  });
+
   it('shows the checklist on the Transcript tab, with evidence that opens the transcript there', () => {
     callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
     renderPage({ item: { ...ITEM, ...PREPARED } });

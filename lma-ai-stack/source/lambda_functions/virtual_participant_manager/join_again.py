@@ -179,6 +179,9 @@ def new_row(
 
     if isinstance(request.get("enableVideoRecording"), bool):
         row["enableVideoRecording"] = request["enableVideoRecording"]
+    # Live guidance for the new meeting; absent, the deployment's setting decides.
+    if isinstance(request.get("guidanceEnabled"), bool):
+        row["guidanceEnabled"] = request["guidanceEnabled"]
 
     agenda = _text(request.get("agenda"))
     if agenda.strip():

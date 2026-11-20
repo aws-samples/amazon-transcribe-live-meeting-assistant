@@ -859,8 +859,8 @@ def delete_meeting_notifications(callid):
     The partition holds the notifications, their dedup pointers, the per-minute
     publish counters and each user's view of them (what they dismissed and
     muted); each expires with the meeting, so without this a deleted meeting's
-    would remain until then. ``gd#<CallId>`` held guidance before notifications
-    replaced it, on deployments of a development build only, and goes too.
+    would remain until then. ``gd#<CallId>`` goes too: it holds the live guidance
+    analyzer's state, and guidance a development build kept there.
     """
     deleted = _delete_partition(f"nt#{callid}", "notification row", callid)
     return deleted + _delete_partition(f"gd#{callid}", "guidance item", callid)

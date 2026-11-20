@@ -281,6 +281,7 @@ def test_labels_and_audience_are_written_with_their_own_mutations(meeting, appsy
         "labels": {"team": "web"},
         "audience": "internal",
         "summaryProfile": "default",
+        "guidance": False,
         "updatedAt": "2026-11-20T10:00:00Z",
     }
 
@@ -321,7 +322,8 @@ def test_only_the_input_given_is_written_and_empty_values_clear(meeting, appsync
 @pytest.mark.parametrize(
     "kwargs,message",
     [
-        ({}, "Give labels, audience, summaryProfile or a combination"),
+        ({}, "Give labels, audience, summaryProfile, guidance or a combination"),
+        ({"guidance": "yes"}, "guidance must be true or false"),
         ({"labels": [{"Key": "a", "Value": "b"}]}, "object"),
         ({"labels": {"Bad Key": "x"}}, "label Key"),
         ({"labels": {"a": 5}}, "must have a Value"),
@@ -340,3 +342,12 @@ def test_a_failed_audience_write_after_the_labels_says_the_labels_changed(meetin
     appsync.answers["updateCallAudience"] = ValueError("throttled")
     with pytest.raises(ValueError, match="labels were changed"):
         preparation.update_metadata(caller(), "m1", labels={"a": "b"}, audience="internal")
+
+
+def test_live_guidance_is_turned_on_with_its_own_mutation(meeting, appsync):
+    appsync.answers["updateCallGuidance"] = {"updateCallGuidance": {"GuidanceEnabled": True}}
+    answer = preparation.update_metadata(caller(SHARED), "m1", guidance=True)
+    ((query, variables),) = appsync.calls
+    assert "mutation UpdateCallGuidance" in query
+    assert variables["input"] == {"CallId": "m1", "GuidanceEnabled": True}
+    assert answer["guidance"] is True

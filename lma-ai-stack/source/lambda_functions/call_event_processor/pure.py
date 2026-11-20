@@ -236,6 +236,64 @@ def agenda_derivation_due(
         return False
 
 
+#: The least time between two live guidance runs; the setting's schema minimum.
+GUIDANCE_MIN_INTERVAL_SECONDS = 60.0
+#: The shipped Seconds between runs, used when the setting cannot be read.
+GUIDANCE_DEFAULT_INTERVAL_SECONDS = 90.0
+
+
+def guidance_settings(raw: Any) -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Live guidance, as the processor needs it.
+
+    Whether a new meeting starts with live guidance on, the seconds between
+    runs (never under the schema's minimum), and whether live guidance is
+    available at all (its runs-per-meeting cap is not 0).
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        interval = float(raw.get("intervalSeconds", GUIDANCE_DEFAULT_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        interval = GUIDANCE_DEFAULT_INTERVAL_SECONDS
+    if interval != interval:  # NaN
+        interval = GUIDANCE_DEFAULT_INTERVAL_SECONDS
+    try:
+        available = int(raw.get("maxRunsPerMeeting", 1)) > 0
+    except (TypeError, ValueError):
+        available = True
+    return (
+        raw.get("defaultEnabled") is True,
+        max(GUIDANCE_MIN_INTERVAL_SECONDS, interval),
+        available,
+    )
+
+
+def guidance_run_due(
+    call_id: Optional[str],
+    now: float,
+    interval_seconds: float,
+    last_queued: "Dict[str, float]",
+) -> bool:
+    """Whether a finished segment should queue a live guidance run for its meeting.
+
+    At most once every ``interval_seconds`` per meeting in this execution
+    environment, recorded in ``last_queued``. That only keeps a busy meeting
+    from queueing a run per segment; the analyzer's own conditional claim on
+    the meeting is what holds the interval across environments and keeps two
+    runs from overlapping. Bounded: a warm environment sees meeting after
+    meeting, and forgetting them costs at most an early queue each, which the
+    claim absorbs.
+    """
+    if not call_id:
+        return False
+    last = last_queued.get(call_id)
+    if last is not None and now - last < interval_seconds:
+        return False
+    if len(last_queued) >= 5000:
+        last_queued.clear()
+    last_queued[call_id] = now
+    return True
+
+
 def apply_meeting_access(segment: Dict[str, Any], meeting: Dict[str, Any]) -> None:
     """Gives a transcript segment its meeting's Owner and SharedWith, in place.
 

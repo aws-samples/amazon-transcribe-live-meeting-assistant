@@ -51,7 +51,8 @@
         "inMeetingContextAccess": "none",
         "inMeetingRequesters": "anyone",
         "webSearchEnabled": true,
-        "mcpServersEnabled": true
+        "mcpServersEnabled": true,
+        "guidance": { "defaultEnabled": false }
       }
     },
     "meeting_processing": {

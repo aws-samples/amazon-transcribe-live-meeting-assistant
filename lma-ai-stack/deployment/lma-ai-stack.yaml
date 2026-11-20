@@ -3057,6 +3057,11 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
+            # Live guidance runs, queued for meetings that have it on.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
             # The text of each key frame, read once it is stored.
             - Effect: Allow
               Action:
@@ -3155,6 +3160,8 @@ Resources:
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
           TRANSCRIPT_DELETION_FUNCTION_ARN: !GetAtt TranscriptDeletionFunction.Arn
           AGENDA_DERIVER_ARN: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
+          # Live guidance runs; see docs/live-guidance.md.
+          LIVE_GUIDANCE_ANALYZER_ARN: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Gives each stored chat attachment its title and summary.
@@ -6527,6 +6534,7 @@ Resources:
         LogLevel: !Ref LogLevel
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         VirtualParticipantTable: !Ref VirtualParticipantTable
         VirtualParticipantTableArn: !GetAtt VirtualParticipantTable.Arn
         VncEdgeTokenSigningSecret: !Ref VncEdgeTokenSigningSecret
@@ -6974,6 +6982,43 @@ Resources:
       FieldName: updateCallSummaryProfile
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # Live guidance on or off for a meeting, on the same resolver and access rule
+  # as its preparation. See docs/live-guidance.md.
+  UpdateCallGuidanceAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallGuidance
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # A digest of the meeting so far, made by the live guidance analyzer.
+  RequestMeetingDigestAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: requestMeetingDigest
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($ctx.arguments),
+            "identity": $util.toJson($ctx.identity)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   ListSummaryProfilesAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -9135,6 +9180,12 @@ Resources:
           $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
         #end
 
+        ## Live guidance for the meeting it creates (Boolean). Absent, the
+        ## deployment's Live guidance setting decides when the meeting starts.
+        #if(!$util.isNull($ctx.args.input.guidanceEnabled))
+          $util.qr($input.put("guidanceEnabled", $ctx.args.input.guidanceEnabled))
+        #end
+
         ## Optional meeting agenda, persisted for immediate and scheduled
         ## meetings alike. The VP container reads it from this row when it
         ## starts and puts it on the meeting record through its START event,
@@ -11219,6 +11270,10 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallLabels"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAudience"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallSummaryProfile"
+                # Live guidance on or off (update_meeting_metadata) and a digest
+                # on request (request_meeting_digest).
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallGuidance"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/requestMeetingDigest"
                 # Query/* covers getVirtualParticipant used by the new
                 # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"

@@ -288,6 +288,7 @@ _CALL_FIELDS = """
       }
       ChecklistUpdatedAt
       SummaryProfile
+      GuidanceEnabled
       ActionItems {
         Text
         Owner

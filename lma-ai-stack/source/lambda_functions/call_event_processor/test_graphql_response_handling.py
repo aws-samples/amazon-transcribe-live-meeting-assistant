@@ -2786,3 +2786,108 @@ def test_a_segment_of_a_deleted_transcript_is_dropped_with_a_transcript_hook_set
     assert hook.calls == 1, "the hook ran, so the segment is a dict of its own"
     assert mutation_inputs(session, "addTranscriptSegment") == []
     assert mutation_inputs(session, "updateCallAggregation") == []
+
+
+# ── live guidance ────────────────────────────────────────────────────────────
+
+GUIDANCE_ARN = "arn:aws:lambda:us-east-1:123456789012:function:stack-LiveGuidanceAnalyzer"
+
+
+@pytest.fixture
+def guidance_hook(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "LIVE_GUIDANCE_ANALYZER_ARN", GUIDANCE_ARN)
+    monkeypatch.setattr(cep, "GUIDANCE_RUN_QUEUED", {})
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: (False, 90.0, True))
+    return hook
+
+
+def _guided(schema: Any, enabled: Any = True) -> QueuedSession:
+    meeting = {"CallId": "call-1", "Status": "STARTED"}
+    if enabled is not None:
+        meeting["GuidanceEnabled"] = enabled
+    return QueuedSession(
+        schema,
+        [
+            {"getCall": meeting},
+            SENTIMENT_RESPONSES["populated"],
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+        ],
+    )
+
+
+def _guidance_runs(hook: RecordingLambda) -> List[Dict[str, Any]]:
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == GUIDANCE_ARN
+    ]
+
+
+def test_a_meeting_with_guidance_on_queues_a_run_at_most_every_interval(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    now = {"t": 0.0}
+    monkeypatch.setattr(cep.time, "monotonic", lambda: now["t"])
+    for at, end in ((1000.0, 10.0), (1030.0, 20.0), (1095.0, 30.0)):
+        now["t"] = at
+        process_event(_guided(schema), _segment(end), monkeypatch)
+    assert _guidance_runs(guidance_hook) == [
+        {"CallId": "call-1", "Trigger": "auto"},
+        {"CallId": "call-1", "Trigger": "auto"},
+    ]
+    assert all(i["InvocationType"] == "Event" for i in guidance_hook.invocations)
+
+
+@pytest.mark.parametrize("enabled", [False, None])
+def test_with_guidance_off_no_run_is_queued(schema, emitted, guidance_hook, monkeypatch, enabled):
+    process_event(_guided(schema, enabled), _segment(10.0), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_a_partial_segment_queues_no_guidance_run(schema, emitted, guidance_hook, monkeypatch):
+    process_event(_guided(schema), _segment(10.0, partial=True), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_guidance_turned_off_for_the_deployment_queues_no_run(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: (False, 90.0, False))
+    process_event(_guided(schema), _segment(10.0), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_a_failure_to_queue_a_guidance_run_does_not_fail_the_segment(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    def refuse(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(guidance_hook, "invoke", refuse)
+    process_event(_guided(schema), _segment(10.0), monkeypatch)
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+
+
+@pytest.mark.parametrize(
+    "settings, event_value, expected",
+    [
+        ((False, 90.0, True), None, "GuidanceEnabled: false"),
+        ((True, 90.0, True), None, "GuidanceEnabled: true"),
+        ((True, 90.0, False), None, "GuidanceEnabled: false"),
+        ((False, 90.0, True), True, "GuidanceEnabled: true"),
+        ((True, 90.0, True), False, "GuidanceEnabled: false"),
+    ],
+)
+def test_a_new_meeting_gets_its_guidance_choice_else_the_deployments(
+    schema, emitted, monkeypatch, settings, event_value, expected
+):
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: settings)
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    event = {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"}
+    if event_value is not None:
+        event["GuidanceEnabled"] = event_value
+    process_event(session, event, monkeypatch)
+    assert expected in print_ast(session.queries[0])

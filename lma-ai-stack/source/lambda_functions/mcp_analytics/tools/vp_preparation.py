@@ -6,9 +6,10 @@
 
 schedule_meeting, start_meeting_now and update_scheduled_meeting take the same
 optional arguments -- ``labels``, ``audience``, ``context``, ``checklist``,
-``summaryProfile`` and ``shareWith`` -- and pass them to createVirtualParticipant
-or updateScheduledVirtualParticipant as ``labels``, ``audience``,
-``meetingContext``, ``checklist``, ``summaryProfile`` and ``meetingSharedWith``. The VP stores them
+``summaryProfile``, ``guidance`` and ``shareWith`` -- and pass them to
+createVirtualParticipant or updateScheduledVirtualParticipant as ``labels``,
+``audience``, ``meetingContext``, ``checklist``, ``summaryProfile``,
+``guidanceEnabled`` and ``meetingSharedWith``. The VP stores them
 on its row and, when it starts, puts them on the meeting it creates; the
 meeting is then shared with the ``shareWith`` addresses. Sharing the Virtual
 Participant itself is a separate thing and is not done here.
@@ -36,6 +37,7 @@ def vp_inputs(
     share_with: Any = None,
     summary_profile: Any = None,
     *,
+    guidance: Any = None,
     for_update: bool = False,
 ) -> Dict[str, Any]:
     """The mutation input fields for the arguments given, checked.
@@ -57,6 +59,10 @@ def vp_inputs(
     if summary_profile is not None:
         # "" for the default, which an update sends to remove the profile.
         fields["summaryProfile"] = profile_argument(summary_profile)
+    if guidance is not None:
+        if not isinstance(guidance, bool):
+            raise ValueError("guidance must be true or false")
+        fields["guidanceEnabled"] = guidance
     if not for_update:
         fields = {name: value for name, value in fields.items() if value not in ("", [], None)}
     return fields
@@ -81,6 +87,10 @@ def vp_preparation_output(vp: Mapping[str, Any]) -> Dict[str, Any]:
             if isinstance(item, Mapping)
         ],
         "summaryProfile": vp.get("summaryProfile") or "default",
+        # null: the deployment's Live guidance setting decides when it starts.
+        "guidance": vp.get("guidanceEnabled")
+        if isinstance(vp.get("guidanceEnabled"), bool)
+        else None,
         "shareWith": share_with,
     }
 

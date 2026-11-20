@@ -52,10 +52,18 @@ def execute(  # pylint: disable=too-many-arguments
     share_with: Any = None,
     now: Optional[float] = None,
     summary_profile: Any = None,
+    guidance: Any = None,
 ) -> Dict[str, Any]:
     """Change the scheduled VP's time, name, agenda or meeting preparation."""
     changes: Dict[str, Any] = vp_inputs(
-        labels, audience, context, checklist, share_with, summary_profile, for_update=True
+        labels,
+        audience,
+        context,
+        checklist,
+        share_with,
+        summary_profile,
+        guidance=guidance,
+        for_update=True,
     )
     if meeting_name is not None:
         if not isinstance(meeting_name, str) or not meeting_name.strip():
@@ -69,7 +77,7 @@ def execute(  # pylint: disable=too-many-arguments
     if not changes:
         raise ValueError(
             "Give at least one of scheduledTime, meetingName, agenda, labels, audience, "
-            "context, checklist, summaryProfile or shareWith"
+            "context, checklist, summaryProfile, guidance or shareWith"
         )
 
     vp = get_vp(virtual_participant_id)

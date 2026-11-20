@@ -710,6 +710,8 @@ def _with_notifications(aws):
     aws.table.put(PK=pk, SK="u#user@example.com", Dismissed={"g1"})
     aws.table.put(PK=pk, SK="r#29000000", Count=3)
     aws.table.put(PK=f"gd#{CALL_ID}", SK="g#2026-11-19T10:00:00Z#x", Text="older guidance")
+    # The live guidance analyzer's state, whose summary is drawn from the transcript.
+    aws.table.put(PK=f"gd#{CALL_ID}", SK="analyzer", RollingSummary="what was said")
     aws.table.put(PK="nt#another-meeting", SK="n#2026-11-19T10:00:00Z#g9", Category="guidance")
 
 

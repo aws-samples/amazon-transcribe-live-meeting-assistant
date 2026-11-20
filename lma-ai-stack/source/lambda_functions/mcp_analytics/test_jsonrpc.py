@@ -107,7 +107,7 @@ class TestMCPToolsList(unittest.TestCase):
             "get_meeting_consent",
         ):
             self.assertIn(name, tool_names)
-        self.assertEqual(len(tool_names), 31)
+        self.assertEqual(len(tool_names), 32)
         for removed in ("get_live_transcript", "unshare_meeting"):
             self.assertNotIn(removed, tool_names)
 
@@ -267,6 +267,7 @@ class TestKeyScopes(unittest.TestCase):
         "ask_meeting_assistant",
         "share_meeting",
         "regenerate_meeting_summary",
+        "request_meeting_digest",
         "end_virtual_participant",
         "set_meeting_context",
         "set_meeting_checklist",

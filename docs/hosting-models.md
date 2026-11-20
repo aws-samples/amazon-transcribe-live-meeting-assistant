@@ -65,6 +65,7 @@ the full table.
 | | Meeting Assistant › In-meeting requests: meeting context and checklist | None | The owner's preparation notes are never read out to guests. |
 | Knowledge | Meeting Assistant › Web search | Off | Nothing from a meeting is sent to a web search provider, from the meeting page's chat either. |
 | | Meeting Assistant › MCP servers | Off | None of the MCP servers installed on the MCP Servers page is connected to or offered. LMA's own MCP server is not affected. |
+| | Meeting Assistant › Live guidance › On for new meetings | On | The people running a meeting are offered [live guidance](live-guidance.md) in its Notifications drawer, never in the meeting chat and never to its guests. Each run is a model call billed to the meeting; a meeting can still turn it off. |
 | Summaries | Meeting Processing › Default summary profile for new meetings | `discovery-session` | New meetings are summarized with decisions, action items, open questions, risks and requirements heard; see [Summary profiles](transcript-summarization.md#summary-profiles). |
 | Other | Amazon Transcribe › Redact personal information; Amazon Bedrock Models › Model inference geography | Off; Global | The shipped defaults. Change them in a copy of the profile if your policy needs them. |
 

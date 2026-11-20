@@ -19,6 +19,7 @@ from tools import (
     meeting_record,
     notifications,
     virtual_participants,
+    vp_preparation,
 )
 from tools._meeting_fakes import ADMIN, OTHER, OWNER, SHARED, caller, meeting_row
 
@@ -823,3 +824,46 @@ def test_vps_by_call_reads_only_the_link_attributes_and_keeps_the_newest(monkeyp
         "#call": "CallId",
         "#created": "createdAt",
     }
+
+
+# ── live guidance ────────────────────────────────────────────────────────────
+
+
+def test_a_digest_is_requested_for_a_meeting_the_caller_can_see(calls_table, appsync):
+    calls_table.put(meeting_row(SharedWith=[SHARED]))
+    appsync.answers["requestMeetingDigest"] = {
+        "requestMeetingDigest": {
+            "Success": True,
+            "Message": "Published to the meeting's notifications.",
+            "Text": "Price and term agreed.",
+            "NotificationId": "n7",
+        }
+    }
+    answer = guidance.request_digest(caller(SHARED), "m1")
+    ((query, variables),) = appsync.calls
+    assert "mutation RequestMeetingDigest" in query and variables == {"callId": "m1"}
+    assert answer["digest"] == "Price and term agreed." and answer["guidanceId"] == "n7"
+
+
+def test_a_digest_is_refused_for_a_meeting_the_caller_cannot_see(calls_table, appsync):
+    calls_table.put(meeting_row())
+    with pytest.raises(PermissionError):
+        guidance.request_digest(caller(OTHER), "m1")
+    assert appsync.calls == []
+
+
+def test_a_digest_that_could_not_be_made_says_why(calls_table, appsync):
+    calls_table.put(meeting_row())
+    appsync.answers["requestMeetingDigest"] = {
+        "requestMeetingDigest": {"Success": False, "Message": "Nothing has been said yet."}
+    }
+    with pytest.raises(ValueError, match="Nothing has been said yet."):
+        guidance.request_digest(caller(), "m1")
+
+
+def test_live_guidance_is_given_to_a_virtual_participant_as_true_or_false():
+    assert vp_preparation.vp_inputs(guidance=True) == {"guidanceEnabled": True}
+    assert vp_preparation.vp_inputs(guidance=False) == {"guidanceEnabled": False}
+    assert vp_preparation.vp_inputs() == {}
+    with pytest.raises(ValueError, match="guidance must be true or false"):
+        vp_preparation.vp_inputs(guidance="on")

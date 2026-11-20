@@ -67,6 +67,7 @@ import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
 import ChecklistPanel from './ChecklistPanel';
+import LiveGuidancePanel from './LiveGuidancePanel';
 import MeetingContextPanel from './MeetingContextPanel';
 import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
@@ -1901,6 +1902,7 @@ export const CallPanel = ({
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
     sendUpdateMeetingPreparation,
+    sendRequestMeetingDigest,
   } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
@@ -2612,6 +2614,16 @@ export const CallPanel = ({
     onShowTime: (seconds) => showInTranscript(seconds, { reveal: true }),
   };
   const hasChecklist = Array.isArray(item.checklist) && item.checklist.length > 0;
+  // Live guidance, beside the checklist it reads. See docs/live-guidance.md.
+  const liveGuidancePanel = (
+    <LiveGuidancePanel
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      isLive={isLive}
+      onToggle={savePreparation ? (enabled) => savePreparation('guidance', { GuidanceEnabled: enabled }) : undefined}
+      onRequestDigest={sendRequestMeetingDigest ? () => sendRequestMeetingDigest(item.callId) : undefined}
+    />
+  );
   // eslint-disable-next-line react/jsx-props-no-spreading
   const checklistPanel = <ChecklistPanel {...checklistProps} />;
   // The checklist again at the top of the Transcript tab, where a live meeting
@@ -2661,6 +2673,7 @@ export const CallPanel = ({
         )}
       </Grid>
       {contextPanel}
+      {liveGuidancePanel}
       {checklistPanel}
       {enableSentimentAnalysis && (
         <Grid gridDefinition={[{ colspan: 12 }]}>
@@ -2693,6 +2706,7 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
+      {isLive && liveGuidancePanel}
       {transcriptChecklist}
       <CallTranscriptContainer
         item={item}

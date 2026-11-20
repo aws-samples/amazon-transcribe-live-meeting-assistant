@@ -8,6 +8,7 @@ import asyncio
 import json
 import math
 import re
+import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from os import getenv
@@ -89,6 +90,8 @@ from pure import (  # noqa: E402
     convert_keys_to_uppercamelcase,
     forget_language,
     get_sentiment_per_quarter,
+    guidance_run_due,
+    guidance_settings,
     language_to_record,
     merge_dicts,
     segment_analyses,
@@ -128,6 +131,10 @@ TRANSCRIPT_DELETION_FUNCTION_ARN = getenv("TRANSCRIPT_DELETION_FUNCTION_ARN", ""
 # agenda_derivation_threshold() seconds in, for an agenda somebody stated. 0
 # turns it off. See agenda_deriver.
 AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
+# Live guidance runs, queued for a finished speech segment of a meeting whose
+# GuidanceEnabled is true, at most every intervalSeconds per meeting here. See
+# live_guidance_analyzer and docs/live-guidance.md.
+LIVE_GUIDANCE_ANALYZER_ARN = getenv("LIVE_GUIDANCE_ANALYZER_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
@@ -140,6 +147,9 @@ AGENDA_DERIVATION_AFTER_SECONDS = 300.0
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
+# When this execution environment last queued a live guidance run per meeting;
+# see guidance_run_due.
+GUIDANCE_RUN_QUEUED: Dict[str, float] = {}
 # The languages this execution environment has added to each meeting's
 # DetectedLanguages; see language_to_record.
 DETECTED_LANGUAGES_NOTED: Dict[str, set] = {}
@@ -218,6 +228,44 @@ def agenda_derivation_threshold() -> float:
     )
 
 
+def live_guidance_settings() -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Live guidance: on for new meetings, the interval, available.
+
+    The Configuration page's values, else the shipped defaults; read on the
+    section's standard tier, so a saved change reaches meetings about five
+    minutes later. A read that fails is the shipped values: off for new
+    meetings, which is also what the store holds until an administrator
+    changes it.
+    """
+    try:
+        raw = read_setting(MEETING_ASSIST.name, "guidance", default={})
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the Live guidance settings; using the shipped ones")
+        raw = {}
+    return guidance_settings(raw)
+
+
+def queue_guidance_run(call_id: str) -> None:
+    """Queue a live guidance run for a meeting, fire-and-forget.
+
+    Asynchronous for the reason queue_agenda_derivation gives. The analyzer
+    decides for itself whether a run is due -- another environment may have
+    queued one, or too little has been said -- so queueing one too many costs a
+    conditional write. A failure to queue is logged and the segment processed
+    regardless: guidance is an enhancement.
+    """
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=LIVE_GUIDANCE_ANALYZER_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": "auto"}),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue a live guidance run; continuing", extra=dict(call_id=call_id)
+        )
+
+
 @lru_cache(maxsize=8)
 def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
     """``pattern`` compiled, or None when it is not a regular expression."""
@@ -252,6 +300,7 @@ if (
     or SPEAKER_NAME_RESOLVER_ARN
     or TRANSCRIPT_DELETION_FUNCTION_ARN
     or AGENDA_DERIVER_ARN
+    or LIVE_GUIDANCE_ANALYZER_ARN
     or KEYFRAME_TEXT_EXTRACTOR_ARN
     or CHAT_ATTACHMENT_SUMMARIZER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
@@ -1946,6 +1995,7 @@ async def get_call_details(
             schema.Query.getCall.args(CallId=message["CallId"]).select(
                 *call_fields(schema),
                 schema.Call.TranscriptDeletedAt,
+                *guidance_field(schema),
             )
         )
     )
@@ -1984,7 +2034,21 @@ async def get_call_details(
     # Only when set, so the post-call hook's payload is unchanged otherwise.
     if call.get("TranscriptDeletedAt"):
         details["TranscriptDeletedAt"] = call["TranscriptDeletedAt"]
+    if call.get("GuidanceEnabled") is True:
+        details["GuidanceEnabled"] = True
     return details
+
+
+def guidance_field(schema: DSLSchema) -> tuple:
+    """Call.GuidanceEnabled, when the schema the API is running declares it.
+
+    Conditional for the reason graphql_helpers.call_fields gives: during a stack
+    update the running schema can be older than this function.
+    """
+    # pylint: disable-next=protected-access
+    if "GuidanceEnabled" in schema.Call._type.fields:
+        return (schema.Call.GuidanceEnabled,)
+    return ()
 
 
 ##########################################################################
@@ -2072,6 +2136,13 @@ async def execute_process_event_api_mutation(
     if event_type == "START":
         # CREATE CALL
         LOGGER.debug("CREATE CALL")
+        # Live guidance for the new meeting: a Virtual Participant's choice,
+        # else the deployment's On for new meetings, stored as true or false.
+        if not isinstance(message.get("GuidanceEnabled"), bool) and input_declares(
+            appsync_session, "CreateCallInput", "GuidanceEnabled"
+        ):
+            default_on, _interval, available = live_guidance_settings()
+            message["GuidanceEnabled"] = default_on and available
         response = await execute_create_call_mutation(
             message=message, appsync_session=appsync_session
         )
@@ -2507,6 +2578,20 @@ async def execute_process_event_api_mutation(
                 )
             ):
                 queue_agenda_derivation(normalized_message["CallId"])
+            if (
+                LIVE_GUIDANCE_ANALYZER_ARN
+                and payload.get("GuidanceEnabled") is True
+                and not normalized_message["IsPartial"]
+                and is_speech_channel(normalized_message.get("Channel"))
+            ):
+                _default_on, interval, available = live_guidance_settings()
+                if available and guidance_run_due(
+                    normalized_message.get("CallId"),
+                    time.monotonic(),
+                    interval,
+                    GUIDANCE_RUN_QUEUED,
+                ):
+                    queue_guidance_run(normalized_message["CallId"])
             if analyses.agent_assist:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,

@@ -110,6 +110,23 @@ test('the default or a malformed summary profile is not put on the meeting', () 
   assert.equal('SummaryProfile' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
 });
 
+test('a VP with live guidance on or off creates its meeting with that choice', () => {
+  for (const guidanceEnabled of [true, false]) {
+    const preparation = preparationFromVpRow({ guidanceEnabled });
+    assert.equal(preparation?.guidanceEnabled, guidanceEnabled);
+    assert.deepEqual(preparationStartFields(preparation, 'alice@example.com'), {
+      GuidanceEnabled: guidanceEnabled,
+    });
+  }
+});
+
+test("a VP without a live guidance choice leaves it to the deployment's setting", () => {
+  for (const guidanceEnabled of [undefined, null, 'true', 1]) {
+    assert.equal(preparationFromVpRow({ guidanceEnabled }), null);
+  }
+  assert.equal('GuidanceEnabled' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+});
+
 test('the meeting platform is named as the meeting record names it', () => {
   assert.equal(meetingPlatformName('ZOOM'), 'Zoom');
   assert.equal(meetingPlatformName('Teams'), 'Teams');

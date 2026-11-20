@@ -32,6 +32,8 @@ const mapCallsAttributes = (calls) => {
       // The meeting's summary profile (absent: the default), the action items
       // listed with its summary, and the platform a Virtual Participant joined.
       SummaryProfile: summaryProfile,
+      // Whether live guidance reads the meeting (docs/live-guidance.md).
+      GuidanceEnabled: guidanceEnabled,
       ActionItems: actionItems,
       MeetingPlatform: meetingPlatform,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
@@ -121,6 +123,7 @@ const mapCallsAttributes = (calls) => {
       checklist,
       checklistUpdatedAt,
       summaryProfile,
+      guidanceEnabled,
       actionItems,
       meetingPlatform,
       transcriptDeletionScheduledFor,
@@ -242,6 +245,8 @@ export const adoptMeetingCopy = (current, incoming) => {
     // query. A null is a cleared profile, so only an absent one is kept.
     summaryProfile: incoming.summaryProfile === undefined ? current.summaryProfile : incoming.summaryProfile,
     actionItems: keep('actionItems'),
+    // Not selected by the list query or the Kinesis pipeline's updates.
+    guidanceEnabled: keep('guidanceEnabled'),
     meetingPlatform: keep('meetingPlatform'),
   };
 };
