@@ -15,7 +15,8 @@ assistant can keep it current from the transcript as the meeting goes.
 
 Whiteboards are shown in LMA only. They are never posted to the meeting's chat,
 never spoken by a voice assistant, and never visible to the meeting's other
-participants. An MCP client can read them.
+participants. They are also offered over MCP; see
+[Reading and writing them over MCP](#reading-and-writing-them-over-mcp).
 
 **What is on by default.** With the shipped settings, anyone who can see a
 meeting can make whiteboards by hand and edit them; that makes no model call
@@ -93,9 +94,12 @@ or who last edited it, and when.
 - The whiteboard's menu renames it, changes its instructions, turns the
   assistant's updates of it on or off, shows its **versions**, or deletes it.
 - **Assistant keeps whiteboards updated** turns the assistant's updates on or
-  off for the meeting. **Update now** updates them from the transcript at once,
-  rather than at the next run. Both are offered while the deployment allows the
-  assistant's updates (see **Runs per meeting at most** below).
+  off for the meeting, and is offered while the deployment allows the
+  assistant's updates (see **Runs per meeting at most** below). While they are
+  on, **Update now** updates the whiteboards from the transcript at once rather
+  than at the next run, at most once every 30 seconds. If the update takes
+  longer than the page waits, the page says so, and its changes appear as soon
+  as it finishes.
 
 Every change reaches every open meeting page through the `onMeetingWhiteboard`
 subscription, without a reload. Once the meeting's transcript is deleted, the
@@ -112,7 +116,7 @@ finished speech segment of the meeting can start one. A run happens:
   have been said since the last run, so a quiet meeting costs nothing;
 - one at a time for each meeting;
 - at most **Runs per meeting at most** (60 by default) times per meeting,
-  **Update now** included;
+  **Update now** included, which waits at least 30 seconds after the previous run;
 - once more when the meeting ends, so the whiteboards include its last minutes;
 - never after the transcript has been deleted.
 
@@ -280,7 +284,7 @@ archive also holds each whiteboard as `whiteboards/<n>-<title>.md`, diagrams in
 | `updateMeetingWhiteboard(input)` | `CallId`, `WhiteboardId`, `BaseVersion`, and any of `Title`, `Instructions`, `AssistantUpdates`, `Panels` (the whole new list; a panel with no `PanelId` is new), or `RestoreVersion`. |
 | `deleteMeetingWhiteboard(input)` | `CallId`, `WhiteboardId`. Deletes the whiteboard and its versions. |
 | `updateCallWhiteboards(input)` | `CallId`, `WhiteboardsEnabled`. Published to `onUpdateCall`. |
-| `requestWhiteboardUpdate(CallId)` | Update now: one run, without waiting for the interval. |
+| `requestWhiteboardUpdate(CallId)` | Update now: one run, without waiting for the interval, at least 30 seconds after the previous run. A run that outlasts AppSync's 30-second limit still finishes, and its changes arrive through `onMeetingWhiteboard`. |
 | `onMeetingWhiteboard(CallId)` | Every whiteboard change; a deleted whiteboard arrives with `Deleted: true`. Select `Owner` and `SharedWith`, which the subscription requires of every caller who is not an Admin. |
 
 A backend role calling with IAM must name a `Source` (`user` when it acts for a
@@ -306,7 +310,7 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
 | A Markdown panel | 8,000 characters |
 | A diagram panel | 6,000 characters |
 | A whiteboard as stored | 32 KB |
-| Changes to one meeting's whiteboards | 60 a minute, people and assistant together |
+| Attempts to change one meeting's whiteboards | 60 a minute, people and assistant together, counted whether or not the change is stored |
 
 ## Limitations
 
@@ -315,8 +319,8 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
   assistant leaves it alone.
 - **It runs on speech.** During a long silence nothing runs.
 - **A meeting that turns it on late** is read from its most recent part, up to
-  about 24,000 characters, with earlier parts known only from the assistant's
-  notes.
+  about 24,000 characters. The first run has no notes of its own yet, so what
+  was said before that part is not seen; later runs carry the notes forward.
 - **Requests made in the meeting**, such as asking the voice assistant or the
   meeting chat to make a whiteboard, are not supported; whiteboards are made on
   the meeting page, by the assistant's updates, or over MCP.

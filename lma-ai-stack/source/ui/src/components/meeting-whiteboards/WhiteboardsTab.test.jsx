@@ -157,6 +157,16 @@ describe('WhiteboardsTab', () => {
     expect(await screen.findByText('Updated 1 whiteboard.')).toBeTruthy();
   });
 
+  it('says an update that outlasts the request is still on its way, not that it failed', async () => {
+    const pending = 'The update is taking longer than usual. Its changes appear here as soon as it finishes.';
+    const state = stateWith({
+      requestUpdate: vi.fn().mockResolvedValue({ error: null, pending: true, message: pending }),
+    });
+    render(<WhiteboardsTab whiteboards={state} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+    expect(await screen.findByText(pending)).toBeTruthy();
+  });
+
   it('hides the switch when the deployment turned the assistant off', () => {
     render(<WhiteboardsTab whiteboards={stateWith({ assistantAvailable: false })} />);
     expect(screen.queryByText(/Assistant keeps whiteboards updated/)).toBeNull();

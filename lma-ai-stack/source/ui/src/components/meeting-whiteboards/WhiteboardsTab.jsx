@@ -416,11 +416,10 @@ const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = unde
     setUpdating(true);
     const result = await whiteboards.requestUpdate();
     setUpdating(false);
-    setNotice(
-      result.error
-        ? { type: 'error', text: result.error }
-        : { type: 'success', text: result.message || 'The whiteboards were updated.' },
-    );
+    let notice = { type: 'success', text: result.message || 'The whiteboards were updated.' };
+    if (result.error) notice = { type: 'error', text: result.error };
+    else if (result.pending) notice = { type: 'info', text: result.message };
+    setNotice(notice);
   };
 
   return (

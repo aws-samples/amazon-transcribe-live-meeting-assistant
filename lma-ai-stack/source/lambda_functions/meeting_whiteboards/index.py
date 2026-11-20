@@ -86,7 +86,8 @@ METERING_CONTEXT = "MeetingWhiteboards"
 #: Longer than the function's timeout, so a stopped run cannot hold its meeting longer.
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", "180"))
 RUN_MAX_TOKENS = 2500
-#: Writes to one meeting's whiteboards in a UTC minute, people and assistant together.
+#: Write attempts on one meeting's whiteboards in a UTC minute, people and assistant
+#: together, counted before the write whether or not it is stored.
 WRITES_PER_MINUTE = 60
 MAX_VERSION_PAGE = 50
 MAX_TRANSCRIPT_PAGES = 100
@@ -946,6 +947,9 @@ CREATE_MUTATION = (
 
 #: Triggers that do not wait for the interval or for new segments.
 EAGER_TRIGGERS = ("request", "final")
+#: The least time between a run on request and the run before it, so repeated
+#: presses of Update now cannot use up a meeting's runs at most.
+REQUEST_GAP_SECONDS = 30
 
 
 def why_not(
@@ -1158,10 +1162,13 @@ def run(call_id: str, trigger: str = "auto") -> Dict[str, Any]:
     state = LIVE.claim(
         call_id,
         now=now,
-        interval_seconds=settings.interval_seconds,
+        interval_seconds=(
+            REQUEST_GAP_SECONDS if trigger == "request" else settings.interval_seconds
+        ),
         max_runs=settings.max_runs_per_meeting,
         expires=expiry(meeting),
-        ignore_interval=trigger in EAGER_TRIGGERS,
+        # The run at the meeting's end waits for nothing but the lease.
+        ignore_interval=trigger == "final",
     )
     if state is None:
         return {

@@ -658,7 +658,9 @@ def test_update_now_runs_without_waiting_and_with_the_meeting_switch_off(table, 
     _segments(table, 2)
     result = call("requestWhiteboardUpdate", user(SHARED), CallId=CALL)
     assert result["Success"] is True and len(running["calls"]) == 1
-    assert running["lease"].claims[0]["ignore_interval"] is True
+    # Not the interval, but a short gap, so repeated presses cannot use up the runs.
+    assert running["lease"].claims[0]["ignore_interval"] is False
+    assert running["lease"].claims[0]["interval_seconds"] == index.REQUEST_GAP_SECONDS
     with refused("Unauthorized"):
         call("requestWhiteboardUpdate", user(OTHER), CallId=CALL)
 

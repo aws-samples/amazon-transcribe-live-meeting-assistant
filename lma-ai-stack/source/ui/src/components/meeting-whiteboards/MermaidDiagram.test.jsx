@@ -14,7 +14,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn() }));
-const purify = vi.hoisted(() => ({ sanitize: vi.fn((svg) => svg.replace(/<script.*?<\/script>/g, '')) }));
+// The sanitizer stands in for DOMPurify: what the page inserts is its answer,
+// never what Mermaid returned.
+const SANITIZED = '<svg><g>drawn</g></svg>';
+const purify = vi.hoisted(() => ({ sanitize: vi.fn() }));
 
 vi.mock('mermaid', () => ({ default: mermaid }));
 vi.mock('dompurify', () => ({ default: purify }));
@@ -28,11 +31,13 @@ afterEach(() => {
 
 describe('MermaidDiagram', () => {
   it('draws a diagram in strict mode and sanitizes what Mermaid returns', async () => {
-    mermaid.render.mockResolvedValue({ svg: '<svg><g>drawn</g><script>x</script></svg>' });
+    const raw = '<svg><g>drawn</g><foreignObject>raw</foreignObject></svg>';
+    mermaid.render.mockResolvedValue({ svg: raw });
+    purify.sanitize.mockReturnValue(SANITIZED);
     render(<MermaidDiagram text={'flowchart TD\n  a-->b'} />);
     const drawn = await screen.findByTestId('whiteboard-diagram');
-    expect(drawn.innerHTML).toContain('drawn');
-    expect(drawn.innerHTML).not.toContain('script');
+    expect(purify.sanitize.mock.calls[0][0]).toBe(raw);
+    expect(drawn.innerHTML).toBe(SANITIZED);
     expect(mermaid.initialize).toHaveBeenCalledWith({ startOnLoad: false, securityLevel: 'strict' });
     expect(purify.sanitize).toHaveBeenCalled();
   });

@@ -505,7 +505,7 @@ def test_an_export_that_cannot_be_built_is_left_out_of_the_archive_with_a_note(
 
 
 def test_the_everything_archive_holds_the_export_and_lists_it(fakes) -> None:
-    _dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
+    dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
     started = prepare(OWNER)
     index.handler(json.loads(lam.invocations[0]["Payload"]), Context())
     archive = next(v for k, v in s3.stored.items() if k.endswith(".zip"))
@@ -516,3 +516,9 @@ def test_the_everything_archive_holds_the_export_and_lists_it(fakes) -> None:
         assert board.startswith("# Plan\n") and "```mermaid\nflowchart TD\n  a-->b\n```" in board
         assert "`whiteboards/1-Plan.md`" in opened.read("README.md").decode()
     assert started["Contents"] == "EVERYTHING"
+    # Only the whiteboards themselves are read, not their versions or counters.
+    whiteboard_reads = [
+        q for q in dynamo.queries if q["ExpressionAttributeValues"][":pk"]["S"].startswith("wb#")
+    ]
+    assert whiteboard_reads
+    assert all(q["ExpressionAttributeValues"][":prefix"]["S"] == "b#" for q in whiteboard_reads)

@@ -744,3 +744,15 @@ def test_deleting_the_transcript_deletes_every_whiteboard_row(aws):
     lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     assert [k for k in aws.table.items if k[0] == pk] == []
     assert ("wb#another-meeting", "b#wb9") in aws.table.items
+
+
+def test_the_whiteboards_are_deleted_after_the_meeting_records_the_deletion(aws, monkeypatch):
+    # The whiteboard resolver refuses a write once the meeting carries
+    # TranscriptDeletedAt; sweeping only after it is set leaves no window in
+    # which a write could land and outlast the sweep.
+    order = []
+    record, sweep = lf.record_deletion, lf.delete_whiteboards
+    monkeypatch.setattr(lf, "record_deletion", lambda *a: order.append("record") or record(*a))
+    monkeypatch.setattr(lf, "delete_whiteboards", lambda c: order.append("whiteboards") or sweep(c))
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert order == ["record", "whiteboards"]

@@ -17,6 +17,10 @@ import requestWhiteboardUpdate from '../../graphql/queries/requestWhiteboardUpda
 import updateCallWhiteboards from '../../graphql/queries/updateCallWhiteboards';
 import onMeetingWhiteboard from '../../graphql/queries/onMeetingWhiteboard';
 import { errorMessage, isConflict, mergeWhiteboard } from './whiteboard-model';
+import { isRequestTimeout } from '../../hooks/use-calls-graphql-api';
+
+export const WHITEBOARD_UPDATE_PENDING =
+  'The update is taking longer than usual. Its changes appear here as soon as it finishes.';
 
 const logger = new ConsoleLogger('useMeetingWhiteboards');
 
@@ -204,6 +208,11 @@ const useMeetingWhiteboards = (callId, { client: injected } = {}) => {
         message: answer.Message,
       };
     } catch (err) {
+      // A run that outlasts AppSync's 30 seconds is not refused: it finishes
+      // on its own and its changes arrive through onMeetingWhiteboard.
+      if (isRequestTimeout(err)) {
+        return { error: null, pending: true, message: WHITEBOARD_UPDATE_PENDING };
+      }
       logger.error('could not update the whiteboards now', err);
       return { error: errorMessage(err), message: null };
     }

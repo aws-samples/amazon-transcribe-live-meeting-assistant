@@ -873,6 +873,11 @@ def delete_meeting_whiteboards(callid):
     """Delete the meeting's whiteboards (PK ``wb#<CallId>``): each whiteboard, its
     versions, the count, the write counters and the assistant's state. Each expires
     with the transcript, so without this a deleted meeting's would remain until then.
+
+    It runs beside the other steps while the meeting row still exists, so a
+    whiteboard write committed in that moment can remain after it. Such a row
+    still expires with the transcript, and once deleteCall removes the meeting
+    row the resolver refuses every further write, since each write checks it.
     """
     return _delete_partition(f"wb#{callid}", "whiteboard row", callid)
 

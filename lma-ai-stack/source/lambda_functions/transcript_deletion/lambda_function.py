@@ -558,8 +558,11 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     remove_from_knowledge_base(keys)
     attachments = delete_attachments(call_id)
     notifications = delete_transcript_bound_notifications(call_id)
-    whiteboards = delete_whiteboards(call_id)
     record_deletion(call_id, trigger, segments, len(keys) + attachments)
+    # After the record: the whiteboard resolver refuses every write once the
+    # meeting carries TranscriptDeletedAt, so nothing written to them can
+    # outlast this sweep, as for the checklist quotes below.
+    whiteboards = delete_whiteboards(call_id)
     checklist_items = strip_checklist_quotes(call_id)
     LOGGER.info(
         json.dumps(
