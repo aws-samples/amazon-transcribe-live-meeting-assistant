@@ -23,7 +23,9 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 >
 > **When to move a source onto it.** Two features need it:
 > [voice enrollment](voice-enrollment.md), whose speaker embeddings only this engine
-> computes, so enrolled voices are matched only in meetings it transcribes; and
+> computes, so enrolled voices are matched only in meetings it transcribes (it needs
+> a bundle with a speaker model, which the default `-sortformer` bundle is not; see
+> [which bundles support it](voice-enrollment.md#which-model-bundles-support-enrollment)); and
 > separating the several voices on one microphone or one attendee tile, which it does
 > better than Amazon Transcribe in the measurement in
 > [Virtual Participant](virtual-participant.md). Its transcripts are not better:

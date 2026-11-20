@@ -80,6 +80,7 @@ from lma_config import (  # configuration layer
     ConfigurationStore,
     deletion_delay_minutes,
 )
+from lma_meeting_preparation.rules import strip_quotes  # configuration layer
 
 # pylint: enable=import-error
 
@@ -245,6 +246,75 @@ def record_deletion(call_id: str, trigger: str, segments: int, files: int) -> No
         if _error_code(error) != "ConditionalCheckFailedException":
             raise
         LOGGER.info("meeting %s has no record; its transcript was deleted all the same", call_id)
+
+
+#: Attempts at removing the checklist's quotes while the checklist changes.
+QUOTE_STRIP_ATTEMPTS = 4
+
+
+class ChecklistQuotesNotRemoved(RuntimeError):
+    """The checklist kept changing while its quotes were being removed."""
+
+
+def strip_checklist_quotes(call_id: str) -> int:
+    """Remove every evidence quote from the meeting's checklist; the number of items changed.
+
+    A quote is transcript content, so it goes with the transcript. Each
+    evidence entry keeps its segment id and its time. The write is conditional
+    on the checklist's version as read (the meeting preparation resolver's
+    guard), and bumps it, so a checklist write racing this one is read again
+    rather than restoring a quote; and once TranscriptDeletedAt is set, which
+    record_deletion does first, the resolver stores no new quote.
+    """
+    for _attempt in range(QUOTE_STRIP_ATTEMPTS):
+        item = (
+            _table()
+            .get_item(
+                Key=meeting_key(call_id),
+                ProjectionExpression="Checklist, ChecklistVersion",
+                ConsistentRead=True,
+            )
+            .get("Item")
+        )
+        checklist = (item or {}).get("Checklist")
+        if not checklist:
+            return 0
+        stripped, changed = strip_quotes(checklist)
+        if not changed:
+            return 0
+        version = int((item or {}).get("ChecklistVersion") or 0)
+        if version:
+            condition = "ChecklistVersion = :version"
+            values: Dict[str, Any] = {":version": version}
+        else:
+            condition = "attribute_not_exists(ChecklistVersion)"
+            values = {}
+        values.update({":checklist": stripped, ":next": version + 1})
+        try:
+            _table().update_item(
+                Key=meeting_key(call_id),
+                UpdateExpression="SET Checklist = :checklist, ChecklistVersion = :next",
+                ConditionExpression=f"attribute_exists(PK) AND {condition}",
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if _error_code(error) != "ConditionalCheckFailedException":
+                raise
+            LOGGER.info(
+                "the checklist of %s changed while removing its quotes; reading it again", call_id
+            )
+            continue
+        return sum(
+            1
+            for before, after in zip(checklist, stripped)
+            if (before.get("Evidence") or []) != (after.get("Evidence") or [])
+        )
+    # Raised, so the invocation fails and is retried (the schedule's retry
+    # policy, or the caller's): the deletion is safe to run again, and a
+    # transcript recorded as deleted must not keep its quotes.
+    raise ChecklistQuotesNotRemoved(
+        f"the checklist of {call_id} kept changing while removing its quotes"
+    )
 
 
 # ── deleting ────────────────────────────────────────────────────────────────
@@ -425,6 +495,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     remove_from_knowledge_base(keys)
     attachments = delete_attachments(call_id)
     record_deletion(call_id, trigger, segments, len(keys) + attachments)
+    checklist_items = strip_checklist_quotes(call_id)
     LOGGER.info(
         json.dumps(
             {
@@ -434,6 +505,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
                 "segmentsDeleted": segments,
                 "filesDeleted": len(keys),
                 "attachmentFilesDeleted": attachments,
+                "checklistItemsWithQuotesRemoved": checklist_items,
             }
         )
     )

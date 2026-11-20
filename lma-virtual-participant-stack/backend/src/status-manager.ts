@@ -19,6 +19,7 @@ import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
 import { CallSessionReadError, callSessionFromVpRow, type VpCallSession } from './call-session.js';
+import { preparationFromVpRow, type VpPreparation } from './meeting-preparation.js';
 import { createLogger, registerSecretValue } from './logger.js';
 
 const log = createLogger('status-manager');
@@ -656,6 +657,48 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
+   * The fields of this VP's row read when it starts: the CallId and capture
+   * session (getCallSession) and the agenda and meeting preparation
+   * (getMeetingInputs), in one read. The meeting password is not among them:
+   * it is read separately, from the table, by startup-meeting-password.ts.
+   */
+  private static readonly SESSION_FIELDS = `
+            id
+            CallId
+            sessionNumber
+            sessionTimeOffset`;
+
+  private static readonly STARTUP_FIELDS = `${VirtualParticipantStatusManager.SESSION_FIELDS}
+            agenda
+            agendaSource
+            labels { Key Value }
+            audience
+            meetingContext
+            checklist { ItemId Text Kind Priority Source }`;
+
+  /** The agenda and meeting preparation from the startup read, once it has been made. */
+  private meetingInputs: { agenda: VpAgenda | null; preparation: VpPreparation | null } | null = null;
+
+  /** The agenda and meeting preparation of a row as read, logged by size only. */
+  private meetingInputsFrom(row: any): { agenda: VpAgenda | null; preparation: VpPreparation | null } {
+    const agenda = agendaFromVpRow(row);
+    const preparation = preparationFromVpRow(row);
+    log.info(
+      agenda
+        ? `VP ${this.participantId} has an agenda (${agenda.agenda.length} characters, source ${agenda.agendaSource})`
+        : `VP ${this.participantId} has no agenda`,
+    );
+    log.info(
+      preparation
+        ? `VP ${this.participantId} has meeting preparation (${preparation.labels.length} labels, ` +
+            `audience ${preparation.audience ?? 'unspecified'}, context ${preparation.meetingContext.length} ` +
+            `characters, ${preparation.checklist.length} checklist items)`
+        : `VP ${this.participantId} has no meeting preparation`,
+    );
+    return { agenda, preparation };
+  }
+
+  /**
    * The CallId on this VP's row and the capture session it runs, read together.
    *
    * One read, so a VP that knows its CallId also knows its session: a rejoined
@@ -665,24 +708,43 @@ export class VirtualParticipantStatusManager {
    * could not be read, which is not the same thing: treating it as a first
    * launch would start a rejoined VP's meeting under a new CallId. Without a
    * GraphQL endpoint (local runs) there is no row, and the answer is null.
+   *
+   * The same read takes the agenda and meeting preparation, which
+   * getMeetingInputs then answers with. If that read fails, the CallId and
+   * session are read again on their own, so the preparation never fails a
+   * launch.
    */
   async getCallSession(): Promise<VpCallSession | null> {
     if (!this.graphqlEndpoint) return null;
     let result: any;
-    const query = `
+    const query = (fields: string) => `
         query GetVirtualParticipant($id: ID!) {
-          getVirtualParticipant(id: $id) {
-            id
-            CallId
-            sessionNumber
-            sessionTimeOffset
+          getVirtualParticipant(id: $id) {${fields}
           }
         }
       `;
     try {
-      result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      result = await this.signAndSendGraphQLRequest(query(VirtualParticipantStatusManager.STARTUP_FIELDS), {
+        id: this.participantId,
+      });
+      if (result?.getVirtualParticipant) {
+        this.meetingInputs = this.meetingInputsFrom(result.getVirtualParticipant);
+      }
     } catch (error) {
-      throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
+      // The agenda and meeting preparation are enhancements and must not fail
+      // the launch: the CallId and session are read again on their own, and
+      // getMeetingInputs makes its own read, which may fail without harm.
+      log.warn(`Reading the VP record with its meeting inputs failed; reading the CallId alone: ${error}`);
+      result = null;
+    }
+    if (!result?.getVirtualParticipant) {
+      try {
+        result = await this.signAndSendGraphQLRequest(query(VirtualParticipantStatusManager.SESSION_FIELDS), {
+          id: this.participantId,
+        });
+      } catch (error) {
+        throw new CallSessionReadError(`the Virtual Participant's record could not be read: ${error}`);
+      }
     }
     // signAndSendGraphQLRequest answers null for an HTTP failure, and the row is
     // always there for a launched VP: neither is a row without a CallId.
@@ -699,33 +761,30 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
-   * The agenda given when this VP was started or scheduled, from its own row.
+   * The agenda and the meeting preparation (labels, audience, meeting context,
+   * checklist) given when this VP was started or scheduled.
    *
-   * Null when the row has none or cannot be read: an agenda is an enhancement,
-   * and a VP that could not read one still joins and records the meeting.
+   * From the startup read (getCallSession) when it has been made, so the row is
+   * read once; otherwise read here. Each is null when the row has none, and
+   * both when the row cannot be read: they are enhancements, and a VP that could
+   * not read them still joins and records the meeting. Only sizes are logged,
+   * never the content.
    */
-  async getAgenda(): Promise<VpAgenda | null> {
+  async getMeetingInputs(): Promise<{ agenda: VpAgenda | null; preparation: VpPreparation | null }> {
+    if (this.meetingInputs) return this.meetingInputs;
     try {
       const query = `
         query GetVirtualParticipant($id: ID!) {
-          getVirtualParticipant(id: $id) {
-            id
-            agenda
-            agendaSource
+          getVirtualParticipant(id: $id) {${VirtualParticipantStatusManager.STARTUP_FIELDS}
           }
         }
       `;
       const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
-      const agenda = agendaFromVpRow(result?.getVirtualParticipant);
-      log.info(
-        agenda
-          ? `VP ${this.participantId} has an agenda (${agenda.agenda.length} characters, source ${agenda.agendaSource})`
-          : `VP ${this.participantId} has no agenda`,
-      );
-      return agenda;
+      this.meetingInputs = this.meetingInputsFrom(result?.getVirtualParticipant);
+      return this.meetingInputs;
     } catch (error) {
-      log.error('Error getting the agenda:', error);
-      return null;
+      log.error('Error getting the agenda and meeting preparation:', error);
+      return { agenda: null, preparation: null };
     }
   }
 

@@ -59,6 +59,12 @@ ALL_TOOLS = {
     "read_skill_file",
 }
 
+# The meeting context and checklist: the meeting page's own chat is offered
+# them, and a request made in the meeting is not, whatever inMeetingRequestTools
+# says, unless inMeetingContextAccess is "allowed" (test_meeting_preparation_tools.py).
+CONTEXT_TOOLS = {"get_meeting_context", "get_meeting_checklist"}
+PAGE_TOOLS = ALL_TOOLS | CONTEXT_TOOLS
+
 # The current meeting: its transcript, its agenda, its shared screen and the
 # attachments shared in its chat. Guests in the meeting may read the agenda of
 # the meeting they are in, and see again what was shared with them, as they
@@ -171,6 +177,8 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         ("create_meeting_history_tool", "meeting_history"),
         ("create_current_meeting_transcript_tool", "current_meeting_transcript"),
         ("create_meeting_agenda_tool", "get_meeting_agenda"),
+        ("create_meeting_context_tool", "get_meeting_context"),
+        ("create_meeting_checklist_tool", "get_meeting_checklist"),
         ("create_meeting_frames_tool", "get_meeting_frames"),
         ("create_chat_attachments_tool", "get_chat_attachments"),
         ("create_vnc_preview_control_tool", "control_vnc_preview"),
@@ -302,7 +310,7 @@ def test_the_meeting_pages_assistant_is_given_every_configured_tool_whatever_the
     # a stand-in that builds nothing.
     configured({"inMeetingRequestTools": value})
     agent = built({"userEmail": "owner@example.com"})
-    assert agent["tools"] == ALL_TOOLS
+    assert agent["tools"] == PAGE_TOOLS
     assert handler_module.MEETING_CHAT_NOTE not in agent["system_prompt"]
     assert handler_module.CURRENT_MEETING_SCOPE_NOTE not in agent["system_prompt"]
 

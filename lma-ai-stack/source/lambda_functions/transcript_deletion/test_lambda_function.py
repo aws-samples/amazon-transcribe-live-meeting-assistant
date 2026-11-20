@@ -62,7 +62,7 @@ class FakeTable:
         item = self.items.get((Key["PK"], Key["SK"]))
         return {"Item": dict(item)} if item else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **_):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **kwargs):
         item = self.items.get((Key["PK"], Key["SK"]))
         if item is None:
             raise _conflict("ConditionalCheckFailedException")
@@ -76,6 +76,17 @@ class FakeTable:
             ):
                 raise _conflict("ConditionalCheckFailedException")
             item.pop("TranscriptDeletionScheduledFor", None)
+            return
+        if UpdateExpression.startswith("SET Checklist = :checklist"):
+            condition = kwargs["ConditionExpression"]
+            if "attribute_not_exists(ChecklistVersion)" in condition:
+                holds = "ChecklistVersion" not in item
+            else:
+                holds = item.get("ChecklistVersion") == values[":version"]
+            if not holds:
+                raise _conflict("ConditionalCheckFailedException")
+            item["Checklist"] = values[":checklist"]
+            item["ChecklistVersion"] = values[":next"]
             return
         if UpdateExpression.startswith("SET TranscriptDeletionScheduledFor"):
             item["TranscriptDeletionScheduledFor"] = values[":at"]
@@ -264,6 +275,86 @@ def test_a_knowledge_base_failure_does_not_fail_the_deletion(aws):
     outcome = lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     assert outcome["action"] == "deleted"
     assert "TranscriptDeletedAt" in _meeting(aws)
+
+
+CHECKLIST = [
+    {
+        "ItemId": "q1",
+        "Text": "Who owns the budget?",
+        "Kind": "question",
+        "Status": "covered",
+        "StatusSource": "assistant",
+        "Evidence": [
+            {"SegmentId": "s1", "StartTime": 64.5, "Quote": "Dana owns it"},
+            {"SegmentId": "s2", "StartTime": 70, "Quote": None},
+        ],
+        "Note": "Agreed",
+    },
+    {"ItemId": "t1", "Text": "Hiring", "Kind": "topic", "Status": "open", "Evidence": []},
+]
+
+
+def test_deleting_the_transcript_removes_each_checklist_quote_and_keeps_where_it_was(aws):
+    _meeting(aws).update(Checklist=CHECKLIST, ChecklistVersion=3)
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    meeting = _meeting(aws)
+    assert meeting["Checklist"][0]["Evidence"] == [
+        {"SegmentId": "s1", "StartTime": 64.5, "Quote": None},
+        {"SegmentId": "s2", "StartTime": 70, "Quote": None},
+    ]
+    # The status, note and the other item are kept; the version moves on, so a
+    # checklist write that read the old one is read again.
+    assert meeting["Checklist"][0]["Status"] == "covered"
+    assert meeting["Checklist"][0]["Note"] == "Agreed"
+    assert meeting["Checklist"][1] == CHECKLIST[1]
+    assert meeting["ChecklistVersion"] == 4
+
+
+def test_a_checklist_the_meeting_was_created_with_is_still_stripped(aws):
+    _meeting(aws).update(Checklist=CHECKLIST)
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] is None
+    assert _meeting(aws)["ChecklistVersion"] == 1
+
+
+def test_a_checklist_that_changes_meanwhile_is_read_again(aws, monkeypatch):
+    _meeting(aws).update(Checklist=CHECKLIST, ChecklistVersion=3)
+    original = aws.table.update_item
+    raced = []
+
+    def update_item(**kwargs):
+        if kwargs["UpdateExpression"].startswith("SET Checklist") and not raced:
+            raced.append(True)
+            _meeting(aws)["ChecklistVersion"] = 4
+        return original(**kwargs)
+
+    monkeypatch.setattr(aws.table, "update_item", update_item)
+    assert lf.strip_checklist_quotes(CALL_ID) == 1
+    assert _meeting(aws)["ChecklistVersion"] == 5
+    assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] is None
+
+
+def test_a_checklist_that_never_stops_changing_fails_the_run_so_it_is_retried(aws, monkeypatch):
+    _meeting(aws).update(Checklist=CHECKLIST, ChecklistVersion=3)
+    original = aws.table.update_item
+
+    def update_item(**kwargs):
+        if kwargs["UpdateExpression"].startswith("SET Checklist"):
+            _meeting(aws)["ChecklistVersion"] += 1
+        return original(**kwargs)
+
+    monkeypatch.setattr(aws.table, "update_item", update_item)
+    with pytest.raises(lf.ChecklistQuotesNotRemoved):
+        lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] == "Dana owns it"
+
+
+def test_a_meeting_without_quotes_is_not_written(aws):
+    _meeting(aws).update(Checklist=[CHECKLIST[1]], ChecklistVersion=2)
+    assert lf.strip_checklist_quotes(CALL_ID) == 0
+    assert _meeting(aws)["ChecklistVersion"] == 2
+    del _meeting(aws)["Checklist"]
+    assert lf.strip_checklist_quotes(CALL_ID) == 0
 
 
 def test_stamps_the_meeting_and_keeps_its_other_fields(aws):

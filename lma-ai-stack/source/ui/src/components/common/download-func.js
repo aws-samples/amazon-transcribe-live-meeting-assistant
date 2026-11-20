@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from './speaker-identities';
 import { detectedLanguagesText, meetingLanguages, showsLanguageMarks } from './detected-languages';
-import { keyframeImagesAsText, summarySections } from './summary';
+import { downloadSummarySections, keyframeImagesAsText } from './summary';
 import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
 import { fetchKeyframeThumbnails } from './keyframe-thumbnails';
@@ -318,25 +318,34 @@ export const downloadTranscriptAsDocx = async (callTranscriptPerCallId, meeting)
 const escapeMarkdown = (text) => String(text ?? '').replace(/([\\`*_[\]<>#|])/g, '\\$1');
 
 /**
- * The lines naming the meeting at the top of a Markdown download. The detected
- * languages are listed only for a meeting in more than one, the same test that
- * marks each line with its language, so a meeting in one language downloads as
- * before. `segments` are the transcript's, when the download has them: their
- * languages are counted with the record's, as the per-line marks count them.
+ * The facts naming the meeting at the top of a download, [{ label, value }]:
+ * its ID, date, participants (`participants`, the names the meeting page's
+ * header lists, when the caller has them), duration, and detected languages.
+ * The languages are listed only for a meeting in more than one, the same test
+ * that marks each line with its language, so a meeting in one language
+ * downloads as before. `segments` are the transcript's, when the download has
+ * them: their languages are counted with the record's, as the per-line marks
+ * count them.
  */
-const markdownMeetingFacts = (meeting, segments = []) => {
+export const meetingFacts = (meeting, segments = [], participants = []) => {
   const languages = meetingLanguages(meeting.detectedLanguages, segments);
+  const names = (participants || []).map((name) => String(name ?? '').trim()).filter(Boolean);
   return [
-    `- **Meeting ID:** ${escapeMarkdown(meeting.callId)}`,
-    meeting.initiationTimeStamp ? `- **Date:** ${meeting.initiationTimeStamp}` : null,
-    meeting.conversationDurationTimeStamp ? `- **Duration:** ${meeting.conversationDurationTimeStamp}` : null,
-    showsLanguageMarks(languages)
-      ? `- **Detected languages:** ${escapeMarkdown(detectedLanguagesText(languages))}`
+    { label: 'Meeting ID', value: String(meeting.callId ?? '') },
+    meeting.initiationTimeStamp ? { label: 'Date', value: String(meeting.initiationTimeStamp) } : null,
+    names.length ? { label: 'Participants', value: names.join(', ') } : null,
+    meeting.conversationDurationTimeStamp
+      ? { label: 'Duration', value: String(meeting.conversationDurationTimeStamp) }
       : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
+    showsLanguageMarks(languages) ? { label: 'Detected languages', value: detectedLanguagesText(languages) } : null,
+  ].filter(Boolean);
 };
+
+/** The meeting's facts (meetingFacts) as the Markdown list at the top of a download. */
+const markdownMeetingFacts = (meeting, segments = [], participants = []) =>
+  meetingFacts(meeting, segments, participants)
+    .map(({ label, value }) => `- **${label}:** ${escapeMarkdown(value)}`)
+    .join('\n');
 
 /** The consent record (consentAsText) as a Markdown section. */
 export const consentAsMarkdown = (consent) => {
@@ -359,16 +368,18 @@ export const consentAsMarkdown = (consent) => {
 };
 
 /**
- * The summary as a Markdown document: the meeting's name and facts, a section
- * per summary section (a `##` heading each), and the consent record when the
- * meeting has one. A key frame cannot travel with a Markdown file, so its
- * picture is written as its alt text; with `keyframes: 'reference'` the
- * picture's `![alt](keyframe:<FrameId>)` reference is kept, for the Word and
- * PDF downloads, which embed the frame (summaryDocBlocks).
+ * The summary as a Markdown document: the meeting's name and facts, every
+ * section of the summary (a `##` heading each) in reading order
+ * (downloadSummarySections), and the consent record when the meeting has one.
+ * A key frame cannot travel with a Markdown file, so its picture is written as
+ * its alt text; with `keyframes: 'reference'` the picture's
+ * `![alt](keyframe:<FrameId>)` reference is kept, for the Word and PDF
+ * downloads, which embed the frame (summaryDocBlocks). `participants` are the
+ * names listed with the meeting's facts.
  */
-export const summaryDownloadMarkdown = (meeting, consent = null, { keyframes = 'text' } = {}) => {
-  const parts = [`# ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting)];
-  const sections = summarySections(meeting.callSummaryText);
+export const summaryDownloadMarkdown = (meeting, consent = null, { keyframes = 'text', participants = [] } = {}) => {
+  const parts = [`# ${escapeMarkdown(meetingTitle(meeting.callId))}`, markdownMeetingFacts(meeting, [], participants)];
+  const sections = downloadSummarySections(meeting.callSummaryText);
   if (!sections.length) parts.push('## Summary\n\nNot available');
   sections.forEach(({ title, markdown }) => {
     const body = keyframes === 'reference' ? markdown : keyframeImagesAsText(markdown);
@@ -467,8 +478,14 @@ const keyframeAsText = (block) => ({ kind: 'paragraph', runs: inlineRuns(`(${blo
  * or one that could not be fetched, is its alt text in brackets, as in the
  * other downloads.
  */
-export const summaryDocBlocks = async (meeting, consent = null, { loadThumbnails = fetchKeyframeThumbnails } = {}) => {
-  const blocks = markdownToDocBlocks(summaryDownloadMarkdown(meeting, consent, { keyframes: 'reference' }));
+export const summaryDocBlocks = async (
+  meeting,
+  consent = null,
+  { loadThumbnails = fetchKeyframeThumbnails, participants = [] } = {},
+) => {
+  const blocks = markdownToDocBlocks(
+    summaryDownloadMarkdown(meeting, consent, { keyframes: 'reference', participants }),
+  );
   const frameIds = blocks.filter((block) => block.kind === 'keyframe').map((block) => block.id);
   const thumbnails = frameIds.length && meeting.callId ? (await loadThumbnails(meeting.callId, frameIds)) || {} : {};
   return blocks.map((block) => {
@@ -597,4 +614,97 @@ export const downloadTranscriptAsPdf = async (callTranscriptPerCallId, meeting, 
 export const downloadTranscriptAsMarkdown = async (callTranscriptPerCallId, meeting) => {
   const { callId } = meeting;
   await exportToMarkdownFile(transcriptDownloadMarkdown(callTranscriptPerCallId, meeting), `Transcript-${callId}`);
+};
+
+// The FrameIds the key frame pictures in a text name, in the order they appear.
+const frameIdsInText = (text) => [...String(text ?? '').matchAll(KEYFRAME_REFERENCE)].map((match) => match[2]);
+
+// The HTML renderer (html-export.jsx), loaded the first time a web page is
+// asked for, so react-dom/server is not in the page's bundle.
+const loadHtmlExport = () => import('./html-export');
+
+// The consent record as the body of a section, without the heading the Markdown download gives it.
+const consentBody = (consent) => (consent ? consentAsMarkdown(consent).replace(/^## Consent\n+/, '') : '');
+
+/**
+ * The summary as a self-contained HTML document (a string; see
+ * html-export.jsx): the meeting's name and facts, every section of the summary
+ * in reading order (downloadSummarySections), and the consent record, with
+ * each key frame the summary pictures embedded from the thumbnail
+ * fetchKeyframeThumbnails fetched (at most MAX_EMBEDDED_KEYFRAMES of them),
+ * the same fetch the Word and PDF downloads use.
+ */
+export const summaryDownloadHtml = async (
+  meeting,
+  consent = null,
+  { loadThumbnails = fetchKeyframeThumbnails, participants = [], loadRenderer = loadHtmlExport } = {},
+) => {
+  const found = downloadSummarySections(meeting.callSummaryText);
+  const sections = found.length ? found : [{ title: 'Summary', markdown: 'Not available' }];
+  const frameIds = sections.flatMap((section) => frameIdsInText(section.markdown));
+  const thumbnails = frameIds.length && meeting.callId ? (await loadThumbnails(meeting.callId, frameIds)) || {} : {};
+  const { renderSummaryHtml } = await loadRenderer();
+  return renderSummaryHtml({
+    title: meetingTitle(meeting.callId),
+    facts: meetingFacts(meeting, [], participants),
+    sections,
+    consentMarkdown: consentBody(consent),
+    thumbnails,
+  });
+};
+
+/**
+ * The transcript as a self-contained HTML document (a string): the same rows,
+ * speaker names and times as the other transcript downloads
+ * (transcriptDownloadRows), under the meeting's facts, and the consent record
+ * at the end when the meeting has one.
+ */
+export const transcriptDownloadHtml = async (
+  callTranscriptPerCallId,
+  meeting,
+  consent = null,
+  { loadRenderer = loadHtmlExport } = {},
+) => {
+  const rows = transcriptDownloadRows(callTranscriptPerCallId, meeting);
+  const { renderTranscriptHtml } = await loadRenderer();
+  return renderTranscriptHtml({
+    title: `Meeting Transcript: ${meetingTitle(meeting.callId)}`,
+    facts: meetingFacts(
+      meeting,
+      rows.map((row) => ({ languageCode: row.language })),
+    ),
+    rows: rows.map((row) => ({
+      speaker: row.speaker,
+      stamp: rowStamp(row),
+      text: String(row.transcript ?? '').trim(),
+    })),
+    consentMarkdown: consentBody(consent),
+  });
+};
+
+const exportToHtmlFile = (html, nameFile) => {
+  saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `${nameFile}.html`);
+};
+
+/** The summary as a web page, saved as `Summary-<callId>.html`. */
+export const downloadSummaryAsHtml = async (meeting, consent = null, options = {}) => {
+  try {
+    exportToHtmlFile(await summaryDownloadHtml(meeting, consent, options), `Summary-${meeting.callId}`);
+  } catch (error) {
+    console.error('Error exporting to HTML:', error);
+    alert('Could not generate the web page. Please make sure you have an internet connection and try again.');
+  }
+};
+
+/** The transcript as a web page, saved as `Transcript-<callId>.html`. */
+export const downloadTranscriptAsHtml = async (callTranscriptPerCallId, meeting, consent = null, options = {}) => {
+  try {
+    exportToHtmlFile(
+      await transcriptDownloadHtml(callTranscriptPerCallId, meeting, consent, options),
+      `Transcript-${meeting.callId}`,
+    );
+  } catch (error) {
+    console.error('Error exporting to HTML:', error);
+    alert('Could not generate the web page. Please make sure you have an internet connection and try again.');
+  }
 };

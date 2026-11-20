@@ -71,6 +71,8 @@ The Meeting Assistant has access to the following tools. A request made in the m
 | `current_meeting_transcript` | Retrieves and summarizes the current meeting transcript. Use this to answer questions about what has been discussed in the ongoing meeting. The messages typed in the meeting chat are among the lines, each as `[chat] <sender>: <message>` in time order with the speech. It can prefix each line with its time from the start of the meeting (`[MM:SS]`), which the assistant uses when an answer should say when something was discussed. |
 | `get_meeting_agenda` | Reads the current meeting's agenda, numbered as the meeting page lists it, with where it came from. The assistant uses it for questions about the agenda and for progress checks — each item reported as covered, in progress or remaining, with the transcript times where it was discussed — and says so plainly when the meeting has no agenda rather than inventing one. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Agenda](meeting-agenda.md#asking-the-assistant-about-the-agenda). |
 | `get_meeting_frames` | Reads the key frames of the meeting's shared screen — the last few, those in a time range, or the one on screen at a moment — each with what was said while it was on screen, and passes the pictures themselves to the model when it reads images (every model the stack offers except Amazon Nova Micro, which gets the times and transcript only). It answers "summarize that slide", "translate the last slide into French" or "show me the last two slides"; in the meeting page's chat the answer can show the frames, while in the meeting chat and by voice it describes them. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
+| `get_meeting_context` | Reads the current meeting's [meeting context](meeting-context-and-checklist.md): the briefing written by the people preparing it (goals, background, terms, what a good outcome is). Offered to the meeting page's chat, and to a request made in the meeting only when **In-meeting requests: meeting context and checklist** is Allowed; see [Requests made in the meeting](meeting-context-and-checklist.md#requests-made-in-the-meeting). |
+| `get_meeting_checklist` | Reads the current meeting's [checklist](meeting-context-and-checklist.md): one line per item with its status, priority, kind and the transcript times of its evidence, for questions such as "what haven't we covered?". Offered as `get_meeting_context` is. |
 | `get_chat_attachments` | Lists the images and files shared in the meeting chat that the Virtual Participant stored, each with when it was shared, its file name, and its AI title and summary, or why it was recorded by name only. It answers "what was the picture Alice posted?" or "which documents were shared in the chat?". It lists them; it does not pass the files themselves to the model. Offered in every tool scope, as `get_meeting_frames` is. See [Chat Attachments](virtual-participant.md#chat-attachments). |
 | `document_search` | Searches the Bedrock Knowledge Base for relevant documents. Available only when a Knowledge Base is configured (STRANDS_BEDROCK_WITH_KB modes). |
 | `meeting_history` | Performs semantic search across past meeting transcripts. User-Based Access Control (UBAC) is enforced, so users only see results from their own meetings unless they are admins. |
@@ -105,6 +107,16 @@ None of these can tell who in the meeting asked: a chat sender is known only by 
   | **In-meeting requests: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise; see [Skills](#skills) |
 
   A tool that is switched on but that the deployment cannot offer (web search with no Tavily API key, a knowledge base that is not deployed, MCP servers when none is installed or none could be loaded) is named to the assistant as not available, so that it says so when a request needs it. The meeting assistant function's log records, for every in-meeting request, the tool groups allowed, offered and unavailable.
+
+**The meeting context and checklist** are not offered to any request made in
+the meeting under any of the three choices: the context can hold the owner's
+preparation notes, and a meeting's guests are often outside the owner's
+organization. **Meeting Assistant › In-meeting requests: meeting context and
+checklist** (`meeting_assist.inMeetingContextAccess`) is `none` by default; an
+Admin who sets it to `allowed` offers `get_meeting_context` and
+`get_meeting_checklist` to requests made in the meeting too, whose answers are
+then posted or spoken for everyone there. See
+[Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md#requests-made-in-the-meeting).
 
 ### Choosing MCP servers one by one
 
@@ -317,6 +329,7 @@ See [Integration Credentials](infrastructure-and-security.md#rotating-a-credenti
 
 ## Related Documentation
 
+- [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
 - [MCP Servers](mcp-servers.md)
 - [Transcript Summarization](transcript-summarization.md)
 - [Voice Assistant](voice-assistant.md)

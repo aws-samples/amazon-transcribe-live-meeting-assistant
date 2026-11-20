@@ -352,6 +352,21 @@ Parameters:
       it to open a short-lived embedding session; empty means that engine is not
       deployed, and enrolling a voice is refused rather than appearing to work.
 
+  AsrModelBundleId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The ASR model bundle baked into the MicroVM image. Voice
+      enrollment names it when the bundle cannot compute a voiceprint.
+
+  AsrSpeakerModelId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The speaker-embedding model in that bundle, or "none". Voice
+      enrollment needs one; with "none" the portal says so before anything is
+      recorded. Empty means not known, and the embedding session decides.
+
   TroubleshootingAgentFunctionArn:
     Type: String
     Default: ""
@@ -1125,6 +1140,11 @@ Resources:
           # The embedding model lives in the ASR MicroVM image, so computing a
           # voiceprint means acquiring a short-lived session from the launcher.
           ASR_LAUNCHER_FUNCTION_ARN: !Ref AsrLauncherFunctionArn
+          # Not every bundle carries a speaker-embedding model (the default one
+          # diarizes end to end without one), and its MicroVM then refuses to
+          # embed. Knowing it here lets the portal say so up front.
+          ASR_MODEL_BUNDLE_ID: !Ref AsrModelBundleId
+          ASR_SPEAKER_MODEL_ID: !Ref AsrSpeakerModelId
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentManagerFunction
@@ -7036,6 +7056,149 @@ Resources:
         LambdaFunctionArn: !GetAtt MeetingConsentResolverFunction.Arn
 
   ##########################################################################
+  # Meeting preparation: a meeting's labels, audience, meeting context and
+  # checklist (Call.Labels, Audience, MeetingContext, Checklist). One resolver
+  # Lambda for the five mutations, and for the check the Virtual Participant
+  # create and scheduled-edit pipelines run on the same inputs. See
+  # docs/meeting-context-and-checklist.md.
+  ##########################################################################
+
+  MeetingPreparationResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt MeetingPreparationResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_preparation_resolver
+      Description: >-
+        Lambda resolver for a meeting's labels, audience, meeting context and
+        checklist
+      MemorySize: 256
+      # One read and one write, repeated a few times on a conflict.
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          ADMIN_GROUP: "Admin"
+          LOG_LEVEL: !Ref LogLevel
+      # Carries lma_meeting_preparation (the rules). Pure Python, so it does
+      # not pin an architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/MeetingPreparationResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only a table name and a group name"
+    DependsOn:
+      - MeetingPreparationResolverFunctionLogGroup
+
+  MeetingPreparationResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/MeetingPreparationResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingPreparationResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingPreparationResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-MeetingPreparationResolver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The meeting rows (c# partitions): read for their Owner,
+              # SharedWith and checklist, which decide who may write and what
+              # the checklist holds; updated with the preparation fields only.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncMeetingPreparationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingPreparationResolverFunction.Arn
+
+  MeetingPreparationLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MeetingPreparationLambda
+      Description: Lambda function for a meeting's labels, audience, meeting context and checklist
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingPreparationLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingPreparationResolverFunction.Arn
+
+  ##########################################################################
   # Meeting reopen: reopenMeeting allows one more capture session on an
   # existing meeting, for a streaming client that is to continue it. The
   # session rules are lma_sessions in the configuration layer, which the
@@ -8140,6 +8303,76 @@ Resources:
           - !GetAtt UpdateCallAgendaAppSyncFunction.FunctionId
       RequestMappingTemplate: "{}"
       ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+  # A meeting's preparation: labels, audience, meeting context and checklist.
+  # Reachable by signed-in users; the Lambda applies the updateCallAgenda rule
+  # (Admin, the meeting owner, or a user it is shared with) and restates it in
+  # the write's condition.
+
+  UpdateCallMeetingContextAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallMeetingContext
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      # Published to onUpdateCall, filtered on SharedWith in subscription.js,
+      # so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallChecklistAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallChecklist
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      # Published to onUpdateCall, filtered on SharedWith in subscription.js,
+      # so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallChecklistItemAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallChecklistItem
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      # Published to onUpdateCall, filtered on SharedWith in subscription.js,
+      # so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallLabelsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallLabels
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      # Published to onUpdateCall, filtered on SharedWith in subscription.js,
+      # so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallAudienceAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallAudience
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      # Published to onUpdateCall, filtered on SharedWith in subscription.js,
+      # so it answers in the form that filter matches.
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
   AddCallSummaryTextAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -10108,6 +10341,21 @@ Resources:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
+  # The check of a Virtual Participant's meeting preparation inputs (labels,
+  # audience, meetingContext, checklist), by the meeting preparation resolver
+  # Lambda, before createVirtualParticipant or updateScheduledVirtualParticipant
+  # stores them. A request without them does not invoke the Lambda.
+  ValidateMeetingPreparationAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ValidateMeetingPreparation
+      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/validateMeetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/validateMeetingPreparation.response.vtl
+
   CreateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -10115,7 +10363,22 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: createVirtualParticipant
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt ValidateMeetingPreparationAppSyncFunction.FunctionId
+          - !GetAtt CreateVirtualParticipantAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+  CreateVirtualParticipantAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: CreateVirtualParticipantWrite
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      FunctionVersion: "2018-05-29"
       # !Sub for ${MeetingRecordExpirationInDays} only: the template writes
       # every VTL reference without braces, so nothing else is substituted.
       RequestMappingTemplate: !Sub |
@@ -10195,6 +10458,17 @@ Resources:
             $util.qr($input.put("agendaSource", "mcp"))
           #else
             $util.qr($input.put("agendaSource", "scheduled"))
+          #end
+        #end
+
+        ## Optional meeting preparation (labels, audience, meetingContext,
+        ## checklist), checked and normalized by the pipeline's first function,
+        ## which put them in the stash. Read by the VP container when it starts,
+        ## like the agenda; an empty one is not stored.
+        #set($preparation = $util.defaultIfNull($ctx.stash.preparation, {}))
+        #foreach($name in $util.defaultIfNull($preparation.present, []))
+          #if(!$util.isNull($preparation.get($name)))
+            $util.qr($input.put($name, $preparation.get($name)))
           #end
         #end
 
@@ -10664,12 +10938,13 @@ Resources:
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/virtual_participant_manager
       Description: Enhanced Virtual Participant Manager with ECS termination and Kinesis events
-      MemorySize: 512
-      Timeout: 300
-      # Carries lma_sessions, the session rules rejoin shares with the meeting
-      # reopen resolver. Pure Python, so it does not pin an architecture.
+      # lma_meeting_preparation, for the meeting preparation a Join again
+      # carries, and lma_sessions, the session rules rejoin shares with the
+      # meeting reopen resolver. Pure Python, so it does not pin an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
+      MemorySize: 512
+      Timeout: 300
       Environment:
         Variables:
           TABLE_NAME: !Ref VirtualParticipantTable
@@ -12342,13 +12617,19 @@ Resources:
                         Description: "ISO 8601 end date"
                       participant:
                         Type: string
-                        Description: "Filter by participant name"
+                        Description: >-
+                          Matches a name in a participant list stored on the
+                          meeting record; LMA does not record one today, so
+                          this usually matches nothing.
                       status:
                         Type: string
-                        Description: "Meeting status filter"
+                        Description: >-
+                          Meeting status filter: ALL (default), IN_PROGRESS
+                          (started or transcribing), STARTED, TRANSCRIBING,
+                          ERRORED or ENDED. Not case sensitive.
                       limit:
                         Type: number
-                        Description: "Maximum number of meetings to return"
+                        Description: "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)"
                 - Name: schedule_meeting
                   Description: >-
                     Schedule a future meeting with virtual participant. If you
@@ -12834,6 +13115,7 @@ Resources:
       Kind: PIPELINE
       PipelineConfig:
         Functions:
+          - !GetAtt ValidateMeetingPreparationAppSyncFunction.FunctionId
           - !GetAtt ReadScheduledVirtualParticipantAppSyncFunction.FunctionId
           - !GetAtt UpdateScheduledVirtualParticipantAppSyncFunction.FunctionId
       RequestMappingTemplate: "{}"

@@ -217,3 +217,41 @@ def test_the_selectors_work_against_a_schema_without_the_language_fields(dsl_sch
     older = DSLSchema(build_ast_schema(parse(APPSYNC_PRELUDE + without), assume_valid_sdl=True))
     assert "LanguageCode" not in {str(f.name) for f in transcript_segment_fields(older)}
     assert "DetectedLanguages" not in {str(f.name) for f in call_fields(older)}
+
+
+def test_the_call_selector_carries_every_sessions_recordings(dsl_schema: DSLSchema):
+    """The write that stores a session's recording link publishes it to
+    onUpdateCall, so a meeting page left open plays the new session's file."""
+    from gql.dsl import DSLQuery, dsl_gql
+    from graphql import print_ast
+
+    from graphql_helpers.call_fields import SESSION_PLAYBACK_FIELDS
+
+    selected = {str(f.name) for f in call_fields(dsl_schema)}
+    assert set(SESSION_PLAYBACK_FIELDS) | {"Sessions"} <= selected
+    document = print_ast(
+        dsl_gql(
+            DSLQuery(dsl_schema.Query.getCall.args(CallId="c").select(*call_fields(dsl_schema)))
+        )
+    )
+    sessions = document[document.index("Sessions {") :]
+    sessions = sessions[sessions.index("{") + 1 : sessions.index("}")]
+    assert set(sessions.split()) == {"SessionNumber", "OffsetSeconds", "StartedAt"}
+
+
+def test_the_call_selector_works_against_a_schema_without_the_session_fields(
+    dsl_schema: DSLSchema,
+):
+    """During a stack update the running schema can predate these fields."""
+    without = SCHEMA.read_text()
+    for line in (
+        "\tRecordingUrlSessions: [Int]\n",
+        "\tVideoRecordingUrlSessions: [Int]\n",
+        "\tSessions: [CallSession]\n",
+    ):
+        assert line in without, line
+        without = without.replace(line, "", 1)
+    older = DSLSchema(build_ast_schema(parse(APPSYNC_PRELUDE + without), assume_valid_sdl=True))
+    selected = {str(f.name) for f in call_fields(older)}
+    assert not {"RecordingUrlSessions", "VideoRecordingUrlSessions", "Sessions"} & selected
+    assert {"RecordingUrls", "SessionNumber"} <= selected

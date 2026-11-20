@@ -1,0 +1,9 @@
+## The checked meeting preparation inputs, for the pipeline's write function to
+## read from the stash (as $ctx.stash.preparation): `present` and, for each
+## name in it, the value to store or null to remove. A refused input is the
+## request's error, with the Lambda's message.
+#if( $ctx.error )
+  $util.error($ctx.error.message, "BadRequest")
+#end
+$util.qr( $ctx.stash.put("preparation", $ctx.result) )
+$util.toJson($ctx.result)
