@@ -20,6 +20,7 @@
 // Admin); this module only offers what they allow, and says why Continue is
 // not offered. See docs/virtual-participant.md#join-again.
 
+import { vpPreparationForm } from '../common/meeting-preparation';
 import { consentChoiceOf } from './scheduled-edit';
 import { EMPTY_VP_FORM, submittedMeetingFields } from './vp-form';
 
@@ -138,7 +139,8 @@ export const meetingFromRead = ({ data = undefined, error = undefined } = {}) =>
 /**
  * The values Join again opens the create form with.
  *
- * Copied: platform, meeting ID or link, meeting name, agenda, consent choice
+ * Copied: platform, meeting ID or link, meeting name, agenda, meeting
+ * preparation (labels, audience, meeting context, checklist), consent choice
  * and video recording. Left as for a new Virtual Participant: the date and
  * time, the password (the API never returns it; the server uses the saved one
  * for the same meeting), the Zoom account choice and the browser profile (both
@@ -152,6 +154,7 @@ export const joinAgainFormFrom = (vp, continueOption = { available: false, reaso
     meetingPlatform: vp?.meetingPlatform || EMPTY_VP_FORM.meetingPlatform,
     meetingId: vp?.meetingId || '',
     agenda: vp?.agenda || '',
+    preparation: vpPreparationForm(vp),
   };
   return {
     form,
@@ -229,6 +232,10 @@ export const joinAgainInputFrom = (sourceVpId, vpInput, { useStoredZoomAccount =
     'scheduledTimeZone',
     'enableVideoRecording',
     'agenda',
+    'labels',
+    'audience',
+    'meetingContext',
+    'checklist',
     'consentMode',
     'consentRule',
   ].forEach((field) => {

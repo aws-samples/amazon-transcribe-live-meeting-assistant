@@ -285,6 +285,13 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallAgenda"),
     # Lambda resolver applying the same rule in `caller_may_edit`.
     ("Mutation", "deriveCallAgenda"),
+    # The preparation of one meeting: one Lambda resolver applies the same
+    # owner/share rule and restates it in the write's DynamoDB condition.
+    ("Mutation", "updateCallMeetingContext"),
+    ("Mutation", "updateCallChecklist"),
+    ("Mutation", "updateCallChecklistItem"),
+    ("Mutation", "updateCallLabels"),
+    ("Mutation", "updateCallAudience"),
     # The consent record of one meeting: one Lambda resolver applies each
     # operation's rule against the meeting's owner and share list, and the
     # evidence mutation accepts backend roles only.

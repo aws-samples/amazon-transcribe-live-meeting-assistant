@@ -55,6 +55,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# recorded before they were kept.
 	RecordingUrls: [String]
 	VideoRecordingUrls: [String]
+	# The capture session each link in RecordingUrls and VideoRecordingUrls was
+	# recorded in, at the same index; null where the writer did not know it.
+	# Written with the link, in the same update. Absent, or shorter than the
+	# link list, on a meeting recorded by a pre-release build of the rejoin
+	# feature; the meeting page then pairs them only where it can.
+	RecordingUrlSessions: [Int]
+	VideoRecordingUrlSessions: [Int]
 	TotalConversationDurationMillis: Float
 	AgentId: String
 	Metadatajson: String
@@ -91,6 +98,28 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# backend -- and when.
 	AgendaUpdatedBy: String
 	AgendaUpdatedAt: AWSDateTime
+	# The meeting's preparation, beside its agenda: key/value labels, its
+	# audience, a briefing for the assistant and the summary, and the items it
+	# should cover. Set when a Virtual Participant creates the meeting (from the
+	# values it was started or scheduled with) and through updateCallLabels,
+	# updateCallAudience, updateCallMeetingContext, updateCallChecklist and
+	# updateCallChecklistItem, which hold a signed-in caller to the
+	# updateCallAgenda access rule. Never posted to the meeting chat or spoken by
+	# LMA on its own. See docs/meeting-context-and-checklist.md.
+	# At most 20. Key [a-z0-9][a-z0-9._-]{0,62}, unique; Value at most 256
+	# characters. [] once cleared.
+	Labels: [CallLabel]
+	# "internal", "external", or absent (unspecified, the default).
+	Audience: String
+	# When Labels or Audience last changed.
+	MeetingMetadataUpdatedAt: AWSDateTime
+	# Markdown, at most 20,000 characters, with who last set it and when.
+	MeetingContext: String
+	MeetingContextUpdatedBy: String
+	MeetingContextUpdatedAt: AWSDateTime
+	# At most 100 items, and at most 128 KB stored.
+	Checklist: [ChecklistItem]
+	ChecklistUpdatedAt: AWSDateTime
 	# The meeting's consent record: the mode and rule it runs in, its status,
 	# whether it may be recorded and transcribed now, and the notices, replies,
 	# attestation and evidence behind that. Absent on a meeting whose consent was
@@ -157,8 +186,23 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	ReopenedBy: String
 	SessionStartedNumber: Int
 	SessionStartedAt: AWSDateTime
+	# Every capture session after the first that has started, oldest first, with
+	# where it starts on the transcript timeline: appended by startCallSession.
+	# The first session starts at 0 and is not listed. The meeting page's player
+	# reads it, with the recording lists above, to play each session's recording
+	# at its place on the timeline.
+	Sessions: [CallSession]
 	Owner: String
 	SharedWith: String
+}
+
+# One capture session of a meeting (Call.Sessions).
+type CallSession @aws_cognito_user_pools
+@aws_iam {
+	SessionNumber: Int!
+	# Where the session starts on the meeting's transcript timeline, in seconds.
+	OffsetSeconds: Float
+	StartedAt: AWSDateTime
 }
 
 type CallList @aws_cognito_user_pools
@@ -224,6 +268,15 @@ input CreateCallInput {
 	AgendaSource: String
 	AgendaUpdatedBy: String
 	AgendaUpdatedAt: AWSDateTime
+	# The same for the meeting's preparation; see these fields on Call.
+	Labels: [CallLabelInput]
+	Audience: String
+	MeetingMetadataUpdatedAt: AWSDateTime
+	MeetingContext: String
+	MeetingContextUpdatedBy: String
+	MeetingContextUpdatedAt: AWSDateTime
+	Checklist: [ChecklistItemStateInput]
+	ChecklistUpdatedAt: AWSDateTime
 	# How the meeting is captured and transcribed; see these fields on Call.
 	CaptureSource: String
 	TranscriptionEngine: String
@@ -345,6 +398,12 @@ type Mutation @aws_iam {
 	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
 	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools @aws_iam
+	# The meeting's preparation; see docs/meeting-context-and-checklist.md.
+	updateCallMeetingContext(input: UpdateCallMeetingContextInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallChecklist(input: UpdateCallChecklistInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallChecklistItem(input: UpdateCallChecklistItemInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallLabels(input: UpdateCallLabelsInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallAudience(input: UpdateCallAudienceInput!): Call @aws_cognito_user_pools @aws_iam
 	# The meeting consent record (Call.Consent). One Lambda resolver applies the
 	# access rule of each; see the Meeting consent section below and
 	# docs/meeting-consent.md.
@@ -611,6 +670,15 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# neither launch path has to carry it.
 	agenda: String
 	agendaSource: String
+	# The meeting's preparation given when the VP was started or scheduled,
+	# checked by the meeting preparation resolver: labels, audience, meeting
+	# context and checklist (as definitions). Read by the VP container when it
+	# starts, like the agenda, which puts them on the meeting record it creates.
+	# See docs/meeting-context-and-checklist.md.
+	labels: [CallLabel]
+	audience: String
+	meetingContext: String
+	checklist: [ChecklistItemDefinition]
 	# The meeting consent mode and opt-in rule chosen for this meeting when the
 	# VP was started or scheduled; absent means the deployment's (see
 	# docs/meeting-consent.md). Read by the VP container when it starts, like
@@ -714,6 +782,14 @@ input CreateVirtualParticipantInput {
 	# resolver records its source as "mcp" for an IAM caller and "scheduled"
 	# for a signed-in user.
 	agenda: String
+	# Optional meeting preparation, with the limits of the Call fields of the
+	# same names: labels, audience ("internal" or "external"), meeting context
+	# (Markdown) and checklist. Persisted on the row and put on the meeting
+	# when the VP creates it.
+	labels: [CallLabelInput!]
+	audience: String
+	meetingContext: String
+	checklist: [ChecklistItemInput!]
 	# Optional meeting consent choice for this meeting: "off", "notify" or
 	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,
 	# the deployment's. The deployment's rule on a per-meeting choice is
@@ -775,6 +851,11 @@ input UpdateScheduledVirtualParticipantInput {
 	scheduledTimeZone: String
 	# Sent empty, removes the agenda.
 	agenda: String
+	# Sent empty (an empty list or text), each removes that input.
+	labels: [CallLabelInput!]
+	audience: String
+	meetingContext: String
+	checklist: [ChecklistItemInput!]
 	# Sent empty, removes the meeting consent choice, so the deployment's applies.
 	consentMode: String
 	consentRule: String
@@ -806,6 +887,11 @@ input JoinAgainVirtualParticipantInput {
 	scheduledTimeZone: String
 	enableVideoRecording: Boolean
 	agenda: String
+	# The meeting preparation, as on CreateVirtualParticipantInput.
+	labels: [CallLabelInput!]
+	audience: String
+	meetingContext: String
+	checklist: [ChecklistItemInput!]
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
@@ -922,7 +1008,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -1278,6 +1364,9 @@ input UpdateRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The capture session the recording belongs to, appended to
+	# Call.RecordingUrlSessions beside the link.
+	RecordingUrlSession: Int
 }
 
 input UpdateVideoRecordingUrlInput {
@@ -1286,6 +1375,9 @@ input UpdateVideoRecordingUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+	# The capture session the recording belongs to, appended to
+	# Call.VideoRecordingUrlSessions beside the link.
+	VideoRecordingUrlSession: Int
 }
 
 input AddCallDetectedLanguageInput {
@@ -1296,6 +1388,10 @@ input AddCallDetectedLanguageInput {
 input StartCallSessionInput {
 	CallId: ID!
 	SessionNumber: Int!
+	# Where the session starts on the transcript timeline, as the rejoin that
+	# allowed it recorded (Call.SessionOffsetSeconds). Given, the
+	# session is appended to Call.Sessions.
+	SessionOffsetSeconds: Float
 }
 
 input UpdateTranscriptionPauseInput {
@@ -1340,6 +1436,11 @@ type VoiceEnrollmentState @aws_cognito_user_pools {
 	# The exact text the enrollee is shown and whose hash is stored with their
 	# consent, so a stored consent proves what it was given to.
 	Terms: String
+	# False when this deployment cannot compute a voiceprint: no on-demand
+	# speech engine, or an ASR model bundle with no speaker model. The reason
+	# says which, and the portal shows it instead of offering to record.
+	EnrollmentAvailable: Boolean
+	EnrollmentUnavailableReason: String
 }
 
 type VoiceEnrollmentResult @aws_cognito_user_pools {
@@ -1415,6 +1516,161 @@ input UpdateCallAgendaInput {
 
 input DeriveCallAgendaInput {
 	CallId: ID!
+}
+
+# ----------------------------------------------------------------------------
+# Meeting preparation: labels, audience, meeting context and checklist
+#
+# Written by the meeting preparation resolver Lambda, which holds a signed-in
+# caller to the updateCallAgenda rule -- Admin, the meeting's owner, or a user it
+# has been shared with -- and restates it in the write's DynamoDB condition. See
+# docs/meeting-context-and-checklist.md.
+# ----------------------------------------------------------------------------
+
+type CallLabel @aws_cognito_user_pools
+@aws_iam {
+	Key: String!
+	Value: String!
+}
+
+type ChecklistEvidence @aws_cognito_user_pools
+@aws_iam {
+	# The transcript segment the evidence is in.
+	SegmentId: String
+	# Seconds from the meeting's start.
+	StartTime: Float
+	# At most 300 characters, verbatim from the transcript. Removed when the
+	# transcript is deleted under retention; SegmentId and StartTime are kept.
+	Quote: String
+}
+
+type ChecklistItem @aws_cognito_user_pools
+@aws_iam {
+	# Caller-supplied and stable: [A-Za-z0-9._:-]{1,64}, unique in the meeting.
+	ItemId: String!
+	# At most 500 characters.
+	Text: String!
+	# question, topic, risk, confirm, decision or action.
+	Kind: String!
+	# must, should (the default) or could.
+	Priority: String
+	# An opaque reference of the caller's, at most 256 characters, returned
+	# unchanged.
+	Source: String
+	# open (the default), covered, partial, deferred or not_applicable.
+	Status: String!
+	# Who set the status: "user" or "assistant". The assistant never changes a
+	# status a user set.
+	StatusSource: String
+	# At most 5 entries, the newest kept.
+	Evidence: [ChecklistEvidence]
+	# At most 1000 characters.
+	Note: String
+	UpdatedBy: String
+	UpdatedAt: AWSDateTime
+}
+
+# A checklist item as it is defined before the meeting: what a Virtual
+# Participant is started or scheduled with. Every item starts open when the
+# Virtual Participant creates the meeting.
+type ChecklistItemDefinition @aws_cognito_user_pools
+@aws_iam {
+	ItemId: String!
+	Text: String!
+	Kind: String!
+	Priority: String
+	Source: String
+}
+
+input CallLabelInput {
+	Key: String!
+	Value: String!
+}
+
+input ChecklistEvidenceInput {
+	SegmentId: String
+	StartTime: Float
+	Quote: String
+}
+
+# A checklist item as a caller defines it. Its status, evidence and note are
+# changed through updateCallChecklistItem.
+input ChecklistItemInput {
+	ItemId: String!
+	Text: String!
+	Kind: String!
+	Priority: String
+	Source: String
+}
+
+# A whole checklist item, as the Virtual Participant puts it on the meeting it
+# creates (CreateCallInput.Checklist).
+input ChecklistItemStateInput {
+	ItemId: String!
+	Text: String!
+	Kind: String!
+	Priority: String
+	Source: String
+	Status: String!
+	StatusSource: String
+	Evidence: [ChecklistEvidenceInput]
+	Note: String
+	UpdatedBy: String
+	UpdatedAt: AWSDateTime
+}
+
+input UpdateCallMeetingContextInput {
+	CallId: ID!
+	# Markdown, at most 20,000 characters. An empty string clears it.
+	MeetingContext: String!
+	# Backend roles only: the label the change is attributed to. A signed-in
+	# user's change is attributed to their username, whatever is sent here.
+	UpdatedBy: String
+}
+
+input UpdateCallChecklistInput {
+	CallId: ID!
+	# The whole list, in order (an empty list clears it). An item whose ItemId
+	# is already present keeps its Status, StatusSource, Evidence and Note.
+	Checklist: [ChecklistItemInput!]!
+	# Start every item again as open, with no evidence or note.
+	ResetStatuses: Boolean
+	# Backend roles only, which must supply it, as on updateCallChecklistItem.
+	# An "assistant" replace that would reset, leave out or change an item
+	# whose status a user set is refused (StatusSetByUser).
+	StatusSource: String
+	# Backend roles only, as in UpdateCallMeetingContextInput.
+	UpdatedBy: String
+}
+
+input UpdateCallChecklistItemInput {
+	CallId: ID!
+	ItemId: String!
+	Status: String
+	# An empty string clears the note.
+	Note: String
+	# Replaces the item's evidence.
+	Evidence: [ChecklistEvidenceInput!]
+	# Added after the item's evidence. Either way the newest 5 entries are kept.
+	AddEvidence: [ChecklistEvidenceInput!]
+	# Backend roles only, which must supply it: "user" for a change made for a
+	# person, "assistant" for one the assistant decided. A signed-in user's
+	# change is always "user".
+	StatusSource: String
+	# Backend roles only, as in UpdateCallMeetingContextInput.
+	UpdatedBy: String
+}
+
+input UpdateCallLabelsInput {
+	CallId: ID!
+	# Replaces the labels; an empty list clears them.
+	Labels: [CallLabelInput!]!
+}
+
+input UpdateCallAudienceInput {
+	CallId: ID!
+	# "internal" or "external"; null or empty clears it.
+	Audience: String
 }
 
 # ----------------------------------------------------------------------------

@@ -62,6 +62,10 @@ export default defineConfig({
               slug: "transcript-summarization",
             },
             { label: "Meeting Agenda", slug: "meeting-agenda" },
+            {
+              label: "Meeting Context, Labels, Audience and Checklist",
+              slug: "meeting-context-and-checklist",
+            },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript Deletion After the Summary",

@@ -21,6 +21,14 @@ const mapCallsAttributes = (calls) => {
       AgendaSource: agendaSource,
       AgendaUpdatedBy: agendaUpdatedBy,
       AgendaUpdatedAt: agendaUpdatedAt,
+      Labels: labels,
+      Audience: audience,
+      MeetingMetadataUpdatedAt: meetingMetadataUpdatedAt,
+      MeetingContext: meetingContext,
+      MeetingContextUpdatedBy: meetingContextUpdatedBy,
+      MeetingContextUpdatedAt: meetingContextUpdatedAt,
+      Checklist: checklist,
+      ChecklistUpdatedAt: checklistUpdatedAt,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
@@ -38,11 +46,17 @@ const mapCallsAttributes = (calls) => {
       UpdatedAt: updatedAt,
       RecordingUrl: recordingUrl,
       VideoRecordingUrl: videoRecordingUrl,
-      // The links of every session's recordings, for a meeting the Virtual
-      // Participant joined again (Join again); only getCall asks for them, so an
-      // update from the meeting's subscription keeps the ones already read.
+      // Every capture session's recording links with the session of each, and
+      // where each session starts on the transcript: what the player reads to
+      // play a continued meeting's sessions in turn (playbackSessions).
       RecordingUrls: recordingUrls,
+      RecordingUrlSessions: recordingUrlSessions,
       VideoRecordingUrls: videoRecordingUrls,
+      VideoRecordingUrlSessions: videoRecordingUrlSessions,
+      Sessions: sessions,
+      SessionNumber: sessionNumber,
+      SessionOffsetSeconds: sessionOffsetSeconds,
+      SessionStartedNumber: sessionStartedNumber,
       // How the meeting was captured and transcribed, as its START recorded it;
       // absent on a meeting started before these were stored (meeting-context.js).
       CaptureSource: captureSource,
@@ -92,6 +106,15 @@ const mapCallsAttributes = (calls) => {
       agendaSource,
       agendaUpdatedBy,
       agendaUpdatedAt,
+      // The meeting's preparation; see docs/meeting-context-and-checklist.md.
+      labels,
+      audience,
+      meetingMetadataUpdatedAt,
+      meetingContext,
+      meetingContextUpdatedBy,
+      meetingContextUpdatedAt,
+      checklist,
+      checklistUpdatedAt,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
@@ -103,7 +126,13 @@ const mapCallsAttributes = (calls) => {
       recordingUrl,
       videoRecordingUrl,
       recordingUrls,
+      recordingUrlSessions,
       videoRecordingUrls,
+      videoRecordingUrlSessions,
+      sessions,
+      sessionNumber,
+      sessionOffsetSeconds,
+      sessionStartedNumber,
       captureSource,
       transcriptionEngine,
       transcriptionLanguage,
@@ -143,7 +172,10 @@ const mapCallsAttributes = (calls) => {
  *
  * The agenda is one unit keyed on agendaUpdatedAt, as in mergeCallUpdate:
  * every agenda write sets that timestamp, so a copy that has one is
- * authoritative for all four fields, including an agenda that was cleared.
+ * authoritative for all four fields, including an agenda that was cleared. The
+ * meeting preparation is three such units: the labels and audience, keyed on
+ * meetingMetadataUpdatedAt; the meeting context, on meetingContextUpdatedAt;
+ * and the checklist, on checklistUpdatedAt.
  */
 export const adoptMeetingCopy = (current, incoming) => {
   if (!current || !incoming) return incoming;
@@ -159,6 +191,23 @@ export const adoptMeetingCopy = (current, incoming) => {
           agendaUpdatedBy: current.agendaUpdatedBy,
           agendaUpdatedAt: current.agendaUpdatedAt,
         }),
+    ...(incoming.meetingMetadataUpdatedAt
+      ? {}
+      : {
+          labels: current.labels,
+          audience: current.audience,
+          meetingMetadataUpdatedAt: current.meetingMetadataUpdatedAt,
+        }),
+    ...(incoming.meetingContextUpdatedAt
+      ? {}
+      : {
+          meetingContext: current.meetingContext,
+          meetingContextUpdatedBy: current.meetingContextUpdatedBy,
+          meetingContextUpdatedAt: current.meetingContextUpdatedAt,
+        }),
+    ...(incoming.checklistUpdatedAt
+      ? {}
+      : { checklist: current.checklist, checklistUpdatedAt: current.checklistUpdatedAt }),
     captureSource: keep('captureSource'),
     transcriptionEngine: keep('transcriptionEngine'),
     transcriptionLanguage: keep('transcriptionLanguage'),
@@ -169,13 +218,33 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
     transcriptionPause: keep('transcriptionPause'),
+    // The session playback fields: every write published to onUpdateCall
+    // selects them, but the meeting list's copy comes from listCallsDateRange,
+    // which does not, and a Lambda or schema older than these fields publishes
+    // them as null. Either would otherwise clear what getCall read.
     recordingUrls: keep('recordingUrls'),
+    recordingUrlSessions: keep('recordingUrlSessions'),
     videoRecordingUrls: keep('videoRecordingUrls'),
+    videoRecordingUrlSessions: keep('videoRecordingUrlSessions'),
+    sessions: keep('sessions'),
+    sessionNumber: keep('sessionNumber'),
+    sessionOffsetSeconds: keep('sessionOffsetSeconds'),
+    sessionStartedNumber: keep('sessionStartedNumber'),
   };
 };
 
 /** Whether a newer copy of a meeting carries a different agenda from the copy on screen. */
 export const agendaChanged = (current, incoming) =>
   Boolean(incoming?.agendaUpdatedAt) && incoming.agendaUpdatedAt !== current?.agendaUpdatedAt;
+
+/**
+ * Whether a newer copy of a meeting carries different preparation (labels,
+ * audience, meeting context or checklist) from the copy on screen. Those
+ * writes leave UpdatedAt alone, as an agenda write does.
+ */
+export const preparationChanged = (current, incoming) =>
+  ['meetingMetadataUpdatedAt', 'meetingContextUpdatedAt', 'checklistUpdatedAt'].some(
+    (field) => Boolean(incoming?.[field]) && incoming[field] !== current?.[field],
+  );
 
 export default mapCallsAttributes;

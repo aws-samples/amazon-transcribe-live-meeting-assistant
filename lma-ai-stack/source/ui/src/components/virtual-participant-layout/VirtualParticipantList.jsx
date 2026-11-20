@@ -67,6 +67,7 @@ import {
   joinAgainVirtualParticipantMutation,
   rejoinVirtualParticipantMutation,
 } from './join-again';
+import { vpPreparationInput } from '../common/meeting-preparation';
 import {
   CREATE_MIN_LEAD_MINUTES,
   EMPTY_VP_FORM,
@@ -647,6 +648,9 @@ const VirtualParticipantList = () => {
       // reads it from there when it starts and puts it on the meeting record.
       const agendaText = (createForm.agenda || '').trim();
       if (agendaText) vpInput.agenda = agendaText;
+
+      // The meeting preparation, stored and read the same way; only what was given.
+      Object.assign(vpInput, vpPreparationInput(createForm.preparation));
 
       // Stored on the VP row too, and read by the VP when it starts.
       Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));

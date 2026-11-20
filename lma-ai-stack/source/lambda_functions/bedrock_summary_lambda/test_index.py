@@ -1253,6 +1253,119 @@ def test_text_inserted_for_one_placeholder_is_not_read_as_the_other(
 
 
 # --------------------------------------------------------------------------
+# The meeting context and checklist placeholders
+# --------------------------------------------------------------------------
+
+CHECKLIST = [
+    {
+        "ItemId": "q1",
+        "Text": "Who owns the budget?",
+        "Kind": "question",
+        "Priority": "must",
+        "Status": "covered",
+        "StatusSource": "user",
+        "Evidence": [{"SegmentId": "s1", "StartTime": 64.0, "Quote": "Dana owns it"}],
+        "Note": None,
+    },
+    {"ItemId": "r1", "Text": "Vendor lock-in", "Kind": "risk", "Status": "open", "Evidence": []},
+]
+
+
+def test_the_checklist_renders_one_line_per_item_with_its_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Coverage": "Checklist:<br>{checklist}<br>Context:<br>{context}"}),
+        custom=ddb_item(),
+    )
+    index.generate_summary(
+        "T", None, meeting_context="  # Goals\nAgree the budget ", checklist=CHECKLIST
+    )
+    assert prompts_sent(bedrock) == [
+        "Checklist:\n"
+        "1. [covered] (must, question) Who owns the budget? Evidence at 1:04.\n"
+        "2. [open] (should, risk) Vendor lock-in\n"
+        "Context:\n# Goals\nAgree the budget"
+    ]
+
+
+def test_a_section_naming_what_the_meeting_lacks_is_left_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["one", "two"]),
+        templates=ddb_item(
+            **{
+                "1#Summary": "S {transcript}",
+                "2#Context": "C {context}",
+                "3#Checklist": "L {checklist}",
+                "4#Actions": "A {transcript}",
+            }
+        ),
+        custom=ddb_item(),
+    )
+    for context, checklist in ((None, None), ("  ", []), ("", "not a list")):
+        bedrock.requests.clear()
+        result = json.loads(
+            index.generate_summary("T", None, meeting_context=context, checklist=checklist)
+        )
+        assert prompts_sent(bedrock) == ["S T", "A T"]
+        assert "Context" not in result and "Checklist" not in result
+
+
+def test_the_handler_passes_the_meetings_own_context_and_checklist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = {}
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda *_args, meeting_context=None, checklist=None, **_: (
+            seen.update(context=meeting_context, checklist=checklist) or "a summary"
+        ),
+    )
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=FakeLambdaClient(
+            metadata={**METADATA, "MeetingContext": "Goals", "Checklist": CHECKLIST}
+        ),
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == {"context": "Goals", "checklist": CHECKLIST}
+
+
+def test_no_shipped_section_uses_the_context_or_checklist_placeholders() -> None:
+    """The shipped summaries are unchanged: a meeting with a context or a
+    checklist is summarised exactly as before until a prompt names them."""
+    for path in (
+        HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json",
+        HERE.parents[3]
+        / "lma-llm-template-setup-stack"
+        / "source"
+        / "lambda_functions"
+        / "LLMPromptSummaryTemplate.json",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert "{context}" not in text and "{checklist}" not in text, path
+
+
+def test_text_inserted_for_the_context_is_not_read_as_another_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#C": "{context} / {transcript}"}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, meeting_context="{transcript} {checklist}")
+    assert prompts_sent(bedrock) == ["{transcript} {checklist} / T"]
+
+
+# --------------------------------------------------------------------------
 # The shared screen in the knowledge base document
 # --------------------------------------------------------------------------
 

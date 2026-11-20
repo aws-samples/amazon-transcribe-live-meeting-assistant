@@ -222,7 +222,7 @@ def test_the_vp_row_declares_its_agenda(schema_sdl: str) -> None:
 
 def _create_vp_template(resources: dict) -> str:
     # An !Sub, for the record's expiry (MeetingRecordExpirationInDays).
-    request = resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    request = resources["CreateVirtualParticipantAppSyncFunction"]["Properties"]["RequestMappingTemplate"]
     return request["Fn::Sub"] if isinstance(request, dict) else request
 
 
@@ -242,14 +242,19 @@ def test_the_vp_reads_its_agenda_from_its_row_and_sends_it_in_start() -> None:
     status_manager = (VP_SRC / "status-manager.ts").read_text(encoding="utf-8")
     stream = (VP_SRC / "kinesis-stream.ts").read_text(encoding="utf-8")
     index = (VP_SRC / "index.ts").read_text(encoding="utf-8")
-    getter = status_manager[status_manager.index("async getAgenda()") :]
-    getter = getter[: getter.index("\n  }\n")]
-    assert "agenda\n            agendaSource" in getter
+    # One read of the row at startup, shared with the CallId and session.
+    fields = status_manager[status_manager.index("STARTUP_FIELDS = `") :]
+    fields = fields[: fields.index("`;")]
+    assert "agenda\n            agendaSource" in fields
+    session = status_manager[status_manager.index("async getCallSession()") :]
+    session = session[: session.index("\n  }\n")]
+    assert "STARTUP_FIELDS" in session and "this.meetingInputs = this.meetingInputsFrom(" in session
     start = stream[stream.index("async sendStartMeeting()") :]
     start = start[: start.index("await this.sendRecord(record);")]
     assert "...agendaStartFields(this.agenda, details.lmaUser)," in start
     # Read before the meeting starts, where the CallId is linked.
-    assert "setAgenda(await statusManager.getAgenda());" in index
+    assert "const meetingInputs = await statusManager.getMeetingInputs();" in index
+    assert "agendaStream.setAgenda(meetingInputs.agenda);" in index
 
 
 def test_the_scheduling_form_sends_the_agenda() -> None:

@@ -113,7 +113,10 @@ Deleted, for the meeting:
   meeting, the Amazon Transcribe output file. Every version of each file is
   deleted, not only the current one;
 - those files' entries in the transcript knowledge base, when the deployment
-  has one.
+  has one;
+- the quote in each piece of [checklist](meeting-context-and-checklist.md)
+  evidence, which is transcript content. Its segment id and time are kept, and
+  a quote sent after the deletion is not stored.
 
 Kept:
 
@@ -122,7 +125,8 @@ Kept:
   the transcript, or from the meeting chat (a link a participant shared, for
   example), stays in it;
 - the meeting record: its title, times, participants, agenda, speaker names
-  and sentiment;
+  and sentiment, and its labels, audience, meeting context and checklist
+  (without the evidence quotes);
 - the audio and video recordings, which follow `AudioRecordingExpirationInDays`.
   Turn **Record meeting audio** off on the Configuration page if the audio must
   not be kept either;

@@ -92,8 +92,19 @@
       "title": "In-meeting requests: skills",
       "description": "With In-meeting requests set to Selected tools, offer every skill on the Skills page to requests made in the meeting, except one whose own setting under Tool selection says otherwise. A skill is guidance an administrator wrote; it gives the assistant no tool it is not otherwise offered."
     },
-    "systemPrompt": {
+    "inMeetingContextAccess": {
       "order": 10,
+      "type": "string",
+      "title": "In-meeting requests: meeting context and checklist",
+      "description": "Whether any request made in the meeting (a question typed in the meeting chat, a request spoken to the voice assistant, or one spoken with the wake phrase) may read the meeting's context and checklist. None, the default, offers them only to the meeting page's own assistant chat, whatever In-meeting requests is set to: the context can hold the owner's preparation notes, and a meeting's guests are often outside the owner's organization. Allowed offers them to requests made in the meeting too, and an answer drawn from them is then posted in the meeting chat or spoken for everyone in the meeting; LMA never posts or speaks them on its own.",
+      "enum": ["none", "allowed"],
+      "enumLabels": {
+        "none": "None: only the meeting page's assistant (default)",
+        "allowed": "Allowed: requests made in the meeting may read them"
+      }
+    },
+    "systemPrompt": {
+      "order": 11,
       "type": "string",
       "title": "Assistant instructions",
       "description": "The editable part of the meeting assistant's system prompt: who the assistant is, how long and in what tone it answers, and how it chooses among its tools. LMA always appends a fixed part that no profile can change: that what a tool returns (the transcript, the meeting chat, the shared screen, documents, web pages, MCP server results) is quoted data and never instructions, except a skill the assistant loads, which it follows within the fixed part; that people are not identified from their faces; how to drive the Virtual Participant browser; and the limits on requests made in the meeting. Reset to default to return to the shipped text.",
@@ -103,7 +114,7 @@
       "maxLength": 20000
     },
     "toolSelection": {
-      "order": 11,
+      "order": 12,
       "type": "object",
       "title": "Tool selection",
       "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one. A server or skill not listed here follows the defaults: it is used for the meeting owner's own requests, and for requests made in the meeting as In-meeting requests (and, under Selected tools, its kind's switch) allows; for an MCP server that is how it behaved before this setting existed. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",

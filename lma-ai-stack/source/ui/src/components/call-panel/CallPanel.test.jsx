@@ -74,6 +74,8 @@ import { CallPanel } from './CallPanel';
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 // eslint-disable-next-line import/first
 import { installMediaElementStub, loadMedia } from '../meeting-player/media-element-stub';
+// eslint-disable-next-line import/first
+import sign from '../common/generate-s3-presigned-url';
 
 /* eslint-disable react/prop-types */
 
@@ -915,6 +917,137 @@ describe('the player kept in step with the transcript', () => {
     fireEvent.click(within(filter).getByRole('button', { name: 'All speakers' }));
     expect(screen.getByText('Welcome to the budget review.')).toBeTruthy();
   });
+
+  it('has no session selector for a meeting captured in one session', async () => {
+    await openRecording();
+    expect(screen.queryByTestId('meeting-player-sessions')).toBeNull();
+  });
+});
+
+describe('the player of a meeting continued in a second session', () => {
+  // Session 2 starts at 317 s on the transcript's clock; each session has an
+  // audio recording of its own, which starts at 0.
+  const AUDIO_1 = 'https://bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/m.wav';
+  const AUDIO_2 = 'https://bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/m_s2.wav';
+  const CONTINUED = {
+    ...ITEM,
+    recordingUrl: AUDIO_2,
+    recordingUrls: [AUDIO_1, AUDIO_2],
+    recordingUrlSessions: [1, 2],
+    sessions: [{ SessionNumber: 2, OffsetSeconds: 317, StartedAt: '2026-11-03T15:00:00.000Z' }],
+    sessionNumber: 2,
+    sessionOffsetSeconds: 317,
+    sessionStartedNumber: 2,
+  };
+  const line = (id, speaker, transcript, startTime, endTime) => ({
+    segmentId: id,
+    createdAt: `2026-11-03T14:05:${String(startTime % 60).padStart(2, '0')}.000Z`,
+    channel: 'REMOTE',
+    speaker,
+    transcript,
+    startTime,
+    endTime,
+    isPartial: false,
+  });
+  const LINES = {
+    [ITEM.callId]: {
+      REMOTE: {
+        segments: [
+          line('s1', 'Sarah Lee', 'Thanks for joining.', 20, 24),
+          line('s2-s1', 'Sarah Lee', 'We are back after the break.', 330, 340),
+        ],
+      },
+    },
+  };
+  const media = () => document.querySelector('[data-testid="meeting-player"] audio');
+  const rowOf = (text) => [...document.querySelectorAll('[data-row-id]')].find((row) => row.textContent.includes(text));
+  // Each file signed under a link of its own, so the test can tell them apart.
+  const signedOf = (url) => `${url}?signed`;
+  const playing = async (url, duration) => {
+    await waitFor(() => expect(media()?.getAttribute('src')).toBe(signedOf(url)));
+    loadMedia(media(), duration);
+  };
+
+  beforeEach(() => {
+    sign.mockImplementation((url) => Promise.resolve(signedOf(url)));
+  });
+  afterEach(() => {
+    sign.mockResolvedValue('https://signed.example/x');
+  });
+
+  it("starts on the first session's recording and offers both sessions", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    const selector = screen.getByTestId('meeting-player-sessions');
+    expect(within(selector).getByRole('button', { name: 'Session 1 (from 0:00)' })).toBeTruthy();
+    expect(within(selector).getByRole('button', { name: 'Session 2 (from 5:17)' })).toBeTruthy();
+  });
+
+  it("plays a second-session line from its own file at the line's time less the session's start", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(13);
+    expect(media().paused).toBe(false);
+    expect(rowOf('We are back after the break.').getAttribute('aria-current')).toBe('true');
+    // And back: a first-session line plays the first session's file.
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 00:20.0' }));
+    await playing(AUDIO_1, 300);
+    expect(media().currentTime).toBe(20);
+    expect(rowOf('Thanks for joining.').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('follows the second session on the transcript timeline as it plays', async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(within(screen.getByTestId('meeting-player-sessions')).getByRole('button', { name: /^Session 2/ }));
+    await playing(AUDIO_2, 120);
+    act(() => {
+      media().play();
+      media().currentTime = 15;
+      fireEvent(media(), new Event('timeupdate'));
+    });
+    expect(rowOf('We are back after the break.').getAttribute('aria-current')).toBe('true');
+    expect(rowOf('Thanks for joining.').getAttribute('aria-current')).toBeNull();
+  });
+
+  it("plays on into the second session's recording when the first ends", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    act(() => {
+      media().play();
+      media().currentTime = 300;
+      fireEvent(media(), new Event('ended'));
+    });
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
+
+  it("lists each session's recording on the Details tab, and plays one from its session's start", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES, url: '/calls/m?tab=details' });
+    expect(await screen.findByText('Audio recording, Session 1 (from 0:00)')).toBeTruthy();
+    expect(screen.getByText('Audio recording, Session 2 (from 5:17)')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Play the session 2 audio recording' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
+
+  it("plays the loaded session's recording from its start from the Details tab, not from where it was", async () => {
+    renderPage({ item: CONTINUED, transcript: LINES });
+    await playing(AUDIO_1, 300);
+    fireEvent.click(screen.getByRole('button', { name: 'Play from 05:30.0' }));
+    await playing(AUDIO_2, 120);
+    expect(media().currentTime).toBe(13);
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play the session 2 audio recording' }));
+    expect(selectedTab().textContent).toBe('Transcript');
+    expect(media().currentTime).toBe(0);
+    expect(media().paused).toBe(false);
+  });
 });
 
 describe('the meeting assistant panel', () => {
@@ -1633,6 +1766,91 @@ describe('the agenda on the Transcript tab', () => {
     renderPage();
     expect(within(transcriptPanel()).queryByTestId('agenda-compact')).toBeNull();
     expect(within(transcriptPanel()).queryByTestId('agenda-collapsible')).toBeNull();
+  });
+});
+
+describe('the meeting preparation', () => {
+  const PREPARED = {
+    labels: [{ Key: 'project', Value: 'website-relaunch' }],
+    audience: 'external',
+    meetingMetadataUpdatedAt: '2026-11-03T14:00:00.000Z',
+    meetingContext: '**Goal**: agree the budget',
+    meetingContextUpdatedBy: 'alice',
+    meetingContextUpdatedAt: '2026-11-03T14:00:00.000Z',
+    checklist: [
+      {
+        ItemId: 'q1',
+        Text: 'Who owns the budget?',
+        Kind: 'question',
+        Priority: 'must',
+        Status: 'covered',
+        StatusSource: 'assistant',
+        Evidence: [{ SegmentId: 's1', StartTime: 64, Quote: 'Dana owns it' }],
+        UpdatedBy: 'LMA',
+        UpdatedAt: '2026-11-03T14:10:00.000Z',
+      },
+    ],
+    checklistUpdatedAt: '2026-11-03T14:10:00.000Z',
+  };
+  const VIEWERS = {
+    owner: { owner: 'alice', sharedWith: '' },
+    'a shared user': { owner: 'bob', sharedWith: '[carol, alice]' },
+  };
+
+  it.each(Object.keys(VIEWERS))('can be edited by %s', (viewer) => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send };
+    renderPage({ item: { ...ITEM, ...VIEWERS[viewer], ...PREPARED }, url: '/calls/m?tab=summary' });
+    const summary = screen.getByTestId('meeting-context-panel').closest('[role="tabpanel"]');
+    expect(within(summary).getByText('project=website-relaunch')).toBeTruthy();
+    expect(within(summary).getByText('External')).toBeTruthy();
+    expect(within(screen.getByTestId('meeting-context-panel')).getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(within(screen.getByTestId('checklist-panel')).getByRole('button', { name: 'Edit list' })).toBeTruthy();
+    expect(within(summary).getByRole('button', { name: 'Edit labels and audience' })).toBeTruthy();
+    // A status is set from the item's own control, as a user's.
+    expect(within(screen.getByTestId('checklist-panel')).getByLabelText('Status of Who owns the budget?')).toBeTruthy();
+  });
+
+  it('is shown read-only to a viewer who is neither the owner nor shared with', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, owner: 'bob', sharedWith: '', ...PREPARED }, url: '/calls/m?tab=summary' });
+    const context = screen.getByTestId('meeting-context-panel');
+    expect(within(context).queryByRole('button', { name: 'Edit' })).toBeNull();
+    const checklist = screen.getByTestId('checklist-panel');
+    expect(within(checklist).queryByRole('button', { name: 'Edit list' })).toBeNull();
+    expect(within(checklist).queryByLabelText('Status of Who owns the budget?')).toBeNull();
+    expect(within(checklist).getByText('Covered')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit labels and audience' })).toBeNull();
+  });
+
+  it('is left out for a viewer who cannot change a meeting that has none', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, owner: 'bob', sharedWith: '' }, url: '/calls/m?tab=summary' });
+    expect(screen.queryByTestId('meeting-context-panel')).toBeNull();
+    expect(screen.queryByTestId('checklist-panel')).toBeNull();
+    expect(screen.queryByTestId('meeting-labels')).toBeNull();
+  });
+
+  it('sends a status the owner sets as a checklist item update', async () => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send };
+    renderPage({ item: { ...ITEM, ...PREPARED }, url: '/calls/m?tab=summary' });
+    const select = createWrapper(screen.getByTestId('checklist-panel')).findSelect();
+    select.openDropdown();
+    select.selectOptionByValue('deferred', { expandToViewport: true });
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(ITEM.callId, 'checklistItem', { ItemId: 'q1', Status: 'deferred' }),
+    );
+  });
+
+  it('shows the checklist on the Transcript tab, with evidence that opens the transcript there', () => {
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn() };
+    renderPage({ item: { ...ITEM, ...PREPARED } });
+    const collapsible = screen.getByTestId('checklist-collapsible');
+    fireEvent.click(collapsible.querySelector('[aria-expanded]'));
+    expect(within(collapsible).getByRole('button', { name: 'Show the transcript at 1:04' })).toBeTruthy();
+    fireEvent.click(within(collapsible).getByRole('button', { name: 'Show the transcript at 1:04' }));
+    expect(selectedTab().textContent).toBe('Transcript');
   });
 });
 

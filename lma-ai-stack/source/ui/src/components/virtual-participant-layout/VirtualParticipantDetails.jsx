@@ -72,6 +72,19 @@ const getVirtualParticipant = `
       enableVideoRecording
       agenda
       agendaSource
+      labels {
+        Key
+        Value
+      }
+      audience
+      meetingContext
+      checklist {
+        ItemId
+        Text
+        Kind
+        Priority
+        Source
+      }
       consentMode
       consentRule
       scheduledTimeZone
