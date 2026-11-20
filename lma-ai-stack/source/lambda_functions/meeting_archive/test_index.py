@@ -600,3 +600,26 @@ def test_meeting_json_holds_only_listed_fields(fakes):
     details = json.loads(archive_of(s3, answer).read("meeting.json"))
     assert "InternalNote" not in details and "CallSummaryText" not in details
     assert details["CallId"] == CALL and details["Owner"] == "owner@example.com"
+
+
+@pytest.mark.parametrize("attribute", ["UpdatedAt", "TranscriptDeletedAt"])
+def test_an_archive_older_than_the_meetings_last_change_is_not_offered_again(fakes, attribute):
+    dynamo, _s3, lam = fakes()
+    first = prepare(OWNER)
+    run_build(lam)
+    # The meeting moved on after the archive was started: it ended and was
+    # summarised, or its transcript was deleted under the Retention settings.
+    dynamo.meeting[attribute] = s("2999-01-01T00:00:00.000Z")
+    again = prepare(OWNER)
+    assert again["ArchiveId"] != first["ArchiveId"]
+    assert again["Status"] == "PREPARING"
+    assert len(lam.invocations) == 2
+
+
+def test_an_archive_started_after_the_meetings_last_change_is_offered_again(fakes):
+    dynamo, _s3, lam = fakes()
+    dynamo.meeting["UpdatedAt"] = s("2000-01-01T00:00:00.000Z")
+    first = prepare(OWNER)
+    run_build(lam)
+    assert prepare(OWNER)["ArchiveId"] == first["ArchiveId"]
+    assert len(lam.invocations) == 1

@@ -311,9 +311,40 @@ def read_status(call_id: str, archive_id: str) -> Optional[Dict[str, Any]]:
 REUSE_SECONDS = 20 * 3600
 
 
-def reusable_archive(call_id: str, status: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """The caller's own archive of the same contents still preparing, or ready
-    and recent, so that asking again neither starts a second build nor waits."""
+def _instant(stamp: Any) -> Optional[dt.datetime]:
+    """An ISO 8601 UTC time ("...Z", with or without fractions of a second), or None."""
+    text = str(stamp or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def built_after_last_change(found: Mapping[str, Any], meeting: Mapping[str, Any]) -> bool:
+    """Whether an archive was started after the meeting record last changed, and
+    after its transcript was deleted, so that it still holds what a new archive
+    would. A meeting still going on changes with each update, so an archive of
+    it is not offered again once the meeting has moved on."""
+    started = _instant(found.get("CreatedAt"))
+    if started is None:
+        return False
+    for attribute in ("UpdatedAt", "TranscriptDeletedAt"):
+        changed = _instant(meeting.get(attribute))
+        if changed is not None and changed >= started:
+            return False
+    return True
+
+
+def reusable_archive(
+    call_id: str, status: Mapping[str, Any], meeting: Mapping[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The caller's own archive of the same contents still preparing, or ready,
+    recent and started after the meeting last changed, so that asking again
+    neither starts a second build nor waits, and never answers with an archive
+    older than the meeting it copies."""
     folder = f"{ARCHIVE_PREFIX}{posixify_filename(call_id)}/"
     best: Optional[Dict[str, Any]] = None
     for page in S3.get_paginator("list_objects_v2").paginate(
@@ -329,8 +360,9 @@ def reusable_archive(call_id: str, status: Mapping[str, Any]) -> Optional[Dict[s
             ):
                 continue
             age = _age_seconds(found.get("CreatedAt"))
-            fresh = (found.get("Status") == PREPARING and age <= STALE_SECONDS) or (
-                found.get("Status") == READY and age <= REUSE_SECONDS
+            fresh = built_after_last_change(found, meeting) and (
+                (found.get("Status") == PREPARING and age <= STALE_SECONDS)
+                or (found.get("Status") == READY and age <= REUSE_SECONDS)
             )
             if fresh and (best is None or str(found.get("CreatedAt")) > str(best.get("CreatedAt"))):
                 best = found
@@ -1057,7 +1089,7 @@ def prepare(event: Mapping[str, Any], context: Any) -> Dict[str, Any]:
         "CreatedAt": now_iso(),
         "UpdatedAt": now_iso(),
     }
-    existing = reusable_archive(call_id, status)
+    existing = reusable_archive(call_id, status, meeting)
     if existing is not None:
         return public_status(existing)
     write_status(status)

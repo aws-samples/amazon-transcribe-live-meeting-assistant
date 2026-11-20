@@ -721,8 +721,11 @@ seconds for a short meeting, a few minutes for hours of video), and then a
 | `README.md` | Every file in the archive, and anything left out and why |
 
 The archive is answered to the people who can open the meeting, and its link only
-to the person who asked for it (or an Admin). An archive whose files come to more
-than 5 GB is not built; the header says so, and the recordings can be downloaded
+to the person who asked for it (or an Admin). Asking again for the same archive
+gives the one already being prepared, or the one already built when the meeting
+has not changed since it was started; once the meeting has changed (it ended,
+its summary was written, or its transcript was deleted) a new archive is built.
+An archive whose files come to more than 5 GB is not built; the header says so, and the recordings can be downloaded
 on their own. The archive is a temporary copy: it is deleted a day after it was
 written, and when the meeting is deleted. See
 [Privacy and Data Handling](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime).
