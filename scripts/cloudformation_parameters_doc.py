@@ -289,6 +289,10 @@ CLASSIFICATION: Dict[str, Classification] = {
     "PostCallSummaryLambdaHookFunctionArn": _c(
         RESOURCE, "Grants the meeting event processor permission to invoke the named function."
     ),
+    "EnableMeetingEvents": _c(
+        RESOURCE,
+        "Decides whether the meeting event bus and its publishing grants exist.",
+    ),
     # Amazon CloudFront Configuration
     "CloudFrontPriceClass": _c(
         RESOURCE,

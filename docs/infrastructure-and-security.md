@@ -40,12 +40,13 @@ LMA is deployed as a set of 11 nested CloudFormation stacks providing a fully se
 6. **Results are persisted** to DynamoDB via AppSync mutations.
 7. **Real-time updates** are pushed to the UI via AppSync GraphQL subscriptions.
 8. **End-to-end latency** is typically a few seconds.
+9. **Meeting lifecycle events** (Meeting Started, Meeting Ended, Summary Ready, Virtual Participant Status Changed) are published to the stack's own EventBridge bus, `<stack name>-meeting-events`, for other systems to subscribe to with a rule. They carry identifiers and states only. See [Meeting Lifecycle Events](meeting-events.md).
 
 ## Nested Stack Structure
 
 | Stack | Purpose |
 |-------|---------|
-| lma-ai-stack | Core stack: Lambda functions, AppSync API, DynamoDB, Cognito, CloudFront UI |
+| lma-ai-stack | Core stack: Lambda functions, AppSync API, DynamoDB, Cognito, CloudFront UI. Nests `lma-ai-lambda-resolvers` (the Lambda functions behind AppSync data sources) and, when `EnableMeetingEvents` is `true`, `lma-ai-meeting-events` (the Virtual Participant status event publisher) |
 | lma-websocket-transcriber-stack | WebSocket server on ECS Fargate with Application Load Balancer |
 | lma-virtual-participant-stack | VP ECS tasks and Step Functions scheduler |
 | lma-vpc-stack | VPC, public/private subnets (2 AZs), NAT gateway, security groups |
@@ -402,6 +403,7 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 ## IAM
 
 - **Least-privilege policies** for all IAM roles created by the stack
+- Of the roles the stack creates, only the call event processor's, the summary regenerator's and the Virtual Participant status publisher's are granted `events:PutEvents` on the meeting event bus: on that bus alone, with the `events:source` condition key set to `lma` (see [Meeting Lifecycle Events](meeting-events.md#the-event-bus))
 - Optional **permissions boundary** via the `InstallationPermissionsBoundaryArn` parameter, applied to all roles created during installation
 - The Virtual Participant's task role, which is also its MicroVM execution role, may read one thing from the VirtualParticipant table: a `GetItem` of a record's `id` and `meetingPassword`, limited with the `dynamodb:Attributes` and `dynamodb:Select` condition keys. The Virtual Participant reads its meeting password that way when it starts, and no launch request carries the password (see [How the VP gets the meeting password](virtual-participant.md#how-the-vp-gets-the-meeting-password))
 

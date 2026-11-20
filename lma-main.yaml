@@ -340,6 +340,21 @@ Parameters:
       for example, updating the call summary to a CRM system. For a meeting whose transcript
       has been deleted by the Retention settings, the payload also carries TranscriptDeletedAt.
 
+  EnableMeetingEvents:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Create the LMA meeting event bus (named <stack name>-meeting-events) and
+      publish Meeting Started, Meeting Ended, Summary Ready and Virtual
+      Participant Status Changed to it. The events carry identifiers and states
+      only, never meeting content. Nothing subscribes until you add a rule to the
+      bus, so with no rule the events have no effect. The bus name and ARN are the
+      MeetingEventBusName and MeetingEventBusArn outputs. Remove the rules you
+      added to the bus before setting this to 'false'. See docs/meeting-events.md.
+
   AdminEmail:
     Type: String
     Description: >-
@@ -960,6 +975,7 @@ Metadata:
           - EndOfCallLambdaHookFunctionArn
           - StartOfCallLambdaHookFunctionArn
           - PostCallSummaryLambdaHookFunctionArn
+          - EnableMeetingEvents
       - Label:
           default: Amazon CloudFront Configuration
         Parameters:
@@ -1090,6 +1106,8 @@ Metadata:
         default:
           Lambda Hook Function ARN for Custom Post Processing, after the Call
           Transcript Summary is processed (existing)
+      EnableMeetingEvents:
+        default: Publish Meeting Lifecycle Events to an EventBridge Bus
       CloudFrontPriceClass:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
@@ -1327,6 +1345,10 @@ Conditions:
     - !Equals [!Ref EnableMicrovmAsr, "true"]
     - !Condition IsMicrovmRegion
   ShouldCreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, "true"]
+  ShouldEnableMeetingEvents: !Equals [!Ref EnableMeetingEvents, "true"]
+  ShouldAlarmOnMeetingEvents: !And
+    - !Condition ShouldCreateOperationalAlarms
+    - !Condition ShouldEnableMeetingEvents
   # AdminEmail is a required parameter with an AllowedPattern that an empty
   # string does not match, so in practice this is always true. It is asserted
   # anyway so that the subscription resource states the contract it depends on:
@@ -1931,6 +1953,19 @@ Resources:
   ##########################################################################
   # Resources shared by multiple nested stacks
   ##########################################################################
+  # The meeting event bus (docs/meeting-events.md). The AI stack's call event
+  # processor, summary regenerator and Virtual Participant status publisher put
+  # events on it, each granted events:PutEvents on this bus alone. Created here
+  # rather than in a nested stack because the rules a customer adds point at
+  # it, and this template is never split. Encrypted with an AWS owned key: the
+  # events carry identifiers and states only.
+  MeetingEventBus:
+    Type: AWS::Events::EventBus
+    Condition: ShouldEnableMeetingEvents
+    Properties:
+      Name: !Sub "${AWS::StackName}-meeting-events"
+      Description: !Sub "Meeting lifecycle events from LMA stack ${AWS::StackName}"
+
   CallDataStream:
     Type: AWS::Kinesis::Stream
     Properties:
@@ -2859,6 +2894,8 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        MeetingEventBusName: !If [ShouldEnableMeetingEvents, !Ref MeetingEventBus, ""]
+        MeetingEventBusArn: !If [ShouldEnableMeetingEvents, !GetAtt MeetingEventBus.Arn, ""]
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         S3BucketName: !If
@@ -3907,6 +3944,34 @@ Resources:
   # avoids FILL, which makes an expression dense and so stops TreatMissingData
   # from ever being consulted.
   ##########################################################################
+  MeetingEventsPublishFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldAlarmOnMeetingEvents
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-meeting-events-publish-failures"
+      AlarmDescription: >-
+        Five or more meeting lifecycle events could not be put on the meeting
+        event bus in a 5-minute window. A publish that fails is logged and
+        dropped so that the meeting is unaffected, which means a rule on the bus
+        never sees those events and nothing else reports it. Read the log groups
+        of the Call Event Processor, the summary regenerator and the Virtual
+        Participant status publisher for 'could not publish a meeting event' or
+        'not accepted by the event bus' over the same period; each line names
+        the detail-type, the meeting or Virtual Participant, and the error code.
+        Consumers can reconcile what they missed by polling list_meetings. See
+        docs/meeting-events.md.
+      Namespace: !Ref AWS::StackName
+      MetricName: MeetingEventsPublishFailed
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
   TranscriptSegmentWriteFailuresAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: ShouldCreateOperationalAlarms
@@ -3977,7 +4042,7 @@ Resources:
   # from each nested stack: every identifier the widgets need is already a
   # nested stack Output, so the variable map of the list form of Fn::Sub is
   # enough. The widgets above the "Application metrics" band read metrics AWS
-  # services publish; the five metric widgets in that band read metrics LMA
+  # services publish; the six metric widgets in that band read metrics LMA
   # publishes itself, in the namespace ${AWS::StackName} -- which needs no
   # variable in the map below, since Fn::Sub resolves the pseudo-parameter
   # directly. The log tables after the band are Logs Insights queries, not
@@ -4167,7 +4232,7 @@ Resources:
               {
                 "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
                 "properties": {
-                  "markdown": "## Application metrics\n\nThe five widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. The Virtual Participant publishes only its Nova Sonic quota refusals so far; MicroVM ASR and Meeting Assistant metrics are not published yet."
+                  "markdown": "## Application metrics\n\nThe six widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. The Virtual Participant publishes only its Nova Sonic quota refusals so far; MicroVM ASR and Meeting Assistant metrics are not published yet."
                 }
               },
               {
@@ -4242,7 +4307,7 @@ Resources:
                 }
               },
               {
-                "type": "metric", "x": 0, "y": 52, "width": 24, "height": 6,
+                "type": "metric", "x": 0, "y": 52, "width": 12, "height": 6,
                 "properties": {
                   "title": "Nova Sonic streams refused for the account's concurrency quota (20 per region, shared by every voice assistant in the account) — each refusal degrades a voice assistant rather than failing it",
                   "region": "${AWS::Region}",
@@ -4251,6 +4316,28 @@ Resources:
                   "metrics": [
                     ["${AWS::StackName}", "NovaSonicStreamsThrottled", {"label": "Refused stream opens"}]
                   ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 52, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Meeting lifecycle events put on the meeting event bus — a failed one is dropped, so a rule on the bus never sees it",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "MeetingEventsPublished", {"label": "Published"}],
+                    ["${AWS::StackName}", "MeetingEventsPublishFailed", {"label": "Failed", "yAxis": "right"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-meeting-events-publish-failures notifies at or above this",
+                        "value": 5,
+                        "yAxis": "right"
+                      }
+                    ]
+                  }
                 }
               },
               {
@@ -4318,6 +4405,19 @@ Outputs:
   ApplicationCloudfrontEndpoint:
     Description: LMA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+
+  MeetingEventBusName:
+    Condition: ShouldEnableMeetingEvents
+    Description: >-
+      Name of the LMA meeting event bus. Add a rule to it to receive Meeting
+      Started, Meeting Ended, Summary Ready and Virtual Participant Status
+      Changed (docs/meeting-events.md).
+    Value: !Ref MeetingEventBus
+
+  MeetingEventBusArn:
+    Condition: ShouldEnableMeetingEvents
+    Description: ARN of the LMA meeting event bus, for rules and policies in other stacks.
+    Value: !GetAtt MeetingEventBus.Arn
 
   ChromeExtensionDownloadUrl:
     Description: LMA Chrome Browser extension download link

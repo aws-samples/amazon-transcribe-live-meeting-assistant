@@ -171,15 +171,27 @@ def _actions(statement: dict) -> list[str]:
     return [action] if isinstance(action, str) else list(action)
 
 
-def test_the_regenerator_can_only_write_the_one_graphql_field(resources: dict) -> None:
+def test_the_regenerator_can_only_write_its_two_graphql_fields(resources: dict) -> None:
     """Scoped the way the speaker name resolver is: the Lambda writes with its
     own IAM credentials, which take the backend branch of the mutation's access
-    condition, so the field it may call is the boundary."""
+    condition, so the fields it may call are the boundary: the summary, and the
+    meeting's summary_ready notification."""
     role = resources["SummaryRegeneratorFunctionExecutionRole"]
     graphql = [s for s in _statements(role) if "appsync:GraphQL" in _actions(s)]
     assert len(graphql) == 1
-    resource = graphql[0]["Resource"]["Fn::Sub"]
-    assert resource.endswith("/types/Mutation/fields/updateCallSummaryText")
+    fields = sorted(entry["Fn::Sub"].rsplit("/", 1)[-1] for entry in graphql[0]["Resource"])
+    assert fields == ["publishMeetingNotification", "updateCallSummaryText"]
+    for entry in graphql[0]["Resource"]:
+        assert "/types/Mutation/fields/" in entry["Fn::Sub"]
+
+
+def test_the_regenerator_may_publish_only_lma_events_to_the_meeting_event_bus(
+    resources: dict,
+) -> None:
+    role = resources["SummaryRegeneratorFunctionExecutionRole"]
+    (statement,) = [s for s in _statements(role) if "events:PutEvents" in _actions(s)]
+    assert statement["Resource"] == {"Ref": "MeetingEventBusArn"}
+    assert statement["Condition"] == {"StringEquals": {"events:source": "lma"}}
 
 
 def test_the_regenerator_cannot_write_to_the_table(resources: dict) -> None:

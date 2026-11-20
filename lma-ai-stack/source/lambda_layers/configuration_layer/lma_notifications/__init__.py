@@ -296,7 +296,9 @@ def build_input(  # pylint: disable=too-many-arguments,too-many-locals,redefined
     return item
 
 
-def appsync_graphql(query: str, variables: Mapping[str, Any]) -> Dict[str, Any]:
+def appsync_graphql(
+    query: str, variables: Mapping[str, Any], timeout: float = 30
+) -> Dict[str, Any]:
     """One request to LMA's AppSync API, signed with this function's IAM role.
 
     Returns the response's ``data``; raises NotificationError for its first error.
@@ -322,7 +324,7 @@ def appsync_graphql(query: str, variables: Mapping[str, Any]) -> Dict[str, Any]:
     request = urllib.request.Request(  # noqa: S310 -- an https URL checked above
         url, data=body.encode("utf-8"), headers=dict(signed.headers), method="POST"
     )
-    with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
         result = json.loads(response.read().decode("utf-8"))
     errors = result.get("errors") or []
     if errors:
@@ -354,6 +356,7 @@ def publish_meeting_notification(  # pylint: disable=too-many-arguments,too-many
     actions: Optional[Iterable[Mapping[str, Any]]] = None,
     created_by: Optional[str] = None,
     graphql: Optional[GraphQL] = None,
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Store a notification on a meeting and announce it to the people who can see it.
 
@@ -371,6 +374,7 @@ def publish_meeting_notification(  # pylint: disable=too-many-arguments,too-many
         actions: up to two ``{"label", "kind": "copy" | "mutation", "payload"}``.
         created_by: the user it is published on behalf of, if any.
         graphql: for tests, a stand-in for the signed AppSync request.
+        timeout: seconds the AppSync request may take; 30 when not given.
 
     Returns:
         The stored notification as the mutation answers it, with ``Created``
@@ -390,8 +394,12 @@ def publish_meeting_notification(  # pylint: disable=too-many-arguments,too-many
         actions=actions,
         created_by=created_by,
     )
-    send = graphql or appsync_graphql
-    data = send(PUBLISH_MEETING_NOTIFICATION, {"input": item})
+    if graphql is not None:
+        data = graphql(PUBLISH_MEETING_NOTIFICATION, {"input": item})
+    elif timeout is not None:
+        data = appsync_graphql(PUBLISH_MEETING_NOTIFICATION, {"input": item}, timeout=timeout)
+    else:
+        data = appsync_graphql(PUBLISH_MEETING_NOTIFICATION, {"input": item})
     stored = data.get("publishMeetingNotification") or {}
     LOGGER.info(
         "published a meeting notification: callId=%s category=%s type=%s created=%s",

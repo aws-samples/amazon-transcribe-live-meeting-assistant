@@ -29,6 +29,10 @@ from typing import (
 # third-party imports from Lambda layer
 import boto3
 
+# Meeting Started, Meeting Ended and Summary Ready, published to the stack's
+# meeting event bus (docs/meeting-events.md). Never raises.
+import meeting_event_publisher  # noqa: E402
+
 # custom utils/helpers imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import execute_gql_query_with_retries
@@ -571,6 +575,12 @@ def summary_outcome_state(text: Any, message: Optional[Mapping[str, Any]] = None
     """
     state = json.loads(_summary_outcome_state(text))
     extras = message or {}
+    # The orchestrator's own time for the run, when the record carries it: the
+    # same on every redelivery of the record, so a redelivered summary is stored
+    # with, and announced as Summary Ready at, the time it was first written.
+    completed_at = extras.get("SummaryCompletedAt")
+    if isinstance(completed_at, str) and completed_at:
+        state["updatedAt"] = completed_at
     if summary_was_produced(text):
         if isinstance(extras.get("SummaryProfileUsed"), str):
             state["profile"] = extras["SummaryProfileUsed"]
@@ -2040,6 +2050,9 @@ async def execute_process_event_api_mutation(
             # that could not be created has not started.
             if not was_already_created(response):
                 METRICS.count(metric_names.MEETINGS_STARTED)
+                await meeting_event_publisher.meeting_started(
+                    message, session_number_of(message), appsync_session, LOGGER
+                )
 
         # A later capture session of a meeting that already exists: its owner or
         # an Admin rejoined it (docs/virtual-participant.md#rejoin), which allowed
@@ -2063,6 +2076,12 @@ async def execute_process_event_api_mutation(
             if not session_started:
                 await end_rejoined_vp_of_deleted_meeting(
                     message=message, appsync_session=appsync_session
+                )
+            else:
+                # A reopened meeting's later session is a Meeting Started of its
+                # own, carrying the session number; it is not a second meeting.
+                await meeting_event_publisher.meeting_started(
+                    message, session_number_of(message), appsync_session, LOGGER
                 )
 
         # The meeting is being captured again, so a transcript deletion
@@ -2260,6 +2279,17 @@ async def execute_process_event_api_mutation(
             # session's END was processed.
             if not was_already_ended and started_session == 1:
                 METRICS.count(metric_names.MEETINGS_ENDED)
+            # Every session's end, unlike the count above: a consumer sees each
+            # session of a reopened meeting start and end. Not for a redelivered
+            # END, which finds the meeting already ENDED.
+            if not was_already_ended:
+                await meeting_event_publisher.meeting_ended(
+                    message,
+                    session_number_of(message) if "SessionNumber" in message else started_session,
+                    appsync_session,
+                    LOGGER,
+                    written=response,
+                )
 
     elif event_type == "ADD_SUMMARY":
         LOGGER.debug("ADD_SUMMARY MUTATION ")
@@ -2302,6 +2332,9 @@ async def execute_process_event_api_mutation(
                         "deletion scheduled at the end of the meeting still applies",
                         extra=dict(call_id=message.get("CallId")),
                     )
+            # A summary was stored, not a failed run's placeholder.
+            if summary_was_produced(message.get("CallSummaryText")):
+                await meeting_event_publisher.summary_ready(message, appsync_session, LOGGER)
 
         if POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN:
             payload = await get_call_details(message=message, appsync_session=appsync_session)

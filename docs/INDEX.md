@@ -85,6 +85,7 @@ title: "LMA Documentation"
 - [WebSocket Streaming API](websocket-streaming-api.md) — Full protocol specification for building custom streaming clients
 - [Embeddable Components](embeddable-components.md) — iframe embedding, postMessage API, authentication options
 - [Lambda Hook Functions](lambda-hook-functions.md) — Custom transcript processing, FetchTranscript utility, summarization hooks
+- [Meeting Lifecycle Events](meeting-events.md) — The stack's EventBridge event bus: Meeting Started, Meeting Ended, Summary Ready and Virtual Participant Status Changed, what each event carries (identifiers and states only), reopened meetings, deduplication, an example rule, and polling instead
 
 ### Administration
 
