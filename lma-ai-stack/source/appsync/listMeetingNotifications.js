@@ -22,6 +22,20 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 /**
+ * A time in the form UpdatedAt is stored in: UTC, always with three digits of
+ * milliseconds (notificationPublishMeeting.js). The filter compares the two as strings,
+ * which orders them by time only when both have that form; an AWSDateTime with
+ * an offset, or without fractional seconds, would not.
+ */
+function storedForm(time) {
+    return util.time.epochMilliSecondsToFormatted(
+        util.time.parseISO8601ToEpochMilliSeconds(time),
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        'UTC',
+    );
+}
+
+/**
  * @param {import('@aws-appsync/utils').Context} ctx the context
  * @returns {*} the request
  */
@@ -52,7 +66,7 @@ export function request(ctx) {
     if (args.Since) {
         filters.push('#updatedAt >= :since');
         names['#updatedAt'] = 'UpdatedAt';
-        values[':since'] = args.Since;
+        values[':since'] = storedForm(args.Since);
     }
     if (filters.length > 0) {
         query.filter = {

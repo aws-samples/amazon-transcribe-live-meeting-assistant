@@ -18,6 +18,7 @@ import { util } from '@aws-appsync/utils';
  */
 
 const MAX_DISMISSED = 1000;
+const MAX_MUTED = 50;
 const MAX_PER_CHANGE = 50;
 const MAX_ID = 64;
 const MAX_CATEGORY = 32;
@@ -82,17 +83,18 @@ function updateRequest(ctx) {
         values[':ttl'] = util.dynamodb.toDynamoDB(expiresAfter);
         sets.push('#ttl = :ttl');
     }
-    let condition = null;
+    // Each set's cap, with room for every entry this change adds, so neither
+    // set ever passes its cap.
+    const caps = [];
+    const capNames = {};
+    const capValues = {};
     if (given(input.Dismiss)) {
         names['#dismissed'] = 'Dismissed';
         values[':dismiss'] = util.dynamodb.toStringSet(input.Dismiss);
         adds.push('#dismissed :dismiss');
-        condition = {
-            expression: 'attribute_not_exists(#dismissed) OR size(#dismissed) < :max',
-            expressionNames: { '#dismissed': 'Dismissed' },
-            // Room for every id this change adds, so the set never passes the cap.
-            expressionValues: { ':max': util.dynamodb.toDynamoDB(MAX_DISMISSED - input.Dismiss.length + 1) },
-        };
+        caps.push('(attribute_not_exists(#dismissed) OR size(#dismissed) < :maxDismissed)');
+        capNames['#dismissed'] = 'Dismissed';
+        capValues[':maxDismissed'] = util.dynamodb.toDynamoDB(MAX_DISMISSED - input.Dismiss.length + 1);
     }
     if (given(input.Restore)) {
         names['#dismissed'] = 'Dismissed';
@@ -103,6 +105,9 @@ function updateRequest(ctx) {
         names['#muted'] = 'MutedCategories';
         values[':mute'] = util.dynamodb.toStringSet(input.Mute);
         adds.push('#muted :mute');
+        caps.push('(attribute_not_exists(#muted) OR size(#muted) < :maxMuted)');
+        capNames['#muted'] = 'MutedCategories';
+        capValues[':maxMuted'] = util.dynamodb.toDynamoDB(MAX_MUTED - input.Mute.length + 1);
     }
     if (given(input.Unmute)) {
         names['#muted'] = 'MutedCategories';
@@ -124,8 +129,8 @@ function updateRequest(ctx) {
         key: key(ctx, input.CallId),
         update: { expression, expressionNames: names, expressionValues: values },
     };
-    if (condition) {
-        request.condition = condition;
+    if (caps.length > 0) {
+        request.condition = { expression: caps.join(' AND '), expressionNames: capNames, expressionValues: capValues };
     }
     return request;
 }
@@ -148,7 +153,10 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-            util.error(`At most ${MAX_DISMISSED} dismissed notifications are kept per meeting`, 'LimitExceeded');
+            util.error(
+                `At most ${MAX_DISMISSED} dismissed notifications and ${MAX_MUTED} muted categories are kept per meeting`,
+                'LimitExceeded',
+            );
         }
         util.error(ctx.error.message, ctx.error.type);
     }

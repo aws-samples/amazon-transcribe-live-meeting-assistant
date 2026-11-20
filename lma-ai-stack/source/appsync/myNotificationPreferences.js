@@ -73,7 +73,8 @@ export function request(ctx) {
         request.condition = {
             expression: 'attribute_not_exists(#muted) OR size(#muted) < :max',
             expressionNames: { '#muted': 'MutedCategories' },
-            expressionValues: { ':max': util.dynamodb.toDynamoDB(MAX_MUTED) },
+            // Room for every category this change adds, so the set never passes the cap.
+            expressionValues: { ':max': util.dynamodb.toDynamoDB(MAX_MUTED - input.Mute.length + 1) },
         };
     } else {
         values[':unmute'] = util.dynamodb.toStringSet(input.Unmute);

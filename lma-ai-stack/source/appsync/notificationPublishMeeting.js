@@ -209,7 +209,13 @@ export function response(ctx) {
     if (!meeting) {
         util.error(`Meeting ${ctx.args.input.CallId} was not found`, 'NotFound');
     }
-    const now = util.time.nowISO8601();
+    // UTC with three digits of milliseconds always, so stored times order by
+    // time as strings, as listMeetingNotifications.js compares Since with them.
+    const now = util.time.epochMilliSecondsToFormatted(
+        util.time.nowEpochMilliSeconds(),
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        'UTC',
+    );
     const notificationId = util.autoId();
     ctx.stash.notificationMeeting = {
         Owner: meeting.Owner === undefined ? null : meeting.Owner,

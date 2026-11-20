@@ -386,6 +386,7 @@ def test_the_read_is_of_the_notification_rows_with_its_filters(client) -> None:
     assert request["query"]["expressionValues"] == {":pk": {"S": "nt#m1"}, ":prefix": {"S": "n#"}}
     assert request["limit"] == 500 and request["scanIndexForward"] is True
     assert request["filter"]["expression"] == "#category = :category AND #updatedAt >= :since"
+    assert request["filter"]["expressionValues"][":since"] == {"S": "2026-11-19T14:00:00.000Z"}
 
 
 def test_the_read_answers_without_storage_keys(client) -> None:
@@ -436,7 +437,9 @@ def test_a_users_view_is_keyed_by_their_identity(client) -> None:
     assert request["key"] == {"PK": {"S": "nt#m1"}, "SK": {"S": f"u#{SHARED}"}}
     assert "ADD #dismissed :dismiss" in request["update"]["expression"]
     assert request["update"]["expressionValues"][":dismiss"] == {"SS": ["a"]}
-    assert "size(#dismissed) < :max" in request["condition"]["expression"]
+    assert "size(#dismissed) < :maxDismissed" in request["condition"]["expression"]
+    # Room for the one id added, so the set stays within 1000.
+    assert str(request["condition"]["expressionValues"][":maxDismissed"]["N"]) == "1000"
 
 
 def test_dismiss_and_restore_together_are_refused(client) -> None:
@@ -559,3 +562,45 @@ def test_a_checklist_status_action_the_resolver_refuses(client, args, message) -
         "identity": BACKEND,
     })
     assert message in _error(response)
+
+
+@pytest.mark.parametrize(
+    "since, stored",
+    [
+        # An offset is the same moment in UTC.
+        ("2026-11-19T15:00:00+01:00", "2026-11-19T14:00:00.000Z"),
+        # Without fractional seconds it still sorts before a row from within that second.
+        ("2026-11-19T13:00:00Z", "2026-11-19T13:00:00.000Z"),
+        ("2026-11-19T13:00:00.500Z", "2026-11-19T13:00:00.500Z"),
+    ],
+)
+def test_since_is_compared_in_the_form_updated_at_is_stored_in(client, since, stored) -> None:
+    request = _ok(_evaluate(client, "listMeetingNotifications.js", "request", {
+        "arguments": {"CallId": "m1", "Since": since},
+        "identity": USER,
+    }))
+    assert request["filter"]["expressionValues"][":since"] == {"S": stored}
+    # The stored form orders by time as a string.
+    assert "2026-11-19T13:00:00.500Z" >= stored or stored > "2026-11-19T13:00:00.500Z"
+
+
+def test_every_meeting_mutes_stay_within_their_cap(client) -> None:
+    categories = [f"c{i}" for i in range(50)]
+    request = _ok(_evaluate(client, "myNotificationPreferences.js", "request", {
+        "arguments": {"input": {"Mute": categories}},
+        "identity": USER,
+        "info": {"fieldName": "updateMyNotificationPreferences", "parentTypeName": "Mutation", "variables": {}},
+    }))
+    # Fifty added at once only to an empty set: 50 - 50 + 1.
+    assert str(request["condition"]["expressionValues"][":max"]["N"]) == "1"
+
+
+def test_mutes_on_one_meeting_have_a_cap(client) -> None:
+    request = _ok(_evaluate(client, "myMeetingNotificationState.js", "request", {
+        "arguments": {"input": {"CallId": "m1", "Mute": ["status", "tips"]}},
+        "identity": USER,
+        "info": {"fieldName": "updateMyMeetingNotificationState", "parentTypeName": "Mutation", "variables": {}},
+        "stash": {"meetingExpiresAfter": 2000},
+    }))
+    assert "size(#muted) < :maxMuted" in request["condition"]["expression"]
+    assert str(request["condition"]["expressionValues"][":maxMuted"]["N"]) == "49"

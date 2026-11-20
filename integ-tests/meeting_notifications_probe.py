@@ -291,10 +291,9 @@ class Probe:
             self.observed["prefs_restored"] = before
 
     def burst(self) -> None:
-        # Start at the top of a minute, so the burst falls in one counter.
-        seconds = datetime.now(timezone.utc).second
-        if seconds > 2:
-            time.sleep(60 - seconds + 1)
+        # Start at the top of the next minute, so the burst has a counter of its
+        # own: the earlier publishes counted against the current one.
+        time.sleep(60 - datetime.now(timezone.utc).second + 1)
         started = time.monotonic()
         accepted, refused = 0, None
         for _ in range(RATE_PER_MINUTE + 5):

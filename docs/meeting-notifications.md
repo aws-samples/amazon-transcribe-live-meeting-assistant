@@ -274,7 +274,7 @@ meeting, `PK = nt#<CallId>`:
 | A notification | `n#<CreatedAt>#<NotificationId>` | Its fields, and its expiry (`ExpiresAfter`) |
 | A dedup pointer | `d#<Category>#<DedupKey>` | The notification the first publish with that key made |
 | A rate counter | `r#<minute>` | The publishes in that minute; expires after an hour |
-| A user's view | `u#<username>` | `Dismissed` (at most 1000 ids) and `MutedCategories` |
+| A user's view | `u#<username>` | `Dismissed` (at most 1000 ids) and `MutedCategories` (at most 50) |
 
 A user's categories muted on every meeting are one row, `PK = usr#<username>`,
 `SK = notification-prefs` (at most 50 categories).
