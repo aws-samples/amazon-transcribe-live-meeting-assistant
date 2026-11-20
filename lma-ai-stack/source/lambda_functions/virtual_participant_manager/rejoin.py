@@ -323,6 +323,14 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
         )
     if meeting.get("TranscriptDeletedAt"):
         raise RejoinRefused("The meeting's transcript has been deleted, so it cannot be reopened.")
+    if lma_sessions.streaming_session_holds(meeting):
+        # A session reopenMeeting allowed (a Desktop Capture App continuing the
+        # meeting, for example) is live or about to start; the same rule
+        # reopenMeeting applies to a rejoin's session.
+        raise RejoinRefused(
+            "This meeting is being continued from another app, or was reopened a few minutes "
+            "ago to be. Rejoin once that capture has ended, or in 15 minutes if it never started."
+        )
 
     if manager.registered_host_running(vp_id):
         raise RejoinRefused(

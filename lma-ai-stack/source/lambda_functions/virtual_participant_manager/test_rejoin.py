@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -317,6 +318,77 @@ def test_a_meeting_whose_transcript_was_deleted_is_not_reopened(world):
     with pytest.raises(rejoin.RejoinRefused, match="transcript has been deleted"):
         rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
     assert w.vp_table.updates == [] and w.state_machine.executions == []
+
+
+def _recently() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def test_a_meeting_live_in_a_session_reopen_meeting_allowed_is_not_rejoined(world):
+    w = world(
+        meeting={
+            "Owner": "owner@example.com",
+            "Status": "TRANSCRIBING",
+            "SessionNumber": 2,
+            "SessionStartedNumber": 2,
+            "ReopenedVia": "reopenMeeting",
+            "ReopenedAt": "2026-11-18T10:00:00+00:00",
+        }
+    )
+    with pytest.raises(rejoin.RejoinRefused, match="continued from another app"):
+        rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.vp_table.updates == [] and w.events.updates == []
+    assert w.state_machine.executions == []
+
+
+def test_a_meeting_with_a_pending_reopen_meeting_session_is_not_rejoined(world):
+    w = world(
+        meeting={
+            "Owner": "owner@example.com",
+            "Status": "ENDED",
+            "SessionNumber": 2,
+            "ReopenedVia": "reopenMeeting",
+            "ReopenedAt": _recently(),
+        }
+    )
+    with pytest.raises(rejoin.RejoinRefused, match="continued from another app"):
+        rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.vp_table.updates == [] and w.events.updates == []
+
+
+def test_a_reopen_meeting_session_that_never_started_stops_holding_the_rejoin_off(world):
+    w = world(
+        meeting={
+            "Owner": "owner@example.com",
+            "Status": "ENDED",
+            "SessionNumber": 2,
+            "ReopenedVia": "reopenMeeting",
+            "ReopenedAt": "2026-11-18T10:00:00+00:00",
+        }
+    )
+    rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.events.meeting["SessionNumber"] == 3
+
+
+def test_a_rejoins_own_session_that_did_not_start_does_not_hold_a_retry_off(world):
+    w = world(
+        meeting={
+            "Owner": "owner@example.com",
+            "Status": "ENDED",
+            "SessionNumber": 2,
+            "ReopenedVia": "rejoinVirtualParticipant",
+            "ReopenedAt": _recently(),
+        }
+    )
+    rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.events.meeting["SessionNumber"] == 3
+
+
+def test_a_meeting_still_marked_live_in_its_first_session_is_rejoined(world):
+    # A Virtual Participant that dropped out can leave its meeting marked live.
+    w = world(meeting={"Owner": "owner@example.com", "Status": "TRANSCRIBING"})
+    rejoin.rejoin_virtual_participant(w.manager, "vp-1", OWNER)
+    assert w.events.meeting["SessionNumber"] == 2
 
 
 def test_a_deletion_that_ran_after_the_check_refuses_the_rejoin_and_releases_the_row(

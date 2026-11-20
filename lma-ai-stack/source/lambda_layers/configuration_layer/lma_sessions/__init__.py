@@ -36,6 +36,15 @@ VIA_REOPEN_MEETING = "reopenMeeting"
 #: on the transcript timeline.
 SESSION_GAP_SECONDS = 1
 
+#: Statuses of a meeting that is still being captured.
+LIVE_STATUSES = ("STARTED", "TRANSCRIBING")
+
+#: How long a session allowed on the meeting (by a rejoin or by reopenMeeting)
+#: is waited for before another may be allowed: long enough for a Virtual
+#: Participant to launch and be admitted. A session that has not started by
+#: then is taken to have been abandoned.
+PENDING_SESSION_SECONDS = 15 * 60
+
 
 class SessionNotAllowed(Exception):
     """The meeting record changed while a session was being allowed on it: it was
@@ -123,6 +132,44 @@ def transcript_end_times(table: Any, call_id: str) -> Iterator[Any]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def pending_session(meeting: Mapping[str, Any], now: Optional[datetime] = None) -> bool:
+    """Whether a session allowed on the meeting recently has not started yet."""
+    allowed = session_number(meeting.get("SessionNumber"))
+    started = session_number(meeting.get("SessionStartedNumber"))
+    if allowed <= started:
+        return False
+    try:
+        reopened_at = datetime.fromisoformat(str(meeting.get("ReopenedAt")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if reopened_at.tzinfo is None:
+        reopened_at = reopened_at.replace(tzinfo=timezone.utc)
+    elapsed = ((now or datetime.now(timezone.utc)) - reopened_at).total_seconds()
+    # A time a little ahead of this clock (another writer's clock) is still
+    # recent; one far ahead is not read as holding the meeting indefinitely.
+    return -PENDING_SESSION_SECONDS < elapsed < PENDING_SESSION_SECONDS
+
+
+def streaming_session_holds(meeting: Mapping[str, Any], now: Optional[datetime] = None) -> bool:
+    """Whether a session reopenMeeting allowed is live on the meeting, or pending.
+
+    A Virtual Participant rejoin is held off while it does: allowing one more
+    session would leave the streaming client's session behind it, so its
+    reconnects and its END would no longer be the meeting's current session's.
+    Only a session reopenMeeting allowed holds a rejoin off. A live first
+    session, or a rejoin's own session that did not start (a launch that
+    failed, for example), does not, as before streaming clients could reopen a
+    meeting.
+    """
+    if meeting.get("ReopenedVia") != VIA_REOPEN_MEETING:
+        return False
+    if pending_session(meeting, now):
+        return True
+    allowed = session_number(meeting.get("SessionNumber"))
+    started = session_number(meeting.get("SessionStartedNumber"))
+    return started >= allowed > 1 and meeting.get("Status") in LIVE_STATUSES
 
 
 def allow_session(

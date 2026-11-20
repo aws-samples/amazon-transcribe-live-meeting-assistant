@@ -88,6 +88,7 @@ import { readConsentSettings } from './consent/settings';
 import {
     MeetingAccess,
     decideMeetingAccess,
+    mayResumeWhenRefused,
     meetingRefusal,
     recordingBaseName,
     readMeetingRecordWithRetries,
@@ -674,13 +675,46 @@ const onTextMessage = async (
             ws.close(1008, 'meeting consent required');
             return;
         }
+        // The same user reconnecting to a meeting whose connection dropped on
+        // this task: carry on with that session rather than starting another.
+        // Its old connection may not have been seen to close yet (a dropped
+        // network is noticed by the client first), so a live session of the
+        // same meeting and user is taken over the same way.
+        const resumeHeldSession = async (): Promise<boolean> => {
+            const resumed = await sessions.resume(
+                ws,
+                callMetaData.callId,
+                getAuthenticatedCaller(request)?.sub,
+                callMetaData,
+                async () => {
+                    for (const frame of pendingConsentFrames.release(ws)) {
+                        await onConsentFrame(clientIP, ws, frame);
+                    }
+                }
+            );
+            if (resumed) {
+                await sessions.afterStart(ws);
+            }
+            return Boolean(resumed);
+        };
+
         // A START that names an existing meeting adds to it, so it is accepted
         // from the meeting's owner or an Admin; one that continues a meeting
-        // must name the session reopenMeeting allowed on it. Checked before anything is written for the meeting
-        // (calleventdata/meeting-session.ts). The session's number and offset
-        // come from the meeting record, never from the client.
+        // must name the session reopenMeeting allowed on it. Checked before
+        // anything is written for the meeting (calleventdata/meeting-session.ts).
+        // The session's number and offset come from the meeting record, never
+        // from the client.
         const access = await checkMeetingAccess(clientIP, callMetaData, request);
         if (access.kind === 'refuse') {
+            // A record that could not be read does not end a session held on
+            // this task: its reconnect resumes it, as it did before START read
+            // the record.
+            if (mayResumeWhenRefused(access) && (await resumeHeldSession())) {
+                server.log.warn(
+                    `[START]: [${clientIP}][${callMetaData.callId}] - The meeting record could not be read; resumed the session held for this caller.`
+                );
+                return;
+            }
             server.log.warn(
                 `[START]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${access.code}).`
             );
@@ -709,24 +743,7 @@ const onTextMessage = async (
             });
         }
 
-        // The same user reconnecting to a meeting whose connection dropped on
-        // this task: carry on with that session rather than starting another.
-        // Its old connection may not have been seen to close yet (a dropped
-        // network is noticed by the client first), so a live session of the
-        // same meeting and user is taken over the same way.
-        const resumed = await sessions.resume(
-            ws,
-            callMetaData.callId,
-            getAuthenticatedCaller(request)?.sub,
-            callMetaData,
-            async () => {
-                for (const frame of pendingConsentFrames.release(ws)) {
-                    await onConsentFrame(clientIP, ws, frame);
-                }
-            }
-        );
-        if (resumed) {
-            await sessions.afterStart(ws);
+        if (await resumeHeldSession()) {
             return;
         }
 

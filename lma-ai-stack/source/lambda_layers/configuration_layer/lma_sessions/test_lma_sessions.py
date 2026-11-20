@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
@@ -159,3 +160,67 @@ def test_the_reopener_is_recorded_by_email_then_username() -> None:
     assert sessions.who({"username": "u", "claims": {"email": "e@example.com"}}) == "e@example.com"
     assert sessions.who({"username": "u"}) == "u"
     assert sessions.who(None) == "unknown"
+
+
+NOW = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+RECENT = "2026-11-20T11:55:00+00:00"
+LONG_AGO = "2026-11-20T11:00:00+00:00"
+VIA_REOPEN = {"ReopenedVia": "reopenMeeting"}
+VIA_REJOIN = {"ReopenedVia": "rejoinVirtualParticipant"}
+
+
+@pytest.mark.parametrize(
+    ("meeting", "holds"),
+    [
+        # A session reopenMeeting allowed, live.
+        (
+            {
+                "Status": "TRANSCRIBING",
+                "SessionNumber": 2,
+                "SessionStartedNumber": 2,
+                "ReopenedAt": LONG_AGO,
+                **VIA_REOPEN,
+            },
+            True,
+        ),
+        # Allowed a few minutes ago, not started yet.
+        ({"Status": "ENDED", "SessionNumber": 2, "ReopenedAt": RECENT, **VIA_REOPEN}, True),
+        # Allowed long ago and never started: abandoned.
+        ({"Status": "ENDED", "SessionNumber": 2, "ReopenedAt": LONG_AGO, **VIA_REOPEN}, False),
+        # Started and ended.
+        (
+            {
+                "Status": "ENDED",
+                "SessionNumber": 2,
+                "SessionStartedNumber": 2,
+                "ReopenedAt": RECENT,
+                **VIA_REOPEN,
+            },
+            False,
+        ),
+        # A rejoin's own session, pending or live.
+        ({"Status": "ENDED", "SessionNumber": 2, "ReopenedAt": RECENT, **VIA_REJOIN}, False),
+        (
+            {
+                "Status": "TRANSCRIBING",
+                "SessionNumber": 2,
+                "SessionStartedNumber": 2,
+                "ReopenedAt": RECENT,
+                **VIA_REJOIN,
+            },
+            False,
+        ),
+        # The first session, live.
+        ({"Status": "TRANSCRIBING"}, False),
+    ],
+)
+def test_only_a_live_or_pending_reopen_meeting_session_holds_a_rejoin_off(meeting, holds) -> None:
+    assert sessions.streaming_session_holds(meeting, now=NOW) is holds
+
+
+def test_a_session_allowed_recently_and_not_started_is_pending() -> None:
+    assert sessions.pending_session({"SessionNumber": 2, "ReopenedAt": RECENT}, now=NOW)
+    assert not sessions.pending_session({"SessionNumber": 2, "ReopenedAt": LONG_AGO}, now=NOW)
+    assert not sessions.pending_session(
+        {"SessionNumber": 2, "SessionStartedNumber": 2, "ReopenedAt": RECENT}, now=NOW
+    )
