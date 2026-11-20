@@ -2,8 +2,11 @@
 # This file is licensed under the MIT-0 License.
 """Unit tests for publish operations."""
 
+import io
+import json
 import re
 import tempfile
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +23,7 @@ from lma_sdk._core.publish import (
     _list_untracked_files,
     calculate_configuration_seed_hash,
     check_prerequisites,
+    chrome_extension_version,
     STACK_DEFINITIONS,
     STACK_NAMES,
 )
@@ -568,3 +572,141 @@ class TestHashAndPackage:
         template = repo / stack_name / stack_def.deployment_subdir / stack_def.template_file
         pattern = rf"^[ \t]+{re.escape(stack_def.hash_template_field)}:"
         assert re.search(pattern, template.read_text(), re.MULTILINE)
+
+
+# Chrome's rule for a manifest `version`: one to four dot-separated integers,
+# each from 0 to 65535, with no leading zeros on a non-zero integer.
+_CHROME_VERSION_RE = re.compile(r"^(0|[1-9]\d{0,4})(\.(0|[1-9]\d{0,4})){0,3}$")
+
+
+def _is_valid_chrome_version(value: str) -> bool:
+    return bool(_CHROME_VERSION_RE.match(value)) and all(
+        int(part) <= 65535 for part in value.split(".")
+    )
+
+
+def _chrome_order_key(value: str) -> tuple[int, ...]:
+    """Chrome compares component by component, a missing component counting as 0."""
+    parts = [int(part) for part in value.split(".")]
+    return tuple(parts + [0] * (4 - len(parts)))
+
+
+class TestChromeExtensionVersion:
+    """Tests for the mapping from ./VERSION to the extension manifest `version`."""
+
+    @pytest.mark.parametrize(
+        "version, expected",
+        [
+            ("0.4.1.dev1", "0.4.1.1"),
+            ("0.4.1.dev22", "0.4.1.22"),
+            ("0.4.1dev3", "0.4.1.3"),
+            ("0.4.1.a2", "0.4.1.10002"),
+            ("0.4.1b1", "0.4.1.20001"),
+            ("0.4.1.rc1", "0.4.1.30001"),
+            ("0.4.1rc2", "0.4.1.30002"),
+            ("0.4.1-rc3", "0.4.1.30003"),
+            ("0.4.1", "0.4.1.65535"),
+            ("0.3.4.23", "0.3.4.23"),
+            ("1.10.0", "1.10.0.65535"),
+            (" 0.4.1.dev1\n", "0.4.1.1"),
+        ],
+    )
+    def test_maps_lma_versions(self, version, expected):
+        assert chrome_extension_version(version) == expected
+
+    @pytest.mark.parametrize(
+        "version",
+        ["0.4.1.dev1", "0.4.1rc1", "0.4.1", "0.0.0.dev0", "65535.65535.65535", "0.4.1.dev9999"],
+    )
+    def test_mapped_versions_satisfy_chrome_rule(self, version):
+        assert _is_valid_chrome_version(chrome_extension_version(version))
+
+    def test_mapped_versions_sort_in_release_order(self):
+        ordered = [
+            "0.4.0.dev1",
+            "0.4.0rc1",
+            "0.4.0",
+            "0.4.1.dev1",
+            "0.4.1.dev2",
+            "0.4.1.dev10",
+            "0.4.1.dev9999",
+            "0.4.1a1",
+            "0.4.1b1",
+            "0.4.1rc1",
+            "0.4.1rc2",
+            "0.4.1",
+            "0.4.2.dev1",
+            "0.5.0.dev1",
+            "1.0.0",
+        ]
+        keys = [_chrome_order_key(chrome_extension_version(v)) for v in ordered]
+        assert keys == sorted(keys)
+        assert len(set(keys)) == len(keys)
+
+    def test_release_sorts_above_its_pre_release_builds(self):
+        release = _chrome_order_key(chrome_extension_version("0.4.1"))
+        assert release > _chrome_order_key(chrome_extension_version("0.4.1.dev9999"))
+        assert release > _chrome_order_key(chrome_extension_version("0.4.1rc9999"))
+
+    @pytest.mark.parametrize(
+        "version",
+        ["", "0.4", "v0.4.1", "0.4.1.dev10000", "0.4.1rc10000", "0.4.1-wip", "70000.0.0", "0.4.1.post1"],
+    )
+    def test_rejects_versions_it_cannot_map(self, version):
+        with pytest.raises(LMAPublishError):
+            chrome_extension_version(version)
+
+
+class TestBrowserExtensionPackage:
+    """Runs the browser extension publish path over the real stack directory."""
+
+    REPO = Path(__file__).resolve().parents[3]
+
+    def _publish(self, client, tmp_path: Path, version: str) -> dict:
+        from lma_sdk._core.publish import Publisher
+
+        stack_def = next(s for s in STACK_DEFINITIONS if s.name == "lma-browser-extension-stack")
+        uploaded: dict[str, bytes] = {}
+
+        def capture_upload(path, bucket, key):
+            uploaded[key] = Path(path).read_bytes()
+
+        s3 = MagicMock()
+        s3.upload_file.side_effect = capture_upload
+        publisher = Publisher(client)
+        with patch.object(Publisher, "_s3", new=s3), patch.object(Publisher, "_validate_template"):
+            result = publisher._publish_zip_with_token_replace(
+                stack_def=stack_def,
+                project_dir=self.REPO,
+                bucket="bucket",
+                prefix_and_version=f"prefix/{version}",
+                region="us-east-1",
+                version=version,
+                tmpdir=tmp_path,
+            )
+        zip_key = result["browser_ext_src_s3_location"].split("/", 1)[1]
+        with zipfile.ZipFile(io.BytesIO(uploaded[zip_key])) as zf:
+            manifest = json.loads(zf.read("public/manifest.json"))
+            package = json.loads(zf.read("package.json"))
+        template = uploaded[f"prefix/{version}/lma-browser-extension-stack/template.yaml"].decode()
+        return {"manifest": manifest, "package": package, "template": template}
+
+    @pytest.mark.parametrize("version", ["0.4.1.dev1", "0.4.1rc1", "0.4.1"])
+    def test_packaged_manifest_version_satisfies_chrome_rule(self, client, tmp_path, version):
+        manifest = self._publish(client, tmp_path, version)["manifest"]
+        assert _is_valid_chrome_version(manifest["version"])
+        assert manifest["version"] == chrome_extension_version(version)
+        assert manifest["version_name"] == version
+
+    def test_packaged_files_carry_no_unreplaced_tokens(self, client, tmp_path):
+        out = self._publish(client, tmp_path, "0.4.1.dev1")
+        assert out["package"]["version"] == "0.4.1.dev1"
+        assert "lma-chrome-extension-v0.4.1.dev1.zip" in out["template"]
+        for body in (json.dumps(out["manifest"]), json.dumps(out["package"]), out["template"]):
+            assert "VERSION_TOKEN>" not in body
+
+    def test_tracked_manifest_is_left_unmodified(self, client, tmp_path):
+        manifest = self.REPO / "lma-browser-extension-stack" / "public" / "manifest.json"
+        before = manifest.read_text()
+        self._publish(client, tmp_path, "0.4.1.dev1")
+        assert manifest.read_text() == before

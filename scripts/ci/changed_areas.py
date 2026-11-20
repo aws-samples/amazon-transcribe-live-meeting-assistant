@@ -371,6 +371,11 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # tests and the SDK's publish tests. (The demo recorder's session helper reads it
     # too; that step takes the whole `templates` area.)
     ("lma-main.yaml", ("asr", "lambdas", "sdk_cli")),
+    # The SDK's publish tests package the real browser extension stack and read the
+    # version tokens in these files.
+    ("lma-browser-extension-stack/public/manifest.json", "sdk_cli"),
+    ("lma-browser-extension-stack/package.json", "sdk_cli"),
+    ("lma-browser-extension-stack/template.yaml", "sdk_cli"),
     # The AI stack static tests scan every source file under utilities/ for
     # createVirtualParticipant selections (test_shared_with_access.py), and check the
     # anchors of every Markdown link into the parameters page in every *.md in the
