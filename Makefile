@@ -81,6 +81,7 @@ PYTHON_LINT_PATHS := \
 CFN_TEMPLATES := \
 	lma-main.yaml \
 	$(AI_STACK_DIR)/deployment/lma-ai-stack.yaml \
+	$(AI_STACK_DIR)/deployment/lma-ai-lambda-resolvers.yaml \
 	$(AI_STACK_DIR)/deployment/virtual-participant-enhancements.yaml \
 	$(ASR_DIR)/template.yaml \
 	lma-bedrockagent-stack/template.yaml \
@@ -200,8 +201,11 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo "Upgrading pip..."
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	@echo "Installing Python lint/dev tools..."
+# aws-sam-translator: lma-ai-stack/test/test_resource_budget.py runs the SAM
+# transform to count the AI stack's resources. cfn-lint no longer installs it.
 	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
+		aws-sam-translator \
 		bandit \
 		black \
 		cfn-lint \

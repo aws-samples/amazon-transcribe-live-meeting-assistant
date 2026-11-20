@@ -821,6 +821,8 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             // The embed asked for the chat, so its panel starts open.
             assistantDefaultOpen
+            // An embed has no drawers, so the meeting's notifications show above the tabs.
+            notificationsInline
           />
         </div>
       </CallsContext.Provider>

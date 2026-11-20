@@ -157,6 +157,39 @@ $util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead")
   #end
 #end
 
+## Who the meeting is shared with when the VP creates it, as
+## createVirtualParticipant checks and stores it; sent empty, removed. This
+## does not share the Virtual Participant itself.
+#if( $ctx.args.input.containsKey("meetingSharedWith") )
+  #set( $meetingRecipients = [] )
+  #foreach( $meetingRecipient in $util.defaultIfNull($ctx.args.input.meetingSharedWith, []) )
+    #set( $meetingRecipientText = $util.defaultIfNull($meetingRecipient, "").trim() )
+    #if( !$meetingRecipientText.isEmpty() )
+      #if( !$meetingRecipientText.matches("[^@\s\[\],]+@[^@\s\[\],]+\.[^@\s\[\],]+") )
+        $util.error("meetingSharedWith: $meetingRecipientText is not an email address", "BadRequest")
+      #end
+      #if( !$meetingRecipients.contains($meetingRecipientText) )
+        $util.qr( $meetingRecipients.add($meetingRecipientText) )
+      #end
+    #end
+  #end
+  #if( $meetingRecipients.size() > 50 )
+    $util.error("meetingSharedWith names more than 50 email addresses", "BadRequest")
+  #end
+  #set( $meetingSharedWithValue = "" )
+  #foreach( $meetingRecipientText in $meetingRecipients )
+    #set( $meetingSharedWithValue = "$meetingSharedWithValue$meetingRecipientText" )
+    #if( $foreach.hasNext )
+      #set( $meetingSharedWithValue = "$meetingSharedWithValue," )
+    #end
+  #end
+  #if( $meetingSharedWithValue.isEmpty() )
+    $util.qr( $removeNames.add("meetingSharedWith") )
+  #else
+    $util.qr( $setValues.put("meetingSharedWith", $meetingSharedWithValue) )
+  #end
+#end
+
 ## Meeting consent, with createVirtualParticipant's names and rule.
 #if( $ctx.args.input.containsKey("consentMode") )
   #if( $util.isNullOrBlank($ctx.args.input.consentMode) )

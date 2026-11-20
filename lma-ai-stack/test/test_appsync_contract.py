@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from ai_stack_templates import all_template_paths, flattened
 
 # graphql-core is a dev dependency of lib/lma_sdk, installed by
 # `make setup-cli-dev`. Imported unconditionally on purpose: skipping the whole
@@ -52,6 +53,8 @@ from graphql.language.ast import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AI_STACK = REPO_ROOT / "lma-ai-stack"
 TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
+# Every AI stack template file, the nested ones included; see ai_stack_templates.
+_ALL_TEMPLATES_TEXT = "\n".join(path.read_text() for path in all_template_paths())
 APPSYNC_DIR = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC_DIR / "schema.graphql"
 UI_SRC = AI_STACK / "source" / "ui" / "src"
@@ -267,9 +270,10 @@ OTHER_FIELDS = [
     ("Mutation", "addTranscriptSegment"),
     ("Mutation", "addVideoKeyframe"),
     ("Mutation", "addChatAttachment"),
-    # Written by the hosted MCP server's push_meeting_guidance tool with SigV4,
-    # after it has checked the MCP caller may see the meeting.
-    ("Mutation", "addMeetingGuidance"),
+    # A meeting notification, published by a backend with SigV4 (the hosted MCP
+    # server after checking the MCP caller may see the meeting); recipients come
+    # from the meeting in the resolver.
+    ("Mutation", "publishMeetingNotification"),
     ("Mutation", "addChatToken"),
     # One meeting at a time, authorized per meeting by the resolver against its
     # owner and share list rather than by group.
@@ -302,6 +306,10 @@ OTHER_FIELDS = [
     ("Mutation", "attestMeetingConsent"),
     ("Mutation", "addMeetingConsentEvidence"),
     ("Mutation", "verifyMeetingConsentEvidence"),
+    # An archive of one meeting's files: a Lambda resolver applying getCall's
+    # rule, which reads an archive back only for the caller who started it.
+    ("Mutation", "prepareMeetingArchive"),
+    ("Query", "getMeetingArchive"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),
@@ -343,6 +351,12 @@ OTHER_FIELDS = [
     ("Mutation", "setMyZoomCredentials"),
     ("Mutation", "deleteMyZoomCredentials"),
     ("Mutation", "deleteMyChromeProfile"),
+    # The caller's own view of one meeting's notifications (after the meeting's
+    # access check), and their own muted categories.
+    ("Mutation", "updateMyMeetingNotificationState"),
+    ("Mutation", "updateMyNotificationPreferences"),
+    ("Query", "getMyMeetingNotificationState"),
+    ("Query", "getMyNotificationPreferences"),
     # Reads scoped to the caller, to one meeting, or to the caller's own record.
     ("Query", "getCall"),
     # One meeting's cost estimate, authorized in the resolver by getCall's rule.
@@ -356,6 +370,8 @@ OTHER_FIELDS = [
     ("Query", "getChatAttachments"),
     # One meeting's consent record, authorized in the resolver by getCall's rule.
     ("Query", "getMeetingConsent"),
+    # One meeting's notifications, after meetingAccess.js applies getCall's rule.
+    ("Query", "listMeetingNotifications"),
     ("Query", "listCallsDateRange"),
     ("Query", "getCallCount"),
     ("Query", "queryKnowledgeBase"),
@@ -521,7 +537,7 @@ class Resolver:
 
 def _load_resolvers() -> list[Resolver]:
     resolvers: list[Resolver] = []
-    for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text()):
+    for block in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT):
         if "Type: AWS::AppSync::Resolver" not in block:
             continue
         logical_id = block.split(":", 1)[0].strip()
@@ -597,32 +613,45 @@ LAMBDA_AWSJSON_FIELDS = {
 }
 
 
-def _template_resources(kind: str) -> dict[str, str]:
-    return {
-        block.split(":", 1)[0].strip(): block
-        for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
-        if f"Type: {kind}" in block
-    }
+# Read with the AI stack's nested templates inlined, so a resolver whose data
+# source is declared in one (named through `!GetAtt <Stack>.Outputs.<Name>`)
+# resolves to that data source; see ai_stack_templates.
+_FLAT_RESOURCES = flattened()["Resources"]
+
+
+def _getatt_target(value) -> str | None:
+    target = value.get("Fn::GetAtt") if isinstance(value, dict) else None
+    if isinstance(target, list):
+        return str(target[0])
+    if isinstance(target, str):
+        return target.split(".", 1)[0]
+    return None
 
 
 def _lambda_backed(resolver: Resolver) -> bool:
     """Whether a Lambda data source serves the resolver, directly or in its pipeline."""
-    lambdas = {
-        logical_id
-        for logical_id, block in _template_resources("AWS::AppSync::DataSource").items()
-        if re.search(r"^      Type: AWS_LAMBDA$", block, re.M)
-    }
-    functions = _template_resources("AWS::AppSync::FunctionConfiguration")
-    blocks = [resolver.block] + [
-        functions[function_id]
-        for function_id in re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
-        if function_id in functions
+    properties = _FLAT_RESOURCES[resolver.logical_id].get("Properties") or {}
+    pipeline = (properties.get("PipelineConfig") or {}).get("Functions") or []
+    candidates = [properties] + [
+        _FLAT_RESOURCES[function_id].get("Properties") or {}
+        for function_id in map(_getatt_target, pipeline)
+        if function_id in _FLAT_RESOURCES
     ]
     return any(
-        source in lambdas
-        for block in blocks
-        for source in re.findall(r"DataSourceName: !GetAtt (\w+)\.Name", block)
+        ((_FLAT_RESOURCES.get(_getatt_target(c.get("DataSourceName"))) or {}).get("Properties") or {})
+        .get("Type")
+        == "AWS_LAMBDA"
+        for c in candidates
     )
+
+
+def test_lambda_backed_detection_sees_data_sources_in_nested_templates() -> None:
+    """Guards the selector below: getAsrConfig's data source is declared in a
+    nested template, and the meeting preparation fields' validation runs in a
+    pipeline function there; both must count as Lambda-backed."""
+    assert _lambda_backed(_resolver("Query", "getAsrConfig"))
+    assert _lambda_backed(_resolver("Mutation", "updateCallLabels"))
+    assert _lambda_backed(_resolver("Query", "listInstalledMCPServers"))
 
 
 def _holds_awsjson(graphql_type, seen: tuple[str, ...] = ()) -> bool:
@@ -700,7 +729,7 @@ def test_update_virtual_participant_writes_status_only_when_one_is_supplied() ->
     """
     resolver = _resolver("Mutation", "updateVirtualParticipant")
     status_set = re.search(
-        r'#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*'
+        r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*"
         r'\$util\.qr\( \$expSet\.put\("#status", ":status"\) \)',
         resolver.block,
     )
@@ -874,7 +903,7 @@ def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
-    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", TEMPLATE.read_text()))
+    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", _ALL_TEMPLATES_TEXT))
     on_disk = {path.name for path in APPSYNC_DIR.iterdir() if path.is_file()}
     assert not (on_disk - referenced), (
         f"files in {APPSYNC_DIR.name}/ that no template resource references: "
@@ -967,12 +996,32 @@ MCP_TOOLS_DIR = AI_STACK / "source" / "lambda_functions" / "mcp_analytics" / "to
 _PY_OPERATION = re.compile(r'"""\s*((?:query|mutation)\s+\w+\s*[({].*?)"""', re.S)
 
 
+def _subscribed_call_fields() -> str:
+    source = (MCP_TOOLS_DIR / "call_fields.py").read_text()
+    return re.search(r'SUBSCRIBED_CALL_FIELDS = """(.*?)"""', source, re.S).group(1)
+
+
+# The publish helper the MCP tools call (guidance.push) sends its mutation from
+# the configuration layer, with the MCP server function's role.
+NOTIFICATIONS_HELPER = (
+    AI_STACK
+    / "source"
+    / "lambda_layers"
+    / "configuration_layer"
+    / "lma_notifications"
+    / "__init__.py"
+)
+
+
 def _mcp_operations() -> list[tuple[str, str]]:
     operations = []
-    for path in sorted(MCP_TOOLS_DIR.glob("*.py")):
+    for path in [*sorted(MCP_TOOLS_DIR.glob("*.py")), NOTIFICATIONS_HELPER]:
         if path.name.startswith("test_"):
             continue
         for body in _PY_OPERATION.findall(path.read_text()):
+            # A document that selects the Call fields onUpdateCall subscribers
+            # need names them by a placeholder (tools/call_fields.py).
+            body = body.replace("__SUBSCRIBED_CALL_FIELDS__", _subscribed_call_fields())
             named = re.search(r"\b(?:query|mutation)\s+(\w+)", body)
             operations.append((f"{path.name}::{named.group(1)}", body))
     return operations
@@ -985,7 +1034,8 @@ def test_mcp_operations_were_found() -> None:
     """Guards the extractor: the meeting tools send at least these."""
     names = {label.split("::")[1] for label, _ in MCP_OPERATIONS}
     for name in (
-        "AddMeetingGuidance",
+        "ListMeetingNotifications",
+        "PublishMeetingNotification",
         "UpdateCallAgenda",
         "UpdateScheduledVirtualParticipant",
         "EndVirtualParticipant",
@@ -993,6 +1043,11 @@ def test_mcp_operations_were_found() -> None:
         "GetVideoKeyframes",
         "GetChatAttachments",
         "GetMeetingConsent",
+        "UpdateCallMeetingContext",
+        "UpdateCallChecklist",
+        "UpdateCallChecklistItem",
+        "UpdateCallLabels",
+        "UpdateCallAudience",
     ):
         assert name in names, name
 
@@ -1010,7 +1065,7 @@ def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
     """Every mutation an MCP tool sends is named in the function's appsync:GraphQL grant."""
     block = next(
         b
-        for b in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
+        for b in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT)
         if b.startswith("MCPServerAnalyticsFunction:")
     )
     granted = set(re.findall(r"/types/Mutation/fields/(\w+)", block))
@@ -1022,28 +1077,121 @@ def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
     assert sent <= granted, f"sent but not granted: {sorted(sent - granted)}"
 
 
-# ── meeting guidance reaches the meeting page as the meeting's messages do ──
+# ── meeting notifications reach the meeting page as the meeting's messages do ──
 
 
-def test_meeting_guidance_is_filtered_on_owner_and_shared_with() -> None:
-    """onAddMeetingGuidance uses subscription.js, and the page selects both fields."""
-    subscription = _resolver("Subscription", "onAddMeetingGuidance")
+def test_meeting_notifications_are_filtered_on_owner_and_shared_with() -> None:
+    """onMeetingNotification uses subscription.js, and the page selects both fields."""
+    subscription = _resolver("Subscription", "onMeetingNotification")
     assert "CodeS3Location: ../source/appsync/subscription.js" in subscription.block
-    mutation = _resolver("Mutation", "addMeetingGuidance")
-    # The response template that publishes SharedWith in the "[a, b]" form.
-    assert mutation.files[-1].endswith("dDbPutCondition.response.vtl")
-    page = (UI_SRC / "graphql" / "queries" / "onAddMeetingGuidance.js").read_text()
-    selection = page[page.index("onAddMeetingGuidance(") :]
+    page = (UI_SRC / "graphql" / "queries" / "onMeetingNotification.js").read_text()
+    selection = page[page.index("onMeetingNotification(") :]
     assert re.search(r"\bOwner\b", selection) and re.search(r"\bSharedWith\b", selection)
-    assert "CallId: $callId" in page
+    assert re.search(r"\bCallId\b", selection)
 
 
-def test_meeting_guidance_is_written_by_backend_roles_only(field_nodes) -> None:
+def test_meeting_notifications_are_published_by_backend_roles_only(field_nodes) -> None:
     """The mutation carries no Cognito directive, so a signed-in user cannot call it."""
-    assert _cognito_groups(field_nodes[("Mutation", "addMeetingGuidance")]) is None
+    assert _cognito_groups(field_nodes[("Mutation", "publishMeetingNotification")]) is None
+
+
+def test_the_publish_pipeline_reads_the_meeting_first_and_writes_last() -> None:
+    resolver = _resolver("Mutation", "publishMeetingNotification")
+    order = re.findall(r"!GetAtt (\w+)AppSyncFunction\.FunctionId", resolver.block)
+    assert order == [
+        "NotificationPublishMeeting",
+        "NotificationPublishRate",
+        "NotificationPublishDedup",
+        "NotificationPublishWrite",
+    ]
+
+
+@pytest.mark.parametrize(
+    "type_name, field",
+    [
+        ("Query", "listMeetingNotifications"),
+        ("Query", "getMyMeetingNotificationState"),
+        ("Mutation", "updateMyMeetingNotificationState"),
+    ],
+)
+def test_a_meetings_notifications_are_read_after_its_access_check(type_name, field) -> None:
+    """meetingAccess.js decides from the meeting as it is now, before any read or write."""
+    resolver = _resolver(type_name, field)
+    order = re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
+    assert order[0] == "MeetingAccessAppSyncFunction", order
+
+
+def test_the_published_recipients_come_from_the_meeting_and_are_never_stored() -> None:
+    meeting = (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    write = (APPSYNC_DIR / "notificationPublishWrite.js").read_text()
+    # The meeting row is read, and its access stashed for the answer.
+    assert "key: util.dynamodb.toMapValues({ PK: key, SK: key })" in meeting
+    assert "Owner: meeting.Owner" in meeting
+    # The write stores the publisher's fields only.
+    fields = re.search(r"REQUIRED_FIELDS = \[(.*?)\];.*?OPTIONAL_FIELDS = \[(.*?)\];", write, re.S)
+    stored = fields.group(1) + fields.group(2)
+    assert "Owner" not in stored and "SharedWith" not in stored
+    # And the input type offers no way to name them.
+    sdl = SCHEMA.read_text()
+    publish_input = sdl[sdl.index("input PublishMeetingNotificationInput {") :]
+    publish_input = publish_input[: publish_input.index("}")]
+    assert "Owner" not in publish_input and "SharedWith" not in publish_input
+
+
+def _block_between(text: str, begin: str, end: str) -> str:
+    return text[text.index(begin) + len(begin) : text.index(end)]
+
+
+def test_mutation_actions_are_the_same_on_the_server_and_in_the_page() -> None:
+    """A MUTATION button names an action both sides know, or the publish is refused."""
+    server = _block_between(
+        (APPSYNC_DIR / "notificationPublishMeeting.js").read_text(),
+        "// BEGIN notificationMutationActions",
+        "// END notificationMutationActions",
+    )
+    page = _block_between(
+        (UI_SRC / "components" / "meeting-notifications" / "notification-actions.js").read_text(),
+        "// BEGIN notificationMutationActions",
+        "// END notificationMutationActions",
+    )
+    # The top-level keys of each object: four spaces in the resolver, two in the page.
+    server_names = re.findall(r"^    (\w+): \[", server, re.M)
+    page_names = re.findall(r"^  (\w+): \{", page, re.M)
+    assert server_names, "no action found in the resolver's list"
+    assert sorted(server_names) == sorted(page_names)
+    # A name inherited by every object is never taken for an action.
+    assert (
+        "Object.keys(MUTATION_ACTIONS).includes(name)"
+        in (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    )
+
+
+def test_the_user_view_is_keyed_by_the_callers_identity() -> None:
+    for name in ("myMeetingNotificationState.js", "myNotificationPreferences.js"):
+        text = (APPSYNC_DIR / name).read_text()
+        assert "ctx.identity && ctx.identity.username" in text, name
+        assert "args.Username" not in text and "input.Username" not in text, name
+
+
+def test_the_notifications_read_stays_inside_the_notification_rows() -> None:
+    text = (APPSYNC_DIR / "listMeetingNotifications.js").read_text()
+    assert "begins_with(SK, :prefix)" in text and "':prefix': 'n#'" in text
 
 
 def test_enum_bodies_carry_no_comments(schema_sdl: str) -> None:
     """AppSync rejects a # comment inside an enum body that graphql-core accepts."""
     for match in re.finditer(r"^enum (\w+)\s*\{(.*?)^\}", schema_sdl, re.M | re.S):
         assert "#" not in match.group(2), f"enum {match.group(1)} has a comment in its body"
+
+
+def test_transcript_bound_categories_are_the_publish_helpers() -> None:
+    """The resolver refuses, and keeps the expiry of, the categories the helper and the transcript deletion treat as quoting the transcript."""
+    import importlib.util
+
+    text = (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    block = _block_between(text, "// BEGIN transcriptBoundCategories", "// END transcriptBoundCategories")
+    in_resolver = set(re.findall(r"'([a-z][a-z0-9_-]*)'", block))
+    spec = importlib.util.spec_from_file_location("lma_notifications_for_contract", NOTIFICATIONS_HELPER)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    assert in_resolver == set(helper.TRANSCRIPT_BOUND_CATEGORIES)

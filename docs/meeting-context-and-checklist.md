@@ -97,6 +97,8 @@ removes it.
 
 **The API.** See [API](#api).
 
+**An MCP client.** The hosted MCP server's `schedule_meeting` and `start_meeting_now` take the four inputs, and `update_scheduled_meeting` changes them before the meeting starts; `get_meeting_context`, `set_meeting_context`, `get_meeting_checklist`, `set_meeting_checklist`, `update_checklist_item` and `update_meeting_metadata` read and change them afterwards, and `list_meetings` finds meetings by their labels and audience. A status an MCP client sets is recorded as `StatusSource: user`, because the client acts for its user. See the [MCP Tools Reference](mcp-tools-reference.md).
+
 ## On the meeting page
 
 - **Labels and audience** are shown at the top of the **Summary** tab: the

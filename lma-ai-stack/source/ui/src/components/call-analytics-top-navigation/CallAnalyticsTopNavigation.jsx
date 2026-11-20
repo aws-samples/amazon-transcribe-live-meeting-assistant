@@ -6,9 +6,14 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { signOut, fetchUserAttributes } from 'aws-amplify/auth';
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
+import useNotificationCount from '../../hooks/use-notification-count';
+import useNotificationPreferences from '../../hooks/use-notification-preferences';
+import { meetingCallIdOf, meetingHref } from '../meeting-notifications/meeting-route';
+import NotificationPreferencesModal from '../meeting-notifications/NotificationPreferencesModal';
 
 const logger = new ConsoleLogger('TopNavigation');
 
@@ -53,6 +58,17 @@ const CallAnalyticsTopNavigation = () => {
   const { isAdmin } = useUserGroups();
   const [email, setEmail] = useState('');
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
+  const [isPreferencesVisible, setIsPreferencesVisible] = useState(false);
+  const location = useLocation();
+  const signedIn = authState === 'authenticated' && Boolean(user?.username);
+  const { mutedEverywhere, unmuteEverywhere } = useNotificationPreferences({ enabled: signedIn });
+  // Meeting notifications that arrived during this visit, for meetings this
+  // user owns or that are shared with them (docs/meeting-notifications.md).
+  const notificationCount = useNotificationCount({
+    username: signedIn ? user.username : null,
+    currentCallId: meetingCallIdOf(location.pathname),
+    mutedEverywhere,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +101,30 @@ const CallAnalyticsTopNavigation = () => {
           identity={{ href: '#', title: 'Live Meeting Assistant' }}
           i18nStrings={{ overflowMenuTriggerText: 'More' }}
           utilities={[
+            {
+              type: 'menu-dropdown',
+              iconName: 'notification',
+              ariaLabel:
+                notificationCount.total > 0
+                  ? `Meeting notifications, ${notificationCount.total} during this visit`
+                  : 'Meeting notifications',
+              title: 'Meeting notifications during this visit',
+              badge: notificationCount.total > 0,
+              text: notificationCount.total > 0 ? String(notificationCount.total) : undefined,
+              items: [
+                ...(notificationCount.meetings.length === 0
+                  ? [{ id: 'none', text: 'None during this visit', disabled: true }]
+                  : notificationCount.meetings.map((meeting) => ({
+                      id: `meeting:${meeting.callId}`,
+                      text: `${meeting.callId} (${meeting.count})`,
+                      href: meetingHref(meeting.callId),
+                    }))),
+                { id: 'notification-settings', text: 'Notification settings' },
+              ],
+              onItemClick: ({ detail }) => {
+                if (detail.id === 'notification-settings') setIsPreferencesVisible(true);
+              },
+            },
             {
               type: 'menu-dropdown',
               text: userId,
@@ -133,6 +173,12 @@ const CallAnalyticsTopNavigation = () => {
         />
       </div>
       <SignOutModal visible={isSignOutModalVisible} setVisible={setIsSignOutModalVisiblesetVisible} />
+      <NotificationPreferencesModal
+        visible={isPreferencesVisible}
+        onDismiss={() => setIsPreferencesVisible(false)}
+        mutedEverywhere={mutedEverywhere}
+        onUnmute={unmuteEverywhere}
+      />
     </>
   );
 };

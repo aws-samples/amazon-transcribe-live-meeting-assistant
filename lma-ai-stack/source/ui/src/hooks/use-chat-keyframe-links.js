@@ -35,6 +35,16 @@ export const loadKeyframe = async (callId, frameId) => {
 };
 
 /**
+ * One page of a meeting's frames in time order (getVideoKeyframes' answer:
+ * { VideoKeyframes, nextToken }), for reading every frame, as the slide deck does.
+ */
+export const loadKeyframePage = async (variables) => {
+  const client = generateClient();
+  const response = await client.graphql({ query: getVideoKeyframes, variables });
+  return response?.data?.getVideoKeyframes || { VideoKeyframes: [], nextToken: null };
+};
+
+/**
  * Several frames of a meeting, with their signed links, by id: one request per
  * hundred frames rather than one per frame. A frame that does not exist is not
  * in the answer; a caller without access to the meeting gets an error for the

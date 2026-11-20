@@ -7,6 +7,9 @@
 it is the stack that takes longest to deploy and roll back. The equivalent tests
 for the Virtual Participant template have repeatedly caught deploy-blocking
 mistakes in seconds; this is the same idea applied to the larger template.
+The tests read it with its nested templates' resources inlined
+(`ai_stack_templates.flattened`), so they hold for the deployed stack whichever
+file a resource is written in.
 
 Two kinds of assertion, kept visibly apart:
 
@@ -31,8 +34,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import TEMPLATE, all_template_paths, flattened
 
-TEMPLATE = Path(__file__).resolve().parents[1] / "deployment" / "lma-ai-stack.yaml"
 MAIN_TEMPLATE = Path(__file__).resolve().parents[2] / "lma-main.yaml"
 
 # Substituted by CloudFormation rather than declared in the template.
@@ -73,12 +76,14 @@ _CfnLoader.add_multi_constructor("!", _intrinsic)
 
 @pytest.fixture(scope="module")
 def template() -> dict:
-    return yaml.load(TEMPLATE.read_text(), Loader=_CfnLoader)
+    """The AI stack with its nested templates' resources inlined; see ai_stack_templates."""
+    return flattened()
 
 
 @pytest.fixture(scope="module")
 def raw() -> str:
-    return TEMPLATE.read_text()
+    """Every AI stack template file's text, so a ratchet counts all of them."""
+    return "\n".join(path.read_text() for path in all_template_paths())
 
 
 @pytest.fixture(scope="module")
@@ -855,7 +860,7 @@ def test_partition_and_endpoint_literals_do_not_increase(raw: str):
 _LIST_LITERAL_CALL = re.compile(r"\]\s*\.\s*[A-Za-z_]+\s*\(")
 
 
-@pytest.mark.parametrize("path", [TEMPLATE, MAIN_TEMPLATE])
+@pytest.mark.parametrize("path", [*all_template_paths(), MAIN_TEMPLATE])
 def test_no_velocity_method_call_on_a_list_literal(path: Path):
     offenders = [
         f"{path.name}:{number}: {line.strip()}"

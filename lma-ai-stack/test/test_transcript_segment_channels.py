@@ -38,6 +38,7 @@ import re
 from pathlib import Path
 
 import pytest
+from ai_stack_templates import all_template_paths
 
 # graphql-core is a dev dependency of lib/lma_sdk, as for test_appsync_contract.py.
 from graphql import (
@@ -138,7 +139,9 @@ def _queries_returning_channels(schema) -> list[str]:
 def _request_template(field_name: str, type_name: str = "Query") -> Path:
     """The request mapping template of the resolver on this field."""
     matches = []
-    for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text()):
+    # Every AI stack template file, the nested ones included; see ai_stack_templates.
+    text = "\n".join(path.read_text() for path in all_template_paths())
+    for block in _RESOURCE_SPLIT.split(text):
         if "Type: AWS::AppSync::Resolver" not in block:
             continue
         if not re.search(rf"^      TypeName: {type_name}$", block, re.M):

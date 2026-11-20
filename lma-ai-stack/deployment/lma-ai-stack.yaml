@@ -2344,6 +2344,7 @@ Resources:
         - !Ref VideoKeyframesResolverFunctionExecutionRole
         - !Ref ChatAttachmentSummarizerFunctionExecutionRole
         - !Ref ChatAttachmentsResolverFunctionExecutionRole
+        - !Ref MeetingArchiveFunctionExecutionRole
         - !Ref MeetingConsentResolverFunctionExecutionRole
         - !Ref ConsentEvidenceVerifierFunctionExecutionRole
         - !Ref UploadManifestLambdaRole
@@ -2657,77 +2658,6 @@ Resources:
       # Ordered behind the seeder, like every configuration reader.
       - SeedConfiguration
 
-  StrandsChatInterfaceFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt StrandsChatInterfaceFunctionExecutionRole.Arn
-      Runtime: python3.12
-      # No SnapStart here: `ApplyOn: PublishedVersions` only takes effect for a
-      # published version, and this function is reached through an unqualified
-      # $LATEST ARN (the StrandsChatDataSource AppSync data source uses
-      # `!GetAtt StrandsChatInterfaceFunction.Arn`), so no version is ever
-      # published and the setting was inert. Measured before removing it: init
-      # 440 ms, exec 297 ms — SnapStart targets multi-second inits, and paying
-      # for a version cache plus alias-qualified wiring buys nothing at 440 ms.
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref LogLevel
-          ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
-      Timeout: 30
-      MemorySize: 128
-      Handler: lambda_function.lambda_handler
-      CodeUri: ../source/lambda_functions/strands_chat_interface
-      Description: This AWS Lambda Function handles STRANDS chat interface messages.
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/StrandsChatInterfaceFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for chat interface function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like function ARNs"
-    DependsOn:
-      - StrandsChatInterfaceFunctionLogGroup
-
-  StrandsChatInterfaceFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/StrandsChatInterfaceFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  StrandsChatInterfaceFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: STRANDS Chat Interface Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - "sts:AssumeRole"
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-StrandsChatInterface
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
-
   AsyncAgentAssistOrchestratorLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -2840,7 +2770,7 @@ Resources:
               !Ref EndOfCallLambdaHookFunctionArn,
             ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          SPEAKER_NAME_RESOLVER_ARN: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
           # Must exceed the resolver's own 60s timeout, so a pass that is still
           # running is never abandoned and retried from here.
           SPEAKER_NAME_READ_TIMEOUT: 75
@@ -2947,7 +2877,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                Resource: !GetAtt SpeakerNameResolverFunction.Arn
+                Resource: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
 
 
   ##########################################################################
@@ -3105,7 +3035,7 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !GetAtt SpeakerNameResolverFunction.Arn
+              Resource: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
             # Told when each meeting ends and when its summary is stored.
             - Effect: Allow
               Action:
@@ -3116,7 +3046,7 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !GetAtt AgendaDeriverFunction.Arn
+              Resource: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
             # The text of each key frame, read once it is stored.
             - Effect: Allow
               Action:
@@ -3197,9 +3127,9 @@ Resources:
           IS_TRANSCRIPT_SUMMARY_ENABLED:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
-          SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          SPEAKER_NAME_RESOLVER_ARN: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
           TRANSCRIPT_DELETION_FUNCTION_ARN: !GetAtt TranscriptDeletionFunction.Arn
-          AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
+          AGENDA_DERIVER_ARN: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Gives each stored chat attachment its title and summary.
@@ -3664,218 +3594,6 @@ Resources:
                   - kms:Decrypt
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
-
-  QueryKnowledgeBaseResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
-      Description: Lambda function to query the meeting transcript knowledge base
-      MemorySize: 512
-      Timeout: 60
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref LogLevel
-          KB_ID: !Ref BedrockKnowledgeBaseID
-          KB_ACCOUNT_ID: !Ref AWS::AccountId
-          KB_REGION: !Ref AWS::Region
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    DependsOn:
-      - QueryKnowledgeBaseResolverFunctionLogGroup
-      # Ordered behind the seeder, like every configuration reader.
-      - SeedConfiguration
-
-  MeetingInvitationParserFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt MeetingInvitationParserFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/meeting_invitation_parser
-      Description: Lambda function to parse meeting invitations using Bedrock AI
-      MemorySize: 512
-      Timeout: 60
-      Environment:
-        Variables:
-          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/MeetingInvitationParserFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    DependsOn:
-      - MeetingInvitationParserFunctionLogGroup
-      # Ordered behind the seeder, like every configuration reader.
-      - SeedConfiguration
-
-  MeetingInvitationParserFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/MeetingInvitationParserFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  MeetingInvitationParserFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: Meeting Invitation Parser Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - "sts:AssumeRole"
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-MeetingInvitationParser
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              # Read-only, on the shared configuration table: the model this
-              # function calls is read from its Amazon Bedrock Models section.
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  QueryKnowledgeBaseResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  QueryKnowledgeBaseResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: QueryKnowledgeBaseResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - "sts:AssumeRole"
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-BedrockKnowledgeBase
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:Retrieve"
-                  - "bedrock:RetrieveAndGenerate"
-                #TODO: Figure out how to restrict to target Transcript KB - created in a parallel nested stack
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              # Read-only, on the shared configuration table: the model this
-              # function calls is read from its Amazon Bedrock Models section.
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - appsync.amazonaws.com
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: 
-                  - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
-                  - !GetAtt MeetingInvitationParserFunction.Arn
 
   ##########################################################################
   # Meeting Controls Lambda - To share and delete meetings
@@ -4859,531 +4577,12 @@ Resources:
       # transcript still has to be deleted, by running the function again.
       MessageRetentionPeriod: 1209600
 
-  UpdateChatButtonConfigResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
-      Description: >-
-        Lambda resolver for the Meeting Assist chat buttons: reads a stored
-        record and saves an edit against an allowed field list
-      MemorySize: 256
-      Timeout: 30
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          ADMIN_GROUP: "Admin"
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateChatButtonConfigResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
-    DependsOn:
-      - UpdateChatButtonConfigResolverFunctionLogGroup
-      # The chat panel should not load its buttons from an unseeded table and
-      # show nobody any shipped buttons.
-      - SeedConfiguration
-
-  UpdateChatButtonConfigResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateChatButtonConfigResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  UpdateChatButtonConfigResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: UpdateChatButtonConfigResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-UpdateChatButtonConfig
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # GetItem as well as PutItem: the chat panel's read is served from
-              # here, and a save reads the profile's current version so a write
-              # that another session has superseded can be refused.
-              # Deliberately no DeleteItem.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncUpdateChatButtonConfigLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - appsync.amazonaws.com
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt UpdateChatButtonConfigResolverFunction.Arn
-
-  UpdateChatButtonConfigLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: UpdateChatButtonConfigLambda
-      Description: Lambda data source backing the updateChatButtonConfig mutation
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncUpdateChatButtonConfigLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UpdateChatButtonConfigResolverFunction.Arn
-
-  ##########################################################################
-  # Nova Sonic Config - Lambda, IAM, DataSources
-  ##########################################################################
-
-  UpdateNovaSonicConfigResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      Role: !GetAtt UpdateNovaSonicConfigResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/update_nova_sonic_config_resolver
-      Description: >-
-        Lambda resolver for the Nova Sonic voice assistant settings: reads the
-        stored record and saves an edit, with input validation
-      MemorySize: 256
-      Timeout: 30
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          ADMIN_GROUP: "Admin"
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateNovaSonicConfigResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
-    DependsOn:
-      - UpdateNovaSonicConfigResolverFunctionLogGroup
-      # A read of the Nova Sonic settings should not meet an unseeded table and
-      # show an administrator no shipped defaults.
-      - SeedConfiguration
-
-  UpdateNovaSonicConfigResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateNovaSonicConfigResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  UpdateNovaSonicConfigResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: UpdateNovaSonicConfigResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-UpdateNovaSonicConfig
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # GetItem as well as PutItem: a save reads the profile's current
-              # version so a write that another session has superseded can be
-              # refused, and the page's own read is served from here too.
-              # Deliberately no DeleteItem.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncUpdateNovaSonicConfigLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - appsync.amazonaws.com
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
-
-  UpdateNovaSonicConfigLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: UpdateNovaSonicConfigLambda
-      Description: Lambda function for updateNovaSonicConfig with input validation
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncUpdateNovaSonicConfigLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
-
-  ##########################################################################
-  # ASR runtime config (the asr_engine section) - Lambda, IAM, DataSources
-  #
-  # Created whether or not the on-demand engine is deployed: the Virtual
-  # Participant reads its voice separation switch through getAsrConfig on
-  # Amazon Transcribe as well.
-  ##########################################################################
-
-  UpdateAsrConfigResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      Role: !GetAtt UpdateAsrConfigResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/update_asr_config_resolver
-      Description: >-
-        Lambda resolver for the ASR runtime switches: reads the effective
-        switches and saves an edit, with input validation
-      MemorySize: 256
-      Timeout: 30
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          ADMIN_GROUP: "Admin"
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
-    DependsOn:
-      - UpdateAsrConfigResolverFunctionLogGroup
-      # The Stream Audio form and the Virtual Participant should not read an
-      # unseeded table and get no shipped switches.
-      - SeedConfiguration
-
-  UpdateAsrConfigResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  UpdateAsrConfigResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: UpdateAsrConfigResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-UpdateAsrConfig
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # GetItem as well as PutItem: every read is served from here, and a
-              # save reads the profile's current version so a write that another
-              # session has superseded can be refused. Deliberately no DeleteItem.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncUpdateAsrConfigLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: InvokeLambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt UpdateAsrConfigResolverFunction.Arn
-
-  # ----------------------------------------------------------------------------
-  # Speaker name resolution
-  #
-  # Speaker separation can tell voices apart but cannot know who they are, so a
-  # conference-room meeting reads "Other Participant (spk_0)". This function
-  # reads the transcript, asks a model for evidence of who each voice is, and
-  # verifies every proposal against the turn index before applying it. Reachable
-  # from the Speakers panel and invoked once at the end of a meeting, before the
-  # summary, so the summary reads names rather than voice ids.
-  # ----------------------------------------------------------------------------
-  SpeakerNameResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt SpeakerNameResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/speaker_name_resolver
-      Description: Infers speaker names from the transcript and stores them on the meeting
-      MemorySize: 512
-      # A model call over a bounded number of turns, plus the paged transcript
-      # read. Deliberately shorter than the summary orchestrator's socket timeout
-      # for this invoke (SPEAKER_NAME_READ_TIMEOUT, 75s), so the caller never
-      # gives up on a pass that is still running and retries it.
-      Timeout: 60
-      Environment:
-        Variables:
-          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
-          # Token usage per naming pass, for the meeting cost estimate.
-          METERING_TABLE_NAME: !Ref EventSourcingTable
-          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
-      # Carries lma_metering and lma_config. Pure Python, so it does not pin this
-      # function to an architecture.
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/SpeakerNameResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for a function whose work is re-runnable on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
-    DependsOn:
-      - SpeakerNameResolverFunctionLogGroup
-      # Ordered behind the seeder, like every configuration reader.
-      - SeedConfiguration
-
-  SpeakerNameResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/SpeakerNameResolverFunction
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  SpeakerNameResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: SpeakerNameResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-SpeakerNameResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # Read only: the names are written back through AppSync, so that
-              # open meeting pages re-label from the onUpdateCall publish.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
-              # The one write: metering records for the meeting cost estimate,
-              # and only under the mtr# partitions.
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "mtr#*"
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateSpeakerIdentities"
-              # Read-only, on the shared configuration table: the model is read
-              # from its Amazon Bedrock Models section. The KMS grant below
-              # covers decrypting it.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              # Scoped the same way BedrockSummaryLambda and
-              # MeetingInvitationParser scope the identical call, since
-              # the configured model may name a foundation model, a custom model or an
-              # inference profile. Only converse() is called, so the streaming
-              # action is not granted.
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncSpeakerNameResolverLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeSpeakerNameResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt SpeakerNameResolverFunction.Arn
-
-  SpeakerNameResolverLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: SpeakerNameResolverLambda
-      Description: Lambda function for resolveSpeakerNames
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncSpeakerNameResolverLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt SpeakerNameResolverFunction.Arn
-
   ResolveSpeakerNamesResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt SpeakerNameResolverLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverLambdaDataSourceName
       TypeName: Mutation
       FieldName: resolveSpeakerNames
       Runtime:
@@ -5667,179 +4866,12 @@ Resources:
   # ----------------------------------------------------------------------------
   # Agenda derivation
   #
-  # Reads a meeting's transcript for an agenda somebody stated, and stores it
-  # only if one was. Invoked once, asynchronously, by the call event processor
-  # about five minutes into a meeting with no agenda, and on demand from the
-  # Agenda panel's "Derive agenda" button. See docs/meeting-agenda.md.
-  # ----------------------------------------------------------------------------
-  AgendaDeriverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt AgendaDeriverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/agenda_deriver
-      Description: Derives a meeting's agenda from its transcript when one was stated
-      MemorySize: 512
-      # One model call over a bounded transcript, plus the paged transcript read.
-      # The on-demand pass answers an AppSync request, which AppSync abandons at
-      # 30 seconds. The transcript bound in pure.py keeps the call short, but a
-      # reasoning model or Bedrock retries can still outlast that; the function
-      # then usually finishes on its own within this timeout, any agenda it
-      # finds arrives through onUpdateCall, and the Agenda panel says so.
-      Timeout: 60
-      Environment:
-        Variables:
-          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
-          # Token usage per pass, for the meeting cost estimate.
-          METERING_TABLE_NAME: !Ref EventSourcingTable
-          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
-      # Carries lma_metering and lma_config. Pure Python, so it does not pin this
-      # function to an architecture.
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/AgendaDeriverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for a function whose work is re-runnable on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
-    DependsOn:
-      - AgendaDeriverFunctionLogGroup
-      # Ordered behind the seeder, like every configuration reader.
-      - SeedConfiguration
-
-  AgendaDeriverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/AgendaDeriverFunction
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  AgendaDeriverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: AgendaDeriver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-AgendaDeriver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # The meeting record and its transcript segments. The agenda itself
-              # is written back through AppSync, so open meeting pages update.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
-              # The automatic pass's once-per-meeting claim, a conditional write
-              # on the meeting record, and only under the c# partitions.
-              - Effect: Allow
-                Action:
-                  - dynamodb:UpdateItem
-                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "c#*"
-              # Metering records for the meeting cost estimate, only under mtr#.
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "mtr#*"
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallAgenda"
-              # Read-only, on the shared configuration table: the model is read
-              # from its Amazon Bedrock Models section. The KMS grant below
-              # covers decrypting it.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              # Scoped as the speaker name resolver scopes the identical call.
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncAgendaDeriverLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeAgendaDeriver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt AgendaDeriverFunction.Arn
-
-  AgendaDeriverLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: AgendaDeriverLambda
-      Description: Lambda function for deriveCallAgenda
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncAgendaDeriverLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt AgendaDeriverFunction.Arn
-
   DeriveCallAgendaResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AgendaDeriverLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverLambdaDataSourceName
       TypeName: Mutation
       FieldName: deriveCallAgenda
       Runtime:
@@ -6022,18 +5054,6 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/regenerateCallSummary.js
 
-  UpdateAsrConfigLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: UpdateAsrConfigLambda
-      Description: Lambda function for updateAsrConfig with input validation
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncUpdateAsrConfigLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UpdateAsrConfigResolverFunction.Arn
-
-
   # Served by the same Lambda as the mutation rather than by a DynamoDB data
   # source, for the reason given at the LLM prompt template resolvers below: the
   # switches live compressed in the shared configuration table. The function
@@ -6044,7 +5064,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateAsrConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateAsrConfigLambdaDataSourceName
       TypeName: Query
       FieldName: getAsrConfig
       Runtime:
@@ -6076,7 +5096,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateAsrConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateAsrConfigLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateAsrConfig
       Runtime:
@@ -6109,280 +5129,6 @@ Resources:
   ##########################################################################
   # LLM Prompt Template Config - Lambda, IAM, DataSources
   ##########################################################################
-
-  UpdateLLMPromptTemplateResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      Role: !GetAtt UpdateLLMPromptTemplateResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/update_llm_prompt_template_resolver
-      Description: >-
-        Lambda resolver for the summary prompt templates: reads the stored
-        record and saves an edit, with input validation
-      MemorySize: 256
-      Timeout: 30
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          ADMIN_GROUP: "Admin"
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateLLMPromptTemplateResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
-    DependsOn:
-      - UpdateLLMPromptTemplateResolverFunctionLogGroup
-      # As for the summariser: a read of the prompts should not meet an unseeded
-      # table and show an administrator an empty set of prompts.
-      - SeedConfiguration
-
-  UpdateLLMPromptTemplateResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateLLMPromptTemplateResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  UpdateLLMPromptTemplateResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: UpdateLLMPromptTemplateResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-UpdateLLMPromptTemplate
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # GetItem as well as PutItem: a save reads the record's current
-              # version so a write that another session has superseded can be
-              # refused, and the editor's own read is served from here too.
-              # Deliberately no DeleteItem.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncUpdateLLMPromptTemplateLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - appsync.amazonaws.com
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
-
-  UpdateLLMPromptTemplateLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: UpdateLLMPromptTemplateLambda
-      Description: Lambda function for updateLLMPromptTemplate with input validation
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncUpdateLLMPromptTemplateLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
-
-  ##########################################################################
-  # Per-meeting cost estimate: Query.getCallCost computes an itemised estimate
-  # from the meeting's metering records (PK mtr#<CallId> in EventSourcingTable)
-  # and the call_pricing section of the configuration store. getCallPricing and
-  # updateCallPricing let an Admin read and change that price table. See
-  # docs/meeting-cost-estimate.md.
-  ##########################################################################
-
-  CallCostResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt CallCostResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/call_cost_resolver
-      Description: >-
-        Lambda resolver for the per-meeting cost estimate and the price table it
-        is computed with
-      MemorySize: 256
-      Timeout: 30
-      Tracing: Active
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          ADMIN_GROUP: "Admin"
-          LOG_LEVEL: !Ref LogLevel
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/CallCostResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names and a group name"
-    DependsOn:
-      - CallCostResolverFunctionLogGroup
-      # An estimate drawn before the price table is seeded would show every
-      # line as unpriced.
-      - SeedConfiguration
-
-  CallCostResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/CallCostResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  CallCostResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: CallCostResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-CallCostResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # Reads only: a meeting's metering records and the Owner and
-              # SharedWith of its call row, which decide who may see it.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                Resource: !GetAtt EventSourcingTable.Arn
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "c#*"
-                      - "mtr#*"
-              # The price table. PutItem is the Admin's save, which is a
-              # conditional write of the custom profile; no DeleteItem.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncCallCostLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt CallCostResolverFunction.Arn
-
-  CallCostLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: CallCostLambda
-      Description: Lambda function for the per-meeting cost estimate and its price table
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncCallCostLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CallCostResolverFunction.Arn
 
   ##########################################################################
   # Troubleshooting agent entry points: startTroubleshooting records a job and
@@ -6896,6 +5642,213 @@ Resources:
         LambdaFunctionArn: !GetAtt ChatAttachmentsResolverFunction.Arn
 
   ##########################################################################
+  # Meeting archive: prepareMeetingArchive / getMeetingArchive. One function
+  # answers both fields and, invoked by itself, builds the ZIP archive of a
+  # meeting's files under lma-meeting-archives/ in the recordings bucket, which
+  # the bucket's lifecycle rule deletes after a day. See docs/web-ui-guide.md.
+  ##########################################################################
+  MeetingArchiveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-MeetingArchive"
+      Handler: index.handler
+      Role: !GetAtt MeetingArchiveFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_archive
+      Description: >-
+        Lambda resolver that prepares a ZIP archive of a meeting's files, and
+        builds it in the background
+      # The build streams every object, so it needs time rather than memory;
+      # the memory buys network throughput.
+      MemorySize: 1024
+      Timeout: 900
+      Tracing: Active
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          ARCHIVE_PREFIX: "lma-meeting-archives/"
+          ADMIN_GROUP: "Admin"
+          MAX_ARCHIVE_BYTES: "5368709120"
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/MeetingArchiveFunction
+      # A build is not retried: the caller sees FAILED and can ask again.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - a failed build is recorded in its status object"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix, a group name and a size"
+    DependsOn:
+      - MeetingArchiveFunctionLogGroup
+
+  MeetingArchiveFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/MeetingArchiveFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingArchiveFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingArchive Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-MeetingArchive
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Reads only: the meeting row (access, recordings, summary,
+              # consent) and its transcript, key frame and attachment items.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+                      - "trs#*"
+                      - "kf#*"
+                      - "att#*"
+              # Reads of the meeting files an archive holds. The function
+              # reads only the objects the meeting record and its items name,
+              # inside the meeting's own folders.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-audio-recordings/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-recordings/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-keyframes/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-chat-attachments/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-consent-evidence/*"
+              # Listing, for its own archives only (an archive already prepared
+              # is offered again). Consent evidence is read by the keys the
+              # meeting's consent record names.
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}"
+                Condition:
+                  StringLike:
+                    "s3:prefix":
+                      - "lma-meeting-archives/*"
+              # The archives and their status objects, and nothing else, are written.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-meeting-archives/*"
+              # Its own second leg, the build.
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-MeetingArchive"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncMeetingArchiveLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingArchiveFunction.Arn
+
+  MeetingArchiveLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MeetingArchiveLambda
+      Description: Lambda function that prepares and reads back an archive of a meeting's files
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingArchiveLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingArchiveFunction.Arn
+
+  PrepareMeetingArchiveAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingArchiveLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: prepareMeetingArchive
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/meetingArchiveLambda.js
+
+  GetMeetingArchiveAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingArchiveLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getMeetingArchive
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/meetingArchiveLambda.js
+
+  ##########################################################################
   # Meeting consent: the consent record on each meeting (Call.Consent), the
   # deployment's consent settings, and the capture gate. One resolver Lambda
   # for getMeetingConsent, getMeetingConsentDefaults and every consent
@@ -7072,311 +6025,6 @@ Resources:
   # docs/meeting-context-and-checklist.md.
   ##########################################################################
 
-  MeetingPreparationResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt MeetingPreparationResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      Architectures:
-        - arm64
-      CodeUri: ../source/lambda_functions/meeting_preparation_resolver
-      Description: >-
-        Lambda resolver for a meeting's labels, audience, meeting context and
-        checklist
-      MemorySize: 256
-      # One read and one write, repeated a few times on a conflict.
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          ADMIN_GROUP: "Admin"
-          LOG_LEVEL: !Ref LogLevel
-      # Carries lma_meeting_preparation (the rules). Pure Python, so it does
-      # not pin an architecture.
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/MeetingPreparationResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only a table name and a group name"
-    DependsOn:
-      - MeetingPreparationResolverFunctionLogGroup
-
-  MeetingPreparationResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/MeetingPreparationResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  MeetingPreparationResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: MeetingPreparationResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-MeetingPreparationResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # The meeting rows (c# partitions): read for their Owner,
-              # SharedWith and checklist, which decide who may write and what
-              # the checklist holds; updated with the preparation fields only.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:UpdateItem
-                Resource: !GetAtt EventSourcingTable.Arn
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "c#*"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncMeetingPreparationLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt MeetingPreparationResolverFunction.Arn
-
-  MeetingPreparationLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: MeetingPreparationLambda
-      Description: Lambda function for a meeting's labels, audience, meeting context and checklist
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncMeetingPreparationLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt MeetingPreparationResolverFunction.Arn
-
-  ##########################################################################
-  # Meeting reopen: reopenMeeting allows one more capture session on an
-  # existing meeting, for a streaming client that is to continue it. The
-  # session rules are lma_sessions in the configuration layer, which the
-  # Virtual Participant rejoin uses too. See
-  # docs/desktop-capture-app.md#continue-an-existing-meeting.
-  ##########################################################################
-
-  MeetingReopenResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt MeetingReopenResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      Architectures:
-        - arm64
-      CodeUri: ../source/lambda_functions/meeting_reopen_resolver
-      Description: >-
-        Lambda resolver for reopenMeeting: allows the next capture session on
-        an existing meeting for its owner or an Admin
-      MemorySize: 256
-      # One read of the meeting, one query of its transcript's end times, one
-      # conditional write.
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          LOG_LEVEL: !Ref LogLevel
-      # Carries lma_sessions. Pure Python, so it does not pin an architecture.
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/MeetingReopenResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only a table name and a log level"
-    DependsOn:
-      - MeetingReopenResolverFunctionLogGroup
-
-  MeetingReopenResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/MeetingReopenResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  MeetingReopenResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: MeetingReopenResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-MeetingReopenResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # The meeting row (c#) is read for its Owner, Status and sessions
-              # and given the session it allows; the transcript (trs#) is
-              # queried for its latest end time.
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:UpdateItem
-                Resource: !GetAtt EventSourcingTable.Arn
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "c#*"
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                Resource: !GetAtt EventSourcingTable.Arn
-                Condition:
-                  ForAllValues:StringLike:
-                    "dynamodb:LeadingKeys":
-                      - "trs#*"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncMeetingReopenLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt MeetingReopenResolverFunction.Arn
-
-  MeetingReopenLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: MeetingReopenLambda
-      Description: Lambda function that allows the next capture session on a meeting
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncMeetingReopenLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt MeetingReopenResolverFunction.Arn
-
-  ReopenMeetingAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingReopenLambdaDataSource.Name
-      TypeName: Mutation
-      FieldName: reopenMeeting
-      RequestMappingTemplateS3Location: ../source/appsync/reopenMeeting.request.vtl
-      # A refusal is answered as {"errorType", "message"} and raised here as an
-      # error of that type, so a client can tell the refusals apart.
-      ResponseMappingTemplate: |
-        #if( $ctx.error )
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        #if( $ctx.result.errorType )
-          $util.error($ctx.result.message, $ctx.result.errorType)
-        #end
-        $util.toJson($ctx.result)
-
   # The consent evidence verifier: reads one evidence screenshot with a vision
   # model and returns what it shows. Invoked only by the meeting consent
   # resolver, which stores the result. See docs/meeting-consent.md.
@@ -7506,139 +6154,6 @@ Resources:
   # restore and label the revisions every configuration save records). See
   # docs/configuration-store.md.
   ##########################################################################
-
-  ConfigurationRevisionsResolverFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.handler
-      Role: !GetAtt ConfigurationRevisionsResolverFunctionExecutionRole.Arn
-      Runtime: python3.12
-      CodeUri: ../source/lambda_functions/configuration_revisions_resolver
-      Description: >-
-        Lambda resolver for the configuration editor and history: reads and
-        saves configuration sections, and lists, reads, compares, restores and
-        labels configuration revisions
-      MemorySize: 256
-      Timeout: 30
-      Tracing: Active
-      Layers:
-        - !Ref ConfigurationPythonLayer
-      Environment:
-        Variables:
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
-          ADMIN_GROUP: "Admin"
-          LOG_LEVEL: !Ref LogLevel
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/ConfigurationRevisionsResolverFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment holds only resource names and a group name"
-    DependsOn:
-      - ConfigurationRevisionsResolverFunctionLogGroup
-      # A restore writes the profile the seeder creates.
-      - SeedConfiguration
-
-  ConfigurationRevisionsResolverFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/ConfigurationRevisionsResolverFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  ConfigurationRevisionsResolverFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: ConfigurationRevisionsResolver Function Lambda Role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "lambda.${AWS::URLSuffix}"
-            Action:
-              - "sts:AssumeRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-        - !Ref ConfigurationRevisionWriteAccess
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-ConfigurationRevisionsResolver
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # PutItem is an editor save, a restore, a new profile or the
-              # active-profile pointer, each conditional like any other save.
-              # DeleteItem deletes a Custom profile, conditional on the version
-              # read; Scan lists the profiles (a hash-key-only table of a few
-              # dozen items).
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Scan
-                Resource: !GetAtt ConfigurationTable.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-
-  AppSyncConfigurationRevisionsLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt ConfigurationRevisionsResolverFunction.Arn
-
-  ConfigurationRevisionsLambdaDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: ConfigurationRevisionsLambda
-      Description: Lambda function for the configuration editor and history
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncConfigurationRevisionsLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt ConfigurationRevisionsResolverFunction.Arn
 
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
@@ -7924,6 +6439,45 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DefinitionS3Location: ../source/appsync/schema.graphql
 
+  # The Lambda functions behind most of this stack's Lambda-backed AppSync data
+  # sources, with their roles, log groups and the data sources themselves. The
+  # resolvers stay here and name each data source through this stack's outputs.
+  # See the header of lma-ai-lambda-resolvers.yaml for what belongs there.
+  #
+  # The path is relative to this template's directory and also resolves from
+  # lma-ai-stack/out/, where `make release` writes the substituted copy that
+  # `sam build` reads; `sam package` uploads the child template.
+  LambdaResolversStack:
+    Type: AWS::CloudFormation::Stack
+    # Ten of the functions read the configuration table, and none may go live
+    # before the seeder has written the configuration they read.
+    DependsOn: SeedConfiguration
+    Properties:
+      TemplateURL: ../deployment/lma-ai-lambda-resolvers.yaml
+      Parameters:
+        AIStackName: !Ref AWS::StackName
+        AppSyncApiId: !GetAtt AppSyncApiEncrypted.ApiId
+        AppSyncGraphQLUrl: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+        AsyncAgentAssistOrchestratorArn: !GetAtt AsyncAgentAssistOrchestrator.Arn
+        BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseID
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        ConfigurationBucket: !Ref ConfigurationBucket
+        ConfigurationPythonLayer: !Ref ConfigurationPythonLayer
+        ConfigurationRevisionWriteAccess: !Ref ConfigurationRevisionWriteAccess
+        ConfigurationTable: !Ref ConfigurationTable
+        ConfigurationTableArn: !GetAtt ConfigurationTable.Arn
+        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
+        EventSourcingTable: !Ref EventSourcingTable
+        EventSourcingTableArn: !GetAtt EventSourcingTable.Arn
+        LogLevel: !Ref LogLevel
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        VirtualParticipantTable: !Ref VirtualParticipantTable
+        VirtualParticipantTableArn: !GetAtt VirtualParticipantTable.Arn
+        VncEdgeTokenSigningSecret: !Ref VncEdgeTokenSigningSecret
+        VPTaskRegistry: !Ref VPTaskRegistry
+        VPTaskRegistryArn: !GetAtt VPTaskRegistry.Arn
+
   AppSyncDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
@@ -7965,62 +6519,6 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncUploadMeetingInitiatorLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UploadMeetingInitiatorFunction.Arn
-
-  KnowledgeBaseDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: KnowledgeBase
-      Description: Interface to Bedrock KB for meeting transcript queries
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
-
-  StrandsChatDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: StrandsChat
-      Description: STRANDS Chat Interface for direct chat messages
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncStrandsChatLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt StrandsChatInterfaceFunction.Arn
-
-  MeetingInvitationParserDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: MeetingInvitationParser
-      Description: Data source for parsing meeting invitations using Bedrock AI
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt MeetingInvitationParserFunction.Arn
-
-
-  AppSyncStrandsChatLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - appsync.amazonaws.com
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource: !GetAtt StrandsChatInterfaceFunction.Arn
 
   AppSyncApiCache:
     Type: AWS::AppSync::ApiCache
@@ -8106,6 +6604,12 @@ Resources:
                 "UpdatedAt": $util.dynamodb.toDynamoDBJson($ctx.args.input.UpdatedAt),
                 "ExpiresAfter": $util.dynamodb.toDynamoDBJson($ctx.args.input.ExpiresAfter),
                 "Owner": $util.dynamodb.toDynamoDBJson($ctx.args.input.Owner),
+                ## A meeting created already shared (a Virtual Participant
+                ## started with meetingSharedWith) is counted for the people
+                ## it is shared with, as shareCall's copy on this row does.
+                #if( !$util.isNullOrBlank($ctx.args.input.SharedWith) )
+                "SharedWith": $util.dynamodb.toDynamoDBJson($ctx.args.input.SharedWith),
+                #end
                 ## ItemType flags this row for the TypeDateIndex GSI that
                 ## powers listCallsDateRange / getCallCount.  Only list-tracking
                 ## rows carry ItemType so the GSI stays tight.
@@ -8323,7 +6827,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallMeetingContext
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
@@ -8336,7 +6840,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallChecklist
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
@@ -8349,7 +6853,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallChecklistItem
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
@@ -8362,7 +6866,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallLabels
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
@@ -8375,13 +6879,35 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallAudience
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
       # Published to onUpdateCall, filtered on SharedWith in subscription.js,
       # so it answers in the form that filter matches.
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # reopenMeeting: allows one more capture session on an existing meeting,
+  # for its owner or an Admin. See lma_sessions in the configuration layer.
+  ReopenMeetingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingReopenLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: reopenMeeting
+      RequestMappingTemplateS3Location: ../source/appsync/reopenMeeting.request.vtl
+      # A refusal is answered as {"errorType", "message"} and raised here as an
+      # error of that type, so a client can tell the refusals apart.
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if( $ctx.result.errorType )
+          $util.error($ctx.result.message, $ctx.result.errorType)
+        #end
+        $util.toJson($ctx.result)
 
   AddCallSummaryTextAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -8427,18 +6953,221 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.response.vtl
 
-  # A note of guidance on a meeting from the hosted MCP server
-  # (push_meeting_guidance); published to onAddMeetingGuidance.
-  AddMeetingGuidanceAppSyncResolver:
+  # Meeting notifications (docs/meeting-notifications.md), all in AppSync and
+  # DynamoDB with no Lambda. publishMeetingNotification (IAM only) checks the
+  # notification and reads the meeting, whose Owner and SharedWith go on the
+  # published message only; counts it against the meeting's allowance for the
+  # minute; finds the notification an earlier publish with the same DedupKey
+  # made; and stores it. The reads run after MeetingAccessAppSyncFunction, which
+  # decides access from the meeting as it is now.
+  NotificationPublishMeetingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishMeeting
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishMeeting.js
+
+  NotificationPublishRateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishRate
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishRate.js
+
+  NotificationPublishDedupAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishDedup
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishDedup.js
+
+  NotificationPublishWriteAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishWrite.js
+
+  ListMeetingNotificationsAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ListMeetingNotifications
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/listMeetingNotifications.js
+
+  NotificationMeetingExpiryAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationMeetingExpiry
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationMeetingExpiry.js
+
+  MyMeetingNotificationStateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MyMeetingNotificationState
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/myMeetingNotificationState.js
+
+  PublishMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
-      FieldName: addMeetingGuidance
-      RequestMappingTemplateS3Location: ../source/appsync/addMeetingGuidance.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      FieldName: publishMeetingNotification
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt NotificationPublishMeetingAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishRateAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishDedupAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishWriteAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  ListMeetingNotificationsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listMeetingNotifications
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt ListMeetingNotificationsAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  UpdateMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt NotificationMeetingExpiryAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  UpdateMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   AddChatAttachmentAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -8985,13 +7714,13 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
 
-  OnAddMeetingGuidanceAppSyncResolver:
+  OnMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Subscription
-      FieldName: onAddMeetingGuidance
+      FieldName: onMeetingNotification
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
       Runtime:
@@ -9016,7 +7745,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.KnowledgeBaseDataSourceName
       TypeName: Query
       FieldName: queryKnowledgeBase
       Runtime: 
@@ -9029,7 +7758,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt MeetingInvitationParserDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingInvitationParserDataSourceName
       TypeName: Query
       FieldName: parseMeetingInvitation
       RequestMappingTemplate: |
@@ -9057,7 +7786,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateChatButtonConfigLambdaDataSourceName
       TypeName: Query
       FieldName: getChatButtonConfig
       Runtime:
@@ -9089,7 +7818,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateChatButtonConfigLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateChatButtonConfig
       Runtime:
@@ -9107,7 +7836,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateNovaSonicConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateNovaSonicConfigLambdaDataSourceName
       TypeName: Query
       FieldName: getNovaSonicConfig
       Runtime:
@@ -9139,7 +7868,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateNovaSonicConfigLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateNovaSonicConfigLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateNovaSonicConfig
       Runtime:
@@ -9159,7 +7888,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateLLMPromptTemplateLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateLLMPromptTemplateLambdaDataSourceName
       TypeName: Query
       FieldName: getLLMPromptTemplate
       Runtime:
@@ -9191,7 +7920,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt UpdateLLMPromptTemplateLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.UpdateLLMPromptTemplateLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateLLMPromptTemplate
       Runtime:
@@ -9206,7 +7935,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.CallCostLambdaDataSourceName
       TypeName: Query
       FieldName: getCallCost
       Runtime:
@@ -9219,7 +7948,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.CallCostLambdaDataSourceName
       TypeName: Query
       FieldName: getCallPricing
       Runtime:
@@ -9232,7 +7961,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.CallCostLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateCallPricing
       Runtime:
@@ -9248,7 +7977,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Query
       FieldName: getConfiguration
       Runtime:
@@ -9261,7 +7990,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: updateConfiguration
       Runtime:
@@ -9274,7 +8003,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Query
       FieldName: listConfigurationRevisions
       Runtime:
@@ -9287,7 +8016,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Query
       FieldName: getConfigurationRevision
       Runtime:
@@ -9300,7 +8029,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Query
       FieldName: diffConfigurationRevisions
       Runtime:
@@ -9313,7 +8042,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: restoreConfigurationRevision
       Runtime:
@@ -9326,7 +8055,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: labelConfigurationRevision
       Runtime:
@@ -9339,7 +8068,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Query
       FieldName: listConfigurationProfiles
       Runtime:
@@ -9352,7 +8081,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: createConfigurationProfile
       Runtime:
@@ -9365,7 +8094,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: deleteConfigurationProfile
       Runtime:
@@ -9378,7 +8107,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.ConfigurationRevisionsLambdaDataSourceName
       TypeName: Mutation
       FieldName: activateConfigurationProfile
       Runtime:
@@ -9391,7 +8120,7 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt StrandsChatDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.StrandsChatDataSourceName
       TypeName: Mutation
       FieldName: sendChatMessage
       RequestMappingTemplate: |
@@ -9439,132 +8168,6 @@ Resources:
   # for VPs that are not running on a MicroVM.
   ##########################################################################
 
-  MicrovmVncTokenFunctionRole:
-    Type: AWS::IAM::Role
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: "CreateMicrovmAuthToken does not support resource-level permissions"
-      cdk_nag:
-        rules_to_suppress:
-          - id: AwsSolutions-IAM5
-            reason: 'lambda-microvms does not support resource-level permissions for CreateMicrovmAuthToken'
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: lambda.amazonaws.com
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: MintMicrovmAuthToken
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:CreateMicrovmAuthToken
-                Resource: "*"
-              - Effect: Allow
-                # Look up the caller's VP to (a) find its microvmId and (b) verify
-                # ownership before handing out a token.
-                Action:
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt VPTaskRegistry.Arn
-                  - !GetAtt VirtualParticipantTable.Arn
-              # Both tables are encrypted with the customer-managed key, so
-              # dynamodb:GetItem alone is not enough — the read fails with a KMS
-              # AccessDeniedException and the VNC viewer shows only
-              # "Failed to connect: undefined".
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-
-  # Dedicated, KMS-encrypted log group, matching every other function in this
-  # stack. The function logs VP ids and caller identities, so its logs must not
-  # land in an unencrypted default group.
-  MicrovmVncTokenFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/${AWS::StackName}/lambda/MicrovmVncTokenFunction"
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  MicrovmVncTokenFunction:
-    Type: AWS::Serverless::Function
-    DependsOn:
-      - MicrovmVncTokenFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: "Function only calls AWS public APIs; no VPC resources"
-          - id: W92
-            reason: "Reserved concurrency not required; invoked once per viewer session"
-    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
-    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
-    # checkov:skip=CKV_AWS_173: "Environment contains only table names"
-    Properties:
-      Handler: index.lambda_handler
-      Runtime: python3.12
-      Timeout: 15
-      MemorySize: 256
-      Role: !GetAtt MicrovmVncTokenFunctionRole.Arn
-      Environment:
-        Variables:
-          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
-          VP_TABLE_NAME: !Ref VirtualParticipantTable
-      CodeUri: ../source/lambda_functions/microvm_vnc_token
-      LoggingConfig:
-        LogGroup: !Ref MicrovmVncTokenFunctionLogGroup
-
-  MicrovmVncTokenDataSourceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      Policies:
-        - PolicyName: LambdaInvokePolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt MicrovmVncTokenFunction.Arn
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-
-  MicrovmVncTokenDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: MicrovmVncTokenManager
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt MicrovmVncTokenDataSourceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt MicrovmVncTokenFunction.Arn
-
   CreateMicrovmVncTokenResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -9572,7 +8175,7 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: createMicrovmVncToken
-      DataSourceName: !GetAtt MicrovmVncTokenDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MicrovmVncTokenDataSourceName
       RequestMappingTemplate: |
         {
           "version": "2018-05-29",
@@ -10360,7 +8963,7 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: ValidateMeetingPreparation
-      DataSourceName: !GetAtt MeetingPreparationLambdaDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
       FunctionVersion: "2018-05-29"
       RequestMappingTemplateS3Location: ../source/appsync/validateMeetingPreparation.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/validateMeetingPreparation.response.vtl
@@ -10478,6 +9081,38 @@ Resources:
         #foreach($name in $util.defaultIfNull($preparation.present, []))
           #if(!$util.isNull($preparation.get($name)))
             $util.qr($input.put($name, $preparation.get($name)))
+          #end
+        #end
+
+        ## Optional: who the meeting is shared with when the VP creates it, each
+        ## an email address, stored comma-separated as meetingSharedWith. The VP
+        ## container reads it when it starts and puts it on the meeting record as
+        ## the meeting's SharedWith. The Virtual Participant itself is not shared.
+        #if( !$util.isNull($ctx.args.input.meetingSharedWith) )
+          #set( $meetingRecipients = [] )
+          #foreach( $meetingRecipient in $util.defaultIfNull($ctx.args.input.meetingSharedWith, []) )
+            #set( $meetingRecipientText = $util.defaultIfNull($meetingRecipient, "").trim() )
+            #if( !$meetingRecipientText.isEmpty() )
+              #if( !$meetingRecipientText.matches("[^@\s\[\],]+@[^@\s\[\],]+\.[^@\s\[\],]+") )
+                $util.error("meetingSharedWith: $meetingRecipientText is not an email address", "BadRequest")
+              #end
+              #if( !$meetingRecipients.contains($meetingRecipientText) )
+                $util.qr( $meetingRecipients.add($meetingRecipientText) )
+              #end
+            #end
+          #end
+          #if( $meetingRecipients.size() > 50 )
+            $util.error("meetingSharedWith names more than 50 email addresses", "BadRequest")
+          #end
+          #set( $meetingSharedWithValue = "" )
+          #foreach( $meetingRecipientText in $meetingRecipients )
+            #set( $meetingSharedWithValue = "$meetingSharedWithValue$meetingRecipientText" )
+            #if( $foreach.hasNext )
+              #set( $meetingSharedWithValue = "$meetingSharedWithValue," )
+            #end
+          #end
+          #if( !$meetingSharedWithValue.isEmpty() )
+            $util.qr( $input.put("meetingSharedWith", $meetingSharedWithValue) )
           #end
         #end
 
@@ -12135,6 +10770,7 @@ Resources:
           USER_POOL_ID: !Ref UserPoolId
           ADMIN_GROUP: "Admin"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -12190,6 +10826,24 @@ Resources:
                   - cognito-idp:AdminRemoveUserFromGroup
                   - cognito-idp:AdminListGroupsForUser
                 Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              # A deleted user's meeting notification preferences: DeleteItem
+              # only, and only under the usr# partitions.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DeleteItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "usr#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   UserManagementDataSourceRole:
     Type: AWS::IAM::Role
@@ -12401,6 +11055,9 @@ Resources:
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # The guidance push_meeting_guidance publishes expires with the
+          # transcript: the Retention section's value, at most this parameter's.
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
@@ -12421,6 +11078,9 @@ Resources:
           MEETING_CONTROLS_FUNCTION: !Ref MeetingControlsResolverFunction
           SUMMARY_REGENERATOR_FUNCTION: !Ref SummaryRegeneratorFunction
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
+          # The release this stack runs, reported as the MCP server's
+          # serverInfo.version (the UI shows the same value).
+          LMA_VERSION: !Ref BootstrapVersion
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -12462,10 +11122,17 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
                 # The meeting tools' writes, each made only after the tool has
                 # checked the MCP caller's access (tools/access.py).
-                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/addMeetingGuidance"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/publishMeetingNotification"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAgenda"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateScheduledVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/endVirtualParticipant"
+                # The meeting preparation tools' writes (meeting context,
+                # checklist, labels and audience).
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallMeetingContext"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklist"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklistItem"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallLabels"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAudience"
                 # Query/* covers getVirtualParticipant used by the new
                 # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
@@ -12566,135 +11233,169 @@ Resources:
             ToolSchema:
               InlinePayload:
                 - Name: search_lma_meetings
-                  Description: "Search across all meeting transcripts and summaries using natural language queries"
+                  Description: >-
+                    Search across all meeting transcripts and summaries using natural
+                    language queries
                   InputSchema:
                     Type: object
                     Properties:
                       query:
                         Type: string
-                        Description: "Natural language search query"
+                        Description: Natural language search query
                       startDate:
                         Type: string
-                        Description: "Optional ISO 8601 start date"
+                        Description: Optional ISO 8601 start date
                       endDate:
                         Type: string
-                        Description: "Optional ISO 8601 end date"
+                        Description: Optional ISO 8601 end date
                       maxResults:
                         Type: number
-                        Description: "Maximum results to return"
+                        Description: Maximum results to return
                     Required:
                       - query
                 - Name: get_meeting_transcript
-                  Description: "Retrieve the complete transcript for a specific meeting"
+                  Description: >-
+                    Retrieve the transcript of a meeting. format text (the default) and
+                    srt return the whole transcript of an ended meeting. format json returns
+                    it page by page, also while the meeting runs: {segments, nextToken,
+                    meetingStatus}, each segment with segmentId, startTime, endTime, speaker,
+                    channel, text and type (speech or chat). Call it first without nextToken,
+                    then with the nextToken of the previous answer. While the meeting
+                    is in progress nextToken is always returned, so poll from it (about
+                    every pollAfterSeconds); once the meeting has ended and the last segment
+                    has been read it is null.
                   InputSchema:
                     Type: object
                     Properties:
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (CallId)"
+                        Description: Meeting ID (CallId)
                       format:
                         Type: string
-                        Description: "Output format (json, text, or srt)"
+                        Description: 'Output format: json, text (default) or srt'
+                      nextToken:
+                        Type: string
+                        Description: >-
+                          format json: the nextToken of the previous answer; omit it on
+                          the first call
+                      maxSegments:
+                        Type: number
+                        Description: >-
+                          format json: most segments to return (default 500, at most 2000)
+                      includeAssistant:
+                        Type: boolean
+                        Description: >-
+                          format json: also return the meeting assistant's answers (type
+                          assistant; default false)
                     Required:
                       - meetingId
                 - Name: get_meeting_summary
-                  Description: "Get AI-generated summary and action items for a meeting"
+                  Description: Get AI-generated summary and action items for a meeting
                   InputSchema:
                     Type: object
                     Properties:
                       meetingId:
                         Type: string
-                        Description: "Meeting ID (CallId)"
+                        Description: Meeting ID (CallId)
                       includeActionItems:
                         Type: boolean
-                        Description: "Include action items"
+                        Description: Include action items
                       includeTopics:
                         Type: boolean
-                        Description: "Include key topics"
+                        Description: Include key topics
                     Required:
                       - meetingId
                 - Name: list_meetings
-                  Description: "List meetings with optional filters"
+                  Description: >-
+                    List meetings with optional filters, newest first. Each meeting has
+                    its labels, audience, status, startTime, endTime, owner, summaryReady
+                    and, when a Virtual Participant captured it, virtualParticipantId.
                   InputSchema:
                     Type: object
                     Properties:
                       startDate:
                         Type: string
-                        Description: "ISO 8601 start date"
+                        Description: ISO 8601 start date
                       endDate:
                         Type: string
-                        Description: "ISO 8601 end date"
+                        Description: ISO 8601 end date
                       participant:
                         Type: string
                         Description: >-
-                          Matches a name in a participant list stored on the
-                          meeting record; LMA does not record one today, so
-                          this usually matches nothing.
+                          Matches a name in a participant list stored on the meeting record;
+                          LMA does not record one today, so this usually matches nothing.
                       status:
                         Type: string
                         Description: >-
-                          Meeting status filter: ALL (default), IN_PROGRESS
-                          (started or transcribing), STARTED, TRANSCRIBING,
-                          ERRORED or ENDED. Not case sensitive.
+                          Meeting status filter: ALL (default), IN_PROGRESS (started or
+                          transcribing), STARTED, TRANSCRIBING, ERRORED or ENDED. Not
+                          case sensitive.
                       limit:
                         Type: number
-                        Description: "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)"
+                        Description: >-
+                          Maximum number of meetings to return: a whole number from 1
+                          to 1000 (default 20)
+                      updatedSince:
+                        Type: string
+                        Description: Only meetings changed at or after this ISO 8601 time
+                      endedSince:
+                        Type: string
+                        Description: >-
+                          Only meetings that ended at or after this ISO 8601 time (an
+                          ended meeting changed afterwards is listed too)
                 - Name: schedule_meeting
                   Description: >-
-                    Schedule a future meeting with virtual participant. If you
-                    already have a Virtual Participant waiting for a meeting
-                    with the same name (ignoring case) and scheduled time
-                    (within a minute), that one is updated with the meeting
-                    link or ID, password, agenda and platform given here
-                    instead of scheduling a second one, and the result has
-                    action "updated" and its virtualParticipantId (otherwise
-                    action "created"). A Virtual Participant cannot be changed
-                    within 5 minutes of its start. Pass allowDuplicate=true to
-                    schedule a second Virtual Participant anyway.
+                    Schedule a future meeting with virtual participant. If you already
+                    have a Virtual Participant waiting for a meeting with the same name
+                    (ignoring case) and scheduled time (within a minute), that one is
+                    updated with the meeting link or ID, password, agenda, platform and
+                    other settings given here instead of scheduling a second one, and
+                    the result has action "updated" and its virtualParticipantId (otherwise
+                    action "created"). A Virtual Participant cannot be changed within
+                    5 minutes of its start. Pass allowDuplicate=true to schedule a second
+                    Virtual Participant anyway. The result's meetingId is the LMA meeting,
+                    null until the Virtual Participant has started it; platformMeetingId
+                    is the meeting ID or link given here.
                   InputSchema:
                     Type: object
                     Properties:
                       meetingName:
                         Type: string
-                        Description: "Name/title of the meeting"
+                        Description: Name/title of the meeting
                       meetingPlatform:
                         Type: string
-                        Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
+                        Description: Platform (Zoom, Teams, Chime, Webex, Google Meet)
                       meetingId:
                         Type: string
                         Description: >-
-                          Meeting ID (numeric ID only; for Google Meet the
-                          meeting code, e.g. abc-defg-hij). For Zoom, the full
-                          join link from the invitation (for example
-                          https://us05web.zoom.us/j/81234567890?pwd=...) may be
-                          passed instead of the ID and passcode, and is the
-                          most reliable option; a personal meeting link
-                          (https://<name>.zoom.us/my/<room>) works too.
+                          Meeting ID (numeric ID only; for Google Meet the meeting code,
+                          e.g. abc-defg-hij). For Zoom, the full join link from the invitation
+                          (for example https://us05web.zoom.us/j/81234567890?pwd=...)
+                          may be passed instead of the ID and passcode, and is the most
+                          reliable option; a personal meeting link (https://<name>.zoom.us/my/<room>)
+                          works too.
                       scheduledTime:
                         Type: string
-                        Description: "ISO 8601 datetime when meeting should start"
+                        Description: ISO 8601 datetime
                       meetingPassword:
                         Type: string
                         Description: >-
-                          Optional meeting passcode, as the invitation text
-                          shows it (for example "Passcode: 1234 5678"), not the
-                          pwd= value of a join link. If only a Zoom link is
-                          available, pass the whole link as meetingId, or the
-                          link's pwd value whole here.
+                          Optional meeting passcode, as the invitation text shows it (for
+                          example "Passcode: 1234 5678"), not the pwd= value of a join
+                          link. If only a Zoom link is available, pass the whole link
+                          as meetingId, or the link's pwd value whole here.
                       agenda:
                         Type: string
                         Description: >-
-                          Optional meeting agenda, one item per line -- for
-                          example the agenda from the calendar invite. It is
-                          stored on the meeting record and shown on the
-                          meeting's page.
+                          Optional meeting agenda, one item per line -- for example the
+                          agenda from the calendar invite. It is stored on the meeting
+                          record and shown on the meeting's page.
                       allowDuplicate:
                         Type: boolean
                         Description: >-
-                          Schedule a new Virtual Participant even if one is
-                          already scheduled for a meeting with the same name
-                          and time (default false: that one is updated
-                          instead).
+                          Schedule a new Virtual Participant even if one is already scheduled
+                          for a meeting with the same name and time (default false: that
+                          one is updated instead).
                     Required:
                       - meetingName
                       - meetingPlatform
@@ -12702,76 +11403,72 @@ Resources:
                       - scheduledTime
                 - Name: start_meeting_now
                   Description: >-
-                    Start a meeting immediately with a virtual participant.
-                    When the user has stored Zoom credentials in LMA, the VP
-                    signs in to Zoom with them by default for a more reliable
-                    join; pass useStoredZoomCredentials=false to force a guest
-                    join. Returns immediately with virtualParticipantId; the VP
-                    may take up to 60s to fully join. Use
-                    get_virtual_participant_status to poll progress, especially
-                    to detect MANUAL_ACTION_REQUIRED (CAPTCHA, 2FA, SSO) where
-                    the human user must complete a challenge in the LMA viewer.
+                    Start a meeting immediately with a virtual participant. When the user
+                    has stored Zoom credentials in LMA, the VP will sign in to Zoom with
+                    them by default for a more reliable join; pass useStoredZoomCredentials=false
+                    to force a guest join. Returns immediately with the virtualParticipantId;
+                    the VP may take up to 60 seconds to fully join. Use get_virtual_participant_status
+                    to poll progress, especially to detect MANUAL_ACTION_REQUIRED states
+                    (CAPTCHA, 2FA, SSO) where the human user must complete a challenge
+                    in the LMA viewer, and to read the meetingId (the LMA meeting) once
+                    the VP has started it.
                   InputSchema:
                     Type: object
                     Properties:
                       meetingName:
                         Type: string
-                        Description: "Name/title of the meeting"
+                        Description: Name/title of the meeting
                       meetingPlatform:
                         Type: string
-                        Description: "Platform (Zoom, Teams, Chime, Webex, Google Meet)"
+                        Description: Platform (Zoom, Teams, Chime, Webex, Google Meet)
                       meetingId:
                         Type: string
                         Description: >-
-                          Meeting ID (numeric ID only; for Google Meet the
-                          meeting code, e.g. abc-defg-hij). For Zoom, the full
-                          join link from the invitation (for example
-                          https://us05web.zoom.us/j/81234567890?pwd=...) may be
-                          passed instead of the ID and passcode, and is the
-                          most reliable option; a personal meeting link
-                          (https://<name>.zoom.us/my/<room>) works too.
+                          Meeting ID (numeric ID only; for Google Meet the meeting code,
+                          e.g. abc-defg-hij). For Zoom, the full join link from the invitation
+                          (for example https://us05web.zoom.us/j/81234567890?pwd=...)
+                          may be passed instead of the ID and passcode, and is the most
+                          reliable option; a personal meeting link (https://<name>.zoom.us/my/<room>)
+                          works too.
                       meetingPassword:
                         Type: string
                         Description: >-
-                          Optional meeting passcode, as the invitation text
-                          shows it (for example "Passcode: 1234 5678"), not the
-                          pwd= value of a join link. If only a Zoom link is
-                          available, pass the whole link as meetingId, or the
-                          link's pwd value whole here.
-                      useStoredZoomCredentials:
-                        Type: boolean
-                        Description: >-
-                          Default true. When the user has stored Zoom
-                          credentials, the VP signs in to Zoom before joining
-                          the meeting. Set to false to force a guest join.
+                          Optional meeting passcode, as the invitation text shows it (for
+                          example "Passcode: 1234 5678"), not the pwd= value of a join
+                          link. If only a Zoom link is available, pass the whole link
+                          as meetingId, or the link's pwd value whole here.
                       agenda:
                         Type: string
                         Description: >-
-                          Optional meeting agenda, one item per line -- for
-                          example the agenda from the calendar invite. It is
-                          stored on the meeting record and shown on the
-                          meeting's page.
+                          Optional meeting agenda, one item per line -- for example the
+                          agenda from the calendar invite. It is stored on the meeting
+                          record and shown on the meeting's page.
+                      useStoredZoomCredentials:
+                        Type: boolean
+                        Description: >-
+                          Default true. When the user has stored Zoom credentials, the
+                          VP signs in to Zoom before joining the meeting. Set to false
+                          to force a guest join.
                     Required:
                       - meetingName
                       - meetingPlatform
                       - meetingId
                 - Name: get_virtual_participant_status
                   Description: >-
-                    Get the current status of a virtual participant launched via
-                    start_meeting_now. Returns status, a human-readable summary,
-                    and — critically — manualActionRequired=true with a
-                    manualActionMessage when the VP is blocked on a CAPTCHA / 2FA
-                    / SSO / consent challenge that the human user must complete
-                    in the LMA viewer (virtualParticipantUrl). Poll this every
-                    5–10 seconds for ~2 minutes after start_meeting_now if you
-                    need to confirm the meeting was joined or surface a
-                    manual-action prompt back to your user.
+                    Get the current status of a virtual participant launched via start_meeting_now.
+                    Returns status, a human-readable summary, the meetingId of the LMA
+                    meeting once the VP has started it, and — critically — manualActionRequired=true
+                    with a manualActionMessage when the VP is blocked on a CAPTCHA / 2FA
+                    / SSO / consent challenge that the human user must complete in the
+                    LMA viewer (virtualParticipantUrl). Poll this every 5–10 seconds for
+                    ~2 minutes after start_meeting_now if you need to confirm the meeting
+                    was joined or surface a manual-action prompt back to your user.
                   InputSchema:
                     Type: object
                     Properties:
                       virtualParticipantId:
                         Type: string
-                        Description: "VP id returned by start_meeting_now"
+                        Description: VP id returned by start_meeting_now
                     Required:
                       - virtualParticipantId
 
@@ -13297,123 +11994,6 @@ Resources:
   # ALB and CloudFront behavior exist.
   ##########################################################################
 
-  VncEdgeTokenFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: lambda.amazonaws.com
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyName: MintVncEdgeToken
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref VncEdgeTokenSigningSecret
-              - Effect: Allow
-                # Look up the caller's VP to confirm access before signing, and
-                # to read the VNC server credential the VP task recorded there.
-                Action:
-                  - dynamodb:GetItem
-                Resource: !GetAtt VirtualParticipantTable.Arn
-              # Both the table and the secret are encrypted with the
-              # customer-managed key, so the read actions above are not
-              # sufficient on their own.
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService":
-                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
-                      - !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
-
-  # Dedicated, KMS-encrypted log group, matching every other function in this
-  # stack. The function logs VP ids and caller identities, so its logs must not
-  # land in an unencrypted default group.
-  VncEdgeTokenFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/${AWS::StackName}/lambda/VncEdgeTokenFunction"
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  VncEdgeTokenFunction:
-    Type: AWS::Serverless::Function
-    # The log group is created by this stack, so it must exist before the
-    # function's first invocation could create it implicitly and collide.
-    DependsOn: VncEdgeTokenFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: "Function only calls AWS public APIs; no VPC resources"
-          - id: W92
-            reason: "Reserved concurrency not required; invoked once per viewer session"
-    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
-    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
-    # checkov:skip=CKV_AWS_173: "Environment contains only a table name and a secret ARN"
-    Properties:
-      Handler: index.lambda_handler
-      Runtime: python3.12
-      Timeout: 15
-      MemorySize: 256
-      Role: !GetAtt VncEdgeTokenFunctionRole.Arn
-      Environment:
-        Variables:
-          VP_TABLE_NAME: !Ref VirtualParticipantTable
-          SIGNING_SECRET_ARN: !Ref VncEdgeTokenSigningSecret
-      CodeUri: ../source/lambda_functions/vnc_edge_token
-      LoggingConfig:
-        LogGroup: !Ref VncEdgeTokenFunctionLogGroup
-
-  VncEdgeTokenDataSourceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      Policies:
-        - PolicyName: LambdaInvokePolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt VncEdgeTokenFunction.Arn
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-
-  VncEdgeTokenDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: VncEdgeTokenManager
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt VncEdgeTokenDataSourceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt VncEdgeTokenFunction.Arn
-
   CreateVncEdgeTokenResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -13421,7 +12001,7 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: createVncEdgeToken
-      DataSourceName: !GetAtt VncEdgeTokenDataSource.Name
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.VncEdgeTokenDataSourceName
       RequestMappingTemplate: |
         {
           "version": "2018-05-29",

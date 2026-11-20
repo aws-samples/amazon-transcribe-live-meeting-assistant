@@ -72,7 +72,7 @@ def execute(
         meetingUrl, virtualParticipantUrl, and a human-readable summary.
     """
     if not virtual_participant_id:
-        raise ValueError("virtual_participant_id is required")
+        raise ValueError("virtualParticipantId is required")
 
     appsync_url = os.environ.get("APPSYNC_GRAPHQL_URL")
     if not appsync_url:
@@ -201,6 +201,9 @@ def execute(
     if status == "FAILED":
         response_data["errorMessage"] = vp.get("errorMessage")
 
+    # meetingId is the LMA meeting, null until the VP has created it; callId is
+    # its earlier name, kept for clients that read it.
+    response_data["meetingId"] = vp.get("CallId") or None
     if vp.get("CallId"):
         response_data["callId"] = vp["CallId"]
         response_data["meetingUrl"] = get_meeting_url(vp["CallId"])

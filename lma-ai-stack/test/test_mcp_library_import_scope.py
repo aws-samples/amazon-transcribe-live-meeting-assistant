@@ -22,10 +22,11 @@ from typing import Any, Iterator, List, Tuple
 
 import pytest
 import yaml
+from ai_stack_templates import all_template_paths
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = [
-    REPO / "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    *all_template_paths(),  # the AI stack and its nested templates
     REPO / "lma-ai-stack/deployment/virtual-participant-enhancements.yaml",
     REPO / "lma-virtual-participant-stack/template.yaml",
     REPO / "lma-meetingassist-setup-stack/template.yaml",

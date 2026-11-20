@@ -41,6 +41,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
@@ -78,7 +79,8 @@ def _load(path: Path) -> Dict[str, Any]:
 
 
 MAIN = _load(MAIN_TEMPLATE)
-AI = _load(AI_TEMPLATE)
+# The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+AI = flattened()
 MEETING_ASSIST = _load(MEETING_ASSIST_TEMPLATE)
 ENTRIES = parameters.parameter_defaults()
 

@@ -197,7 +197,11 @@ STATE_MACHINES := $(wildcard $(STATE_MACHINES_DIR)/*)
 STATE_MACHINES_SRC_FILES := $(wildcard \
 	$(STATE_MACHINES_DIR)/**/*.asl.json \
 )
+# Nested templates of the AI stack, which `sam build` builds and `sam package`
+# uploads with it (TemplateURL in lma-ai-stack.yaml).
+NESTED_TEMPLATE_FILES := $(wildcard deployment/lma-ai-lambda-resolvers.yaml)
 BUILD_SOURCES := $(TEMPLATE_FILE) \
+	$(NESTED_TEMPLATE_FILES) \
 	$(LAMBDA_LAYERS_SRC_FILES) \
 	$(LAMBDA_FUNCTIONS_PYTHON_SRC_FILES) \
 	$(STATE_MACHINES_SRC_FILES) \
@@ -291,7 +295,7 @@ EDGE_AUTH_CODE_HASH := $(shell \
 )
 
 PACKAGE_RELEASE_REPLACE_OUT_FILE := $(OUT_DIR)/template-replaced-$(RELEASE_S3_BUCKET)-$(RELEASE_S3_PREFIX_SUB)-$(RELEASE_VERSION).yaml
-$(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
+$(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) $(NESTED_TEMPLATE_FILES) | $(OUT_DIR)
 	@[ -z '$(RELEASE_S3_BUCKET_BASE)' ] && \
 	  echo '[ERROR] need to set env var: RELEASE_S3_BUCKET_BASE' && \
 	  exit 1 || true

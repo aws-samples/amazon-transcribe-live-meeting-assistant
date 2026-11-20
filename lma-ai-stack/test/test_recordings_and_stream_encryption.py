@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN = REPO_ROOT / "lma-main.yaml"
@@ -66,7 +67,11 @@ _CACHE: dict[Path, dict] = {}
 
 def _resources(path: Path) -> dict:
     if path not in _CACHE:
-        _CACHE[path] = yaml.load(path.read_text(), Loader=_CfnLoader)
+        # The AI stack is read with its nested templates' resources inlined; see
+        # ai_stack_templates.
+        _CACHE[path] = (
+            flattened() if path == AI_STACK else yaml.load(path.read_text(), Loader=_CfnLoader)
+        )
     return _CACHE[path]["Resources"]
 
 
