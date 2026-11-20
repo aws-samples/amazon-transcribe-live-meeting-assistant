@@ -2,118 +2,23 @@
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 """A meeting's consent record as the MCP get_meeting_consent tool and the meeting
-export give it: camelCase, and no evidence images.
+export give it: camelCase, LMA's own values, and no evidence images.
 
 The record is the meeting's ``Consent`` attribute, the shape getMeetingConsent
 answers with (without its signed links). See docs/meeting-consent.md.
 
-:func:`meeting_consent_output` is the get_meeting_consent answer. It gives the
-stored values unchanged -- ``mode``, ``rule``, ``status``, each event's
-``decision`` and ``source`` are LMA's own names -- with one entry per consent
-event, and says only whether evidence exists.
-
-:func:`consent_output` is the export's ``consent`` part, in the shape the
-export schema (docs/schemas/meeting-export-v1.schema.json) describes today:
-one row per participant, ``opt-in`` for ``opt_in``, ``consented`` for
-``consent``. The two shapes differ because only the MCP tool's answer was
-changed to LMA's own values; the export's part was left as it is.
+:func:`meeting_consent_output` is both the get_meeting_consent answer and the
+export's ``consent`` part, so the two always give the record in one shape. It
+gives the stored values unchanged -- ``mode``, ``rule``, ``status``, each
+event's ``decision`` and ``source`` are LMA's own names -- with one entry per
+consent event, and says only whether evidence exists.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Mapping, Optional
 
-from .rules import normalize_name
-
-#: The stored modes, as the export's consent part names them.
-MODES = {"off": "off", "notify": "notify", "opt_in": "opt-in"}
-DECISIONS = {"consent": "consented", "objection": "objected"}
-PLACEHOLDER_SEAT = re.compile(r"^unidentified participant \d+$")
-
-
-def _latest_replies(events: List[Mapping[str, Any]]) -> Dict[str, Mapping[str, Any]]:
-    """Each participant's latest reply, by normalised name; an attestation is not a reply."""
-    latest: Dict[str, Mapping[str, Any]] = {}
-    for event in events:
-        if event.get("Source") == "attestation":
-            continue
-        key = normalize_name(event.get("ParticipantName"))
-        if key and event.get("Decision") in DECISIONS:
-            latest[key] = event
-    return latest
-
-
-def participant_rows(consent: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    """One row per participant, as the meeting page's Consent section lists them.
-
-    Everyone listed as present, then anybody else who was listed or replied,
-    each with their latest reply; the seats a Virtual Participant lists for
-    people not yet seen by name are left out unless a reply was recorded under
-    one. The record holds display names only, so a row has no email address.
-    """
-    events = [event for event in consent.get("Events") or [] if isinstance(event, Mapping)]
-    replies = _latest_replies(events)
-    rows: List[Dict[str, Any]] = []
-    seen = set()
-    names = [
-        *(consent.get("Participants") or []),
-        *(consent.get("ParticipantsSeen") or []),
-        *(event.get("ParticipantName") for event in events if event.get("Source") != "attestation"),
-    ]
-    for name in names:
-        key = normalize_name(name)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        reply = replies.get(key)
-        if reply is None and PLACEHOLDER_SEAT.match(key):
-            continue
-        rows.append(
-            {
-                "name": name,
-                "status": DECISIONS[reply["Decision"]] if reply else "no_reply",
-                "at": (reply.get("RecordedAt") or reply.get("OccurredAt")) if reply else None,
-                "method": reply.get("Source") if reply else None,
-            }
-        )
-    return rows
-
-
-def consent_output(call_id: str, state: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    """The answer for a getMeetingConsent result, or ``{"Consent": <the stored record>}``."""
-    consent = (state or {}).get("Consent") or {}
-    mode = MODES.get(str(consent.get("Mode") or "off"), consent.get("Mode"))
-    if not consent or mode == "off":
-        return {"meetingId": call_id, "mode": "off"}
-    attestation = consent.get("Attestation") or None
-    evidence = [entry for entry in consent.get("Evidence") or [] if entry]
-    return {
-        "meetingId": call_id,
-        "mode": mode,
-        # How consent is given in an opt-in meeting: by each participant, or by the
-        # meeting owner's attestation; null for notify.
-        "consentGivenBy": consent.get("Rule") if mode == "opt-in" else None,
-        "status": consent.get("Status"),
-        "captureAllowed": consent.get("CaptureAllowed"),
-        "noticePostedAt": consent.get("NoticePostedAt"),
-        "startedAt": consent.get("StartedAt"),
-        "updatedAt": consent.get("UpdatedAt"),
-        "attestation": (
-            {
-                "attestedBy": attestation.get("AttestedBy"),
-                "method": attestation.get("Method"),
-                "at": attestation.get("AttestedAt"),
-            }
-            if attestation
-            else None
-        ),
-        "participants": participant_rows(consent),
-        "evidence": {"exists": bool(evidence), "count": len(evidence)},
-    }
-
-
-# ── get_meeting_consent ─────────────────────────────────────────────────────
+# ── the consent record ──────────────────────────────────────────────────────
 
 
 def consent_events(consent: Mapping[str, Any]) -> List[Dict[str, Any]]:
@@ -163,10 +68,13 @@ def participant_consent(speaker_id: Any, events: List[Mapping[str, Any]]) -> str
 
 
 def meeting_consent_output(call_id: str, state: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    """The get_meeting_consent answer for a getMeetingConsent result.
+    """The consent record for a getMeetingConsent result, or ``{"Consent": <the stored record>}``.
 
-    A meeting whose consent was never started has mode ``off`` and status
-    ``not_required``, and ``captureAllowed`` is the meeting's capture gate.
+    The get_meeting_consent answer and the export's ``consent`` part. A meeting
+    whose consent was never started has mode ``off`` and status
+    ``not_required``, and ``captureAllowed`` is the meeting's capture gate when
+    ``state`` gives one (getMeetingConsent does; the export does not, so it is
+    null there).
     ``rule`` is given for an opt-in meeting only, as only opt-in uses one.
     """
     state = state or {}

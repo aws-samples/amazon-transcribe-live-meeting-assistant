@@ -477,7 +477,7 @@ A meeting whose consent was never started answers with `mode` `off`, `status`
 capture gate. The evidence images are in `get_meeting_record`'s `consent`
 section, for the meeting's owner and Admins.
 
-The meeting export's `consent` part has a different shape; see
+The meeting export's `consent` part is the same record in the same shape; see
 [the meeting export](meeting-export.md#consent).
 
 ```json

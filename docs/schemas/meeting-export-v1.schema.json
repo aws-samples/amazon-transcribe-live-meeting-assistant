@@ -92,45 +92,154 @@
     },
     "consent": {
       "type": "object",
-      "required": ["meetingId", "mode"],
+      "description": "The meeting's consent record in LMA's own values, the same shape as the MCP get_meeting_consent tool's answer. The evidence images are never included.",
+      "required": [
+        "meetingId",
+        "mode",
+        "status",
+        "notices",
+        "events",
+        "hasEvidence"
+      ],
       "properties": {
-        "meetingId": { "type": "string" },
-        "mode": { "enum": ["off", "notify", "opt-in"] },
-        "consentGivenBy": { "$ref": "#/$defs/nullableString" },
-        "status": { "$ref": "#/$defs/nullableString" },
-        "captureAllowed": { "type": ["boolean", "null"] },
-        "noticePostedAt": { "$ref": "#/$defs/nullableString" },
-        "startedAt": { "$ref": "#/$defs/nullableString" },
-        "updatedAt": { "$ref": "#/$defs/nullableString" },
+        "meetingId": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "off",
+            "notify",
+            "opt_in"
+          ]
+        },
+        "rule": {
+          "enum": [
+            "each_participant",
+            "owner_attests",
+            null
+          ],
+          "description": "The rule of an opt-in meeting; null otherwise, as only opt-in uses one."
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "granted",
+            "objected",
+            "not_required"
+          ]
+        },
+        "captureAllowed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the meeting may be captured, as the consent record says; null when its consent was never started."
+        },
+        "noticePostedAt": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "notices": {
+          "type": "array",
+          "description": "Each posting of the notice kept on the record.",
+          "items": {
+            "type": "object",
+            "required": [
+              "channel",
+              "postedAt"
+            ],
+            "properties": {
+              "channel": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "chat, voice, banner or invite."
+              },
+              "postedAt": {
+                "$ref": "#/$defs/nullableString"
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "description": "One entry per consent event, in the order recorded.",
+          "items": {
+            "type": "object",
+            "required": [
+              "participantName",
+              "decision",
+              "source",
+              "at",
+              "speakerId"
+            ],
+            "properties": {
+              "participantName": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "decision": {
+                "enum": [
+                  "consent",
+                  "objection",
+                  null
+                ]
+              },
+              "source": {
+                "enum": [
+                  "chat",
+                  "voice",
+                  "ui",
+                  "attestation",
+                  null
+                ]
+              },
+              "at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "When the reply or attestation happened, or when it was recorded if the record holds only that."
+              },
+              "speakerId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The participant's speakerId when the event was recorded against a transcript speaker; null otherwise. A consent event records a display name only, so this is null for every event today; a name is never matched to a speaker."
+              }
+            }
+          }
+        },
         "attestation": {
           "oneOf": [
-            { "type": "null" },
+            {
+              "type": "null"
+            },
             {
               "type": "object",
               "properties": {
-                "attestedBy": { "$ref": "#/$defs/nullableString" },
-                "method": { "$ref": "#/$defs/nullableString" },
-                "at": { "$ref": "#/$defs/nullableString" }
+                "attestedBy": {
+                  "$ref": "#/$defs/nullableString"
+                },
+                "method": {
+                  "$ref": "#/$defs/nullableString"
+                },
+                "at": {
+                  "$ref": "#/$defs/nullableString"
+                }
               }
             }
           ]
         },
-        "participants": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name", "status"],
-            "properties": {
-              "name": { "type": "string" },
-              "status": { "enum": ["consented", "objected", "no_reply"] },
-              "at": { "$ref": "#/$defs/nullableString" },
-              "method": { "$ref": "#/$defs/nullableString" }
-            }
-          }
+        "hasEvidence": {
+          "type": "boolean",
+          "description": "Whether evidence images exist; they are not included."
         },
-        "evidence": {
-          "type": "object",
-          "properties": { "exists": { "type": "boolean" }, "count": { "type": "integer" } }
+        "startedAt": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/nullableString"
         }
       }
     },

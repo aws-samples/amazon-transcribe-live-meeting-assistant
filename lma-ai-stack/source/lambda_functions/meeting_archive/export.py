@@ -33,7 +33,7 @@ from lma_channels import canonical_channel  # configuration layer
 from lma_chat_links import extract_links  # configuration layer
 from lma_consent.summary import (  # configuration layer
     consent_events,
-    consent_output,
+    meeting_consent_output,
     participant_consent,
 )
 from lma_speakers import (  # configuration layer
@@ -560,7 +560,8 @@ def build_export(
             for entry in speakers.participants()
         ]
     if "consent" in wanted:
-        export["consent"] = consent_output(call_id, {"Consent": meeting.get("Consent")})
+        # The same shape as get_meeting_consent's answer.
+        export["consent"] = meeting_consent_output(call_id, {"Consent": meeting.get("Consent")})
     if "checklist" in wanted:
         export["checklist"] = checklist_part(meeting, quotes=retained, times=times)
     if "keyframes" in wanted:

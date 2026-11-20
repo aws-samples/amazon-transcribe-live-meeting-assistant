@@ -91,7 +91,10 @@ The meeting page always offers its download as a link of this kind.
   "participants": [
     {"speakerId": "remote-spk_0", "label": "Other Participant (spk_0)", "name": "Priya Shah", "nameSource": "manual", "email": null, "consent": "unknown"}
   ],
-  "consent": {"meetingId": "...", "mode": "opt-in", "participants": [], "evidence": {"exists": true, "count": 1}},
+  "consent": {"meetingId": "...", "mode": "opt_in", "rule": "each_participant", "status": "granted", "captureAllowed": true,
+              "noticePostedAt": "...", "notices": [{"channel": "chat", "postedAt": "..."}],
+              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null}],
+              "attestation": null, "hasEvidence": true, "startedAt": "...", "updatedAt": "..."},
   "agenda": {"text": "...", "source": "mcp"},
   "context": "...",
   "checklist": [{"itemId": "q1", "text": "...", "kind": "question", "status": "covered",
@@ -189,16 +192,24 @@ images**, and no links to them; the summary's pictures become their alt text.
 
 ### `consent`
 
-`consent` is the consent record in the export's own shape: `mode`
-(`off`, `notify` or `opt-in`), `consentGivenBy` (the rule of an opt-in
-meeting), the status, the attestation, and one row per participant with their
-latest reply (`consented`, `objected` or `no_reply`). The evidence is described
-only by whether it exists and how many entries there are. The MCP
-`get_meeting_consent` tool gives the record in LMA's own values instead
-(`opt_in`, `rule`, one entry per consent event, `hasEvidence`), so the two
-shapes differ. The evidence images themselves are only in the
-Everything archive, for the meeting's owner and Admins
-([meeting consent](meeting-consent.md)).
+`consent` is the consent record in LMA's own values, in the same shape as the
+answer of the MCP [`get_meeting_consent`](mcp-tools-reference.md#get_meeting_consent)
+tool, which is built by the same code:
+
+- `mode` is `off`, `notify` or `opt_in`; `rule` is `each_participant` or
+  `owner_attests` for an opt-in meeting, and null otherwise;
+- `status` is `pending`, `granted`, `objected` or `not_required`, and
+  `captureAllowed` says whether the meeting may be captured (null when its
+  consent was never started);
+- `notices` lists each posting of the notice with its `channel` and `postedAt`;
+- `events` has one entry per consent event, with `participantName`, `decision`
+  (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or
+  `attestation`), `at` and `speakerId`, which is null for every event because
+  a consent event records a display name, not a transcript speaker;
+- `hasEvidence` says whether evidence images exist.
+
+The evidence images themselves are only in the Everything archive, for the
+meeting's owner and Admins ([meeting consent](meeting-consent.md)).
 
 ### `checklist`
 

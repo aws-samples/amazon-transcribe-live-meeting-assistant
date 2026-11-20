@@ -383,6 +383,138 @@ def test_a_participant_s_consent_follows_their_latest_linked_reply(decisions, ex
     assert export.participant_consent(None, unlinked) == "unknown"
 
 
+CONSENT_RECORD = {
+    "M": {
+        "Mode": s("opt_in"),
+        "Rule": s("each_participant"),
+        "Status": s("granted"),
+        "CaptureAllowed": {"BOOL": True},
+        "NoticePostedAt": s("2026-11-03T14:05:30Z"),
+        "Notices": {
+            "L": [
+                {
+                    "M": {
+                        "Channel": s("chat"),
+                        "Text": s("LMA is recording"),
+                        "PostedAt": s("2026-11-03T14:05:30Z"),
+                        "PostedBy": s("vp"),
+                    }
+                }
+            ]
+        },
+        "Events": {
+            "L": [
+                {
+                    "M": {
+                        "EventId": s("e1"),
+                        "ParticipantName": s("Priya Shah"),
+                        "Decision": s("objection"),
+                        "Source": s("chat"),
+                        "Text": s("no thanks"),
+                        "OccurredAt": s("2026-11-03T14:06:00Z"),
+                        "RecordedAt": s("2026-11-03T14:06:01Z"),
+                    }
+                },
+                {
+                    "M": {
+                        "ParticipantName": s("Priya Shah"),
+                        "Decision": s("consent"),
+                        "Source": s("voice"),
+                        "RecordedAt": s("2026-11-03T14:07:00Z"),
+                    }
+                },
+                {
+                    "M": {
+                        "ParticipantName": s("owner@example.com"),
+                        "Decision": s("consent"),
+                        "Source": s("attestation"),
+                        "OccurredAt": s("2026-11-03T14:08:00Z"),
+                    }
+                },
+            ]
+        },
+        "Attestation": {
+            "M": {
+                "AttestedBy": s("owner@example.com"),
+                "Method": s("verbal"),
+                "Statement": s("Everyone agreed"),
+                "AttestedAt": s("2026-11-03T14:08:00Z"),
+            }
+        },
+        "Evidence": {
+            "L": [
+                {
+                    "M": {
+                        "EvidenceId": s("ev1"),
+                        "S3Key": s(f"lma-consent-evidence/{POSIX}/evidence-1.jpg"),
+                    }
+                }
+            ]
+        },
+        "StartedAt": s("2026-11-03T14:05:10Z"),
+        "UpdatedAt": s("2026-11-03T14:08:00Z"),
+    }
+}
+
+
+def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fakes) -> None:
+    """One shape for both: the export's part equals the MCP tool's answer for the same record."""
+    from lma_consent.summary import meeting_consent_output
+
+    meeting = full_meeting(Consent=CONSENT_RECORD)
+    document = export_of(fakes, meeting=meeting)
+    valid(document)
+    stored = index.read_meeting(CALL)["Consent"]
+    # What getMeetingConsent answers with, minus its signed links, as the MCP tool reads it.
+    answer = meeting_consent_output(
+        CALL, {"CallId": CALL, "CaptureAllowed": True, "Consent": stored}
+    )
+    assert document["consent"] == answer
+    assert document["consent"] == {
+        "meetingId": CALL,
+        "mode": "opt_in",
+        "rule": "each_participant",
+        "status": "granted",
+        "captureAllowed": True,
+        "noticePostedAt": "2026-11-03T14:05:30Z",
+        "notices": [{"channel": "chat", "postedAt": "2026-11-03T14:05:30Z"}],
+        "events": [
+            {
+                "participantName": "Priya Shah",
+                "decision": "objection",
+                "source": "chat",
+                "at": "2026-11-03T14:06:00Z",
+                "speakerId": None,
+            },
+            {
+                "participantName": "Priya Shah",
+                "decision": "consent",
+                "source": "voice",
+                "at": "2026-11-03T14:07:00Z",
+                "speakerId": None,
+            },
+            {
+                "participantName": "owner@example.com",
+                "decision": "consent",
+                "source": "attestation",
+                "at": "2026-11-03T14:08:00Z",
+                "speakerId": None,
+            },
+        ],
+        "attestation": {
+            "attestedBy": "owner@example.com",
+            "method": "verbal",
+            "at": "2026-11-03T14:08:00Z",
+        },
+        "hasEvidence": True,
+        "startedAt": "2026-11-03T14:05:10Z",
+        "updatedAt": "2026-11-03T14:08:00Z",
+    }
+    # No notice text, reply words, evidence key or other stored detail is copied.
+    text = json.dumps(document["consent"])
+    assert "no thanks" not in text and "LMA is recording" not in text and ".jpg" not in text
+
+
 def test_participants_are_named_only_from_a_name_given_or_confirmed(fakes) -> None:
     people = {p["speakerId"]: p for p in export_of(fakes)["participants"]}
     assert people["remote-spk_0"]["name"] == "Priya Shah"
@@ -428,7 +560,8 @@ def test_no_image_or_evidence_is_in_the_export(fakes) -> None:
     text = json.dumps(document)
     assert "keyframe:" not in text and "ImageUrl" not in text and ".jpg" not in text
     assert "(Slide 1)" in json.dumps(document["summary"])
-    assert document["consent"]["evidence"] == {"exists": True, "count": 3}
+    assert document["consent"]["hasEvidence"] is True
+    assert "evidence" not in document["consent"]
     assert [f["altText"] for f in document["keyframes"]] == ["Roadmap", "Shared screen at 01:10"]
 
 
@@ -484,7 +617,20 @@ def test_a_meeting_with_nothing_but_its_record_matches_the_schema(fakes) -> None
     document = export_of(fakes, meeting=bare, parts={})
     valid(document)
     assert document["meeting"]["summaryProfile"] == "default"
-    assert document["consent"] == {"meetingId": CALL, "mode": "off"}
+    assert document["consent"] == {
+        "meetingId": CALL,
+        "mode": "off",
+        "rule": None,
+        "status": "not_required",
+        "captureAllowed": None,
+        "noticePostedAt": None,
+        "notices": [],
+        "events": [],
+        "attestation": None,
+        "hasEvidence": False,
+        "startedAt": None,
+        "updatedAt": None,
+    }
     assert "summary" not in document
     assert document["transcript"] == [] and document["actionItems"] == []
 
@@ -543,7 +689,7 @@ def test_the_export_is_given_to_whoever_may_see_the_meeting(fakes, identity) -> 
     answer = mcp(identity)
     valid(answer["export"])
     # The image-less consent record, for everyone who can see the meeting.
-    assert answer["export"]["consent"]["mode"] == "opt-in"
+    assert answer["export"]["consent"]["mode"] == "opt_in"
 
 
 def test_the_export_is_refused_to_anyone_else_and_for_a_missing_meeting(fakes) -> None:
