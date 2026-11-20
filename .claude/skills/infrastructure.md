@@ -12,6 +12,7 @@ LMA is a set of **nested CloudFormation stacks** orchestrated by
 | Nested stack template (`*/deployment/*.yaml`) | Purpose |
 |---|---|
 | `lma-ai-stack/deployment/lma-ai-stack.yaml` | Lambdas, AppSync, Cognito, DynamoDB, UI (CloudFront) |
+| `lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml` | Nested in the AI stack: the Lambda functions behind its Lambda-backed AppSync data sources |
 | `lma-websocket-transcriber-stack/` | ECS Fargate WebSocket → Transcribe → Kinesis |
 | `lma-virtual-participant-stack/` | ECS Fargate headless Chrome (Puppeteer) |
 | `lma-vpc-stack/` | VPC, security groups, NAT |
@@ -196,6 +197,38 @@ make lint-validate              # SAM template validation
 make lint-cfn-policy-validator  # IAM policy validator
 make lint-cfn                   # all of the above + cfn_nag
 ```
+
+## AI Stack Resource Budget
+
+CloudFormation refuses a template with more than 500 resources, counted after
+the SAM transform (which adds a role per function without one, a permission per
+event, and so on). `lma-ai-stack/test/test_resource_budget.py` runs the
+transform and holds every AI stack template to 470. When it fails, make room
+rather than raising the number:
+
+- A Lambda function behind an AppSync data source goes in
+  `lma-ai-lambda-resolvers.yaml` with its roles, log group and data source; the
+  resolvers stay in `lma-ai-stack.yaml` and name the data source through
+  `!GetAtt LambdaResolversStack.Outputs.<DataSource>Name`. The template header
+  says what qualifies.
+- Anything else stateless and cohesive can move into a new nested stack declared
+  the same way (`TemplateURL: ../deployment/<file>.yaml`, added to
+  `CFN_TEMPLATES` in the root `Makefile`).
+- Never move a table, bucket, key, user pool, stream or the GraphQL API.
+- CloudFormation creates a moved resource before it deletes the original, so a
+  moved log group, data source or named function needs a new name;
+  `test_ai_stack_nested_templates.py` checks the log group and data source rules.
+
+Tests that read the AI stack's resources (those under `lma-ai-stack/test/`,
+the VP stack's `test_ai_stack_vnc_alb.py`) read them through
+`lma-ai-stack/test/ai_stack_templates.py`: `flattened()` for the stack with its
+nested templates inlined, `all_template_paths()` for the files. A test that
+loads `lma-ai-stack.yaml` directly sees only the parent's resources and stops
+checking anything that moves, without failing, so a new test should use the
+helper. The exceptions check each file on purpose: `test_resource_budget.py`,
+`test_ai_stack_nested_templates.py` and `test_log_destinations.py`. The Lambda
+suites' own tests under `source/lambda_functions/` read only resources that are
+still in the parent.
 
 ## Common Red Flags
 

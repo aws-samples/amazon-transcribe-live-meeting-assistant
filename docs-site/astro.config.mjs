@@ -66,6 +66,7 @@ export default defineConfig({
               label: "Meeting Context, Labels, Audience and Checklist",
               slug: "meeting-context-and-checklist",
             },
+            { label: "Meeting Notifications", slug: "meeting-notifications" },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript Deletion After the Summary",
@@ -102,6 +103,7 @@ export default defineConfig({
               label: "MCP API Key Auth",
               slug: "mcp-api-key-auth",
             },
+            { label: "MCP Tools Reference", slug: "mcp-tools-reference" },
             { label: "Salesforce MCP", slug: "salesforce-mcp-setup" },
             {
               label: "Amazon QuickSuite MCP",

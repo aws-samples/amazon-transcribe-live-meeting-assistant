@@ -29,6 +29,7 @@ from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, norm
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
 from tools.virtual_participants import pending_scheduled_vps_of_owner, update_scheduled_vp
+from tools.vp_preparation import platform_fields
 
 logger = logging.getLogger()
 
@@ -64,6 +65,7 @@ def update_scheduled_match(  # pylint: disable=too-many-arguments
     meeting_password: Optional[str],
     agenda: Optional[str],
     scheduled_time: str,
+    preparation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Give a matching scheduled VP the new meeting details instead of creating another."""
     changes: Dict[str, Any] = {"meetingPlatform": meeting_platform, "meetingId": meeting_id}
@@ -74,6 +76,8 @@ def update_scheduled_match(  # pylint: disable=too-many-arguments
         changes["clearMeetingPassword"] = True
     if agenda:
         changes["agenda"] = agenda
+    # Only the inputs this call gives; the scheduled VP keeps the others.
+    changes.update(preparation or {})
     vp_id = vp["id"]
     try:
         updated = update_scheduled_vp(vp_id, changes)
@@ -88,7 +92,7 @@ def update_scheduled_match(  # pylint: disable=too-many-arguments
         "action": "updated",
         "meetingName": updated.get("meetingName") or vp.get("meetingName"),
         "meetingPlatform": updated.get("meetingPlatform") or meeting_platform,
-        "meetingId": updated.get("meetingId") or meeting_id,
+        **platform_fields(updated.get("meetingId") or meeting_id, vp.get("CallId")),
         "scheduledFor": updated.get("scheduledFor") or vp.get("scheduledFor") or scheduled_time,
         "status": updated.get("status") or vp.get("status"),
         "owner": vp.get("Owner"),
@@ -111,6 +115,7 @@ def execute(
     use_stored_zoom_credentials: bool = True,
     agenda: Optional[str] = None,
     allow_duplicate: bool = False,
+    preparation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Schedule a future meeting with virtual participant.
@@ -138,6 +143,9 @@ def execute(
         allow_duplicate: Schedule a new VP even when the caller already has one
             waiting for the same meeting name and time (by default that one is
             updated instead).
+        preparation: The meeting preparation inputs, already checked
+            (vp_preparation.vp_inputs): labels, audience, meetingContext,
+            checklist and meetingSharedWith.
 
     Returns:
         Dict with scheduled virtual participant details; ``action`` is
@@ -180,7 +188,13 @@ def execute(
         if match is not None:
             logger.info("MCP schedule matches scheduled VP %s; updating it", match["id"])
             return update_scheduled_match(
-                match, meeting_platform, meeting_id, meeting_password, agenda, scheduled_time
+                match,
+                meeting_platform,
+                meeting_id,
+                meeting_password,
+                agenda,
+                scheduled_time,
+                preparation,
             )
 
     # Prepare GraphQL mutation
@@ -242,6 +256,8 @@ def execute(
             # Persisted on the VP row so VPScheduler can read them later.
             **({"userSub": cognito_sub} if cognito_sub else {}),
             **({"userZoomSub": cognito_sub} if use_zoom_creds else {}),
+            # Stored on the VP row and put on the meeting when it starts.
+            **(preparation or {}),
         }
     }
 
@@ -286,7 +302,7 @@ def execute(
             "action": "created",
             "meetingName": vp_data["meetingName"],
             "meetingPlatform": vp_data["meetingPlatform"],
-            "meetingId": vp_data["meetingId"],
+            **platform_fields(vp_data["meetingId"], call_id),
             "scheduledFor": scheduled_time,
             "status": vp_data["status"],
             "owner": vp_data.get("owner", user_id),

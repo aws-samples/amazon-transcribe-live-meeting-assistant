@@ -277,6 +277,7 @@ are rewritten or expire (see
 | **Agenda** | On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row | Deleted, from the meeting and from its Virtual Participant records |
 | **Consent record** | On the meeting record (`Consent`) | As the meeting record | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
 | **Consent evidence images** | The recordings bucket, `lma-consent-evidence/<meeting>/` | 90 days | The lifecycle rule, from `TranscriptionExpirationInDays`; **Keep evidence screenshots** off deletes each image once checked | Deleted, every version |
+| **Meeting notifications**: guidance for the people running the meeting, and other categories a feature publishes; each user's dismissals and categories muted on that meeting | The meetings table, under the meeting. A user's categories muted on every meeting are one item per user | Guidance: as the transcript. Other categories and users' views: as the meeting record | Guidance follows the transcript, including **Delete the transcript after the summary**; the others follow **Days to keep meeting records**. A user's every-meeting mutes are deleted with the user. See [Meeting Notifications](meeting-notifications.md#retention) | Deleted |
 | **Usage records** behind the meeting's cost estimate | The meetings table | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
 | **Virtual Participant records**: meeting name, platform, meeting ID and password, schedule, agenda, per-meeting consent and video choices, status | The Virtual Participant DynamoDB table | 90 days from when the record was created, or from the time it is scheduled for if that is later. A record written before these records were given an expiry has none, and is kept until it is deleted | `MeetingRecordExpirationInDays`, the stack parameter only; deleted from the **Virtual Participants** page | Every record that names the meeting is deleted |
 | **Pending uploads**: a file uploaded for batch transcription, before it is processed | The recordings bucket, `lma-uploads-pending/` | 7 days | Fixed lifecycle rule | Not applicable |
@@ -286,6 +287,7 @@ are rewritten or expire (see
 | **S3 server access logs** of the stack's buckets, which name the objects read and written, and so the file names derived from meeting IDs | The stack's logging bucket, encrypted with Amazon S3 managed keys | 180 days | Fixed lifecycle rule | Not affected |
 | **Virtual Participant browser profiles** (meeting-platform cookies, per user) | The Virtual Participant profiles bucket | 365 days after the profile was last saved | Removed when the user removes their Zoom credentials. See [Persistent Chromium profile per user](zoom-credentials-and-join-reliability.md#persistent-chromium-profile-per-user) | Not affected |
 | **Downloads**: transcript, summary and slide exports | Produced in the user's browser and saved on the user's device | Outside LMA | Outside LMA. See [Transcript Downloads](web-ui-guide.md#transcript-downloads) | Not affected |
+| **Meeting archives**: the ZIP files **Download › Everything (.zip)**, **Key frames (.zip)** and **All attachments (.zip)** prepare, and a status file for each | The recordings bucket, `lma-meeting-archives/<meeting>/`, encrypted with the stack's key. Each is a copy of the meeting's files as they were when it was prepared; the consent record and evidence are in it only for the meeting's owner or an Admin | 1 day | Fixed lifecycle rule (`MeetingArchiveCleanup`), which also removes an unfinished upload after a day. See [Everything as one archive](web-ui-guide.md#everything-as-one-archive) | Deleted, every version |
 
 Who can read each item is described in
 [User-Based Access Control](user-based-access-control.md): the meeting's owner,
@@ -306,6 +308,7 @@ that neither the retention settings nor deleting a meeting change:
 | The meetings table's DynamoDB stream | 24 hours |
 | The point-in-time recovery of the stack's DynamoDB tables | 35 days; a deleted item can be restored from it until then. Point-in-time recovery is a safety protection and stays on |
 | Earlier versions of objects in the recordings bucket | Up to about two days after they stop being current; see [Earlier versions in the recordings bucket](#earlier-versions-in-the-recordings-bucket). Deleting a meeting, and **Delete the transcript after the summary**, delete every version of the files they remove at once |
+| A meeting archive prepared for download | One day after it was written (up to about two, with its earlier version), whatever the retention settings say of the files it copied. **Delete the transcript after the summary** and the other retention rules do not reach into an archive already prepared; deleting the meeting deletes its archives. A person who downloaded an archive keeps their copy, as with any download |
 | CloudWatch logs | `CloudWatchLogsExpirationInDays` |
 | Amazon Bedrock model invocation logging | As configured for the account. Off by default; if the account has it on, every prompt is logged, including summary prompts that contain the whole transcript |
 | Optional integrations outside AWS | Under each provider's own terms; see [Optional integrations outside AWS](infrastructure-and-security.md#optional-integrations-outside-aws) |
@@ -411,6 +414,7 @@ Deleting a meeting removes, for that meeting:
 - the usage records behind its cost estimate;
 - its key-frame items and images, and its consent evidence images;
 - its chat attachments: their items, and every version of their files;
+- its notifications, and every user's dismissals and mutes on it;
 - its audio recording and its video recording, with any video segments still in
   the bucket;
 - the transcript and summary files in `lma-transcripts/` whose names begin with

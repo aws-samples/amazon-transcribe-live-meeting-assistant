@@ -28,6 +28,7 @@ COPIES = [
     FUNCTIONS / "call_event_processor" / "attachment_input.py",
     FUNCTIONS / "chat_attachments_resolver" / "index.py",
     FUNCTIONS / "chat_attachment_summarizer" / "pure.py",
+    FUNCTIONS / "meeting_archive" / "index.py",
 ]
 
 # A meeting folder whose name, like a posixified CallId, keeps a run of dots.

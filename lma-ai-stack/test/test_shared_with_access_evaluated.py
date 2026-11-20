@@ -579,10 +579,10 @@ def test_a_vnc_preview_toggle_is_recorded_for_the_meeting(client) -> None:
 
 
 def test_the_vnc_preview_pipeline_answers_with_the_recorded_event(client) -> None:
-    import yaml  # imported here so the module collects without PyYAML when skipped
-    from test_shared_with_access import TEMPLATE, _CfnLoader, _resolver_for
+    from ai_stack_templates import flattened
+    from test_shared_with_access import _resolver_for
 
-    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    resources = flattened()["Resources"]
     code = _resolver_for(resources, "Mutation", "toggleVNCPreview")["Code"]
     event = {"CallId": "c1", "Action": "open", "Success": True}
     response = client.evaluate_code(
@@ -615,15 +615,13 @@ def test_a_signed_in_chat_subscriber_names_the_meeting(client) -> None:
 def _inline(field: str, key: str) -> str:
     """The write's request or response template; for a pipeline, its last
     function's."""
-    import yaml  # imported here so the module collects without PyYAML when skipped
+    from ai_stack_templates import flattened
     from test_shared_with_access import (
-        TEMPLATE,
-        _CfnLoader,
         _request_template,
         _response_template,
     )
 
-    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    resources = flattened()["Resources"]
     if key == "RequestMappingTemplate":
         template = _request_template(resources, field)
     else:
@@ -825,10 +823,10 @@ def test_an_acknowledged_failure_answers_true(client) -> None:
 
 def _unshare_read(client, row) -> dict:
     """The stash the read function leaves for the write."""
-    import yaml  # imported here so the module collects without PyYAML when skipped
-    from test_shared_with_access import TEMPLATE, _CfnLoader
 
-    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    from ai_stack_templates import flattened
+
+    resources = flattened()["Resources"]
     function = resources["ReadVirtualParticipantSharingAppSyncFunction"]["Properties"]
     request = client.evaluate_mapping_template(
         template=function["RequestMappingTemplate"],

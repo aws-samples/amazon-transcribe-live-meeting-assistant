@@ -843,3 +843,41 @@ def test_every_cognito_call_names_the_configured_user_pool(cognito: FakeCognito)
     assert cognito.calls, "no Cognito calls were recorded"
     for name, kwargs in cognito.calls:
         assert kwargs.get("UserPoolId") == index.USER_POOL_ID, name
+
+
+def test_a_deleted_users_notification_preferences_are_deleted(
+    cognito: FakeCognito, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deleted = []
+
+    class Table:
+        def delete_item(self, Key):  # noqa: N803
+            deleted.append(Key)
+
+    monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")
+    monkeypatch.setattr(
+        index.boto3, "resource", lambda name: SimpleNamespace(Table=lambda n: Table())
+    )
+    cognito.admins = [CALLER]
+
+    index.handler(admin_event("deleteUser", delete_input("plain@example.com")), None)
+
+    assert deleted == [{"PK": "usr#plain@example.com", "SK": "notification-prefs"}]
+
+
+def test_a_preferences_row_that_cannot_be_deleted_does_not_fail_the_deletion(
+    cognito: FakeCognito, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Table:
+        def delete_item(self, Key):  # noqa: N803
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "DeleteItem")
+
+    monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")
+    monkeypatch.setattr(
+        index.boto3, "resource", lambda name: SimpleNamespace(Table=lambda n: Table())
+    )
+    cognito.admins = [CALLER]
+
+    result = index.handler(admin_event("deleteUser", delete_input("plain@example.com")), None)
+
+    assert result == {"username": "plain@example.com", "success": True}

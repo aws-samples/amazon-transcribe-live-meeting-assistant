@@ -17,36 +17,66 @@ from tools import (
     meeting_actions,
     meeting_agenda,
     meeting_record,
+    notifications,
     virtual_participants,
 )
 from tools._meeting_fakes import ADMIN, OTHER, OWNER, SHARED, caller, meeting_row
 
-# ── push_meeting_guidance / list_meeting_guidance ───────────────────────────
+# ── push_meeting_guidance / list_meeting_guidance / list_meeting_notifications ─
 
-
-def test_guidance_is_stored_on_the_meeting_for_its_owner_and_shared_users(calls_table, appsync):
-    calls_table.put(meeting_row(SharedWith=[SHARED, "b@example.com"]))
-    appsync.answers["addMeetingGuidance"] = {
-        "addMeetingGuidance": {"GuidanceId": "g1", "CreatedAt": "2026-11-19T14:00:00Z"}
+PUBLISHED = {
+    "publishMeetingNotification": {
+        "NotificationId": "g1",
+        "CreatedAt": "2026-11-19T14:00:00Z",
+        "Created": True,
     }
+}
+
+
+def test_guidance_is_published_as_a_guidance_notification(calls_table, appsync, monkeypatch):
+    import lma_notifications
+
+    monkeypatch.setattr(lma_notifications, "transcript_expires_after", lambda now=None: 1800000000)
+    calls_table.put(meeting_row(SharedWith=[SHARED, "b@example.com"]))
+    appsync.answers["publishMeetingNotification"] = PUBLISHED
     answer = guidance.push(
         caller(SHARED), "m1", "  Ask about pricing  ", title="Pricing", level="warning"
     )
     query, variables = appsync.calls[0]
     item = variables["input"]
-    assert "mutation AddMeetingGuidance" in query
-    assert item["CallId"] == "m1" and item["Text"] == "Ask about pricing"
-    assert item["Level"] == "WARNING" and item["Title"] == "Pricing"
+    assert "mutation PublishMeetingNotification" in query
+    assert item["CallId"] == "m1" and item["Body"] == "Ask about pricing"
+    assert item["Category"] == "guidance" and item["Type"] == "note"
+    assert item["Severity"] == "WARNING" and item["Title"] == "Pricing"
     assert item["Source"] == "mcp" and item["CreatedBy"] == SHARED
-    # Who receives it is the meeting's owner and share list, in the published form.
-    assert item["Owner"] == OWNER
-    assert item["SharedWith"] == f"[{SHARED}, b@example.com]"
-    assert item["ExpiresAfter"] == 1900000000
-    assert answer["guidanceId"] == "g1" and answer["level"] == "WARNING"
+    # Guidance follows the transcript's retention.
+    assert item["ExpiresAfter"] == 1800000000
+    # Who receives it is decided by the resolver from the meeting, not sent.
+    assert "Owner" not in item and "SharedWith" not in item
+    # The tool's answer keeps its shape.
+    assert answer == {
+        "meetingId": "m1",
+        "guidanceId": "g1",
+        "createdAt": "2026-11-19T14:00:00Z",
+        "level": "WARNING",
+        "title": "Pricing",
+        "text": "Ask about pricing",
+        "delivered": "Shown on the meeting page to its owner and the people it is shared with.",
+    }
+
+
+def test_guidance_without_a_title_is_published_without_one(calls_table, appsync):
+    calls_table.put(meeting_row())
+    appsync.answers["publishMeetingNotification"] = PUBLISHED
+    answer = guidance.push(caller(), "m1", "note", level="urgent")
+    item = appsync.calls[0][1]["input"]
+    assert "Title" not in item and item["Severity"] == "URGENT"
+    assert answer["title"] is None
 
 
 def test_guidance_is_never_sent_to_the_meeting_chat(calls_table, appsync, lambdas):
     calls_table.put(meeting_row())
+    appsync.answers["publishMeetingNotification"] = PUBLISHED
     guidance.push(caller(), "m1", "note")
     assert [query for query, _ in appsync.calls if "chat" in query.lower()] == []
     assert lambdas.calls == []
@@ -63,41 +93,117 @@ def test_guidance_is_checked_before_anything_is_sent(calls_table, appsync, text,
     assert appsync.calls == []
 
 
-def test_guidance_for_a_meeting_the_caller_cannot_see_is_refused(calls_table, appsync):
+def test_notifications_of_a_meeting_the_caller_cannot_see_are_refused(calls_table, appsync):
     calls_table.put(meeting_row())
     with pytest.raises(PermissionError):
         guidance.push(caller(OTHER), "m1", "note")
     with pytest.raises(PermissionError):
         guidance.list_items(caller(OTHER), "m1")
+    with pytest.raises(PermissionError):
+        notifications.list_items(caller(OTHER), "m1")
     assert appsync.calls == []
 
 
-def test_guidance_is_listed_newest_first_from_the_meeting_partition(calls_table):
+ROW = {
+    "CallId": "m1",
+    "NotificationId": "n1",
+    "Category": "guidance",
+    "Type": "ask_question",
+    "Severity": "SUGGESTION",
+    "Title": "Ask about the budget",
+    "Body": "Nobody has said **who** signs off.",
+    "Refs": ["checklist:c1", "segment:s9"],
+    "DedupKey": "ask_question:c1",
+    "Actions": [{"Label": "Copy question", "Kind": "COPY", "Payload": '{"text":"Who signs?"}'}],
+    "Source": "guidance-analyzer",
+    "CreatedBy": None,
+    "CreatedAt": "2026-11-19T14:00:00Z",
+    "UpdatedAt": "2026-11-19T14:03:00Z",
+    "Revision": 2,
+    "ExpiresAt": None,
+}
+
+
+def test_guidance_is_listed_newest_first_from_the_guidance_category(calls_table, appsync):
     calls_table.put(meeting_row())
-    for stamp, text in (("2026-11-19T14:00:00Z", "first"), ("2026-11-19T14:05:00Z", "second")):
-        calls_table.put(
-            {
-                "PK": "gd#m1",
-                "SK": f"g#{stamp}#{text}",
-                "Text": text,
-                "Level": "INFO",
-                "CreatedAt": stamp,
-            }
-        )
-    calls_table.put({"PK": "gd#m2", "SK": "g#x", "Text": "another meeting's"})
-    listed = guidance.list_items(caller(SHARED), "m1")
-    assert [item["text"] for item in listed["guidance"]] == ["second", "first"]
-    assert calls_table.queries[-1]["ScanIndexForward"] is False
+    appsync.answers["ListMeetingNotifications"] = {
+        "listMeetingNotifications": {"Items": [ROW], "NextToken": None}
+    }
+    listed = guidance.list_items(caller(SHARED), "m1", limit=500)
+    variables = appsync.calls[0][1]
+    assert variables["category"] == "guidance" and variables["newestFirst"] is True
+    assert variables["limit"] == 200
+    assert listed["guidance"] == [
+        {
+            "guidanceId": "n1",
+            "createdAt": "2026-11-19T14:00:00Z",
+            "createdBy": None,
+            "source": "guidance-analyzer",
+            "type": "ask_question",
+            "level": "SUGGESTION",
+            "title": "Ask about the budget",
+            "text": "Nobody has said **who** signs off.",
+        }
+    ]
 
 
-# ── update_meeting_agenda ───────────────────────────────────────────────────
-
-
-def test_the_agenda_of_a_meeting_in_progress_is_written_as_the_meeting_page_writes_it(
-    calls_table, appsync
-):
+def test_notifications_are_listed_with_type_refs_and_dedup_key(calls_table, appsync):
     calls_table.put(meeting_row())
-    meeting_agenda.execute(caller(SHARED), ["Intro", "Pricing"], meeting_id="m1")
+    appsync.answers["ListMeetingNotifications"] = {
+        "listMeetingNotifications": {"Items": [ROW], "NextToken": None}
+    }
+    listed = notifications.list_items(
+        caller(SHARED), "m1", category="guidance", since="2026-11-19T13:00:00Z", cursor="c"
+    )
+    variables = appsync.calls[0][1]
+    assert variables == {
+        "callId": "m1",
+        "limit": 100,
+        "newestFirst": False,
+        "category": "guidance",
+        "since": "2026-11-19T13:00:00Z",
+        "nextToken": "c",
+    }
+    item = listed["notifications"][0]
+    assert item["type"] == "ask_question"
+    assert item["refs"] == ["checklist:c1", "segment:s9"]
+    assert item["dedupKey"] == "ask_question:c1"
+    assert item["severity"] == "suggestion" and item["revision"] == 2
+    assert item["actions"] == [
+        {"label": "Copy question", "kind": "COPY", "payload": {"text": "Who signs?"}}
+    ]
+    assert listed["nextCursor"] is None and listed["count"] == 1
+
+
+def test_an_admin_lists_any_meetings_notifications(calls_table, appsync):
+    calls_table.put(meeting_row())
+    appsync.answers["ListMeetingNotifications"] = {"listMeetingNotifications": {"Items": []}}
+    assert notifications.list_items(caller(ADMIN, admin=True), "m1")["count"] == 0
+
+
+@pytest.mark.parametrize("arguments", [{"limit": "many"}, {"category": 5}, {"since": "x" * 65}])
+def test_notification_list_arguments_are_checked(calls_table, appsync, arguments):
+    calls_table.put(meeting_row())
+    with pytest.raises(ValueError):
+        notifications.list_items(caller(), "m1", **arguments)
+    assert appsync.calls == []
+
+
+# ── get_meeting_agenda / update_meeting_agenda ──────────────────────────────
+
+
+def test_the_agenda_is_written_as_the_meeting_page_writes_it(calls_table, appsync):
+    calls_table.put(meeting_row())
+    appsync.answers["updateCallAgenda"] = {
+        "updateCallAgenda": {
+            "CallId": "m1",
+            "Agenda": "Intro\nPricing",
+            "AgendaSource": "mcp",
+            "AgendaUpdatedBy": SHARED,
+            "AgendaUpdatedAt": "2026-11-20T10:00:00Z",
+        }
+    }
+    answer = meeting_agenda.update_agenda(caller(SHARED), "m1", ["Intro", "Pricing"])
     query, variables = appsync.calls[0]
     assert "mutation UpdateCallAgenda" in query
     assert variables["input"] == {
@@ -106,26 +212,54 @@ def test_the_agenda_of_a_meeting_in_progress_is_written_as_the_meeting_page_writ
         "AgendaSource": "mcp",
         "AgendaUpdatedBy": SHARED,
     }
+    assert answer == {
+        "meetingId": "m1",
+        "agenda": "Intro\nPricing",
+        "agendaSource": "mcp",
+        "updatedBy": SHARED,
+        "updatedAt": "2026-11-20T10:00:00Z",
+    }
+
+
+def test_the_agenda_is_read_from_the_meeting(calls_table):
+    calls_table.put(
+        meeting_row(
+            Agenda="Intro",
+            AgendaSource="scheduled",
+            AgendaUpdatedBy=OWNER,
+            AgendaUpdatedAt="2026-11-19T09:00:00Z",
+        )
+    )
+    assert meeting_agenda.get_agenda(caller(SHARED), "m1") == {
+        "meetingId": "m1",
+        "agenda": "Intro",
+        "agendaSource": "scheduled",
+        "updatedBy": OWNER,
+        "updatedAt": "2026-11-19T09:00:00Z",
+    }
+    assert meeting_agenda.get_agenda(caller(ADMIN, admin=True), "m1")["agenda"] == "Intro"
+    with pytest.raises(PermissionError):
+        meeting_agenda.get_agenda(caller(OTHER), "m1")
 
 
 def test_an_empty_agenda_clears_it_and_a_missing_one_is_refused(calls_table, appsync):
     calls_table.put(meeting_row())
-    meeting_agenda.execute(caller(), "", meeting_id="m1")
+    meeting_agenda.update_agenda(caller(), "m1", "")
     assert appsync.calls[0][1]["input"]["Agenda"] == ""
     with pytest.raises(ValueError):
-        meeting_agenda.execute(caller(), None, meeting_id="m1")
+        meeting_agenda.update_agenda(caller(), "m1", None)
 
 
-def test_the_agenda_of_an_ended_meeting_or_of_someone_elses_is_not_changed(calls_table, appsync):
+def test_an_ended_meeting_has_its_agenda_changed_and_someone_elses_does_not(calls_table, appsync):
     calls_table.put(meeting_row("m1", status="ENDED"))
     calls_table.put(meeting_row("m2"))
-    with pytest.raises(ValueError, match="not in progress"):
-        meeting_agenda.execute(caller(), "x", meeting_id="m1")
+    meeting_agenda.update_agenda(caller(), "m1", "x")
+    assert appsync.calls[0][1]["input"]["CallId"] == "m1"
     with pytest.raises(PermissionError):
-        meeting_agenda.execute(caller(OTHER), "x", meeting_id="m2")
-    with pytest.raises(ValueError, match="exactly one"):
-        meeting_agenda.execute(caller(), "x", meeting_id="m2", virtual_participant_id="vp1")
-    assert appsync.calls == []
+        meeting_agenda.update_agenda(caller(OTHER), "m2", "x")
+    with pytest.raises(ValueError, match="meetingId"):
+        meeting_agenda.update_agenda(caller(), "", "x")
+    assert len(appsync.calls) == 1
 
 
 def vp_row(vp_id="vp1", status="SCHEDULED", owner=OWNER, **extra):
@@ -140,26 +274,6 @@ def vp_row(vp_id="vp1", status="SCHEDULED", owner=OWNER, **extra):
     }
     row.update(extra)
     return row
-
-
-def test_a_scheduled_vp_agenda_is_changed_by_its_owner_only(vp_table, appsync):
-    vp_table.put(vp_row())
-    meeting_agenda.execute(caller(), "Intro", virtual_participant_id="vp1")
-    query, variables = appsync.calls[0]
-    assert "mutation UpdateScheduledVirtualParticipant" in query
-    assert variables["input"] == {"id": "vp1", "agenda": "Intro"}
-    with pytest.raises(PermissionError, match="owner or an Admin"):
-        meeting_agenda.execute(caller(SHARED), "x", virtual_participant_id="vp1")
-    with pytest.raises(PermissionError, match="not found"):
-        meeting_agenda.execute(caller(OTHER), "x", virtual_participant_id="vp1")
-    assert len(appsync.calls) == 1
-
-
-def test_a_vp_that_has_started_has_its_agenda_changed_on_its_meeting(vp_table, appsync):
-    vp_table.put(vp_row(status="ACTIVE"))
-    with pytest.raises(ValueError, match="meeting_id"):
-        meeting_agenda.execute(caller(), "x", virtual_participant_id="vp1")
-    assert appsync.calls == []
 
 
 # ── end_meeting / list and end Virtual Participants ─────────────────────────
@@ -238,10 +352,11 @@ def test_vps_are_listed_for_whoever_may_see_them_without_a_password(vp_table):
     assert len(every) == 3
 
 
-def test_a_finished_vp_is_not_ended_again(vp_table, appsync):
-    vp_table.put(vp_row(status="ENDED"))
-    with pytest.raises(ValueError, match="already finished"):
-        virtual_participants.end_by_id(caller(), "vp1")
+def test_ending_a_finished_vp_again_changes_nothing_and_says_so(vp_table, appsync):
+    vp_table.put(vp_row(status="ENDED", CallId="m1"))
+    answer = virtual_participants.end_by_id(caller(), "vp1")
+    assert answer["alreadyEnded"] is True and answer["status"] == "ENDED"
+    assert answer["virtualParticipantId"] == "vp1" and answer["meetingId"] == "m1"
     with pytest.raises(PermissionError):
         virtual_participants.end_by_id(caller(OTHER), "vp1")
     assert appsync.calls == []
@@ -512,3 +627,96 @@ def test_an_unknown_section_or_a_hidden_meeting_is_refused(calls_table, appsync)
     with pytest.raises(PermissionError):
         meeting_record.execute(caller(OTHER), "m1", include=["recordings"])
     assert appsync.calls == []
+
+
+def _paged(monkeypatch, pages):
+    """read_page answering from `pages` in turn, recording the limit each call asked for."""
+    asked = []
+
+    def read_page(
+        call_id, *, category=None, since=None, limit=100, cursor=None, newest_first=False
+    ):
+        asked.append({"limit": limit, "cursor": cursor})
+        return pages[len(asked) - 1]
+
+    monkeypatch.setattr(notifications, "read_page", read_page)
+    return asked
+
+
+def test_a_filtered_list_follows_pages_until_it_has_the_limit(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    asked = _paged(
+        monkeypatch,
+        [
+            {"Items": [], "NextToken": "t1"},
+            {"Items": [dict(ROW, NotificationId="a")], "NextToken": "t2"},
+            {"Items": [dict(ROW, NotificationId="b")], "NextToken": "t3"},
+        ],
+    )
+    listed = notifications.list_items(caller(), "m1", category="guidance", limit=2)
+    assert [item["notificationId"] for item in listed["notifications"]] == ["a", "b"]
+    # Each page asks only for what is still wanted, so nothing read is left out.
+    assert [call["limit"] for call in asked] == [2, 2, 1]
+    assert [call["cursor"] for call in asked] == [None, "t1", "t2"]
+    assert listed["nextCursor"] == "t3"
+
+
+def test_a_filtered_list_stops_after_its_page_budget(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    pages = [{"Items": [], "NextToken": f"t{i}"} for i in range(notifications.MAX_PAGES + 5)]
+    asked = _paged(monkeypatch, pages)
+    listed = notifications.list_items(caller(), "m1", category="guidance")
+    assert len(asked) == notifications.MAX_PAGES
+    assert listed["count"] == 0 and listed["nextCursor"] == f"t{notifications.MAX_PAGES - 1}"
+
+
+def test_guidance_is_listed_past_other_categories(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    _paged(
+        monkeypatch,
+        [
+            {"Items": [], "NextToken": "t1"},
+            {"Items": [dict(ROW, NotificationId="g")], "NextToken": None},
+        ],
+    )
+    listed = guidance.list_items(caller(), "m1")
+    assert [item["guidanceId"] for item in listed["guidance"]] == ["g"]
+    assert listed["hasMore"] is False
+
+
+def test_guidance_says_when_it_stopped_before_the_end(calls_table, monkeypatch):
+    calls_table.put(meeting_row())
+    pages = [{"Items": [], "NextToken": f"t{i}"} for i in range(notifications.MAX_PAGES)]
+    _paged(monkeypatch, pages)
+    listed = guidance.list_items(caller(), "m1")
+    assert listed["count"] == 0 and listed["hasMore"] is True
+
+
+# ── the Virtual Participant of each listed meeting ──────────────────────────
+
+
+def test_vps_by_call_reads_only_the_link_attributes_and_keeps_the_newest(monkeypatch):
+    from tools import virtual_participants
+
+    requests = []
+
+    class Table:
+        def scan(self, **kwargs):
+            requests.append(kwargs)
+            return {
+                "Items": [
+                    {"id": "old", "CallId": "m1", "createdAt": "2026-11-19T09:00:00Z"},
+                    {"id": "new", "CallId": "m1", "createdAt": "2026-11-19T10:00:00Z"},
+                    {"id": "other", "CallId": "m9", "createdAt": "2026-11-19T10:00:00Z"},
+                ]
+            }
+
+    monkeypatch.setattr(virtual_participants, "vp_table", lambda: Table())
+    found, complete = virtual_participants.vps_by_call({"m1"})
+    assert found == {"m1": "new"} and complete is True
+    assert requests[0]["ProjectionExpression"] == "#id, #call, #created"
+    assert requests[0]["ExpressionAttributeNames"] == {
+        "#id": "id",
+        "#call": "CallId",
+        "#created": "createdAt",
+    }

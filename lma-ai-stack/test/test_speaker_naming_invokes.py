@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 
 import pytest
+from ai_stack_templates import flattened
 
 LAMBDAS = Path(__file__).resolve().parents[1] / "source" / "lambda_functions"
 EVENT_PROCESSOR = (
@@ -126,15 +127,22 @@ def test_both_callers_identify_the_pass_as_the_final_one(
 def test_the_resolver_timeout_is_shorter_than_the_callers_socket_timeout() -> None:
     """So the caller can never abandon a pass that is still running and start
     another."""
-    template = (
-        Path(__file__).resolve().parents[1] / "deployment" / "lma-ai-stack.yaml"
-    ).read_text(encoding="utf-8")
-    function = template[template.index("  SpeakerNameResolverFunction:") :]
-    timeout = int(re.search(r"\n      Timeout: (\d+)", function).group(1))
-    socket_timeout = int(
-        re.search(r"SPEAKER_NAME_READ_TIMEOUT: (\d+)", template).group(1)
-    )
-    assert timeout < socket_timeout, (
-        f"the resolver may run for {timeout}s but its caller gives up at "
-        f"{socket_timeout}s, so a slow pass would be retried"
-    )
+    resources = flattened()["Resources"]
+    timeout = int(resources["SpeakerNameResolverFunction"]["Properties"]["Timeout"])
+    socket_timeouts = {
+        name: int(variables["SPEAKER_NAME_READ_TIMEOUT"])
+        for name, resource in resources.items()
+        if "SPEAKER_NAME_READ_TIMEOUT"
+        in (
+            variables := (
+                ((resource.get("Properties") or {}).get("Environment") or {}).get("Variables")
+                or {}
+            )
+        )
+    }
+    assert socket_timeouts, "no caller sets SPEAKER_NAME_READ_TIMEOUT -- selector stale?"
+    for caller, socket_timeout in socket_timeouts.items():
+        assert timeout < socket_timeout, (
+            f"the resolver may run for {timeout}s but {caller} gives up at "
+            f"{socket_timeout}s, so a slow pass would be retried"
+        )

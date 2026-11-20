@@ -22,7 +22,7 @@
  * DOM calls and textContent, so a slide's text is never read as markup.
  */
 import { chapterTitlesByFrame } from './chapters';
-import { formatFrameTime, frameLabel, isDistinctFrame } from './video-keyframes';
+import { formatFrameTime, frameLabel, isDistinctFrame, mergeKeyframes } from './video-keyframes';
 
 const DECK_STYLE = `
 @page { size: landscape; margin: 10mm; }
@@ -123,4 +123,29 @@ export const printDeck = async (tab, { title, frames, chapters }, { wait = IMAGE
   await Promise.all(images.map((img) => loaded(img, wait)));
   tab.focus();
   tab.print();
+};
+
+// The resolver's largest page, for reading every frame at once for the deck.
+export const EXPORT_PAGE_SIZE = 500;
+// A meeting keeps at most 1,000 frames; the bound stops a looping token.
+export const MAX_EXPORT_PAGES = 10;
+
+/**
+ * Every key frame of the meeting, read fresh page by page through
+ * `loadFrames(variables)` (getVideoKeyframes' answer), for links that last the
+ * print.
+ */
+export const loadEveryKeyframe = async (callId, loadFrames) => {
+  let all = [];
+  let token = null;
+  let pages = 0;
+  do {
+    // eslint-disable-next-line no-await-in-loop -- each page names the next
+    const page = await loadFrames({ callId, limit: EXPORT_PAGE_SIZE, nextToken: token, afterFrameId: null });
+    const incoming = page?.VideoKeyframes || [];
+    all = mergeKeyframes(all, incoming);
+    token = (incoming.length && page?.nextToken) || null;
+    pages += 1;
+  } while (token && pages < MAX_EXPORT_PAGES);
+  return all;
 };

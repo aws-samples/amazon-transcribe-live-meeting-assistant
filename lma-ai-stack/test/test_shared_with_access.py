@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 AI_STACK = Path(__file__).resolve().parents[1]
 TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
@@ -59,7 +60,7 @@ PUBLISHING_TEMPLATES = [
     "addVideoKeyframe.response.vtl",
     "updateVirtualParticipant.response.vtl",
 ]
-PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js"]
+PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js", "notificationPublishWrite.js"]
 ENTRIES_JS = [*PUBLISHING_JS, "meetingAccess.js"]
 WRITE_TEMPLATES = [
     "updateSpeakerIdentities.request.vtl",
@@ -86,7 +87,8 @@ _CfnLoader.add_multi_constructor("!", _intrinsic)
 
 @pytest.fixture(scope="module")
 def resources() -> dict:
-    return yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    return flattened()["Resources"]
 
 
 def _read(name: str) -> str:
@@ -699,6 +701,7 @@ PYTHON_READERS = [
     "chat_attachments_resolver/index.py",
     "list_calls_gsi_resolver/index.py",
     "mcp_analytics/tools/get_virtual_participant_status.py",
+    "meeting_archive/index.py",
     "meeting_consent_resolver/index.py",
     "meeting_preparation_resolver/index.py",
     "meeting_controls_resolver/index.py",

@@ -19,10 +19,9 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
+from ai_stack_templates import flattened
 
 AI_STACK = Path(__file__).resolve().parents[1]
-TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
 APPSYNC = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC / "schema.graphql"
 AGENDA_VTL = APPSYNC / "updateCallAgenda.request.vtl"
@@ -41,25 +40,10 @@ CALL_FIELDS = (
 AGENDA_FIELDS = ("Agenda", "AgendaSource", "AgendaUpdatedBy", "AgendaUpdatedAt")
 
 
-class _CfnLoader(yaml.SafeLoader):
-    """YAML loader that tolerates CloudFormation short-form intrinsics."""
-
-
-def _intrinsic(loader: yaml.Loader, tag_suffix: str, node: yaml.Node):  # noqa: ANN202
-    name = f"Fn::{tag_suffix}" if tag_suffix != "Ref" else "Ref"
-    if isinstance(node, yaml.ScalarNode):
-        return {name: loader.construct_scalar(node)}
-    if isinstance(node, yaml.SequenceNode):
-        return {name: loader.construct_sequence(node, deep=True)}
-    return {name: loader.construct_mapping(node, deep=True)}
-
-
-_CfnLoader.add_multi_constructor("!", _intrinsic)
-
-
 @pytest.fixture(scope="module")
 def resources() -> dict:
-    return yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    """The AI stack's resources, its nested templates' included; see ai_stack_templates."""
+    return flattened()["Resources"]
 
 
 @pytest.fixture(scope="module")
@@ -303,7 +287,10 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
     assert api_key["properties"]["agenda"]["type"] == "string"
     assert "agenda" not in gateway.get("Required", [])
     assert "agenda" not in api_key.get("required", [])
-    assert set(gateway["Properties"]) == set(api_key["properties"])
+    # The meeting preparation arguments are the API key endpoint's alone
+    # (test_mcp_tool_schemas.py GATEWAY_WITHOUT).
+    preparation = {"labels", "audience", "context", "checklist", "shareWith"}
+    assert set(gateway["Properties"]) == set(api_key["properties"]) - preparation
 
 
 @pytest.mark.parametrize("tool", ["start_meeting_now", "schedule_meeting"])

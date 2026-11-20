@@ -124,7 +124,7 @@ def not_found_or_denied(kind: str, item_id: str) -> PermissionError:
 def require_meeting(call_id: Any, caller: Caller) -> Dict[str, Any]:
     """The meeting's row for a caller getCall would answer; refused otherwise."""
     if not isinstance(call_id, str) or not call_id.strip():
-        raise ValueError("meeting_id is required")
+        raise ValueError("meetingId is required")
     call_id = call_id.strip()
     meeting = get_meeting(call_id)
     if meeting is None or not can_read(meeting, caller):

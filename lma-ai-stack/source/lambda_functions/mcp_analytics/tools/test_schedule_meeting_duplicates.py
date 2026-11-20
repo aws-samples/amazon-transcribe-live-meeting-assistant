@@ -113,7 +113,9 @@ def test_a_second_call_for_the_same_meeting_updates_the_scheduled_vp(vp_table, u
     assert created == []
     assert answer["virtualParticipantId"] == "vp-old"
     assert answer["action"] == "updated"
-    assert answer["meetingId"] == NEW_LINK
+    assert answer["platformMeetingId"] == NEW_LINK
+    # The LMA meeting does not exist until the VP starts it.
+    assert answer["meetingId"] is None
     (query, variables), *rest = updates.calls
     assert rest == []
     assert "mutation UpdateScheduledVirtualParticipant" in query

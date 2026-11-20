@@ -4,7 +4,11 @@
 
 """
 Tool 2: get_meeting_transcript
-Retrieve full transcript from S3 with speaker attribution
+
+``format: text`` and ``format: srt`` return the whole transcript from its file
+in S3, with speaker attribution. ``format: json`` returns it page by page, as
+segments read from the EventSourcing table, with a ``nextToken`` to read on
+from, so it can be read while the meeting runs (tools/transcript_pages.py).
 """
 
 import json
@@ -19,8 +23,14 @@ from tools.url_helper import get_meeting_url
 logger = logging.getLogger()
 
 
-def execute(
-    meeting_id: str, format: str = "text", user_id: str = None, is_admin: bool = False
+def execute(  # pylint: disable=too-many-arguments,redefined-builtin
+    meeting_id: str,
+    format: str = "text",
+    user_id: str = None,
+    is_admin: bool = False,
+    next_token: Any = None,
+    max_segments: Any = None,
+    include_assistant: bool = False,
 ) -> Dict[str, Any]:
     """
     Retrieve full meeting transcript from S3.
@@ -37,6 +47,22 @@ def execute(
     """
     if not meeting_id:
         raise ValueError("Meeting ID is required")
+
+    if format == "json":
+        # Imported here: this module's own tests load it without the package.
+        # pylint: disable=import-outside-toplevel
+        from tools import transcript_pages
+        from tools.access import Caller
+
+        answer = transcript_pages.execute(
+            Caller(user_id=user_id or "", is_admin=bool(is_admin)),
+            meeting_id,
+            next_token=next_token,
+            max_segments=max_segments,
+            include_assistant=include_assistant,
+        )
+        answer["meetingUrl"] = get_meeting_url(answer["meetingId"])
+        return answer
 
     # Check permissions
     if not can_access_meeting(meeting_id, user_id, is_admin):
@@ -89,9 +115,7 @@ def execute(
         raise ValueError(f"Transcript not found for meeting {meeting_id}")
 
     # Format based on requested format
-    if format == "json":
-        result = {"meetingId": meeting_id, "format": "json", "transcript": transcript_data}
-    elif format == "text":
+    if format == "text":
         result = {
             "meetingId": meeting_id,
             "format": "text",
