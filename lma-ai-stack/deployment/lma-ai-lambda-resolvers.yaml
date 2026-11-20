@@ -1627,7 +1627,7 @@ Resources:
     Type: AWS::AppSync::DataSource
     Properties:
       ApiId: !Ref AppSyncApiId
-      Name: MeetingReopenLambda
+      Name: MeetingReopenFunction
       Description: Lambda function that allows the next capture session on a meeting
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncMeetingReopenLambdaRole.Arn
