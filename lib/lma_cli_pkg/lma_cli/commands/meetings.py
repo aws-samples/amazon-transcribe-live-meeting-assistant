@@ -57,6 +57,11 @@ def meetings_delete_cmd(ctx, labels, user_name, confirm, stack_name, region, as_
     except LMAError as e:
         print_error(str(e))
         sys.exit(2)
+    # A stack or Region given before `meetings` (lma --stack-name B meetings delete)
+    # wins over this command's own option when that came only from the environment,
+    # so an exported LMA_STACK_NAME never redirects a deletion meant for another stack.
+    stack_name = _explicit(ctx, "stack_name", stack_name)
+    region = _explicit(ctx, "region", region)
     client = ctx.obj["client_factory"](stack_name=stack_name, region=region)
     try:
         result = client.meetings.delete_by_labels(wanted, as_user=user_name, confirm=confirm)
@@ -68,6 +73,8 @@ def meetings_delete_cmd(ctx, labels, user_name, confirm, stack_name, region, as_
         click.echo(result.model_dump_json(indent=2))
         sys.exit(1 if result.failed else 0)
 
+    account = f", account {result.account}" if result.account else ""
+    print_info(f"Stack {result.stack} (Region {result.region}{account})")
     selector = ", ".join(f"{key}={value}" for key, value in wanted.items())
     whose = "every user's meetings" if result.scope == "all" else f"meetings owned by {result.user}"
     print_info(f"Meetings labelled {selector}, among {whose}:")
@@ -90,7 +97,20 @@ def meetings_delete_cmd(ctx, labels, user_name, confirm, stack_name, region, as_
     for failure in result.failed:
         print_error(f"{failure.call_id}: {failure.error}")
     total = len(result.matched)
+    where = f"from stack {result.stack} in {result.region}"
     if result.failed:
-        print_error(f"Deleted {len(result.deleted)} of {total} meeting(s); {len(result.failed)} failed.")
+        print_error(
+            f"Deleted {len(result.deleted)} of {total} meeting(s) {where}; {len(result.failed)} failed."
+        )
         sys.exit(1)
-    print_success(f"Deleted {len(result.deleted)} of {total} meeting(s).")
+    print_success(f"Deleted {len(result.deleted)} of {total} meeting(s) {where}.")
+
+
+def _explicit(ctx: click.Context, name: str, value):
+    """This command's ``name``, unless only the environment set it and the group was given one."""
+    from click.core import ParameterSource
+
+    group_value = (ctx.obj or {}).get(name)
+    if group_value and ctx.get_parameter_source(name) != ParameterSource.COMMANDLINE:
+        return group_value
+    return value

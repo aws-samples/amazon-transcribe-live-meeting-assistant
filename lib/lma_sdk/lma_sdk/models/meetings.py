@@ -40,6 +40,10 @@ class MeetingDeleteResult(BaseModel):
     """
 
     dry_run: bool
+    #: The stack, Region and AWS account the selection was made in.
+    stack: str = ""
+    region: str = ""
+    account: str = ""
     user: str
     #: ``all`` when the user is in the Admin group, else ``own``.
     scope: str

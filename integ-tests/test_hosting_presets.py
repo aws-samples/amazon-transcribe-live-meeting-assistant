@@ -20,7 +20,7 @@ tests after it
     a dry run deletes nothing, a meeting in progress is skipped, and a confirmed
     run removes each matching meeting whole -- its record, its list entry, its
     transcript items and its files in the recordings bucket -- and nothing else.
-    The two temporary Cognito users, created without a password or an email, and
+    The two temporary Cognito users, created with no password and no invitation message, and
     every synthetic meeting are removed in teardown.
 
 Opt-in, with ``LMA_TEST_HOSTING_ASSISTANT=1`` (changes a deployment-wide setting
@@ -105,7 +105,10 @@ def _email_domain(stack: Stack) -> str:
 
 @pytest.fixture(scope="module")
 def users(client, stack: Stack):
-    """A temporary user and a temporary Admin, created with no password or email; deleted after."""
+    """A temporary user and a temporary Admin, deleted after.
+
+    Created with no password and no invitation message (MessageAction SUPPRESS).
+    """
     cognito = stack.session.client("cognito-idp")
     pool = _pool_id(client)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -129,6 +132,15 @@ def users(client, stack: Stack):
                 cognito.admin_delete_user(UserPoolId=pool, Username=username)
             except Exception as error:  # noqa: BLE001
                 print(f"could not delete the temporary user {username}: {error}")
+
+
+def _list_key(created_at: str, call_id: str) -> dict[str, Any]:
+    """The key of a meeting's list entry, as createCall writes it (a four-hour shard of the day)."""
+    shard = int(created_at[11:13]) // 4
+    return {
+        "PK": {"S": f"cls#{created_at[:10]}#s#{shard:02d}"},
+        "SK": {"S": f"ts#{created_at}#id#{call_id}"},
+    }
 
 
 def _posix(name: str) -> str:
@@ -209,8 +221,14 @@ def labelled(client, stack: Stack, users: dict[str, str]):
             files.append(key)
         yield {"label": value, "call_ids": call_ids, "created_at": created_at, "files": files}
     finally:
-        for call_id in call_ids.values():
+        for name, call_id in call_ids.items():
             cleanup(client.stack_name, call_id, region=client.region)
+            # cleanup() removes the c#<CallId> partition only; the meeting's list
+            # entry, which lma meetings delete reads, is removed here.
+            try:
+                ddb.delete_item(TableName=stack.event_table, Key=_list_key(created_at[name], call_id))
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 ddb.delete_item(
                     TableName=stack.event_table,
@@ -227,10 +245,12 @@ def labelled(client, stack: Stack, users: dict[str, str]):
 
 def _lma(client, *args: str) -> tuple[int, str]:
     """``lma meetings delete ...`` run through the CLI itself, as an operator runs it."""
+    # The stack and Region given to the command itself, which nothing in the
+    # environment overrides.
     result = CliRunner().invoke(
         main,
-        ["--stack-name", client.stack_name, *(["--region", client.region] if client.region else []),
-         "meetings", "delete", *args],
+        ["meetings", "delete", "--stack-name", client.stack_name,
+         *(["--region", client.region] if client.region else []), *args],
     )
     return result.exit_code, result.output
 
@@ -284,14 +304,8 @@ def test_the_owner_deletes_their_labelled_meetings_whole(client, stack, users, l
         versions = s3.list_object_versions(Bucket=stack.recordings_bucket, Prefix=key)
         assert not versions.get("Versions") and not versions.get("DeleteMarkers"), f"{key} was not deleted"
     # The list entry, at the keys createCall gives it.
-    created = labelled["created_at"]["own-1"]
-    shard = int(created[11:13]) // 4
     listed = ddb.get_item(
-        TableName=stack.event_table,
-        Key={
-            "PK": {"S": f"cls#{created[:10]}#s#{shard:02d}"},
-            "SK": {"S": f"ts#{created}#id#{ids['own-1']}"},
-        },
+        TableName=stack.event_table, Key=_list_key(labelled["created_at"]["own-1"], ids["own-1"])
     ).get("Item")
     assert listed is None, "the meeting's list entry was not deleted"
     # Not the owner's, another label, or still in progress: kept.

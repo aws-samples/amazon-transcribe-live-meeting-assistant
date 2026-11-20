@@ -28,6 +28,7 @@ to delete, ``lambda:InvokeFunction`` on the meeting controls function.
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional
 
 from boto3.dynamodb.types import TypeDeserializer
@@ -52,6 +53,8 @@ MEETING_CONTROLS_FUNCTION = "{stack}-MeetingControlsLambda"
 DELETED = "Meetings deleted successfully"
 #: BatchGetItem's limit on keys per request.
 BATCH_GET_MAX = 100
+#: How many times keys BatchGetItem leaves unprocessed are retried, with backoff.
+UNPROCESSED_RETRIES = 8
 
 _DESERIALIZER = TypeDeserializer()
 
@@ -116,6 +119,13 @@ class MeetingOperations:
                 break
         return user.username, ADMIN_GROUP in groups
 
+    def account_id(self) -> str:
+        """The AWS account the caller's credentials are in, or "" when it cannot be read."""
+        try:
+            return str(self._client.session.client("sts").get_caller_identity().get("Account") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
     # ── finding the meetings ───────────────────────────────────────────────
 
     @property
@@ -173,12 +183,21 @@ class MeetingOperations:
                     "ExpressionAttributeNames": {"#owner": "Owner", "#status": "Status"},
                 }
             }
+            attempt = 0
             while request:
                 response = dynamodb.batch_get_item(RequestItems=request)
                 for item in response.get("Responses", {}).get(self.table_name, []):
                     record = _plain(item)
                     found[str(record.get("CallId"))] = record
                 request = response.get("UnprocessedKeys") or {}
+                if request:
+                    # Keys DynamoDB did not process (throttling): back off, then retry them.
+                    attempt += 1
+                    if attempt > UNPROCESSED_RETRIES:
+                        raise LMAConfigurationError(
+                            "The meetings table kept refusing reads; try again later"
+                        )
+                    time.sleep(min(0.1 * 2**attempt, 5.0))
         return found
 
     def find_by_labels(
@@ -187,7 +206,9 @@ class MeetingOperations:
         """The meetings that carry every one of ``labels`` and that ``as_user`` may delete.
 
         ``admin`` is looked up when not given: an Admin's selection is every
-        meeting, anyone else's only the meetings they own.
+        meeting, anyone else's only the meetings they own. When ``admin`` is
+        given, ``as_user`` is not looked up and must already be the Cognito user
+        name (as ``user_scope`` returns it), since that is what a meeting's owner is.
         """
         if not labels:
             raise LMAValidationError("give at least one label")
@@ -277,6 +298,9 @@ class MeetingOperations:
         found = self.find_by_labels(labels, username, admin=admin)
         result = MeetingDeleteResult(
             dry_run=not confirm,
+            stack=self._client._require_stack(),  # noqa: SLF001
+            region=self._client.region,
+            account=self.account_id(),
             user=username,
             scope="all" if admin else "own",
             labels=dict(labels),

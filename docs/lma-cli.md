@@ -291,7 +291,14 @@ A meeting that is still in progress (`STARTED` or `TRANSCRIBING`) is never
 deleted: it is listed as skipped, and the command can be run again after it
 ends. A meeting the delete path does not delete is named with the reason, the
 rest are still deleted, and the command prints the final count (*Deleted 4 of
-5 meeting(s); 1 failed*) and exits with status 1. The meetings are found by
+5 meeting(s) from stack LMA in us-east-1; 1 failed*) and exits with status 1.
+
+Its first line names the stack, Region and AWS account it acts on, in the dry
+run and with `--confirm`, and `--json` includes them as `stack`, `region` and
+`account`; check them before confirming. A `--stack-name` or `--region` given
+before `meetings` (`lma --stack-name LMA-team meetings delete ...`) is used over
+`LMA_STACK_NAME` and `AWS_DEFAULT_REGION` in the environment; one given after
+`delete` is used over both. The meetings are found by
 reading every meeting's list entry, with no date limit, so a large deployment
 takes longer to search.
 

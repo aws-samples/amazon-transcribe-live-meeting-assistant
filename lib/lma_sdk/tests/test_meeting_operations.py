@@ -131,6 +131,7 @@ def aws(client):
         "lambda": fakes.lambda_,
         "cognito-idp": fakes.cognito,
         "cloudformation": fakes.cloudformation,
+        "sts": SimpleNamespace(get_caller_identity=lambda: {"Account": "111122223333"}),
     }
     client.session.client.side_effect = lambda name, **_kw: services[name]
     vp = SimpleNamespace(
@@ -259,3 +260,41 @@ def test_a_failed_meeting_is_reported_and_the_rest_are_still_deleted(client, aws
 def test_nothing_matching_deletes_nothing(client, aws):
     result = client.meetings.delete_by_labels({"engagement": "none"}, as_user="admin", confirm=True)
     assert result.matched == [] and aws.lambda_.invocations == []
+
+
+def test_the_result_names_the_stack_region_and_account(client, aws):
+    result = client.meetings.delete_by_labels({"engagement": "acme"}, as_user="admin")
+    assert (result.stack, result.region, result.account) == (
+        "test-lma-stack",
+        "us-east-1",
+        "111122223333",
+    )
+
+
+def test_keys_left_unprocessed_are_retried_with_backoff(client, aws, monkeypatch):
+    slept = []
+    monkeypatch.setattr(meeting_ops.time, "sleep", slept.append)
+    real = aws.dynamodb.batch_get_item
+    calls = {"n": 0}
+
+    def throttled_once(RequestItems):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            ((table, _request),) = RequestItems.items()
+            return {"Responses": {table: []}, "UnprocessedKeys": RequestItems}
+        return real(RequestItems)
+
+    aws.dynamodb.batch_get_item = throttled_once
+    found = client.meetings.find_by_labels({"engagement": "acme"}, as_user="admin")
+    assert [m.call_id for m in found] == ["acme-1", "acme-2", "acme-live"]
+    assert slept and slept[0] > 0
+
+
+def test_a_table_that_keeps_refusing_reads_fails_rather_than_spinning(client, aws, monkeypatch):
+    monkeypatch.setattr(meeting_ops.time, "sleep", lambda _s: None)
+    aws.dynamodb.batch_get_item = lambda RequestItems: {
+        "Responses": {},
+        "UnprocessedKeys": RequestItems,
+    }
+    with pytest.raises(meeting_ops.LMAConfigurationError, match="kept refusing"):
+        client.meetings.find_by_labels({"engagement": "acme"}, as_user="admin")
