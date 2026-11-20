@@ -304,6 +304,14 @@ def discovery_meeting(env):
     chat_id, chat_start, chat_sender, chat_text = CHAT
     rows.append(meeting.segment(chat_id, chat_start, chat_start + 1, chat_sender, chat_text, "MEETING_CHAT"))
     meeting.put_segments(rows)
+    # The segments are written to the table directly, so the meeting gets the
+    # duration the call event processor's aggregation would have given it.
+    env.ddb.update_item(
+        TableName=env.table,
+        Key={"PK": {"S": f"c#{meeting.call_id}"}, "SK": {"S": f"c#{meeting.call_id}"}},
+        UpdateExpression="SET TotalConversationDurationMillis = :d",
+        ExpressionAttributeValues={":d": {"N": "54000"}},
+    )
     meeting.end()
     return meeting
 
