@@ -957,7 +957,10 @@ def plan_archive(
             plan.leave_out("Consent record", "the meeting has none")
     else:
         plan.leave_out(
-            "Consent record and evidence", "included only for the meeting's owner and Admins"
+            "Consent record and evidence",
+            "the full record and its evidence images are included only for the meeting's owner "
+            "and Admins; meeting-export.json holds the consent summary any reader of the meeting "
+            "can see, without images",
         )
     return plan
 

@@ -230,7 +230,8 @@ def test_a_malformed_action_item_answer_keeps_the_summary(monkeypatch) -> None:
     result = index.handler({"CallId": CALL_ID}, None)
     assert json.loads(result["summary"])["SUMMARY"] == "summary"
     assert result["actionItemsStatus"] == "failed"
-    assert "actionItems" not in result
+    # An earlier list is not kept under this summary.
+    assert result["actionItems"] == []
 
 
 def test_a_failed_action_item_call_keeps_the_summary(monkeypatch) -> None:

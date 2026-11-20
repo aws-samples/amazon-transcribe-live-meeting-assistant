@@ -180,8 +180,10 @@ Every item is checked before it is stored:
 - A time outside the meeting is dropped.
 - The segment is found from the time rather than taken from the model.
 
-An answer that is not a JSON list stores no action items. The summary itself is
-kept either way, and the summary's state records whether the list was made.
+An answer that is not a JSON list stores an empty list, so an earlier summary's
+items do not stay under the new one. The summary itself is kept either way, the
+summary's state records whether the list was made, and the meeting page says
+when it was not.
 
 The items are stored on the meeting as `ActionItems`, with the summary they were
 listed with. The meeting page shows them below the summary as a table, with

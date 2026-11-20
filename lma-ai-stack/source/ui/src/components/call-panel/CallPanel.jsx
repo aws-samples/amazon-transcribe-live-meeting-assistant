@@ -546,6 +546,11 @@ export const CallSummary = ({
         />
       )}
       {!editing && <ActionItemsTable items={item.actionItems} />}
+      {!editing && !regenerating && summaryState.actionItems === 'failed' && (
+        <Box variant="small" color="text-status-warning">
+          The action items could not be listed for this summary. Regenerate tries again.
+        </Box>
+      )}
     </Container>
   );
 };

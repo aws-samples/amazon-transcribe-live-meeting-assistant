@@ -112,6 +112,12 @@ describe('the summary profile on the meeting page', () => {
     await waitFor(() => expect(onRegenerate).toHaveBeenCalledWith('discovery-session'));
   });
 
+  it('says when the action items could not be listed', () => {
+    const state = JSON.stringify({ source: 'generated', status: 'idle', actionItems: 'failed' });
+    render(<CallSummary item={{ ...ITEM, actionItems: [], callSummaryState: state }} />);
+    expect(screen.getByText(/The action items could not be listed/)).toBeTruthy();
+  });
+
   it('regenerates at once, as before, when there is no profile to choose', async () => {
     const onRegenerate = vi.fn().mockResolvedValue({ Success: true });
     render(<CallSummary item={{ ...ITEM, summaryProfile: null }} onRegenerate={onRegenerate} />);

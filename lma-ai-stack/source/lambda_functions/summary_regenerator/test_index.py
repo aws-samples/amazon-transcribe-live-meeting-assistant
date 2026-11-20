@@ -212,7 +212,7 @@ def test_a_default_summary_of_a_meeting_without_action_items_writes_none(monkeyp
     assert set(written[-1]["state"]) == {"source", "status", "updatedAt"}
 
 
-def test_a_failed_action_item_list_keeps_the_previous_one(monkeypatch) -> None:
+def test_a_failed_action_item_list_does_not_keep_the_previous_one(monkeypatch) -> None:
     meeting = {**MEETING_ROW, "ActionItems": {"L": [{"M": {"Text": {"S": "old"}}}]}}
     body = {
         "summary": NEW_SUMMARY,
@@ -221,7 +221,7 @@ def test_a_failed_action_item_list_keeps_the_previous_one(monkeypatch) -> None:
     }
     _, _, _, written = install(monkeypatch, meeting=meeting, body=body)
     index.handler(RUN_EVENT, FakeContext())
-    assert "action_items" not in written[-1]
+    assert written[-1]["action_items"] == []
     assert written[-1]["state"]["actionItems"] == "failed"
 
 

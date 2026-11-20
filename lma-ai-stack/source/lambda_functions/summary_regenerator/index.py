@@ -547,8 +547,9 @@ def outcome_extras(body, meeting):
     """What a run's answer adds to the stored result: the state's profile fields,
     and the action items to write with the text (None to leave them as they are).
 
-    A summary from a profile that lists no action items clears a list a
-    previous summary left, so the stored items always belong to the stored text.
+    A summary that comes with no list -- from a profile that lists no action
+    items, or one whose list could not be made -- clears a list a previous
+    summary left, so the stored items always belong to the stored text.
     """
     state = {}
     if isinstance(body.get("summaryProfile"), str):
@@ -560,9 +561,9 @@ def outcome_extras(body, meeting):
     items = body.get("actionItems")
     if isinstance(items, list):
         action_items = [item for item in items if isinstance(item, dict)]
-    elif body.get("actionItemsStatus") == "failed":
-        action_items = None
     else:
+        # No list: from a profile that lists none, or a list that failed. Either
+        # way an earlier list does not stay under the new text.
         action_items = [] if meeting.get("ActionItems") else None
     return state, action_items
 

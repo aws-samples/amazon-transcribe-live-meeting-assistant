@@ -1096,6 +1096,10 @@ def handler(event, context):
             except Exception as error:  # pylint: disable=broad-except
                 print(f"Action items for {callId} not listed: {type(error).__name__}")
                 result["actionItemsStatus"] = "failed"
+            if result.get("actionItemsStatus") == "failed":
+                # Stored items belong to the stored summary: an earlier list is
+                # not kept under this one. The state says the list failed.
+                result["actionItems"] = []
         elif choice and (metadata or {}).get("ActionItems"):
             # The items the meeting holds belong to an earlier summary, written
             # with a profile that lists them; this one lists none, so they are
