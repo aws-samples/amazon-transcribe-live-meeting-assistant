@@ -55,6 +55,7 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 #: session is waited for (both in lma_sessions, shared with the rejoin).
 LIVE_STATUSES = lma_sessions.LIVE_STATUSES
 PENDING_SESSION_SECONDS = lma_sessions.PENDING_SESSION_SECONDS
+PENDING_SESSION_MINUTES = PENDING_SESSION_SECONDS // 60
 pending_session = lma_sessions.pending_session
 
 
@@ -152,7 +153,7 @@ def reopen_meeting(identity: Mapping[str, Any], call_id: Any) -> Dict[str, Any]:
             "MeetingInProgress",
             "This meeting was reopened a few minutes ago, by a Virtual Participant rejoin or by "
             "another user, and that capture has not started yet. Try again once it has ended, "
-            "or in 15 minutes.",
+            f"or in {PENDING_SESSION_MINUTES} minutes.",
         )
 
     session = lma_sessions.next_session_number(

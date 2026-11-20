@@ -96,6 +96,7 @@ import {
     meetingRefusal,
     recordingBaseName,
     readMeetingRecordWithRetries,
+    MEETING_READ_ATTEMPT_TIMEOUT_MS,
 } from './calleventdata/meeting-session';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
@@ -136,6 +137,11 @@ const GRAPHQL_ENDPOINT = process.env['GRAPHQL_ENDPOINT'] || '';
 const CONSENT_EVIDENCE_PREFIX = process.env['CONSENT_EVIDENCE_PREFIX'] || 'lma-consent-evidence/';
 const graphqlCaller = GRAPHQL_ENDPOINT ? createSignedGraphqlCaller(GRAPHQL_ENDPOINT, AWS_REGION) : undefined;
 const consentApi = graphqlCaller ? new ConsentApi(graphqlCaller) : undefined;
+// The meeting-record read at START holds the client's audio, so its requests
+// are abandoned after a few seconds rather than the consent calls' timeout.
+const meetingRecordCaller = GRAPHQL_ENDPOINT
+    ? createSignedGraphqlCaller(GRAPHQL_ENDPOINT, AWS_REGION, { timeoutMs: MEETING_READ_ATTEMPT_TIMEOUT_MS })
+    : undefined;
 
 /** A JSON frame to the client. Clients that predate these frames ignore them. */
 const sendFrame = (ws: WebSocket, frame: Record<string, unknown>): void => {
@@ -485,7 +491,10 @@ const checkMeetingAccess = async (
             : meetingRefusal('SESSION_NOT_ALLOWED');
     }
     try {
-        const record = await readMeetingRecordWithRetries(graphqlCaller, callMetaData.callId);
+        const record = await readMeetingRecordWithRetries(
+            meetingRecordCaller ?? graphqlCaller,
+            callMetaData.callId
+        );
         return decideMeetingAccess(record, caller, callMetaData.sessionNumber);
     } catch (error) {
         server.log.error(

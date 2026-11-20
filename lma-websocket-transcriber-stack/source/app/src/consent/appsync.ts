@@ -69,8 +69,17 @@ class NodeSha256 {
 /** Long enough for verifyMeetingConsentEvidence, which waits for a vision model's answer. */
 const REQUEST_TIMEOUT_MS = 35_000;
 
-/** A GraphqlCaller that signs each request with this task's credentials. */
-export const createSignedGraphqlCaller = (endpoint: string, region: string): GraphqlCaller => {
+/**
+ * A GraphqlCaller that signs each request with this task's credentials.
+ * `timeoutMs` abandons a request that has not been answered by then; the
+ * default suits the consent mutations.
+ */
+export const createSignedGraphqlCaller = (
+    endpoint: string,
+    region: string,
+    options: { timeoutMs?: number } = {}
+): GraphqlCaller => {
+    const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
     const url = new URL(endpoint);
     const signer = new SignatureV4({
         service: 'appsync',
@@ -100,7 +109,7 @@ export const createSignedGraphqlCaller = (endpoint: string, region: string): Gra
             method: 'POST',
             headers,
             body,
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            signal: AbortSignal.timeout(timeoutMs),
         });
         const text = await response.text();
         try {

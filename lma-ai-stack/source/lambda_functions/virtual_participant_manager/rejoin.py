@@ -329,7 +329,8 @@ def rejoin_virtual_participant(manager: Any, vp_id: str, identity: Dict[str, Any
         # reopenMeeting applies to a rejoin's session.
         raise RejoinRefused(
             "This meeting is being continued from another app, or was reopened a few minutes "
-            "ago to be. Rejoin once that capture has ended, or in 15 minutes if it never started."
+            "ago to be. Rejoin once that capture has ended, or in "
+            f"{lma_sessions.PENDING_SESSION_SECONDS // 60} minutes if it never started."
         )
 
     if manager.registered_host_running(vp_id):
