@@ -29,8 +29,9 @@ Parameters:
   AIStackName:
     Type: String
     Description: >-
-      The AI stack's own name. Names this stack's log groups and inline policies
-      as they were named in the AI stack.
+      The AI stack's own name. Prefixes this stack's log groups
+      (/<AI stack name>/resolvers/lambda/<function>) and names its inline
+      policies as the AI stack did.
   AppSyncApiId:
     Type: String
   AppSyncGraphQLUrl:
@@ -650,6 +651,17 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AIStackName}/resolvers/lambda/UpdateAsrConfigResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateAsrConfigResolverFunctionLogGroup
 

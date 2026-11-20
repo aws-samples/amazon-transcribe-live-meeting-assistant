@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from ai_stack_templates import flattened
 
 # graphql-core is a dev dependency of lib/lma_sdk, installed by
 # `make setup-cli-dev`. Imported unconditionally on purpose: skipping the whole
@@ -604,32 +605,45 @@ LAMBDA_AWSJSON_FIELDS = {
 }
 
 
-def _template_resources(kind: str) -> dict[str, str]:
-    return {
-        block.split(":", 1)[0].strip(): block
-        for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
-        if f"Type: {kind}" in block
-    }
+# Read with the AI stack's nested templates inlined, so a resolver whose data
+# source is declared in one (named through `!GetAtt <Stack>.Outputs.<Name>`)
+# resolves to that data source; see ai_stack_templates.
+_FLAT_RESOURCES = flattened()["Resources"]
+
+
+def _getatt_target(value) -> str | None:
+    target = value.get("Fn::GetAtt") if isinstance(value, dict) else None
+    if isinstance(target, list):
+        return str(target[0])
+    if isinstance(target, str):
+        return target.split(".", 1)[0]
+    return None
 
 
 def _lambda_backed(resolver: Resolver) -> bool:
     """Whether a Lambda data source serves the resolver, directly or in its pipeline."""
-    lambdas = {
-        logical_id
-        for logical_id, block in _template_resources("AWS::AppSync::DataSource").items()
-        if re.search(r"^      Type: AWS_LAMBDA$", block, re.M)
-    }
-    functions = _template_resources("AWS::AppSync::FunctionConfiguration")
-    blocks = [resolver.block] + [
-        functions[function_id]
-        for function_id in re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
-        if function_id in functions
+    properties = _FLAT_RESOURCES[resolver.logical_id].get("Properties") or {}
+    pipeline = (properties.get("PipelineConfig") or {}).get("Functions") or []
+    candidates = [properties] + [
+        _FLAT_RESOURCES[function_id].get("Properties") or {}
+        for function_id in map(_getatt_target, pipeline)
+        if function_id in _FLAT_RESOURCES
     ]
     return any(
-        source in lambdas
-        for block in blocks
-        for source in re.findall(r"DataSourceName: !GetAtt (\w+)\.Name", block)
+        ((_FLAT_RESOURCES.get(_getatt_target(c.get("DataSourceName"))) or {}).get("Properties") or {})
+        .get("Type")
+        == "AWS_LAMBDA"
+        for c in candidates
     )
+
+
+def test_lambda_backed_detection_sees_data_sources_in_nested_templates() -> None:
+    """Guards the selector below: getAsrConfig's data source is declared in a
+    nested template, and the meeting preparation fields' validation runs in a
+    pipeline function there; both must count as Lambda-backed."""
+    assert _lambda_backed(_resolver("Query", "getAsrConfig"))
+    assert _lambda_backed(_resolver("Mutation", "updateCallLabels"))
+    assert _lambda_backed(_resolver("Query", "listInstalledMCPServers"))
 
 
 def _holds_awsjson(graphql_type, seen: tuple[str, ...] = ()) -> bool:

@@ -195,8 +195,9 @@ Key conventions:
 3. Add the resource to the relevant template
    (`lma-ai-stack/deployment/lma-ai-stack.yaml` or a nested template; a
    function behind an AppSync data source goes in
-   `lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml`, see the AI stack
-   resource budget in `infrastructure.md`),
+   `lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml` when it qualifies
+   (the template header says what qualifies), see the AI stack resource budget
+   in `infrastructure.md`),
    following the canonical pattern:
    - Dedicated `AWS::Logs::LogGroup` with KMS encryption
    - `LoggingConfig.LogGroup` referencing it
