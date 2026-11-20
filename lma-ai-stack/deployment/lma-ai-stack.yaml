@@ -2738,11 +2738,14 @@ Resources:
               # The MCP server library import and the skill writes are for
               # administrators (the Admin group, or an operator's IAM principal
               # through the SDK and CLI), not for the stack's own function roles.
+              # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"
@@ -2997,11 +3000,14 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
             # The MCP server library import and the skill writes are for
             # administrators, not for the stack's own function roles.
+            # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
             - Effect: Deny
               Action:
                 - appsync:GraphQL
               Resource:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"
@@ -3737,11 +3743,14 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
               # The MCP server library import and the skill writes are for
               # administrators, not for the stack's own function roles.
+              # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/importMCPServerLibrary"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/rejoinVirtualParticipant"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/reopenMeeting"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createSkill"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateSkill"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/deleteSkill"

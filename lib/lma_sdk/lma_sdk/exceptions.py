@@ -43,6 +43,14 @@ class LMATimeoutError(LMAError):
 class LMAAppSyncError(LMAError):
     """Raised when an AppSync GraphQL call returns errors."""
 
+    @property
+    def error_type(self) -> str | None:
+        """The first GraphQL error's ``errorType``: the refusal a resolver
+        names (``MeetingNotFound``, for example), or None."""
+        errors = self.details.get("errors") or []
+        first = errors[0] if errors and isinstance(errors[0], dict) else {}
+        return first.get("errorType")
+
 
 class LMAVirtualParticipantError(LMAError):
     """Raised when a Virtual Participant operation fails."""

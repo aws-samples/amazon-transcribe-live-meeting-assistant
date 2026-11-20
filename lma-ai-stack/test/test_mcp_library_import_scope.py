@@ -40,6 +40,10 @@ FIELDS = (
     "deleteSkill",
     "importSkill",
     "importSkillLibrary",
+    # Accept IAM callers for operators (the lma CLI and SDK), as a backend role
+    # that may act on any meeting.
+    "rejoinVirtualParticipant",
+    "reopenMeeting",
 )
 
 

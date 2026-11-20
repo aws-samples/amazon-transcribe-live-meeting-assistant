@@ -100,8 +100,8 @@ main.add_command(logs_cmd)
 main.add_command(check_prereqs_cmd)
 main.add_command(vp_cmd)
 main.add_command(mcp_cmd)
-main.add_command(skills_cmd)
 main.add_command(meetings_cmd)
+main.add_command(skills_cmd)
 
 
 # ── Optional plugins (entry-point group "lma_cli.plugins") ──────
