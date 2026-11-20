@@ -340,9 +340,12 @@ def test_a_replace_keeps_progress_and_the_assistant_never_overrides_a_user(
 def test_a_change_over_a_limit_is_refused_whole_and_names_the_limit(
     client: LMAClient, aws: dict[str, Any], prepared_meeting
 ) -> None:
+    # Runs after the replace test, which leaves item c1 on the checklist; the
+    # labels are cleared at the end, once nothing compares them any more.
     call_id, _meeting = prepared_meeting
     graphql = client.appsync.graphql
     before = live_meeting.read_meeting(aws["ddb"], aws["table"], call_id)
+    assert any(item["ItemId"] == "c1" for item in before["Checklist"]), "run with the replace test before it"
 
     with pytest.raises(Exception, match="at most 20 labels"):
         graphql(UPDATE_LABELS, {"input": {"CallId": call_id,

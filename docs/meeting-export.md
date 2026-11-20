@@ -114,13 +114,8 @@ any field it does not know. A change that cannot follow those rules gets a new
 
 **Recognising an export.** Every export starts with
 `"format": "lma-meeting-export"`, before `schemaVersion`, so a file can be
-recognised by its content alone. The schema lists `format` as optional rather
-than required, because exports made before it was added are schema version 1
-too and must still validate; LMA always writes it.
-
-Fields added within schema version 1, all optional, and absent from exports
-made before them: `format`, each participant's `consent`, and `endTime` on each
-piece of checklist evidence and each action item.
+recognised by its content alone. LMA always writes it. The schema lists it as
+optional, as its rule for a field added within schema version 1 requires.
 
 ### `meeting`
 
@@ -199,10 +194,8 @@ images**, and no links to them; the summary's pictures become their alt text.
 meeting), the status, the attestation, and one row per participant with their
 latest reply (`consented`, `objected` or `no_reply`). The evidence is described
 only by whether it exists and how many entries there are. The MCP
-`get_meeting_consent` tool now gives the record in LMA's own values instead
-(`opt_in`, `rule`, one entry per consent event, `hasEvidence`); the export keeps
-the shape above, because a field's meaning does not change within a schema
-version. The evidence images themselves are only in the
+`get_meeting_consent` tool gives the record in LMA's own values instead
+(`opt_in`, `rule`, one entry per consent event, `hasEvidence`). The evidence images themselves are only in the
 Everything archive, for the meeting's owner and Admins
 ([meeting consent](meeting-consent.md)).
 

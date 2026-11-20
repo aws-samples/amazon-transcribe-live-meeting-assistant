@@ -274,7 +274,7 @@ def test_the_format_is_named_first_so_a_file_is_recognised_by_its_content(fakes)
 
 
 def test_an_export_without_the_format_still_matches_the_schema(fakes) -> None:
-    """Exports made before the format was added are still schema version 1."""
+    """format is optional in the schema, as a field added within version 1 is, and fixed when given."""
     document = export_of(fakes)
     del document["format"]
     valid(document)

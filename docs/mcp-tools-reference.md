@@ -477,11 +477,8 @@ A meeting whose consent was never started answers with `mode` `off`, `status`
 capture gate. The evidence images are in `get_meeting_record`'s `consent`
 section, for the meeting's owner and Admins.
 
-The answer before this version named the opt-in mode `opt-in`, gave the rule as
-`consentGivenBy`, listed one row per participant (`participants`) instead of
-the events, and gave `evidence` (`exists`, `count`) instead of `hasEvidence`.
-The meeting export's `consent` part keeps that earlier shape, which its schema
-version fixes; see [the meeting export](meeting-export.md#consent).
+The meeting export's `consent` part has a different shape; see
+[the meeting export](meeting-export.md#consent).
 
 ```json
 {"meetingId": "e3b9…"}
