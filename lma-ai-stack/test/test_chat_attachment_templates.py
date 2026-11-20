@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterator, List
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 REPO = Path(__file__).resolve().parents[2]
 AI_STACK = REPO / "lma-ai-stack" / "deployment" / "lma-ai-stack.yaml"
@@ -54,7 +55,8 @@ def _resources(path: Path) -> Dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def ai() -> Dict[str, Any]:
-    return _resources(AI_STACK)
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    return flattened()["Resources"]
 
 
 def _statements(role: Dict[str, Any]) -> Iterator[Dict[str, Any]]:

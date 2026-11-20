@@ -17,6 +17,7 @@ import ast
 from pathlib import Path
 
 import yaml
+from ai_stack_templates import flattened
 
 AI_STACK = Path(__file__).resolve().parents[1]
 TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
@@ -41,7 +42,8 @@ _CfnLoader.add_multi_constructor("!", _intrinsic)
 
 
 def _gateway_description(argument: str) -> str:
-    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    resources = flattened()["Resources"]
     for resource in resources.values():
         config = (resource.get("Properties") or {}).get("TargetConfiguration") or {}
         payload = ((config.get("Mcp") or {}).get("Lambda") or {}).get("ToolSchema", {})

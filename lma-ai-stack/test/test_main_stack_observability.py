@@ -41,6 +41,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
@@ -371,8 +372,11 @@ def test_every_nested_stack_output_the_alarms_read_is_declared(logical_id: str):
     main = MAIN_TEMPLATE.read_text()
     consumed = set(re.findall(rf"{logical_id}\s*\.\s*Outputs\s*\.\s*(\w+)", main))
     consumed |= set(re.findall(rf'"{logical_id}"\s*,\s*"Outputs\.(\w+)"', main))
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
     declared = set(
-        yaml.load(child_template.read_text(), Loader=_CfnLoader).get("Outputs", {})
+        flattened()["Outputs"]
+        if child_template == AI_TEMPLATE
+        else yaml.load(child_template.read_text(), Loader=_CfnLoader).get("Outputs", {})
     )
 
     assert expected <= consumed, (

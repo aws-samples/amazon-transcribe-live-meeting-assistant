@@ -47,6 +47,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import all_template_paths, flattened
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
@@ -118,7 +119,8 @@ def main_template() -> dict:
 
 @pytest.fixture(scope="module")
 def ai_template() -> dict:
-    return _load(AI_TEMPLATE)
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    return flattened()
 
 
 @pytest.fixture(scope="module")
@@ -317,7 +319,7 @@ def test_each_typescript_emitter_is_given_the_parent_stack_name(
 
 
 @pytest.mark.parametrize(
-    "template_path", [AI_TEMPLATE, TRANSCRIBER_TEMPLATE, VP_TEMPLATE, MAIN_TEMPLATE]
+    "template_path", [*all_template_paths(), TRANSCRIBER_TEMPLATE, VP_TEMPLATE, MAIN_TEMPLATE]
 )
 def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(template_path: Path):
     """A `PutMetricData` grant must be scoped, and must come with the variable.
