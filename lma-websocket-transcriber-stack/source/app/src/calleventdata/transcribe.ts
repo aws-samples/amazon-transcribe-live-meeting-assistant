@@ -259,6 +259,9 @@ export const writeCallRecordingEvent = async (
         EventType: 'ADD_S3_RECORDING_URL',
         CallId: callMetaData.callId,
         RecordingUrl: recordingUrl,
+        // The session the recording belongs to: the link is written after the
+        // session's END, when the meeting may already be in a later session.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
