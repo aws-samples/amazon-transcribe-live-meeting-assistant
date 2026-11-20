@@ -288,7 +288,8 @@ def test_the_owner_deletes_their_labelled_meetings_whole(client, stack, users, l
     code, output = _lma(client, "--label", f"engagement={labelled['label']}", "--user-name", users["owner"],
                         "--confirm")
     assert code == 0, output
-    assert "Deleted 2 of 2 meeting(s)." in output
+    flat = " ".join(output.split())  # the console may wrap a long line
+    assert f"Deleted 2 of 2 meeting(s) from stack {client.stack_name}" in flat, output
     ddb = stack.session.client("dynamodb")
     for name in ("own-1", "own-2"):
         assert not _exists(stack, ids[name]), f"{name} was not deleted"
