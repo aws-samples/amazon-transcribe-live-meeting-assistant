@@ -674,7 +674,8 @@ export class VirtualParticipantStatusManager {
             labels { Key Value }
             audience
             meetingContext
-            checklist { ItemId Text Kind Priority Source }`;
+            checklist { ItemId Text Kind Priority Source }
+            meetingSharedWith`;
 
   /** The agenda and meeting preparation from the startup read, once it has been made. */
   private meetingInputs: { agenda: VpAgenda | null; preparation: VpPreparation | null } | null = null;
@@ -692,7 +693,8 @@ export class VirtualParticipantStatusManager {
       preparation
         ? `VP ${this.participantId} has meeting preparation (${preparation.labels.length} labels, ` +
             `audience ${preparation.audience ?? 'unspecified'}, context ${preparation.meetingContext.length} ` +
-            `characters, ${preparation.checklist.length} checklist items)`
+            `characters, ${preparation.checklist.length} checklist items, shared with ` +
+            `${preparation.meetingSharedWith.length} people at creation)`
         : `VP ${this.participantId} has no meeting preparation`,
     );
     return { agenda, preparation };

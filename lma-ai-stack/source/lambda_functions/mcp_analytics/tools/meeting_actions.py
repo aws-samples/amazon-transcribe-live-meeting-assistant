@@ -6,7 +6,7 @@
 
 * end_meeting -- endVirtualParticipant for each of the meeting's Virtual
   Participants that has not finished (virtual_participants.end_vp).
-* delete_meeting and share_meeting / unshare_meeting -- the meeting controls
+* delete_meeting and share_meeting -- the meeting controls
   Lambda behind deleteMeetings and shareMeetings, invoked directly with the MCP
   caller's identity, so its own owner-or-Admin check applies as well as the one
   here. Those two mutations accept signed-in users only, so they cannot be
@@ -17,8 +17,7 @@
 """
 
 import os
-import re
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from tools.access import (
     Caller,
@@ -31,12 +30,10 @@ from tools.access import (
 )
 from tools.appsync_client import graphql
 from tools.get_virtual_participant_status import shared_with_entries
+from tools.recipients import recipients
 from tools.url_helper import get_meeting_url
 from tools.virtual_participants import active_vps_of_meeting, end_vp
 
-# One recipient: an email address, as meeting_controls_resolver accepts it.
-RECIPIENT_PATTERN = re.compile(r"[^@\[\]\s,]+@[^@\[\]\s,]+\.[^@\[\]\s,]+")
-MAX_RECIPIENTS = 50
 DELETED = "Meetings deleted successfully"
 SHARED = "Meetings shared successfully"
 
@@ -74,7 +71,7 @@ query GetCallCost($CallId: ID!) {
 def end_meeting(caller: Caller, meeting_id: str, reason: Any = None) -> Dict[str, Any]:
     """End the meeting's Virtual Participants, which ends the meeting."""
     meeting = require_meeting(meeting_id, caller)
-    call_id = meeting.get("CallId") or meeting_id.strip()
+    call_id = meeting.get("CallId") or str(meeting_id).strip()
     vps, complete = active_vps_of_meeting(call_id)
     if not vps:
         if not complete:
@@ -120,7 +117,7 @@ def delete_meeting(caller: Caller, meeting_id: str, confirm: Any = False) -> Dic
             "deleted until it is called again with confirm: true."
         )
     meeting = require_meeting(meeting_id, caller)
-    call_id = meeting.get("CallId") or meeting_id.strip()
+    call_id = meeting.get("CallId") or str(meeting_id).strip()
     require_meeting_manager(meeting, caller, "delete it")
     outcome = _controls(
         "deleteMeetings", caller, {"Calls": [{"CallId": call_id, **list_keys(meeting)}]}
@@ -130,32 +127,24 @@ def delete_meeting(caller: Caller, meeting_id: str, confirm: Any = False) -> Dic
     return {"meetingId": call_id, "deleted": True}
 
 
-def _recipients(value: Any) -> List[str]:
-    if isinstance(value, str):
-        value = value.split(",")
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError("recipients must be a list of email addresses")
-    found = []
-    for item in value:
-        address = item.strip()
-        if not address:
-            continue
-        if not RECIPIENT_PATTERN.fullmatch(address):
-            raise ValueError(f"{address!r} is not an email address")
-        if address not in found:
-            found.append(address)
-    if not found:
-        raise ValueError("recipients must name at least one email address")
-    if len(found) > MAX_RECIPIENTS:
-        raise ValueError(f"recipients can name at most {MAX_RECIPIENTS} addresses at a time")
-    return found
+SHARE_ACTIONS = ("add", "remove")
 
 
-def change_sharing(caller: Caller, meeting_id: str, recipients: Any, share: bool) -> Dict[str, Any]:
-    """Add recipients to, or remove them from, the people the meeting is shared with."""
-    addresses = _recipients(recipients)
+def share_meeting(
+    caller: Caller, meeting_id: Any, users: Any, action: Any = None
+) -> Dict[str, Any]:
+    """share_meeting: add people to, or remove them from, those the meeting is shared with."""
+    action = "add" if action in (None, "") else action
+    if action not in SHARE_ACTIONS:
+        raise ValueError("action must be add or remove")
+    return change_sharing(caller, meeting_id, users, share=action == "add")
+
+
+def change_sharing(caller: Caller, meeting_id: Any, users: Any, share: bool) -> Dict[str, Any]:
+    """Add users to, or remove them from, the people the meeting is shared with."""
+    addresses = recipients(users, "users")
     meeting = require_meeting(meeting_id, caller)
-    call_id = meeting.get("CallId") or meeting_id.strip()
+    call_id = meeting.get("CallId") or str(meeting_id).strip()
     require_meeting_manager(meeting, caller, "change who it is shared with")
     # The write replaces the whole list (shareMeetings takes every recipient), so a
     # change made on the meeting page between this read and that write is not kept.
@@ -180,7 +169,7 @@ def change_sharing(caller: Caller, meeting_id: str, recipients: Any, share: bool
 def regenerate_summary(caller: Caller, meeting_id: str) -> Dict[str, Any]:
     """Start a new summary of the meeting; it replaces the stored one when it finishes."""
     meeting = require_meeting(meeting_id, caller)
-    call_id = meeting.get("CallId") or meeting_id.strip()
+    call_id = meeting.get("CallId") or str(meeting_id).strip()
     event = {"arguments": {"input": {"CallId": call_id}}, "identity": resolver_identity(caller)}
     outcome = invoke_function(os.environ.get("SUMMARY_REGENERATOR_FUNCTION", ""), event, 60)
     if not isinstance(outcome, dict) or not outcome.get("Success"):
@@ -197,6 +186,6 @@ def regenerate_summary(caller: Caller, meeting_id: str) -> Dict[str, Any]:
 def meeting_cost(caller: Caller, meeting_id: str) -> Dict[str, Any]:
     """The meeting's itemised cost estimate."""
     meeting = require_meeting(meeting_id, caller)
-    call_id = meeting.get("CallId") or meeting_id.strip()
+    call_id = meeting.get("CallId") or str(meeting_id).strip()
     cost = graphql(GET_CALL_COST, {"CallId": call_id}).get("getCallCost") or {}
     return {"meetingId": call_id, **cost, "note": "An estimate computed from metering records."}
