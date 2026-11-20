@@ -361,6 +361,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{FUNCTIONS}/edge_auth_deployer/**", "vp_template"),
     ("lma-ai-stack/source/appsync/schema.graphql", "vp_template"),
     ("README.md", "vp_template"),
+    # ...and read the AI stack through the AI stack tests' helper, which inlines its
+    # nested templates.
+    ("lma-ai-stack/test/ai_stack_templates.py", "vp_template"),
     # lma-main.yaml is read by the ASR bundle check, the configuration seeder's
     # tests and the SDK's publish tests. (The demo recorder's session helper reads it
     # too; that step takes the whole `templates` area.)

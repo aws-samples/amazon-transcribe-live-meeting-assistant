@@ -21,6 +21,7 @@ the Virtual Participant.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -54,9 +55,20 @@ def _intrinsic(loader: yaml.Loader, tag_suffix: str, node: yaml.Node):  # noqa: 
 _CfnLoader.add_multi_constructor("!", _intrinsic)
 
 
+# The AI stack keeps some of these resources (the token minters among them) in a
+# nested template. The AI stack's own tests read it with those inlined, through
+# this helper, and so do these: the gating rules hold for the deployed stack
+# whichever file a resource is written in.
+_SPEC = importlib.util.spec_from_file_location(
+    "ai_stack_templates", TEMPLATE.parents[1] / "test" / "ai_stack_templates.py"
+)
+ai_stack_templates = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(ai_stack_templates)
+
+
 @pytest.fixture(scope="module")
 def template() -> dict:
-    return yaml.load(TEMPLATE.read_text(), Loader=_CfnLoader)
+    return ai_stack_templates.flattened()
 
 
 @pytest.fixture(scope="module")

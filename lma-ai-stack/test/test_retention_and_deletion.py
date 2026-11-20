@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN = REPO_ROOT / "lma-main.yaml"
@@ -64,7 +65,8 @@ def main() -> dict:
 
 @pytest.fixture(scope="module")
 def ai_stack() -> dict:
-    return _resources(AI_STACK)
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    return flattened()["Resources"]
 
 
 def _create_vp_request(ai_stack: dict) -> str:

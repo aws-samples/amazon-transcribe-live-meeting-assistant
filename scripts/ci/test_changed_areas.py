@@ -145,6 +145,20 @@ def test_a_template_change_runs_cfn_lint_and_the_template_readers() -> None:
     assert "ui" not in steps
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "lma-ai-stack/deployment/lma-ai-stack.yaml",
+        "lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml",
+    ],
+)
+def test_an_ai_stack_template_change_runs_the_resource_budget_and_cfn_lint(path: str) -> None:
+    """The AI stack static tests include test_resource_budget.py, which counts each
+    AI stack template's resources after the SAM transform, and the VP template
+    tests read both templates through the AI stack tests' helper."""
+    assert {"cfn_lint", "ai_stack", "vp_template"} <= ran([path])
+
+
 def test_the_browser_extension_runs_alone() -> None:
     assert ran(["lma-browser-extension-stack/src/App.tsx"]) == {"browser_extension"}
 
@@ -312,6 +326,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("README.md", "vp_template"),
         ("lma-ai-stack/source/lambda_functions/vnc_edge_token/index.py", "vp_template"),
         ("lma-ai-stack/source/appsync/schema.graphql", "vp_template"),
+        # ...and read the AI stack through the AI stack tests' template helper.
+        ("lma-ai-stack/test/ai_stack_templates.py", "vp_template"),
         # The ASR Lambdas read the runtime catalogue; the bundle check reads lma-main.
         ("lma-asr-microvm-stack/source/catalog.json", "lambdas"),
         ("lma-main.yaml", "asr"),
