@@ -1628,3 +1628,13 @@ class TestPreparationFilters(unittest.TestCase):
                 result = run(FakeTable(self.rows()))
         self.assertIn("virtualParticipantId may be missing", result["note"])
         self.assertEqual(len(result["meetings"]), 3)
+
+
+class TestStartDateAlone(unittest.TestCase):
+    def test_a_start_date_without_an_end_date_is_used_up_to_today(self):
+        table = FakeTable([meeting("a")])
+        result = run(table, start_date="2020-01-01", ended_since="2026-11-01T00:00:00Z")
+        condition = table.query_calls[0]["KeyConditionExpression"]
+        self.assertEqual(condition._values[1]._values[1], "ts#2020-01-01")
+        self.assertTrue(condition._values[1]._values[2].startswith("ts#20"))
+        self.assertNotIn("createdFrom", result["filters"])

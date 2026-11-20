@@ -43,9 +43,10 @@ This guide shows three layers of usage:
 
 ## Available LMA tools
 
-LMA exposes seven tools, of which five are read-only (annotated
-`readOnlyHint: true` so Quick Desktop classifies them correctly for scheduled
-agents — no `allow_unscoped_write_tools` required for read-only flows):
+LMA exposes 28 tools. The read-only ones are annotated `readOnlyHint: true` so
+Quick Desktop classifies them correctly for scheduled agents — no
+`allow_unscoped_write_tools` required for read-only flows. The seven most used
+in the workflows below are:
 
 - **Read-only:** `search_lma_meetings`, `get_meeting_transcript`,
   `get_meeting_summary`, `list_meetings`, `get_virtual_participant_status`
@@ -54,9 +55,11 @@ agents — no `allow_unscoped_write_tools` required for read-only flows):
 The write tools need an API key generated with the **Read and write** scope; a
 **Read only** key (the default) is offered the read-only tools only. A key
 created before keys had scopes is listed as **Legacy (original tools)** and keeps
-all seven tools above. The API key
-endpoint serves further meeting tools too, listed in
-[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed).
+these seven tools and the other read-only tools. The rest — meeting
+preparation (agenda, context, checklist, labels), transcript paging, sharing,
+consent, guidance and meeting management — are listed in
+[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed)
+and the [MCP Tools Reference](mcp-tools-reference.md).
 
 All responses include `meetingUrl` and (where applicable)
 `virtualParticipantUrl` deep-links so agents can post clickable references

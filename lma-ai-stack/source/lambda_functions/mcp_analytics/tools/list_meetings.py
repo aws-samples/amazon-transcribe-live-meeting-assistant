@@ -305,9 +305,9 @@ def execute(
         include = build_filter(user_id, is_admin, participant, statuses, extra)
 
         # Query strategy depends on filters
-        if start_date and end_date:
-            # Use date-based query for efficiency
-            start, end = start_date, end_date
+        if start_date:
+            # The creation-date range given; up to today when it has no end.
+            start, end = start_date, end_date or datetime.utcnow().strftime("%Y-%m-%d")
         elif walk_from:
             start, end = walk_from, end_date or datetime.utcnow().strftime("%Y-%m-%d")
         else:

@@ -30,8 +30,8 @@ client connects, and the API key scopes, are in
   or join link; their answers return that as `platformMeetingId`, and return
   `meetingId` as the LMA meeting, which is `null` until the Virtual Participant
   has started it. `get_virtual_participant_status` returns `meetingId` once it
-  has. (`callId`, the earlier name of the LMA meeting in those answers, is still
-  returned.)
+  has. `callId` is also returned, with the same value, as `start_meeting_now`
+  and `get_virtual_participant_status` already did.
 - **Answers** are JSON text content. An error is a tool result with
   `isError: true` and a message saying what was wrong; a meeting that does not
   exist and one the caller may not see are refused with the same message.
@@ -39,7 +39,13 @@ client connects, and the API key scopes, are in
   Admin, the meeting's owner, or a user the meeting is shared with, and lets the
   same people make each change, except where the table says otherwise.
 - **Front doors.** Every tool is served on both the API key endpoint and the
-  OAuth (AgentCore Gateway) endpoint, with the same definitions.
+  OAuth (AgentCore Gateway) endpoint, with the same definitions. The OAuth
+  endpoint has no key scopes: a user signed in through it can call every tool,
+  including those that change something, for the meetings they may change, as on
+  the meeting page.
+- **Legacy keys** keep `schedule_meeting` and `start_meeting_now` as they were:
+  their `labels`, `audience`, `context`, `checklist` and `shareWith` arguments
+  need a **Read and write** key.
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered
   for, the read-only tools only.

@@ -682,13 +682,6 @@ def scope_refusal(tool_name: str, scope: str) -> str:
     )
 
 
-def _vp_preparation(a: Dict[str, Any]) -> Dict[str, Any]:
-    """The meeting preparation arguments of schedule_meeting and start_meeting_now, checked."""
-    return vp_preparation.vp_inputs(
-        a.get("labels"), a.get("audience"), a.get("context"), a.get("checklist"), a.get("shareWith")
-    )
-
-
 class CallerInfo(NamedTuple):
     """Who a tool call is for: the user the request resolved to, and the key's scope."""
 
@@ -700,6 +693,27 @@ class CallerInfo(NamedTuple):
 def _meeting(caller: CallerInfo) -> Any:
     """The caller as the meeting tools take it (tools/access.py)."""
     return access.Caller(user_id=caller.user_id, is_admin=caller.is_admin, scope=caller.scope)
+
+
+# The arguments schedule_meeting and start_meeting_now gained with the meeting
+# preparation tools. A legacy key keeps those two tools as they were, so it is
+# refused these, as it is refused the tools that set them on a meeting.
+PREPARATION_ARGUMENTS = ("labels", "audience", "context", "checklist", "shareWith")
+
+
+def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Dict[str, Any]:
+    """The meeting preparation arguments of schedule_meeting and start_meeting_now, checked."""
+    given = [name for name in PREPARATION_ARGUMENTS if a.get(name) is not None]
+    if given and caller.scope == LEGACY_SCOPE:
+        raise PermissionError(
+            f"{', '.join(given)} on {tool_name} change who can see the meeting and what it "
+            "carries, so they need an MCP API key with the read-write scope; this key was "
+            "created before keys had scopes, and keeps the original tools as they were. "
+            "Generate a read-write key on the MCP Servers page (Hosted MCP Access) to use them."
+        )
+    return vp_preparation.vp_inputs(
+        a.get("labels"), a.get("audience"), a.get("context"), a.get("checklist"), a.get("shareWith")
+    )
 
 
 # Every tool, called with the MCP caller and the tool's arguments.
@@ -751,7 +765,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         is_admin=caller.is_admin,
         agenda=a.get("agenda"),
         allow_duplicate=a.get("allowDuplicate") is True,
-        preparation=_vp_preparation(a),
+        preparation=_vp_preparation(caller, "schedule_meeting", a),
     ),
     "start_meeting_now": lambda caller, a: start_meeting_now.execute(
         meeting_name=a.get("meetingName"),
@@ -763,7 +777,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         # Default ON; pass useStoredZoomCredentials=false to opt-out.
         use_stored_zoom_credentials=a.get("useStoredZoomCredentials", True),
         agenda=a.get("agenda"),
-        preparation=_vp_preparation(a),
+        preparation=_vp_preparation(caller, "start_meeting_now", a),
     ),
     "get_virtual_participant_status": lambda caller, a: get_virtual_participant_status.execute(
         virtual_participant_id=a.get("virtualParticipantId"),

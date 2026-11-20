@@ -720,3 +720,35 @@ class TestGatewayRouting(unittest.TestCase):
         self.assertEqual(
             index.infer_tool({"virtualParticipantId": "v"}), "get_virtual_participant_status"
         )
+
+
+class TestLegacyKeyPreparationArguments(unittest.TestCase):
+    """A legacy key keeps schedule_meeting and start_meeting_now as they were."""
+
+    def _call(self, name, arguments, scope):
+        body = {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+        event = api_gw_event(body, user_id="alice@example.com", scope=scope)
+        return json.loads(index.lambda_handler(event, None)["body"])["result"]
+
+    def test_a_legacy_key_is_refused_the_preparation_arguments(self):
+        from tools import schedule_meeting, start_meeting_now
+
+        schedule_meeting.execute = MagicMock(return_value={"virtualParticipantId": "vp1"})
+        start_meeting_now.execute = MagicMock(return_value={"virtualParticipantId": "vp2"})
+        base = {"meetingName": "W", "meetingPlatform": "ZOOM", "meetingId": "1"}
+        for name in ("schedule_meeting", "start_meeting_now"):
+            for argument in ("shareWith", "labels", "context", "checklist", "audience"):
+                with self.subTest(tool=name, argument=argument):
+                    result = self._call(name, {**base, argument: "x"}, scope=None)
+                    self.assertTrue(result["isError"])
+                    self.assertIn("read-write", result["content"][0]["text"])
+        schedule_meeting.execute.assert_not_called()
+        start_meeting_now.execute.assert_not_called()
+        # Without them the legacy key keeps both tools.
+        result = self._call("start_meeting_now", base, scope=None)
+        self.assertNotIn("isError", result)

@@ -84,7 +84,8 @@ def platform_fields(platform_meeting_id: Optional[str], call_id: Optional[str]) 
 
     ``meetingId`` is the LMA meeting (the Call id), null until the VP has
     created it; ``platformMeetingId`` is the meeting platform's ID or join link.
-    ``callId`` is the earlier name of ``meetingId``, kept for clients that read it.
+    ``callId`` is also returned, as start_meeting_now and get_virtual_participant_status
+    already did.
     """
     return {
         "meetingId": call_id or None,
