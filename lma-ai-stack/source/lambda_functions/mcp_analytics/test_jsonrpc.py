@@ -107,7 +107,7 @@ class TestMCPToolsList(unittest.TestCase):
             "get_meeting_consent",
         ):
             self.assertIn(name, tool_names)
-        self.assertEqual(len(tool_names), 28)
+        self.assertEqual(len(tool_names), 29)
         for removed in ("get_live_transcript", "unshare_meeting"):
             self.assertNotIn(removed, tool_names)
 
@@ -671,25 +671,49 @@ def gateway_context(tool):
 
 
 class TestGatewayRouting(unittest.TestCase):
-    """The gateway names the tool in the Lambda context; every tool is reachable."""
+    """The gateway names the tool in the Lambda context; it serves the seven original tools."""
 
     CLAIMS = {"sub": "user123", "cognito:username": "bob", "cognito:groups": "Users"}
 
-    def test_a_meeting_tool_is_routed_by_its_name_with_the_callers_identity(self):
-        from tools import access, preparation
+    def test_a_tool_other_than_the_original_seven_is_not_available(self):
+        from tools import meeting_actions, preparation
 
-        access.Caller = MagicMock(side_effect=lambda **kw: kw)
-        preparation.set_context = MagicMock(return_value={"context": "x"})
-        event = bedrock_event({"meetingId": "m1", "context": "x"}, claims=self.CLAIMS)
-        result = index.lambda_handler(event, gateway_context("set_meeting_context"))
+        preparation.set_context = MagicMock()
+        meeting_actions.delete_meeting = MagicMock()
+        for name, arguments in (
+            ("set_meeting_context", {"meetingId": "m1", "context": "x"}),
+            ("delete_meeting", {"meetingId": "m1", "confirm": True}),
+            ("get_meeting_consent", {"meetingId": "m1"}),
+        ):
+            with self.subTest(tool=name):
+                event = bedrock_event(arguments, claims=self.CLAIMS)
+                result = index.lambda_handler(event, gateway_context(name))
+                self.assertEqual(result["statusCode"], 400)
+                message = json.loads(result["body"])["error"]["message"]
+                self.assertIn("not available on this endpoint", message)
+        preparation.set_context.assert_not_called()
+        meeting_actions.delete_meeting.assert_not_called()
+
+    def test_the_gateway_keeps_schedule_and_start_as_they_were(self):
+        from tools import schedule_meeting, start_meeting_now
+
+        schedule_meeting.execute = MagicMock(return_value={"virtualParticipantId": "vp1"})
+        start_meeting_now.execute = MagicMock(return_value={"virtualParticipantId": "vp2"})
+        base = {"meetingName": "W", "meetingPlatform": "ZOOM", "meetingId": "1"}
+        event = bedrock_event({**base, "shareWith": ["a@example.com"]}, claims=self.CLAIMS)
+        result = index.lambda_handler(event, gateway_context("start_meeting_now"))
+        self.assertEqual(result["statusCode"], 403)
+        self.assertIn("not available on this endpoint", result["body"])
+        start_meeting_now.execute.assert_not_called()
+        result = index.lambda_handler(
+            bedrock_event(base, claims=self.CLAIMS), gateway_context("start_meeting_now")
+        )
         self.assertEqual(result["statusCode"], 200)
-        caller, meeting_id, context = preparation.set_context.call_args[0]
-        self.assertEqual((meeting_id, context), ("m1", "x"))
-        # The gateway carries no key, so no key scope narrows it.
-        self.assertEqual(caller, {"user_id": "user123", "is_admin": False, "scope": "read-write"})
+        start_meeting_now.execute.assert_called_once()
 
     def test_every_tool_has_a_handler(self):
         self.assertEqual(set(index.TOOL_HANDLERS), {tool["name"] for tool in index.TOOLS})
+        self.assertEqual(index.GATEWAY_TOOL_NAMES, {tool["name"] for tool in index.MCP_TOOLS})
 
     def test_an_original_tool_is_routed_by_its_name_whatever_its_arguments(self):
         from tools import get_transcript

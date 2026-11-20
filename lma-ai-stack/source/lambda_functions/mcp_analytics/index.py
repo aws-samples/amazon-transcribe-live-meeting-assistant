@@ -7,18 +7,19 @@
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access.
 
-Two front doors serve the same tools: the seven original ones (MCP_TOOLS) and
-the meeting tools in tool_definitions.py.
+Two front doors:
 
-* The API key path speaks MCP JSON-RPC. Every API key carries a scope
-  (execute_tool_call): a read key is answered only by the tools whose
-  annotations declare readOnlyHint, a read-write key by every tool, and a legacy
-  key -- one stored before keys had scopes -- by the seven original tools and
-  the read-only meeting tools.
-* The BedrockAgentCore Gateway path invokes this function with a tool's
+* The API key path speaks MCP JSON-RPC and serves every tool: the seven original
+  ones (MCP_TOOLS) and the meeting tools in tool_definitions.py. Every API key
+  carries a scope (execute_tool_call): a read key is answered only by the tools
+  whose annotations declare readOnlyHint, a read-write key by every tool, and a
+  legacy key -- one stored before keys had scopes -- by the seven original tools,
+  as they were, and the read-only meeting tools.
+* The BedrockAgentCore Gateway path serves the seven original tools, as they
+  were (GATEWAY_TOOL_NAMES). The gateway invokes this function with a tool's
   arguments as the event and the tool's name in the Lambda context
-  (``bedrockAgentCoreToolName``). An event without that name is matched to one
-  of the seven original tools by its arguments, as before.
+  (``bedrockAgentCoreToolName``); an event without that name is matched to one
+  of the seven by its arguments.
 
 Access to each meeting is decided in tools/access.py, on both paths.
 """
@@ -43,6 +44,7 @@ from tools import (
     meeting_actions,
     meeting_agenda,
     meeting_record,
+    notifications,
     preparation,
     schedule_meeting,
     scheduled_meeting,
@@ -204,7 +206,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             tool_input = event
             tool_name = gateway_tool_name(context) or infer_tool(tool_input)
-            # The gateway authenticates the user with OAuth; no API key, so no scope.
+            if tool_name not in GATEWAY_TOOL_NAMES:
+                return error_response(400, gateway_refusal(tool_name))
+            # The gateway authenticates the user with OAuth; no API key, so no key
+            # scope. It serves the seven original tools as they were.
             key_scope_to_apply = None
 
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
@@ -221,7 +226,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.warning(f"Refused {tool_name} for a key with the {key_scope_to_apply} scope")
             return error_response(403, scope_refusal(tool_name, key_scope_to_apply))
 
-        caller = CallerInfo(user_id, is_admin, key_scope_to_apply or READ_WRITE_SCOPE)
+        caller = CallerInfo(user_id, is_admin, key_scope_to_apply or GATEWAY_SCOPE)
         result = TOOL_HANDLERS[tool_name](caller, tool_input)
 
         # Return MCP-formatted success response
@@ -378,14 +383,13 @@ MCP_TOOLS = [
             "Schedule a future meeting with virtual participant. If you already have a "
             "Virtual Participant waiting for a meeting with the same name (ignoring case) "
             "and scheduled time (within a minute), that one is updated with the meeting "
-            "link or ID, password, agenda, platform and meeting preparation given here "
+            "link or ID, password, agenda, platform and other settings given here "
             'instead of scheduling a second one, and the result has action "updated" and '
             'its virtualParticipantId (otherwise action "created"). A Virtual Participant '
             "cannot be changed within 5 minutes of its start. Pass allowDuplicate=true to "
             "schedule a second Virtual Participant anyway. The result's meetingId is the LMA "
             "meeting, null until the Virtual Participant has started it; platformMeetingId "
-            "is the meeting ID or link given here. Change it later with "
-            "update_scheduled_meeting."
+            "is the meeting ID or link given here."
         ),
         "inputSchema": {
             "type": "object",
@@ -654,6 +658,19 @@ def is_read_only(tool_name: str) -> bool:
 
 ORIGINAL_TOOL_NAMES = frozenset(tool["name"] for tool in MCP_TOOLS)
 
+# The tools the BedrockAgentCore Gateway path serves, and the scope its callers
+# are held to: the seven original tools, as they were.
+GATEWAY_TOOL_NAMES = ORIGINAL_TOOL_NAMES
+GATEWAY_SCOPE = "gateway"
+
+
+def gateway_refusal(tool_name: Any) -> str:
+    """The answer for a tool the gateway path does not serve."""
+    return (
+        f"{tool_name} is not available on this endpoint; use the MCP API key endpoint "
+        "(see docs/mcp-api-key-auth.md)."
+    )
+
 
 def scope_allows(scope: str, tool_name: str) -> bool:
     """Whether a key with `scope` may call the tool."""
@@ -696,14 +713,19 @@ def _meeting(caller: CallerInfo) -> Any:
 
 
 # The arguments schedule_meeting and start_meeting_now gained with the meeting
-# preparation tools. A legacy key keeps those two tools as they were, so it is
-# refused these, as it is refused the tools that set them on a meeting.
+# preparation tools. A legacy key and the gateway keep those two tools as they
+# were, so they are refused these.
 PREPARATION_ARGUMENTS = ("labels", "audience", "context", "checklist", "shareWith")
 
 
 def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Dict[str, Any]:
     """The meeting preparation arguments of schedule_meeting and start_meeting_now, checked."""
     given = [name for name in PREPARATION_ARGUMENTS if a.get(name) is not None]
+    if given and caller.scope == GATEWAY_SCOPE:
+        raise PermissionError(
+            f"{', '.join(given)} on {tool_name} are not available on this endpoint; use the "
+            "MCP API key endpoint (see docs/mcp-api-key-auth.md)."
+        )
     if given and caller.scope == LEGACY_SCOPE:
         raise PermissionError(
             f"{', '.join(given)} on {tool_name} change who can see the meeting and what it "
@@ -793,6 +815,14 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
     ),
     "list_meeting_guidance": lambda caller, a: guidance.list_items(
         _meeting(caller), a.get("meeting_id"), limit=a.get("limit")
+    ),
+    "list_meeting_notifications": lambda caller, a: notifications.list_items(
+        _meeting(caller),
+        a.get("meeting_id"),
+        category=a.get("category"),
+        since=a.get("since"),
+        limit=a.get("limit"),
+        cursor=a.get("cursor"),
     ),
     "get_meeting_agenda": lambda caller, a: meeting_agenda.get_agenda(
         _meeting(caller), a.get("meetingId")

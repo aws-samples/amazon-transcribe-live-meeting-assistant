@@ -4,10 +4,8 @@
 
 """The MCP definitions of the meeting tools.
 
-Both front doors serve them: the API key endpoint lists them from here, and the
-OAuth endpoint (the AgentCore Gateway target) declares the same names,
-descriptions and input schemas in the stack template, which
-lma-ai-stack/test/test_mcp_tool_schemas.py holds equal to these.
+The API key endpoint serves them; the OAuth endpoint (the AgentCore Gateway
+target) serves the seven original tools in index.MCP_TOOLS only.
 
 A tool whose annotations carry ``readOnlyHint: true`` changes nothing and is
 answered for any key. Every other tool here changes something and is answered
@@ -17,8 +15,9 @@ whose change cannot be taken back or takes something away from people, and
 ``idempotentHint`` the ones that change nothing more when called again with
 the same arguments.
 
-The gateway's schema format has no ``enum`` and no ``additionalProperties``, so
-each value an argument accepts is named in its description too.
+Each value an argument accepts is named in its description too, as the
+original tools' descriptions do for the gateway's schema format, which has no
+``enum``.
 """
 
 from typing import Any, Dict, List
@@ -107,10 +106,10 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "name": "push_meeting_guidance",
         "description": (
             "Leave a short note of guidance on a meeting for the people following it in "
-            "LMA: it appears at once on the meeting page as a dismissible notification for "
-            "the meeting's owner and the people it is shared with, and is stored with the "
-            "meeting. It is NOT posted to the meeting's chat, so other participants do not "
-            "see it. Requires a read-write API key."
+            "LMA: it appears at once in the meeting page's notifications panel for the "
+            "meeting's owner and the people it is shared with, and is stored with the "
+            "meeting until its transcript is deleted. It is NOT posted to the meeting's "
+            "chat, so other participants do not see it. Requires a read-write API key."
         ),
         "inputSchema": {
             "type": "object",
@@ -133,12 +132,38 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "list_meeting_guidance",
-        "description": "List the guidance notes pushed to a meeting, newest first.",
+        "description": "List the guidance given on a meeting, newest first.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "meeting_id": MEETING_ID,
                 "limit": {"type": "number", "description": "Most items to return (default 50)"},
+            },
+            "required": ["meeting_id"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "list_meeting_notifications",
+        "description": (
+            "List the notifications LMA showed on a meeting's page to the people who can see "
+            "the meeting -- guidance (category 'guidance') and any other category -- oldest "
+            "first, a page at a time. Each has its category, type, severity, title, body "
+            "(Markdown), refs, dedupKey, actions and times. Pass since (ISO 8601) to get only "
+            "those created or updated since then. While nextCursor is set there may be more: "
+            "pass it as cursor for the next page, which can be short or empty."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": MEETING_ID,
+                "category": {"type": "string", "description": "Only this category"},
+                "since": {
+                    "type": "string",
+                    "description": "Only those created or updated at or after this ISO 8601 time",
+                },
+                "limit": {"type": "number", "description": "Most items to return (default 100)"},
+                "cursor": {"type": "string", "description": "nextCursor from the previous page"},
             },
             "required": ["meeting_id"],
         },
@@ -196,7 +221,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "properties": {"meetingId": MEETING_ID, "context": CONTEXT},
             "required": ["meetingId", "context"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "get_meeting_checklist",
@@ -271,7 +296,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "properties": {"meetingId": MEETING_ID, "labels": LABELS, "audience": AUDIENCE},
             "required": ["meetingId"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "get_meeting_consent",

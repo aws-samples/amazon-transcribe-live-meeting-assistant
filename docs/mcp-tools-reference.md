@@ -23,7 +23,7 @@ client connects, and the API key scopes, are in
 ## Conventions
 
 - **Names.** Tool names are snake_case; argument and answer fields are
-  camelCase. The two meeting guidance tools still take `meeting_id`.
+  camelCase. The guidance and notification tools take `meeting_id`.
 - **`meetingId`** is the LMA meeting (its CallId) wherever a tool takes or
   returns it. The one exception is the `meetingId` *argument* of
   `schedule_meeting` and `start_meeting_now`, which is the meeting platform's ID
@@ -38,11 +38,11 @@ client connects, and the API key scopes, are in
 - **Access.** Every tool answers the callers the meeting page answers: an
   Admin, the meeting's owner, or a user the meeting is shared with, and lets the
   same people make each change, except where the table says otherwise.
-- **Front doors.** Every tool is served on both the API key endpoint and the
-  OAuth (AgentCore Gateway) endpoint, with the same definitions. The OAuth
-  endpoint has no key scopes: a user signed in through it can call every tool,
-  including those that change something, for the meetings they may change, as on
-  the meeting page.
+- **Front doors.** The API key endpoint offers every tool on this page. The
+  OAuth (AgentCore Gateway) endpoint offers the seven original tools for now
+  (`search_lma_meetings`, `list_meetings`, `get_meeting_summary`,
+  `get_meeting_transcript`, `get_virtual_participant_status`, `schedule_meeting`
+  and `start_meeting_now`), without the meeting preparation arguments.
 - **Legacy keys** keep `schedule_meeting` and `start_meeting_now` as they were:
   their `labels`, `audience`, `context`, `checklist` and `shareWith` arguments
   need a **Read and write** key.
@@ -67,6 +67,7 @@ client connects, and the API key scopes, are in
 | `get_virtual_participant_status` | no | |
 | `list_virtual_participants` | no | |
 | `list_meeting_guidance` | no | |
+| `list_meeting_notifications` | no | |
 | `schedule_meeting` | yes | the caller schedules for themselves |
 | `start_meeting_now` | yes | the caller starts it for themselves |
 | `update_scheduled_meeting` | yes | the Virtual Participant's owner and Admin |
@@ -83,7 +84,7 @@ client connects, and the API key scopes, are in
 | `end_virtual_participant` | yes | the Virtual Participant's owner and Admin |
 | `delete_meeting` | yes | owner and Admin |
 
-That is 28 tools. The examples below show the `arguments` of a `tools/call`
+That is 29 tools. The examples below show the `arguments` of a `tools/call`
 request and the JSON of the answer, shortened where marked.
 
 ## Before the meeting

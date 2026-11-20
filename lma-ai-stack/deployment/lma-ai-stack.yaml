@@ -8254,18 +8254,221 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.response.vtl
 
-  # A note of guidance on a meeting from the hosted MCP server
-  # (push_meeting_guidance); published to onAddMeetingGuidance.
-  AddMeetingGuidanceAppSyncResolver:
+  # Meeting notifications (docs/meeting-notifications.md), all in AppSync and
+  # DynamoDB with no Lambda. publishMeetingNotification (IAM only) checks the
+  # notification and reads the meeting, whose Owner and SharedWith go on the
+  # published message only; counts it against the meeting's allowance for the
+  # minute; finds the notification an earlier publish with the same DedupKey
+  # made; and stores it. The reads run after MeetingAccessAppSyncFunction, which
+  # decides access from the meeting as it is now.
+  NotificationPublishMeetingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishMeeting
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishMeeting.js
+
+  NotificationPublishRateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishRate
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishRate.js
+
+  NotificationPublishDedupAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishDedup
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishDedup.js
+
+  NotificationPublishWriteAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationPublishWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationPublishWrite.js
+
+  ListMeetingNotificationsAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ListMeetingNotifications
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/listMeetingNotifications.js
+
+  NotificationMeetingExpiryAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NotificationMeetingExpiry
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/notificationMeetingExpiry.js
+
+  MyMeetingNotificationStateAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MyMeetingNotificationState
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/myMeetingNotificationState.js
+
+  PublishMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
-      FieldName: addMeetingGuidance
-      RequestMappingTemplateS3Location: ../source/appsync/addMeetingGuidance.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      FieldName: publishMeetingNotification
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt NotificationPublishMeetingAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishRateAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishDedupAppSyncFunction.FunctionId
+          - !GetAtt NotificationPublishWriteAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  ListMeetingNotificationsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listMeetingNotifications
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt ListMeetingNotificationsAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  UpdateMyMeetingNotificationStateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyMeetingNotificationState
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt NotificationMeetingExpiryAppSyncFunction.FunctionId
+          - !GetAtt MyMeetingNotificationStateAppSyncFunction.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
+
+  GetMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  UpdateMyNotificationPreferencesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMyNotificationPreferences
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/myNotificationPreferences.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   AddChatAttachmentAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -8812,13 +9015,13 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
 
-  OnAddMeetingGuidanceAppSyncResolver:
+  OnMeetingNotificationAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Subscription
-      FieldName: onAddMeetingGuidance
+      FieldName: onMeetingNotification
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
       Runtime:
@@ -11993,6 +12196,7 @@ Resources:
           USER_POOL_ID: !Ref UserPoolId
           ADMIN_GROUP: "Admin"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -12048,6 +12252,24 @@ Resources:
                   - cognito-idp:AdminRemoveUserFromGroup
                   - cognito-idp:AdminListGroupsForUser
                 Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              # A deleted user's meeting notification preferences: DeleteItem
+              # only, and only under the usr# partitions.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DeleteItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "usr#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   UserManagementDataSourceRole:
     Type: AWS::IAM::Role
@@ -12259,6 +12481,9 @@ Resources:
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # The guidance push_meeting_guidance publishes expires with the
+          # transcript: the Retention section's value, at most this parameter's.
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
@@ -12323,7 +12548,7 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
                 # The meeting tools' writes, each made only after the tool has
                 # checked the MCP caller's access (tools/access.py).
-                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/addMeetingGuidance"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/publishMeetingNotification"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAgenda"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateScheduledVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/endVirtualParticipant"
@@ -12536,14 +12761,6 @@ Resources:
                         Description: >-
                           Maximum number of meetings to return: a whole number from 1
                           to 1000 (default 20)
-                      labels:
-                        Type: object
-                        Description: >-
-                          Only meetings that have every one of these labels, as an object
-                          of key to value, for example {"project": "website-relaunch"}
-                      audience:
-                        Type: string
-                        Description: 'Only meetings with this audience: internal or external'
                       updatedSince:
                         Type: string
                         Description: Only meetings changed at or after this ISO 8601 time
@@ -12558,13 +12775,13 @@ Resources:
                     have a Virtual Participant waiting for a meeting with the same name
                     (ignoring case) and scheduled time (within a minute), that one is
                     updated with the meeting link or ID, password, agenda, platform and
-                    meeting preparation given here instead of scheduling a second one,
-                    and the result has action "updated" and its virtualParticipantId (otherwise
+                    other settings given here instead of scheduling a second one, and
+                    the result has action "updated" and its virtualParticipantId (otherwise
                     action "created"). A Virtual Participant cannot be changed within
                     5 minutes of its start. Pass allowDuplicate=true to schedule a second
                     Virtual Participant anyway. The result's meetingId is the LMA meeting,
                     null until the Virtual Participant has started it; platformMeetingId
-                    is the meeting ID or link given here. Change it later with update_scheduled_meeting.
+                    is the meeting ID or link given here.
                   InputSchema:
                     Type: object
                     Properties:
@@ -12605,65 +12822,6 @@ Resources:
                           Schedule a new Virtual Participant even if one is already scheduled
                           for a meeting with the same name and time (default false: that
                           one is updated instead).
-                      labels:
-                        Type: object
-                        Description: >-
-                          Optional labels for the meeting as an object of key to value,
-                          for example {"project": "website-relaunch"}, so it can be found
-                          by them later (list_meetings labels): at most 20; a key is 1
-                          to 63 lower-case letters, digits, '.', '_' and '-', starting
-                          with a letter or digit; a value is at most 256 characters
-                      audience:
-                        Type: string
-                        Description: >-
-                          Optional: internal (only the owner's organization) or external
-                          (customers or partners present)
-                      context:
-                        Type: string
-                        Description: >-
-                          Optional meeting context: a Markdown briefing for the meeting
-                          assistant and the summary (goals, background, terms), at most
-                          20000 characters
-                      checklist:
-                        Type: array
-                        Description: >-
-                          Optional checklist: at most 100 items the meeting should cover;
-                          each starts open
-                        Items:
-                          Type: object
-                          Properties:
-                            itemId:
-                              Type: string
-                              Description: >-
-                                A stable id you choose, unique in the meeting: 1 to 64
-                                letters, digits, '.', '_', ':' and '-'
-                            text:
-                              Type: string
-                              Description: What the item is, at most 500 characters
-                            kind:
-                              Type: string
-                              Description: question, topic, risk, confirm, decision or
-                                action
-                            priority:
-                              Type: string
-                              Description: must, should (the default) or could
-                            source:
-                              Type: string
-                              Description: >-
-                                An opaque reference of yours, returned unchanged (at most
-                                256 characters)
-                          Required:
-                            - itemId
-                            - text
-                            - kind
-                      shareWith:
-                        Type: array
-                        Description: >-
-                          Optional email addresses of LMA users to share the meeting with
-                          once the Virtual Participant creates it (at most 50); the Virtual
-                          Participant itself is not shared
-                        Items:
-                          Type: string
                     Required:
                       - meetingName
                       - meetingPlatform
@@ -12717,65 +12875,6 @@ Resources:
                           Default true. When the user has stored Zoom credentials, the
                           VP signs in to Zoom before joining the meeting. Set to false
                           to force a guest join.
-                      labels:
-                        Type: object
-                        Description: >-
-                          Optional labels for the meeting as an object of key to value,
-                          for example {"project": "website-relaunch"}, so it can be found
-                          by them later (list_meetings labels): at most 20; a key is 1
-                          to 63 lower-case letters, digits, '.', '_' and '-', starting
-                          with a letter or digit; a value is at most 256 characters
-                      audience:
-                        Type: string
-                        Description: >-
-                          Optional: internal (only the owner's organization) or external
-                          (customers or partners present)
-                      context:
-                        Type: string
-                        Description: >-
-                          Optional meeting context: a Markdown briefing for the meeting
-                          assistant and the summary (goals, background, terms), at most
-                          20000 characters
-                      checklist:
-                        Type: array
-                        Description: >-
-                          Optional checklist: at most 100 items the meeting should cover;
-                          each starts open
-                        Items:
-                          Type: object
-                          Properties:
-                            itemId:
-                              Type: string
-                              Description: >-
-                                A stable id you choose, unique in the meeting: 1 to 64
-                                letters, digits, '.', '_', ':' and '-'
-                            text:
-                              Type: string
-                              Description: What the item is, at most 500 characters
-                            kind:
-                              Type: string
-                              Description: question, topic, risk, confirm, decision or
-                                action
-                            priority:
-                              Type: string
-                              Description: must, should (the default) or could
-                            source:
-                              Type: string
-                              Description: >-
-                                An opaque reference of yours, returned unchanged (at most
-                                256 characters)
-                          Required:
-                            - itemId
-                            - text
-                            - kind
-                      shareWith:
-                        Type: array
-                        Description: >-
-                          Optional email addresses of LMA users to share the meeting with
-                          once the Virtual Participant creates it (at most 50); the Virtual
-                          Participant itself is not shared
-                        Items:
-                          Type: string
                     Required:
                       - meetingName
                       - meetingPlatform
@@ -12798,478 +12897,6 @@ Resources:
                         Description: VP id returned by start_meeting_now
                     Required:
                       - virtualParticipantId
-                - Name: push_meeting_guidance
-                  Description: >-
-                    Leave a short note of guidance on a meeting for the people following
-                    it in LMA: it appears at once on the meeting page as a dismissible
-                    notification for the meeting's owner and the people it is shared with,
-                    and is stored with the meeting. It is NOT posted to the meeting's
-                    chat, so other participants do not see it. Requires a read-write API
-                    key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meeting_id:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      text:
-                        Type: string
-                        Description: The guidance, at most 2000 characters
-                      title:
-                        Type: string
-                        Description: Optional heading, at most 200 characters
-                      level:
-                        Type: string
-                        Description: How prominently it is shown (default info)
-                    Required:
-                      - meeting_id
-                      - text
-                - Name: list_meeting_guidance
-                  Description: List the guidance notes pushed to a meeting, newest first.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meeting_id:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      limit:
-                        Type: number
-                        Description: Most items to return (default 50)
-                    Required:
-                      - meeting_id
-                - Name: get_meeting_agenda
-                  Description: >-
-                    Get a meeting's agenda, with where it came from (agendaSource), who
-                    last changed it and when.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: update_meeting_agenda
-                  Description: >-
-                    Replace a meeting's agenda, while it runs or after it has ended. The
-                    previous agenda is overwritten; pass an empty string to clear it.
-                    To change the agenda of a Virtual Participant that has not started
-                    yet, use update_scheduled_meeting. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      agenda:
-                        Type: string
-                        Description: The agenda, one item per line (at most 10000 characters)
-                    Required:
-                      - meetingId
-                      - agenda
-                - Name: get_meeting_context
-                  Description: >-
-                    Get a meeting's context: the Markdown briefing for the meeting assistant
-                    and the summary, with who last changed it and when.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: set_meeting_context
-                  Description: >-
-                    Replace a meeting's context (a Markdown briefing for the meeting assistant
-                    and the summary). Pass an empty string to clear it. Requires a read-write
-                    API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      context:
-                        Type: string
-                        Description: >-
-                          The meeting context: a Markdown briefing for the meeting assistant
-                          and the summary (goals, background, terms), at most 20000 characters
-                    Required:
-                      - meetingId
-                      - context
-                - Name: get_meeting_checklist
-                  Description: >-
-                    Get a meeting's checklist: each item with its status (open, covered,
-                    partial, deferred or not_applicable), who set it (statusSource user
-                    or assistant), its evidence in the transcript and its note.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: set_meeting_checklist
-                  Description: >-
-                    Replace a meeting's whole checklist, in the order given. An item whose
-                    itemId was already there keeps its status, evidence and note, unless
-                    resetStatuses is true; an item left out is removed with its progress.
-                    Pass an empty list to clear it. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      items:
-                        Type: array
-                        Description: 'The checklist: at most 100 items the meeting should
-                          cover'
-                        Items:
-                          Type: object
-                          Properties:
-                            itemId:
-                              Type: string
-                              Description: >-
-                                A stable id you choose, unique in the meeting: 1 to 64
-                                letters, digits, '.', '_', ':' and '-'
-                            text:
-                              Type: string
-                              Description: What the item is, at most 500 characters
-                            kind:
-                              Type: string
-                              Description: question, topic, risk, confirm, decision or
-                                action
-                            priority:
-                              Type: string
-                              Description: must, should (the default) or could
-                            source:
-                              Type: string
-                              Description: >-
-                                An opaque reference of yours, returned unchanged (at most
-                                256 characters)
-                          Required:
-                            - itemId
-                            - text
-                            - kind
-                      resetStatuses:
-                        Type: boolean
-                        Description: Start every item again as open (default false)
-                    Required:
-                      - meetingId
-                      - items
-                - Name: update_checklist_item
-                  Description: >-
-                    Set the status or the note of one checklist item. The status is recorded
-                    as set by a user (statusSource user), so the meeting assistant does
-                    not change it afterwards. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      itemId:
-                        Type: string
-                        Description: The item's itemId
-                      status:
-                        Type: string
-                        Description: open, covered, partial, deferred or not_applicable
-                      note:
-                        Type: string
-                        Description: A note, at most 1000 characters; an empty string
-                          clears it
-                    Required:
-                      - meetingId
-                      - itemId
-                - Name: update_meeting_metadata
-                  Description: >-
-                    Replace a meeting's labels, set its audience, or both. The labels
-                    given replace all of the meeting's labels; pass {} to clear them.
-                    Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      labels:
-                        Type: object
-                        Description: >-
-                          Labels as an object of key to value, for example {"project":
-                          "website-relaunch"}: at most 20; a key is 1 to 63 lower-case
-                          letters, digits, '.', '_' and '-', starting with a letter or
-                          digit; a value is at most 256 characters
-                      audience:
-                        Type: string
-                        Description: >-
-                          internal (only the owner's organization) or external (customers
-                          or partners present); an empty string clears it
-                    Required:
-                      - meetingId
-                - Name: get_meeting_consent
-                  Description: >-
-                    Get a meeting's consent record: its mode (off, notify or opt-in),
-                    how consent is given in an opt-in meeting (each_participant or owner_attests),
-                    when the notice was posted, the owner's attestation, and one row per
-                    participant with their latest reply (consented, objected or no_reply),
-                    when and how it was given. Says whether evidence exists; the evidence
-                    images are not returned.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: update_scheduled_meeting
-                  Description: >-
-                    Change a Virtual Participant that is waiting for its scheduled launch:
-                    its scheduled time, meeting name, agenda, labels, audience, context,
-                    checklist, or who the meeting is shared with once it starts. Each
-                    argument given replaces that setting; an empty value removes it. Refused
-                    within 5 minutes of the start, and a new time must be at least 5 minutes
-                    away. Only its owner or an Admin may change it. Requires a read-write
-                    API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      virtualParticipantId:
-                        Type: string
-                        Description: Virtual Participant id
-                      scheduledTime:
-                        Type: string
-                        Description: ISO 8601 datetime
-                      meetingName:
-                        Type: string
-                        Description: Name/title of the meeting
-                      agenda:
-                        Type: string
-                        Description: The agenda, one item per line (at most 10000 characters)
-                      labels:
-                        Type: object
-                        Description: >-
-                          Labels as an object of key to value, for example {"project":
-                          "website-relaunch"}: at most 20; a key is 1 to 63 lower-case
-                          letters, digits, '.', '_' and '-', starting with a letter or
-                          digit; a value is at most 256 characters
-                      audience:
-                        Type: string
-                        Description: >-
-                          internal (only the owner's organization) or external (customers
-                          or partners present); an empty string clears it
-                      context:
-                        Type: string
-                        Description: >-
-                          The meeting context: a Markdown briefing for the meeting assistant
-                          and the summary (goals, background, terms), at most 20000 characters
-                      checklist:
-                        Type: array
-                        Description: 'The checklist: at most 100 items the meeting should
-                          cover'
-                        Items:
-                          Type: object
-                          Properties:
-                            itemId:
-                              Type: string
-                              Description: >-
-                                A stable id you choose, unique in the meeting: 1 to 64
-                                letters, digits, '.', '_', ':' and '-'
-                            text:
-                              Type: string
-                              Description: What the item is, at most 500 characters
-                            kind:
-                              Type: string
-                              Description: question, topic, risk, confirm, decision or
-                                action
-                            priority:
-                              Type: string
-                              Description: must, should (the default) or could
-                            source:
-                              Type: string
-                              Description: >-
-                                An opaque reference of yours, returned unchanged (at most
-                                256 characters)
-                          Required:
-                            - itemId
-                            - text
-                            - kind
-                      shareWith:
-                        Type: array
-                        Description: >-
-                          Email addresses of LMA users to share the meeting with once
-                          the Virtual Participant creates it (at most 50); the Virtual
-                          Participant itself is not shared
-                        Items:
-                          Type: string
-                    Required:
-                      - virtualParticipantId
-                - Name: end_meeting
-                  Description: >-
-                    End a meeting that a Virtual Participant is capturing: the VP leaves
-                    the meeting and recording and transcription stop, which cannot be
-                    undone. A meeting streamed from a browser tab or the desktop app is
-                    ended where it is streamed instead. Only the VP's owner or an Admin
-                    may end it. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      reason:
-                        Type: string
-                        Description: Optional reason, recorded on the VP
-                    Required:
-                      - meetingId
-                - Name: end_virtual_participant
-                  Description: >-
-                    End a Virtual Participant: it leaves its meeting, which stops recording
-                    and transcription, or, if it is waiting for a scheduled launch, the
-                    launch is cancelled. This cannot be undone. Calling it again for one
-                    that has already finished changes nothing and says so (alreadyEnded).
-                    Only its owner or an Admin may end it. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      virtualParticipantId:
-                        Type: string
-                        Description: Virtual Participant id
-                      reason:
-                        Type: string
-                        Description: Optional reason, recorded on the VP
-                    Required:
-                      - virtualParticipantId
-                - Name: delete_meeting
-                  Description: >-
-                    PERMANENTLY DELETE a meeting and everything stored with it: transcript,
-                    summary, recordings, key frames, chat attachments, consent record.
-                    This cannot be undone. Nothing is deleted unless `confirm` is true;
-                    confirm with the user first. Only the meeting's owner or an Admin
-                    may delete it. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      confirm:
-                        Type: boolean
-                        Description: Must be true to delete
-                    Required:
-                      - meetingId
-                      - confirm
-                - Name: ask_meeting_assistant
-                  Description: >-
-                    Ask the LMA meeting assistant a question about one meeting, the way
-                    the meeting page's assistant chat does, and get its answer. The answer
-                    is also added to the meeting's assistant conversation on the meeting
-                    page. Uses the meeting assistant's model and tools, so it can take
-                    up to a minute. Requires a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      question:
-                        Type: string
-                        Description: The question, at most 4000 characters
-                    Required:
-                      - meetingId
-                      - question
-                - Name: get_meeting_record
-                  Description: >-
-                    Get the parts of a meeting's record named in `include`: details, summary,
-                    transcript, chat_links, key_frames, chat_attachments (titles, summaries
-                    and download links), recordings (audio and video download links) and
-                    consent (the consent record and its evidence screenshots; meeting
-                    owner or Admin only). Defaults to details and summary. The answer
-                    contains SENSITIVE content and pre-signed download links that work
-                    for anyone holding them until `linksExpireAt` (one hour); do not share
-                    them.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      include:
-                        Type: array
-                        Description: >-
-                          Sections to return (default details and summary): details, summary,
-                          transcript, chat_links, key_frames, chat_attachments, recordings,
-                          consent
-                        Items:
-                          Type: string
-                    Required:
-                      - meetingId
-                - Name: share_meeting
-                  Description: >-
-                    Change who a meeting is shared with (by email address): action add
-                    (the default) lets them read its transcript, summary and recordings
-                    in LMA; action remove takes that access away. Returns the meeting's
-                    sharedWith. Only the meeting's owner or an Admin may change it. Requires
-                    a read-write API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                      users:
-                        Type: array
-                        Description: Email addresses (at most 50)
-                        Items:
-                          Type: string
-                      action:
-                        Type: string
-                        Description: add (default) or remove
-                    Required:
-                      - meetingId
-                      - users
-                - Name: regenerate_meeting_summary
-                  Description: >-
-                    Generate the meeting's summary again from its transcript. The new
-                    summary REPLACES the current one, including any edits made to it,
-                    when it finishes (usually within a few minutes). Requires a read-write
-                    API key.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: get_meeting_cost
-                  Description: >-
-                    Get the itemised cost estimate of a meeting (AWS services it used).
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      meetingId:
-                        Type: string
-                        Description: Meeting ID (CallId)
-                    Required:
-                      - meetingId
-                - Name: list_virtual_participants
-                  Description: >-
-                    List the Virtual Participants you can see (yours and those shared
-                    with you), newest first, with their status and meeting. Start one
-                    with start_meeting_now or schedule_meeting.
-                  InputSchema:
-                    Type: object
-                    Properties:
-                      status:
-                        Type: string
-                        Description: Only this status, e.g. ACTIVE or SCHEDULED
-                      limit:
-                        Type: number
-                        Description: Most to return (default 25, max 100)
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role

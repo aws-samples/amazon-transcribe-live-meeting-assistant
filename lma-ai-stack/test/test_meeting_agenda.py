@@ -303,7 +303,10 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
     assert api_key["properties"]["agenda"]["type"] == "string"
     assert "agenda" not in gateway.get("Required", [])
     assert "agenda" not in api_key.get("required", [])
-    assert set(gateway["Properties"]) == set(api_key["properties"])
+    # The meeting preparation arguments are the API key endpoint's alone
+    # (test_mcp_tool_schemas.py GATEWAY_WITHOUT).
+    preparation = {"labels", "audience", "context", "checklist", "shareWith"}
+    assert set(gateway["Properties"]) == set(api_key["properties"]) - preparation
 
 
 @pytest.mark.parametrize("tool", ["start_meeting_now", "schedule_meeting"])

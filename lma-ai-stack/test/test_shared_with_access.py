@@ -59,7 +59,7 @@ PUBLISHING_TEMPLATES = [
     "addVideoKeyframe.response.vtl",
     "updateVirtualParticipant.response.vtl",
 ]
-PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js"]
+PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js", "notificationPublishWrite.js"]
 ENTRIES_JS = [*PUBLISHING_JS, "meetingAccess.js"]
 WRITE_TEMPLATES = [
     "updateSpeakerIdentities.request.vtl",

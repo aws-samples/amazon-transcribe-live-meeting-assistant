@@ -127,7 +127,7 @@ def test_a_failed_cleanup_keeps_the_meeting_record(monkeypatch) -> None:
     monkeypatch.setattr(index, "delete_keyframes", lambda callid: 0)
     monkeypatch.setattr(index, "delete_consent_evidence", lambda callid: 0)
     monkeypatch.setattr(index, "delete_chat_attachments", lambda callid: 0)
-    monkeypatch.setattr(index, "delete_meeting_guidance", lambda callid: 0)
+    monkeypatch.setattr(index, "delete_meeting_notifications", lambda callid: 0)
     monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
     monkeypatch.setattr(index, "DSLMutation", lambda *a: None)
 

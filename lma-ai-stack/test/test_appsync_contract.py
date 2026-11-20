@@ -267,9 +267,10 @@ OTHER_FIELDS = [
     ("Mutation", "addTranscriptSegment"),
     ("Mutation", "addVideoKeyframe"),
     ("Mutation", "addChatAttachment"),
-    # Written by the hosted MCP server's push_meeting_guidance tool with SigV4,
-    # after it has checked the MCP caller may see the meeting.
-    ("Mutation", "addMeetingGuidance"),
+    # A meeting notification, published by a backend with SigV4 (the hosted MCP
+    # server after checking the MCP caller may see the meeting); recipients come
+    # from the meeting in the resolver.
+    ("Mutation", "publishMeetingNotification"),
     ("Mutation", "addChatToken"),
     # One meeting at a time, authorized per meeting by the resolver against its
     # owner and share list rather than by group.
@@ -341,6 +342,12 @@ OTHER_FIELDS = [
     ("Mutation", "setMyZoomCredentials"),
     ("Mutation", "deleteMyZoomCredentials"),
     ("Mutation", "deleteMyChromeProfile"),
+    # The caller's own view of one meeting's notifications (after the meeting's
+    # access check), and their own muted categories.
+    ("Mutation", "updateMyMeetingNotificationState"),
+    ("Mutation", "updateMyNotificationPreferences"),
+    ("Query", "getMyMeetingNotificationState"),
+    ("Query", "getMyNotificationPreferences"),
     # Reads scoped to the caller, to one meeting, or to the caller's own record.
     ("Query", "getCall"),
     # One meeting's cost estimate, authorized in the resolver by getCall's rule.
@@ -354,6 +361,8 @@ OTHER_FIELDS = [
     ("Query", "getChatAttachments"),
     # One meeting's consent record, authorized in the resolver by getCall's rule.
     ("Query", "getMeetingConsent"),
+    # One meeting's notifications, after meetingAccess.js applies getCall's rule.
+    ("Query", "listMeetingNotifications"),
     ("Query", "listCallsDateRange"),
     ("Query", "getCallCount"),
     ("Query", "queryKnowledgeBase"),
@@ -970,9 +979,21 @@ def _subscribed_call_fields() -> str:
     return re.search(r'SUBSCRIBED_CALL_FIELDS = """(.*?)"""', source, re.S).group(1)
 
 
+# The publish helper the MCP tools call (guidance.push) sends its mutation from
+# the configuration layer, with the MCP server function's role.
+NOTIFICATIONS_HELPER = (
+    AI_STACK
+    / "source"
+    / "lambda_layers"
+    / "configuration_layer"
+    / "lma_notifications"
+    / "__init__.py"
+)
+
+
 def _mcp_operations() -> list[tuple[str, str]]:
     operations = []
-    for path in sorted(MCP_TOOLS_DIR.glob("*.py")):
+    for path in [*sorted(MCP_TOOLS_DIR.glob("*.py")), NOTIFICATIONS_HELPER]:
         if path.name.startswith("test_"):
             continue
         for body in _PY_OPERATION.findall(path.read_text()):
@@ -991,7 +1012,8 @@ def test_mcp_operations_were_found() -> None:
     """Guards the extractor: the meeting tools send at least these."""
     names = {label.split("::")[1] for label, _ in MCP_OPERATIONS}
     for name in (
-        "AddMeetingGuidance",
+        "ListMeetingNotifications",
+        "PublishMeetingNotification",
         "UpdateCallAgenda",
         "UpdateScheduledVirtualParticipant",
         "EndVirtualParticipant",
@@ -1033,28 +1055,121 @@ def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
     assert sent <= granted, f"sent but not granted: {sorted(sent - granted)}"
 
 
-# ── meeting guidance reaches the meeting page as the meeting's messages do ──
+# ── meeting notifications reach the meeting page as the meeting's messages do ──
 
 
-def test_meeting_guidance_is_filtered_on_owner_and_shared_with() -> None:
-    """onAddMeetingGuidance uses subscription.js, and the page selects both fields."""
-    subscription = _resolver("Subscription", "onAddMeetingGuidance")
+def test_meeting_notifications_are_filtered_on_owner_and_shared_with() -> None:
+    """onMeetingNotification uses subscription.js, and the page selects both fields."""
+    subscription = _resolver("Subscription", "onMeetingNotification")
     assert "CodeS3Location: ../source/appsync/subscription.js" in subscription.block
-    mutation = _resolver("Mutation", "addMeetingGuidance")
-    # The response template that publishes SharedWith in the "[a, b]" form.
-    assert mutation.files[-1].endswith("dDbPutCondition.response.vtl")
-    page = (UI_SRC / "graphql" / "queries" / "onAddMeetingGuidance.js").read_text()
-    selection = page[page.index("onAddMeetingGuidance(") :]
+    page = (UI_SRC / "graphql" / "queries" / "onMeetingNotification.js").read_text()
+    selection = page[page.index("onMeetingNotification(") :]
     assert re.search(r"\bOwner\b", selection) and re.search(r"\bSharedWith\b", selection)
-    assert "CallId: $callId" in page
+    assert re.search(r"\bCallId\b", selection)
 
 
-def test_meeting_guidance_is_written_by_backend_roles_only(field_nodes) -> None:
+def test_meeting_notifications_are_published_by_backend_roles_only(field_nodes) -> None:
     """The mutation carries no Cognito directive, so a signed-in user cannot call it."""
-    assert _cognito_groups(field_nodes[("Mutation", "addMeetingGuidance")]) is None
+    assert _cognito_groups(field_nodes[("Mutation", "publishMeetingNotification")]) is None
+
+
+def test_the_publish_pipeline_reads_the_meeting_first_and_writes_last() -> None:
+    resolver = _resolver("Mutation", "publishMeetingNotification")
+    order = re.findall(r"!GetAtt (\w+)AppSyncFunction\.FunctionId", resolver.block)
+    assert order == [
+        "NotificationPublishMeeting",
+        "NotificationPublishRate",
+        "NotificationPublishDedup",
+        "NotificationPublishWrite",
+    ]
+
+
+@pytest.mark.parametrize(
+    "type_name, field",
+    [
+        ("Query", "listMeetingNotifications"),
+        ("Query", "getMyMeetingNotificationState"),
+        ("Mutation", "updateMyMeetingNotificationState"),
+    ],
+)
+def test_a_meetings_notifications_are_read_after_its_access_check(type_name, field) -> None:
+    """meetingAccess.js decides from the meeting as it is now, before any read or write."""
+    resolver = _resolver(type_name, field)
+    order = re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
+    assert order[0] == "MeetingAccessAppSyncFunction", order
+
+
+def test_the_published_recipients_come_from_the_meeting_and_are_never_stored() -> None:
+    meeting = (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    write = (APPSYNC_DIR / "notificationPublishWrite.js").read_text()
+    # The meeting row is read, and its access stashed for the answer.
+    assert "key: util.dynamodb.toMapValues({ PK: key, SK: key })" in meeting
+    assert "Owner: meeting.Owner" in meeting
+    # The write stores the publisher's fields only.
+    fields = re.search(r"REQUIRED_FIELDS = \[(.*?)\];.*?OPTIONAL_FIELDS = \[(.*?)\];", write, re.S)
+    stored = fields.group(1) + fields.group(2)
+    assert "Owner" not in stored and "SharedWith" not in stored
+    # And the input type offers no way to name them.
+    sdl = SCHEMA.read_text()
+    publish_input = sdl[sdl.index("input PublishMeetingNotificationInput {") :]
+    publish_input = publish_input[: publish_input.index("}")]
+    assert "Owner" not in publish_input and "SharedWith" not in publish_input
+
+
+def _block_between(text: str, begin: str, end: str) -> str:
+    return text[text.index(begin) + len(begin) : text.index(end)]
+
+
+def test_mutation_actions_are_the_same_on_the_server_and_in_the_page() -> None:
+    """A MUTATION button names an action both sides know, or the publish is refused."""
+    server = _block_between(
+        (APPSYNC_DIR / "notificationPublishMeeting.js").read_text(),
+        "// BEGIN notificationMutationActions",
+        "// END notificationMutationActions",
+    )
+    page = _block_between(
+        (UI_SRC / "components" / "meeting-notifications" / "notification-actions.js").read_text(),
+        "// BEGIN notificationMutationActions",
+        "// END notificationMutationActions",
+    )
+    # The top-level keys of each object: four spaces in the resolver, two in the page.
+    server_names = re.findall(r"^    (\w+): \[", server, re.M)
+    page_names = re.findall(r"^  (\w+): \{", page, re.M)
+    assert server_names, "no action found in the resolver's list"
+    assert sorted(server_names) == sorted(page_names)
+    # A name inherited by every object is never taken for an action.
+    assert (
+        "Object.keys(MUTATION_ACTIONS).includes(name)"
+        in (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    )
+
+
+def test_the_user_view_is_keyed_by_the_callers_identity() -> None:
+    for name in ("myMeetingNotificationState.js", "myNotificationPreferences.js"):
+        text = (APPSYNC_DIR / name).read_text()
+        assert "ctx.identity && ctx.identity.username" in text, name
+        assert "args.Username" not in text and "input.Username" not in text, name
+
+
+def test_the_notifications_read_stays_inside_the_notification_rows() -> None:
+    text = (APPSYNC_DIR / "listMeetingNotifications.js").read_text()
+    assert "begins_with(SK, :prefix)" in text and "':prefix': 'n#'" in text
 
 
 def test_enum_bodies_carry_no_comments(schema_sdl: str) -> None:
     """AppSync rejects a # comment inside an enum body that graphql-core accepts."""
     for match in re.finditer(r"^enum (\w+)\s*\{(.*?)^\}", schema_sdl, re.M | re.S):
         assert "#" not in match.group(2), f"enum {match.group(1)} has a comment in its body"
+
+
+def test_transcript_bound_categories_are_the_publish_helpers() -> None:
+    """The resolver refuses, and keeps the expiry of, the categories the helper and the transcript deletion treat as quoting the transcript."""
+    import importlib.util
+
+    text = (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    block = _block_between(text, "// BEGIN transcriptBoundCategories", "// END transcriptBoundCategories")
+    in_resolver = set(re.findall(r"'([a-z][a-z0-9_-]*)'", block))
+    spec = importlib.util.spec_from_file_location("lma_notifications_for_contract", NOTIFICATIONS_HELPER)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    assert in_resolver == set(helper.TRANSCRIPT_BOUND_CATEGORIES)

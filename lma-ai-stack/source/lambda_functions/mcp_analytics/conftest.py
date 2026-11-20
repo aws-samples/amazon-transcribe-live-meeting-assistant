@@ -5,6 +5,10 @@
 
 The meeting preparation and consent tools import its lma_meeting_preparation
 and lma_consent modules, as the function does in Lambda.
+
+The server's index imports the meeting tools, and the guidance tool imports
+``lma_notifications`` from that layer, so a test here that imports the real
+index needs it, as the tests under tools/ do (tools/conftest.py).
 """
 
 import sys

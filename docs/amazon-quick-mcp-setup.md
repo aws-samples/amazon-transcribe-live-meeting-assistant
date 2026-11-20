@@ -12,9 +12,10 @@ Quick products:
 | **Amazon Quick Suite** | Web app (Enterprise tier) | OAuth 3LO via Cognito | Multi-user organizations using Quick Suite for chat, dashboards, and connectors |
 | **Amazon Quick Desktop** | Native macOS / Windows app | API key (Bearer) | Individual users wanting scheduled agents and a personal knowledge graph |
 
-Both expose the same 28 LMA tools (search, transcript, summary, list,
-schedule, start-now, VP status, and the tools that prepare, follow and close a
-meeting). Pick the path below that matches the product you're connecting.
+The API key path (Quick Desktop) exposes 29 LMA tools (search, transcript,
+summary, list, schedule, start-now, VP status, and the tools that prepare,
+follow and close a meeting); the OAuth path (Quick Suite) exposes the seven
+original ones for now. Pick the path below that matches the product you're connecting.
 
 > **Looking for ways to use LMA from Quick Desktop?** Once you've completed
 > the Quick Desktop setup below, see
@@ -64,8 +65,10 @@ auth path Quick uses.
 
 ## Available LMA Tools
 
-Both auth paths expose the same 28 tools, with the same definitions. Read-only
-tools are annotated with `readOnlyHint: true` so MCP clients (including Quick
+The API key path exposes all 29 tools below; the OAuth path exposes the seven
+original ones for now (the first seven rows, without the meeting preparation
+arguments of `schedule_meeting` and `start_meeting_now`). Read-only tools are
+annotated with `readOnlyHint: true` so MCP clients (including Quick
 Desktop scheduled agents) classify them correctly; every tool also declares
 `destructiveHint` and `idempotentHint`.
 
@@ -84,6 +87,7 @@ Desktop scheduled agents) classify them correctly; every tool also declares
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
 | `list_virtual_participants` | ✅ | The Virtual Participants you can see |
 | `list_meeting_guidance` | ✅ | The guidance notes pushed to a meeting |
+| `list_meeting_notifications` | ✅ | The notifications shown on a meeting's page |
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant, optionally with labels, audience, context, a checklist and people to share it with |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant, with the same options |
 | `update_scheduled_meeting` | — | Change a scheduled Virtual Participant until 5 minutes before it starts |
@@ -146,7 +150,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same 28 tools. See
+> the user's identity on every request and exposes the full tool set. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -222,7 +226,7 @@ per-user API key endpoint, and it is the route to use if tool calls through
 
 ### 2.5 Review discovered tools
 
-Quick Suite will discover the 28 LMA tools. Click **Next** to continue.
+Quick Suite will discover the seven LMA tools. Click **Next** to continue.
 
 ### 2.6 Share (optional)
 
@@ -302,7 +306,7 @@ architecture.
      - **Value**: your API key from Step 1
 6. Click **Connect**
 
-Quick Desktop will discover the LMA tools its key's scope allows (28 with a
+Quick Desktop will discover the LMA tools its key's scope allows (29 with a
 **Read and write** key) and confirm the connection.
 
 > **Note**: Quick Desktop authenticates the API-key path with a custom

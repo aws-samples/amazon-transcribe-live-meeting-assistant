@@ -94,9 +94,13 @@ def get_vp(vp_id: Any) -> Optional[Dict[str, Any]]:
     return vp_table().get_item(Key={"id": vp_id.strip()}).get("Item")
 
 
-def _scan(filter_expression=None) -> Tuple[List[Dict[str, Any]], bool]:
-    """The rows read, and whether the whole table was read (False at MAX_SCAN_PAGES)."""
-    kwargs: Dict[str, Any] = {}
+def _scan(filter_expression=None, projection=None) -> Tuple[List[Dict[str, Any]], bool]:
+    """The rows read, and whether the whole table was read (False at MAX_SCAN_PAGES).
+
+    ``projection`` (ProjectionExpression and ExpressionAttributeNames) limits the
+    attributes returned.
+    """
+    kwargs: Dict[str, Any] = dict(projection or {})
     if filter_expression is not None:
         kwargs["FilterExpression"] = filter_expression
     rows: List[Dict[str, Any]] = []
@@ -116,9 +120,16 @@ def active_vps_of_meeting(call_id: str) -> Tuple[List[Dict[str, Any]], bool]:
     return [row for row in rows if row.get("status") not in VP_FINISHED_STATUSES], complete
 
 
+# Only what vps_by_call needs: the VP, its meeting and when it was created.
+VP_LINK_PROJECTION = {
+    "ProjectionExpression": "#id, #call, #created",
+    "ExpressionAttributeNames": {"#id": "id", "#call": "CallId", "#created": "createdAt"},
+}
+
+
 def vps_by_call(call_ids) -> Tuple[Dict[str, str], bool]:
     """The newest Virtual Participant id of each of ``call_ids``, and whether all were read."""
-    rows, complete = _scan(Attr("CallId").exists())
+    rows, complete = _scan(Attr("CallId").exists(), VP_LINK_PROJECTION)
     newest: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         call_id = row.get("CallId")

@@ -43,7 +43,7 @@ This guide shows three layers of usage:
 
 ## Available LMA tools
 
-LMA exposes 28 tools. The read-only ones are annotated `readOnlyHint: true` so
+LMA's API key endpoint exposes 29 tools. The read-only ones are annotated `readOnlyHint: true` so
 Quick Desktop classifies them correctly for scheduled agents — no
 `allow_unscoped_write_tools` required for read-only flows. The seven most used
 in the workflows below are:

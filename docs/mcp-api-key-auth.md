@@ -106,7 +106,7 @@ A new API key is generated with one of two scopes. A key created before keys had
 
 A key created before keys had scopes has no `Scope` attribute and keeps working as it did. To use the meeting tools that change something, generate a key with the **Read and write** scope; the MCP Servers page says so beside a legacy key. A key's scope cannot be changed: revoke the key and generate a new one. The API key path offers a client only the tools its key may call in `tools/list`, and answers a call to any other tool with an MCP tool error that names the scope it needs; the tool does not run. A request whose body is a tool's arguments rather than a JSON-RPC message is held to the key's scope in the same way, and refused with HTTP `403`. Being in the **Admin** group does not widen what a `read` or `legacy` key may do.
 
-The scope applies to the API key endpoint. A legacy key keeps `schedule_meeting` and `start_meeting_now` as they were: their meeting preparation arguments (`labels`, `audience`, `context`, `checklist`, `shareWith`) need a read-write key. The OAuth (3LO) gateway path carries no key, so no scope narrows it: a user signed in through it may call every tool, including the tools that change or delete something, for the meetings the access rule below lets them act on, as on the meeting page. It serves every tool, with the same definitions (the gateway target's tool schema in the stack template, which a test holds equal to the API key endpoint's), and finds which one was called from the tool name the gateway passes in the Lambda context (`bedrockAgentCoreToolName`). A gateway call without that name is matched to one of the seven original tools by its arguments, as before.
+The scope applies to the API key endpoint. A legacy key keeps `schedule_meeting` and `start_meeting_now` as they were: their meeting preparation arguments (`labels`, `audience`, `context`, `checklist`, `shareWith`) need a read-write key. The API key endpoint offers the full tool set. The OAuth (3LO) gateway path offers the seven original tools for now, as they were (without the meeting preparation arguments); any other tool is answered with "not available on this endpoint".
 
 ## Access to Meetings
 
@@ -127,8 +127,8 @@ The server checks access itself before calling anything else, because it calls A
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tool_definitions.py` | MCP definitions of the meeting tools, with the annotations the scope check reads |
 | `docs/mcp-tools-reference.md` | Every tool, with an example request and answer for those that prepare, follow and close a meeting |
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/access.py` | The access rule every meeting tool applies (see [Access to Meetings](#access-to-meetings)) |
-| `lma-ai-stack/source/appsync/addMeetingGuidance.request.vtl` | Stores a guidance item under the meeting; published to `onAddMeetingGuidance` |
-| `lma-ai-stack/source/ui/src/components/call-panel/MeetingGuidanceBanner.jsx` | The meeting page's guidance notifications |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/guidance.py` | `push_meeting_guidance` and `list_meeting_guidance`, as meeting notifications of category `guidance` |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/notifications.py` | `list_meeting_notifications` (see [Meeting Notifications](meeting-notifications.md)) |
 | `lma-ai-stack/source/ui/src/graphql/mutations.js` | generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
@@ -164,7 +164,8 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `get_meeting_context` | read | owner, shared, Admin | The [meeting context](meeting-context-and-checklist.md), with who last changed it and when |
 | `get_meeting_checklist` | read | owner, shared, Admin | The checklist items, each with its status, who set it, its evidence and note |
 | `get_meeting_consent` | read | owner, shared, Admin | The consent record without its evidence images: mode, how consent is given, the notice, the attestation and one row per participant |
-| `list_meeting_guidance` | read | owner, shared, Admin | The guidance pushed to a meeting, newest first |
+| `list_meeting_guidance` | read | owner, shared, Admin | The guidance given on a meeting, newest first |
+| `list_meeting_notifications` | read | owner, shared, Admin | The meeting's notifications, of every category or one, oldest first, with `since` and a cursor; see [Meeting Notifications](meeting-notifications.md#reading-them-over-mcp) |
 | `list_virtual_participants` | read | VP owner, shared, Admin | Virtual Participants the caller can see, newest first; optional `status` filter |
 | `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant, optionally with `labels`, `audience`, `context`, `checklist` and `shareWith`. A meeting the caller has already scheduled is updated rather than scheduled twice; see [Scheduling a Meeting Again](#scheduling-a-meeting-again) |
 | `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant, with the same optional meeting preparation |
@@ -182,7 +183,7 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `end_virtual_participant` | read-write | VP owner, Admin | End a Virtual Participant by its id, or cancel one that is waiting for its scheduled launch; calling it again changes nothing (`alreadyEnded: true`) |
 | `delete_meeting` | read-write | owner, Admin | Permanently delete a meeting and everything stored with it, as the meeting list's Delete does. Nothing is deleted unless `confirm` is `true` |
 
-That is 28 tools. Arguments are camelCase (`meetingId`, `virtualParticipantId`), except the two guidance tools' `meeting_id`. Every tool declares the `readOnlyHint`, `destructiveHint` and `idempotentHint` annotations. Example requests and answers are in the [MCP Tools Reference](mcp-tools-reference.md).
+That is 29 tools, all on the API key endpoint; the OAuth endpoint offers the seven original ones for now. Arguments are camelCase (`meetingId`, `virtualParticipantId`), except the guidance and notification tools' `meeting_id`. Every tool declares the `readOnlyHint`, `destructiveHint` and `idempotentHint` annotations. Example requests and answers are in the [MCP Tools Reference](mcp-tools-reference.md).
 
 Virtual Participants are started with `start_meeting_now` and `schedule_meeting`; there is no separate create tool.
 
@@ -208,9 +209,11 @@ Segments are returned in the order they end on the meeting's timeline, each with
 
 ### Meeting Guidance
 
-`push_meeting_guidance(meeting_id, text, title?, level?)` leaves a short note on a meeting for the people following it in LMA. It appears at once on the meeting page, above the tabs, as a dismissible notification for the meeting's owner, the people it is shared with and Admins who have the page open; `level` (`info`, `warning` or `urgent`) sets how prominently it is shown. It is never posted to the meeting's own chat, so the meeting's other participants do not see it. Dismissing a note hides it on that page only. A page opened after a note was pushed does not show it; `list_meeting_guidance` returns every note the meeting has.
+`push_meeting_guidance(meeting_id, text, title?, level?)` leaves a short note on a meeting for the people following it in LMA. It is a [meeting notification](meeting-notifications.md) of category `guidance` and type `note`: it appears at once in the meeting page's **Notifications** panel for the meeting's owner, the people it is shared with and Admins, and a page opened later shows it too. `level` (`info`, `warning` or `urgent`) sets how prominently it is shown. It is never posted to the meeting's own chat, so the meeting's other participants do not see it. Dismissing a note hides it for that user only. `text` is shown as Markdown, at most 2000 characters; `title` is at most 200.
 
-Each note is stored in the EventSourcing table under `PK = gd#<CallId>`, `SK = g#<CreatedAt>#<GuidanceId>`, with `Text`, `Title`, `Level`, `Source` (`mcp`), `CreatedBy` (the API key's user), the meeting's `Owner` and `SharedWith`, and the meeting's `ExpiresAfter`, so it expires with the meeting. Anything that wants a meeting's guidance in order queries that one partition. The write is the IAM-only `addMeetingGuidance` mutation, published to the `onAddMeetingGuidance(CallId)` subscription, which is filtered on `Owner` and `SharedWith` like the meeting's other subscriptions.
+Guidance may quote the meeting, so it is kept as long as the meeting's transcript: it is deleted with the transcript, by the Retention section's **Delete the transcript after the summary** setting or when the transcript expires, and with the meeting when the meeting is deleted. A meeting whose transcript has been deleted has no guidance left.
+
+`list_meeting_guidance(meeting_id, limit?)` returns the meeting's most recent guidance newest first (`hasMore` is true when it stopped before reading all of the meeting's notifications), including guidance other features publish (its `type` says which), each with `guidanceId`, `createdAt`, `createdBy`, `source`, `type`, `level`, `title` and `text`. `list_meeting_notifications` returns the same items with every field, and the meeting's other categories.
 
 ### Meeting Record Links
 

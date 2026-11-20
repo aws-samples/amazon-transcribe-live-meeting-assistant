@@ -1,13 +1,15 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""The two MCP front doors offer the same tools, described alike (no AWS).
+"""The two MCP front doors describe the tools they share alike (no AWS).
 
 The API key endpoint lists every tool from ``MCP_TOOLS`` (index.py) and
 ``MEETING_TOOLS`` (tool_definitions.py). The OAuth endpoint, an AgentCore
-Gateway target, declares its own copy of each tool in the stack template. A
-client learns a tool's arguments only from that description, so the copies
-name the same tools with the same descriptions and the same input schemas.
+Gateway target, offers the seven original tools as they were, and declares its
+own copy of each in the stack template. A client learns a tool's arguments only
+from that description, so each copy has the API key endpoint's description and
+input schema, without the arguments the gateway does not take
+(``GATEWAY_WITHOUT``).
 
 The gateway's schema format has Type, Description, Properties, Items and
 Required only, so ``enum`` and ``additionalProperties`` are left out of the
@@ -30,6 +32,9 @@ TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
 MCP_LAMBDA = AI_STACK / "source" / "lambda_functions" / "mcp_analytics"
 ON_UPDATE_CALL = AI_STACK / "source" / "ui" / "src" / "graphql" / "queries" / "onUpdateCall.js"
 GATEWAY_KEYS = {"Type", "Description", "Properties", "Items", "Required"}
+# The arguments schedule_meeting and start_meeting_now take on the API key
+# endpoint only (index.PREPARATION_ARGUMENTS).
+GATEWAY_WITHOUT = ("labels", "audience", "context", "checklist", "shareWith")
 
 
 class _CfnLoader(yaml.SafeLoader):
@@ -52,14 +57,30 @@ def _text(value: str) -> str:
     return " ".join(value.split())
 
 
-def _api_key_tools() -> list:
-    tree = ast.parse((MCP_LAMBDA / "index.py").read_text(encoding="utf-8"))
-    original = next(
+def _index_tree() -> ast.Module:
+    return ast.parse((MCP_LAMBDA / "index.py").read_text(encoding="utf-8"))
+
+
+def _original_tools() -> list:
+    return next(
         ast.literal_eval(node.value)
-        for node in tree.body
+        for node in _index_tree().body
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "MCP_TOOLS" for t in node.targets)
     )
+
+
+def _as_gateway_tool(tool: dict) -> dict:
+    """An original tool as the gateway offers it: without GATEWAY_WITHOUT."""
+    schema = dict(tool["inputSchema"])
+    schema["properties"] = {
+        key: value for key, value in schema["properties"].items() if key not in GATEWAY_WITHOUT
+    }
+    return {**tool, "inputSchema": schema}
+
+
+def _api_key_tools() -> list:
+    original = _original_tools()
     spec = importlib.util.spec_from_file_location(
         "mcp_tool_definitions", MCP_LAMBDA / "tool_definitions.py"
     )
@@ -103,17 +124,26 @@ def _normalized(schema: dict) -> dict:
     return out
 
 
-def test_both_front_doors_offer_the_same_tools_in_the_same_order() -> None:
+def test_the_gateway_offers_the_seven_original_tools_in_order() -> None:
     assert [tool["Name"] for tool in _gateway_tools()] == [
-        tool["name"] for tool in _api_key_tools()
+        tool["name"] for tool in _original_tools()
     ]
+    api_key = [tool["name"] for tool in _api_key_tools()]
+    assert api_key[:7] == [tool["Name"] for tool in _gateway_tools()]
 
 
-@pytest.mark.parametrize("tool", _api_key_tools(), ids=lambda tool: tool["name"])
-def test_each_tool_is_described_alike_on_both_front_doors(tool: dict) -> None:
+def test_the_handler_serves_the_gateway_only_its_tools() -> None:
+    source = (MCP_LAMBDA / "index.py").read_text(encoding="utf-8")
+    assert "GATEWAY_TOOL_NAMES = ORIGINAL_TOOL_NAMES" in source
+    assert "if tool_name not in GATEWAY_TOOL_NAMES:" in source
+
+
+@pytest.mark.parametrize("tool", _original_tools(), ids=lambda tool: tool["name"])
+def test_each_gateway_tool_is_described_as_on_the_api_key_endpoint(tool: dict) -> None:
     gateway = next(entry for entry in _gateway_tools() if entry["Name"] == tool["name"])
-    assert _text(gateway["Description"]) == _text(tool["description"])
-    assert _normalized(gateway["InputSchema"]) == _as_gateway(tool["inputSchema"])
+    expected = _as_gateway_tool(tool)
+    assert _text(gateway["Description"]) == _text(expected["description"])
+    assert _normalized(gateway["InputSchema"]) == _as_gateway(expected["inputSchema"])
 
 
 def test_the_gateway_schema_uses_only_the_keys_its_format_has() -> None:
