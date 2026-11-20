@@ -57,6 +57,7 @@ from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
 from lma_config import LANGUAGE_MODELS, MEETING_ASSIST, read_setting, resolve_model_id
+from lma_live_pass import LivePass
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage
 from lma_notifications import (
     GUIDANCE,
@@ -319,39 +320,29 @@ def _expiry(meeting: Mapping[str, Any]) -> Optional[int]:
     return expires
 
 
+def _lease() -> LivePass:
+    """The run lease on the state row (lma_live_pass), on the module's client."""
+    return LivePass(
+        dynamodb,
+        EVENT_SOURCING_TABLE,
+        prefix="gd#",
+        sort_key=STATE_SK,
+        lease_seconds=LEASE_SECONDS,
+        name="guidance",
+    )
+
+
 def claim(
     call_id: str, settings: pure.Settings, now: float, expires: Optional[int]
 ) -> Optional[Dict[str, Any]]:
     """Take the meeting's run lease; the state row, or None when a run may not start now."""
-    values = {
-        ":lease": {"N": str(int(now) + LEASE_SECONDS)},
-        ":now": {"N": str(now)},
-        ":due": {"N": str(now - settings.interval_seconds)},
-        ":max": {"N": str(settings.max_runs_per_meeting)},
-        ":call": {"S": call_id},
-    }
-    sets = ["LeaseUntil = :lease", "CallId = :call"]
-    if expires:
-        values[":ttl"] = {"N": str(expires)}
-        sets.append("ExpiresAfter = if_not_exists(ExpiresAfter, :ttl)")
-    try:
-        response = dynamodb.update_item(
-            TableName=EVENT_SOURCING_TABLE,
-            Key=_state_key(call_id),
-            UpdateExpression="SET " + ", ".join(sets),
-            ConditionExpression=(
-                "(attribute_not_exists(LeaseUntil) OR LeaseUntil < :now) "
-                "AND (attribute_not_exists(LastRunAt) OR LastRunAt <= :due) "
-                "AND (attribute_not_exists(RunCount) OR RunCount < :max)"
-            ),
-            ExpressionAttributeValues=values,
-            ReturnValues="ALL_NEW",
-        )
-    except ClientError as error:
-        if _conflict(error):
-            return None
-        raise
-    return _plain(_deserialize(response.get("Attributes") or {}))
+    return _lease().claim(
+        call_id,
+        now=now,
+        interval_seconds=settings.interval_seconds,
+        max_runs=settings.max_runs_per_meeting,
+        expires=expires,
+    )
 
 
 def claim_digest(call_id: str, now: float, expires: Optional[int]) -> bool:
@@ -391,34 +382,7 @@ def release(call_id: str, lease: Any, ran: bool, now: float, **fields: Any) -> N
     Only this run's lease is released: the condition names it, so a run that
     outlived its lease cannot clear another's.
     """
-    sets: List[str] = []
-    values: Dict[str, Any] = {":lease": {"N": str(int(lease))}}
-    names: Dict[str, str] = {}
-    if ran:
-        sets += ["LastRunAt = :now", "RunCount = if_not_exists(RunCount, :zero) + :one"]
-        values.update({":now": {"N": str(now)}, ":zero": {"N": "0"}, ":one": {"N": "1"}})
-    for number, (name, value) in enumerate(fields.items()):
-        names[f"#f{number}"] = name
-        values[f":f{number}"] = (
-            {"N": str(value)} if isinstance(value, (int, float)) else {"S": str(value)}
-        )
-        sets.append(f"#f{number} = :f{number}")
-    expression = ("SET " + ", ".join(sets) + " " if sets else "") + "REMOVE LeaseUntil"
-    kwargs: Dict[str, Any] = {
-        "TableName": EVENT_SOURCING_TABLE,
-        "Key": _state_key(call_id),
-        "UpdateExpression": expression,
-        "ConditionExpression": "LeaseUntil = :lease",
-        "ExpressionAttributeValues": values,
-    }
-    if names:
-        kwargs["ExpressionAttributeNames"] = names
-    try:
-        dynamodb.update_item(**kwargs)
-    except ClientError as error:
-        if not _conflict(error):
-            raise
-        LOGGER.warning("The guidance lease for %s was no longer this run's", call_id)
+    _lease().release(call_id, lease, ran=ran, now=now, **fields)
 
 
 # ── the model ────────────────────────────────────────────────────────────────
