@@ -159,12 +159,67 @@ def test_an_ai_stack_template_change_runs_the_resource_budget_and_cfn_lint(path:
     assert {"cfn_lint", "ai_stack", "vp_template"} <= ran([path])
 
 
-def test_the_browser_extension_runs_alone() -> None:
-    assert ran(["lma-browser-extension-stack/src/App.tsx"]) == {"browser_extension"}
+@pytest.mark.parametrize(
+    "path",
+    [
+        "lma-browser-extension-stack/src/App.tsx",
+        "lma-browser-extension-stack/public/manifest.json",
+        "lma-browser-extension-stack/e2e/test_extension_smoke.py",
+        "lma-browser-extension-stack/e2e/fixtures/meeting.html",
+    ],
+)
+def test_the_browser_extension_runs_alone(path: str) -> None:
+    assert ran([path]) == {"browser_extension"}
+
+
+def test_the_cognito_template_runs_the_extension_smoke_test() -> None:
+    # The smoke test holds the extension id to the template's sign-in callback.
+    assert {"browser_extension", "cfn_lint"} <= ran(
+        ["lma-cognito-stack/deployment/lma-cognito-stack.yaml"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "job"),
+    [
+        ("lma-desktop-capture-app-stack/source/windows/Engine/SelfTest.cs", "desktop_windows"),
+        ("lma-desktop-capture-app-stack/source/windows/build-windows.ps1", "desktop_windows"),
+        (
+            "lma-desktop-capture-app-stack/source/windows/LMACaptureClient.Windows.csproj",
+            "desktop_windows",
+        ),
+        ("lma-desktop-capture-app-stack/source/windows/lma-config.json", "desktop_windows"),
+        (
+            "lma-desktop-capture-app-stack/source/macos/Sources/LMACaptureClient/SRP.swift",
+            "desktop_macos",
+        ),
+        ("lma-desktop-capture-app-stack/source/macos/make-app.sh", "desktop_macos"),
+        ("lma-desktop-capture-app-stack/source/macos/Package.swift", "desktop_macos"),
+        ("lma-desktop-capture-app-stack/source/macos/Info.plist", "desktop_macos"),
+    ],
+)
+def test_a_desktop_client_change_runs_only_that_clients_job(path: str, job: str) -> None:
+    assert ran([path]) == {job}
+
+
+def test_a_desktop_client_readme_is_documentation() -> None:
+    path = "lma-desktop-capture-app-stack/source/macos/README.md"
+    assert ca.docs_only([path])
+    assert not ran([path]) & {"desktop_windows", "desktop_macos"}
+
+
+def test_the_desktop_app_template_runs_the_template_checks_not_the_clients() -> None:
+    steps = ran(["lma-desktop-capture-app-stack/template.yaml"])
+    assert "cfn_lint" in steps
+    assert not steps & {"desktop_windows", "desktop_macos"}
+
+
+def test_an_unclassified_desktop_app_path_runs_every_check() -> None:
+    assert ca.select(["lma-desktop-capture-app-stack/source/linux/main.c"]).full
 
 
 def test_files_no_step_covers_run_nothing() -> None:
-    assert ran(["lma-desktop-capture-app-stack/source/main.js"]) == set()
+    assert ran(["pypi-placeholder-packages/lma-sdk/README.txt"]) == set()
 
 
 def test_utilities_run_only_the_static_tests_that_scan_them() -> None:
@@ -490,15 +545,24 @@ def test_a_diff_that_cannot_be_computed_runs_everything(tmp_path, monkeypatch) -
 
 
 @pytest.fixture(scope="module")
-def github_steps() -> list[dict]:
-    workflow = yaml.safe_load(CODE_CHECKS.read_text())
-    job = workflow["jobs"]["code-checks"]
+def github_jobs() -> dict[str, dict]:
+    return yaml.safe_load(CODE_CHECKS.read_text())["jobs"]
+
+
+@pytest.fixture(scope="module")
+def github_steps(github_jobs) -> list[dict]:
+    job = github_jobs["code-checks"]
     assert job["name"] == "Lint and unit tests", (
         "the job name is the required status check; renaming it leaves branch "
         "protection waiting for a check that never reports"
     )
     assert "if" not in job, "the required check must report on every run"
+    assert "needs" not in job, "the required check must not wait for, or depend on, another job"
     return job["steps"]
+
+
+#: The jobs gated as a whole, by the `select` job's outputs: the GitHub-only steps.
+GATED_JOBS = {"desktop-windows": "desktop_windows", "desktop-macos": "desktop_macos"}
 
 
 #: Steps that run unconditionally: setup, the selection itself, and this suite.
@@ -528,18 +592,70 @@ def test_every_github_step_is_gated_on_a_real_key_and_runs_when_unset(github_ste
             f"'false'` form is deliberate: a missing or misspelt output runs the step."
         )
         assert match.group(1) in ca.STEPS, f"{name}: unknown key {match.group(1)}"
+        assert match.group(1) not in ca.GITHUB_ONLY_STEPS, (
+            f"{name}: {match.group(1)} is gated as a whole job, not as a step"
+        )
         used.add(match.group(1))
-    assert used == ca.STEPS.keys(), f"keys no step uses: {ca.STEPS.keys() - used}"
+    expected = ca.STEPS.keys() - ca.GITHUB_ONLY_STEPS.keys()
+    assert used == expected, f"keys no step uses: {expected - used}"
 
 
-def test_the_github_selection_is_selective_only_for_pull_requests(github_steps) -> None:
-    step = next(s for s in github_steps if s["name"] == "Select the checks this change needs")
+def _assert_selective_only_for_pull_requests(steps: list[dict]) -> None:
+    step = next(s for s in steps if s["name"] == "Select the checks this change needs")
     assert step["id"] == "areas"
     body = step["run"]
     assert "scripts/ci/changed_areas.py" in body
     assert "pull_request" in body and "--base HEAD^1" in body and "--all" in body
-    checkout = next(s for s in github_steps if s["name"] == "Check out the repository")
+    checkout = next(s for s in steps if s["name"] == "Check out the repository")
     assert checkout["with"]["fetch-depth"] >= 2, "HEAD^1 of the merge commit must be fetched"
+
+
+def test_the_github_selection_is_selective_only_for_pull_requests(github_steps) -> None:
+    _assert_selective_only_for_pull_requests(github_steps)
+
+
+def test_the_select_job_runs_the_same_selection(github_jobs) -> None:
+    select = github_jobs["select"]
+    assert "if" not in select and "needs" not in select
+    _assert_selective_only_for_pull_requests(select["steps"])
+
+
+def test_every_github_only_step_is_a_whole_job_that_runs_when_unset(github_jobs) -> None:
+    """Gated as ``!cancelled() && needs.select.outputs.<key> != 'false'``.
+
+    ``!cancelled()`` matters: without it a failed ``select`` job would skip the job
+    instead of running it, the opposite of "doubt runs the step".
+    """
+    assert set(GATED_JOBS.values()) == ca.GITHUB_ONLY_STEPS.keys()
+    outputs = github_jobs["select"]["outputs"]
+    for job_id, key in GATED_JOBS.items():
+        job = github_jobs[job_id]
+        assert job["needs"] == "select", job_id
+        condition = str(job["if"]).strip()
+        match = re.fullmatch(
+            r"\$\{\{ !cancelled\(\) && needs\.select\.outputs\.(\w+) != 'false' \}\}", condition
+        )
+        assert match and match.group(1) == key, f"{job_id}: {condition!r}"
+        assert outputs[key] == f"${{{{ steps.areas.outputs.{key} }}}}", outputs
+        # No step inside is gated: the job is.
+        assert not [s["name"] for s in job["steps"] if "if" in s], job_id
+    # The other jobs are the required check and the selection itself.
+    assert github_jobs.keys() == {"code-checks", "select", *GATED_JOBS}
+
+
+def test_the_desktop_jobs_run_the_self_test_and_keep_the_build_for_a_week(github_jobs) -> None:
+    for job_id, runner in (
+        ("desktop-windows", "windows-latest"),
+        ("desktop-macos", "macos-latest"),
+    ):
+        job = github_jobs[job_id]
+        assert job["runs-on"] == runner
+        runs = "\n".join(s.get("run", "") for s in job["steps"])
+        assert "--selftest" in runs and "All self-tests PASSED" in runs, job_id
+        uploads = [s for s in job["steps"] if "upload-artifact" in s.get("uses", "")]
+        assert len(uploads) == 1, job_id
+        assert uploads[0]["with"]["retention-days"] <= 7
+        assert uploads[0]["with"]["if-no-files-found"] == "error"
 
 
 def test_every_gitlab_step_is_gated_on_a_real_key() -> None:
@@ -548,9 +664,31 @@ def test_every_gitlab_step_is_gated_on_a_real_key() -> None:
     assert "scripts/ci/changed_areas.py" in script
     assert "CI_MERGE_REQUEST_DIFF_BASE_SHA" in script and "--all" in script
     used = set(re.findall(r"ci_run ([A-Z_]+)", script))
-    assert {key.upper() for key in ca.STEPS} == used, used
+    # GitLab has no Windows or macOS runners, so the GitHub-only steps are absent.
+    assert {key.upper() for key in ca.STEPS.keys() - ca.GITHUB_ONLY_STEPS.keys()} == used, used
     # Every make target and npm command is inside a ci_run block, apart from the
     # always-run CI tooling tests.
     for line in job["script"]:
         if "make " in line or "npm " in line:
             assert "ci_run " in line or "test-ci-tooling" in line, line
+
+
+def test_github_only_steps_say_why() -> None:
+    assert ca.GITHUB_ONLY_STEPS.keys() <= ca.STEPS.keys()
+    for key, reason in ca.GITHUB_ONLY_STEPS.items():
+        assert "GitLab has no" in reason, key
+
+
+def test_both_platforms_run_the_extension_smoke_test_with_the_extension_build(
+    github_steps,
+) -> None:
+    names = [s["name"] for s in github_steps]
+    assert names.index("Browser extension build") < names.index(
+        "Browser extension browser smoke test"
+    )
+    smoke = github_steps[names.index("Browser extension browser smoke test")]
+    assert smoke["if"] == "steps.areas.outputs.browser_extension != 'false'"
+    assert "make test-browser-extension-e2e" in smoke["run"]
+    gitlab = yaml.safe_load(GITLAB_CI.read_text())["code_checks"]["script"]
+    block = next(entry for entry in gitlab if "ci_run BROWSER_EXTENSION" in entry)
+    assert block.index("npm run build") < block.index("make test-browser-extension-e2e")

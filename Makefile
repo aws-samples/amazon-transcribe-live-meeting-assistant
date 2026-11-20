@@ -513,6 +513,20 @@ test-ci-tooling: ## Unit tests for the CI step selection (scripts/ci; no AWS)
 	$(PYTHON) -m pytest scripts/ci -q
 	@echo -e "$(GREEN)✅ CI step-selection tests passed!$(NC)"
 
+# The built browser extension loaded into headless Chromium with Playwright
+# (lma-browser-extension-stack/e2e). Needs `npm run build` in the extension first.
+# Downloads Playwright's Chromium on first use (~170 MB, cached under
+# ~/.cache/ms-playwright); CI passes PLAYWRIGHT_DEPS=--with-deps to install the
+# system libraries it needs as well. No AWS, and nothing reaches the network.
+# Not part of `make test`, which needs neither a build nor a browser.
+PLAYWRIGHT_DEPS ?=
+test-browser-extension-e2e: ## Load the built browser extension in headless Chromium (needs the extension build; no AWS)
+	@echo "Running browser extension Playwright smoke tests..."
+	$(PIP) install -q -r lma-browser-extension-stack/e2e/requirements.txt
+	$(PYTHON) -m playwright install $(PLAYWRIGHT_DEPS) --no-shell chromium
+	$(PYTHON) -m pytest lma-browser-extension-stack/e2e -q
+	@echo -e "$(GREEN)✅ Browser extension smoke tests passed!$(NC)"
+
 # The demo recorder (scripts/ux_recorder*.py), the stack-session helper and the
 # product-demo skill's storyboard file. Needs no AWS, Chrome or network; the
 # render tests skip without ffmpeg and Pillow.

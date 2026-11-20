@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+  A stand-in meeting page for the browser extension's tests, served from 127.0.0.1.
+
+  The extension's recorder content script is injected into every page
+  (`<all_urls>` in manifest.json), so this page needs no meeting platform's
+  markup for capture to start: Platform Detected reads "n/a" and the name and
+  topic are typed in by hand, as they are on any page the extension has no
+  reader for. ?audio=<file> plays a WAV served beside this page on a loop, as
+  the other participants' audio (the captured tab's audio).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>LMA extension test meeting</title>
+  </head>
+  <body>
+    <h1 id="meeting-title">LMA extension test meeting</h1>
+    <p id="participants">Participants: E2E Remote Speaker</p>
+    <audio id="meeting-audio" loop autoplay></audio>
+    <script>
+      const src = new URLSearchParams(window.location.search).get('audio');
+      if (src) {
+        const audio = document.getElementById('meeting-audio');
+        audio.src = src;
+        audio.play().catch((error) => console.log('meeting audio did not start', String(error)));
+      }
+    </script>
+  </body>
+</html>
