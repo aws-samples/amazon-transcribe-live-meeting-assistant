@@ -24,11 +24,12 @@ const readSize = (storage) => {
  *
  * The drawer opens by itself when a notification arrives while the page is
  * open, unless the user has closed it on this meeting during this visit; then
- * the trigger shows a badge instead, until the drawer is opened. Its width is
+ * the trigger shows a badge instead, until the drawer is opened; so it does
+ * while another drawer (Help) is in its place (`covered`). Its width is
  * remembered in this browser. `liveArrivals` is useMeetingNotifications'
  * count of notifications that arrived while the page was open.
  */
-const useNotificationsDrawer = ({ callId, liveArrivals, storage = window.localStorage }) => {
+const useNotificationsDrawer = ({ callId, liveArrivals, covered = false, storage = window.localStorage }) => {
   const [open, setOpen] = useState(false);
   const [badge, setBadge] = useState(false);
   const [size, setSize] = useState(() => readSize(storage));
@@ -47,13 +48,13 @@ const useNotificationsDrawer = ({ callId, liveArrivals, storage = window.localSt
       return;
     }
     seenArrivals.current = liveArrivals;
-    if (open) return;
-    if (closedOn.current.has(callId)) {
+    if (open && !covered) return;
+    if (covered || closedOn.current.has(callId)) {
       setBadge(true);
     } else {
       setOpen(true);
     }
-  }, [callId, liveArrivals, open]);
+  }, [callId, liveArrivals, open, covered]);
 
   const change = useCallback(
     (next) => {

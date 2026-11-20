@@ -77,6 +77,8 @@ const CallAnalyticsLayout = () => {
   const drawer = useNotificationsDrawer({
     callId: meetingCallId,
     liveArrivals: meetingNotifications.liveArrivals,
+    // While Help is shown, an arrival marks the trigger rather than opening it.
+    covered: toolsOpen,
   });
   const showNotificationsDrawer = Boolean(meetingCallId) && meetingNotifications.items.length > 0;
   const visibleCount = meetingNotifications.visible.length;

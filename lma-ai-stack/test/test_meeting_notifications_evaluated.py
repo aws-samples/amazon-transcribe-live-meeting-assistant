@@ -604,3 +604,14 @@ def test_mutes_on_one_meeting_have_a_cap(client) -> None:
     }))
     assert "size(#muted) < :maxMuted" in request["condition"]["expression"]
     assert str(request["condition"]["expressionValues"][":maxMuted"]["N"]) == "49"
+
+
+def test_a_pointer_loses_its_expiry_when_the_notification_does(client) -> None:
+    stash = {"notificationId": "id-new", "notificationSK": "n#t#id-new", "notificationExpiresAfter": None}
+    request = _ok(_evaluate(client, "notificationPublishDedup.js", "request", {
+        "arguments": _publish(DedupKey="ask_question:c1"),
+        "identity": BACKEND,
+        "stash": stash,
+    }))
+    assert request["update"]["expression"].endswith("REMOVE #ttl")
+    assert ":ttl" not in request["update"]["expressionValues"]

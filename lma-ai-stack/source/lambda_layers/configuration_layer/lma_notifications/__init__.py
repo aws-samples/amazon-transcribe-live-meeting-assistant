@@ -13,7 +13,11 @@ meeting's chat or spoken. See docs/meeting-notifications.md.
 ``publish_meeting_notification`` sends the IAM-only ``publishMeetingNotification``
 mutation, signed with the calling function's role; no user token is involved.
 The function's role needs ``appsync:GraphQL`` on that field, and the function
-needs ``APPSYNC_GRAPHQL_URL``. The resolver decides who receives it, from the
+needs ``APPSYNC_GRAPHQL_URL``. A function that publishes category ``guidance``
+also needs ``CONFIGURATION_TABLE_NAME``, read access to the configuration
+table, and ``TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS``, from which
+``transcript_expires_after`` reads the transcript's retention; without them
+the shipped retention is used. The resolver decides who receives it, from the
 meeting: a publisher never names recipients. A publisher acting for a user
 (the MCP server does) checks that user may see the meeting before calling.
 
@@ -216,8 +220,11 @@ def transcript_expires_after(now: Optional[float] = None) -> Optional[int]:
     The transcript's retention (Retention › transcriptionExpirationInDays, at
     most the TranscriptionExpirationInDays parameter), shortened as a
     transcript segment's is while transcripts are deleted after the summary.
-    None when the retention cannot be read; the resolver then gives the row the
-    meeting's expiry, and the transcript deletion still removes it.
+    Where the function has no configuration table or no
+    TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS, read_setting answers with the
+    shipped default. None only when the read fails or the retention is not
+    above zero; the resolver then gives the row the meeting's expiry, and the
+    transcript deletion still removes it.
     """
     # pylint: disable=import-outside-toplevel
     try:

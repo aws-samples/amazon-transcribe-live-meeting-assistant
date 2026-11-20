@@ -106,3 +106,18 @@ describe('useNotificationsDrawer, put away for Help', () => {
     expect(result.current.badge).toBe(false);
   });
 });
+
+describe('useNotificationsDrawer, with Help open', () => {
+  it('marks the trigger instead of opening behind Help', () => {
+    const storage = memoryStorage();
+    const { result, rerender } = renderHook(
+      ({ arrivals, covered }) => useNotificationsDrawer({ callId: 'm1', liveArrivals: arrivals, covered, storage }),
+      { initialProps: { arrivals: 0, covered: true } },
+    );
+    rerender({ arrivals: 1, covered: true });
+    expect(result.current.open).toBe(false);
+    expect(result.current.badge).toBe(true);
+    act(() => result.current.setOpen(true));
+    expect(result.current.badge).toBe(false);
+  });
+});

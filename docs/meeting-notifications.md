@@ -223,7 +223,13 @@ publish_meeting_notification(
 
 The function needs `appsync:GraphQL` on
 `.../types/Mutation/fields/publishMeetingNotification` and the
-`APPSYNC_GRAPHQL_URL` environment variable. The helper sends the IAM-only
+`APPSYNC_GRAPHQL_URL` environment variable. A function that publishes
+category `guidance` also needs what the helper reads the transcript's
+retention with: `CONFIGURATION_TABLE_NAME` and read access to the
+configuration table, and `TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS` set from the
+`TranscriptionExpirationInDays` parameter. Without them its guidance is given
+the shipped transcript retention, capped by the meeting's expiry, rather than
+the deployment's. The helper sends the IAM-only
 `publishMeetingNotification` mutation. A function that publishes on behalf of a
 user, as the MCP server does, checks first that the user may see the meeting.
 

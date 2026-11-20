@@ -33,11 +33,14 @@ export function request(ctx) {
         ':category': input.Category,
     };
     let expression = 'SET #id = if_not_exists(#id, :id), #sk = if_not_exists(#sk, :sk), #category = :category';
-    const names = { '#id': 'NotificationId', '#sk': 'NotificationSK', '#category': 'Category' };
+    const names = { '#id': 'NotificationId', '#sk': 'NotificationSK', '#category': 'Category', '#ttl': 'ExpiresAfter' };
+    // The same expiry as the notification, set or removed as the write does, so
+    // the pointer never expires before the notification it finds.
     if (expiresAfter !== null && expiresAfter !== undefined) {
         expression = `${expression}, #ttl = :ttl`;
-        names['#ttl'] = 'ExpiresAfter';
         values[':ttl'] = expiresAfter;
+    } else {
+        expression = `${expression} REMOVE #ttl`;
     }
     return {
         operation: 'UpdateItem',
