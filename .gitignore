@@ -51,6 +51,8 @@ __pycache__/
 # control so they don't appear as spurious diffs whenever someone reinstalls
 # the local lma-cli / lma-sdk packages.
 *.egg-info/
+# setuptools build output of the local lma-cli / lma-sdk packages.
+lib/*/build/
 *.egg
 
 # Deprecated QnABot submodule (removed)

@@ -705,6 +705,7 @@ PYTHON_READERS = [
     "meeting_archive/index.py",
     "meeting_consent_resolver/index.py",
     "meeting_preparation_resolver/index.py",
+    "meeting_whiteboards/index.py",
     "meeting_controls_resolver/index.py",
     "microvm_vnc_token/vp_access.py",
     "speaker_name_resolver/index.py",

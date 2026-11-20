@@ -54,6 +54,7 @@ from tools import (
     summary_profiles,
     virtual_participants,
     vp_preparation,
+    whiteboards,
 )
 
 logger = logging.getLogger()
@@ -891,6 +892,23 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         audience=a.get("audience"),
         summary_profile=a.get("summaryProfile"),
         guidance=a.get("guidance"),
+    ),
+    "list_meeting_whiteboards": lambda caller, a: whiteboards.list_whiteboards(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "get_meeting_whiteboard": lambda caller, a: whiteboards.get_whiteboard(
+        _meeting(caller),
+        a.get("meetingId"),
+        a.get("whiteboardId"),
+        version=a.get("version"),
+        if_newer_than=a.get("ifNewerThan"),
+        fmt=a.get("format"),
+    ),
+    "create_meeting_whiteboard": lambda caller, a: whiteboards.create_whiteboard(
+        _meeting(caller), a.get("meetingId"), a
+    ),
+    "update_meeting_whiteboard": lambda caller, a: whiteboards.update_whiteboard(
+        _meeting(caller), a.get("meetingId"), a
     ),
     "get_meeting_consent": lambda caller, a: consent.execute(_meeting(caller), a.get("meetingId")),
     "update_scheduled_meeting": lambda caller, a: scheduled_meeting.execute(

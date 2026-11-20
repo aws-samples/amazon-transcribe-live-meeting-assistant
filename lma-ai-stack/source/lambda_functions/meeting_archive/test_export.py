@@ -131,6 +131,46 @@ def full_partitions():
         {"PK": s(f"nt#{CALL}"), "SK": s("n#3"), "Category": s("consent"), "Title": s("other")},
         {"PK": s(f"nt#{CALL}"), "SK": s("d#guidance#k"), "Category": s("guidance")},
     ]
+    panel = {
+        "M": {
+            "PanelId": s("decisions"),
+            "Title": s("Decisions"),
+            "Kind": s("markdown"),
+            "Content": s("- Ship in March"),
+            "Source": s("assistant"),
+            "UpdatedBy": s("LMA assistant"),
+            "UpdatedAt": s("2026-11-03T14:20:00.000Z"),
+        }
+    }
+    diagram = {
+        "M": {
+            "PanelId": s("diagram"),
+            "Title": s("Flow"),
+            "Kind": s("mermaid"),
+            "Content": s("flowchart TD\n  a-->b"),
+            "Source": s("user"),
+            "UpdatedBy": s("owner@example.com"),
+            "UpdatedAt": s("2026-11-03T14:30:00.000Z"),
+        }
+    }
+    board = {
+        "PK": s(f"wb#{CALL}"),
+        "WhiteboardId": s("wb1"),
+        "Title": s("Plan"),
+        "Template": s("decisions"),
+        "Instructions": s(""),
+        "AssistantUpdates": {"BOOL": True},
+        "Version": n(3),
+        "CreatedBy": s("owner@example.com"),
+        "CreatedAt": s("2026-11-03T14:00:00.000Z"),
+        "UpdatedBy": s("owner@example.com"),
+        "UpdatedAt": s("2026-11-03T14:30:00.000Z"),
+    }
+    parts[f"wb#{CALL}"] = [
+        {**board, "SK": s("b#wb1"), "Panels": {"L": [panel, diagram]}},
+        {**board, "SK": s("v#wb1#000001"), "Version": n(1), "Panels": {"L": [panel]}},
+        {"PK": s(f"wb#{CALL}"), "SK": s("index"), "Boards": n(1)},
+    ]
     return parts
 
 
@@ -287,6 +327,16 @@ def test_guidance_is_the_guidance_category_alone(fakes) -> None:
     ]
 
 
+def test_whiteboards_are_given_as_they_are_now_without_earlier_versions(fakes) -> None:
+    boards = export_of(fakes)["whiteboards"]
+    assert [b["whiteboardId"] for b in boards] == ["wb1"]
+    assert boards[0]["version"] == 3 and boards[0]["assistantUpdates"] is True
+    assert [(p["title"], p["kind"], p["source"]) for p in boards[0]["panels"]] == [
+        ("Decisions", "markdown", "assistant"),
+        ("Flow", "mermaid", "user"),
+    ]
+
+
 def test_action_items_say_plainly_when_there_is_no_owner(fakes) -> None:
     items = export_of(fakes)["actionItems"]
     assert items[0]["owner"] == "Priya Shah" and items[0]["segmentId"] == "s4"
@@ -305,6 +355,8 @@ def test_a_meeting_whose_transcript_was_deleted_matches_the_schema_without_it(fa
     ]
     # The summary is kept, as the meeting keeps it.
     assert document["summary"]["sections"]
+    # The whiteboards are drawn from the transcript, and deleted with it.
+    assert document["whiteboards"] == []
 
 
 def test_a_meeting_with_nothing_but_its_record_matches_the_schema(fakes) -> None:
@@ -453,11 +505,20 @@ def test_an_export_that_cannot_be_built_is_left_out_of_the_archive_with_a_note(
 
 
 def test_the_everything_archive_holds_the_export_and_lists_it(fakes) -> None:
-    _dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
+    dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
     started = prepare(OWNER)
     index.handler(json.loads(lam.invocations[0]["Payload"]), Context())
     archive = next(v for k, v in s3.stored.items() if k.endswith(".zip"))
     with zipfile.ZipFile(io.BytesIO(archive)) as opened:
         valid(json.loads(opened.read("meeting-export.json")))
         assert "`meeting-export.json`" in opened.read("README.md").decode()
+        board = opened.read("whiteboards/1-Plan.md").decode()
+        assert board.startswith("# Plan\n") and "```mermaid\nflowchart TD\n  a-->b\n```" in board
+        assert "`whiteboards/1-Plan.md`" in opened.read("README.md").decode()
     assert started["Contents"] == "EVERYTHING"
+    # Only the whiteboards themselves are read, not their versions or counters.
+    whiteboard_reads = [
+        q for q in dynamo.queries if q["ExpressionAttributeValues"][":pk"]["S"].startswith("wb#")
+    ]
+    assert whiteboard_reads
+    assert all(q["ExpressionAttributeValues"][":prefix"]["S"] == "b#" for q in whiteboard_reads)

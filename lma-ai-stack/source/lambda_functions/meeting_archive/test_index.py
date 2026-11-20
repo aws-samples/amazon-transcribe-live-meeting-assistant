@@ -107,13 +107,19 @@ class FakeDynamo:
     ):
         self.meeting = meeting
         self.partitions = partitions or {}
+        self.queries: List[Dict[str, Any]] = []
 
     def get_item(self, **kwargs):
         return {"Item": self.meeting} if self.meeting else {}
 
     def query(self, **kwargs):
-        pk = kwargs["ExpressionAttributeValues"][":pk"]["S"]
-        return {"Items": self.partitions.get(pk, [])}
+        self.queries.append(kwargs)
+        values = kwargs["ExpressionAttributeValues"]
+        items = self.partitions.get(values[":pk"]["S"], [])
+        prefix = values.get(":prefix", {}).get("S")
+        if prefix:
+            items = [i for i in items if str(i.get("SK", {}).get("S", "")).startswith(prefix)]
+        return {"Items": items}
 
 
 class Body:

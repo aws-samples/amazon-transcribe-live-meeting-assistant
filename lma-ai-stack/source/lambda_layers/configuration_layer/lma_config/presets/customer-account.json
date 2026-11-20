@@ -52,7 +52,8 @@
         "inMeetingRequesters": "anyone",
         "webSearchEnabled": false,
         "mcpServersEnabled": true,
-        "guidance": { "defaultEnabled": false }
+        "guidance": { "defaultEnabled": false },
+        "whiteboards": { "defaultEnabled": false }
       }
     },
     "meeting_processing": {

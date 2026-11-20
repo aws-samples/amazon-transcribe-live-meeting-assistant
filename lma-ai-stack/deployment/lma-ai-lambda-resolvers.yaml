@@ -1244,6 +1244,200 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt LiveGuidanceAnalyzerFunction.Arn
 
+  # ----------------------------------------------------------------------------
+  # Meeting whiteboards. The resolver for the whiteboard queries and mutations
+  # (one transaction per write, judged against the meeting at the moment of the
+  # write), and the assistant that keeps a meeting's whiteboards up to date from
+  # its transcript: invoked asynchronously by the call event processor, at most
+  # every intervalSeconds per meeting, for a meeting whose WhiteboardsEnabled is
+  # true and once at each meeting's end, and through requestWhiteboardUpdate.
+  # See docs/meeting-whiteboards.md.
+  # ----------------------------------------------------------------------------
+  MeetingWhiteboardsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt MeetingWhiteboardsFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/meeting_whiteboards
+      Description: Stores a meeting's whiteboards and keeps them up to date from its transcript
+      MemorySize: 512
+      # One model call per run over a bounded transcript, plus the paged reads.
+      # Below the run lease (LEASE_SECONDS), so a run that is stopped at its
+      # timeout cannot keep its meeting locked longer than the lease.
+      Timeout: 120
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
+          ADMIN_GROUP: "Admin"
+          LEASE_SECONDS: "180"
+          # Token usage per run, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AIStackName}/resolvers/lambda/MeetingWhiteboardsFunction
+      # A failed run is logged and skipped: the next one waits a full interval,
+      # and an asynchronous retry would only repeat a model call.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required: a run that fails is skipped by design and the next run reads the meeting again"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and numbers"
+    DependsOn:
+      - MeetingWhiteboardsFunctionLogGroup
+
+  MeetingWhiteboardsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AIStackName}/resolvers/lambda/MeetingWhiteboardsFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingWhiteboardsFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingWhiteboards Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-MeetingWhiteboards
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The meeting record (access, the switch), its transcript and key
+              # frames (what a run reads), and the whiteboards' own rows.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+                      - "trs#*"
+                      - "kf#*"
+                      - "wb#*"
+              # Each write is a transaction that checks the meeting row and
+              # writes only under wb#; the meeting switch is the one write of the
+              # meeting row (updateCallWhiteboards).
+              - Effect: Allow
+                Action:
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+                      - "wb#*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchWriteItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "wb#*"
+              # Metering records for the meeting cost estimate, only under mtr#.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
+              # The assistant's changes go through AppSync, so open meeting pages
+              # update and the resolver's rules apply to it as to anyone.
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/createMeetingWhiteboard"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/updateMeetingWhiteboard"
+              # Read-only, on the shared configuration table: the Whiteboards
+              # settings, the model and the transcript retention.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Ref ConfigurationTableArn
+              # Scoped as the live guidance analyzer scopes the identical call.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncMeetingWhiteboardsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-AppSyncInvokeMeetingWhiteboards
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MeetingWhiteboardsFunction.Arn
+
+  MeetingWhiteboardsLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      Name: MeetingWhiteboardsFunction
+      Description: Lambda function for the meeting whiteboard queries and mutations
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingWhiteboardsLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingWhiteboardsFunction.Arn
+
   UpdateAsrConfigLambdaDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
@@ -2152,6 +2346,8 @@ Outputs:
     Value: !GetAtt AgendaDeriverLambdaDataSource.Name
   LiveGuidanceAnalyzerLambdaDataSourceName:
     Value: !GetAtt LiveGuidanceAnalyzerLambdaDataSource.Name
+  MeetingWhiteboardsLambdaDataSourceName:
+    Value: !GetAtt MeetingWhiteboardsLambdaDataSource.Name
   UpdateAsrConfigLambdaDataSourceName:
     Value: !GetAtt UpdateAsrConfigLambdaDataSource.Name
   UpdateLLMPromptTemplateLambdaDataSourceName:
@@ -2178,3 +2374,5 @@ Outputs:
     Value: !GetAtt AgendaDeriverFunction.Arn
   LiveGuidanceAnalyzerFunctionArn:
     Value: !GetAtt LiveGuidanceAnalyzerFunction.Arn
+  MeetingWhiteboardsFunctionArn:
+    Value: !GetAtt MeetingWhiteboardsFunction.Arn

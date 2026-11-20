@@ -522,3 +522,17 @@ def test_a_guidance_run_is_due_at_most_every_interval_per_meeting():
     assert guidance_run_due("m2", 150.0, 90.0, queued)
     assert guidance_run_due("m1", 190.0, 90.0, queued)
     assert not guidance_run_due(None, 500.0, 90.0, queued)
+
+
+def test_whiteboard_settings_take_the_shipped_values_and_bounds():
+    from pure import whiteboard_settings  # noqa: PLC0415
+
+    assert whiteboard_settings({}) == (False, 180.0, True)
+    assert whiteboard_settings(None) == (False, 180.0, True)
+    assert whiteboard_settings({"defaultEnabled": True, "intervalSeconds": 5}) == (True, 60.0, True)
+    assert whiteboard_settings({"maxRunsPerMeeting": 0})[2] is False
+    assert whiteboard_settings({"intervalSeconds": "x", "defaultEnabled": "yes"}) == (
+        False,
+        180.0,
+        True,
+    )

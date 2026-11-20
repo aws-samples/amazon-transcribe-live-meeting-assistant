@@ -10,9 +10,11 @@ import {
   TAB_SUMMARY,
   TAB_SCREEN_SHARE,
   TAB_TRANSCRIPT,
+  TAB_WHITEBOARDS,
   availableTabs,
   defaultTab,
   resolveTab,
+  whiteboardsTabLabel,
 } from './meeting-tabs';
 
 describe('meeting tabs', () => {
@@ -23,8 +25,14 @@ describe('meeting tabs', () => {
   });
 
   it('offers Screen share only for a meeting with key frames', () => {
-    expect(availableTabs({ hasKeyframes: false })).toEqual([TAB_SUMMARY, TAB_TRANSCRIPT, TAB_DETAILS]);
-    expect(availableTabs({ hasKeyframes: true })).toEqual([TAB_SUMMARY, TAB_TRANSCRIPT, TAB_SCREEN_SHARE, TAB_DETAILS]);
+    expect(availableTabs({ hasKeyframes: false })).toEqual([TAB_SUMMARY, TAB_TRANSCRIPT, TAB_WHITEBOARDS, TAB_DETAILS]);
+    expect(availableTabs({ hasKeyframes: true })).toEqual([
+      TAB_SUMMARY,
+      TAB_TRANSCRIPT,
+      TAB_WHITEBOARDS,
+      TAB_SCREEN_SHARE,
+      TAB_DETAILS,
+    ]);
   });
 
   it('shows a requested tab the meeting has, and the default for one it does not', () => {
@@ -33,6 +41,12 @@ describe('meeting tabs', () => {
     expect(resolveTab(TAB_SCREEN_SHARE, { hasKeyframes: true })).toBe(TAB_SCREEN_SHARE);
     expect(resolveTab(TAB_SCREEN_SHARE, { hasKeyframes: false })).toBe(TAB_TRANSCRIPT);
     expect(resolveTab('agenda')).toBe(TAB_TRANSCRIPT);
+  });
+
+  it('offers Whiteboards on every meeting, counting them once there is one', () => {
+    expect(resolveTab(TAB_WHITEBOARDS)).toBe(TAB_WHITEBOARDS);
+    expect(whiteboardsTabLabel(0)).toBe('Whiteboards');
+    expect(whiteboardsTabLabel(3)).toBe('Whiteboards (3)');
   });
 
   it('opens the Summary tab for a link saved when it was called Overview', () => {

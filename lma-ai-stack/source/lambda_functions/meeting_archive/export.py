@@ -11,14 +11,15 @@ change; a new field is optional, and a consumer ignores what it does not know.
 
 Built from what the archive function reads anyway -- the meeting row, its
 transcript segments (``trs#``), key frames (``kf#``) and notifications
-(``nt#``) -- by :func:`build_export`, which reads nothing itself. Who may have
+(``nt#``) and whiteboards (``wb#``) -- by :func:`build_export`, which reads nothing itself. Who may have
 it is decided before it is built: the ``getCall`` rule, as for every archive.
 
 What the export never holds: an image (key frames are given by their alt text),
 a recording, a signed link, or the consent evidence (only whether it exists).
 Once the transcript was deleted under the Retention settings, the transcript,
-the links from the chat and the participants are left out, and the checklist's
-evidence has no quotes.
+the links from the chat and the participants are left out, the checklist's
+evidence has no quotes, and the whiteboards (deleted with the transcript) are an
+empty list.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from lma_speakers import (  # configuration layer
     split_diarization_label,
 )
 from lma_summary_profiles import DEFAULT_PROFILE, action_items_output  # configuration layer
+from lma_whiteboards import rules as whiteboard_rules  # configuration layer
 
 # pylint: enable=import-error
 
@@ -58,6 +60,7 @@ PARTS = (
     "actionItems",
     "keyframes",
     "guidance",
+    "whiteboards",
 )
 DEFAULT_INCLUDE = PARTS
 
@@ -449,12 +452,24 @@ def guidance_part(notifications: Iterable[Mapping[str, Any]]) -> List[Dict[str, 
     ]
 
 
+def whiteboards_part(rows: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """The meeting's whiteboards as they are now (no earlier versions), in the
+    order they were made: the rows under ``wb#`` whose sort key is ``b#``."""
+    boards = [
+        r for r in rows if isinstance(r, Mapping) and str(r.get("SK") or "b#").startswith("b#")
+    ]
+    return [
+        whiteboard_rules.whiteboard_output(b) for b in whiteboard_rules.sort_whiteboards(boards)
+    ]
+
+
 def build_export(
     meeting: Mapping[str, Any],
     *,
     segments: Sequence[Mapping[str, Any]] = (),
     keyframes: Sequence[Mapping[str, Any]] = (),
     notifications: Sequence[Mapping[str, Any]] = (),
+    whiteboards: Sequence[Mapping[str, Any]] = (),
     include: Sequence[str] = DEFAULT_INCLUDE,
     sections: Sequence[Tuple[str, str]] = (),
     state: Optional[Mapping[str, Any]] = None,
@@ -515,4 +530,7 @@ def build_export(
         export["actionItems"] = action_items_output(meeting.get("ActionItems"))
     if "guidance" in wanted:
         export["guidance"] = guidance_part(notifications)
+    if "whiteboards" in wanted:
+        # Drawn from the transcript, so deleted with it.
+        export["whiteboards"] = whiteboards_part(whiteboards) if retained else []
     return export

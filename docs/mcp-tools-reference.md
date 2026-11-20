@@ -70,6 +70,8 @@ client connects, and the API key scopes, are in
 | `list_meeting_guidance` | no | |
 | `list_meeting_notifications` | no | |
 | `list_summary_profiles` | no | |
+| `list_meeting_whiteboards` | no | |
+| `get_meeting_whiteboard` | no | |
 | `schedule_meeting` | yes | the caller schedules for themselves |
 | `start_meeting_now` | yes | the caller starts it for themselves |
 | `update_scheduled_meeting` | yes | the Virtual Participant's owner and Admin |
@@ -81,13 +83,15 @@ client connects, and the API key scopes, are in
 | `share_meeting` | yes | owner and Admin |
 | `push_meeting_guidance` | yes | |
 | `request_meeting_digest` | yes | |
+| `create_meeting_whiteboard` | yes | |
+| `update_meeting_whiteboard` | yes | |
 | `ask_meeting_assistant` | yes | |
 | `regenerate_meeting_summary` | yes | |
 | `end_meeting` | yes | the Virtual Participant's owner and Admin |
 | `end_virtual_participant` | yes | the Virtual Participant's owner and Admin |
 | `delete_meeting` | yes | owner and Admin |
 
-That is 32 tools. The examples below show the `arguments` of a `tools/call`
+That is 36 tools. The examples below show the `arguments` of a `tools/call`
 request and the JSON of the answer, shortened where marked.
 
 ## Before the meeting
@@ -335,6 +339,41 @@ the meeting. Answers with its text. One model call, billed to the meeting; see
 
 ```json
 {"meetingId": "e3b9…", "digest": "The renewal price and term are agreed. …\n\n**Still open**\n- Who signs off on the budget", "guidanceId": "6f0c…", "delivered": "Shown on the meeting page to its owner and the people it is shared with."}
+```
+
+### list_meeting_whiteboards, get_meeting_whiteboard
+
+A meeting's [whiteboards](meeting-whiteboards.md): named panels, each Markdown or a
+diagram in a subset of Mermaid, that the assistant can keep up to date during the
+meeting and its people can edit. `list_meeting_whiteboards` gives them without their
+panels. `get_meeting_whiteboard` gives one with its panels, each marked `source`
+`user` or `assistant`, or an earlier `version`. Pass `ifNewerThan` with the version
+you have to poll cheaply, and `format: "markdown"` for one Markdown document.
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "ifNewerThan": 7}
+```
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "version": 7, "notModified": true}
+```
+
+### create_meeting_whiteboard, update_meeting_whiteboard
+
+Make a whiteboard from a `template` (`decisions`, `process`, `comparison`, `timeline`
+or `blank`) or with the `panels` given, or change one. An update names the
+`baseVersion` it was made from, is refused if the whiteboard has moved on since, and
+takes the whole new list of `panels`. A panel the tool writes or changes is recorded
+as the caller's (`source: user`), so the assistant does not change it afterwards; send
+a panel with `source: "assistant"` to hand it to the assistant. Read-write key only.
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "baseVersion": 7,
+ "panels": [{"panelId": "decisions", "title": "Decisions", "content": "- Launch on March 4"}]}
+```
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "title": "Plan", "version": 8, "panels": [{"panelId": "decisions", "title": "Decisions", "kind": "markdown", "content": "- Launch on March 4", "source": "user", "updatedBy": "user@example.com", "updatedAt": "…"}], "…": "…"}
 ```
 
 ### list_summary_profiles

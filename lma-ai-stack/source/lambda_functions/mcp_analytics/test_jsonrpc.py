@@ -105,9 +105,13 @@ class TestMCPToolsList(unittest.TestCase):
             "set_meeting_checklist",
             "update_scheduled_meeting",
             "get_meeting_consent",
+            "list_meeting_whiteboards",
+            "get_meeting_whiteboard",
+            "create_meeting_whiteboard",
+            "update_meeting_whiteboard",
         ):
             self.assertIn(name, tool_names)
-        self.assertEqual(len(tool_names), 32)
+        self.assertEqual(len(tool_names), 36)
         for removed in ("get_live_transcript", "unshare_meeting"):
             self.assertNotIn(removed, tool_names)
 
@@ -274,6 +278,8 @@ class TestKeyScopes(unittest.TestCase):
         "update_checklist_item",
         "update_meeting_metadata",
         "update_scheduled_meeting",
+        "create_meeting_whiteboard",
+        "update_meeting_whiteboard",
     ]
 
     def _call(self, name, arguments=None, scope=None, is_admin="false"):

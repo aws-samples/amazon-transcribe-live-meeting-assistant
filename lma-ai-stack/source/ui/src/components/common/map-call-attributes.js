@@ -36,6 +36,8 @@ const mapCallsAttributes = (calls) => {
       GuidanceEnabled: guidanceEnabled,
       ActionItems: actionItems,
       MeetingPlatform: meetingPlatform,
+      // Whether the assistant keeps the meeting's whiteboards updated.
+      WhiteboardsEnabled: whiteboardsEnabled,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
@@ -126,6 +128,7 @@ const mapCallsAttributes = (calls) => {
       guidanceEnabled,
       actionItems,
       meetingPlatform,
+      whiteboardsEnabled,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
@@ -248,6 +251,9 @@ export const adoptMeetingCopy = (current, incoming) => {
     // Not selected by the list query or the Kinesis pipeline's updates.
     guidanceEnabled: keep('guidanceEnabled'),
     meetingPlatform: keep('meetingPlatform'),
+    // Selected by getCall, onUpdateCall and updateCallWhiteboards only; a write
+    // that does not select it arrives with it null, which keeps the copy held.
+    whiteboardsEnabled: keep('whiteboardsEnabled'),
   };
 };
 

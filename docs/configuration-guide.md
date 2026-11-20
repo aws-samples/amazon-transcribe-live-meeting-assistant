@@ -469,6 +469,10 @@ as the Regulated – consent required preset, with the same consequences for Str
 Audio, the Desktop Capture App and the Webex join, keeps the transcript, and
 turns requests made in the meeting, web search and the installed MCP servers off.
 
+Every preset leaves **Meeting Assistant › Whiteboards › On for new meetings** off, so
+the assistant's [whiteboard](meeting-whiteboards.md) updates run only for a meeting
+someone turns them on for; whiteboards made by hand are available under every preset.
+
 Standard holds the shipped defaults, so applying it in the editor puts these
 settings back after another preset changed them. The layer's tests
 hold each preset to exactly the values in this table.

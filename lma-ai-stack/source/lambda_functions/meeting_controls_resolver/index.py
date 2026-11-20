@@ -774,7 +774,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  7. Deletion of the meeting's consent evidence images
         #  8. Deletion of the meeting's chat attachments (PK att#<CallId>, and files)
         #  9. Deletion of its notifications and every user's view of them (PK nt#<CallId>)
-        with ThreadPoolExecutor(max_workers=9) as pool:
+        # 10. Deletion of its whiteboards, their versions and state (PK wb#<CallId>)
+        with ThreadPoolExecutor(max_workers=10) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(delete_transcript_items, callid)
             details_future = pool.submit(get_call_details, appsync_session, schema, callid)
@@ -785,6 +786,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             evidence_future = pool.submit(delete_consent_evidence, callid)
             attachments_future = pool.submit(delete_chat_attachments, callid)
             notifications_future = pool.submit(delete_meeting_notifications, callid)
+            whiteboards_future = pool.submit(delete_meeting_whiteboards, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -796,6 +798,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             evidence_future.result()
             attachments_future.result()
             notifications_future.result()
+            whiteboards_future.result()
 
         call_details = (details_result or {}).get("getCall") or {}
         shared_with = call_details.get("SharedWith")
@@ -864,6 +867,19 @@ def delete_meeting_notifications(callid):
     """
     deleted = _delete_partition(f"nt#{callid}", "notification row", callid)
     return deleted + _delete_partition(f"gd#{callid}", "guidance item", callid)
+
+
+def delete_meeting_whiteboards(callid):
+    """Delete the meeting's whiteboards (PK ``wb#<CallId>``): each whiteboard, its
+    versions, the count, the write counters and the assistant's state. Each expires
+    with the transcript, so without this a deleted meeting's would remain until then.
+
+    It runs beside the other steps while the meeting row still exists, so a
+    whiteboard write committed in that moment can remain after it. Such a row
+    still expires with the transcript, and once deleteCall removes the meeting
+    row the resolver refuses every further write, since each write checks it.
+    """
+    return _delete_partition(f"wb#{callid}", "whiteboard row", callid)
 
 
 def _delete_partition(pk, kind, callid):

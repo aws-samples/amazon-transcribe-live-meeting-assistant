@@ -153,7 +153,7 @@ def test_the_function_reads_only_meeting_partitions_and_writes_no_items(ai_stack
     assert len(dynamo) == 1
     assert sorted(dynamo[0]["Action"]) == ["dynamodb:GetItem", "dynamodb:Query"]
     keys = dynamo[0]["Condition"]["ForAllValues:StringLike"]["dynamodb:LeadingKeys"]
-    assert sorted(keys) == ["att#*", "c#*", "kf#*", "nt#*", "trs#*"]
+    assert sorted(keys) == ["att#*", "c#*", "kf#*", "nt#*", "trs#*", "wb#*"]
 
 
 def test_the_mcp_server_builds_meeting_exports_with_the_function(ai_stack: dict) -> None:

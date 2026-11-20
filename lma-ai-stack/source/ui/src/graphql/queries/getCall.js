@@ -56,6 +56,7 @@ export default /* GraphQL */ `
         SegmentId
       }
       MeetingPlatform
+      WhiteboardsEnabled
       TranscriptDeletionScheduledFor
       TranscriptDeletedAt
       TranscriptSegmentsDeleted

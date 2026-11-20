@@ -127,6 +127,9 @@ export const mergeCallUpdate = (existing, call) => ({
   // make, but not by the Kinesis pipeline's updates or the list query, so an
   // update without it keeps the value. Every write of it is true or false.
   GuidanceEnabled: call.GuidanceEnabled ?? existing?.GuidanceEnabled,
+  // Selected by getCall, onUpdateCall and updateCallWhiteboards; every other
+  // write published to onUpdateCall arrives with it null, which is not a change.
+  WhiteboardsEnabled: call.WhiteboardsEnabled ?? existing?.WhiteboardsEnabled,
   ...(call.AgendaUpdatedAt
     ? {}
     : {

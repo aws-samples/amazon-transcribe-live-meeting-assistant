@@ -443,13 +443,17 @@ def session_urls(meeting: Mapping[str, Any], single: str, many: str) -> List[str
     return urls
 
 
-def query_items(partition: str) -> List[Dict[str, Any]]:
+def query_items(partition: str, prefix: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Every item of one partition, or only those whose sort key starts with ``prefix``."""
     items: List[Dict[str, Any]] = []
     kwargs: Dict[str, Any] = {
         "TableName": EVENT_SOURCING_TABLE,
         "KeyConditionExpression": "PK = :pk",
         "ExpressionAttributeValues": {":pk": {"S": partition}},
     }
+    if prefix:
+        kwargs["KeyConditionExpression"] = "PK = :pk AND begins_with(SK, :prefix)"
+        kwargs["ExpressionAttributeValues"][":prefix"] = {"S": prefix}
     while True:
         page = DYNAMODB.query(**kwargs)
         items.extend(_item(raw) for raw in page.get("Items", []))
@@ -936,6 +940,23 @@ def plan_archive(
     else:
         plan.add_text("meeting-export.json", exported, "Meeting export (docs/meeting-export.md)")
 
+    # Each whiteboard as it is now, one Markdown file each, diagrams as mermaid
+    # code blocks. Deleted with the transcript, as they are drawn from it.
+    if meeting.get("TranscriptDeletedAt"):
+        plan.leave_out("Whiteboards", "deleted with the transcript under the Retention settings")
+    else:
+        boards = [
+            row
+            for row in query_items(f"wb#{call_id}", "b#")
+            if str(row.get("SK") or "").startswith("b#")
+        ]
+        for number, board in enumerate(export.whiteboard_rules.sort_whiteboards(boards), start=1):
+            plan.add_text(
+                f"whiteboards/{number}-{safe_name(board.get('Title'), 'whiteboard')}.md",
+                export.whiteboard_rules.whiteboard_markdown(board),
+                f"Whiteboard: {board.get('Title') or 'untitled'} (Markdown)",
+            )
+
     details = {k: meeting[k] for k in DETAILS_FIELDS if k in meeting}
     details["Participants"] = participants
     details["Sessions"] = sessions
@@ -1042,6 +1063,7 @@ def meeting_export(
             query_items(f"kf#{call_id}") if {"keyframes", "transcript"} & set(wanted) else []
         )
     notifications = query_items(f"nt#{call_id}") if "guidance" in wanted else []
+    whiteboards = query_items(f"wb#{call_id}", "b#") if retained and "whiteboards" in wanted else []
     try:
         state = json.loads(meeting.get("CallSummaryState") or "{}")
     except (TypeError, ValueError):
@@ -1051,6 +1073,7 @@ def meeting_export(
         segments=segments,
         keyframes=keyframes,
         notifications=notifications,
+        whiteboards=whiteboards,
         include=wanted,
         sections=summary_sections(meeting.get("CallSummaryText")),
         state=state if isinstance(state, dict) else {},

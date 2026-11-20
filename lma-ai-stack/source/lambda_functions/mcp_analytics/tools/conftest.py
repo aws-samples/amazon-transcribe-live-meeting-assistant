@@ -62,6 +62,7 @@ def appsync(monkeypatch):
         notifications,
         preparation,
         virtual_participants,
+        whiteboards,
     )
 
     recorder = Recorder()
@@ -74,6 +75,7 @@ def appsync(monkeypatch):
         notifications,
         preparation,
         virtual_participants,
+        whiteboards,
     ):
         monkeypatch.setattr(module, "graphql", recorder.graphql)
     return recorder

@@ -97,6 +97,7 @@ from pure import (  # noqa: E402
     segment_analyses,
     session_number_of,
     transcription_pause_state,
+    whiteboard_settings,
 )
 
 # pylint: enable=import-error
@@ -135,6 +136,10 @@ AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
 # GuidanceEnabled is true, at most every intervalSeconds per meeting here. See
 # live_guidance_analyzer and docs/live-guidance.md.
 LIVE_GUIDANCE_ANALYZER_ARN = getenv("LIVE_GUIDANCE_ANALYZER_ARN", "")
+# The assistant's whiteboard runs, queued the same way for a meeting whose
+# WhiteboardsEnabled is true, and once more at each meeting's end. See
+# meeting_whiteboards and docs/meeting-whiteboards.md.
+MEETING_WHITEBOARDS_ARN = getenv("MEETING_WHITEBOARDS_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
@@ -150,6 +155,8 @@ AGENDA_PASS_QUEUED: set = set()
 # When this execution environment last queued a live guidance run per meeting;
 # see guidance_run_due.
 GUIDANCE_RUN_QUEUED: Dict[str, float] = {}
+# When this execution environment last queued a whiteboard run per meeting.
+WHITEBOARD_RUN_QUEUED: Dict[str, float] = {}
 # The languages this execution environment has added to each meeting's
 # DetectedLanguages; see language_to_record.
 DETECTED_LANGUAGES_NOTED: Dict[str, set] = {}
@@ -266,6 +273,39 @@ def queue_guidance_run(call_id: str) -> None:
         )
 
 
+def meeting_whiteboards_settings() -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Whiteboards: on for new meetings, the interval, available.
+
+    Read as live_guidance_settings reads its section; a read that fails is the
+    shipped values, off for new meetings.
+    """
+    try:
+        raw = read_setting(MEETING_ASSIST.name, "whiteboards", default={})
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the Whiteboards settings; using the shipped ones")
+        raw = {}
+    return whiteboard_settings(raw)
+
+
+def queue_whiteboard_run(call_id: str, trigger: str = "auto") -> None:
+    """Queue a run of the whiteboards' assistant, fire-and-forget, as queue_guidance_run.
+
+    The function decides for itself whether the run is due, from the meeting's
+    switch, its lease and what was said; a failure to queue is logged and the
+    event processed regardless.
+    """
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=MEETING_WHITEBOARDS_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": trigger}),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue a whiteboard run; continuing", extra=dict(call_id=call_id)
+        )
+
+
 @lru_cache(maxsize=8)
 def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
     """``pattern`` compiled, or None when it is not a regular expression."""
@@ -301,6 +341,7 @@ if (
     or TRANSCRIPT_DELETION_FUNCTION_ARN
     or AGENDA_DERIVER_ARN
     or LIVE_GUIDANCE_ANALYZER_ARN
+    or MEETING_WHITEBOARDS_ARN
     or KEYFRAME_TEXT_EXTRACTOR_ARN
     or CHAT_ATTACHMENT_SUMMARIZER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
@@ -1996,6 +2037,7 @@ async def get_call_details(
                 *call_fields(schema),
                 schema.Call.TranscriptDeletedAt,
                 *guidance_field(schema),
+                *whiteboards_field(schema),
             )
         )
     )
@@ -2036,6 +2078,8 @@ async def get_call_details(
         details["TranscriptDeletedAt"] = call["TranscriptDeletedAt"]
     if call.get("GuidanceEnabled") is True:
         details["GuidanceEnabled"] = True
+    if call.get("WhiteboardsEnabled") is True:
+        details["WhiteboardsEnabled"] = True
     return details
 
 
@@ -2048,6 +2092,14 @@ def guidance_field(schema: DSLSchema) -> tuple:
     # pylint: disable-next=protected-access
     if "GuidanceEnabled" in schema.Call._type.fields:
         return (schema.Call.GuidanceEnabled,)
+    return ()
+
+
+def whiteboards_field(schema: DSLSchema) -> tuple:
+    """Call.WhiteboardsEnabled, when the schema the API is running declares it (see guidance_field)."""
+    # pylint: disable-next=protected-access
+    if "WhiteboardsEnabled" in schema.Call._type.fields:
+        return (schema.Call.WhiteboardsEnabled,)
     return ()
 
 
@@ -2143,6 +2195,13 @@ async def execute_process_event_api_mutation(
         ):
             default_on, _interval, available = live_guidance_settings()
             message["GuidanceEnabled"] = default_on and available
+        # The whiteboards' assistant for the new meeting: a choice the event
+        # carries, else the deployment's On for new meetings.
+        if not isinstance(message.get("WhiteboardsEnabled"), bool) and input_declares(
+            appsync_session, "CreateCallInput", "WhiteboardsEnabled"
+        ):
+            default_on, _interval, available = meeting_whiteboards_settings()
+            message["WhiteboardsEnabled"] = default_on and available
         response = await execute_create_call_mutation(
             message=message, appsync_session=appsync_session
         )
@@ -2335,6 +2394,13 @@ async def execute_process_event_api_mutation(
         # not: a failure redelivers the record with the meeting still open, so
         # the retry schedules it. The function is idempotent, and returns at
         # once while the Retention section leaves transcripts alone.
+        # The whiteboards' last run, so they include the meeting's last minutes.
+        # Queued for every meeting that ends: the function reads the meeting's
+        # WhiteboardsEnabled and returns at once, with no model call, when the
+        # assistant's updates are off.
+        if MEETING_WHITEBOARDS_ARN and not was_already_ended:
+            queue_whiteboard_run(message.get("CallId"), "final")
+
         if TRANSCRIPT_DELETION_FUNCTION_ARN and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
@@ -2592,6 +2658,20 @@ async def execute_process_event_api_mutation(
                     GUIDANCE_RUN_QUEUED,
                 ):
                     queue_guidance_run(normalized_message["CallId"])
+            if (
+                MEETING_WHITEBOARDS_ARN
+                and payload.get("WhiteboardsEnabled") is True
+                and not normalized_message["IsPartial"]
+                and is_speech_channel(normalized_message.get("Channel"))
+            ):
+                _default_on, interval, available = meeting_whiteboards_settings()
+                if available and guidance_run_due(
+                    normalized_message.get("CallId"),
+                    time.monotonic(),
+                    interval,
+                    WHITEBOARD_RUN_QUEUED,
+                ):
+                    queue_whiteboard_run(normalized_message["CallId"])
             if analyses.agent_assist:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,

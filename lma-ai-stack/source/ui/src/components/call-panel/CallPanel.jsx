@@ -68,6 +68,7 @@ import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
 import ChecklistPanel from './ChecklistPanel';
 import LiveGuidancePanel from './LiveGuidancePanel';
+import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
 import MeetingContextPanel from './MeetingContextPanel';
 import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
@@ -84,7 +85,14 @@ import MeetingAttributes from './MeetingAttributes';
 import MeetingAssistantPanel from './MeetingAssistantPanel';
 import useAssistantPanel from '../../hooks/use-assistant-panel';
 import { NodeSlot, useDetachedNode } from './NodeSlot';
-import { TAB_DETAILS, TAB_SCREEN_SHARE, TAB_SUMMARY, TAB_TRANSCRIPT } from './meeting-tabs';
+import {
+  TAB_DETAILS,
+  TAB_SCREEN_SHARE,
+  TAB_SUMMARY,
+  TAB_TRANSCRIPT,
+  TAB_WHITEBOARDS,
+  whiteboardsTabLabel,
+} from './meeting-tabs';
 import SummarySections from './SummarySections';
 import useMeetingTab from '../../hooks/use-meeting-tab';
 import useTranscriptTranslation from '../../hooks/use-transcript-translation';
@@ -2078,6 +2086,9 @@ export const CallPanel = ({
     setKeyframes({ count: 0, more: false, loaded: false });
   }, [item.callId]);
   const hasKeyframes = keyframes.count > 0;
+  // The meeting's whiteboards, kept current by their own subscription; held
+  // here so the tab's label can count them. See docs/meeting-whiteboards.md.
+  const whiteboards = useMeetingWhiteboards(item.callId);
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
   // Opening the live view also opens the tab it is on, wherever it was asked for.
   const setVncPreview = useCallback(
@@ -2797,6 +2808,18 @@ export const CallPanel = ({
   const tabs = [
     { id: TAB_SUMMARY, label: 'Summary', content: summaryTab, contentRenderStrategy: 'eager' },
     { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
+    {
+      id: TAB_WHITEBOARDS,
+      label: whiteboardsTabLabel(whiteboards.items.length),
+      content: (
+        <WhiteboardsTab
+          whiteboards={whiteboards}
+          readOnly={speakerNamesReadOnly}
+          assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
+        />
+      ),
+      contentRenderStrategy: 'eager',
+    },
     ...(hasKeyframes
       ? [
           {
