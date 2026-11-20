@@ -52,8 +52,9 @@ What is deleted, for the meeting:
 * the transcript knowledge base's entries for those files;
 * the meeting's notifications of the categories that may quote the transcript
   (``guidance``; ``lma_notifications.TRANSCRIPT_BOUND_CATEGORIES``), with
-  their dedup pointers, and any guidance rows an earlier build stored under
-  ``gd#<CallId>``. The meeting's other notifications are kept.
+  their dedup pointers, and any guidance rows stored under ``gd#<CallId>`` on
+  deployments of a development build only (this sweep can go after the next
+  release). The meeting's other notifications are kept.
 
 The meeting record is then stamped with when its transcript was deleted, and
 how many segments and files were removed, which the meeting page shows. The
@@ -425,7 +426,7 @@ def delete_transcript_bound_notifications(call_id: str) -> int:
     The notifications of TRANSCRIPT_BOUND_CATEGORIES and their dedup pointers,
     both of which carry the category, under ``nt#<CallId>``; the partition's
     other rows (other categories, publish counters, users' views) are kept.
-    Also every row under ``gd#<CallId>``, where an earlier build kept guidance.
+    Also every row under ``gd#<CallId>``, where a development build kept guidance.
     """
     deleted = 0
     with _table().batch_writer() as batch:

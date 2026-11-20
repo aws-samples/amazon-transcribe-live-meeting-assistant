@@ -104,6 +104,10 @@ def test_the_transcript_deletion_removes_the_guidance_only(observed) -> None:
     assert observed["user_rows_after_transcript_deletion"] == 1
 
 
+def test_guidance_is_refused_once_the_transcript_is_deleted(observed) -> None:
+    assert observed["guidance_after_deletion"] == "refused", observed["guidance_after_deletion"]
+
+
 def test_deleting_the_meeting_deletes_every_notification_row(observed) -> None:
     assert not observed["meeting_after_delete"], observed["delete_result"]
     assert observed["rows_after_delete"] == 0

@@ -234,6 +234,7 @@ def test_the_request_is_signed_for_appsync(monkeypatch):
     [
         ("RateLimited", notifications.NotificationRateLimited),
         ("NotFound", notifications.NotificationMeetingNotFound),
+        ("TranscriptDeleted", notifications.NotificationTranscriptDeleted),
         ("BadRequest", notifications.NotificationError),
     ],
 )

@@ -152,7 +152,9 @@ contract test holds the two lists to each other.
 ## Retention
 
 - **Guidance** (category `guidance`) may quote the meeting, so it follows the
-  **transcript**. It expires with the transcript (**Days to keep transcript
+  **transcript**. Once a meeting's transcript is deleted, a guidance publish to
+  it is refused (`NotificationTranscriptDeleted`), and an update through a
+  DedupKey keeps the expiry the first publish gave it. It expires with the transcript (**Days to keep transcript
   segments**), and the [transcript deletion](transcript-deletion.md) function
   deletes it when the transcript is deleted after the summary. That includes
   the guidance an MCP client pushed with `push_meeting_guidance`.

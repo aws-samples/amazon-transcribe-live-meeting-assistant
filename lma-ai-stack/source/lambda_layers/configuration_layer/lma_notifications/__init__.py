@@ -114,6 +114,10 @@ class NotificationMeetingNotFound(NotificationError):
     """There is no such meeting."""
 
 
+class NotificationTranscriptDeleted(NotificationError):
+    """The meeting's transcript is deleted, so a transcript-bound category is not kept."""
+
+
 def _text(value: Any, field: str, limit: int, required: bool) -> Optional[str]:
     if value is None or (isinstance(value, str) and not value.strip()):
         if required:
@@ -329,6 +333,8 @@ def appsync_graphql(query: str, variables: Mapping[str, Any]) -> Dict[str, Any]:
             raise NotificationRateLimited(message, error_type)
         if error_type == "NotFound":
             raise NotificationMeetingNotFound(message, error_type)
+        if error_type == "TranscriptDeleted":
+            raise NotificationTranscriptDeleted(message, error_type)
         raise NotificationError(message, error_type)
     return result.get("data") or {}
 

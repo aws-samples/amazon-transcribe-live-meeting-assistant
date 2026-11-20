@@ -37,7 +37,9 @@ export function request(ctx) {
     // The same expiry as the notification, set or removed as the write does, so
     // the pointer never expires before the notification it finds.
     if (expiresAfter !== null && expiresAfter !== undefined) {
-        expression = `${expression}, #ttl = :ttl`;
+        expression = ctx.stash.notificationTranscriptBound
+            ? `${expression}, #ttl = if_not_exists(#ttl, :ttl)`
+            : `${expression}, #ttl = :ttl`;
         values[':ttl'] = expiresAfter;
     } else {
         expression = `${expression} REMOVE #ttl`;

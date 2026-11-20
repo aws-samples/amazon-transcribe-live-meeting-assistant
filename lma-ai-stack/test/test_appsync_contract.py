@@ -1147,3 +1147,16 @@ def test_enum_bodies_carry_no_comments(schema_sdl: str) -> None:
     """AppSync rejects a # comment inside an enum body that graphql-core accepts."""
     for match in re.finditer(r"^enum (\w+)\s*\{(.*?)^\}", schema_sdl, re.M | re.S):
         assert "#" not in match.group(2), f"enum {match.group(1)} has a comment in its body"
+
+
+def test_transcript_bound_categories_are_the_publish_helpers() -> None:
+    """The resolver refuses, and keeps the expiry of, the categories the helper and the transcript deletion treat as quoting the transcript."""
+    import importlib.util
+
+    text = (APPSYNC_DIR / "notificationPublishMeeting.js").read_text()
+    block = _block_between(text, "// BEGIN transcriptBoundCategories", "// END transcriptBoundCategories")
+    in_resolver = set(re.findall(r"'([a-z][a-z0-9_-]*)'", block))
+    spec = importlib.util.spec_from_file_location("lma_notifications_for_contract", NOTIFICATIONS_HELPER)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    assert in_resolver == set(helper.TRANSCRIPT_BOUND_CATEGORIES)

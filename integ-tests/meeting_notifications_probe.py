@@ -327,6 +327,13 @@ class Probe:
         self.observed["user_rows_after_transcript_deletion"] = sum(
             1 for row in rows if row["SK"]["S"].startswith("u#")
         )
+        try:
+            self.publish(category="guidance", type="note", title="After the transcript")
+            self.observed["guidance_after_deletion"] = "accepted"
+        except self.n.NotificationTranscriptDeleted:
+            self.observed["guidance_after_deletion"] = "refused"
+        except self.n.NotificationError as error:
+            self.observed["guidance_after_deletion"] = f"other: {error.error_type}"
 
     def meeting_deletion(self) -> None:
         self.observed["delete_result"] = self._controls("deleteMeetings", {})

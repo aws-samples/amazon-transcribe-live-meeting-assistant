@@ -108,7 +108,10 @@ export function request(ctx) {
         removes.push('#ttl');
     } else {
         values[':ttl'] = expiresAfter;
-        sets.push('#ttl = :ttl');
+        // A notification that may quote the transcript keeps the expiry its
+        // first publish gave it, so updating it never takes it past the
+        // transcript's retention.
+        sets.push(ctx.stash.notificationTranscriptBound ? '#ttl = if_not_exists(#ttl, :ttl)' : '#ttl = :ttl');
     }
     let expression = `SET ${sets.join(', ')} ADD #revision :one`;
     if (removes.length > 0) {

@@ -64,6 +64,12 @@ const MUTATION_ACTION_VALUES = {
     },
 };
 
+// BEGIN transcriptBoundCategories -- the categories that may quote the
+// transcript and are kept only as long as it is: lma_notifications'
+// TRANSCRIPT_BOUND_CATEGORIES, which test_appsync_contract.py holds this to.
+const TRANSCRIPT_BOUND_CATEGORIES = ['guidance'];
+// END transcriptBoundCategories
+
 function bad(message) {
     util.error(message, 'BadRequest');
 }
@@ -209,6 +215,16 @@ export function response(ctx) {
     if (!meeting) {
         util.error(`Meeting ${ctx.args.input.CallId} was not found`, 'NotFound');
     }
+    // A category that may quote the transcript is not stored once the
+    // transcript is deleted, as a checklist quote sent after it is not.
+    const transcriptBound = TRANSCRIPT_BOUND_CATEGORIES.includes(ctx.args.input.Category);
+    if (transcriptBound && meeting.TranscriptDeletedAt) {
+        util.error(
+            `Meeting ${ctx.args.input.CallId} has had its transcript deleted, so ${ctx.args.input.Category} is not kept for it`,
+            'TranscriptDeleted',
+        );
+    }
+    ctx.stash.notificationTranscriptBound = transcriptBound;
     // UTC with three digits of milliseconds always, so stored times order by
     // time as strings, as listMeetingNotifications.js compares Since with them.
     const now = util.time.epochMilliSecondsToFormatted(

@@ -615,3 +615,41 @@ def test_a_pointer_loses_its_expiry_when_the_notification_does(client) -> None:
     }))
     assert request["update"]["expression"].endswith("REMOVE #ttl")
     assert ":ttl" not in request["update"]["expressionValues"]
+
+
+def test_guidance_for_a_meeting_whose_transcript_is_deleted_is_refused(client) -> None:
+    meeting = {"PK": "c#m1", "Owner": OWNER, "ExpiresAfter": 2000, "TranscriptDeletedAt": "2026-11-19T15:00:00Z"}
+    response = _evaluate(client, "notificationPublishMeeting.js", "response", {
+        "arguments": _publish(),
+        "identity": BACKEND,
+        "result": meeting,
+    })
+    assert "transcript deleted" in _error(response)
+
+
+def test_another_category_is_kept_after_the_transcript_is_deleted(client) -> None:
+    meeting = {"PK": "c#m1", "Owner": OWNER, "ExpiresAfter": 2000, "TranscriptDeletedAt": "2026-11-19T15:00:00Z"}
+    response = _evaluate(client, "notificationPublishMeeting.js", "response", {
+        "arguments": _publish(Category="status"),
+        "identity": BACKEND,
+        "result": meeting,
+    })
+    _ok(response)
+    assert json.loads(response["stash"])["notificationTranscriptBound"] is False
+
+
+@pytest.mark.parametrize("bound, expected", [(True, "#ttl = if_not_exists(#ttl, :ttl)"), (False, "#ttl = :ttl")])
+def test_an_update_keeps_a_transcript_bound_expiry(client, bound, expected) -> None:
+    stash = dict(WRITE_STASH, notificationTranscriptBound=bound)
+    request = _ok(_evaluate(client, "notificationPublishWrite.js", "request", {
+        "arguments": _publish(),
+        "identity": BACKEND,
+        "stash": stash,
+    }))
+    assert expected in request["update"]["expression"]
+    pointer = _ok(_evaluate(client, "notificationPublishDedup.js", "request", {
+        "arguments": _publish(DedupKey="k"),
+        "identity": BACKEND,
+        "stash": stash,
+    }))
+    assert expected in pointer["update"]["expression"]
