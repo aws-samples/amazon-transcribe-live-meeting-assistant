@@ -5,15 +5,15 @@
 
 One probe run (meeting_whiteboards_probe.py) creates a meeting with the
 assistant's whiteboard updates on and a control meeting with them off, sends a
-recorded planning conversation to both in two waves, edits one panel as the
-Cognito test user between the waves, and observes what the assistant did, what
+recorded planning conversation to both in three waves, edits one panel as the
+Cognito test user between the assistant's first and second runs, and observes what the assistant did, what
 MCP and the export return, and what the transcript deletion removes. Each test
 asserts one property. The model's wording varies, so the assertions about it are
 loose: a panel the assistant filled, not its text. What the whiteboards held is
 printed, so a reader can judge their quality.
 
 Runs whenever a Cognito test user is configured, and skips without one. Takes
-about eight minutes: the transcript is sent in two waves an interval apart.
+about twelve minutes: the transcript is sent in three waves an interval apart.
 Self-cleaning: both meetings are removed by their CallIds, and the API keys are
 revoked.
 """
@@ -34,7 +34,9 @@ def observed(client):
     try:
         import pycognito  # noqa: F401
     except ImportError:
-        pytest.skip("pycognito not installed (pip install -r integ-tests/requirements.txt)")
+        pytest.skip(
+            "pycognito not installed (pip install -r integ-tests/requirements.txt)"
+        )
 
     from meeting_whiteboards_probe import run_probe
 
@@ -52,7 +54,9 @@ def test_the_meetings_start_with_their_whiteboards_choice(observed) -> None:
     assert observed["control_enabled"] is False
 
 
-def test_a_whiteboard_made_by_hand_is_the_users_and_costs_no_model_call(observed) -> None:
+def test_a_whiteboard_made_by_hand_is_the_users_and_costs_no_model_call(
+    observed,
+) -> None:
     manual = observed["manual"]
     assert manual["Version"] == 2 and manual["Panels"][0]["Source"] == "user"
     assert (
@@ -67,7 +71,11 @@ def test_the_assistant_makes_and_fills_the_default_whiteboard(observed) -> None:
     assert boards, observed["first_state"]
     board = boards[0]
     assert board["Template"] == "decisions" and board["CreatedBy"] == "LMA assistant"
-    filled = [p for p in board["Panels"] if p["Source"] == "assistant" and p["Content"].strip()]
+    filled = [
+        p
+        for p in board["Panels"]
+        if p["Source"] == "assistant" and p["Content"].strip()
+    ]
     assert filled, board
     assert "MeetingWhiteboards" in observed["assisted_metering"]
 
@@ -92,7 +100,10 @@ def test_each_change_is_a_version_with_its_source(observed) -> None:
 
 
 def test_only_a_read_write_key_is_offered_the_whiteboard_writes(observed) -> None:
-    assert observed["read_key_tools"] == ["get_meeting_whiteboard", "list_meeting_whiteboards"]
+    assert observed["read_key_tools"] == [
+        "get_meeting_whiteboard",
+        "list_meeting_whiteboards",
+    ]
     assert observed["rw_key_tools"] == [
         "create_meeting_whiteboard",
         "get_meeting_whiteboard",

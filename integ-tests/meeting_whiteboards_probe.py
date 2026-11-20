@@ -10,11 +10,15 @@ the CallDataStream, as kds_pipeline_probe sends):
 * the **control** meeting starts with ``WhiteboardsEnabled: false``, and gets a
   whiteboard made by hand.
 
-The assisted meeting is sent a recorded planning conversation in two waves, the
-second a little over the shipped 180 seconds between runs after the first. After
-the first run has filled the default whiteboard, the test user rewrites its
-Decisions panel; the probe then records whether the second run left that panel
-as the user wrote it. It reads the whiteboards over the hosted MCP server with a
+Both meetings are sent a recorded planning conversation in three waves (16, 16
+and 8 finished segments), each a little over the shipped 180 seconds between runs
+after the one before. A run is queued when a segment arrives, at most once per
+interval, and needs 15 new segments, so the first segment of the second wave
+starts the run that reads the first wave. After the third wave the test user presses
+Update now, which needs only one new segment, so a second run happens whatever the
+automatic trigger saw. Between those two runs the test user
+rewrites the Decisions panel; the probe then records whether the second run left
+that panel as the user wrote it. It reads the whiteboards over the hosted MCP server with a
 read-write key (and checks a read key is not offered the write tools), reads the
 meeting export, runs the transcript deletion function on the assisted meeting,
 and records the metering of both meetings.
@@ -42,14 +46,26 @@ from ws_stream_probe import _mint_tokens, _outputs, _stack_resources
 
 MEETING_WAIT_SECONDS = 90
 #: A little over the shipped Seconds between runs (180).
-SECOND_WAVE_AFTER_SECONDS = 200
+#: A little over the shipped Seconds between runs, so a wave's first segment queues a run.
+WAVE_GAP_SECONDS = 200
 RUN_WAIT_SECONDS = 300
-USER_DECISION = "- Launch moves to the second week of March (set by the integration test)"
+USER_DECISION = (
+    "- Launch moves to the second week of March (set by the integration test)"
+)
 
 CONVERSATION = [
-    ("Ana", "Thanks for joining. Today we need to settle the launch date and the pricing tiers."),
-    ("Ben", "Engineering can be ready by the first week of March if the payments work lands."),
-    ("Ana", "Then let's decide: we launch on March fourth, assuming payments are done."),
+    (
+        "Ana",
+        "Thanks for joining. Today we need to settle the launch date and the pricing tiers.",
+    ),
+    (
+        "Ben",
+        "Engineering can be ready by the first week of March if the payments work lands.",
+    ),
+    (
+        "Ana",
+        "Then let's decide: we launch on March fourth, assuming payments are done.",
+    ),
     ("Ben", "Agreed, March fourth. I'll own the payments integration."),
     (
         "Ana",
@@ -58,7 +74,10 @@ CONVERSATION = [
     ("Ben", "Do we know if enterprise includes single sign-on? That's still open."),
     ("Ana", "We don't know yet. Let's keep that as an open question for Priya."),
     ("Ben", "The team tier should include up to twenty seats."),
-    ("Ana", "Decision: the team tier is ten dollars per seat and includes up to twenty seats."),
+    (
+        "Ana",
+        "Decision: the team tier is ten dollars per seat and includes up to twenty seats.",
+    ),
     ("Ben", "One risk is the app store review, which can take two weeks."),
     ("Ana", "Good point. We should submit the build by February eighteenth."),
     ("Ben", "I'll note that. Who writes the launch announcement?"),
@@ -66,7 +85,10 @@ CONVERSATION = [
     ("Ben", "The process is: build, internal test, app store review, then launch."),
     ("Ana", "Yes, and after launch we monitor for a week before announcing broadly."),
     ("Ben", "So that's settled for the launch plan."),
-    ("Ana", "Next, the support plan. Support hours will be nine to five on weekdays at first."),
+    (
+        "Ana",
+        "Next, the support plan. Support hours will be nine to five on weekdays at first.",
+    ),
     ("Ben", "Decision then: weekday support nine to five, weekends later."),
     ("Ana", "And we drop the free tier's file limit to one gigabyte."),
     ("Ben", "Agreed. The single sign-on question still needs Priya."),
@@ -74,6 +96,28 @@ CONVERSATION = [
     ("Ben", "Fine, monthly only at launch then. That's a decision."),
     ("Ana", "Great. I think that covers it for today."),
     ("Ben", "Thanks everyone."),
+    (
+        "Ana",
+        "One more thing before we go: the beta group is the twelve design partners.",
+    ),
+    ("Ben", "Agreed, beta with the twelve design partners from February twenty-fifth."),
+    ("Ana", "Priya confirmed by message that enterprise includes single sign-on."),
+    ("Ben", "Good, so that question is answered: enterprise includes single sign-on."),
+    ("Ana", "Then the enterprise tier is priced per seat at twenty-five dollars."),
+    (
+        "Ben",
+        "Decision: enterprise is twenty-five dollars per seat, with single sign-on.",
+    ),
+    ("Ana", "Marketing named Jordan to write the launch announcement."),
+    ("Ben", "Great, Jordan owns the announcement, due March first."),
+    ("Ana", "We should also track the support backlog after launch."),
+    ("Ben", "I will set up the backlog dashboard by March third."),
+    ("Ana", "And the annual billing comparison is moved to the next meeting."),
+    ("Ben", "Noted. Let us also keep the free tier limit at one gigabyte."),
+    ("Ana", "That is everything. Thanks, Ben."),
+    ("Ben", "Thanks, Ana. Talk next week."),
+    ("Ana", "Bye for now."),
+    ("Ben", "Bye."),
 ]
 
 _FIELDS = """
@@ -95,6 +139,7 @@ UPDATE = (
     + _FIELDS
     + "} }"
 )
+UPDATE_NOW = "mutation N($c: ID!) { requestWhiteboardUpdate(CallId: $c) { Success Message Updated } }"
 VERSIONS = (
     "query V($c: ID!, $w: ID!) { listMeetingWhiteboardVersions(CallId: $c, WhiteboardId: $w, Limit: 50) "
     "{ Items { Version Source UpdatedBy ChangedPanels } } }"
@@ -118,7 +163,8 @@ class Deployment:
             if r["LogicalResourceId"] == "AISTACK"
         )
         ai = {
-            r["LogicalResourceId"]: r["PhysicalResourceId"] for r in _stack_resources(cfn, ai_stack)
+            r["LogicalResourceId"]: r["PhysicalResourceId"]
+            for r in _stack_resources(cfn, ai_stack)
         }
         self.table = ai["EventSourcingTable"]
         self.deletion_function = ai.get("TranscriptDeletionFunction")
@@ -216,7 +262,9 @@ class Meeting:
 
     def meeting(self) -> dict | None:
         key = {"PK": {"S": f"c#{self.call_id}"}, "SK": {"S": f"c#{self.call_id}"}}
-        item = self.d.ddb.get_item(TableName=self.d.table, Key=key, ConsistentRead=True).get("Item")
+        item = self.d.ddb.get_item(
+            TableName=self.d.table, Key=key, ConsistentRead=True
+        ).get("Item")
         return _plain(item) if item else None
 
     def partition(self, pk: str) -> list[dict]:
@@ -238,7 +286,9 @@ class Meeting:
 
     def state(self) -> dict:
         rows = [
-            _plain(r) for r in self.partition(f"wb#{self.call_id}") if r["SK"]["S"] == "updater"
+            _plain(r)
+            for r in self.partition(f"wb#{self.call_id}")
+            if r["SK"]["S"] == "updater"
         ]
         return rows[0] if rows else {}
 
@@ -247,7 +297,8 @@ class Meeting:
 
     def metering_contexts(self) -> list[str]:
         return sorted(
-            {_plain(r).get("Context") for r in self.partition(f"mtr#{self.call_id}")} - {None}
+            {_plain(r).get("Context") for r in self.partition(f"mtr#{self.call_id}")}
+            - {None}
         )
 
     def cleanup(self) -> None:
@@ -285,11 +336,15 @@ class Probe:
         if status != 200 or not isinstance(body, dict) or "result" not in body:
             raise ProbeError(f"{name} returned HTTP {status}: {json.dumps(body)[:300]}")
         text = body["result"]["content"][0]["text"]
-        return (True, text) if body["result"].get("isError") else (False, json.loads(text))
+        return (
+            (True, text) if body["result"].get("isError") else (False, json.loads(text))
+        )
 
     def tool_names(self, key: str) -> set[str]:
         status, body = _post(
-            self.d.endpoint, {"x-api-key": key}, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+            self.d.endpoint,
+            {"x-api-key": key},
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         )
         if status != 200:
             raise ProbeError(f"tools/list returned HTTP {status}")
@@ -355,7 +410,8 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
         "assisted_call_id": assisted.call_id,
         "control_call_id": control.call_id,
     }
-    first, second = CONVERSATION[:16], CONVERSATION[16:]
+    waves = [CONVERSATION[:16], CONVERSATION[16:32], CONVERSATION[32:]]
+    assert [len(w) for w in waves] == [16, 16, 8], [len(w) for w in waves]
     try:
         for meeting in (assisted, control):
             meeting.start()
@@ -364,12 +420,17 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
                 raise ProbeError(
                     f"meeting {meeting.call_id} was not created; see test_kds_pipeline_creates_meeting"
                 )
-        observed["assisted_enabled"] = (assisted.meeting() or {}).get("WhiteboardsEnabled")
-        observed["control_enabled"] = (control.meeting() or {}).get("WhiteboardsEnabled")
+        observed["assisted_enabled"] = (assisted.meeting() or {}).get(
+            "WhiteboardsEnabled"
+        )
+        observed["control_enabled"] = (control.meeting() or {}).get(
+            "WhiteboardsEnabled"
+        )
 
         # A whiteboard made by hand on the control meeting: no model call.
         manual = probe.gql(
-            CREATE, {"i": {"CallId": control.call_id, "Title": "By hand", "Template": "blank"}}
+            CREATE,
+            {"i": {"CallId": control.call_id, "Title": "By hand", "Template": "blank"}},
         )
         manual = manual["createMeetingWhiteboard"]
         panels = _panels(manual)
@@ -387,10 +448,16 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
         )
         observed["manual"] = edited["updateMeetingWhiteboard"]
 
-        assisted.send(first, 0)
-        control.send(first, 0)
+        for meeting in (assisted, control):
+            meeting.send(waves[0], 0)
+        time.sleep(WAVE_GAP_SECONDS)
+        for meeting in (assisted, control):
+            meeting.send(waves[1], 16)
+        second_wave_at = time.monotonic()
         state = _wait_runs(assisted, 1)
-        observed["first_state"] = {k: state.get(k) for k in ("RunCount", "LastSegmentEndTime")}
+        observed["first_state"] = {
+            k: state.get(k) for k in ("RunCount", "LastSegmentEndTime")
+        }
         observed["after_first"] = probe.boards(assisted)
 
         # The user takes the Decisions panel.
@@ -427,13 +494,26 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
                 )
                 observed["stale_refused"] = False
             except ProbeError as error:
-                observed["stale_refused"] = "WhiteboardConflict" in str(error) or "changed" in str(
+                observed["stale_refused"] = "WhiteboardConflict" in str(
                     error
-                )
+                ) or "changed" in str(error)
 
-        time.sleep(SECOND_WAVE_AFTER_SECONDS)
-        assisted.send(second, len(first))
-        control.send(second, len(first))
+        time.sleep(max(0.0, WAVE_GAP_SECONDS - (time.monotonic() - second_wave_at)))
+        for meeting in (assisted, control):
+            meeting.send(waves[2], 32)
+        # The second run, whatever the automatic trigger saw: Update now as the
+        # test user, which needs one new segment and waits 30 s after a run.
+        time.sleep(40)
+        if int(assisted.state().get("RunCount") or 0) < 2:
+            try:
+                observed["update_now"] = probe.gql(UPDATE_NOW, {"c": assisted.call_id})[
+                    "requestWhiteboardUpdate"
+                ]
+            except ProbeError as error:
+                observed["update_now"] = {
+                    "Success": False,
+                    "Message": f"request failed: {error}",
+                }
         state = _wait_runs(assisted, 2)
         observed["second_state"] = {k: state.get(k) for k in ("RunCount",)}
         observed["after_second"] = probe.boards(assisted)
@@ -461,7 +541,10 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
                 _, current = probe.mcp(
                     key,
                     "get_meeting_whiteboard",
-                    {"meetingId": assisted.call_id, "whiteboardId": board["WhiteboardId"]},
+                    {
+                        "meetingId": assisted.call_id,
+                        "whiteboardId": board["WhiteboardId"],
+                    },
                 )
                 observed["mcp_get"] = current
                 _, observed["mcp_not_modified"] = probe.mcp(
@@ -485,7 +568,9 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
         if deployment.deletion_function:
             response = deployment.lam.invoke(
                 FunctionName=deployment.deletion_function,
-                Payload=json.dumps({"CallId": assisted.call_id, "Trigger": "scheduled"}).encode(),
+                Payload=json.dumps(
+                    {"CallId": assisted.call_id, "Trigger": "scheduled"}
+                ).encode(),
             )
             observed["deletion_error"] = response.get("FunctionError")
             observed["rows_after_deletion"] = len(assisted.whiteboard_rows())
