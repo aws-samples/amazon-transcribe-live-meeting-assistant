@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -185,6 +186,24 @@ def reference_may_read(row, user):
     else:
         entries = []
     return user in [e.strip() for e in entries if e.strip()]
+
+
+LABEL_SHAPES = (
+    None,
+    [],
+    [{"Key": "project", "Value": "relaunch"}],
+    [{"Key": "project", "Value": "relaunch"}, {"Key": "team", "Value": "web"}],
+    [{"Key": "project", "Value": "Relaunch"}, {"Key": "team", "Value": "web"}],
+    [{"Key": "team", "Value": "web"}],
+)
+
+
+def reference_labels_match(row, wanted):
+    """Every wanted key is on the meeting with exactly that value."""
+    if not wanted:
+        return True
+    stored = {label["Key"]: label["Value"] for label in row.get("Labels") or []}
+    return all(key in stored and stored[key] == value for key, value in wanted.items())
 
 
 def run(table, **kwargs):
@@ -919,6 +938,8 @@ class TestTwoStepReads(unittest.TestCase):
                     owner=chooser.choice(users),
                     status=chooser.choice(["STARTED", "TRANSCRIBING", "ENDED", "ERRORED"]),
                     Participants=chooser.choice([["Ann"], ["Cy"], [{"Name": "Ann Lee"}], []]),
+                    Labels=chooser.choice(LABEL_SHAPES),
+                    Audience=chooser.choice(["internal", "external", None]),
                 )
                 who = chooser.sample(users, chooser.randint(0, 2))
                 shared = chooser.choice(shapes)(who)
@@ -936,7 +957,14 @@ class TestTwoStepReads(unittest.TestCase):
                 (None, False),
                 ("a", True),
             ):
-                for status in (None, "IN_PROGRESS", "ENDED"):
+                for status, labels, audience in (
+                    (None, None, None),
+                    ("IN_PROGRESS", None, None),
+                    ("ENDED", {"project": "relaunch"}, None),
+                    (None, {"project": "relaunch", "team": "web"}, None),
+                    (None, None, "external"),
+                    ("ENDED", {"team": "web"}, "internal"),
+                ):
                     for participant in (None, "ann"):
                         for limit in (1, 7, 60):
                             statuses = list_meetings.statuses_for(status)
@@ -952,9 +980,17 @@ class TestTwoStepReads(unittest.TestCase):
                                     or list_meetings.participant_in_meeting(r, participant)
                                 )
                                 and (statuses is None or r["Status"] in statuses)
+                                and reference_labels_match(r, labels)
+                                and (audience is None or r.get("Audience") == audience)
                             ][:limit]
                             with self.subTest(
-                                size=size, user=user, status=status, p=participant, limit=limit
+                                size=size,
+                                user=user,
+                                status=status,
+                                p=participant,
+                                labels=labels,
+                                audience=audience,
+                                limit=limit,
                             ):
                                 result = run(
                                     FakeTable(rows),
@@ -963,6 +999,8 @@ class TestTwoStepReads(unittest.TestCase):
                                     status=status,
                                     participant=participant,
                                     limit=limit,
+                                    labels=labels,
+                                    audience=audience,
                                 )
                                 self.assertEqual(ids(result), expected)
                                 self.assertEqual(result["count"], len(expected))
@@ -1378,9 +1416,9 @@ class TestLimitArgument(unittest.TestCase):
         seen = []
         real = list_meetings.walk_date_range
 
-        def spy(table, start, end, limit, include=None):
+        def spy(table, start, end, limit, include=None, projection=None):
             seen.append(limit)
-            return real(table, start, end, limit, include)
+            return real(table, start, end, limit, include, projection)
 
         with patch.object(list_meetings, "walk_date_range", spy):
             for value in (1000, 1001, 10**9, 5e6, "99999"):
@@ -1393,9 +1431,9 @@ class TestLimitArgument(unittest.TestCase):
         seen = []
         real = list_meetings.walk_date_range
 
-        def spy(table, start, end, limit, include=None):
+        def spy(table, start, end, limit, include=None, projection=None):
             seen.append(limit)
-            return real(table, start, end, limit, include)
+            return real(table, start, end, limit, include, projection)
 
         with patch.object(list_meetings, "walk_date_range", spy):
             run(self.table(), limit=7.0)
@@ -1448,3 +1486,145 @@ class TestWalkResult(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPreparationFilters(unittest.TestCase):
+    """labels, audience, updatedSince and endedSince, decided before the limit."""
+
+    def rows(self):
+        return [
+            meeting(
+                "a",
+                Labels=[{"Key": "project", "Value": "x"}, {"Key": "team", "Value": "web"}],
+                Audience="external",
+                UpdatedAt="2026-11-19T12:00:00Z",
+            ),
+            meeting(
+                "b",
+                Labels=[{"Key": "project", "Value": "x"}],
+                Audience="internal",
+                UpdatedAt="2026-11-18T12:00:00Z",
+            ),
+            meeting(
+                "c",
+                status="STARTED",
+                Labels=[{"Key": "project", "Value": "x"}],
+                UpdatedAt="2026-11-19T13:00:00Z",
+            ),
+            meeting("d", owner=OTHER, Labels=[{"Key": "project", "Value": "x"}]),
+        ]
+
+    def test_every_label_given_must_match(self):
+        table = FakeTable(self.rows())
+        self.assertEqual(ids(run(table, labels={"project": "x"})), ["a", "b", "c"])
+        self.assertEqual(ids(run(table, labels={"project": "x", "team": "web"})), ["a"])
+        self.assertEqual(ids(run(table, labels={"project": "X"})), [])
+        self.assertEqual(ids(run(table, labels={"team": "web", "other": "y"})), [])
+
+    def test_the_label_filter_is_decided_before_the_limit(self):
+        rows = [meeting(f"n{i}") for i in range(30)] + self.rows()
+        self.assertEqual(ids(run(FakeTable(rows), labels={"team": "web"}, limit=1)), ["a"])
+
+    def test_audience_filters(self):
+        table = FakeTable(self.rows())
+        self.assertEqual(ids(run(table, audience="External")), ["a"])
+        self.assertEqual(ids(run(table, audience="internal")), ["b"])
+        self.assertEqual(ids(run(table, audience="")), ["a", "b", "c"])
+
+    def test_updated_since_and_ended_since(self):
+        table = FakeTable(self.rows())
+        self.assertEqual(ids(run(table, updated_since="2026-11-19T00:00:00Z")), ["a", "c"])
+        # A meeting still running has not ended.
+        self.assertEqual(ids(run(table, ended_since="2026-11-19T00:00:00Z")), ["a"])
+        self.assertEqual(ids(run(table, ended_since="2026-11-19T12:00:00+00:00")), ["a"])
+        self.assertEqual(ids(run(table, ended_since="2026-11-19T12:00:01Z")), [])
+
+    def test_bad_filter_values_are_refused_before_anything_is_read(self):
+        table = FakeTable(self.rows())
+        for kwargs, message in (
+            ({"labels": ["project=x"]}, "labels must be an object"),
+            ({"labels": {"Project": "x"}}, "not a label key"),
+            ({"labels": {"project": 1}}, "must be a string"),
+            ({"audience": "everyone"}, "internal or external"),
+            ({"updated_since": "yesterday"}, "updatedSince"),
+            ({"ended_since": 5}, "endedSince"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as caught:
+                    run(table, **kwargs)
+                self.assertIn(message, str(caught.exception))
+        self.assertEqual(table.query_calls, [])
+
+    def test_the_projection_reads_only_the_attributes_of_the_filters_given(self):
+        table = FakeTable(self.rows())
+        run(table)
+        self.assertEqual(
+            table.batch_projections[0], list_meetings.DECISION_PROJECTION["ProjectionExpression"]
+        )
+        table = FakeTable(self.rows())
+        run(table, labels={"project": "x"}, audience="internal", updated_since="2026-01-01")
+        projected = {part.strip() for part in table.batch_projections[0].split(",")}
+        self.assertTrue({"#labels", "#audience", "#updated"} <= projected)
+
+    def test_an_admin_with_a_label_filter_is_filtered_too(self):
+        table = FakeTable(self.rows())
+        result = run(table, user_id="admin", is_admin=True, labels={"project": "x"})
+        self.assertEqual(ids(result), ["a", "b", "c", "d"])
+
+    def test_a_since_filter_without_a_start_date_widens_the_created_range_only_backwards(self):
+        table = FakeTable(self.rows())
+        result = run(table, updated_since="2020-01-01T00:00:00Z")
+        self.assertEqual(result["filters"]["createdFrom"], "2019-12-31T00:00:00")
+        self.assertIn("Only meetings created since 2019-12-31T00:00:00", result["note"])
+        condition = table.query_calls[0]["KeyConditionExpression"]
+        self.assertEqual(condition._values[1]._values[1], "ts#2019-12-31T00:00:00")
+        # A recent time keeps the default of seven days.
+        recent = run(FakeTable(self.rows()), ended_since=datetime.utcnow().isoformat() + "Z")
+        created_from = datetime.fromisoformat(recent["filters"]["createdFrom"])
+        self.assertLess(created_from, datetime.utcnow() - timedelta(days=6, hours=23))
+        # A start date given is used as it is.
+        table = FakeTable(self.rows())
+        result = run(
+            table,
+            start_date="2026-11-01",
+            end_date="2026-11-30",
+            updated_since="2020-01-01T00:00:00Z",
+        )
+        self.assertNotIn("createdFrom", result["filters"])
+
+    def test_each_meeting_has_the_new_fields(self):
+        rows = self.rows()
+        rows[0]["CallSummaryText"] = "Agreed the plan."
+        rows[1]["CallSummaryText"] = "An error occurred."
+        result = run(FakeTable(rows), labels={"project": "x"})
+        a, b, c = result["meetings"]
+        self.assertEqual(a["labels"], {"project": "x", "team": "web"})
+        self.assertEqual(a["audience"], "external")
+        self.assertTrue(a["summaryReady"])
+        self.assertFalse(b["summaryReady"])
+        self.assertEqual(a["endTime"], "2026-11-19T12:00:00Z")
+        self.assertIsNone(c["endTime"])
+        self.assertEqual(a["owner"], ME)
+        self.assertEqual(a["status"], "ENDED")
+        self.assertEqual(a["startTime"], "2026-11-18T10:00:00Z")
+        self.assertNotIn("virtualParticipantId", a)
+        self.assertIsNone(a["virtualParticipantUrl"])
+
+    def test_a_meeting_a_virtual_participant_captured_names_it(self):
+        with patch.dict(os.environ, {"VP_TABLE_NAME": "vps"}):
+            with patch(
+                "tools.virtual_participants.vps_by_call", return_value=({"a": "vp-a"}, True)
+            ):
+                result = run(FakeTable(self.rows()), labels={"project": "x"})
+        a, b, _c = result["meetings"]
+        self.assertEqual(a["virtualParticipantId"], "vp-a")
+        self.assertTrue(a["virtualParticipantUrl"].endswith("vp-a"))
+        self.assertNotIn("virtualParticipantId", b)
+        self.assertNotIn("note", result)
+
+    def test_an_incomplete_virtual_participant_read_is_noted(self):
+        with patch.dict(os.environ, {"VP_TABLE_NAME": "vps"}):
+            with patch("tools.virtual_participants.vps_by_call", side_effect=RuntimeError("x")):
+                result = run(FakeTable(self.rows()))
+        self.assertIn("virtualParticipantId may be missing", result["note"])
+        self.assertEqual(len(result["meetings"]), 3)

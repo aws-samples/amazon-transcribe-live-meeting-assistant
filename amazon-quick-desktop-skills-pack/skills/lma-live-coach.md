@@ -30,15 +30,16 @@ Real-time AI sales coaching during calls — launch LMA's virtual participant, t
 - Call `live_meeting_assistant_lma__start_meeting_now` with:
   - `meetingName`: from calendar subject or user input
   - `meetingPlatform`: Zoom | Teams | Chime | Webex
-  - `meetingId`: numeric meeting ID
+  - `meetingId`: numeric meeting ID (the platform's meeting ID)
+- Poll `live_meeting_assistant_lma__get_virtual_participant_status` with the returned `virtualParticipantId` until the VP has joined and its answer has a `meetingId`: that is the LMA meeting, which the transcript is read by (the meeting platform's ID is `platformMeetingId`)
 - Confirm the VP has joined and share the `meetingUrl` and `virtualParticipantUrl` with the user
 
 ### Step 3: Start coaching loop
 - **Mode**: agentic
 - Spawn a background task that runs a coaching loop:
   1. Wait 60 seconds
-  2. Call `live_meeting_assistant_lma__get_meeting_transcript` with the meeting ID
-  3. Extract the latest transcript chunk (since last check)
+  2. Call `live_meeting_assistant_lma__get_meeting_transcript` with the LMA `meetingId` from Step 2, `format: "json"` and, after the first call, the `nextToken` of the previous answer
+  3. The `segments` returned are the transcript added since the last check
   4. Analyze against sales methodology frameworks:
      - **MEDDPICC**: Metrics, Economic Buyer, Decision Criteria, Decision Process, Paper Process, Identify Pain, Champion, Competition
      - **SPIN**: Situation, Problem, Implication, Need-Payoff
@@ -50,7 +51,7 @@ Real-time AI sales coaching during calls — launch LMA's virtual participant, t
      - The insight/observation
      - Suggested action for the rep
      - importance: "important"
-  6. Repeat until the meeting ends (detect via `list_meetings` showing status=ENDED)
+  6. Repeat until the meeting ends: the transcript answer's `nextToken` is `null` once the meeting has ended and its last segment has been read
 
 ### Step 4: Post-call summary
 - **Mode**: agentic

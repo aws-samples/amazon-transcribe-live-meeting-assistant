@@ -14,15 +14,21 @@ holds one key:
 
 1. a key with the read scope, with which a write tool must be refused and must
    leave nothing behind;
-2. a key with the read-write scope, with which it polls get_live_transcript
-   with its cursor while segments are added, pushes guidance and reads it back,
-   reads the recording link from get_meeting_record, and deletes the meeting
-   with delete_meeting, first without confirm (nothing may be deleted) and then
-   with it; and schedules a meeting two days ahead with schedule_meeting twice,
-   the second time with a new meeting ID (the scheduled Virtual Participant must
-   be updated, not duplicated), then once more with allowDuplicate. Every
-   Virtual Participant it scheduled is cancelled with end_virtual_participant
-   before the key is revoked, so none is ever launched.
+2. a key with the read-write scope, with which it reads get_meeting_transcript
+   (format json) page by page with its nextToken while segments are added,
+   pushes guidance and reads it back, sets and reads the meeting's agenda,
+   context, checklist (and one item's status), labels and audience, finds the
+   meeting by its labels with list_meetings, reads its consent record (off),
+   shares the meeting with an example.com address and unshares it again, reads
+   the recording link from get_meeting_record, and deletes the meeting with
+   delete_meeting, first without confirm (nothing may be deleted) and then with
+   it; and schedules a meeting two days ahead with schedule_meeting twice, the
+   second time with a new meeting ID (the scheduled Virtual Participant must be
+   updated, not duplicated), then once more with allowDuplicate and with meeting
+   preparation, which update_scheduled_meeting then changes. Every Virtual
+   Participant it scheduled is cancelled with end_virtual_participant (twice,
+   which must change nothing the second time) before the key is revoked, so
+   none is ever launched.
 
 Each key is revoked in a ``finally``, and whatever is left of the meeting is
 removed at the end, by its CallId only. The result is a dict of observations;
@@ -233,15 +239,24 @@ class Probe:
         key, prefix = self.generate_key("read")
         try:
             listed = self.tools(key)
-            self.observed["read_key_lists_live_transcript"] = "get_live_transcript" in listed
+            self.observed["read_key_lists_read_tools"] = {
+                "get_meeting_transcript",
+                "get_meeting_checklist",
+                "get_meeting_consent",
+            } <= listed
+            self.observed["read_key_lists_preparation_writes"] = bool(
+                listed & {"set_meeting_context", "update_scheduled_meeting", "share_meeting"}
+            )
             self.observed["read_key_lists_write_tool"] = bool(
                 listed & {"push_meeting_guidance", "delete_meeting", "start_meeting_now"}
             )
             error, answer = self.call(key, "push_meeting_guidance", {"meeting_id": self.call_id, "text": "x"})
             self.observed["read_key_write_refused"] = error and "read-write" in str(answer)
-            error, answer = self.call(key, "delete_meeting", {"meeting_id": self.call_id, "confirm": True})
+            error, answer = self.call(key, "delete_meeting", {"meetingId": self.call_id, "confirm": True})
             self.observed["read_key_delete_refused"] = error
-            error, answer = self.call(key, "get_live_transcript", {"meeting_id": self.call_id})
+            error, answer = self.call(key, "set_meeting_context", {"meetingId": self.call_id, "context": "x"})
+            self.observed["read_key_context_refused"] = error and "read-write" in str(answer)
+            error, answer = self.call(key, "get_meeting_transcript", {"meetingId": self.call_id, "format": "json"})
             self.observed["read_key_reads"] = not error
         finally:
             self.revoke(prefix)
@@ -259,25 +274,85 @@ class Probe:
     def with_read_write_key(self) -> None:
         key, prefix = self.generate_key("read-write")
         try:
-            self._live_transcript(key)
+            self._transcript_pages(key)
             self._guidance(key)
+            self._preparation(key)
             self._record(key)
             self._delete(key)
             self._schedule_twice(key)
         finally:
             self.revoke(prefix)
 
-    def _live_transcript(self, key: str) -> None:
+    def _transcript_pages(self, key: str) -> None:
         self.put_segment("seg-1", 0.0, 2.0, "first line")
         self.put_segment("seg-2", 2.5, 4.0, "second line", channel="LOCAL")
-        _, first = self.call(key, "get_live_transcript", {"meeting_id": self.call_id})
+        page = {"meetingId": self.call_id, "format": "json"}
+        _, first = self.call(key, "get_meeting_transcript", {**page, "maxSegments": 1})
+        _, second = self.call(key, "get_meeting_transcript", {**page, "nextToken": first["nextToken"]})
         self.put_segment("seg-3", 4.5, 6.0, "third line")
-        _, second = self.call(key, "get_live_transcript", {"meeting_id": self.call_id, "since": first["cursor"]})
-        _, third = self.call(key, "get_live_transcript", {"meeting_id": self.call_id, "since": second["cursor"]})
-        self.observed["live_first_ids"] = [line["segmentId"] for line in first["lines"]]
-        self.observed["live_second_ids"] = [line["segmentId"] for line in second["lines"]]
-        self.observed["live_third_ids"] = [line["segmentId"] for line in third["lines"]]
-        self.observed["live_is_live"] = first["live"]
+        _, third = self.call(key, "get_meeting_transcript", {**page, "nextToken": second["nextToken"]})
+        _, fourth = self.call(key, "get_meeting_transcript", {**page, "nextToken": third["nextToken"]})
+        self.observed["pages_ids"] = [
+            [segment["segmentId"] for segment in answer["segments"]] for answer in (first, second, third, fourth)
+        ]
+        self.observed["pages_status"] = first["meetingStatus"]
+        self.observed["pages_live_token"] = bool(fourth["nextToken"])
+        self.observed["pages_segment_fields"] = sorted(first["segments"][0]) if first["segments"] else []
+
+    def _preparation(self, key: str) -> None:
+        """The agenda, context, checklist, labels and audience of the meeting, and finding it."""
+        meeting = {"meetingId": self.call_id}
+        errors: dict[str, Any] = {}
+
+        def call(name: str, arguments: dict) -> Any:
+            error, answer = self.call(key, name, {**meeting, **arguments})
+            if error:
+                errors[name] = answer
+                return {}
+            return answer
+
+        agenda = call("update_meeting_agenda", {"agenda": "Intro\nBudget"})
+        self.observed["agenda_written"] = (agenda.get("agenda"), agenda.get("agendaSource"))
+        self.observed["agenda_read"] = call("get_meeting_agenda", {}).get("agenda")
+        context = call("set_meeting_context", {"context": "# Goals\nAgree the budget"})
+        self.observed["context_updated_by"] = context.get("updatedBy")
+        self.observed["context_read"] = call("get_meeting_context", {}).get("context")
+        items = [
+            {"itemId": "q1", "text": "Who owns the budget?", "kind": "question", "priority": "must"},
+            {"itemId": "t1", "text": "Hiring plan", "kind": "topic"},
+        ]
+        call("set_meeting_checklist", {"items": items})
+        item = call("update_checklist_item", {"itemId": "q1", "status": "covered", "note": "Dana"})
+        self.observed["item_status"] = (item.get("status"), item.get("statusSource"), item.get("note"))
+        checklist = call("get_meeting_checklist", {})
+        self.observed["checklist_ids"] = [entry["itemId"] for entry in checklist.get("items", [])]
+        # Replacing the list keeps the progress of an item that stays.
+        call("set_meeting_checklist", {"items": items[:1]})
+        kept = call("get_meeting_checklist", {}).get("items", [])
+        self.observed["checklist_kept_status"] = [(entry["itemId"], entry["status"]) for entry in kept]
+        label = f"integ-{uuid.uuid4().hex[:8]}"
+        metadata = call("update_meeting_metadata", {"labels": {"probe": label, "kind": "mcp"}, "audience": "internal"})
+        self.observed["metadata"] = (metadata.get("labels"), metadata.get("audience"))
+        found = self.list_with_labels(key, {"probe": label, "kind": "mcp"})
+        self.observed["listed_by_labels"] = [entry["meetingId"] for entry in found]
+        self.observed["listed_fields"] = sorted(found[0]) if found else []
+        self.observed["listed_by_one_wrong_label"] = [
+            entry["meetingId"] for entry in self.list_with_labels(key, {"probe": label, "kind": "other"})
+        ]
+        self.observed["consent"] = call("get_meeting_consent", {})
+        guest = f"integ-share-{uuid.uuid4().hex[:6]}@example.com"
+        added = call("share_meeting", {"users": [guest]})
+        removed = call("share_meeting", {"users": [guest], "action": "remove"})
+        self.observed["shared_after_add"] = guest in (added.get("sharedWith") or [])
+        self.observed["shared_after_remove"] = guest in (removed.get("sharedWith") or [])
+        self.observed["preparation_errors"] = errors
+
+    def list_with_labels(self, key: str, labels: dict) -> list:
+        error, answer = self.call(key, "list_meetings", {"labels": labels, "limit": 5})
+        if error:
+            self.observed.setdefault("preparation_errors", {})["list_meetings"] = answer
+            return []
+        return answer.get("meetings", [])
 
     def _guidance(self, key: str) -> None:
         text = f"integ guidance {uuid.uuid4().hex[:6]}"
@@ -293,7 +368,7 @@ class Probe:
     def _record(self, key: str) -> None:
         self.put_recording()
         error, record = self.call(
-            key, "get_meeting_record", {"meeting_id": self.call_id, "include": ["details", "recordings"]}
+            key, "get_meeting_record", {"meetingId": self.call_id, "include": ["details", "recordings"]}
         )
         if error:
             self.observed["record_error"] = record
@@ -307,10 +382,10 @@ class Probe:
         self.observed["record_link_fetch_status"] = status
 
     def _delete(self, key: str) -> None:
-        error, _ = self.call(key, "delete_meeting", {"meeting_id": self.call_id})
+        error, _ = self.call(key, "delete_meeting", {"meetingId": self.call_id})
         self.observed["delete_without_confirm_refused"] = error
         self.observed["meeting_after_unconfirmed_delete"] = self.meeting_row() is not None
-        error, answer = self.call(key, "delete_meeting", {"meeting_id": self.call_id, "confirm": True})
+        error, answer = self.call(key, "delete_meeting", {"meetingId": self.call_id, "confirm": True})
         self.observed["delete_error"] = answer if error else None
         deadline = time.monotonic() + DELETE_WAIT_SECONDS
         while time.monotonic() < deadline and self.meeting_row():
@@ -333,7 +408,14 @@ class Probe:
             for extra in (
                 {},
                 {"meetingName": arguments["meetingName"].upper(), "meetingId": "89876543210"},
-                {"allowDuplicate": True},
+                {
+                    "allowDuplicate": True,
+                    "labels": {"probe": "schedule"},
+                    "audience": "external",
+                    "context": "Scheduled context",
+                    "checklist": [{"itemId": "a1", "text": "Agree next steps", "kind": "action"}],
+                    "shareWith": ["integ-share@example.com"],
+                },
             ):
                 error, answer = self.call(key, "schedule_meeting", {**arguments, **extra})
                 if error:
@@ -349,10 +431,44 @@ class Probe:
             self.observed["schedule_duplicate_new_id"] = (
                 answers[2]["virtualParticipantId"] != answers[0]["virtualParticipantId"]
             )
-            self.observed["schedule_updated_meeting_id"] = answers[1].get("meetingId")
+            self.observed["schedule_updated_meeting_id"] = answers[1].get("platformMeetingId")
+            self.observed["schedule_lma_meeting_id"] = answers[0].get("meetingId")
+            self._update_scheduled(key, answers[2]["virtualParticipantId"], when)
         finally:
+            ends = []
             for vp_id in scheduled:
-                self.call(key, "end_virtual_participant", {"virtual_participant_id": vp_id, "reason": "integ test"})
+                ends.append(self.end_vp(key, vp_id))
+            # Ending one again changes nothing and says so.
+            if scheduled:
+                ends.append(self.end_vp(key, scheduled[0]))
+            self.observed["end_answers"] = ends
+
+    def end_vp(self, key: str, vp_id: str) -> Any:
+        error, answer = self.call(key, "end_virtual_participant", {"virtualParticipantId": vp_id, "reason": "integ test"})
+        return {"error": answer} if error else {"status": answer.get("status"), "alreadyEnded": answer.get("alreadyEnded")}
+
+    def _update_scheduled(self, key: str, vp_id: str, when: datetime) -> None:
+        later = (when + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        error, answer = self.call(
+            key,
+            "update_scheduled_meeting",
+            {
+                "virtualParticipantId": vp_id,
+                "scheduledTime": later,
+                "agenda": "Updated agenda",
+                "labels": {"probe": "updated"},
+                "audience": "",
+                "checklist": [],
+                "shareWith": ["integ-share-2@example.com"],
+            },
+        )
+        if error:
+            self.observed["update_scheduled_error"] = answer
+            return
+        self.observed["update_scheduled"] = {
+            key_: answer.get(key_)
+            for key_ in ("virtualParticipantId", "scheduledFor", "agenda", "labels", "audience", "context", "checklist", "shareWith", "meetingId")
+        }
 
 
 def _fetch_status(url: str) -> int | None:

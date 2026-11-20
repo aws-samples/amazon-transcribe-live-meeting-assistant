@@ -58,7 +58,8 @@ title: "LMA Documentation"
 ### MCP Server Integration
 
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
-- [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, key scopes (read only, read and write), JSON-RPC 2.0 protocol support, and every hosted MCP tool: the live transcript, meeting guidance, the meeting record, the meeting assistant and meeting management
+- [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, key scopes (read only, read and write), JSON-RPC 2.0 protocol support, and every hosted MCP tool: the transcript read page by page, meeting preparation, meeting guidance, the meeting record, consent, the meeting assistant and meeting management
+- [MCP Tools Reference](mcp-tools-reference.md) — Every tool the hosted MCP server offers, with an example request and answer for those an AI assistant uses to prepare, follow and close a meeting: scheduling with meeting preparation, transcript paging, agenda, context, checklist, labels, sharing, consent and ending
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Salesforce Connected App with OAuth 2.1
 - [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)
 - [Amazon Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) — Conversational workflows, scheduled agent recipes, and the skills pack for Quick Desktop

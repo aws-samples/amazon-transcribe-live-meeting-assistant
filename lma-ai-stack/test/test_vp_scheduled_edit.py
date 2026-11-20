@@ -380,3 +380,68 @@ def test_the_answer_says_whether_a_password_is_set_without_it(appsync, resources
     answer = _respond(appsync, resources, None, OWNER_IDENTITY, _row())
     assert answer["hasMeetingPassword"] is True
     assert "meetingPassword" not in answer
+
+
+# ── who the meeting is shared with once it starts ───────────────────────────
+
+
+@evaluated
+def test_meeting_shared_with_is_stored_comma_separated_and_without_repeats(
+    appsync, write_vtl: str
+) -> None:
+    request = _write(
+        appsync,
+        write_vtl,
+        {"meetingSharedWith": [" bo@example.com", "cy@example.com", "bo@example.com", ""]},
+        OWNER_IDENTITY,
+        _row(),
+    )
+    assert "error" not in request, request
+    values = request["update"]["expressionValues"]
+    assert values[":meetingSharedWith"] == {"S": "bo@example.com,cy@example.com"}
+    # The Virtual Participant itself is not shared.
+    assert "#SharedWith" not in request["update"]["expressionNames"]
+
+
+@evaluated
+def test_an_empty_meeting_shared_with_removes_it(appsync, write_vtl: str) -> None:
+    request = _write(appsync, write_vtl, {"meetingSharedWith": []}, OWNER_IDENTITY, _row())
+    assert "error" not in request, request
+    assert "#meetingSharedWith" in request["update"]["expression"].split("REMOVE", 1)[1]
+
+
+@evaluated
+@pytest.mark.parametrize(
+    "recipients,message",
+    [
+        (["not-an-address"], "is not an email address"),
+        (["a@example.com,b@example.com"], "is not an email address"),
+        (["[a@example.com]"], "is not an email address"),
+        ([f"u{n}@example.com" for n in range(51)], "more than 50"),
+    ],
+)
+def test_a_meeting_shared_with_entry_that_is_not_one_address_is_refused(
+    appsync, write_vtl: str, recipients: list, message: str
+) -> None:
+    result = _write(appsync, write_vtl, {"meetingSharedWith": recipients}, OWNER_IDENTITY, _row())
+    assert message in _error(result)
+
+
+def test_meeting_shared_with_is_offered_on_both_virtual_participant_inputs() -> None:
+    schema = SCHEMA.read_text(encoding="utf-8")
+    for type_name in ("CreateVirtualParticipantInput", "UpdateScheduledVirtualParticipantInput"):
+        body = schema[schema.index(f"input {type_name} {{") :]
+        body = body[: body.index("}")]
+        assert "meetingSharedWith: [String!]" in body, type_name
+    vp_type = schema[schema.index("type VirtualParticipant ") :]
+    assert "meetingSharedWith: String" in vp_type[: vp_type.index("\n}")]
+
+
+def test_create_stores_meeting_shared_with_and_not_the_vps_own_sharing(resources: dict) -> None:
+    template = resources["CreateVirtualParticipantAppSyncFunction"]["Properties"][
+        "RequestMappingTemplate"
+    ]
+    template = template.get("Fn::Sub", template) if isinstance(template, dict) else template
+    assert '$input.put("meetingSharedWith", $meetingSharedWithValue)' in template
+    # The row's own SharedWith (who may see the Virtual Participant) starts empty.
+    assert '$util.qr($input.put("SharedWith", ""))' in template

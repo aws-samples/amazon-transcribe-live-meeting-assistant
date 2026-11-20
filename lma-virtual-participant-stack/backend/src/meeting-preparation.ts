@@ -34,6 +34,8 @@ export interface VpPreparation {
   audience: 'internal' | 'external' | null;
   meetingContext: string;
   checklist: ChecklistDefinition[];
+  /** Who the meeting is shared with when it is created (the row's meetingSharedWith). */
+  meetingSharedWith: string[];
 }
 
 /** The bounds the meeting preparation resolver holds the row to. */
@@ -43,6 +45,24 @@ export const MAX_CHECKLIST_ITEMS = 100;
 
 const isString = (value: unknown): value is string => typeof value === 'string';
 
+/** The most people a meeting is shared with at creation, as the resolver allows. */
+export const MAX_MEETING_SHARED_WITH = 50;
+
+/**
+ * The entries of the row's meetingSharedWith, stored comma-separated by the
+ * createVirtualParticipant and updateScheduledVirtualParticipant resolvers,
+ * which refuse an entry holding "[", "]" or ",".
+ */
+function sharedWithEntries(value: unknown): string[] {
+  if (!isString(value)) return [];
+  const entries: string[] = [];
+  for (const part of value.split(',')) {
+    const entry = part.trim();
+    if (entry && !entry.includes('[') && !entry.includes(']') && !entries.includes(entry)) entries.push(entry);
+  }
+  return entries.slice(0, MAX_MEETING_SHARED_WITH);
+}
+
 /**
  * The preparation stored on a VP row, or null when it has none.
  *
@@ -50,7 +70,10 @@ const isString = (value: unknown): value is string => typeof value === 'string';
  * left out rather than failing the meeting, which is recorded either way.
  */
 export function preparationFromVpRow(
-  row: { labels?: unknown; audience?: unknown; meetingContext?: unknown; checklist?: unknown } | null | undefined,
+  row:
+    | { labels?: unknown; audience?: unknown; meetingContext?: unknown; checklist?: unknown; meetingSharedWith?: unknown }
+    | null
+    | undefined,
 ): VpPreparation | null {
   const labels = (Array.isArray(row?.labels) ? row.labels : [])
     .filter((label: any) => label && isString(label.Key) && label.Key && isString(label.Value))
@@ -67,8 +90,11 @@ export function preparationFromVpRow(
       if (isString(item.Source)) definition.Source = item.Source;
       return definition;
     });
-  if (!labels.length && !audience && !meetingContext.trim() && !checklist.length) return null;
-  return { labels, audience, meetingContext: meetingContext.trim() ? meetingContext : '', checklist };
+  const meetingSharedWith = sharedWithEntries(row?.meetingSharedWith);
+  if (!labels.length && !audience && !meetingContext.trim() && !checklist.length && !meetingSharedWith.length) {
+    return null;
+  }
+  return { labels, audience, meetingContext: meetingContext.trim() ? meetingContext : '', checklist, meetingSharedWith };
 }
 
 /**
@@ -104,5 +130,8 @@ export function preparationStartFields(
     }));
     fields.ChecklistUpdatedAt = at;
   }
+  // Only a VP started or scheduled with meetingSharedWith creates its meeting
+  // shared; sharing the VP itself (its SharedWith) does not share the meeting.
+  if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');
   return fields;
 }

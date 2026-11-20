@@ -102,6 +102,7 @@ export default defineConfig({
               label: "MCP API Key Auth",
               slug: "mcp-api-key-auth",
             },
+            { label: "MCP Tools Reference", slug: "mcp-tools-reference" },
             { label: "Salesforce MCP", slug: "salesforce-mcp-setup" },
             {
               label: "Amazon QuickSuite MCP",

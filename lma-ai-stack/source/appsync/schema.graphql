@@ -672,6 +672,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemDefinition]
+	# The people the meeting is to be shared with once the VP creates it, as
+	# comma-separated email addresses. Only the meetingSharedWith input sets it,
+	# and it does not share the Virtual Participant itself (that is SharedWith).
+	# Read by the VP container when it starts, which puts it on the meeting
+	# record it creates as the meeting's SharedWith.
+	meetingSharedWith: String
 	# The meeting consent mode and opt-in rule chosen for this meeting when the
 	# VP was started or scheduled; absent means the deployment's (see
 	# docs/meeting-consent.md). Read by the VP container when it starts, like
@@ -783,6 +789,10 @@ input CreateVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional: email addresses the meeting is shared with when the VP creates
+	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
+	# Participant itself is not shared.
+	meetingSharedWith: [String!]
 	# Optional meeting consent choice for this meeting: "off", "notify" or
 	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,
 	# the deployment's. The deployment's rule on a per-meeting choice is
@@ -849,6 +859,9 @@ input UpdateScheduledVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Replaces who the meeting is shared with when the VP creates it; sent
+	# empty, removes it.
+	meetingSharedWith: [String!]
 	# Sent empty, removes the meeting consent choice, so the deployment's applies.
 	consentMode: String
 	consentRule: String

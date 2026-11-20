@@ -5,13 +5,22 @@
 """
 Tool 4: list_meetings
 List meetings from DynamoDB with filters
+
+The meetings are found by walking the TypeDateIndex, which is ordered by when
+each meeting was created; ``startDate`` and ``endDate`` bound that walk. Every
+other filter -- access, status, participant, labels, audience, ``updatedSince``
+and ``endedSince`` -- is decided on the meeting's own row as it is read, before
+the limit. A meeting created before the walk's start is not checked, so when
+``updatedSince`` or ``endedSince`` is given without a ``startDate`` the walk
+starts a day before that time if that is earlier than the default of seven days
+ago (``CREATED_LOOK_BACK``), and the answer says where it started.
 """
 
 import logging
 import os
 import time
-from datetime import datetime
-from typing import Any, Callable, Dict, FrozenSet, List, NamedTuple, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 
@@ -82,6 +91,125 @@ DECISION_PROJECTION: Dict[str, Any] = {
     },
 }
 
+# The further attributes a filter reads, added to the projection only when that
+# filter is given, so a call without it reads no more than before.
+FILTER_ATTRIBUTES = {
+    "labels": ("#labels", "Labels"),
+    "audience": ("#audience", "Audience"),
+    "updated": ("#updated", "UpdatedAt"),
+}
+
+AUDIENCES = ("internal", "external")
+# How long before an updatedSince or endedSince time the walk of the creation
+# index starts, when no startDate is given: a meeting that ended or changed
+# after that time was usually created at most this long before it.
+CREATED_LOOK_BACK = timedelta(days=1)
+DEFAULT_CREATED_RANGE = timedelta(days=7)
+SINCE_NOTE = (
+    "Only meetings created since {created_from} were checked; pass startDate to look "
+    "further back for meetings changed or ended since the time given."
+)
+VP_LOOKUP_NOTE = (
+    "The Virtual Participant table is larger than one read covers, so virtualParticipantId "
+    "may be missing from some meetings."
+)
+
+
+def decision_projection(attributes: Tuple[str, ...] = ()) -> Dict[str, Any]:
+    """DECISION_PROJECTION with the attributes of the given filters added."""
+    if not attributes:
+        return DECISION_PROJECTION
+    names = dict(DECISION_PROJECTION["ExpressionAttributeNames"])
+    expression = DECISION_PROJECTION["ProjectionExpression"]
+    for key in attributes:
+        placeholder, attribute = FILTER_ATTRIBUTES[key]
+        names[placeholder] = attribute
+        expression += f", {placeholder}"
+    return {"ProjectionExpression": expression, "ExpressionAttributeNames": names}
+
+
+def labels_filter(value: Any) -> Optional[Dict[str, str]]:
+    """The ``labels`` argument: an object of label keys to values, all of which must match."""
+    if value is None or value == {}:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("labels must be an object of label keys to string values")
+    try:
+        # pylint: disable-next=import-error,import-outside-toplevel
+        from lma_meeting_preparation.rules import LABEL_KEY
+    except ImportError:  # the layer is absent only outside Lambda
+        LABEL_KEY = None  # pylint: disable=invalid-name
+    wanted: Dict[str, str] = {}
+    for key, label in value.items():
+        if not isinstance(key, str) or (LABEL_KEY is not None and not LABEL_KEY.fullmatch(key)):
+            raise ValueError(f"{key!r} is not a label key")
+        if not isinstance(label, str):
+            raise ValueError(f"The value of label {key} must be a string")
+        wanted[key] = label
+    return wanted
+
+
+def audience_filter(value: Any) -> Optional[str]:
+    """The ``audience`` argument: internal or external; blank is no filter."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, str) and value.strip().lower() in AUDIENCES:
+        return value.strip().lower()
+    raise ValueError("audience must be internal or external")
+
+
+def since_filter(value: Any, name: str) -> Optional[datetime]:
+    """An ISO 8601 time argument, in UTC; blank is no filter."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be an ISO 8601 date and time")
+    try:
+        moment = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(
+            f"{name} must be an ISO 8601 date and time, for example 2026-11-20T09:00:00Z"
+        ) from error
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def stored_time(value: Any) -> Optional[datetime]:
+    """A stored ISO 8601 time, in UTC; None when absent or unreadable."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def labels_of(meeting: Mapping[str, Any]) -> Dict[str, str]:
+    """The meeting's stored labels ([{Key, Value}]) as an object."""
+    out: Dict[str, str] = {}
+    for label in meeting.get("Labels") or []:
+        if isinstance(label, Mapping) and isinstance(label.get("Key"), str):
+            out[label["Key"]] = str(label.get("Value") or "")
+    return out
+
+
+def created_from(start_date: Optional[str], *since: Optional[datetime]) -> Optional[str]:
+    """Where the walk of the creation index starts when no startDate is given.
+
+    The default, seven days ago, or a day before the earliest since-time given
+    when that is earlier; None when there is no since-time (the default applies).
+    """
+    given = [moment for moment in since if moment is not None]
+    if start_date or not given:
+        return None
+    default = datetime.now(timezone.utc) - DEFAULT_CREATED_RANGE
+    start = min([default, *(moment - CREATED_LOOK_BACK for moment in given)])
+    return start.strftime("%Y-%m-%dT%H:%M:%S")
+
 
 def limit_from(limit: Any) -> int:
     """The number of meetings a ``limit`` argument asks for, from 1 to MAX_LIMIT.
@@ -130,6 +258,10 @@ def execute(
     limit: int = 20,
     user_id: str = None,
     is_admin: bool = False,
+    labels: Any = None,
+    audience: Any = None,
+    updated_since: Any = None,
+    ended_since: Any = None,
 ) -> Dict[str, Any]:
     """
     List meetings from DynamoDB with optional filters.
@@ -146,12 +278,22 @@ def execute(
             1,000 (more is read as 1,000); None means 20
         user_id: User ID for access control
         is_admin: Whether user is admin
+        labels: Optional object of label keys to values; every pair must match
+        audience: Optional internal or external
+        updated_since: Optional ISO 8601 time; meetings changed at or after it
+        ended_since: Optional ISO 8601 time; meetings that ended at or after it
 
     Returns:
         Dict with list of meetings and metadata
     """
     statuses = statuses_for(status)
     limit = limit_from(limit)
+    wanted_labels = labels_filter(labels)
+    wanted_audience = audience_filter(audience)
+    updated_after = since_filter(updated_since, "updatedSince")
+    ended_after = since_filter(ended_since, "endedSince")
+    walk_from = created_from(start_date, updated_after, ended_after)
+    extra = MeetingFilters(wanted_labels, wanted_audience, updated_after, ended_after)
 
     dynamodb = boto3.resource("dynamodb")
     table_name = os.environ.get("CALLS_TABLE")
@@ -160,21 +302,23 @@ def execute(
     try:
         # Owner, participant and status are decided while the rows are read, so
         # that only meetings the caller can see count toward the limit.
-        include = build_filter(user_id, is_admin, participant, statuses)
+        include = build_filter(user_id, is_admin, participant, statuses, extra)
 
         # Query strategy depends on filters
         if start_date and end_date:
             # Use date-based query for efficiency
             start, end = start_date, end_date
+        elif walk_from:
+            start, end = walk_from, end_date or datetime.utcnow().strftime("%Y-%m-%d")
         else:
             # Query recent meetings using today's date shards
-            from datetime import timedelta
-
             today = datetime.utcnow()
             # Query last 7 days to ensure we find meetings
             start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
             end = today.strftime("%Y-%m-%d")
-        found = walk_date_range(table, start, end, limit, include)
+        found = walk_date_range(
+            table, start, end, limit, include, decision_projection(extra.attributes())
+        )
         meetings, unreadable, truncated, failed = (
             found.rows,
             found.unreadable,
@@ -182,18 +326,29 @@ def execute(
             found.failed,
         )
 
+        vp_ids, vp_lookup_complete = virtual_participant_ids(meetings)
+
         # Format response
         result = {
-            "meetings": [format_meeting(m) for m in meetings],
+            "meetings": [format_meeting(m, vp_ids.get(m.get("CallId"))) for m in meetings],
             "count": len(meetings),
             "filters": {
                 "startDate": start_date,
                 "endDate": end_date,
                 "participant": participant,
                 "status": status,
+                "labels": wanted_labels,
+                "audience": wanted_audience,
+                "updatedSince": updated_since or None,
+                "endedSince": ended_since or None,
             },
         }
         notes = []
+        if walk_from:
+            result["filters"]["createdFrom"] = walk_from
+            notes.append(SINCE_NOTE.format(created_from=walk_from))
+        if not vp_lookup_complete:
+            notes.append(VP_LOOKUP_NOTE)
         if truncated:
             result["truncated"] = True
             notes.append(TRUNCATED_NOTE)
@@ -210,6 +365,66 @@ def execute(
     except Exception as e:
         logger.error(f"Error listing meetings: {e}")
         raise ValueError(f"Failed to list meetings: {str(e)}")
+
+
+class MeetingFilters(NamedTuple):
+    """The filters on a meeting's preparation and times, each None when not given."""
+
+    labels: Optional[Dict[str, str]] = None
+    audience: Optional[str] = None
+    updated_since: Optional[datetime] = None
+    ended_since: Optional[datetime] = None
+
+    def given(self) -> bool:
+        return any(value is not None for value in self)
+
+    def attributes(self) -> Tuple[str, ...]:
+        """The FILTER_ATTRIBUTES these filters read."""
+        names = []
+        if self.labels:
+            names.append("labels")
+        if self.audience:
+            names.append("audience")
+        if self.updated_since or self.ended_since:
+            names.append("updated")
+        return tuple(names)
+
+    def match(self, meeting: Mapping[str, Any]) -> bool:
+        if self.labels:
+            stored = labels_of(meeting)
+            if any(stored.get(key) != value for key, value in self.labels.items()):
+                return False
+        if self.audience and meeting.get("Audience") != self.audience:
+            return False
+        updated = stored_time(meeting.get("UpdatedAt"))
+        if self.updated_since and (updated is None or updated < self.updated_since):
+            return False
+        if self.ended_since:
+            # A meeting has no end time of its own; an ended meeting's UpdatedAt
+            # is its end or a later change, so no meeting that ended since the
+            # time is left out.
+            if meeting.get("Status") != "ENDED" or updated is None or updated < self.ended_since:
+                return False
+        return True
+
+
+def virtual_participant_ids(meetings: List[Dict[str, Any]]) -> Tuple[Dict[str, str], bool]:
+    """The newest Virtual Participant of each meeting, by CallId, and whether all were read.
+
+    One bounded scan of the Virtual Participant table (virtual_participants),
+    made only when there are meetings to name and the table is configured.
+    """
+    if not meetings or not os.environ.get("VP_TABLE_NAME"):
+        return {}, True
+    wanted = {m.get("CallId") for m in meetings if m.get("CallId")}
+    try:
+        # pylint: disable-next=import-outside-toplevel
+        from tools.virtual_participants import vps_by_call
+
+        return vps_by_call(wanted)
+    except Exception as e:  # the list is still answered without the ids
+        logger.warning("Could not read the Virtual Participant table (%s)", failure_class(e))
+        return {}, False
 
 
 def statuses_for(status: Optional[str]) -> Optional[FrozenSet[str]]:
@@ -236,6 +451,7 @@ def build_filter(
     is_admin: bool,
     participant: Optional[str],
     statuses: Optional[FrozenSet[str]],
+    extra: Optional[MeetingFilters] = None,
 ) -> Optional[Callable[[Dict[str, Any]], bool]]:
     """The test a meeting row has to pass to be listed, or None when every row is.
 
@@ -243,7 +459,8 @@ def build_filter(
     sees every meeting; anyone else sees the meetings they own and the ones
     shared with them. A caller with no identity sees none.
     """
-    if is_admin and not participant and statuses is None:
+    extra = extra or MeetingFilters()
+    if is_admin and not participant and statuses is None and not extra.given():
         return None
     caller = Caller(user_id=user_id or "", is_admin=bool(is_admin))
 
@@ -251,6 +468,8 @@ def build_filter(
         if not can_read(meeting, caller):
             return False
         if participant and not participant_in_meeting(meeting, participant):
+            return False
+        if not extra.match(meeting):
             return False
         if statuses is None:
             return True
@@ -280,6 +499,7 @@ def walk_date_range(
     end_date: str,
     limit: int,
     include: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    projection: Optional[Dict[str, Any]] = None,
 ) -> WalkResult:
     """
     Walk the TypeDateIndex GSI, newest first, and collect up to ``limit`` meetings.
@@ -300,8 +520,6 @@ def walk_date_range(
     on the index row's copy of Owner and SharedWith.  Without ``include`` the
     rows are read in full at once.  At most ``limit`` rows are returned.
     """
-    from datetime import timedelta
-
     from boto3.dynamodb.conditions import Key
 
     meetings: List[Dict] = []
@@ -415,7 +633,7 @@ def walk_date_range(
             # one request decides a whole page (up to 100 rows).
             for position in range(0, len(page_ids), BATCH_GET_MAX):
                 batch = page_ids[position : position + BATCH_GET_MAX]
-                decided, failed = read_meeting_rows(table, batch, DECISION_PROJECTION)
+                decided, failed = read_meeting_rows(table, batch, projection or DECISION_PROJECTION)
                 undecided.extend(order[call_id] for call_id in failed)
                 pending.extend(
                     call_id for call_id in batch if call_id in decided and include(decided[call_id])
@@ -567,20 +785,55 @@ def participant_in_meeting(meeting: Dict[str, Any], participant_name: str) -> bo
     )
 
 
-def format_meeting(meeting: Dict[str, Any]) -> Dict[str, Any]:
-    """Format meeting data for response"""
+# What the summary step stores when it could not produce a summary, and its
+# answer for a meeting with nothing to summarise (call_event_processor's
+# FAILED_SUMMARY_TEXTS and EMPTY_SUMMARY_TEXT).
+UNUSABLE_SUMMARIES = frozenset(
+    {
+        "",
+        "an error occurred.",
+        "an error occurred",
+        "no summary available",
+        "nothing to summarise: the meeting has no transcript",
+    }
+)
+
+
+def summary_ready(meeting: Dict[str, Any]) -> bool:
+    """Whether the meeting has a summary to read (get_meeting_summary)."""
+    text = meeting.get("CallSummaryText")
+    return isinstance(text, str) and text.strip().rstrip(".").lower() not in {
+        entry.rstrip(".") for entry in UNUSABLE_SUMMARIES
+    }
+
+
+def format_meeting(meeting: Dict[str, Any], vp_id: Optional[str] = None) -> Dict[str, Any]:
+    """Format meeting data for response.
+
+    ``endTime`` is when an ended meeting last changed, which is its end unless it
+    was changed afterwards; it is empty while the meeting runs.
+    """
     meeting_id = meeting.get("CallId", meeting.get("PK", "").replace("c#", ""))
-    return {
+    ended = meeting.get("Status") == "ENDED"
+    ready = summary_ready(meeting)
+    out = {
         "meetingId": meeting_id,
         "meetingName": meeting.get("MeetingTopic", ""),
         "startTime": meeting.get("CreatedAt", ""),
-        "endTime": meeting.get("UpdatedAt", ""),
+        "endTime": meeting.get("UpdatedAt", "") if ended else None,
+        "updatedAt": meeting.get("UpdatedAt", ""),
         "duration": meeting.get("TotalConversationDurationMillis", 0) / 1000,
         "status": meeting.get("Status", "UNKNOWN"),
         "participants": meeting.get("Participants", []),
         "owner": meeting.get("Owner", meeting.get("AgentId", "")),
-        "hasSummary": bool(meeting.get("Summary")),
+        "labels": labels_of(meeting),
+        "audience": meeting.get("Audience") or None,
+        "summaryReady": ready,
+        "hasSummary": ready or bool(meeting.get("Summary")),
         "hasTranscript": bool(meeting.get("TranscriptUri") or meeting.get("RecordingUrl")),
         "meetingUrl": get_meeting_url(meeting_id),
-        "virtualParticipantUrl": get_virtual_participant_url(meeting_id),
     }
+    if vp_id:
+        out["virtualParticipantId"] = vp_id
+    out["virtualParticipantUrl"] = get_virtual_participant_url(vp_id) if vp_id else None
+    return out

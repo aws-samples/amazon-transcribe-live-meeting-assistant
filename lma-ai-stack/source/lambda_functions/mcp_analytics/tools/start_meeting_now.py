@@ -18,6 +18,7 @@ from tools.agenda_helper import normalize_agenda
 from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, normalize_platform
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
+from tools.vp_preparation import platform_fields
 
 logger = logging.getLogger()
 
@@ -31,6 +32,7 @@ def execute(
     is_admin: bool = False,
     use_stored_zoom_credentials: bool = True,
     agenda: Optional[str] = None,
+    preparation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Start a meeting immediately with virtual participant.
@@ -54,6 +56,9 @@ def execute(
         agenda: Optional meeting agenda, one item per line (for example the
             agenda from a calendar invite). Stored on the Virtual Participant
             and carried onto the meeting record when the meeting starts.
+        preparation: The meeting preparation inputs, already checked
+            (vp_preparation.vp_inputs): labels, audience, meetingContext,
+            checklist and meetingSharedWith.
 
     Returns:
         Dict with virtual participant details and status
@@ -129,6 +134,8 @@ def execute(
             # Stored on the VP row; the VP puts it on the meeting record when the
             # meeting starts. The resolver records its source as "mcp".
             **({"agenda": agenda} if agenda else {}),
+            # Stored on the VP row and put on the meeting when it starts.
+            **(preparation or {}),
         }
     }
 
@@ -249,16 +256,13 @@ def execute(
             "virtualParticipantId": vp_id,
             "meetingName": vp_data["meetingName"],
             "meetingPlatform": vp_data["meetingPlatform"],
-            "meetingId": vp_data["meetingId"],
+            **platform_fields(vp_data["meetingId"], vp_data.get("CallId")),
             "status": vp_data["status"],
             "owner": vp_data.get("owner", user_id),
             "message": "Virtual participant is initializing and will join the meeting shortly. Check LMA UI for live status.",
         }
 
-        # Add CallId if available
         call_id = vp_data.get("CallId")
-        if call_id:
-            response_data["callId"] = call_id
 
         # Add VNC details if available
         if vp_data.get("vncEndpoint"):

@@ -80,3 +80,17 @@ test('a malformed row entry is left out rather than failing the meeting', () => 
   assert.deepEqual(preparation?.labels, [{ Key: 'ok', Value: 'v' }]);
   assert.deepEqual(preparation?.checklist.map((item) => item.ItemId), ['b']);
 });
+
+test('a VP scheduled with meetingSharedWith creates its meeting shared with those people', () => {
+  const preparation = preparationFromVpRow({ meetingSharedWith: 'bo@example.com, cy@example.com,bo@example.com' });
+  assert.deepEqual(preparation?.meetingSharedWith, ['bo@example.com', 'cy@example.com']);
+  assert.deepEqual(preparationStartFields(preparation, 'alice@example.com'), {
+    SharedWith: 'bo@example.com,cy@example.com',
+  });
+});
+
+test('a VP without meetingSharedWith creates its meeting unshared', () => {
+  assert.equal('SharedWith' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+  assert.equal(preparationFromVpRow({ meetingSharedWith: ' , ' }), null);
+  assert.equal(preparationFromVpRow({ meetingSharedWith: ['a@example.com'] }), null);
+});

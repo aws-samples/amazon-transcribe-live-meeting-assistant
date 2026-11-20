@@ -67,7 +67,13 @@ mutation UpdateScheduledVirtualParticipant($input: UpdateScheduledVirtualPartici
     meetingPlatform
     meetingId
     scheduledFor
+    meetingTime
     agenda
+    labels { Key Value }
+    audience
+    meetingContext
+    checklist { ItemId Text Kind Priority Source }
+    meetingSharedWith
     status
     Owner
     SharedWith
@@ -84,7 +90,7 @@ def vp_table():
 def get_vp(vp_id: Any) -> Optional[Dict[str, Any]]:
     """The Virtual Participant's row, or None."""
     if not isinstance(vp_id, str) or not vp_id.strip():
-        raise ValueError("virtual_participant_id is required")
+        raise ValueError("virtualParticipantId is required")
     return vp_table().get_item(Key={"id": vp_id.strip()}).get("Item")
 
 
@@ -108,6 +114,20 @@ def active_vps_of_meeting(call_id: str) -> Tuple[List[Dict[str, Any]], bool]:
     """The meeting's Virtual Participants that have not finished, and whether all were read."""
     rows, complete = _scan(Attr("CallId").eq(call_id))
     return [row for row in rows if row.get("status") not in VP_FINISHED_STATUSES], complete
+
+
+def vps_by_call(call_ids) -> Tuple[Dict[str, str], bool]:
+    """The newest Virtual Participant id of each of ``call_ids``, and whether all were read."""
+    rows, complete = _scan(Attr("CallId").exists())
+    newest: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        call_id = row.get("CallId")
+        if call_id not in call_ids or not row.get("id"):
+            continue
+        held = newest.get(call_id)
+        if held is None or str(row.get("createdAt") or "") > str(held.get("createdAt") or ""):
+            newest[call_id] = row
+    return {call_id: row["id"] for call_id, row in newest.items()}, complete
 
 
 def pending_scheduled_vps_of_owner(owner: str) -> List[Dict[str, Any]]:
@@ -179,13 +199,15 @@ def list_vps(caller: Caller, status: Optional[str] = None, limit: Any = None) ->
 
 
 def end_vp(caller: Caller, vp: Dict[str, Any], reason: Optional[str] = None) -> Dict[str, Any]:
-    """End (or, while it waits for its launch, cancel) a Virtual Participant."""
+    """End (or, while it waits for its launch, cancel) a Virtual Participant.
+
+    Idempotent: a Virtual Participant that has already finished is left as it
+    is, and the answer says so with ``alreadyEnded``.
+    """
     if not can_manage(vp, caller):
         raise PermissionError("Only the Virtual Participant's owner or an Admin may end it")
     if vp.get("status") in VP_FINISHED_STATUSES:
-        raise ValueError(
-            f"Virtual Participant {vp.get('id')} has already finished ({vp['status']})"
-        )
+        return {**summary(vp), "meetingId": vp.get("CallId"), "alreadyEnded": True}
     scheduled = vp.get("status") == "SCHEDULED"
     end_reason = (reason or "").strip()[:200] or (
         "Cancelled from an MCP client" if scheduled else "Ended from an MCP client"
@@ -197,7 +219,13 @@ def end_vp(caller: Caller, vp: Dict[str, Any], reason: Optional[str] = None) -> 
         ).get("endVirtualParticipant")
         or {}
     )
-    return {**summary(vp), "status": ended.get("status") or "ENDED", "endReason": end_reason}
+    return {
+        **summary(vp),
+        "meetingId": vp.get("CallId"),
+        "status": ended.get("status") or ("CANCELLED" if scheduled else "ENDED"),
+        "endReason": end_reason,
+        "alreadyEnded": False,
+    }
 
 
 def end_by_id(caller: Caller, virtual_participant_id: Any, reason: Optional[str] = None):

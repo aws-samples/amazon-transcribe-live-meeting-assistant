@@ -7,19 +7,26 @@
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access.
 
-The BedrockAgentCore Gateway path serves the seven original tools, inferred from
-their arguments. The API key path speaks MCP JSON-RPC and serves those and the
-meeting tools in tool_definitions.py. On that path every API key carries a
-scope (execute_tool_call): a read key is answered only by the tools whose
-annotations declare readOnlyHint, a read-write key by every tool, and a legacy
-key -- one stored before keys had scopes -- by the seven original tools and the
-read-only meeting tools. Access to each meeting is decided in tools/access.py.
+Two front doors serve the same tools: the seven original ones (MCP_TOOLS) and
+the meeting tools in tool_definitions.py.
+
+* The API key path speaks MCP JSON-RPC. Every API key carries a scope
+  (execute_tool_call): a read key is answered only by the tools whose
+  annotations declare readOnlyHint, a read-write key by every tool, and a legacy
+  key -- one stored before keys had scopes -- by the seven original tools and
+  the read-only meeting tools.
+* The BedrockAgentCore Gateway path invokes this function with a tool's
+  arguments as the event and the tool's name in the Lambda context
+  (``bedrockAgentCoreToolName``). An event without that name is matched to one
+  of the seven original tools by its arguments, as before.
+
+Access to each meeting is decided in tools/access.py, on both paths.
 """
 
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 from tool_definitions import MEETING_TOOLS
 
@@ -27,19 +34,22 @@ from tool_definitions import MEETING_TOOLS
 from tools import (
     access,
     ask_assistant,
+    consent,
     get_summary,
     get_transcript,
     get_virtual_participant_status,
     guidance,
     list_meetings,
-    live_transcript,
     meeting_actions,
     meeting_agenda,
     meeting_record,
+    preparation,
     schedule_meeting,
+    scheduled_meeting,
     search_meetings,
     start_meeting_now,
     virtual_participants,
+    vp_preparation,
 )
 
 logger = logging.getLogger()
@@ -55,6 +65,14 @@ ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 READ_SCOPE = "read"
 READ_WRITE_SCOPE = "read-write"
 LEGACY_SCOPE = "legacy"
+
+# The gateway names a tool "<target name>___<tool name>".
+GATEWAY_TOOL_SEPARATOR = "___"
+
+
+def server_version() -> str:
+    """The deployed LMA version (the stack's release), as serverInfo reports it."""
+    return os.environ.get("LMA_VERSION") or "unknown"
 
 
 def key_scope(authorizer: Dict[str, Any]) -> str:
@@ -91,6 +109,42 @@ def is_admin_claim(claims: Dict[str, Any]) -> bool:
     return ADMIN_GROUP in groups
 
 
+def gateway_tool_name(context: Any) -> Optional[str]:
+    """The tool the AgentCore Gateway was asked for, from the Lambda context; None without one."""
+    client_context = getattr(context, "client_context", None)
+    custom = getattr(client_context, "custom", None)
+    if not isinstance(custom, dict):
+        return None
+    name = custom.get("bedrockAgentCoreToolName")
+    if not isinstance(name, str) or not name:
+        return None
+    return name.split(GATEWAY_TOOL_SEPARATOR, 1)[-1]
+
+
+def infer_tool(tool_input: Dict[str, Any]) -> str:
+    """One of the seven original tools, guessed from the arguments of an unnamed call."""
+    if "virtualParticipantId" in tool_input and len(tool_input) <= 2:
+        return "get_virtual_participant_status"
+    if "query" in tool_input and "maxResults" in tool_input:
+        return "search_lma_meetings"
+    if "meetingId" in tool_input and "format" in tool_input:
+        return "get_meeting_transcript"
+    if "meetingId" in tool_input and (
+        "includeActionItems" in tool_input or "includeTopics" in tool_input
+    ):
+        return "get_meeting_summary"
+    if "meetingPlatform" in tool_input and "scheduledTime" in tool_input:
+        return "schedule_meeting"
+    if (
+        "meetingPlatform" in tool_input
+        and "meetingName" in tool_input
+        and "scheduledTime" not in tool_input
+    ):
+        return "start_meeting_now"
+    # list_meetings, also when nothing else matches.
+    return "list_meetings"
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main handler for MCP Analytics Lambda.
@@ -124,6 +178,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Handle MCP JSON-RPC protocol messages
             if "jsonrpc" in tool_input and "method" in tool_input:
                 return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin, scope)
+            tool_name = infer_tool(tool_input)
         else:
             # BedrockAgentCore Gateway path: the function is invoked with the raw
             # tool input, so the only identity available is whatever the event
@@ -148,39 +203,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return error_response(403, NO_IDENTITY_MESSAGE)
 
             tool_input = event
+            tool_name = gateway_tool_name(context) or infer_tool(tool_input)
             # The gateway authenticates the user with OAuth; no API key, so no scope.
             key_scope_to_apply = None
 
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
-
-        # Determine which tool based on input parameters
-        if "virtualParticipantId" in tool_input and len(tool_input) <= 2:
-            tool_name = "get_virtual_participant_status"
-        elif "query" in tool_input and "maxResults" in tool_input:
-            tool_name = "search_lma_meetings"
-        elif "meetingId" in tool_input and "format" in tool_input:
-            tool_name = "get_meeting_transcript"
-        elif "meetingId" in tool_input and (
-            "includeActionItems" in tool_input or "includeTopics" in tool_input
-        ):
-            tool_name = "get_meeting_summary"
-        elif "meetingPlatform" in tool_input and "scheduledTime" in tool_input:
-            tool_name = "schedule_meeting"
-        elif (
-            "meetingPlatform" in tool_input
-            and "meetingName" in tool_input
-            and "scheduledTime" not in tool_input
-        ):
-            tool_name = "start_meeting_now"
-        elif "limit" in tool_input or "status" in tool_input or "participant" in tool_input:
-            tool_name = "list_meetings"
-        else:
-            # Default to list_meetings if we can't determine
-            tool_name = "list_meetings"
-
         # On the gateway path `tool_input` is the event itself, which carries the
         # caller's claims, so the argument names are logged rather than the values.
-        logger.info(f"Inferred tool: {tool_name}, Input keys: {sorted(tool_input.keys())}")
+        logger.info(f"Tool: {tool_name}, Input keys: {sorted(tool_input.keys())}")
+
+        if tool_name not in TOOL_HANDLERS:
+            return error_response(400, f"Unknown tool: {tool_name}")
 
         # A request on the API key endpoint is held to its key's scope whatever
         # the shape of its body, as execute_tool_call holds a JSON-RPC call.
@@ -188,80 +221,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.warning(f"Refused {tool_name} for a key with the {key_scope_to_apply} scope")
             return error_response(403, scope_refusal(tool_name, key_scope_to_apply))
 
-        # Route to appropriate tool
-        if tool_name == "search_lma_meetings":
-            result = search_meetings.execute(
-                query=tool_input.get("query"),
-                start_date=tool_input.get("startDate"),
-                end_date=tool_input.get("endDate"),
-                max_results=tool_input.get("maxResults", 10),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-
-        elif tool_name == "get_meeting_transcript":
-            result = get_transcript.execute(
-                meeting_id=tool_input.get("meetingId"),
-                format=tool_input.get("format", "text"),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-
-        elif tool_name == "get_meeting_summary":
-            result = get_summary.execute(
-                meeting_id=tool_input.get("meetingId"),
-                include_action_items=tool_input.get("includeActionItems", True),
-                include_topics=tool_input.get("includeTopics", True),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-
-        elif tool_name == "list_meetings":
-            result = list_meetings.execute(
-                start_date=tool_input.get("startDate"),
-                end_date=tool_input.get("endDate"),
-                participant=tool_input.get("participant"),
-                status=tool_input.get("status", "ALL"),
-                limit=tool_input.get("limit", 20),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-
-        elif tool_name == "schedule_meeting":
-            result = schedule_meeting.execute(
-                meeting_name=tool_input.get("meetingName"),
-                meeting_platform=tool_input.get("meetingPlatform"),
-                meeting_id=tool_input.get("meetingId"),
-                scheduled_time=tool_input.get("scheduledTime"),
-                meeting_password=tool_input.get("meetingPassword"),
-                user_id=user_id,
-                is_admin=is_admin,
-                agenda=tool_input.get("agenda"),
-                allow_duplicate=tool_input.get("allowDuplicate") is True,
-            )
-
-        elif tool_name == "start_meeting_now":
-            result = start_meeting_now.execute(
-                meeting_name=tool_input.get("meetingName"),
-                meeting_platform=tool_input.get("meetingPlatform"),
-                meeting_id=tool_input.get("meetingId"),
-                meeting_password=tool_input.get("meetingPassword"),
-                user_id=user_id,
-                is_admin=is_admin,
-                # Default ON; pass useStoredZoomCredentials=false to opt-out.
-                use_stored_zoom_credentials=tool_input.get("useStoredZoomCredentials", True),
-                agenda=tool_input.get("agenda"),
-            )
-
-        elif tool_name == "get_virtual_participant_status":
-            result = get_virtual_participant_status.execute(
-                virtual_participant_id=tool_input.get("virtualParticipantId"),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-
-        else:
-            return error_response(400, f"Unknown tool: {tool_name}")
+        caller = CallerInfo(user_id, is_admin, key_scope_to_apply or READ_WRITE_SCOPE)
+        result = TOOL_HANDLERS[tool_name](caller, tool_input)
 
         # Return MCP-formatted success response
         return success_response(result)
@@ -293,20 +254,50 @@ MCP_TOOLS = [
             },
             "required": ["query"],
         },
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
         "name": "get_meeting_transcript",
-        "description": "Retrieve the complete transcript for a specific meeting",
+        "description": (
+            "Retrieve the transcript of a meeting. format text (the default) and srt return "
+            "the whole transcript of an ended meeting. format json returns it page by page, "
+            "also while the meeting runs: {segments, nextToken, meetingStatus}, each segment "
+            "with segmentId, startTime, endTime, speaker, channel, text and type (speech or "
+            "chat). Call it first without nextToken, then with the nextToken of the previous "
+            "answer. While the meeting is in progress nextToken is always returned, so poll "
+            "from it (about every pollAfterSeconds); once the meeting has ended and the last "
+            "segment has been read it is null."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
-                "format": {"type": "string", "description": "Output format (json, text, or srt)"},
+                "format": {
+                    "type": "string",
+                    "description": "Output format: json, text (default) or srt",
+                },
+                "nextToken": {
+                    "type": "string",
+                    "description": (
+                        "format json: the nextToken of the previous answer; omit it on the "
+                        "first call"
+                    ),
+                },
+                "maxSegments": {
+                    "type": "number",
+                    "description": "format json: most segments to return (default 500, at most 2000)",
+                },
+                "includeAssistant": {
+                    "type": "boolean",
+                    "description": (
+                        "format json: also return the meeting assistant's answers (type "
+                        "assistant; default false)"
+                    ),
+                },
             },
             "required": ["meetingId"],
         },
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
         "name": "get_meeting_summary",
@@ -320,11 +311,15 @@ MCP_TOOLS = [
             },
             "required": ["meetingId"],
         },
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
         "name": "list_meetings",
-        "description": "List meetings with optional filters",
+        "description": (
+            "List meetings with optional filters, newest first. Each meeting has its labels, "
+            "audience, status, startTime, endTime, owner, summaryReady and, when a Virtual "
+            "Participant captured it, virtualParticipantId."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -349,9 +344,33 @@ MCP_TOOLS = [
                     "type": "number",
                     "description": "Maximum number of meetings to return: a whole number from 1 to 1000 (default 20)",
                 },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": (
+                        "Only meetings that have every one of these labels, as an object of "
+                        'key to value, for example {"project": "website-relaunch"}'
+                    ),
+                },
+                "audience": {
+                    "type": "string",
+                    "enum": ["internal", "external"],
+                    "description": "Only meetings with this audience: internal or external",
+                },
+                "updatedSince": {
+                    "type": "string",
+                    "description": "Only meetings changed at or after this ISO 8601 time",
+                },
+                "endedSince": {
+                    "type": "string",
+                    "description": (
+                        "Only meetings that ended at or after this ISO 8601 time (an ended "
+                        "meeting changed afterwards is listed too)"
+                    ),
+                },
             },
         },
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
         "name": "schedule_meeting",
@@ -359,11 +378,14 @@ MCP_TOOLS = [
             "Schedule a future meeting with virtual participant. If you already have a "
             "Virtual Participant waiting for a meeting with the same name (ignoring case) "
             "and scheduled time (within a minute), that one is updated with the meeting "
-            "link or ID, password, agenda and platform given here instead of scheduling a "
-            'second one, and the result has action "updated" and its '
-            'virtualParticipantId (otherwise action "created"). A Virtual Participant '
+            "link or ID, password, agenda, platform and meeting preparation given here "
+            'instead of scheduling a second one, and the result has action "updated" and '
+            'its virtualParticipantId (otherwise action "created"). A Virtual Participant '
             "cannot be changed within 5 minutes of its start. Pass allowDuplicate=true to "
-            "schedule a second Virtual Participant anyway."
+            "schedule a second Virtual Participant anyway. The result's meetingId is the LMA "
+            "meeting, null until the Virtual Participant has started it; platformMeetingId "
+            "is the meeting ID or link given here. Change it later with "
+            "update_scheduled_meeting."
         ),
         "inputSchema": {
             "type": "object",
@@ -409,10 +431,68 @@ MCP_TOOLS = [
                         "false: that one is updated instead)."
                     ),
                 },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "Optional labels for the meeting as an object of key to value, for example {\"project\": \"website-relaunch\"}, so it can be found by them later (list_meetings labels): at most 20; a key is 1 to 63 lower-case letters, digits, '.', '_' and '-', starting with a letter or digit; a value is at most 256 characters",
+                },
+                "audience": {
+                    "type": "string",
+                    "enum": ["internal", "external"],
+                    "description": "Optional: internal (only the owner's organization) or external (customers or partners present)",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional meeting context: a Markdown briefing for the meeting assistant and the summary (goals, background, terms), at most 20000 characters",
+                },
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "itemId": {
+                                "type": "string",
+                                "description": "A stable id you choose, unique in the meeting: 1 to 64 letters, digits, '.', '_', ':' and '-'",
+                            },
+                            "text": {
+                                "type": "string",
+                                "description": "What the item is, at most 500 characters",
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "question",
+                                    "topic",
+                                    "risk",
+                                    "confirm",
+                                    "decision",
+                                    "action",
+                                ],
+                                "description": "question, topic, risk, confirm, decision or action",
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["must", "should", "could"],
+                                "description": "must, should (the default) or could",
+                            },
+                            "source": {
+                                "type": "string",
+                                "description": "An opaque reference of yours, returned unchanged (at most 256 characters)",
+                            },
+                        },
+                        "required": ["itemId", "text", "kind"],
+                    },
+                    "description": "Optional checklist: at most 100 items the meeting should cover; each starts open",
+                },
+                "shareWith": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
-        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
     },
     {
         "name": "start_meeting_now",
@@ -425,7 +505,8 @@ MCP_TOOLS = [
             "VP may take up to 60 seconds to fully join. Use "
             "get_virtual_participant_status to poll progress, especially to "
             "detect MANUAL_ACTION_REQUIRED states (CAPTCHA, 2FA, SSO) where "
-            "the human user must complete a challenge in the LMA viewer."
+            "the human user must complete a challenge in the LMA viewer, and to "
+            "read the meetingId (the LMA meeting) once the VP has started it."
         ),
         "inputSchema": {
             "type": "object",
@@ -470,16 +551,75 @@ MCP_TOOLS = [
                         "Set to false to force a guest join."
                     ),
                 },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "Optional labels for the meeting as an object of key to value, for example {\"project\": \"website-relaunch\"}, so it can be found by them later (list_meetings labels): at most 20; a key is 1 to 63 lower-case letters, digits, '.', '_' and '-', starting with a letter or digit; a value is at most 256 characters",
+                },
+                "audience": {
+                    "type": "string",
+                    "enum": ["internal", "external"],
+                    "description": "Optional: internal (only the owner's organization) or external (customers or partners present)",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional meeting context: a Markdown briefing for the meeting assistant and the summary (goals, background, terms), at most 20000 characters",
+                },
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "itemId": {
+                                "type": "string",
+                                "description": "A stable id you choose, unique in the meeting: 1 to 64 letters, digits, '.', '_', ':' and '-'",
+                            },
+                            "text": {
+                                "type": "string",
+                                "description": "What the item is, at most 500 characters",
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "question",
+                                    "topic",
+                                    "risk",
+                                    "confirm",
+                                    "decision",
+                                    "action",
+                                ],
+                                "description": "question, topic, risk, confirm, decision or action",
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["must", "should", "could"],
+                                "description": "must, should (the default) or could",
+                            },
+                            "source": {
+                                "type": "string",
+                                "description": "An opaque reference of yours, returned unchanged (at most 256 characters)",
+                            },
+                        },
+                        "required": ["itemId", "text", "kind"],
+                    },
+                    "description": "Optional checklist: at most 100 items the meeting should cover; each starts open",
+                },
+                "shareWith": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
-        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
     },
     {
         "name": "get_virtual_participant_status",
         "description": (
             "Get the current status of a virtual participant launched via "
             "start_meeting_now. Returns status, a human-readable summary, "
+            "the meetingId of the LMA meeting once the VP has started it, "
             "and — critically — manualActionRequired=true with a "
             "manualActionMessage when the VP is blocked on a CAPTCHA / 2FA "
             "/ SSO / consent challenge that the human user must complete "
@@ -498,12 +638,11 @@ MCP_TOOLS = [
             },
             "required": ["virtualParticipantId"],
         },
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
 ]
 
-# Every tool the API key endpoint serves: the seven above, which the gateway
-# path serves too, and the meeting tools.
+# Every tool, on both front doors: the seven above and the meeting tools.
 TOOLS: List[Dict[str, Any]] = [*MCP_TOOLS, *MEETING_TOOLS]
 
 
@@ -543,54 +682,171 @@ def scope_refusal(tool_name: str, scope: str) -> str:
     )
 
 
-# The meeting tools, called with the MCP caller and the tool's arguments.
-MEETING_TOOL_HANDLERS = {
-    "get_live_transcript": lambda caller, a: live_transcript.execute(
-        caller,
-        a.get("meeting_id"),
-        since=a.get("since"),
-        limit=a.get("limit"),
-        include_assistant=a.get("include_assistant") is True,
+def _vp_preparation(a: Dict[str, Any]) -> Dict[str, Any]:
+    """The meeting preparation arguments of schedule_meeting and start_meeting_now, checked."""
+    return vp_preparation.vp_inputs(
+        a.get("labels"), a.get("audience"), a.get("context"), a.get("checklist"), a.get("shareWith")
+    )
+
+
+class CallerInfo(NamedTuple):
+    """Who a tool call is for: the user the request resolved to, and the key's scope."""
+
+    user_id: str
+    is_admin: bool
+    scope: str
+
+
+def _meeting(caller: CallerInfo) -> Any:
+    """The caller as the meeting tools take it (tools/access.py)."""
+    return access.Caller(user_id=caller.user_id, is_admin=caller.is_admin, scope=caller.scope)
+
+
+# Every tool, called with the MCP caller and the tool's arguments.
+TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
+    "search_lma_meetings": lambda caller, a: search_meetings.execute(
+        query=a.get("query"),
+        start_date=a.get("startDate"),
+        end_date=a.get("endDate"),
+        max_results=a.get("maxResults", 10),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+    ),
+    "get_meeting_transcript": lambda caller, a: get_transcript.execute(
+        meeting_id=a.get("meetingId"),
+        format=a.get("format", "text"),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+        next_token=a.get("nextToken"),
+        max_segments=a.get("maxSegments"),
+        include_assistant=a.get("includeAssistant") is True,
+    ),
+    "get_meeting_summary": lambda caller, a: get_summary.execute(
+        meeting_id=a.get("meetingId"),
+        include_action_items=a.get("includeActionItems", True),
+        include_topics=a.get("includeTopics", True),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+    ),
+    "list_meetings": lambda caller, a: list_meetings.execute(
+        start_date=a.get("startDate"),
+        end_date=a.get("endDate"),
+        participant=a.get("participant"),
+        status=a.get("status", "ALL"),
+        limit=a.get("limit", 20),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+        labels=a.get("labels"),
+        audience=a.get("audience"),
+        updated_since=a.get("updatedSince"),
+        ended_since=a.get("endedSince"),
+    ),
+    "schedule_meeting": lambda caller, a: schedule_meeting.execute(
+        meeting_name=a.get("meetingName"),
+        meeting_platform=a.get("meetingPlatform"),
+        meeting_id=a.get("meetingId"),
+        scheduled_time=a.get("scheduledTime"),
+        meeting_password=a.get("meetingPassword"),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+        agenda=a.get("agenda"),
+        allow_duplicate=a.get("allowDuplicate") is True,
+        preparation=_vp_preparation(a),
+    ),
+    "start_meeting_now": lambda caller, a: start_meeting_now.execute(
+        meeting_name=a.get("meetingName"),
+        meeting_platform=a.get("meetingPlatform"),
+        meeting_id=a.get("meetingId"),
+        meeting_password=a.get("meetingPassword"),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
+        # Default ON; pass useStoredZoomCredentials=false to opt-out.
+        use_stored_zoom_credentials=a.get("useStoredZoomCredentials", True),
+        agenda=a.get("agenda"),
+        preparation=_vp_preparation(a),
+    ),
+    "get_virtual_participant_status": lambda caller, a: get_virtual_participant_status.execute(
+        virtual_participant_id=a.get("virtualParticipantId"),
+        user_id=caller.user_id,
+        is_admin=caller.is_admin,
     ),
     "push_meeting_guidance": lambda caller, a: guidance.push(
-        caller, a.get("meeting_id"), a.get("text"), title=a.get("title"), level=a.get("level")
+        _meeting(caller),
+        a.get("meeting_id"),
+        a.get("text"),
+        title=a.get("title"),
+        level=a.get("level"),
     ),
     "list_meeting_guidance": lambda caller, a: guidance.list_items(
-        caller, a.get("meeting_id"), limit=a.get("limit")
+        _meeting(caller), a.get("meeting_id"), limit=a.get("limit")
     ),
-    "update_meeting_agenda": lambda caller, a: meeting_agenda.execute(
-        caller,
-        a.get("agenda"),
-        meeting_id=a.get("meeting_id"),
-        virtual_participant_id=a.get("virtual_participant_id"),
+    "get_meeting_agenda": lambda caller, a: meeting_agenda.get_agenda(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "update_meeting_agenda": lambda caller, a: meeting_agenda.update_agenda(
+        _meeting(caller), a.get("meetingId"), a.get("agenda")
+    ),
+    "get_meeting_context": lambda caller, a: preparation.get_context(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "set_meeting_context": lambda caller, a: preparation.set_context(
+        _meeting(caller), a.get("meetingId"), a.get("context")
+    ),
+    "get_meeting_checklist": lambda caller, a: preparation.get_checklist(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "set_meeting_checklist": lambda caller, a: preparation.set_checklist(
+        _meeting(caller), a.get("meetingId"), a.get("items"), reset_statuses=a.get("resetStatuses")
+    ),
+    "update_checklist_item": lambda caller, a: preparation.update_item(
+        _meeting(caller),
+        a.get("meetingId"),
+        a.get("itemId"),
+        status=a.get("status"),
+        note=a.get("note"),
+    ),
+    "update_meeting_metadata": lambda caller, a: preparation.update_metadata(
+        _meeting(caller), a.get("meetingId"), labels=a.get("labels"), audience=a.get("audience")
+    ),
+    "get_meeting_consent": lambda caller, a: consent.execute(_meeting(caller), a.get("meetingId")),
+    "update_scheduled_meeting": lambda caller, a: scheduled_meeting.execute(
+        _meeting(caller),
+        a.get("virtualParticipantId"),
+        scheduled_time=a.get("scheduledTime"),
+        meeting_name=a.get("meetingName"),
+        agenda=a.get("agenda"),
+        labels=a.get("labels"),
+        audience=a.get("audience"),
+        context=a.get("context"),
+        checklist=a.get("checklist"),
+        share_with=a.get("shareWith"),
     ),
     "end_meeting": lambda caller, a: meeting_actions.end_meeting(
-        caller, a.get("meeting_id"), reason=a.get("reason")
-    ),
-    "delete_meeting": lambda caller, a: meeting_actions.delete_meeting(
-        caller, a.get("meeting_id"), confirm=a.get("confirm")
-    ),
-    "ask_meeting_assistant": lambda caller, a: ask_assistant.execute(
-        caller, a.get("meeting_id"), a.get("question")
-    ),
-    "get_meeting_record": lambda caller, a: meeting_record.execute(
-        caller, a.get("meeting_id"), include=a.get("include")
-    ),
-    "share_meeting": lambda caller, a: meeting_actions.change_sharing(
-        caller, a.get("meeting_id"), a.get("recipients"), share=True
-    ),
-    "unshare_meeting": lambda caller, a: meeting_actions.change_sharing(
-        caller, a.get("meeting_id"), a.get("recipients"), share=False
-    ),
-    "regenerate_meeting_summary": lambda caller, a: meeting_actions.regenerate_summary(
-        caller, a.get("meeting_id")
-    ),
-    "get_meeting_cost": lambda caller, a: meeting_actions.meeting_cost(caller, a.get("meeting_id")),
-    "list_virtual_participants": lambda caller, a: virtual_participants.list_vps(
-        caller, status=a.get("status"), limit=a.get("limit")
+        _meeting(caller), a.get("meetingId"), reason=a.get("reason")
     ),
     "end_virtual_participant": lambda caller, a: virtual_participants.end_by_id(
-        caller, a.get("virtual_participant_id"), reason=a.get("reason")
+        _meeting(caller), a.get("virtualParticipantId"), reason=a.get("reason")
+    ),
+    "delete_meeting": lambda caller, a: meeting_actions.delete_meeting(
+        _meeting(caller), a.get("meetingId"), confirm=a.get("confirm")
+    ),
+    "ask_meeting_assistant": lambda caller, a: ask_assistant.execute(
+        _meeting(caller), a.get("meetingId"), a.get("question")
+    ),
+    "get_meeting_record": lambda caller, a: meeting_record.execute(
+        _meeting(caller), a.get("meetingId"), include=a.get("include")
+    ),
+    "share_meeting": lambda caller, a: meeting_actions.share_meeting(
+        _meeting(caller), a.get("meetingId"), a.get("users"), action=a.get("action")
+    ),
+    "regenerate_meeting_summary": lambda caller, a: meeting_actions.regenerate_summary(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "get_meeting_cost": lambda caller, a: meeting_actions.meeting_cost(
+        _meeting(caller), a.get("meetingId")
+    ),
+    "list_virtual_participants": lambda caller, a: virtual_participants.list_vps(
+        _meeting(caller), status=a.get("status"), limit=a.get("limit")
     ),
 }
 
@@ -609,7 +865,7 @@ def handle_mcp_jsonrpc(msg, user_id, username, is_admin, scope=READ_SCOPE):
             {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "lma-mcp-server", "version": "0.2.30"},
+                "serverInfo": {"name": "lma-mcp-server", "version": server_version()},
             },
         )
 
@@ -635,8 +891,9 @@ def execute_tool_call(  # pylint: disable=too-many-arguments
     msg_id, tool_name, arguments, user_id, username, is_admin, scope=READ_SCOPE
 ):
     """Execute a tool call and return MCP JSON-RPC response."""
-    known = any(tool["name"] == tool_name for tool in TOOLS)
-    if known and not scope_allows(scope, tool_name):
+    if tool_name not in TOOL_HANDLERS:
+        return jsonrpc_error(msg_id, -32602, f"Unknown tool: {tool_name}")
+    if not scope_allows(scope, tool_name):
         logger.warning(f"Refused {tool_name} for a key with the {scope} scope")
         return jsonrpc_response(
             msg_id,
@@ -648,75 +905,8 @@ def execute_tool_call(  # pylint: disable=too-many-arguments
     if not isinstance(arguments, dict):
         return jsonrpc_error(msg_id, -32602, "arguments must be an object")
     try:
-        if tool_name in MEETING_TOOL_HANDLERS:
-            caller = access.Caller(user_id=user_id, is_admin=is_admin, scope=scope)
-            result = MEETING_TOOL_HANDLERS[tool_name](caller, arguments)
-        elif tool_name == "search_lma_meetings":
-            result = search_meetings.execute(
-                query=arguments.get("query"),
-                start_date=arguments.get("startDate"),
-                end_date=arguments.get("endDate"),
-                max_results=arguments.get("maxResults", 10),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-        elif tool_name == "get_meeting_transcript":
-            result = get_transcript.execute(
-                meeting_id=arguments.get("meetingId"),
-                format=arguments.get("format", "text"),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-        elif tool_name == "get_meeting_summary":
-            result = get_summary.execute(
-                meeting_id=arguments.get("meetingId"),
-                include_action_items=arguments.get("includeActionItems", True),
-                include_topics=arguments.get("includeTopics", True),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-        elif tool_name == "list_meetings":
-            result = list_meetings.execute(
-                start_date=arguments.get("startDate"),
-                end_date=arguments.get("endDate"),
-                participant=arguments.get("participant"),
-                status=arguments.get("status", "ALL"),
-                limit=arguments.get("limit", 20),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-        elif tool_name == "schedule_meeting":
-            result = schedule_meeting.execute(
-                meeting_name=arguments.get("meetingName"),
-                meeting_platform=arguments.get("meetingPlatform"),
-                meeting_id=arguments.get("meetingId"),
-                scheduled_time=arguments.get("scheduledTime"),
-                meeting_password=arguments.get("meetingPassword"),
-                user_id=user_id,
-                is_admin=is_admin,
-                agenda=arguments.get("agenda"),
-                allow_duplicate=arguments.get("allowDuplicate") is True,
-            )
-        elif tool_name == "start_meeting_now":
-            result = start_meeting_now.execute(
-                meeting_name=arguments.get("meetingName"),
-                meeting_platform=arguments.get("meetingPlatform"),
-                meeting_id=arguments.get("meetingId"),
-                meeting_password=arguments.get("meetingPassword"),
-                user_id=user_id,
-                is_admin=is_admin,
-                use_stored_zoom_credentials=arguments.get("useStoredZoomCredentials", True),
-                agenda=arguments.get("agenda"),
-            )
-        elif tool_name == "get_virtual_participant_status":
-            result = get_virtual_participant_status.execute(
-                virtual_participant_id=arguments.get("virtualParticipantId"),
-                user_id=user_id,
-                is_admin=is_admin,
-            )
-        else:
-            return jsonrpc_error(msg_id, -32602, f"Unknown tool: {tool_name}")
-
+        caller = CallerInfo(user_id, is_admin, scope)
+        result = TOOL_HANDLERS[tool_name](caller, arguments)
         return jsonrpc_response(
             msg_id,
             {

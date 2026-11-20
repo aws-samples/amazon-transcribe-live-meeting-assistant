@@ -108,8 +108,10 @@ def test_list_meetings_answers_shared_users(monkeypatch):
     monkeypatch.setattr(
         list_meetings,
         "walk_date_range",
-        lambda _table, _start, _end, _limit, include=None: list_meetings.WalkResult(
-            [r for r in rows if include is None or include(r)], 0, False, False
+        lambda _table, _start, _end, _limit, include=None, _projection=None: (
+            list_meetings.WalkResult(
+                [r for r in rows if include is None or include(r)], 0, False, False
+            )
         ),
     )
     monkeypatch.setattr(list_meetings.boto3, "resource", lambda *_a, **_k: Resource_any())

@@ -12,9 +12,9 @@ Quick products:
 | **Amazon Quick Suite** | Web app (Enterprise tier) | OAuth 3LO via Cognito | Multi-user organizations using Quick Suite for chat, dashboards, and connectors |
 | **Amazon Quick Desktop** | Native macOS / Windows app | API key (Bearer) | Individual users wanting scheduled agents and a personal knowledge graph |
 
-Both expose the same seven LMA tools (search, transcript, summary, list,
-schedule, start-now, VP status). Pick the path below that matches the product
-you're connecting.
+Both expose the same 28 LMA tools (search, transcript, summary, list,
+schedule, start-now, VP status, and the tools that prepare, follow and close a
+meeting). Pick the path below that matches the product you're connecting.
 
 > **Looking for ways to use LMA from Quick Desktop?** Once you've completed
 > the Quick Desktop setup below, see
@@ -64,28 +64,52 @@ auth path Quick uses.
 
 ## Available LMA Tools
 
-Both auth paths expose the same set of tools. Read-only tools are annotated
-with `readOnlyHint: true` so MCP clients (including Quick Desktop scheduled
-agents) classify them correctly.
+Both auth paths expose the same 28 tools, with the same definitions. Read-only
+tools are annotated with `readOnlyHint: true` so MCP clients (including Quick
+Desktop scheduled agents) classify them correctly; every tool also declares
+`destructiveHint` and `idempotentHint`.
 
 | Tool | Read-only | Description |
 |---|---|---|
 | `search_lma_meetings` | ✅ | Semantic search across meeting transcripts and summaries |
-| `get_meeting_transcript` | ✅ | Full transcript in `text`, `json`, or `srt` format |
+| `list_meetings` | ✅ | Filter by date range, status, labels, audience, or changed or ended since a time |
 | `get_meeting_summary` | ✅ | AI-generated summary with action items and topics |
-| `list_meetings` | ✅ | Filter by date range or status |
+| `get_meeting_transcript` | ✅ | Full transcript in `text` or `srt` format, or page by page (`json`, with `nextToken`), also while the meeting runs |
+| `get_meeting_record` | ✅ | The parts of a meeting's record named in `include`, with time-limited download links |
+| `get_meeting_cost` | ✅ | The meeting's itemised cost estimate |
+| `get_meeting_agenda` | ✅ | The meeting's agenda |
+| `get_meeting_context` | ✅ | The meeting context (a briefing for the assistant and the summary) |
+| `get_meeting_checklist` | ✅ | The meeting's checklist, with each item's status |
+| `get_meeting_consent` | ✅ | The consent record, without its evidence images |
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
-| `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
-| `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
+| `list_virtual_participants` | ✅ | The Virtual Participants you can see |
+| `list_meeting_guidance` | ✅ | The guidance notes pushed to a meeting |
+| `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant, optionally with labels, audience, context, a checklist and people to share it with |
+| `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant, with the same options |
+| `update_scheduled_meeting` | — | Change a scheduled Virtual Participant until 5 minutes before it starts |
+| `update_meeting_agenda` | — | Replace the meeting's agenda |
+| `set_meeting_context` | — | Replace the meeting context |
+| `set_meeting_checklist` | — | Replace the checklist |
+| `update_checklist_item` | — | Set one checklist item's status or note |
+| `update_meeting_metadata` | — | Replace the labels and/or set the audience |
+| `share_meeting` | — | Share the meeting with people, or stop sharing it |
+| `push_meeting_guidance` | — | Show a note on the meeting page |
+| `ask_meeting_assistant` | — | Ask the meeting assistant about one meeting |
+| `regenerate_meeting_summary` | — | Generate the summary again |
+| `end_meeting` | — | End the meeting's Virtual Participant |
+| `end_virtual_participant` | — | End a Virtual Participant, or cancel a scheduled one |
+| `delete_meeting` | — | Permanently delete a meeting (needs `confirm`) |
 
 On the API key path (Quick Desktop) a key with the **Read only** scope is
-offered, and answered for, the read-only tools only; `schedule_meeting` and
-`start_meeting_now` need a **Read and write** key. A key created before keys had
-scopes is listed as **Legacy (original tools)** and keeps every tool in the table
-above. The API key endpoint also
-serves the meeting tools listed in
-[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed),
-such as the live transcript, meeting guidance and the full meeting record.
+offered, and answered for, the read-only tools only; the others need a **Read
+and write** key. A key created before keys had scopes is listed as **Legacy
+(original tools)** and keeps the seven original tools (`search_lma_meetings`,
+`get_meeting_transcript`, `get_meeting_summary`, `list_meetings`,
+`get_virtual_participant_status`, `schedule_meeting` and `start_meeting_now`)
+and the read-only tools. See
+[MCP API Key Authentication › Tools exposed](mcp-api-key-auth.md#tools-exposed)
+and, for example requests and answers, the
+[MCP Tools Reference](mcp-tools-reference.md).
 
 All tool responses include a `meetingUrl` and (where applicable) a
 `virtualParticipantUrl` deep-link back into the LMA web UI for quick drill-down
@@ -122,7 +146,7 @@ Cognito as the identity provider:
 > identity is answered with `403 Unable to determine the calling user` instead
 > of being served. If you see that response on this path, use the per-user API
 > key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
-> the user's identity on every request and exposes the same seven tools. See
+> the user's identity on every request and exposes the same 28 tools. See
 > [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 ## Step 1: Gather LMA MCP Server Configuration
@@ -198,7 +222,7 @@ per-user API key endpoint, and it is the route to use if tool calls through
 
 ### 2.5 Review discovered tools
 
-Quick Suite will discover the seven LMA tools. Click **Next** to continue.
+Quick Suite will discover the 28 LMA tools. Click **Next** to continue.
 
 ### 2.6 Share (optional)
 
@@ -278,7 +302,8 @@ architecture.
      - **Value**: your API key from Step 1
 6. Click **Connect**
 
-Quick Desktop will discover the seven LMA tools and confirm the connection.
+Quick Desktop will discover the LMA tools its key's scope allows (28 with a
+**Read and write** key) and confirm the connection.
 
 > **Note**: Quick Desktop authenticates the API-key path with a custom
 > `x-api-key` header rather than a Bearer-token field. LMA's MCP API Gateway
@@ -336,6 +361,9 @@ Common parameters for the most-used tools.
 
 - `meetingId` (required) — the meeting `CallId`
 - `format` — `text` (default), `json`, or `srt`
+- `nextToken`, `maxSegments` (default 500, at most 2000), `includeAssistant` —
+  with `format: json` the transcript is returned page by page, also while the
+  meeting runs; see [Reading a Transcript Page by Page](mcp-api-key-auth.md#reading-a-transcript-page-by-page)
 
 ### `get_meeting_summary`
 
@@ -357,6 +385,11 @@ Common parameters for the most-used tools.
   as 1, and anything that is not a whole number is refused with "limit must be an
   integer"). A call never looks at more than 1,000 meetings, so it cannot return
   more
+- `labels` — an object of label key to value; only meetings with every one of
+  them are listed. `audience` — `internal` or `external`
+- `updatedSince` / `endedSince` — ISO 8601; meetings changed, or ended, at or
+  after that time. See [MCP Tools Reference › list_meetings](mcp-tools-reference.md#list_meetings)
+  for how they relate to the date range
 
 You see the meetings you own and the ones shared with you (an Admin sees every
 meeting), as on the meeting page. Your access and `status` are applied while the
@@ -388,6 +421,12 @@ more than one applies. `truncated` and `note` are absent otherwise.
 - `agenda` (optional) — the meeting agenda, one item per line, for example the
   agenda from the calendar invite. It is stored on the meeting record when the
   meeting starts; see [Meeting Agenda](meeting-agenda.md)
+- `labels`, `audience`, `context`, `checklist`, `shareWith` (optional) — the
+  meeting's preparation and the people to share it with once it starts; see
+  [MCP Tools Reference › schedule_meeting](mcp-tools-reference.md#schedule_meeting)
+- The answer's `meetingId` is the LMA meeting, `null` until the Virtual
+  Participant has started it; the meeting ID or link given here is
+  `platformMeetingId`
 
 ### `start_meeting_now`
 
@@ -395,7 +434,8 @@ more than one applies. `truncated` and `note` are absent otherwise.
   `schedule_meeting`
 - `useStoredZoomCredentials` — default `true`; when the user has stored Zoom
   credentials in LMA, the VP signs in with them rather than joining as a guest
-- `agenda` (optional) — as for `schedule_meeting`
+- `agenda`, `labels`, `audience`, `context`, `checklist`, `shareWith`
+  (optional) — as for `schedule_meeting`
 
 ### `get_virtual_participant_status`
 

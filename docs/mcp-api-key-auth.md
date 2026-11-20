@@ -39,7 +39,7 @@ Users generate personal API keys from the LMA UI (MCP Servers Configuration page
           ▼                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                MCPServerAnalyticsFunction                    │
-│  - BedrockAgentCore path: raw tool input from gateway       │
+│  - BedrockAgentCore path: tool input, tool named in context │
 │  - API Gateway path: full MCP JSON-RPC 2.0 protocol         │
 │    (initialize, tools/list, tools/call, ping)               │
 │  - UBAC enforced on both paths                              │
@@ -106,11 +106,11 @@ A new API key is generated with one of two scopes. A key created before keys had
 
 A key created before keys had scopes has no `Scope` attribute and keeps working as it did. To use the meeting tools that change something, generate a key with the **Read and write** scope; the MCP Servers page says so beside a legacy key. A key's scope cannot be changed: revoke the key and generate a new one. The API key path offers a client only the tools its key may call in `tools/list`, and answers a call to any other tool with an MCP tool error that names the scope it needs; the tool does not run. A request whose body is a tool's arguments rather than a JSON-RPC message is held to the key's scope in the same way, and refused with HTTP `403`. Being in the **Admin** group does not widen what a `read` or `legacy` key may do.
 
-The scope applies to the API key endpoint. The OAuth (3LO) gateway path carries no key and is unchanged: it serves the seven original tools.
+The scope applies to the API key endpoint. The OAuth (3LO) gateway path carries no key: it serves every tool, with the same definitions (the gateway target's tool schema in the stack template, which a test holds equal to the API key endpoint's), and finds which one was called from the tool name the gateway passes in the Lambda context (`bedrockAgentCoreToolName`). A gateway call without that name is matched to one of the seven original tools by its arguments, as before.
 
 ## Access to Meetings
 
-Scope decides which tools a key may call; access decides which meetings each tool acts on. Every meeting tool answers the callers the meeting page answers (the AppSync `getCall` rule): a member of the **Admin** group, the meeting's owner, or a user the meeting is shared with. `get_meeting_summary`, `get_meeting_transcript` and `list_meetings` apply the same rule. A few operations narrow it to the meeting's owner or an Admin, as the meeting page does: deleting a meeting, changing who it is shared with, and reading its consent record. A Virtual Participant is read on the same rule against its own record, and changed (its agenda edited, or ended) by its owner or an Admin only. A meeting that does not exist and one the caller may not see are refused with the same message.
+Scope decides which tools a key may call; access decides which meetings each tool acts on. Every meeting tool answers the callers the meeting page answers (the AppSync `getCall` rule): a member of the **Admin** group, the meeting's owner, or a user the meeting is shared with. `get_meeting_summary`, `get_meeting_transcript` and `list_meetings` apply the same rule. A few operations narrow it to the meeting's owner or an Admin, as the meeting page does: deleting a meeting, changing who it is shared with, and reading its consent evidence images (the `consent` section of `get_meeting_record`; `get_meeting_consent`, which returns the record without the images, answers everyone the meeting page's Consent section does). A Virtual Participant is read on the same rule against its own record, and changed (its schedule and meeting preparation edited with `update_scheduled_meeting`, or ended) by its owner or an Admin only. A meeting that does not exist and one the caller may not see are refused with the same message.
 
 The server checks access itself before calling anything else, because it calls AppSync and LMA's other Lambda functions with its own IAM role, which those treat as a trusted backend. Where a resolver Lambda decides access from the caller's identity (the meeting controls behind deleting and sharing, and the summary regenerator), the server invokes it directly with the MCP caller's identity, so that resolver's own rule applies as well.
 
@@ -123,8 +123,9 @@ The server checks access itself before calling anything else, because it calls A
 | `lma-ai-stack/source/appsync/schema.graphql` | MCPApiKey type, GenerateMCPApiKeyOutput type, generateMCPApiKey/revokeMCPApiKey mutations, listMCPApiKeys query |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_authorizer/index.py` | REQUEST authorizer — accepts both `Authorization: Bearer` and `x-api-key` headers, hashes token, DynamoDB lookup, returns IAM policy + user context |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_manager/index.py` | AppSync resolver — generate/list/revoke per-user API keys, one key per user enforced |
-| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for the API Gateway path, including the key scope check; on the BedrockAgentCore path, resolves the caller from the forwarded claims (see [Connecting with a User Identity](#connecting-with-a-user-identity)) |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for the API Gateway path, including the key scope check; on the BedrockAgentCore path, resolves the caller from the forwarded claims (see [Connecting with a User Identity](#connecting-with-a-user-identity)) and the tool from the gateway's tool name |
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tool_definitions.py` | MCP definitions of the meeting tools, with the annotations the scope check reads |
+| `docs/mcp-tools-reference.md` | Every tool, with an example request and answer for those that prepare, follow and close a meeting |
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/access.py` | The access rule every meeting tool applies (see [Access to Meetings](#access-to-meetings)) |
 | `lma-ai-stack/source/appsync/addMeetingGuidance.request.vtl` | Stores a guidance item under the meeting; published to `onAddMeetingGuidance` |
 | `lma-ai-stack/source/ui/src/components/call-panel/MeetingGuidanceBanner.jsx` | The meeting page's guidance notifications |
@@ -140,7 +141,7 @@ The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 
 
 | Method | Description |
 |--------|-------------|
-| `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
+| `initialize` | Returns server info (name: `lma-mcp-server`; version: the LMA version the stack runs) and capabilities |
 | `notifications/initialized` | Client acknowledgment, returns empty 200 |
 | `tools/list` | Returns the definitions, with inputSchema and annotations, of the tools the key's scope allows |
 | `tools/call` | Executes a tool by name with arguments, returns MCP content result; a tool the key's scope does not allow is refused with `isError: true` |
@@ -153,25 +154,35 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | Tool | Scope | Access | Description |
 |------|-------|--------|-------------|
 | `search_lma_meetings` | read | own meetings (Admin: all) | Search transcripts/summaries with natural language |
-| `get_meeting_transcript` | read | owner, shared, Admin | Get full transcript (json, text, or srt format) |
+| `get_meeting_transcript` | read | owner, shared, Admin | The whole transcript (`text` or `srt`), or, with `format: "json"`, the transcript page by page with a `nextToken`, also while the meeting runs; see [Reading a Transcript Page by Page](#reading-a-transcript-page-by-page) |
 | `get_meeting_summary` | read | owner, shared, Admin | Get AI summary with action items and topics |
-| `list_meetings` | read | owner, shared, Admin | List meetings with date and status filters (`participant` matches no meeting LMA recorded) |
-| `get_virtual_participant_status` | read | VP owner, shared, Admin | Poll a Virtual Participant's status |
-| `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant. A meeting the caller has already scheduled is updated rather than scheduled twice; see [Scheduling a Meeting Again](#scheduling-a-meeting-again) |
-| `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant |
-| `get_live_transcript` | read | owner, shared, Admin | The lines added to a meeting's transcript since a cursor; see [Following a Meeting Live](#following-a-meeting-live) |
+| `list_meetings` | read | owner, shared, Admin | List meetings with date, status, `labels` (all must match), `audience`, `updatedSince` and `endedSince` filters; each with its labels, audience, status, times, owner, `summaryReady` and Virtual Participant (`participant` matches no meeting LMA recorded) |
+| `get_virtual_participant_status` | read | VP owner, shared, Admin | Poll a Virtual Participant's status, and read the `meetingId` of the meeting it started |
 | `get_meeting_record` | read | owner, shared, Admin; `consent` owner and Admin only | The sections named in `include`: `details`, `summary`, `transcript`, `chat_links`, `key_frames`, `chat_attachments`, `recordings`, `consent` (default `details` and `summary`); see [Meeting Record Links](#meeting-record-links) |
 | `get_meeting_cost` | read | owner, shared, Admin | The meeting's itemised cost estimate, as on its Cost panel |
+| `get_meeting_agenda` | read | owner, shared, Admin | The agenda, with its source and who last changed it and when |
+| `get_meeting_context` | read | owner, shared, Admin | The [meeting context](meeting-context-and-checklist.md), with who last changed it and when |
+| `get_meeting_checklist` | read | owner, shared, Admin | The checklist items, each with its status, who set it, its evidence and note |
+| `get_meeting_consent` | read | owner, shared, Admin | The consent record without its evidence images: mode, how consent is given, the notice, the attestation and one row per participant |
 | `list_meeting_guidance` | read | owner, shared, Admin | The guidance pushed to a meeting, newest first |
 | `list_virtual_participants` | read | VP owner, shared, Admin | Virtual Participants the caller can see, newest first; optional `status` filter |
+| `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant, optionally with `labels`, `audience`, `context`, `checklist` and `shareWith`. A meeting the caller has already scheduled is updated rather than scheduled twice; see [Scheduling a Meeting Again](#scheduling-a-meeting-again) |
+| `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant, with the same optional meeting preparation |
+| `update_scheduled_meeting` | read-write | VP owner, Admin | Change a scheduled Virtual Participant's time, name, agenda, labels, audience, context, checklist or `shareWith`, through the Edit form's write; refused within 5 minutes of the start |
+| `update_meeting_agenda` | read-write | owner, shared, Admin | Replace a meeting's agenda, while it runs or after it has ended |
+| `set_meeting_context` | read-write | owner, shared, Admin | Replace the meeting context |
+| `set_meeting_checklist` | read-write | owner, shared, Admin | Replace the checklist; an item that stays keeps its progress unless `resetStatuses` |
+| `update_checklist_item` | read-write | owner, shared, Admin | Set one item's status (recorded as the user's) or note |
+| `update_meeting_metadata` | read-write | owner, shared, Admin | Replace the labels, set the audience, or both |
 | `push_meeting_guidance` | read-write | owner, shared, Admin | Show a note on the meeting page; see [Meeting Guidance](#meeting-guidance) |
-| `update_meeting_agenda` | read-write | meeting: owner, shared, Admin; VP: owner, Admin | Replace the agenda of a meeting in progress (`meeting_id`) or of a scheduled Virtual Participant at least 5 minutes before its launch (`virtual_participant_id`), through the same writes the Agenda panel and the Edit form make |
 | `ask_meeting_assistant` | read-write | owner, shared, Admin | Ask the meeting assistant about one meeting, as the meeting page's assistant chat does; the answer is returned and also added to the meeting's assistant conversation |
 | `regenerate_meeting_summary` | read-write | owner, shared, Admin | Generate the summary again; the new one replaces the current one, including edits, when it finishes |
-| `share_meeting` / `unshare_meeting` | read-write | owner, Admin | Add email addresses to, or remove them from, the people the meeting is shared with |
+| `share_meeting` | read-write | owner, Admin | Add email addresses to (`action: "add"`, the default), or remove them from (`"remove"`), the people the meeting is shared with |
 | `end_meeting` | read-write | VP owner, Admin | End the meeting's Virtual Participant (the End button's path), which ends the meeting. A meeting streamed from a browser tab, the desktop app or the browser extension is ended where it is streamed |
-| `end_virtual_participant` | read-write | VP owner, Admin | End a Virtual Participant by its id, or cancel one that is waiting for its scheduled launch |
+| `end_virtual_participant` | read-write | VP owner, Admin | End a Virtual Participant by its id, or cancel one that is waiting for its scheduled launch; calling it again changes nothing (`alreadyEnded: true`) |
 | `delete_meeting` | read-write | owner, Admin | Permanently delete a meeting and everything stored with it, as the meeting list's Delete does. Nothing is deleted unless `confirm` is `true` |
+
+That is 28 tools. Arguments are camelCase (`meetingId`, `virtualParticipantId`), except the two guidance tools' `meeting_id`. Every tool declares the `readOnlyHint`, `destructiveHint` and `idempotentHint` annotations. Example requests and answers are in the [MCP Tools Reference](mcp-tools-reference.md).
 
 Virtual Participants are started with `start_meeting_now` and `schedule_meeting`; there is no separate create tool.
 
@@ -181,19 +192,19 @@ An assistant often calls `schedule_meeting` more than once for the same meeting,
 
 The update is the `updateScheduledVirtualParticipant` write the Virtual Participant page's Edit form makes, so its rules apply: a Virtual Participant that starts in less than 5 minutes cannot be changed, and the call then fails with that reason rather than scheduling a second one. Only the caller's own Virtual Participants are matched, an Admin's included; one that has started, finished or been cancelled is never matched, and a different name or time schedules a new one. Pass `allowDuplicate: true` to schedule a second Virtual Participant for the same meeting anyway.
 
-The REST endpoint waits at most 29 seconds for an answer (the API Gateway integration limit). The meeting assistant can take longer than that to answer a question that needs several of its tools; the client then receives a gateway timeout, but the assistant still finishes, and its answer is added to the meeting's assistant conversation, where `get_live_transcript` with `include_assistant: true` returns it.
+The REST endpoint waits at most 29 seconds for an answer (the API Gateway integration limit). The meeting assistant can take longer than that to answer a question that needs several of its tools; the client then receives a gateway timeout, but the assistant still finishes, and its answer is added to the meeting's assistant conversation, where `get_meeting_transcript` with `format: "json"` and `includeAssistant: true` returns it.
 
-Each tool reuses the code path the meeting page uses: the AppSync mutations `updateCallAgenda`, `updateScheduledVirtualParticipant` and `endVirtualParticipant`; the queries `getCallCost`, `getVideoKeyframes`, `getChatAttachments` and `getMeetingConsent`; the meeting controls Lambda behind `deleteMeetings` and `shareMeetings`; the summary regenerator behind `regenerateCallSummary`; and, for `ask_meeting_assistant`, the AsyncAgentAssistOrchestrator invoked with the same request the meeting page's chat sends. Sharing through the MCP server does not send the `onShareMeetings` notification that refreshes the recipients' open meeting lists; they see the meeting the next time their list loads.
+Each tool reuses the code path the meeting page uses: the AppSync mutations `updateCallAgenda`, `updateCallMeetingContext`, `updateCallChecklist`, `updateCallChecklistItem`, `updateCallLabels`, `updateCallAudience`, `updateScheduledVirtualParticipant` and `endVirtualParticipant`, each selecting every field the meeting page's `onUpdateCall` subscription does, so open meeting pages show the change; the queries `getCallCost`, `getVideoKeyframes`, `getChatAttachments` and `getMeetingConsent`; the meeting controls Lambda behind `deleteMeetings` and `shareMeetings`; the summary regenerator behind `regenerateCallSummary`; and, for `ask_meeting_assistant`, the AsyncAgentAssistOrchestrator invoked with the same request the meeting page's chat sends. Sharing through the MCP server does not send the `onShareMeetings` notification that refreshes the recipients' open meeting lists; they see the meeting the next time their list loads.
 
-### Following a Meeting Live
+### Reading a Transcript Page by Page
 
-The server is a stateless Lambda behind a request/response endpoint, so it cannot stream lines to a client. `get_live_transcript` is read by polling instead:
+The server is a stateless Lambda behind a request/response endpoint, so it cannot stream lines to a client. `get_meeting_transcript` with `format: "json"` is read page by page instead, also while the meeting runs:
 
-1. Call it with `meeting_id` only. It returns the meeting's final speech and meeting-chat lines so far (up to `limit`, default 200), a `cursor`, `live` (whether the meeting is still being captured) and `pollAfterSeconds`.
-2. Call it again with `since` set to the `cursor` from the previous answer. It returns only the lines added since then, and a new cursor. When `hasMore` is true, call again at once; otherwise wait `pollAfterSeconds` (5 seconds).
-3. Stop once `live` is false and a call returns no lines.
+1. Call it with `meetingId` and `format: "json"`. It returns the meeting's final speech and meeting-chat segments so far (up to `maxSegments`, default 500, at most 2000), a `nextToken`, the `meetingStatus` and, while the meeting is live, `pollAfterSeconds`.
+2. Call it again with the `nextToken` from the previous answer. It returns only the segments added since then, and a new token. When `hasMore` is true, call again at once; otherwise wait `pollAfterSeconds` (5 seconds).
+3. While the meeting is in progress a `nextToken` is always returned, so a client can keep polling from it. Once the meeting has ended and the last segment has been read, `nextToken` is `null`.
 
-Lines are returned in the order they end on the meeting's timeline, each with its `type` (`speech` or `chat`), `channel`, `speaker` (named as the meeting page names it), `text`, `startTime` and `endTime`. Pass `include_assistant: true` to include the meeting assistant's answers as well. The cursor is opaque and belongs to one meeting. The two speech channels are finalized separately, so each call looks back 60 seconds behind the last line it returned and leaves out the lines it has already returned; a line finalized more than 60 seconds later than lines after it is not returned to a client that has already polled past it. Each call reads the meeting's stored transcript, so polling more often than every few seconds adds load without returning lines sooner.
+Segments are returned in the order they end on the meeting's timeline, each with a stable `segmentId`, its `type` (`speech` or `chat`), `channel`, `speaker` (named as the meeting page names it), `text`, `startTime` and `endTime`. Pass `includeAssistant: true` to include the meeting assistant's answers as well (`type: "assistant"`). The token is opaque and belongs to one meeting. The two speech channels are finalized separately, so each call looks back 60 seconds behind the last segment it returned and leaves out the segments it has already returned; a segment finalized more than 60 seconds later than segments after it is not returned to a client that has already read past it. Each call reads the meeting's stored transcript, so polling more often than every few seconds adds load without returning segments sooner. `format: "text"` and `"srt"` return the whole transcript file, as before.
 
 ### Meeting Guidance
 
@@ -272,11 +283,16 @@ configured; see [integ-tests/README.md](../integ-tests/README.md).
 
 `integ-tests/test_mcp_meeting_tools.py` runs under the same conditions. It
 creates a synthetic meeting owned by the test user, generates a read key and
-checks that a write tool is refused, then generates a read-write key and polls
-`get_live_transcript` with its cursor while segments are added, pushes guidance
-and reads it back with `list_meeting_guidance`, reads a recording link from
-`get_meeting_record`, and deletes the meeting with `delete_meeting`, checking that
-nothing is deleted without `confirm`. It touches no meeting it did not create and
+checks that a write tool is refused, then generates a read-write key and reads
+`get_meeting_transcript` page by page with its `nextToken` while segments are
+added, pushes guidance and reads it back with `list_meeting_guidance`, sets and
+reads the meeting's agenda, context, checklist, labels and audience, finds the
+meeting by its labels with `list_meetings`, reads its consent record, shares it
+and unshares it, reads a recording link from `get_meeting_record`, and deletes
+the meeting with `delete_meeting`, checking that nothing is deleted without
+`confirm`. It also schedules Virtual Participants two days ahead, changes one
+with `update_scheduled_meeting`, and cancels each with
+`end_virtual_participant`, twice. It touches no meeting it did not create and
 revokes each key it generates.
 
 ## Connecting from Quick Suite

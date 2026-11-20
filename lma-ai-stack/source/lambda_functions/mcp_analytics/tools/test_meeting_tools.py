@@ -90,14 +90,21 @@ def test_guidance_is_listed_newest_first_from_the_meeting_partition(calls_table)
     assert calls_table.queries[-1]["ScanIndexForward"] is False
 
 
-# ── update_meeting_agenda ───────────────────────────────────────────────────
+# ── get_meeting_agenda / update_meeting_agenda ──────────────────────────────
 
 
-def test_the_agenda_of_a_meeting_in_progress_is_written_as_the_meeting_page_writes_it(
-    calls_table, appsync
-):
+def test_the_agenda_is_written_as_the_meeting_page_writes_it(calls_table, appsync):
     calls_table.put(meeting_row())
-    meeting_agenda.execute(caller(SHARED), ["Intro", "Pricing"], meeting_id="m1")
+    appsync.answers["updateCallAgenda"] = {
+        "updateCallAgenda": {
+            "CallId": "m1",
+            "Agenda": "Intro\nPricing",
+            "AgendaSource": "mcp",
+            "AgendaUpdatedBy": SHARED,
+            "AgendaUpdatedAt": "2026-11-20T10:00:00Z",
+        }
+    }
+    answer = meeting_agenda.update_agenda(caller(SHARED), "m1", ["Intro", "Pricing"])
     query, variables = appsync.calls[0]
     assert "mutation UpdateCallAgenda" in query
     assert variables["input"] == {
@@ -106,26 +113,54 @@ def test_the_agenda_of_a_meeting_in_progress_is_written_as_the_meeting_page_writ
         "AgendaSource": "mcp",
         "AgendaUpdatedBy": SHARED,
     }
+    assert answer == {
+        "meetingId": "m1",
+        "agenda": "Intro\nPricing",
+        "agendaSource": "mcp",
+        "updatedBy": SHARED,
+        "updatedAt": "2026-11-20T10:00:00Z",
+    }
+
+
+def test_the_agenda_is_read_from_the_meeting(calls_table):
+    calls_table.put(
+        meeting_row(
+            Agenda="Intro",
+            AgendaSource="scheduled",
+            AgendaUpdatedBy=OWNER,
+            AgendaUpdatedAt="2026-11-19T09:00:00Z",
+        )
+    )
+    assert meeting_agenda.get_agenda(caller(SHARED), "m1") == {
+        "meetingId": "m1",
+        "agenda": "Intro",
+        "agendaSource": "scheduled",
+        "updatedBy": OWNER,
+        "updatedAt": "2026-11-19T09:00:00Z",
+    }
+    assert meeting_agenda.get_agenda(caller(ADMIN, admin=True), "m1")["agenda"] == "Intro"
+    with pytest.raises(PermissionError):
+        meeting_agenda.get_agenda(caller(OTHER), "m1")
 
 
 def test_an_empty_agenda_clears_it_and_a_missing_one_is_refused(calls_table, appsync):
     calls_table.put(meeting_row())
-    meeting_agenda.execute(caller(), "", meeting_id="m1")
+    meeting_agenda.update_agenda(caller(), "m1", "")
     assert appsync.calls[0][1]["input"]["Agenda"] == ""
     with pytest.raises(ValueError):
-        meeting_agenda.execute(caller(), None, meeting_id="m1")
+        meeting_agenda.update_agenda(caller(), "m1", None)
 
 
-def test_the_agenda_of_an_ended_meeting_or_of_someone_elses_is_not_changed(calls_table, appsync):
+def test_an_ended_meeting_has_its_agenda_changed_and_someone_elses_does_not(calls_table, appsync):
     calls_table.put(meeting_row("m1", status="ENDED"))
     calls_table.put(meeting_row("m2"))
-    with pytest.raises(ValueError, match="not in progress"):
-        meeting_agenda.execute(caller(), "x", meeting_id="m1")
+    meeting_agenda.update_agenda(caller(), "m1", "x")
+    assert appsync.calls[0][1]["input"]["CallId"] == "m1"
     with pytest.raises(PermissionError):
-        meeting_agenda.execute(caller(OTHER), "x", meeting_id="m2")
-    with pytest.raises(ValueError, match="exactly one"):
-        meeting_agenda.execute(caller(), "x", meeting_id="m2", virtual_participant_id="vp1")
-    assert appsync.calls == []
+        meeting_agenda.update_agenda(caller(OTHER), "m2", "x")
+    with pytest.raises(ValueError, match="meetingId"):
+        meeting_agenda.update_agenda(caller(), "", "x")
+    assert len(appsync.calls) == 1
 
 
 def vp_row(vp_id="vp1", status="SCHEDULED", owner=OWNER, **extra):
@@ -140,26 +175,6 @@ def vp_row(vp_id="vp1", status="SCHEDULED", owner=OWNER, **extra):
     }
     row.update(extra)
     return row
-
-
-def test_a_scheduled_vp_agenda_is_changed_by_its_owner_only(vp_table, appsync):
-    vp_table.put(vp_row())
-    meeting_agenda.execute(caller(), "Intro", virtual_participant_id="vp1")
-    query, variables = appsync.calls[0]
-    assert "mutation UpdateScheduledVirtualParticipant" in query
-    assert variables["input"] == {"id": "vp1", "agenda": "Intro"}
-    with pytest.raises(PermissionError, match="owner or an Admin"):
-        meeting_agenda.execute(caller(SHARED), "x", virtual_participant_id="vp1")
-    with pytest.raises(PermissionError, match="not found"):
-        meeting_agenda.execute(caller(OTHER), "x", virtual_participant_id="vp1")
-    assert len(appsync.calls) == 1
-
-
-def test_a_vp_that_has_started_has_its_agenda_changed_on_its_meeting(vp_table, appsync):
-    vp_table.put(vp_row(status="ACTIVE"))
-    with pytest.raises(ValueError, match="meeting_id"):
-        meeting_agenda.execute(caller(), "x", virtual_participant_id="vp1")
-    assert appsync.calls == []
 
 
 # ── end_meeting / list and end Virtual Participants ─────────────────────────
@@ -238,10 +253,11 @@ def test_vps_are_listed_for_whoever_may_see_them_without_a_password(vp_table):
     assert len(every) == 3
 
 
-def test_a_finished_vp_is_not_ended_again(vp_table, appsync):
-    vp_table.put(vp_row(status="ENDED"))
-    with pytest.raises(ValueError, match="already finished"):
-        virtual_participants.end_by_id(caller(), "vp1")
+def test_ending_a_finished_vp_again_changes_nothing_and_says_so(vp_table, appsync):
+    vp_table.put(vp_row(status="ENDED", CallId="m1"))
+    answer = virtual_participants.end_by_id(caller(), "vp1")
+    assert answer["alreadyEnded"] is True and answer["status"] == "ENDED"
+    assert answer["virtualParticipantId"] == "vp1" and answer["meetingId"] == "m1"
     with pytest.raises(PermissionError):
         virtual_participants.end_by_id(caller(OTHER), "vp1")
     assert appsync.calls == []

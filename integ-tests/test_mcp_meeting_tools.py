@@ -6,9 +6,13 @@
 One probe run (mcp_meeting_tools_probe.py) creates a synthetic meeting owned by
 the Cognito test user, generates a read key and then a read-write key, and
 exercises the tools against that meeting only: a write tool refused to the read
-key, get_live_transcript polled with its cursor, guidance pushed and listed, a
-recording link from get_meeting_record, delete_meeting with and without
-confirm, and schedule_meeting called again for a meeting it already scheduled.
+key, get_meeting_transcript read page by page with its nextToken, guidance
+pushed and listed, the meeting's agenda, context, checklist, labels and audience
+set and read, the meeting found by its labels, its consent record, sharing
+added and removed, a recording link from get_meeting_record, delete_meeting
+with and without confirm, schedule_meeting called again for a meeting it
+already scheduled and with meeting preparation, update_scheduled_meeting, and
+end_virtual_participant called twice.
 Each test asserts one property of what it observed.
 
 Runs whenever a Cognito test user is configured, like test_mcp_api_key_logging,
@@ -55,29 +59,70 @@ def observed(client, request):
 
 
 def test_a_read_key_is_offered_only_read_tools(observed) -> None:
-    assert observed["read_key_lists_live_transcript"], "tools/list did not offer get_live_transcript"
+    assert observed["read_key_lists_read_tools"], "tools/list did not offer the read tools"
     assert not observed["read_key_lists_write_tool"], "tools/list offered a write tool to a read key"
+    assert not observed["read_key_lists_preparation_writes"], "a read key was offered a preparation write"
 
 
 def test_a_read_key_is_refused_a_write_tool_and_nothing_changes(observed) -> None:
     assert observed["read_key_write_refused"], "push_meeting_guidance ran for a read key"
     assert observed["read_key_delete_refused"], "delete_meeting ran for a read key"
+    assert observed["read_key_context_refused"], "set_meeting_context ran for a read key"
     assert observed["guidance_after_read_key"] == 0, "a read key's refused push stored guidance"
     assert observed["meeting_after_read_key"], "a read key's refused delete removed the meeting"
 
 
 def test_a_read_key_reads(observed) -> None:
-    assert observed["read_key_reads"], "get_live_transcript was refused to a read key"
+    assert observed["read_key_reads"], "get_meeting_transcript was refused to a read key"
 
 
-# ── get_live_transcript ─────────────────────────────────────────────────────
+# ── get_meeting_transcript, page by page ────────────────────────────────────
 
 
-def test_live_transcript_cursor_returns_only_new_lines(observed) -> None:
-    assert observed["live_first_ids"] == ["seg-1", "seg-2"], observed["live_first_ids"]
-    assert observed["live_second_ids"] == ["seg-3"], observed["live_second_ids"]
-    assert observed["live_third_ids"] == [], observed["live_third_ids"]
-    assert observed["live_is_live"] is True, "a STARTED meeting was not reported live"
+def test_transcript_pages_return_each_segment_once(observed) -> None:
+    assert observed["pages_ids"] == [["seg-1"], ["seg-2"], ["seg-3"], []], observed["pages_ids"]
+    assert observed["pages_status"] == "STARTED", observed["pages_status"]
+    assert observed["pages_live_token"], "a live meeting's page had no nextToken to poll from"
+    for field in ("segmentId", "startTime", "endTime", "speaker", "channel", "text", "type"):
+        assert field in observed["pages_segment_fields"], field
+
+
+# ── meeting preparation ─────────────────────────────────────────────────────
+
+
+def test_the_preparation_tools_answer_without_error(observed) -> None:
+    assert observed["preparation_errors"] == {}, observed["preparation_errors"]
+
+
+def test_agenda_and_context_are_written_and_read_back(observed) -> None:
+    assert observed["agenda_written"] == ("Intro\nBudget", "mcp"), observed["agenda_written"]
+    assert observed["agenda_read"] == "Intro\nBudget"
+    assert observed["context_read"] == "# Goals\nAgree the budget"
+    assert observed["context_updated_by"], "the context change names no one"
+
+
+def test_a_checklist_item_status_is_the_users_and_survives_a_replace(observed) -> None:
+    assert observed["checklist_ids"] == ["q1", "t1"], observed["checklist_ids"]
+    assert observed["item_status"] == ("covered", "user", "Dana"), observed["item_status"]
+    assert observed["checklist_kept_status"] == [("q1", "covered")], observed["checklist_kept_status"]
+
+
+def test_labels_find_the_meeting_only_when_all_match(observed) -> None:
+    labels, audience = observed["metadata"]
+    assert audience == "internal" and labels and labels.get("kind") == "mcp", observed["metadata"]
+    assert observed["listed_by_labels"] == [observed["call_id"]], observed["listed_by_labels"]
+    assert observed["listed_by_one_wrong_label"] == [], observed["listed_by_one_wrong_label"]
+    for field in ("labels", "audience", "status", "startTime", "endTime", "owner", "summaryReady"):
+        assert field in observed["listed_fields"], field
+
+
+def test_a_meeting_without_consent_reports_mode_off(observed) -> None:
+    assert observed["consent"].get("mode") == "off", observed["consent"]
+
+
+def test_share_meeting_adds_and_removes(observed) -> None:
+    assert observed["shared_after_add"], "share_meeting did not add the address"
+    assert not observed["shared_after_remove"], "share_meeting action remove left the address"
 
 
 # ── push_meeting_guidance ───────────────────────────────────────────────────
@@ -124,3 +169,22 @@ def test_scheduling_the_same_meeting_again_updates_its_virtual_participant(obser
     assert observed["schedule_second_kept_id"], "the second call scheduled a second Virtual Participant"
     assert observed["schedule_updated_meeting_id"] == "89876543210", observed["schedule_updated_meeting_id"]
     assert observed["schedule_duplicate_new_id"], "allowDuplicate did not schedule a new Virtual Participant"
+    assert observed["schedule_lma_meeting_id"] is None, "a scheduled VP answered with an LMA meeting id"
+
+
+def test_update_scheduled_meeting_changes_the_scheduled_virtual_participant(observed) -> None:
+    assert "update_scheduled_error" not in observed, observed.get("update_scheduled_error")
+    updated = observed["update_scheduled"]
+    assert updated["agenda"] == "Updated agenda"
+    assert updated["labels"] == {"probe": "updated"}
+    assert updated["audience"] is None and updated["checklist"] == []
+    assert updated["context"] == "Scheduled context", "a setting not given was changed"
+    assert updated["shareWith"] == ["integ-share-2@example.com"]
+    assert updated["meetingId"] is None
+
+
+def test_end_virtual_participant_cancels_and_is_idempotent(observed) -> None:
+    ends = observed["end_answers"]
+    assert ends and all("error" not in end for end in ends), ends
+    assert all(end["alreadyEnded"] is False for end in ends[:-1]), ends
+    assert ends[-1]["alreadyEnded"] is True, ends

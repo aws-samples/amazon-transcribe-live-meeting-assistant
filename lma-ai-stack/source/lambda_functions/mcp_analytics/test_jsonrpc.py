@@ -8,7 +8,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Set env vars before importing
 os.environ["LOG_LEVEL"] = "WARNING"
@@ -99,11 +99,17 @@ class TestMCPToolsList(unittest.TestCase):
             "schedule_meeting",
             "start_meeting_now",
             "get_virtual_participant_status",
-            "get_live_transcript",
             "push_meeting_guidance",
             "delete_meeting",
+            "get_meeting_context",
+            "set_meeting_checklist",
+            "update_scheduled_meeting",
+            "get_meeting_consent",
         ):
             self.assertIn(name, tool_names)
+        self.assertEqual(len(tool_names), 28)
+        for removed in ("get_live_transcript", "unshare_meeting"):
+            self.assertNotIn(removed, tool_names)
 
     def test_tools_list_offers_a_legacy_key_the_original_tools_and_the_read_tools(self):
         """A key stored before keys had scopes keeps every tool it was offered."""
@@ -113,9 +119,15 @@ class TestMCPToolsList(unittest.TestCase):
             names = {t["name"] for t in json.loads(result["body"])["result"]["tools"]}
             for tool in index.MCP_TOOLS:
                 self.assertIn(tool["name"], names, scope)
-            self.assertIn("get_live_transcript", names)
+            self.assertIn("get_meeting_checklist", names)
             self.assertIn("get_meeting_record", names)
-            for name in ("push_meeting_guidance", "delete_meeting", "ask_meeting_assistant"):
+            for name in (
+                "push_meeting_guidance",
+                "delete_meeting",
+                "ask_meeting_assistant",
+                "set_meeting_context",
+                "update_scheduled_meeting",
+            ):
                 self.assertNotIn(name, names, scope)
 
     def test_tools_list_offers_a_read_key_only_the_read_only_tools(self):
@@ -128,7 +140,7 @@ class TestMCPToolsList(unittest.TestCase):
             for tool in tools:
                 self.assertIs(tool["annotations"]["readOnlyHint"], True, (scope, tool["name"]))
             names = {t["name"] for t in tools}
-            self.assertIn("get_live_transcript", names)
+            self.assertIn("get_meeting_consent", names)
             self.assertNotIn("start_meeting_now", names)
             self.assertNotIn("delete_meeting", names)
 
@@ -254,9 +266,13 @@ class TestKeyScopes(unittest.TestCase):
         "delete_meeting",
         "ask_meeting_assistant",
         "share_meeting",
-        "unshare_meeting",
         "regenerate_meeting_summary",
         "end_virtual_participant",
+        "set_meeting_context",
+        "set_meeting_checklist",
+        "update_checklist_item",
+        "update_meeting_metadata",
+        "update_scheduled_meeting",
     ]
 
     def _call(self, name, arguments=None, scope=None, is_admin="false"):
@@ -264,7 +280,7 @@ class TestKeyScopes(unittest.TestCase):
             "jsonrpc": "2.0",
             "id": 7,
             "method": "tools/call",
-            "params": {"name": name, "arguments": arguments or {"meeting_id": "m1"}},
+            "params": {"name": name, "arguments": arguments or {"meetingId": "m1"}},
         }
         event = api_gw_event(body, user_id="alice@example.com", is_admin=is_admin, scope=scope)
         return json.loads(index.lambda_handler(event, None)["body"])
@@ -274,7 +290,8 @@ class TestKeyScopes(unittest.TestCase):
         writes = sorted(t["name"] for t in index.TOOLS if not index.is_read_only(t["name"]))
         self.assertEqual(writes, sorted(self.WRITE_TOOLS))
         for tool in index.TOOLS:
-            self.assertIn("readOnlyHint", tool.get("annotations", {}), tool["name"])
+            for hint in ("readOnlyHint", "destructiveHint", "idempotentHint"):
+                self.assertIn(hint, tool.get("annotations", {}), (tool["name"], hint))
 
     def test_a_read_key_is_refused_every_write_tool_before_it_runs(self):
         from tools import meeting_actions, schedule_meeting
@@ -295,7 +312,7 @@ class TestKeyScopes(unittest.TestCase):
         for scope in ("read", None):
             resp = self._call(
                 "delete_meeting",
-                {"meeting_id": "m1", "confirm": True},
+                {"meetingId": "m1", "confirm": True},
                 scope=scope,
                 is_admin="true",
             )
@@ -375,7 +392,7 @@ class TestKeyScopes(unittest.TestCase):
 
         access.Caller = MagicMock(side_effect=lambda **kw: kw)
         meeting_record.execute = MagicMock(return_value={"meetingId": "m1"})
-        resp = self._call("get_meeting_record", {"meeting_id": "m1"}, scope=None)
+        resp = self._call("get_meeting_record", {"meetingId": "m1"}, scope=None)
         self.assertNotIn("isError", resp["result"])
         self.assertEqual(meeting_record.execute.call_args[0][0]["scope"], "legacy")
 
@@ -385,7 +402,7 @@ class TestKeyScopes(unittest.TestCase):
         access.Caller = MagicMock(side_effect=lambda **kw: kw)
         meeting_actions.delete_meeting = MagicMock(return_value={"deleted": True})
         resp = self._call(
-            "delete_meeting", {"meeting_id": "m1", "confirm": True}, scope="read-write"
+            "delete_meeting", {"meetingId": "m1", "confirm": True}, scope="read-write"
         )
         self.assertNotIn("isError", resp["result"])
         caller, meeting_id = meeting_actions.delete_meeting.call_args[0]
@@ -396,14 +413,19 @@ class TestKeyScopes(unittest.TestCase):
         )
 
     def test_a_read_key_calls_a_read_tool(self):
-        from tools import access, live_transcript
+        from tools import get_transcript
 
-        access.Caller = MagicMock(side_effect=lambda **kw: kw)
-        live_transcript.execute = MagicMock(return_value={"lines": []})
-        resp = self._call("get_live_transcript", {"meeting_id": "m1", "since": "c"}, scope="read")
+        get_transcript.execute = MagicMock(return_value={"segments": []})
+        resp = self._call(
+            "get_meeting_transcript",
+            {"meetingId": "m1", "format": "json", "nextToken": "c", "maxSegments": 50},
+            scope="read",
+        )
         self.assertNotIn("isError", resp["result"])
-        live_transcript.execute.assert_called_once()
-        self.assertEqual(live_transcript.execute.call_args[1]["since"], "c")
+        get_transcript.execute.assert_called_once()
+        kwargs = get_transcript.execute.call_args[1]
+        self.assertEqual((kwargs["next_token"], kwargs["max_segments"]), ("c", 50))
+        self.assertEqual(kwargs["user_id"], "alice@example.com")
 
 
 class TestUnknownMethod(unittest.TestCase):
@@ -622,3 +644,79 @@ class TestJSONRPCResponseFormat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestServerVersion(unittest.TestCase):
+    """serverInfo.version is the deployed LMA version, not a constant."""
+
+    def _version(self):
+        body = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        resp = json.loads(index.lambda_handler(api_gw_event(body), None)["body"])
+        return resp["result"]["serverInfo"]["version"]
+
+    def test_the_version_is_read_from_the_deployment(self):
+        with patch.dict(os.environ, {"LMA_VERSION": "0.4.2"}):
+            self.assertEqual(self._version(), "0.4.2")
+
+    def test_a_deployment_without_one_says_unknown(self):
+        with patch.dict(os.environ, {"LMA_VERSION": ""}):
+            self.assertEqual(self._version(), "unknown")
+
+
+def gateway_context(tool):
+    """The Lambda context the AgentCore Gateway invokes a target with."""
+    context = MagicMock()
+    context.client_context.custom = {"bedrockAgentCoreToolName": f"LMAAnalyticsTarget___{tool}"}
+    return context
+
+
+class TestGatewayRouting(unittest.TestCase):
+    """The gateway names the tool in the Lambda context; every tool is reachable."""
+
+    CLAIMS = {"sub": "user123", "cognito:username": "bob", "cognito:groups": "Users"}
+
+    def test_a_meeting_tool_is_routed_by_its_name_with_the_callers_identity(self):
+        from tools import access, preparation
+
+        access.Caller = MagicMock(side_effect=lambda **kw: kw)
+        preparation.set_context = MagicMock(return_value={"context": "x"})
+        event = bedrock_event({"meetingId": "m1", "context": "x"}, claims=self.CLAIMS)
+        result = index.lambda_handler(event, gateway_context("set_meeting_context"))
+        self.assertEqual(result["statusCode"], 200)
+        caller, meeting_id, context = preparation.set_context.call_args[0]
+        self.assertEqual((meeting_id, context), ("m1", "x"))
+        # The gateway carries no key, so no key scope narrows it.
+        self.assertEqual(caller, {"user_id": "user123", "is_admin": False, "scope": "read-write"})
+
+    def test_every_tool_has_a_handler(self):
+        self.assertEqual(set(index.TOOL_HANDLERS), {tool["name"] for tool in index.TOOLS})
+
+    def test_an_original_tool_is_routed_by_its_name_whatever_its_arguments(self):
+        from tools import get_transcript
+
+        get_transcript.execute = MagicMock(return_value={"segments": []})
+        event = bedrock_event({"meetingId": "m1"}, claims=self.CLAIMS)
+        index.lambda_handler(event, gateway_context("get_meeting_transcript"))
+        self.assertEqual(get_transcript.execute.call_args[1]["meeting_id"], "m1")
+
+    def test_an_unknown_tool_name_is_refused(self):
+        event = bedrock_event({"meetingId": "m1"}, claims=self.CLAIMS)
+        result = index.lambda_handler(event, gateway_context("drop_everything"))
+        self.assertEqual(result["statusCode"], 400)
+
+    def test_a_named_call_without_an_identity_is_refused(self):
+        from tools import preparation
+
+        preparation.set_context = MagicMock()
+        event = bedrock_event({"meetingId": "m1", "context": "x"}, claims={})
+        result = index.lambda_handler(event, gateway_context("set_meeting_context"))
+        self.assertEqual(result["statusCode"], 403)
+        preparation.set_context.assert_not_called()
+
+    def test_a_call_without_a_tool_name_is_matched_by_its_arguments(self):
+        self.assertIsNone(index.gateway_tool_name(None))
+        self.assertIsNone(index.gateway_tool_name(MagicMock()))
+        self.assertEqual(index.gateway_tool_name(gateway_context("list_meetings")), "list_meetings")
+        self.assertEqual(
+            index.infer_tool({"virtualParticipantId": "v"}), "get_virtual_participant_status"
+        )
