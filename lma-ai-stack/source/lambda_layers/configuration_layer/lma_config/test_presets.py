@@ -35,6 +35,7 @@ ASSISTANT_DEFAULTS = {
         "webSearchEnabled": True,
         "mcpServersEnabled": True,
         "guidance": {"defaultEnabled": False},
+        "whiteboards": {"defaultEnabled": False},
     },
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
@@ -128,6 +129,7 @@ PRESET_VALUES = {
             "webSearchEnabled": False,
             "mcpServersEnabled": False,
             "guidance": {"defaultEnabled": True},
+            "whiteboards": {"defaultEnabled": False},
         },
         "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
     },
@@ -152,6 +154,7 @@ PRESET_VALUES = {
             "webSearchEnabled": False,
             "mcpServersEnabled": True,
             "guidance": {"defaultEnabled": False},
+            "whiteboards": {"defaultEnabled": False},
         },
         "meeting_processing": {"defaultSummaryProfile": "default"},
     },

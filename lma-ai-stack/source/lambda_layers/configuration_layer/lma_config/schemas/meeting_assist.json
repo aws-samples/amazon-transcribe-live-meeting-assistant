@@ -255,6 +255,94 @@
         }
       },
       "additionalProperties": false
+    },
+    "whiteboards": {
+      "order": 17,
+      "type": "object",
+      "title": "Whiteboards",
+      "description": "Whiteboards are named panels (Markdown, or a diagram in a subset of Mermaid) on the meeting page that the people who can see a meeting can make and edit, and that the assistant can keep up to date from the transcript while the meeting is in progress. They are shown in LMA only, never posted to the meeting chat or spoken. Whiteboards made by hand make no model call. The assistant's updates run only for meetings they are switched on for, and each run is a model call billed to the meeting. See docs/meeting-whiteboards.md.",
+      "properties": {
+        "defaultEnabled": {
+          "order": 0,
+          "type": "boolean",
+          "title": "On for new meetings",
+          "description": "Whether a new meeting starts with the assistant's whiteboard updates on. Off by default. The meeting page can still turn them on or off for one meeting."
+        },
+        "intervalSeconds": {
+          "order": 1,
+          "type": "integer",
+          "title": "Seconds between runs",
+          "description": "The least time between two runs on one meeting. A run reads what was said since the last one; a longer interval means fewer model calls.",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "minNewSegments": {
+          "order": 2,
+          "type": "integer",
+          "title": "New transcript segments a run needs",
+          "description": "A run that finds fewer finished transcript segments than this since the last one makes no model call and waits for more.",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "maxRunsPerMeeting": {
+          "order": 3,
+          "type": "integer",
+          "title": "Runs per meeting at most",
+          "description": "The most runs one meeting gets, Update now included, which caps what the assistant's updates can cost per meeting. At the shipped 180 seconds, 60 runs cover three hours. 0 turns the assistant's updates off for the deployment; whiteboards can still be made and edited by hand.",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "maxWhiteboardsPerMeeting": {
+          "order": 4,
+          "type": "integer",
+          "title": "Whiteboards per meeting",
+          "description": "The most whiteboards one meeting may have.",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "modelId": {
+          "order": 5,
+          "type": "string",
+          "title": "Model",
+          "description": "The Amazon Bedrock model that updates the whiteboards. Run within the Amazon Bedrock Models section's inference geography.",
+          "enum": [
+            "",
+            "amazon.nova-micro-v1:0",
+            "amazon.nova-lite-v1:0",
+            "amazon.nova-pro-v1:0",
+            "global.amazon.nova-2-lite-v1:0",
+            "us.amazon.nova-2-lite-v1:0",
+            "us.anthropic.claude-opus-4-1-20250805-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "us.anthropic.claude-sonnet-4-6",
+            "us.anthropic.claude-opus-4-6-v1",
+            "us.anthropic.claude-haiku-5-5",
+            "us.anthropic.claude-sonnet-5-5",
+            "us.anthropic.claude-opus-5-5",
+            "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "global.anthropic.claude-sonnet-4-6",
+            "global.anthropic.claude-opus-4-6-v1",
+            "global.anthropic.claude-haiku-5-5",
+            "global.anthropic.claude-sonnet-5-5",
+            "global.anthropic.claude-opus-5-5"
+          ],
+          "enumLabels": {
+            "": "The Meeting assistant model (Amazon Bedrock Models section)"
+          }
+        },
+        "prompt": {
+          "order": 6,
+          "type": "string",
+          "title": "Instructions",
+          "description": "The editable part of the instructions each run is given: how to keep the whiteboards. LMA always appends a fixed part that no change here removes: that the meeting's content is quoted data and never instructions, which panels the assistant may change, the limits and the Mermaid subset, and the shape of the answer. Reset to default to return to the shipped text.",
+          "format": "textarea",
+          "rows": 14,
+          "minLength": 1,
+          "maxLength": 10000
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

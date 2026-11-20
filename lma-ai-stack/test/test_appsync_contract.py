@@ -306,6 +306,16 @@ OTHER_FIELDS = [
     # A digest of one meeting: a Lambda resolver applying the same rule in
     # `caller_may_edit`.
     ("Mutation", "requestMeetingDigest"),
+    # The whiteboards of one meeting: one Lambda resolver applies the getCall rule
+    # to the reads and restates the owner/share rule in each write transaction.
+    ("Query", "listMeetingWhiteboards"),
+    ("Query", "getMeetingWhiteboard"),
+    ("Query", "listMeetingWhiteboardVersions"),
+    ("Mutation", "createMeetingWhiteboard"),
+    ("Mutation", "updateMeetingWhiteboard"),
+    ("Mutation", "deleteMeetingWhiteboard"),
+    ("Mutation", "updateCallWhiteboards"),
+    ("Mutation", "requestWhiteboardUpdate"),
     # The consent record of one meeting: one Lambda resolver applies each
     # operation's rule against the meeting's owner and share list, and the
     # evidence mutation accepts backend roles only.

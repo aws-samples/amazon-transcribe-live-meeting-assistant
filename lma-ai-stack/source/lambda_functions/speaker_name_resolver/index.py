@@ -289,6 +289,7 @@ _CALL_FIELDS = """
       ChecklistUpdatedAt
       SummaryProfile
       GuidanceEnabled
+      WhiteboardsEnabled
       ActionItems {
         Text
         Owner

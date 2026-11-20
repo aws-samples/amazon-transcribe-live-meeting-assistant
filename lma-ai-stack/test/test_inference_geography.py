@@ -140,6 +140,7 @@ def test_the_readers_that_resolve_are_the_expected_ones() -> None:
         "lma-ai-stack/source/lambda_functions/bedrock_summary_lambda/index.py",
         "lma-ai-stack/source/lambda_functions/agenda_deriver/index.py",
         "lma-ai-stack/source/lambda_functions/live_guidance_analyzer/index.py",
+        "lma-ai-stack/source/lambda_functions/meeting_whiteboards/index.py",
         "lma-ai-stack/source/lambda_functions/meeting_invitation_parser/index.py",
         "lma-ai-stack/source/lambda_functions/speaker_name_resolver/index.py",
         "lma-ai-stack/source/lambda_functions/keyframe_text_extractor/index.py",

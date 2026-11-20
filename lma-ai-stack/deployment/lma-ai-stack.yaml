@@ -3062,6 +3062,11 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
+            # The whiteboards' assistant runs, queued for meetings that have it on.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsFunctionArn
             # The text of each key frame, read once it is stored.
             - Effect: Allow
               Action:
@@ -3162,6 +3167,8 @@ Resources:
           AGENDA_DERIVER_ARN: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
           # Live guidance runs; see docs/live-guidance.md.
           LIVE_GUIDANCE_ANALYZER_ARN: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
+          # The whiteboards' assistant; see docs/meeting-whiteboards.md.
+          MEETING_WHITEBOARDS_ARN: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsFunctionArn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Gives each stored chat attachment its title and summary.
@@ -5788,7 +5795,8 @@ Resources:
             Statement:
               # Reads only: the meeting row (access, recordings, summary,
               # consent) and its transcript, key frame and attachment items,
-              # and its notifications, whose guidance the meeting export holds.
+              # its notifications, whose guidance the meeting export holds, and
+              # its whiteboards, which the export and the archive hold.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -5802,6 +5810,7 @@ Resources:
                       - "kf#*"
                       - "att#*"
                       - "nt#*"
+                      - "wb#*"
               # Reads of the meeting files an archive holds. The function
               # reads only the objects the meeting record and its items name,
               # inside the meeting's own folders.
@@ -7019,6 +7028,128 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
+  # A meeting's whiteboards, answered by the meeting whiteboards Lambda in the
+  # resolvers nested stack. The mutations answer through
+  # dDbPutCondition.response.vtl, which publishes SharedWith in the form the
+  # onMeetingWhiteboard and onUpdateCall filters match. See
+  # docs/meeting-whiteboards.md.
+  ListMeetingWhiteboardsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: listMeetingWhiteboards
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: getMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ListMeetingWhiteboardVersionsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: listMeetingWhiteboardVersions
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: createMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  DeleteMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: deleteMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallWhiteboardsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallWhiteboards
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  RequestWhiteboardUpdateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: requestWhiteboardUpdate
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  OnMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onMeetingWhiteboard
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   ListSummaryProfilesAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -11274,6 +11405,10 @@ Resources:
                 # on request (request_meeting_digest).
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallGuidance"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/requestMeetingDigest"
+                # The whiteboard tools' writes (create_meeting_whiteboard,
+                # update_meeting_whiteboard); their reads are Query fields.
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createMeetingWhiteboard"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateMeetingWhiteboard"
                 # Query/* covers getVirtualParticipant used by the new
                 # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"

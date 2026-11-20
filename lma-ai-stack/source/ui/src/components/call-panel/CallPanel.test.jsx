@@ -263,7 +263,7 @@ describe('the tabs', () => {
 
   it('offers no Screen share tab for a meeting without key frames', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(4));
     expect(screen.queryByRole('tab', { name: /Screen share/ })).toBeNull();
   });
 });
@@ -752,7 +752,7 @@ describe('the player kept in step with the transcript', () => {
 
   it('plays the video of a meeting without a Virtual Participant even with no key frames', async () => {
     await openRecording();
-    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(4));
     expect(media().tagName).toBe('VIDEO');
   });
 

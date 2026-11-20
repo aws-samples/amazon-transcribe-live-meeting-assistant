@@ -67,6 +67,7 @@ SUBSCRIBED_CALL_FIELDS = """
     SegmentId
   }
   MeetingPlatform
+  WhiteboardsEnabled
   Status
   UpdatedAt
   CreatedAt

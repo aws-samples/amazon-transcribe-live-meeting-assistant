@@ -2891,3 +2891,114 @@ def test_a_new_meeting_gets_its_guidance_choice_else_the_deployments(
         event["GuidanceEnabled"] = event_value
     process_event(session, event, monkeypatch)
     assert expected in print_ast(session.queries[0])
+
+
+# ── the whiteboards' assistant ───────────────────────────────────────────────
+
+WHITEBOARDS_ARN = "arn:aws:lambda:us-east-1:123456789012:function:stack-MeetingWhiteboards"
+
+
+@pytest.fixture
+def whiteboards_hook(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "MEETING_WHITEBOARDS_ARN", WHITEBOARDS_ARN)
+    monkeypatch.setattr(cep, "WHITEBOARD_RUN_QUEUED", {})
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: (False, 180.0, True))
+    return hook
+
+
+def _with_whiteboards(schema: Any, enabled: Any = True) -> QueuedSession:
+    meeting = {"CallId": "call-1", "Status": "STARTED"}
+    if enabled is not None:
+        meeting["WhiteboardsEnabled"] = enabled
+    return QueuedSession(
+        schema,
+        [
+            {"getCall": meeting},
+            SENTIMENT_RESPONSES["populated"],
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+        ],
+    )
+
+
+def _whiteboard_runs(hook: RecordingLambda) -> List[Dict[str, Any]]:
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == WHITEBOARDS_ARN
+    ]
+
+
+def test_a_meeting_with_whiteboards_on_queues_a_run_at_most_every_interval(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    now = {"t": 0.0}
+    monkeypatch.setattr(cep.time, "monotonic", lambda: now["t"])
+    for at, end in ((1000.0, 10.0), (1100.0, 20.0), (1185.0, 30.0)):
+        now["t"] = at
+        process_event(_with_whiteboards(schema), _segment(end), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == [
+        {"CallId": "call-1", "Trigger": "auto"},
+        {"CallId": "call-1", "Trigger": "auto"},
+    ]
+    assert all(i["InvocationType"] == "Event" for i in whiteboards_hook.invocations)
+
+
+@pytest.mark.parametrize("enabled", [False, None])
+def test_with_whiteboards_off_no_run_is_queued_for_a_segment(
+    schema, emitted, whiteboards_hook, monkeypatch, enabled
+):
+    process_event(_with_whiteboards(schema, enabled), _segment(10.0), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_a_partial_segment_queues_no_whiteboard_run(schema, emitted, whiteboards_hook, monkeypatch):
+    process_event(_with_whiteboards(schema), _segment(10.0, partial=True), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_whiteboards_turned_off_for_the_deployment_queue_no_run(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: (False, 180.0, False))
+    process_event(_with_whiteboards(schema), _segment(10.0), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_a_meeting_that_ends_queues_the_last_whiteboard_run_once(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    for status in ("STARTED", "ENDED"):
+        session = QueuedSession(
+            schema,
+            [
+                {"getCall": {"CallId": "call-1", "Status": status}},
+                {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+            ],
+        )
+        process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == [{"CallId": "call-1", "Trigger": "final"}]
+
+
+@pytest.mark.parametrize(
+    "settings, event_value, expected",
+    [
+        ((False, 180.0, True), None, "WhiteboardsEnabled: false"),
+        ((True, 180.0, True), None, "WhiteboardsEnabled: true"),
+        ((True, 180.0, False), None, "WhiteboardsEnabled: false"),
+        ((False, 180.0, True), True, "WhiteboardsEnabled: true"),
+        ((True, 180.0, True), False, "WhiteboardsEnabled: false"),
+    ],
+)
+def test_a_new_meeting_gets_its_whiteboards_choice_else_the_deployments(
+    schema, emitted, monkeypatch, settings, event_value, expected
+):
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: settings)
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    event = {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"}
+    if event_value is not None:
+        event["WhiteboardsEnabled"] = event_value
+    process_event(session, event, monkeypatch)
+    assert expected in print_ast(session.queries[0])

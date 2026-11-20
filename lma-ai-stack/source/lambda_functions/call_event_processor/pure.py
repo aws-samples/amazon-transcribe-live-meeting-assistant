@@ -267,6 +267,34 @@ def guidance_settings(raw: Any) -> "tuple[bool, float, bool]":
     )
 
 
+#: The shipped Seconds between whiteboard runs, used when the setting cannot be read.
+WHITEBOARD_DEFAULT_INTERVAL_SECONDS = 180.0
+
+
+def whiteboard_settings(raw: Any) -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Whiteboards, as the processor needs it: whether a new
+    meeting starts with the assistant's updates on, the seconds between runs
+    (never under the schema's minimum), and whether they are available at all
+    (the runs-per-meeting cap is not 0). Read as guidance_settings reads its own.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        interval = float(raw.get("intervalSeconds", WHITEBOARD_DEFAULT_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        interval = WHITEBOARD_DEFAULT_INTERVAL_SECONDS
+    if interval != interval:  # NaN
+        interval = WHITEBOARD_DEFAULT_INTERVAL_SECONDS
+    try:
+        available = int(raw.get("maxRunsPerMeeting", 1)) > 0
+    except (TypeError, ValueError):
+        available = True
+    return (
+        raw.get("defaultEnabled") is True,
+        max(GUIDANCE_MIN_INTERVAL_SECONDS, interval),
+        available,
+    )
+
+
 def guidance_run_due(
     call_id: Optional[str],
     now: float,

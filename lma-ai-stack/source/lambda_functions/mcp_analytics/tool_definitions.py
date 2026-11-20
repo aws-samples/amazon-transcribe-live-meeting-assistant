@@ -116,6 +116,33 @@ GUIDANCE = {
     ),
 }
 
+WHITEBOARD_PANELS = {
+    "type": "array",
+    "description": "At most 12 panels",
+    "items": {
+        "type": "object",
+        "properties": {
+            "panelId": {
+                "type": "string",
+                "description": "An existing panel's id; absent for a new one",
+            },
+            "title": {"type": "string", "description": "At most 80 characters"},
+            "kind": {
+                "type": "string",
+                "enum": ["markdown", "mermaid"],
+                "description": "markdown (at most 8000 characters) or mermaid (at most 6000)",
+            },
+            "content": {"type": "string"},
+            "source": {
+                "type": "string",
+                "enum": ["assistant"],
+                "description": "assistant, to let the assistant update the panel",
+            },
+        },
+        "required": ["title"],
+    },
+}
+
 MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "push_meeting_guidance",
@@ -339,6 +366,111 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
+        "name": "list_meeting_whiteboards",
+        "description": (
+            "List a meeting's whiteboards (named panels the assistant can keep up to date during "
+            "the meeting and its people can edit), without their panels: each one's id, title, "
+            "template, version and whether the assistant updates it, and whether the assistant's "
+            "updates are on for the meeting."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"meetingId": MEETING_ID},
+            "required": ["meetingId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "get_meeting_whiteboard",
+        "description": (
+            "Get one whiteboard of a meeting with its panels (Markdown, or a diagram in a subset "
+            "of Mermaid), each marked source user or assistant, or an earlier version of it. "
+            "Pass ifNewerThan with the version you already have to poll cheaply: the answer is "
+            "{notModified: true} while the whiteboard is still at that version."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "whiteboardId": {"type": "string", "description": "The whiteboard's id"},
+                "version": {"type": "integer", "description": "An earlier version to read"},
+                "ifNewerThan": {
+                    "type": "integer",
+                    "description": "The version you have; answered notModified while it is current",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["json", "markdown"],
+                    "description": "json (the default) or markdown (the whiteboard as one document)",
+                },
+            },
+            "required": ["meetingId", "whiteboardId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "create_meeting_whiteboard",
+        "description": (
+            "Make a whiteboard on a meeting, from a template (decisions, process, comparison, "
+            "timeline or blank) or with the panels given. Panels you give are recorded as "
+            "yours (source user), so the assistant does not change them; give a panel source "
+            "assistant to let it. Requires a read-write API key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "title": {"type": "string", "description": "At most 120 characters"},
+                "template": {
+                    "type": "string",
+                    "enum": ["decisions", "process", "comparison", "timeline", "blank"],
+                    "description": "decisions (the default), process, comparison, timeline or blank",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "What the assistant should keep on it, at most 1000 characters",
+                },
+                "assistantUpdates": {
+                    "type": "boolean",
+                    "description": "Whether the assistant updates it (default true)",
+                },
+                "panels": WHITEBOARD_PANELS,
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": WRITE,
+    },
+    {
+        "name": "update_meeting_whiteboard",
+        "description": (
+            "Change a whiteboard made from baseVersion: its title, instructions, whether the "
+            "assistant updates it, or its panels (the whole new list, in order; a panel left out "
+            "is removed). Refused if the whiteboard has changed since baseVersion: read it again "
+            "and retry. Panels you change become yours (source user). Requires a read-write API "
+            "key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "whiteboardId": {"type": "string", "description": "The whiteboard's id"},
+                "baseVersion": {
+                    "type": "integer",
+                    "description": "The version the change is made from",
+                },
+                "title": {"type": "string", "description": "At most 120 characters"},
+                "instructions": {"type": "string", "description": "At most 1000 characters"},
+                "assistantUpdates": {
+                    "type": "boolean",
+                    "description": "Whether the assistant updates it",
+                },
+                "panels": WHITEBOARD_PANELS,
+            },
+            "required": ["meetingId", "whiteboardId", "baseVersion"],
+        },
+        "annotations": WRITE,
+    },
+    {
         "name": "get_meeting_consent",
         "description": (
             "Get a meeting's consent record: its mode (off, notify or opt-in), how consent "
@@ -535,11 +667,12 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                             "actionItems",
                             "keyframes",
                             "guidance",
+                            "whiteboards",
                         ],
                     },
                     "description": (
                         "Parts to include (default all): transcript, chat, summary, checklist, "
-                        "consent, actionItems, keyframes, guidance. The meeting, its agenda and "
+                        "consent, actionItems, keyframes, guidance, whiteboards. The meeting, its agenda and "
                         "its context are always included"
                     ),
                 },

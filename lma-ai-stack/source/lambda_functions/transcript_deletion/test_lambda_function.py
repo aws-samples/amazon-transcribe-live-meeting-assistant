@@ -730,3 +730,17 @@ def test_the_guidance_categories_are_the_publish_helpers():
 
     assert lf.TRANSCRIPT_BOUND_CATEGORIES is lma_notifications.TRANSCRIPT_BOUND_CATEGORIES
     assert "guidance" in lf.TRANSCRIPT_BOUND_CATEGORIES
+
+
+def test_deleting_the_transcript_deletes_every_whiteboard_row(aws):
+    # Whiteboards are drawn from the transcript, so they go with it, even one
+    # written entirely by hand.
+    pk = f"wb#{CALL_ID}"
+    aws.table.put(PK=pk, SK="b#wb1", Title="By hand", Panels=[{"Source": "user"}])
+    aws.table.put(PK=pk, SK="v#wb1#000001", Title="By hand")
+    aws.table.put(PK=pk, SK="index", Boards=1)
+    aws.table.put(PK=pk, SK="updater", Notes="what was said")
+    aws.table.put(PK="wb#another-meeting", SK="b#wb9", Title="kept")
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert [k for k in aws.table.items if k[0] == pk] == []
+    assert ("wb#another-meeting", "b#wb9") in aws.table.items

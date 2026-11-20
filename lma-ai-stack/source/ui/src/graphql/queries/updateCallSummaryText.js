@@ -75,6 +75,7 @@ export default /* GraphQL */ `
         SegmentId
       }
       MeetingPlatform
+      WhiteboardsEnabled
       Status
       UpdatedAt
       CreatedAt

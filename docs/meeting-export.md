@@ -21,7 +21,8 @@ export** is that record. It is one JSON document that holds:
 - the key frames, as alt text;
 - the summary, section by section;
 - the action items, with their owners and due dates;
-- the guidance given during the meeting.
+- the guidance given during the meeting;
+- the whiteboards, as they are now.
 
 The format is published as a JSON Schema,
 [`docs/schemas/meeting-export-v1.schema.json`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/schemas/meeting-export-v1.schema.json).
@@ -52,6 +53,7 @@ meeting that does not exist.
 | `actionItems` | `actionItems`. |
 | `keyframes` | `keyframes`. |
 | `guidance` | `guidance`: the notifications of the category `guidance` ([meeting notifications](meeting-notifications.md)). |
+| `whiteboards` | `whiteboards`: each [whiteboard](meeting-whiteboards.md) as it is now, with its panels; not its earlier versions. |
 
 `meeting`, `agenda` and `context` are always included.
 
@@ -219,7 +221,8 @@ When the transcript was deleted under the Retention settings:
 - `meeting.transcriptRetained` is false;
 - checklist evidence has no quotes.
 
-The guidance is deleted with the transcript, so `guidance` is then empty. The
+The guidance and the whiteboards are deleted with the transcript, so `guidance` and
+`whiteboards` are then empty. The
 summary and the action items are kept, as the meeting keeps them.
 
 ## Related

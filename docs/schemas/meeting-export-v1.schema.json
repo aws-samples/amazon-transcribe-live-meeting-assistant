@@ -40,7 +40,12 @@
     "keyframes": { "type": "array", "items": { "$ref": "#/$defs/keyframe" } },
     "summary": { "$ref": "#/$defs/summary" },
     "actionItems": { "type": "array", "items": { "$ref": "#/$defs/actionItem" } },
-    "guidance": { "type": "array", "items": { "$ref": "#/$defs/guidanceItem" } }
+    "guidance": { "type": "array", "items": { "$ref": "#/$defs/guidanceItem" } },
+    "whiteboards": {
+      "description": "The meeting's whiteboards as they are now, in the order they were made; earlier versions are not included. Empty when the transcript was deleted under the Retention settings, as whiteboards are deleted with it. Absent from exports made by a version of LMA without whiteboards.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/whiteboard" }
+    }
   },
   "$defs": {
     "nullableString": { "type": ["string", "null"] },
@@ -219,6 +224,36 @@
         "body": { "$ref": "#/$defs/nullableString" },
         "refs": { "type": "array", "items": { "type": "string" } },
         "createdAt": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "whiteboard": {
+      "type": "object",
+      "required": ["whiteboardId", "title", "version", "panels"],
+      "properties": {
+        "whiteboardId": { "type": "string" },
+        "title": { "type": "string" },
+        "template": { "$ref": "#/$defs/nullableString" },
+        "instructions": { "type": "string", "description": "What the assistant was asked to keep on it." },
+        "assistantUpdates": { "type": "boolean" },
+        "version": { "type": "integer", "minimum": 1 },
+        "createdBy": { "$ref": "#/$defs/nullableString" },
+        "createdAt": { "$ref": "#/$defs/nullableString" },
+        "updatedBy": { "$ref": "#/$defs/nullableString" },
+        "updatedAt": { "$ref": "#/$defs/nullableString" },
+        "panels": { "type": "array", "items": { "$ref": "#/$defs/whiteboardPanel" } }
+      }
+    },
+    "whiteboardPanel": {
+      "type": "object",
+      "required": ["panelId", "title", "kind", "content", "source"],
+      "properties": {
+        "panelId": { "type": "string" },
+        "title": { "type": "string" },
+        "kind": { "enum": ["markdown", "mermaid"], "description": "markdown, or a diagram in a subset of Mermaid." },
+        "content": { "type": "string" },
+        "source": { "enum": ["user", "assistant"], "description": "user: a person wrote or changed it; assistant: the assistant keeps it." },
+        "updatedBy": { "$ref": "#/$defs/nullableString" },
+        "updatedAt": { "$ref": "#/$defs/nullableString" }
       }
     }
   }
