@@ -303,7 +303,14 @@ def read_status(call_id: str, archive_id: str) -> Optional[Dict[str, Any]]:
         if error.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "AccessDenied"):
             return None
         raise
-    return json.loads(body.read())
+    status = json.loads(body.read())
+    # The folder is the CallId made safe as a file name, which two CallIds can
+    # share ("a b" and "a_b"): a status object answers only for the meeting it
+    # was written for. Every reader (prepare, getMeetingArchive, the build)
+    # comes through here.
+    if not isinstance(status, dict) or status.get("CallId") != call_id:
+        return None
+    return status
 
 
 #: How long an archive already prepared is offered again instead of a new one:

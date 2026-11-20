@@ -623,3 +623,28 @@ def test_an_archive_started_after_the_meetings_last_change_is_offered_again(fake
     run_build(lam)
     assert prepare(OWNER)["ArchiveId"] == first["ArchiveId"]
     assert len(lam.invocations) == 1
+
+
+def test_an_archive_answers_only_for_the_meeting_it_was_written_for(fakes):
+    # "Weekly sync-..." and "Weekly_sync-..." share one folder name.
+    other = CALL.replace(" ", "_")
+    assert index.posixify_filename(other) == POSIX
+    dynamo, _s3, lam = fakes()
+    first = prepare(OWNER)
+    run_build(lam)
+    dynamo.meeting = meeting_item(CallId=s(other), PK=s(f"c#{other}"), SK=s(f"c#{other}"))
+    event = {
+        "arguments": {"CallId": other, "ArchiveId": first["ArchiveId"]},
+        "identity": OWNER,
+        "info": {"fieldName": "getMeetingArchive"},
+    }
+    with pytest.raises(RuntimeError, match="no such archive"):
+        index.handler(event, Context())
+    prepare_other = {
+        "arguments": {"CallId": other, "Contents": "EVERYTHING"},
+        "identity": OWNER,
+        "info": {"fieldName": "prepareMeetingArchive"},
+    }
+    assert index.handler(prepare_other, Context())["ArchiveId"] != first["ArchiveId"]
+    # The build leg reads no other meeting's request either.
+    assert index.build(other, first["ArchiveId"]) == {"ok": False}
