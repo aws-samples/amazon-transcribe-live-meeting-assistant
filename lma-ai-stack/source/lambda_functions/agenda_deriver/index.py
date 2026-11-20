@@ -116,6 +116,18 @@ _CALL_FIELDS = """
         UpdatedAt
       }
       ChecklistUpdatedAt
+      SummaryProfile
+      GuidanceEnabled
+      WhiteboardsEnabled
+      ActionItems {
+        Text
+        Owner
+        DueDate
+        DueText
+        StartTime
+        SegmentId
+      }
+      MeetingPlatform
       Status
       UpdatedAt
       CreatedAt

@@ -288,9 +288,76 @@ next reopen allows the next number.
 A refusal is printed with its type (`MeetingNotFound`, `Unauthorized`,
 `TranscriptDeleted`, `MeetingInProgress`, `MeetingChanged` or `BadRequest`),
 and the command exits with status 1. Options: `--stack-name`, `--region`,
-`--json`.
+`--json`; a `--stack-name` or `--region` given before `meetings` is used over
+`LMA_STACK_NAME` and `AWS_DEFAULT_REGION` in the environment, as for
+[`lma meetings delete`](#lma-meetings-delete--delete-meetings-by-label).
 
 `lma vp rejoin` and `lma meetings reopen` call mutations that accept IAM callers only when they sign with an **assumed role** (an SSO or role profile, or a role on an instance or in CI); with an IAM user's access keys the server refuses them. A role is accepted as a backend role, which may rejoin any Virtual Participant and reopen any meeting, as it may end any Virtual Participant; the meeting records the role's ARN as who reopened it.
+
+### `lma meetings delete` — Delete Meetings by Label
+
+Deletes every meeting that carries the given [labels](meeting-context-and-checklist.md),
+for example all the meetings of one engagement when it ends. It is a **dry run
+by default**: it lists the meetings it would delete and changes nothing.
+
+```bash
+# List what would be deleted
+lma meetings delete --label engagement=acme --user-name jdoe@example.com
+
+# Delete it
+lma meetings delete --label engagement=acme --user-name jdoe@example.com --confirm
+
+# Every label has to match
+lma meetings delete --label engagement=acme --label phase=discovery \
+                    --user-name admin@example.com --confirm
+```
+
+| Option | Description |
+|--------|-------------|
+| `--label KEY=VALUE` | A label the meetings carry. Repeat it to require several; a meeting has to carry every one, with the same value. Required |
+| `--user-name TEXT` | The LMA user to act for, by email or Cognito user name (env `LMA_USER_NAME`). If the user is in the Admin group, the selection is every user's matching meetings; otherwise only the matching meetings they own. Required |
+| `--confirm` | Delete the meetings. Without it nothing is deleted |
+| `--json` | Print the result as JSON |
+
+Each meeting is deleted on its own through the same per-meeting delete path as
+the meetings list and the meeting page (the meeting controls function's
+`deleteMeetings`), which checks again that the user owns the meeting or is an
+Admin. So everything that deleting a meeting removes goes with it: the meeting
+record and summary, the transcript, key frames, recordings, chat attachments,
+consent record and evidence, notifications, meeting archives and Virtual
+Participant records. See
+[Deleting a meeting](privacy-and-data-handling.md#deleting-a-meeting) for the
+full list and for the copies it does not reach, such as the DynamoDB tables'
+35-day point-in-time recovery.
+
+A meeting that is still in progress (`STARTED` or `TRANSCRIBING`) is never
+deleted: it is listed as skipped, and the command can be run again after it
+ends. A meeting the delete path does not delete is named with the reason, the
+rest are still deleted, and the command prints the final count (*Deleted 4 of
+5 meeting(s) from stack LMA in us-east-1; 1 failed*) and exits with status 1.
+
+Its first line names the stack, Region and AWS account it acts on, in the dry
+run and with `--confirm`, and `--json` includes them as `stack`, `region` and
+`account`; check them before confirming. A `--stack-name` or `--region` given
+before `meetings` (`lma --stack-name LMA-team meetings delete ...`) is used over
+`LMA_STACK_NAME` and `AWS_DEFAULT_REGION` in the environment; one given after
+`delete` is used over both. The meetings are found by
+reading every meeting's list entry, with no date limit, so a large deployment
+takes longer to search.
+
+The command acts with your AWS credentials, which are what allow it at all;
+`--user-name` decides whose meetings are selected. It needs:
+
+| Action | Resource | Used for |
+|--------|----------|----------|
+| `cloudformation:DescribeStackResource` | The LMA stack and its AI stack | Finding the meetings table |
+| `cognito-idp:AdminGetUser`, `cognito-idp:ListUsers`, `cognito-idp:AdminListGroupsForUser` | The LMA user pool | Looking up the user and whether they are an Admin |
+| `dynamodb:Query`, `dynamodb:BatchGetItem` | The meetings table and its `TypeDateIndex` | Finding the meetings and their labels |
+| `lambda:InvokeFunction` | `<stack-name>-MeetingControlsLambda` | Deleting, with `--confirm` only |
+
+It is not offered as an MCP tool.
+
+> The underlying SDK methods are documented under [`client.meetings`](lma-sdk.md#clientmeetings--meetings-by-label).
 
 ### `lma load` — Load Simulator (plugin)
 

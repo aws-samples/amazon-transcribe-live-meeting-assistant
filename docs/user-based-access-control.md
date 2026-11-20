@@ -13,6 +13,7 @@ title: "User-Based Access Control"
 - [Meeting Sharing](#meeting-sharing)
 - [Recording Playback](#recording-playback)
 - [Meeting Deletion](#meeting-deletion)
+- [Knowledge Base Search](#knowledge-base-search)
 - [Upgrading from v0.1.9 or Earlier](#upgrading-from-v019-or-earlier)
 - [Service Limits](#service-limits)
 
@@ -167,6 +168,38 @@ Meeting owners can permanently delete their meetings.
   [Copies that follow their own lifetime](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime)
 - If any step fails, the meeting is not deleted and stays in the list; deleting
   it again repeats every step
+
+### Deleting Meetings by Label
+
+[`lma meetings delete --label key=value --user-name <user>`](lma-cli.md#lma-meetings-delete--delete-meetings-by-label)
+deletes every meeting that carries the labels, through the same per-meeting
+deletion. It acts for the LMA user named: an Admin's selection is every user's
+matching meetings, anyone else's only the ones they own, and the deletion checks
+that again for each meeting. It is a dry run unless `--confirm` is given, and it
+skips meetings still in progress.
+
+## Knowledge Base Search
+
+The transcript knowledge base (`TranscriptKnowledgeBase`) holds every meeting's
+transcript and summary files, with the meeting's owner in each file's metadata.
+Every search of it is filtered on that owner, except an Admin's:
+
+- The meeting assistant's `meeting_history` tool searches only the meetings
+  owned by the user it acts for: the signed-in user on the meeting page, or,
+  for a request made in the meeting that is allowed past meetings, the meeting's
+  owner.
+- The **Meetings Query** page searches only the signed-in user's own meetings,
+  and every meeting for a member of the Admin group, who can read every meeting
+  anyway.
+- The MCP server's `search_meetings` tool, likewise, filters a non-Admin
+  caller's search on that caller and does not filter an Admin's.
+
+A meeting shared with a user is not found by that user's search; only its owner's
+and an Admin's searches find it. So one user's assistant never reaches another
+user's meetings. An in-meeting request that is allowed past meetings reaches all
+of the owner's meetings, including meetings with other organizations, which is
+why **In-meeting requests** is **Current meeting only** by default and in every
+configuration preset.
 
 ## Upgrading from v0.1.9 or Earlier
 

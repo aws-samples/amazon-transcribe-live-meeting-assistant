@@ -29,8 +29,10 @@ import {
 } from '../common/meeting-preparation';
 import { ChecklistEditor } from '../call-panel/ChecklistPanel';
 import { MEETING_CONSENT_OPTIONS, meetingConsentOptionsFor } from './meeting-consent-options';
+import { GUIDANCE_OPTIONS } from './guidance-options';
 import { isMeetingUrl, zoomMeetingLinkHint } from './launch-settings';
 import { PLATFORM_OPTIONS, agendaIsTooLong, meetingIdError } from './vp-form';
+import { summaryProfileOptions } from '../../hooks/use-summary-profiles';
 
 /**
  * The fields of the Virtual Participant form, from the meeting name to video
@@ -65,6 +67,10 @@ const VirtualParticipantFormFields = ({
   consentDefaults = null,
   enableVideoRecording,
   onEnableVideoRecordingChange,
+  summaryProfiles = undefined,
+  // Live guidance for the meeting (guidance-options.js); not offered when omitted.
+  guidanceChoice = undefined,
+  onGuidanceChoiceChange = undefined,
 }) => {
   // A meetingId that is a full join URL (http/https) carries its own password
   // server-side, so the field is relabelled and the password input hidden.
@@ -87,8 +93,13 @@ const VirtualParticipantFormFields = ({
   const contextTooLong = (preparation.meetingContext || '').length > MAX_CONTEXT_CHARS;
   const checklistError = checklistProblem(preparation.checklist);
   const preparationGiven = Boolean(
-    preparation.labelsText || preparation.audience || preparation.meetingContext || preparation.checklist?.length,
+    preparation.labelsText ||
+      preparation.audience ||
+      preparation.meetingContext ||
+      preparation.checklist?.length ||
+      preparation.summaryProfile,
   );
+  const profileOptions = summaryProfileOptions(summaryProfiles, preparation.summaryProfile);
   // A choice the platform or the deployment rules out is shown disabled, with the reason.
   const consentOptions = meetingConsentOptionsFor(form.meetingPlatform, consentDefaults);
 
@@ -221,6 +232,24 @@ const VirtualParticipantFormFields = ({
           defaultExpanded={preparationGiven}
         >
           <SpaceBetween size="m">
+            <FormField
+              label="Summary profile"
+              description={
+                'The sections of the summary written when the meeting ends. ' +
+                "Default is the deployment's standard summary."
+              }
+            >
+              <Select
+                selectedOption={optionFor(profileOptions, preparation.summaryProfile || 'default')}
+                options={profileOptions}
+                onChange={({ detail }) =>
+                  setPreparation({
+                    summaryProfile: detail.selectedOption.value === 'default' ? '' : detail.selectedOption.value,
+                  })
+                }
+                ariaLabel="Summary profile"
+              />
+            </FormField>
             <FormField label="Audience" description="Whether people outside your organization are in the meeting.">
               <Select
                 selectedOption={optionFor(AUDIENCE_OPTIONS, preparation.audience)}
@@ -293,6 +322,26 @@ const VirtualParticipantFormFields = ({
         />
       </FormField>
 
+      {onGuidanceChoiceChange && (
+        <FormField
+          label="Live guidance"
+          description={
+            'Whether LMA reads the meeting while it is in progress, keeps its checklist up to date and offers ' +
+            "guidance in the meeting page's Notifications drawer, to you and the people the meeting is shared " +
+            'with. Never posted to the meeting chat or spoken. Each run is a model call billed to the meeting.'
+          }
+          stretch
+        >
+          <Select
+            selectedOption={GUIDANCE_OPTIONS.find((option) => option.value === guidanceChoice) || GUIDANCE_OPTIONS[0]}
+            onChange={({ detail }) => onGuidanceChoiceChange(detail.selectedOption.value)}
+            options={GUIDANCE_OPTIONS}
+            ariaLabel="Live guidance"
+            disabled={settingsLocked}
+          />
+        </FormField>
+      )}
+
       <FormField
         label="Video recording"
         description={
@@ -326,6 +375,7 @@ VirtualParticipantFormFields.propTypes = {
       labelsText: PropTypes.string,
       audience: PropTypes.string,
       meetingContext: PropTypes.string,
+      summaryProfile: PropTypes.string,
       checklist: PropTypes.arrayOf(PropTypes.shape({ ItemId: PropTypes.string })),
     }),
   }).isRequired,
@@ -351,6 +401,12 @@ VirtualParticipantFormFields.propTypes = {
   }),
   enableVideoRecording: PropTypes.bool.isRequired,
   onEnableVideoRecordingChange: PropTypes.func.isRequired,
+  // The profiles listSummaryProfiles answers with; omitted, the default alone.
+  summaryProfiles: PropTypes.arrayOf(
+    PropTypes.shape({ Name: PropTypes.string, Label: PropTypes.string, Description: PropTypes.string }),
+  ),
+  guidanceChoice: PropTypes.oneOf(['default', 'on', 'off']),
+  onGuidanceChoiceChange: PropTypes.func,
 };
 
 export default VirtualParticipantFormFields;

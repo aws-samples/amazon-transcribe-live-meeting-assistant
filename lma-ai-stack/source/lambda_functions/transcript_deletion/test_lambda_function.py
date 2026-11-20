@@ -710,6 +710,8 @@ def _with_notifications(aws):
     aws.table.put(PK=pk, SK="u#user@example.com", Dismissed={"g1"})
     aws.table.put(PK=pk, SK="r#29000000", Count=3)
     aws.table.put(PK=f"gd#{CALL_ID}", SK="g#2026-11-19T10:00:00Z#x", Text="older guidance")
+    # The live guidance analyzer's state, whose summary is drawn from the transcript.
+    aws.table.put(PK=f"gd#{CALL_ID}", SK="analyzer", RollingSummary="what was said")
     aws.table.put(PK="nt#another-meeting", SK="n#2026-11-19T10:00:00Z#g9", Category="guidance")
 
 
@@ -728,3 +730,29 @@ def test_the_guidance_categories_are_the_publish_helpers():
 
     assert lf.TRANSCRIPT_BOUND_CATEGORIES is lma_notifications.TRANSCRIPT_BOUND_CATEGORIES
     assert "guidance" in lf.TRANSCRIPT_BOUND_CATEGORIES
+
+
+def test_deleting_the_transcript_deletes_every_whiteboard_row(aws):
+    # Whiteboards are drawn from the transcript, so they go with it, even one
+    # written entirely by hand.
+    pk = f"wb#{CALL_ID}"
+    aws.table.put(PK=pk, SK="b#wb1", Title="By hand", Panels=[{"Source": "user"}])
+    aws.table.put(PK=pk, SK="v#wb1#000001", Title="By hand")
+    aws.table.put(PK=pk, SK="index", Boards=1)
+    aws.table.put(PK=pk, SK="updater", Notes="what was said")
+    aws.table.put(PK="wb#another-meeting", SK="b#wb9", Title="kept")
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert [k for k in aws.table.items if k[0] == pk] == []
+    assert ("wb#another-meeting", "b#wb9") in aws.table.items
+
+
+def test_the_whiteboards_are_deleted_after_the_meeting_records_the_deletion(aws, monkeypatch):
+    # The whiteboard resolver refuses a write once the meeting carries
+    # TranscriptDeletedAt; sweeping only after it is set leaves no window in
+    # which a write could land and outlast the sweep.
+    order = []
+    record, sweep = lf.record_deletion, lf.delete_whiteboards
+    monkeypatch.setattr(lf, "record_deletion", lambda *a: order.append("record") or record(*a))
+    monkeypatch.setattr(lf, "delete_whiteboards", lambda c: order.append("whiteboards") or sweep(c))
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    assert order == ["record", "whiteboards"]

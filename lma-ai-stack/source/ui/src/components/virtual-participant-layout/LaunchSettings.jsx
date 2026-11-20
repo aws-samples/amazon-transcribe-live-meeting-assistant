@@ -9,6 +9,7 @@ import { Box, ExpandableSection, KeyValuePairs, SpaceBetween } from '@cloudscape
 
 import { platformLabel } from '../common/meeting-header';
 import { describeAgendaSource, parseAgendaItems } from '../common/agenda';
+import { describeGuidance } from './guidance-options';
 import {
   DEPLOYMENT_DEFAULT,
   describeConsent,
@@ -82,6 +83,7 @@ const LaunchSettings = ({ vp, headerActions = null }) => {
 
   const captureItems = [
     { label: 'Video (screen) recording', value: describeToggle(vp.enableVideoRecording) },
+    { label: 'Live guidance', value: describeGuidance(vp) },
     {
       label: 'Audio recording and transcript',
       value: 'Not a per-meeting choice (deployment setting)',
@@ -135,6 +137,7 @@ LaunchSettings.propTypes = {
     agenda: PropTypes.string,
     agendaSource: PropTypes.string,
     enableVideoRecording: PropTypes.bool,
+    guidanceEnabled: PropTypes.bool,
     consentMode: PropTypes.string,
     consentRule: PropTypes.string,
   }).isRequired,

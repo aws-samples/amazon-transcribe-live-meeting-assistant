@@ -1,0 +1,17 @@
+## Forwards the meeting whiteboard queries and mutations (listMeetingWhiteboards,
+## getMeetingWhiteboard, listMeetingWhiteboardVersions, createMeetingWhiteboard,
+## updateMeetingWhiteboard, deleteMeetingWhiteboard, updateCallWhiteboards and
+## requestWhiteboardUpdate) to the meeting whiteboards Lambda: the arguments,
+## the verified identity and the field name, which is what the Lambda's access
+## check reads. VTL rather than APPSYNC_JS so the mutations can answer through
+## dDbPutCondition.response.vtl, which writes SharedWith in the form the
+## onMeetingWhiteboard and onUpdateCall subscription filters match.
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "arguments": $util.toJson($ctx.arguments),
+    "identity": $util.toJson($ctx.identity),
+    "info": { "fieldName": $util.toJson($ctx.info.fieldName) }
+  }
+}

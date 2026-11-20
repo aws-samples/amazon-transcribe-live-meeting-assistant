@@ -1,0 +1,343 @@
+{
+ "meeting": {
+  "PK": "c#demo-renewal",
+  "SK": "c#demo-renewal",
+  "CallId": "demo-renewal",
+  "Owner": "dana@example.com",
+  "Status": "STARTED",
+  "GuidanceEnabled": true,
+  "Agenda": "1. Price and term\n2. Support hours\n3. Migration timeline\n4. Next steps",
+  "MeetingContext": "Renewal of our support contract with the vendor. We want the price held near last year's and the migration done before the end of March.",
+  "Labels": [
+   {
+    "Key": "planned-minutes",
+    "Value": "30"
+   }
+  ],
+  "Checklist": [
+   {
+    "ItemId": "q-budget-owner",
+    "Text": "Who signs off on the budget for the renewal?",
+    "Kind": "question",
+    "Priority": "must",
+    "Status": "open"
+   },
+   {
+    "ItemId": "t-price-term",
+    "Text": "Renewal price and contract term",
+    "Kind": "topic",
+    "Priority": "must",
+    "Status": "open"
+   },
+   {
+    "ItemId": "r-migration",
+    "Text": "Data migration must finish before the end of March",
+    "Kind": "risk",
+    "Priority": "should",
+    "Status": "open"
+   },
+   {
+    "ItemId": "c-sla-hours",
+    "Text": "Confirm the support hours and their time zone",
+    "Kind": "confirm",
+    "Priority": "should",
+    "Status": "open"
+   },
+   {
+    "ItemId": "d-go-no-go",
+    "Text": "Decide whether to go ahead with the renewal",
+    "Kind": "decision",
+    "Priority": "must",
+    "Status": "open"
+   },
+   {
+    "ItemId": "a-revised-quote",
+    "Text": "Vendor sends a revised quote",
+    "Kind": "action",
+    "Priority": "should",
+    "Status": "open"
+   },
+   {
+    "ItemId": "t-training",
+    "Text": "Training for new staff",
+    "Kind": "topic",
+    "Priority": "could",
+    "Status": "open"
+   },
+   {
+    "ItemId": "q-notice-period",
+    "Text": "What is the cancellation notice period?",
+    "Kind": "question",
+    "Priority": "should",
+    "Status": "deferred",
+    "StatusSource": "user"
+   }
+  ]
+ },
+ "segments": [
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-01",
+   "SegmentId": "seg-01",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Thanks for joining. We have thirty minutes to go through the support contract renewal.",
+   "StartTime": 5.0,
+   "EndTime": 10.73,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-02",
+   "SegmentId": "seg-02",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Great, happy to be here. I brought the renewal quote.",
+   "StartTime": 14.73,
+   "EndTime": 18.27,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-03",
+   "SegmentId": "seg-03",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Let's start with price and term. What are you proposing?",
+   "StartTime": 22.27,
+   "EndTime": 26.0,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-04",
+   "SegmentId": "seg-04",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "The renewal is forty two thousand a year on a two year term, same scope as today.",
+   "StartTime": 30.0,
+   "EndTime": 35.4,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-05",
+   "SegmentId": "seg-05",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "That's up from thirty eight. What changed?",
+   "StartTime": 39.4,
+   "EndTime": 42.4,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-06",
+   "SegmentId": "seg-06",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Mostly the extended support hours, which go to seven in the morning until ten at night.",
+   "StartTime": 46.4,
+   "EndTime": 52.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-07",
+   "SegmentId": "seg-07",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Okay. And are those hours Eastern or Pacific?",
+   "StartTime": 56.2,
+   "EndTime": 59.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-08",
+   "SegmentId": "seg-08",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "We'd cover that, it's flexible.",
+   "StartTime": 63.2,
+   "EndTime": 66.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-09",
+   "SegmentId": "seg-09",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "We also need to move our data to the new platform before the end of March.",
+   "StartTime": 70.2,
+   "EndTime": 75.13,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-10",
+   "SegmentId": "seg-10",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Our migration team is booked until February, but we'll handle that.",
+   "StartTime": 79.13,
+   "EndTime": 83.6,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-11",
+   "SegmentId": "seg-11",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Hm, that's tight. Let's come back to it.",
+   "StartTime": 87.6,
+   "EndTime": 90.6,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-12",
+   "SegmentId": "seg-12",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Sure. I can send the revised quote with the hours written in.",
+   "StartTime": 94.6,
+   "EndTime": 98.67,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-13",
+   "SegmentId": "seg-13",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Please do. Someone on our side will review it.",
+   "StartTime": 102.67,
+   "EndTime": 105.73,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-14",
+   "SegmentId": "seg-14",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Will your finance team need anything else from us?",
+   "StartTime": 109.73,
+   "EndTime": 113.07,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-15",
+   "SegmentId": "seg-15",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Probably the payment schedule. The budget for this sits with operations.",
+   "StartTime": 117.07,
+   "EndTime": 121.87,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-16",
+   "SegmentId": "seg-16",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Understood. Quarterly or annual billing both work.",
+   "StartTime": 125.87,
+   "EndTime": 129.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-17",
+   "SegmentId": "seg-17",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Annual is simpler for us.",
+   "StartTime": 133.2,
+   "EndTime": 136.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-18",
+   "SegmentId": "seg-18",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Then annual it is, invoiced in January.",
+   "StartTime": 140.2,
+   "EndTime": 143.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-19",
+   "SegmentId": "seg-19",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Good. So price is forty two thousand a year, two year term, annual billing.",
+   "StartTime": 147.2,
+   "EndTime": 152.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-20",
+   "SegmentId": "seg-20",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "That's right.",
+   "StartTime": 156.2,
+   "EndTime": 159.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-21",
+   "SegmentId": "seg-21",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Let me think about whether we go ahead. I want to check a couple of things first.",
+   "StartTime": 163.2,
+   "EndTime": 168.6,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-22",
+   "SegmentId": "seg-22",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "Of course. Anything else on your list today?",
+   "StartTime": 172.6,
+   "EndTime": 175.6,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-23",
+   "SegmentId": "seg-23",
+   "Speaker": "Dana",
+   "Channel": "LOCAL",
+   "Transcript": "Training came up last time but we can skip it for now.",
+   "StartTime": 179.6,
+   "EndTime": 183.2,
+   "IsPartial": false
+  },
+  {
+   "PK": "trs#demo-renewal",
+   "SK": "s#seg-24",
+   "SegmentId": "seg-24",
+   "Speaker": "Lee",
+   "Channel": "REMOTE",
+   "Transcript": "No problem, we can schedule it later.",
+   "StartTime": 187.2,
+   "EndTime": 190.2,
+   "IsPartial": false
+  }
+ ]
+}

@@ -199,7 +199,7 @@ STATE_MACHINES_SRC_FILES := $(wildcard \
 )
 # Nested templates of the AI stack, which `sam build` builds and `sam package`
 # uploads with it (TemplateURL in lma-ai-stack.yaml).
-NESTED_TEMPLATE_FILES := $(wildcard deployment/lma-ai-lambda-resolvers.yaml)
+NESTED_TEMPLATE_FILES := $(wildcard deployment/lma-ai-lambda-resolvers.yaml deployment/lma-ai-meeting-events.yaml)
 BUILD_SOURCES := $(TEMPLATE_FILE) \
 	$(NESTED_TEMPLATE_FILES) \
 	$(LAMBDA_LAYERS_SRC_FILES) \

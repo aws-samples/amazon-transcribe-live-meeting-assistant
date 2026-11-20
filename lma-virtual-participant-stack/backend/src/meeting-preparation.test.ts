@@ -10,7 +10,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { preparationFromVpRow, preparationStartFields } from './meeting-preparation.js';
+import { meetingPlatformName, preparationFromVpRow, preparationStartFields } from './meeting-preparation.js';
 
 const ROW = {
   labels: [{ Key: 'project', Value: 'website-relaunch' }],
@@ -93,4 +93,46 @@ test('a VP without meetingSharedWith creates its meeting unshared', () => {
   assert.equal('SharedWith' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
   assert.equal(preparationFromVpRow({ meetingSharedWith: ' , ' }), null);
   assert.equal(preparationFromVpRow({ meetingSharedWith: ['a@example.com'] }), null);
+});
+
+test('a VP with a summary profile creates its meeting with it', () => {
+  const preparation = preparationFromVpRow({ summaryProfile: 'discovery-session' });
+  assert.equal(preparation?.summaryProfile, 'discovery-session');
+  assert.deepEqual(preparationStartFields(preparation, 'alice@example.com'), {
+    SummaryProfile: 'discovery-session',
+  });
+});
+
+test('the default or a malformed summary profile is not put on the meeting', () => {
+  for (const summaryProfile of ['default', '', 'Not A Name', 7]) {
+    assert.equal(preparationFromVpRow({ summaryProfile }), null);
+  }
+  assert.equal('SummaryProfile' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+});
+
+test('a VP with live guidance on or off creates its meeting with that choice', () => {
+  for (const guidanceEnabled of [true, false]) {
+    const preparation = preparationFromVpRow({ guidanceEnabled });
+    assert.equal(preparation?.guidanceEnabled, guidanceEnabled);
+    assert.deepEqual(preparationStartFields(preparation, 'alice@example.com'), {
+      GuidanceEnabled: guidanceEnabled,
+    });
+  }
+});
+
+test("a VP without a live guidance choice leaves it to the deployment's setting", () => {
+  for (const guidanceEnabled of [undefined, null, 'true', 1]) {
+    assert.equal(preparationFromVpRow({ guidanceEnabled }), null);
+  }
+  assert.equal('GuidanceEnabled' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+});
+
+test('the meeting platform is named as the meeting record names it', () => {
+  assert.equal(meetingPlatformName('ZOOM'), 'Zoom');
+  assert.equal(meetingPlatformName('Teams'), 'Teams');
+  assert.equal(meetingPlatformName('GOOGLE_MEET'), 'Google Meet');
+  assert.equal(meetingPlatformName('google meet'), 'Google Meet');
+  assert.equal(meetingPlatformName('Chime'), 'Chime');
+  assert.equal(meetingPlatformName('other'), null);
+  assert.equal(meetingPlatformName(undefined), null);
 });

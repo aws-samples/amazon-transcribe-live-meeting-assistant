@@ -1429,6 +1429,82 @@ def test_a_stored_summary_tells_the_transcript_deletion(
     ]
 
 
+def test_a_profiles_summary_is_stored_with_its_action_items_and_profile(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryProfileUsed": "discovery-session",
+            "ActionItemsStatus": "generated",
+            "ActionItems": [{"Text": "Send the plan", "Owner": "Priya", "StartTime": 3.5}],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert print_ast(sent["ActionItems"]) == (
+        '[{Text: "Send the plan", Owner: "Priya", StartTime: 3.5}]'
+    )
+    state = json.loads(sent["CallSummaryState"])
+    assert state["profile"] == "discovery-session"
+    assert state["actionItems"] == "generated"
+    assert "SummaryProfileUsed" not in sent
+
+
+def test_a_default_summary_records_no_profile(schema, emitted, deletion_function, monkeypatch):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": '{"SUMMARY": "ok"}'},
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    state = json.loads(sent["CallSummaryState"])
+    assert set(state) == {"source", "status", "trigger", "updatedAt"}
+    assert "ActionItems" not in sent
+
+
+def test_a_summary_without_action_items_clears_the_ones_an_earlier_summary_left(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "ActionItems": [],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert print_ast(sent["ActionItems"]) == "[]"
+
+
+def test_action_items_are_not_stored_without_their_summary(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": "An error occurred.",
+            "ActionItems": [{"Text": "x"}],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert "ActionItems" not in sent
+    assert "profile" not in json.loads(sent["CallSummaryState"])
+
+
 def test_a_summary_is_stored_even_if_the_transcript_deletion_cannot_be_told(
     schema, emitted, monkeypatch
 ):
@@ -2710,3 +2786,219 @@ def test_a_segment_of_a_deleted_transcript_is_dropped_with_a_transcript_hook_set
     assert hook.calls == 1, "the hook ran, so the segment is a dict of its own"
     assert mutation_inputs(session, "addTranscriptSegment") == []
     assert mutation_inputs(session, "updateCallAggregation") == []
+
+
+# ── live guidance ────────────────────────────────────────────────────────────
+
+GUIDANCE_ARN = "arn:aws:lambda:us-east-1:123456789012:function:stack-LiveGuidanceAnalyzer"
+
+
+@pytest.fixture
+def guidance_hook(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "LIVE_GUIDANCE_ANALYZER_ARN", GUIDANCE_ARN)
+    monkeypatch.setattr(cep, "GUIDANCE_RUN_QUEUED", {})
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: (False, 90.0, True))
+    return hook
+
+
+def _guided(schema: Any, enabled: Any = True) -> QueuedSession:
+    meeting = {"CallId": "call-1", "Status": "STARTED"}
+    if enabled is not None:
+        meeting["GuidanceEnabled"] = enabled
+    return QueuedSession(
+        schema,
+        [
+            {"getCall": meeting},
+            SENTIMENT_RESPONSES["populated"],
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+        ],
+    )
+
+
+def _guidance_runs(hook: RecordingLambda) -> List[Dict[str, Any]]:
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == GUIDANCE_ARN
+    ]
+
+
+def test_a_meeting_with_guidance_on_queues_a_run_at_most_every_interval(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    now = {"t": 0.0}
+    monkeypatch.setattr(cep.time, "monotonic", lambda: now["t"])
+    for at, end in ((1000.0, 10.0), (1030.0, 20.0), (1095.0, 30.0)):
+        now["t"] = at
+        process_event(_guided(schema), _segment(end), monkeypatch)
+    assert _guidance_runs(guidance_hook) == [
+        {"CallId": "call-1", "Trigger": "auto"},
+        {"CallId": "call-1", "Trigger": "auto"},
+    ]
+    assert all(i["InvocationType"] == "Event" for i in guidance_hook.invocations)
+
+
+@pytest.mark.parametrize("enabled", [False, None])
+def test_with_guidance_off_no_run_is_queued(schema, emitted, guidance_hook, monkeypatch, enabled):
+    process_event(_guided(schema, enabled), _segment(10.0), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_a_partial_segment_queues_no_guidance_run(schema, emitted, guidance_hook, monkeypatch):
+    process_event(_guided(schema), _segment(10.0, partial=True), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_guidance_turned_off_for_the_deployment_queues_no_run(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: (False, 90.0, False))
+    process_event(_guided(schema), _segment(10.0), monkeypatch)
+    assert _guidance_runs(guidance_hook) == []
+
+
+def test_a_failure_to_queue_a_guidance_run_does_not_fail_the_segment(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    def refuse(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(guidance_hook, "invoke", refuse)
+    process_event(_guided(schema), _segment(10.0), monkeypatch)
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+
+
+@pytest.mark.parametrize(
+    "settings, event_value, expected",
+    [
+        ((False, 90.0, True), None, "GuidanceEnabled: false"),
+        ((True, 90.0, True), None, "GuidanceEnabled: true"),
+        ((True, 90.0, False), None, "GuidanceEnabled: false"),
+        ((False, 90.0, True), True, "GuidanceEnabled: true"),
+        ((True, 90.0, True), False, "GuidanceEnabled: false"),
+    ],
+)
+def test_a_new_meeting_gets_its_guidance_choice_else_the_deployments(
+    schema, emitted, monkeypatch, settings, event_value, expected
+):
+    monkeypatch.setattr(cep, "live_guidance_settings", lambda: settings)
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    event = {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"}
+    if event_value is not None:
+        event["GuidanceEnabled"] = event_value
+    process_event(session, event, monkeypatch)
+    assert expected in print_ast(session.queries[0])
+
+
+# ── the whiteboards' assistant ───────────────────────────────────────────────
+
+WHITEBOARDS_ARN = "arn:aws:lambda:us-east-1:123456789012:function:stack-MeetingWhiteboards"
+
+
+@pytest.fixture
+def whiteboards_hook(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(cep, "MEETING_WHITEBOARDS_ARN", WHITEBOARDS_ARN)
+    monkeypatch.setattr(cep, "WHITEBOARD_RUN_QUEUED", {})
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: (False, 180.0, True))
+    return hook
+
+
+def _with_whiteboards(schema: Any, enabled: Any = True) -> QueuedSession:
+    meeting = {"CallId": "call-1", "Status": "STARTED"}
+    if enabled is not None:
+        meeting["WhiteboardsEnabled"] = enabled
+    return QueuedSession(
+        schema,
+        [
+            {"getCall": meeting},
+            SENTIMENT_RESPONSES["populated"],
+            {"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}},
+        ],
+    )
+
+
+def _whiteboard_runs(hook: RecordingLambda) -> List[Dict[str, Any]]:
+    return [
+        json.loads(invocation["Payload"])
+        for invocation in hook.invocations
+        if invocation["FunctionName"] == WHITEBOARDS_ARN
+    ]
+
+
+def test_a_meeting_with_whiteboards_on_queues_a_run_at_most_every_interval(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    now = {"t": 0.0}
+    monkeypatch.setattr(cep.time, "monotonic", lambda: now["t"])
+    for at, end in ((1000.0, 10.0), (1100.0, 20.0), (1185.0, 30.0)):
+        now["t"] = at
+        process_event(_with_whiteboards(schema), _segment(end), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == [
+        {"CallId": "call-1", "Trigger": "auto"},
+        {"CallId": "call-1", "Trigger": "auto"},
+    ]
+    assert all(i["InvocationType"] == "Event" for i in whiteboards_hook.invocations)
+
+
+@pytest.mark.parametrize("enabled", [False, None])
+def test_with_whiteboards_off_no_run_is_queued_for_a_segment(
+    schema, emitted, whiteboards_hook, monkeypatch, enabled
+):
+    process_event(_with_whiteboards(schema, enabled), _segment(10.0), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_a_partial_segment_queues_no_whiteboard_run(schema, emitted, whiteboards_hook, monkeypatch):
+    process_event(_with_whiteboards(schema), _segment(10.0, partial=True), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_whiteboards_turned_off_for_the_deployment_queue_no_run(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: (False, 180.0, False))
+    process_event(_with_whiteboards(schema), _segment(10.0), monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == []
+
+
+def test_a_meeting_that_ends_queues_the_last_whiteboard_run_once(
+    schema, emitted, whiteboards_hook, monkeypatch
+):
+    for status in ("STARTED", "ENDED"):
+        session = QueuedSession(
+            schema,
+            [
+                {"getCall": {"CallId": "call-1", "Status": status}},
+                {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+            ],
+        )
+        process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert _whiteboard_runs(whiteboards_hook) == [{"CallId": "call-1", "Trigger": "final"}]
+
+
+@pytest.mark.parametrize(
+    "settings, event_value, expected",
+    [
+        ((False, 180.0, True), None, "WhiteboardsEnabled: false"),
+        ((True, 180.0, True), None, "WhiteboardsEnabled: true"),
+        ((True, 180.0, False), None, "WhiteboardsEnabled: false"),
+        ((False, 180.0, True), True, "WhiteboardsEnabled: true"),
+        ((True, 180.0, True), False, "WhiteboardsEnabled: false"),
+    ],
+)
+def test_a_new_meeting_gets_its_whiteboards_choice_else_the_deployments(
+    schema, emitted, monkeypatch, settings, event_value, expected
+):
+    monkeypatch.setattr(cep, "meeting_whiteboards_settings", lambda: settings)
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    event = {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"}
+    if event_value is not None:
+        event["WhiteboardsEnabled"] = event_value
+    process_event(session, event, monkeypatch)
+    assert expected in print_ast(session.queries[0])

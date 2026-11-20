@@ -26,6 +26,7 @@ from botocore.exceptions import ClientError
 from lma_chat_links import strip_links  # configuration layer
 from lma_config import (  # configuration layer
     LANGUAGE_MODELS,
+    SUMMARY_PROFILES,
     SUMMARY_PROMPT_TEMPLATES,
     ConfigurationStore,
     read_setting,
@@ -33,6 +34,16 @@ from lma_config import (  # configuration layer
 )
 from lma_meeting_preparation.rules import render_checklist  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
+from lma_summary_profiles import (  # configuration layer
+    ACTION_ITEMS_PROMPT,
+    DEFAULT_PROFILE,
+    MalformedActionItems,
+    normalize_profile_name,
+    profile_entries,
+    profile_prompts,
+    stored_action_items,
+    validate_action_items,
+)
 
 # pylint: enable=import-error
 
@@ -242,36 +253,94 @@ def get_templates_from_dynamodb(prompt_override, refresh_configuration=False):
                     "seeder has not run or its records were removed"
                 )
 
-            # A prompt key is "N#Title" -- the form the configuration editor
-            # writes, and the one the sequence-number stripping below assumes.
-            for k in sorted(section.values):
-                if PROMPT_KEY_PATTERN.match(k):
-                    prompt = section.values[k]
-                    if not isinstance(prompt, str):
-                        # Only a hand edit can store one; reported rather than
-                        # dropped, since whoever made it needs to know.
-                        print(
-                            f"Not using '{k}' as a summary prompt: a prompt must be "
-                            f"text, and this one is {type(prompt).__name__}."
-                        )
-                        continue
-                    # skip if prompt value is empty, or set to 'NONE'
-                    if prompt and prompt != "NONE":
-                        prompt = prompt.replace("<br>", "\n")
-                        index = k.find("#")
-                        k_stripped = k[index + 1 :]
-                        templates.append({k_stripped: prompt})
-                else:
-                    print(
-                        f"Not using '{k}' as a summary prompt: a prompt is stored "
-                        "under a key of the form 'N#Title', where N is a sequence "
-                        "number that orders the sections of the summary."
-                    )
+            templates.extend(templates_from_prompts(section.values))
         except Exception as e:
             print("Exception:", e)
             raise (e)
 
     return templates
+
+
+def templates_from_prompts(prompts):
+    """The summary sections of a set of "N#Title" prompts, in their order.
+
+    The Transcript Summary section and a summary profile's prompts are read
+    alike. A prompt key is "N#Title" -- the form the configuration editor
+    writes, and the one the sequence-number stripping below assumes.
+    """
+    templates = []
+    for k in sorted(prompts):
+        if PROMPT_KEY_PATTERN.match(k):
+            prompt = prompts[k]
+            if not isinstance(prompt, str):
+                # Only a hand edit can store one; reported rather than
+                # dropped, since whoever made it needs to know.
+                print(
+                    f"Not using '{k}' as a summary prompt: a prompt must be "
+                    f"text, and this one is {type(prompt).__name__}."
+                )
+                continue
+            # skip if prompt value is empty, or set to 'NONE'
+            if prompt and prompt != "NONE":
+                prompt = prompt.replace("<br>", "\n")
+                index = k.find("#")
+                k_stripped = k[index + 1 :]
+                templates.append({k_stripped: prompt})
+        else:
+            print(
+                f"Not using '{k}' as a summary prompt: a prompt is stored "
+                "under a key of the form 'N#Title', where N is a sequence "
+                "number that orders the sections of the summary."
+            )
+    return templates
+
+
+class ProfileChoice:
+    """The summary sections a summary is written with, and the profile they are from.
+
+    ``name`` is the profile used, None for the default (the Transcript Summary
+    prompts); ``fallback`` the profile asked for when it could not be used and
+    the default was used instead; ``structured`` whether the profile lists the
+    meeting's action items as data.
+    """
+
+    def __init__(self, templates, name=None, structured=False, fallback=None):
+        self.templates = templates
+        self.name = name
+        self.structured = structured
+        self.fallback = fallback
+
+
+def select_profile(requested, refresh_configuration=False):
+    """The summary sections for the profile a meeting or a regeneration names.
+
+    No profile, or ``default``, is exactly the Transcript Summary prompts as
+    get_templates_from_dynamodb has always read them, and nothing else is read.
+    A profile the configuration does not hold, or holds with no sections, is
+    logged and the default is used, so the meeting still gets a summary.
+    """
+    try:
+        name = normalize_profile_name(requested)
+    except ValueError:
+        print(f"Summary profile {requested!r} is not a profile name; using the default")
+        return ProfileChoice(
+            get_templates_from_dynamodb(None, refresh_configuration), fallback=str(requested)
+        )
+    if name is None:
+        return ProfileChoice(get_templates_from_dynamodb(None, refresh_configuration))
+    if refresh_configuration:
+        CONFIG_STORE.invalidate()
+    section = CONFIG_STORE.get_section(SUMMARY_PROFILES.name)
+    entry = profile_entries(section.values).get(name)
+    templates = templates_from_prompts(profile_prompts(entry)) if entry else []
+    if not templates:
+        print(
+            f"Summary profile {name!r} is not in the configuration or has no sections; "
+            "using the default"
+        )
+        return ProfileChoice(get_templates_from_dynamodb(None, False), fallback=name)
+    print(f"Summary profile {name}: {len(templates)} section(s), fingerprint={section.fingerprint}")
+    return ProfileChoice(templates, name, entry.get("structuredActionItems") is True)
 
 
 def get_transcripts(callId):
@@ -690,9 +759,12 @@ def generate_summary(
     chat_links=None,
     meeting_context=None,
     checklist=None,
+    templates=None,
 ):
-    # first check to see if this is one prompt, or many prompts as a json
-    templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
+    # first check to see if this is one prompt, or many prompts as a json; or the
+    # sections of the meeting's summary profile, already chosen (select_profile)
+    if templates is None:
+        templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
     # Once per summary, after the templates, so every section of one summary is
     # written by the same model even if the cached configuration expires part
     # way through, and a Regenerate -- which dropped the cache above -- uses the
@@ -812,7 +884,14 @@ def keyframe_images_as_text(text):
 
 
 def format_summary(summary, metadata):
-    summary_dict = json.loads(keyframe_images_as_text(summary))
+    text = keyframe_images_as_text(summary)
+    try:
+        summary_dict = json.loads(text)
+    except ValueError:
+        summary_dict = None
+    if not isinstance(summary_dict, dict):
+        # A summary of one section is that section's text, not a JSON object.
+        summary_dict = {"SUMMARY": text}
     summary_dict["MEETING NAME"] = metadata["CallId"]
     summary_dict["MEETING DATE AND TIME"] = metadata["CreatedAt"]
     summary_dict["MEETING DURATION (SECONDS)"] = int(
@@ -906,9 +985,58 @@ def has_content(transcript_json):
     )
 
 
+def get_segments(call_id):
+    """The meeting's segments, each with its id, times and speaker as named.
+
+    Read only for a profile that lists structured action items, whose times are
+    turned into segment ids here rather than taken from the model.
+    """
+    response = lambda_client.invoke(
+        FunctionName=FETCH_TRANSCRIPT_LAMBDA_ARN,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(
+            {
+                "CallId": call_id,
+                "IncludeSpeaker": True,
+                "IncludeChat": True,
+                "IncludeSegments": True,
+            }
+        ),
+    )
+    body = json.loads(response["Payload"].read().decode())
+    segments = body.get("segments") if isinstance(body, dict) else None
+    return segments if isinstance(segments, list) else []
+
+
+def list_action_items(call_id, transcript_json):
+    """The meeting's action items as data, checked: one more model call.
+
+    Raises MalformedActionItems when the model's answer is not a JSON list.
+    """
+    timed = (transcript_json.get("timedTranscript") or "").strip()
+    if not timed:
+        return []
+    segments = get_segments(call_id)
+    names = sorted({str(s.get("speaker")) for s in segments if s.get("speaker")})
+    prompt = ACTION_ITEMS_PROMPT.replace("{timed_transcript}", timed, 1)
+    answer = call_bedrock(prompt, call_id, summary_model_id())
+    if transcript_json.get("chat"):
+        answer = without_links(answer)
+    return validate_action_items(answer, segments, names, transcript_json.get("transcript") or "")
+
+
+def requested_profile(event, metadata):
+    """The summary profile a run is for: a regeneration's choice, else the meeting's."""
+    chosen = event.get("SummaryProfile")
+    if isinstance(chosen, str) and chosen.strip():
+        return chosen
+    return (metadata or {}).get("SummaryProfile")
+
+
 def handler(event, context):
     print("Received event: ", json.dumps(event))
     callId = event["CallId"]
+    result = {}
     try:
         transcript_json = get_transcripts(callId)
         transcript = transcript_json["transcript"]
@@ -927,6 +1055,16 @@ def handler(event, context):
         # that pressing it uses the prompt templates as they are now. An
         # end-of-meeting run does not, and is served from the cache.
         refresh_configuration = bool(event.get("RefreshConfiguration"))
+        # The meeting's summary profile, or a regeneration's choice of one. A
+        # meeting with none is summarised exactly as before: the answer carries
+        # the summary alone. A caller's own prompt has no profile.
+        choice = None
+        if not prompt_override:
+            choice = select_profile(requested_profile(event, metadata), refresh_configuration)
+            if choice.name or choice.fallback:
+                result["summaryProfile"] = choice.name or DEFAULT_PROFILE
+            if choice.fallback:
+                result["summaryProfileFallback"] = choice.fallback
         summary = generate_summary(
             transcript,
             prompt_override,
@@ -939,15 +1077,41 @@ def handler(event, context):
             chat_links=transcript_json.get("chatLinks"),
             meeting_context=(metadata or {}).get("MeetingContext"),
             checklist=(metadata or {}).get("Checklist"),
+            templates=choice.templates if choice else None,
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt
             write_to_s3(callId, metadata, transcript, summary, transcript_json.get("keyframes"))
+        if choice and choice.structured:
+            # A failure here is the action items' alone: the summary stands, and
+            # the answer says the list could not be made.
+            try:
+                result["actionItems"] = stored_action_items(
+                    list_action_items(callId, transcript_json)
+                )
+                result["actionItemsStatus"] = "generated"
+            except MalformedActionItems as error:
+                print(f"Action items for {callId} not listed: {error}")
+                result["actionItemsStatus"] = "failed"
+            except Exception as error:  # pylint: disable=broad-except
+                print(f"Action items for {callId} not listed: {type(error).__name__}")
+                result["actionItemsStatus"] = "failed"
+            if result.get("actionItemsStatus") == "failed":
+                # Stored items belong to the stored summary: an earlier list is
+                # not kept under this one. The state says the list failed.
+                result["actionItems"] = []
+        elif choice and (metadata or {}).get("ActionItems"):
+            # The items the meeting holds belong to an earlier summary, written
+            # with a profile that lists them; this one lists none, so they are
+            # cleared with it. A meeting that holds none gets the answer as before.
+            result["actionItems"] = []
     except Exception as e:
         print(e)
         summary = "An error occurred."
-    logger.debug("Returning: %s", json.dumps({"summary": summary}))
-    return {"summary": summary}
+        result = {}
+    result = {"summary": summary, **result}
+    logger.debug("Returning: %s", json.dumps(result))
+    return result
 
 
 # for testing on terminal

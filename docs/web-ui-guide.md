@@ -174,6 +174,9 @@ assistant is a panel beside the tabs, on every tab; see
     picture.
   - **Chat attachments** — each stored attachment, read again for a fresh link
     and saved rather than opened, and **All attachments (.zip)**.
+  - **Meeting export (.json)** — the [meeting export](meeting-export.md), one
+    structured record of the meeting, prepared on the server like the archives
+    and offered as a link valid for ten minutes.
   - **Everything (.zip)** — see [Everything as one archive](#everything-as-one-archive).
 
   An entry with nothing behind it is disabled, and says why. See
@@ -717,6 +720,7 @@ seconds for a short meeting, a few minutes for hours of video), and then a
 | `keyframes/` | Every key frame's picture. The slide deck is printed by the browser, so it is not in the archive; use **Download › Screen share › Slides (PDF)** |
 | `chat-attachments/` | Every stored chat attachment |
 | `meeting.json` | The meeting's details: its record (dates, owner, sharing, agenda, recording links, transcription settings), its participants and the recording files in the archive |
+| `meeting-export.json` | The [meeting export](meeting-export.md): the meeting as one structured record, with no images. Its consent section is the summary any reader of the meeting can see; the full record and the evidence images are in `consent/` |
 | `consent/` | The consent record and its evidence images, only when the person asking is the meeting's owner or an Admin |
 | `README.md` | Every file in the archive, and anything left out and why |
 

@@ -1478,3 +1478,19 @@ def test_a_key_frames_speech_is_named_from_the_whole_meeting(monkeypatch) -> Non
     )
     assert response["keyframes"][0]["Said"] == "Room 4 · Voice 2: second"
     assert response["transcript"] == "\nRoom 4 · Voice 1: first\nRoom 4 · Voice 2: second"
+
+
+def test_the_segment_list_gives_each_segment_its_id_times_and_speaker() -> None:
+    """IncludeSegments: what the summary's structured action items are placed with."""
+    speech = [
+        {"SegmentId": "b", "StartTime": Decimal("12.5"), "EndTime": Decimal("14"), "Speaker": "x"},
+        {"SegmentId": "a", "StartTime": 1, "EndTime": 3, "Speaker": "x"},
+        {"StartTime": 2, "Speaker": "no id, left out"},
+    ]
+    chat = [{"SegmentId": "c", "StartTime": 5, "Speaker": "Sam Lee", "Channel": "MEETING_CHAT"}]
+    listed = index.segment_list(speech, chat, lambda row: "Priya Shah")
+    assert listed == [
+        {"segmentId": "a", "startTime": 1.0, "endTime": 3.0, "speaker": "Priya Shah"},
+        {"segmentId": "c", "startTime": 5.0, "endTime": 5.0, "speaker": "Sam Lee"},
+        {"segmentId": "b", "startTime": 12.5, "endTime": 14.0, "speaker": "Priya Shah"},
+    ]

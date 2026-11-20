@@ -29,6 +29,15 @@ const mapCallsAttributes = (calls) => {
       MeetingContextUpdatedAt: meetingContextUpdatedAt,
       Checklist: checklist,
       ChecklistUpdatedAt: checklistUpdatedAt,
+      // The meeting's summary profile (absent: the default), the action items
+      // listed with its summary, and the platform a Virtual Participant joined.
+      SummaryProfile: summaryProfile,
+      // Whether live guidance reads the meeting (docs/live-guidance.md).
+      GuidanceEnabled: guidanceEnabled,
+      ActionItems: actionItems,
+      MeetingPlatform: meetingPlatform,
+      // Whether the assistant keeps the meeting's whiteboards updated.
+      WhiteboardsEnabled: whiteboardsEnabled,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
@@ -115,6 +124,11 @@ const mapCallsAttributes = (calls) => {
       meetingContextUpdatedAt,
       checklist,
       checklistUpdatedAt,
+      summaryProfile,
+      guidanceEnabled,
+      actionItems,
+      meetingPlatform,
+      whiteboardsEnabled,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
@@ -230,6 +244,16 @@ export const adoptMeetingCopy = (current, incoming) => {
     sessionNumber: keep('sessionNumber'),
     sessionOffsetSeconds: keep('sessionOffsetSeconds'),
     sessionStartedNumber: keep('sessionStartedNumber'),
+    // Selected by every write published to onUpdateCall but not by the list
+    // query. A null is a cleared profile, so only an absent one is kept.
+    summaryProfile: incoming.summaryProfile === undefined ? current.summaryProfile : incoming.summaryProfile,
+    actionItems: keep('actionItems'),
+    // Not selected by the list query or the Kinesis pipeline's updates.
+    guidanceEnabled: keep('guidanceEnabled'),
+    meetingPlatform: keep('meetingPlatform'),
+    // Selected by getCall, onUpdateCall and updateCallWhiteboards only; a write
+    // that does not select it arrives with it null, which keeps the copy held.
+    whiteboardsEnabled: keep('whiteboardsEnabled'),
   };
 };
 

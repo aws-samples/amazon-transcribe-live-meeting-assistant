@@ -278,6 +278,7 @@ are rewritten or expire (see
 | **Consent record** | On the meeting record (`Consent`) | As the meeting record | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
 | **Consent evidence images** | The recordings bucket, `lma-consent-evidence/<meeting>/` | 90 days | The lifecycle rule, from `TranscriptionExpirationInDays`; **Keep evidence screenshots** off deletes each image once checked | Deleted, every version |
 | **Meeting notifications**: guidance for the people running the meeting, and other categories a feature publishes; each user's dismissals and categories muted on that meeting | The meetings table, under the meeting. A user's categories muted on every meeting are one item per user | Guidance: as the transcript. Other categories and users' views: as the meeting record | Guidance follows the transcript, including **Delete the transcript after the summary**; the others follow **Days to keep meeting records**. A user's every-meeting mutes are deleted with the user. See [Meeting Notifications](meeting-notifications.md#retention) | Deleted |
+| **Meeting whiteboards**: named panels made by hand or kept by the assistant from the transcript, every version of them, and the assistant's notes | The meetings table, under the meeting | As the transcript | Follow the transcript, including **Delete the transcript after the summary**, whoever wrote them. See [Meeting Whiteboards](meeting-whiteboards.md#retention) | Deleted |
 | **Usage records** behind the meeting's cost estimate | The meetings table | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
 | **Virtual Participant records**: meeting name, platform, meeting ID and password, schedule, agenda, per-meeting consent and video choices, status | The Virtual Participant DynamoDB table | 90 days from when the record was created, or from the time it is scheduled for if that is later. A record written before these records were given an expiry has none, and is kept until it is deleted | `MeetingRecordExpirationInDays`, the stack parameter only; deleted from the **Virtual Participants** page | Every record that names the meeting is deleted |
 | **Pending uploads**: a file uploaded for batch transcription, before it is processed | The recordings bucket, `lma-uploads-pending/` | 7 days | Fixed lifecycle rule | Not applicable |
@@ -287,7 +288,7 @@ are rewritten or expire (see
 | **S3 server access logs** of the stack's buckets, which name the objects read and written, and so the file names derived from meeting IDs | The stack's logging bucket, encrypted with Amazon S3 managed keys | 180 days | Fixed lifecycle rule | Not affected |
 | **Virtual Participant browser profiles** (meeting-platform cookies, per user) | The Virtual Participant profiles bucket | 365 days after the profile was last saved | Removed when the user removes their Zoom credentials. See [Persistent Chromium profile per user](zoom-credentials-and-join-reliability.md#persistent-chromium-profile-per-user) | Not affected |
 | **Downloads**: transcript, summary and slide exports | Produced in the user's browser and saved on the user's device | Outside LMA | Outside LMA. See [Transcript Downloads](web-ui-guide.md#transcript-downloads) | Not affected |
-| **Meeting archives**: the ZIP files **Download › Everything (.zip)**, **Key frames (.zip)** and **All attachments (.zip)** prepare, and a status file for each | The recordings bucket, `lma-meeting-archives/<meeting>/`, encrypted with the stack's key. Each is a copy of the meeting's files as they were when it was prepared; the consent record and evidence are in it only for the meeting's owner or an Admin | 1 day | Fixed lifecycle rule (`MeetingArchiveCleanup`), which also removes an unfinished upload after a day. See [Everything as one archive](web-ui-guide.md#everything-as-one-archive) | Deleted, every version |
+| **Meeting archives**: the ZIP files **Download › Everything (.zip)**, **Key frames (.zip)** and **All attachments (.zip)** prepare, the [meeting export](meeting-export.md) files **Download › Meeting export (.json)** and the MCP `get_meeting_export` tool prepare, and a status file for each | The recordings bucket, `lma-meeting-archives/<meeting>/`, encrypted with the stack's key. Each is a copy of the meeting's files as they were when it was prepared; the consent record and evidence are in it only for the meeting's owner or an Admin | 1 day | Fixed lifecycle rule (`MeetingArchiveCleanup`), which also removes an unfinished upload after a day. See [Everything as one archive](web-ui-guide.md#everything-as-one-archive) | Deleted, every version |
 
 Who can read each item is described in
 [User-Based Access Control](user-based-access-control.md): the meeting's owner,
@@ -404,6 +405,9 @@ A meeting's owner can delete it, and an Admin can delete any meeting, from the
 meetings list or from the meeting page's **⋮** menu. People the meeting is shared
 with cannot delete it. The meeting disappears from their meeting lists, without a
 notification. See [Meeting Deletion](user-based-access-control.md#meeting-deletion).
+Every meeting that carries given labels can be deleted at once with
+[`lma meetings delete`](lma-cli.md#lma-meetings-delete--delete-meetings-by-label),
+which goes through the same per-meeting deletion and so removes the same parts.
 
 Deleting a meeting removes, for that meeting:
 
@@ -527,23 +531,31 @@ A **configuration preset** sets the consent, retention and privacy settings
 together. An Admin applies one from **Configuration ▸ Configuration ▸ Actions ▸
 Apply a preset…**, or chooses one at deploy time with the `ConfigurationPreset`
 stack parameter; each preset is also available as a read-only **Managed**
-profile. All four set the same settings, so applying one replaces whatever another
+profile. All six set the same settings, so applying one replaces whatever another
 preset set, and leaves every other setting as it is. See
-[Configuration presets](configuration-guide.md#configuration-presets).
+[Configuration presets](configuration-guide.md#configuration-presets). The two
+hosting presets, Team-hosted and Customer account, are explained in
+[Hosting Models](hosting-models.md).
 
-| Setting | Standard | Internal meetings – notify participants | Regulated – consent required, transcript not retained | Regulated – notify with opt-out, transcript not retained |
-|---|---|---|---|---|
-| Consent mode | Off | Notify | Opt-in | Notify |
-| Consent rule (opt-in) | Each participant | Each participant | Each participant | Each participant |
-| Allow a different choice per meeting | On | On | Off (stricter only) | Off (stricter only) |
-| Keep evidence screenshots | On | On | On | On |
-| Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse |
-| Virtual Participant leaves after an objection | Off | Off | On | On |
-| Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after |
-| Record meeting audio | On | On | Off | Off |
-| Add the meeting chat to the transcript | On | On | Off | Off |
-| Redact personal information | Off | Off | On | On |
-| Model inference geography | Global | Global | Same geography | Same geography |
+| Setting | Standard | Internal meetings – notify participants | Regulated – consent required, transcript not retained | Regulated – notify with opt-out, transcript not retained | Team-hosted (external meetings) | Customer account |
+|---|---|---|---|---|---|---|
+| Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in |
+| Consent rule (opt-in) | Each participant | Each participant | Each participant | Each participant | Each participant | Each participant |
+| Allow a different choice per meeting | On | On | Off (stricter only) | Off (stricter only) | Off (stricter only) | On |
+| Keep evidence screenshots | On | On | On | On | On | On |
+| Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse | Refuse | Refuse |
+| Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
+| Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
+| Record meeting audio | On | On | Off | Off | Off | Off |
+| Add the meeting chat to the transcript | On | On | Off | Off | On | On |
+| Redact personal information | Off | Off | On | On | Off | Off |
+| Model inference geography | Global | Global | Same geography | Same geography | Global | Global |
+| Meeting assistant: web search | On | On | On | On | Off | Off |
+| Meeting assistant: MCP servers | On | On | On | On | Off | On |
+| In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
+| In-meeting requests: meeting context and checklist | None | None | None | None | None | None |
+| In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone |
+| Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` |
 
 No preset sets **Read spoken replies** or **Capture chat attachments**, which
 is off by default. Under the consent-required preset, Stream

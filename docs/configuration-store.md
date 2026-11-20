@@ -232,6 +232,7 @@ Today's sections and their tiers:
 | Section | Tier | Why |
 |---|---|---|
 | `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
+| `summary_profiles` | `standard` | The same reader and the same reasons, for a meeting that names a [summary profile](transcript-summarization.md#summary-profiles) |
 | `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
 | `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
@@ -372,13 +373,14 @@ so a release cannot ship a default its own save would refuse.
 | Section | What the schema holds it to |
 |---|---|
 | `summary_prompt_templates` | Keys of the form `N#Title`, with `N` in the digits 0–9 and a title that is not empty, each a text prompt; `NONE` turns a shipped section off |
+| `summary_profiles` | At most 50 profiles, each named by 1 to 63 lower-case letters, digits and `-`; each with a `label` (at most 80 characters), a `description` (at most 500), `structuredActionItems` (true or false) and `prompts` in the form of `summary_prompt_templates`. `default` is never read from it |
 | `chat_buttons` | Keys of the form `N#Label`, each a text prompt |
 | `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
 | `asr_engine` | The three switches, each `true` or `false`, nothing else |
 | `language_models` | The Model inference geography (`global`, `geography` or `in_region`) and the four model ids, each one of the models its setting offers, nothing else |
 | `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
 | `recording` | `recordAudio`, `true` or `false`, nothing else |
-| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only`, `unrestricted` or `selected`; `inMeetingWebSearch`, `inMeetingDocumentSearch`, `inMeetingMeetingHistory`, `inMeetingMcpServers`, `inMeetingVpControls` and `inMeetingSkills`, each `true` or `false`; `systemPrompt`, the editable part of the assistant's instructions, text of 1 to 20,000 characters; `toolSelection`, an object of `mcpServers` and `skills`, each up to 200 entries keyed by a server or skill id (1 to 256 characters, no control characters), each entry holding only `enabled`, `inMeetingRequests` and `alwaysOn`, each `true` or `false` |
+| `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only`, `unrestricted` or `selected`; `inMeetingWebSearch`, `inMeetingDocumentSearch`, `inMeetingMeetingHistory`, `inMeetingMcpServers`, `inMeetingVpControls` and `inMeetingSkills`, each `true` or `false`; `systemPrompt`, the editable part of the assistant's instructions, text of 1 to 20,000 characters; `toolSelection`, an object of `mcpServers` and `skills`, each up to 200 entries keyed by a server or skill id (1 to 256 characters, no control characters), each entry holding only `enabled`, `inMeetingRequests` and `alwaysOn`, each `true` or `false`; `whiteboards`, the [whiteboards](meeting-whiteboards.md#settings) settings: `defaultEnabled`, `true` or `false`; `intervalSeconds`, 60 to 3600; `minNewSegments`, 1 to 500; `maxRunsPerMeeting`, 0 to 1000; `maxWhiteboardsPerMeeting`, 1 to 10; `modelId`; `prompt`, 1 to 10000 characters; `guidance`, the [live guidance](live-guidance.md#settings) settings: `defaultEnabled`, `true` or `false`; `intervalSeconds`, 60 to 3600; `minNewSegments`, 1 to 500; `maxItemsPer10Min`, 0 to 50; `confidenceThreshold`, 0 to 1; `modelId`, a model id or `""` for the Meeting assistant model; `maxRunsPerMeeting`, 0 to 1000; `prompt`, text of 1 to 10,000 characters |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary`, one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript Deletion After the Summary](transcript-deletion.md)) |
@@ -604,10 +606,12 @@ revision that can be compared and restored like any other.
 
 | Preset | What it changes |
 |---|---|
-| Standard | The consent, retention and privacy settings the presets set, at their shipped defaults |
+| Standard | The consent, retention, privacy, meeting assistant and summary settings the presets set, at their shipped defaults |
 | Internal meetings – notify participants | Meeting Consent mode Notify; audio recorded and the meeting chat captured; the rest at their defaults |
 | Regulated – consent required, transcript not retained | Meeting Consent mode Opt-in, stricter-only per meeting, clients without a consent step refused, the Virtual Participant leaving after an objection; the transcript deleted 15 minutes after the summary; no audio recording or chat capture; redaction on; Amazon Bedrock within the deployment's geography |
 | Regulated – notify with opt-out, transcript not retained | As Regulated, except Meeting Consent mode Notify: capture from the start, stopped by an objection |
+| Team-hosted (external meetings) | Meeting Consent as Regulated (Opt-in, each participant, stricter-only, clients without a consent step refused, leave after an objection); no audio recording; the transcript and chat kept; requests made in the meeting off; web search and the installed MCP servers off; new meetings summarized with `discovery-session`. See [Hosting Models](hosting-models.md) |
+| Customer account | Meeting Consent mode Opt-in, each participant, a different choice per meeting allowed, clients without a consent step refused; no audio recording; web search off; the rest at their defaults. See [Hosting Models](hosting-models.md) |
 
 **Why import does not create a profile.** The plan for this store has an import
 route into a *new* profile rather than apply in place, so that importing cannot
@@ -856,8 +860,8 @@ Two stack parameters decide what `Config#default` holds, as IDP's
 
 - **`ConfigurationPreset`** — the id of a preset, applied over the shipped
   defaults: `standard` (the default, which is the shipped defaults),
-  `internal-meetings-notify`, `regulated-consent-required` or
-  `regulated-notify`; see
+  `internal-meetings-notify`, `regulated-consent-required`,
+  `regulated-notify`, `team-hosted-external` or `customer-account`; see
   [Configuration presets](configuration-guide.md#configuration-presets). `none`,
   the parameter's value in earlier 0.4.0 pre-releases, is also accepted and read
   as `standard`, so a stack deployed with it can be updated without choosing

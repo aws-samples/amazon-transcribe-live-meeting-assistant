@@ -61,6 +61,25 @@ class TestMeetingsReopen:
         assert result.exit_code != 0
         client.meetings.reopen.assert_not_called()
 
+    def test_a_stack_given_before_the_command_wins_over_the_environment(self, client):
+        seen = {}
+
+        def factory(**kwargs):
+            seen.update(kwargs)
+            return client
+
+        client.meetings.reopen.return_value = MeetingSession(
+            call_id=CALL_ID, session_number=2, session_offset_seconds=0
+        )
+        result = CliRunner().invoke(
+            main,
+            ["--stack-name", "B", "--region", "eu-west-1", "meetings", "reopen", "--id", CALL_ID],
+            obj={"client_factory": factory},
+            env={"LMA_STACK_NAME": "A", "AWS_DEFAULT_REGION": "us-east-1"},
+        )
+        assert result.exit_code == 0, result.output
+        assert (seen["stack_name"], seen["region"]) == ("B", "eu-west-1")
+
 
 class TestVpRejoin:
     def test_prints_the_rejoined_session(self, client):

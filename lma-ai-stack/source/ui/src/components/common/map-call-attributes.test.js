@@ -44,6 +44,20 @@ describe('mapCallsAttributes sentiment', () => {
 });
 
 describe('adoptMeetingCopy', () => {
+  it('maps live guidance and keeps it through a copy that leaves it out', () => {
+    const [mapped] = mapCallsAttributes([
+      {
+        CallId: 'c1',
+        GuidanceEnabled: true,
+        CreatedAt: '2026-11-03T14:05:09.123Z',
+        UpdatedAt: '2026-11-03T14:30:00.000Z',
+      },
+    ]);
+    expect(mapped.guidanceEnabled).toBe(true);
+    expect(adoptMeetingCopy(mapped, { callId: 'c1' }).guidanceEnabled).toBe(true);
+    expect(adoptMeetingCopy(mapped, { callId: 'c1', guidanceEnabled: false }).guidanceEnabled).toBe(false);
+  });
+
   const AGENDA = {
     agenda: 'Budget\nHiring',
     agendaSource: 'scheduled',
@@ -64,6 +78,35 @@ describe('adoptMeetingCopy', () => {
     expect(next).toMatchObject({ ...AGENDA, updatedAt: '2026-11-08T15:21:00Z' });
     expect(next.captureSource).toBe('virtual-participant');
     expect(next.transcriptionEngine).toBe('transcribe');
+  });
+
+  it('keeps the summary profile and action items from a copy that did not select them', () => {
+    const shown = { ...onScreen, summaryProfile: 'discovery-session', actionItems: [{ Text: 'Send it' }] };
+    const fromList = { callId: 'c1', summaryProfile: undefined, actionItems: undefined };
+    expect(adoptMeetingCopy(shown, fromList)).toMatchObject({
+      summaryProfile: 'discovery-session',
+      actionItems: [{ Text: 'Send it' }],
+    });
+    // A write that cleared the profile selects it as null, which is kept.
+    expect(adoptMeetingCopy(shown, { callId: 'c1', summaryProfile: null }).summaryProfile).toBeNull();
+  });
+
+  it('maps the summary profile, the action items and the platform', () => {
+    const [mapped] = mapCallsAttributes([
+      {
+        CallId: 'c1',
+        CreatedAt: '2026-11-08T15:00:00Z',
+        UpdatedAt: '2026-11-08T15:30:00Z',
+        SummaryProfile: 'discovery-session',
+        ActionItems: [{ Text: 'a' }],
+        MeetingPlatform: 'Zoom',
+      },
+    ]);
+    expect(mapped).toMatchObject({
+      summaryProfile: 'discovery-session',
+      actionItems: [{ Text: 'a' }],
+      meetingPlatform: 'Zoom',
+    });
   });
 
   it('takes the agenda from a copy that carries one, including a cleared agenda', () => {

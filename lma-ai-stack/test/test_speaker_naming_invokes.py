@@ -93,7 +93,7 @@ def test_the_orchestrator_runs_the_pass_before_it_summarises(
     defined above it, in the other order.
     """
     handler = orchestrator[orchestrator.index("def handler(") :]
-    assert handler.index("name_speakers(") < handler.index("get_call_summary(")
+    assert handler.index("name_speakers(") < handler.index("get_call_summary_result(")
 
 
 def test_the_orchestrator_waits_for_the_pass(orchestrator: str) -> None:

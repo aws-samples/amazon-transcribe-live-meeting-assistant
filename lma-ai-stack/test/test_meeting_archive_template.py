@@ -153,7 +153,27 @@ def test_the_function_reads_only_meeting_partitions_and_writes_no_items(ai_stack
     assert len(dynamo) == 1
     assert sorted(dynamo[0]["Action"]) == ["dynamodb:GetItem", "dynamodb:Query"]
     keys = dynamo[0]["Condition"]["ForAllValues:StringLike"]["dynamodb:LeadingKeys"]
-    assert sorted(keys) == ["att#*", "c#*", "kf#*", "trs#*"]
+    assert sorted(keys) == ["att#*", "c#*", "kf#*", "nt#*", "trs#*", "wb#*"]
+
+
+def test_the_mcp_server_builds_meeting_exports_with_the_function(ai_stack: dict) -> None:
+    """get_meeting_export invokes this function, which applies the getCall rule itself."""
+    server = ai_stack["MCPServerAnalyticsFunction"]["Properties"]
+    assert server["Environment"]["Variables"]["MEETING_ARCHIVE_FUNCTION"] == {
+        "Ref": "MeetingArchiveFunction"
+    }
+    invokes = [
+        resource
+        for policy in server["Policies"]
+        if isinstance(policy, dict) and "Statement" in policy
+        for statement in policy["Statement"]
+        if "lambda:InvokeFunction" in statement["Action"]
+        for resource in statement["Resource"]
+    ]
+    assert {"Fn::GetAtt": "MeetingArchiveFunction.Arn"} in invokes
+    archive = ai_stack["MeetingArchiveFunction"]["Properties"]
+    assert archive["Layers"] == [{"Ref": "ConfigurationPythonLayer"}]
+    assert archive["Environment"]["Variables"]["LMA_VERSION"] == {"Ref": "BootstrapVersion"}
 
 
 def test_the_function_invokes_only_itself(ai_stack: dict) -> None:

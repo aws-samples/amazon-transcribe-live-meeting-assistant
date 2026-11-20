@@ -133,7 +133,7 @@ describe('downloadMenuItems', () => {
   const group = (items, text) => items.find((entry) => entry.text === text);
   const ids = (entries) => entries.map((entry) => entry.id);
 
-  it('has a group for each kind of file, and Everything last', () => {
+  it('has a group for each kind of file, the meeting export, and Everything last', () => {
     const items = downloadMenuItems(BASE);
     expect(items.map((entry) => entry.text)).toEqual([
       'Summary',
@@ -141,10 +141,13 @@ describe('downloadMenuItems', () => {
       'Recordings',
       'Screen share',
       'Chat attachments',
+      'Meeting export (.json)',
       'Everything (.zip)',
     ]);
-    expect(items[5]).toMatchObject({ id: 'archive:EVERYTHING' });
+    expect(items[5]).toMatchObject({ id: 'archive:EXPORT' });
     expect(items[5].disabled).toBeFalsy();
+    expect(items[6]).toMatchObject({ id: 'archive:EVERYTHING' });
+    expect(items[6].disabled).toBeFalsy();
   });
 
   it('disables the transcript, with the reason, once it was deleted', () => {

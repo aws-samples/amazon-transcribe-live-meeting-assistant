@@ -87,9 +87,9 @@ def main(ctx, region, profile, stack_name, verbose):
 from lma_cli.commands.publish import check_prereqs_cmd, publish_cmd
 from lma_cli.commands.stack import delete_cmd, deploy_cmd, logs_cmd, outputs_cmd, status_cmd
 from lma_cli.commands.mcp import mcp_cmd
+from lma_cli.commands.meetings import meetings_cmd
 from lma_cli.commands.skills import skills_cmd
 from lma_cli.commands.vp import vp_cmd
-from lma_cli.commands.meetings import meetings_cmd
 
 main.add_command(publish_cmd)
 main.add_command(deploy_cmd)

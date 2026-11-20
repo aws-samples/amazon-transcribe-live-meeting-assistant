@@ -182,6 +182,7 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
     sections = {entry["Name"]: entry for entry in json.loads(result["Sections"])}
     assert set(sections) == {
         "summary_prompt_templates",
+        "summary_profiles",
         "nova_sonic_config",
         "chat_buttons",
         "asr_engine",
@@ -212,6 +213,8 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
         "internal-meetings-notify",
         "regulated-consent-required",
         "regulated-notify",
+        "team-hosted-external",
+        "customer-account",
     ]
 
 

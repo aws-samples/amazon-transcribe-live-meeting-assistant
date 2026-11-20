@@ -442,6 +442,30 @@ def test_a_form_without_meeting_preparation_stores_none(world):
     assert not {"labels", "audience", "meetingContext", "checklist"} & row.keys()
 
 
+def test_a_new_meeting_carries_the_summary_profile_the_form_gives(world):
+    w = world()
+    join_again.join_again_virtual_participant(
+        w.manager, form(summaryProfile="discovery-session"), OWNER
+    )
+    assert _new_row(w)["summaryProfile"] == "discovery-session"
+
+
+@pytest.mark.parametrize("profile", ["", "default", None])
+def test_the_default_summary_profile_is_not_stored(world, profile):
+    w = world()
+    join_again.join_again_virtual_participant(w.manager, form(summaryProfile=profile), OWNER)
+    assert "summaryProfile" not in _new_row(w)
+
+
+def test_a_malformed_summary_profile_is_refused_before_anything_is_written(world):
+    w = world()
+    with pytest.raises(join_again.JoinAgainRefused, match="summary profile"):
+        join_again.join_again_virtual_participant(
+            w.manager, form(summaryProfile="Not A Name"), OWNER
+        )
+    assert not w.table.puts
+
+
 def test_meeting_preparation_over_a_limit_is_refused_before_anything_is_written(world):
     w = world()
     with pytest.raises(join_again.JoinAgainRefused, match="label Key"):

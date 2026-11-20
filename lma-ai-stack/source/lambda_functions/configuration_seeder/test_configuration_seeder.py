@@ -168,6 +168,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
     body = seeder.shipped_default_body("default")
     assert set(body) == {
         "summary_prompt_templates",
+        "summary_profiles",
         "nova_sonic_config",
         "chat_buttons",
         "call_pricing",
@@ -238,6 +239,51 @@ def test_every_model_a_deployment_can_choose_has_a_price(seeder) -> None:
 def test_the_healthcare_domain_ships_its_own_prompts(seeder) -> None:
     body = seeder.shipped_default_body("healthcare")
     assert "4#BIRP" in body["summary_prompt_templates"]
+
+
+def test_the_baseline_ships_the_discovery_session_and_healthcare_profiles(seeder) -> None:
+    """Both profiles reach every deployment, whatever its Domain."""
+    for domain in ("default", "healthcare"):
+        profiles = seeder.shipped_default_body(domain)["summary_profiles"]
+        assert set(profiles) == {"discovery-session", "healthcare"}
+        discovery = profiles["discovery-session"]
+        assert discovery["structuredActionItems"] is True
+        assert list(discovery["prompts"]) == [
+            "1#SUMMARY",
+            "2#DECISIONS",
+            "3#ACTION ITEMS",
+            "4#OPEN QUESTIONS",
+            "5#RISKS AND CONSTRAINTS",
+            "6#REQUIREMENTS HEARD",
+            "7#CHECKLIST COVERAGE",
+            "8#AGENDA COVERAGE",
+        ]
+        assert "{checklist}" in discovery["prompts"]["7#CHECKLIST COVERAGE"]
+        assert profiles["healthcare"]["structuredActionItems"] is False
+        assert "4#BIRP" in profiles["healthcare"]["prompts"]
+        assert "promptsFile" not in profiles["healthcare"]
+
+
+def test_the_discovery_session_summary_and_agenda_sections_are_the_default_ones(seeder) -> None:
+    """SUMMARY and AGENDA COVERAGE are as the default profile writes them."""
+    shipped = json.loads((HERE / "defaults" / "LLMPromptSummaryTemplate.json").read_text("utf-8"))
+    prompts = seeder.shipped_summary_profiles()["discovery-session"]["prompts"]
+    assert prompts["1#SUMMARY"] == shipped["SUMMARY"]
+    assert prompts["8#AGENDA COVERAGE"] == shipped["AGENDA COVERAGE"]
+
+
+def test_the_shipped_summary_profiles_pass_their_schema(seeder) -> None:
+    from lma_config import validate_section  # pylint: disable=import-outside-toplevel
+
+    validate_section("summary_profiles", seeder.shipped_summary_profiles())
+
+
+def test_the_default_profile_is_unchanged_by_the_summary_profiles(seeder) -> None:
+    """The Transcript Summary prompts are the default profile, and stay as shipped."""
+    shipped = json.loads((HERE / "defaults" / "LLMPromptSummaryTemplate.json").read_text("utf-8"))
+    body = seeder.shipped_default_body("default")
+    assert body["summary_prompt_templates"] == seeder.numbered_prompts(shipped)
+    assert "default" not in body["summary_profiles"]
 
 
 def test_an_unrecognised_domain_falls_back_to_the_default_prompts(seeder) -> None:
@@ -1728,6 +1774,8 @@ PRESETS = (
     "internal-meetings-notify",
     "regulated-consent-required",
     "regulated-notify",
+    "team-hosted-external",
+    "customer-account",
 )
 
 #: A preset needing the on-demand ASR engine, for the paths no shipped preset takes.
@@ -1825,6 +1873,30 @@ def test_the_regulated_notify_preset_builds_the_baseline(seeder) -> None:
     assert baseline["meeting_consent"]["clientsWithoutConsent"] == "reject"
     assert baseline["recording"]["recordAudio"] is False
     assert outcome["ConfigurationPreset"] == "regulated-notify"
+
+
+def test_the_team_hosted_preset_builds_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", configuration_preset="team-hosted-external")
+    baseline = dynamo.body("Config#default")
+    assert baseline["meeting_consent"]["mode"] == "opt_in"
+    assert baseline["meeting_consent"]["allowPerMeetingOverride"] is False
+    assert baseline["meeting_assist"]["inMeetingRequesters"] == "off"
+    assert baseline["meeting_assist"]["webSearchEnabled"] is False
+    assert baseline["meeting_processing"]["defaultSummaryProfile"] == "discovery-session"
+    assert outcome["ConfigurationPreset"] == "team-hosted-external"
+
+
+def test_the_stack_parameters_offer_every_shipped_preset(seeder) -> None:
+    root = Path(__file__).resolve().parents[4]
+    shipped = {preset["Id"] for preset in seeder.shipped_presets()}
+    for template in (root / "lma-main.yaml", root / "lma-ai-stack/deployment/lma-ai-stack.yaml"):
+        allowed = re.search(
+            r"\n  ConfigurationPreset:\n(?:    .*\n)*?    AllowedValues:\n((?:      - .*\n)+)",
+            template.read_text(encoding="utf-8"),
+        )
+        assert allowed, f"{template.name} declares ConfigurationPreset with AllowedValues"
+        assert shipped <= set(re.findall(r"- (\S+)", allowed.group(1))), template.name
 
 
 @pytest.mark.parametrize("choice", ["", "none", "standard"])

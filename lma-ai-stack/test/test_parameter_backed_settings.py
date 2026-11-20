@@ -551,7 +551,12 @@ def _vp_environment() -> Dict[str, Any]:
 
 def test_the_virtual_participant_table_is_found() -> None:
     assert len(VP_ENTRIES) >= 13
-    assert {section for section, *_ in VP_ENTRIES} == {"transcription", "recording", "virtual_participant"}
+    assert {section for section, *_ in VP_ENTRIES} == {
+        "transcription",
+        "recording",
+        "virtual_participant",
+        "meeting_assist",
+    }
 
 
 def test_the_virtual_participant_applies_the_meeting_retention_as_a_limit() -> None:
@@ -606,6 +611,10 @@ VP_SHIPPED_FALLBACKS = {
     ("virtual_participant", "chatAttachmentSummaries"): (
         "chat-attachments.ts",
         "CHAT_ATTACHMENT_SUMMARIES_DEFAULT",
+    ),
+    ("meeting_assist", "inMeetingRequesters"): (
+        "in-meeting-requesters.ts",
+        "IN_MEETING_REQUESTERS_DEFAULT",
     ),
 }
 

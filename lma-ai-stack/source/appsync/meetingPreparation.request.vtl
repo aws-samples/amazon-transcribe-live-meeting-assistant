@@ -1,6 +1,8 @@
 ## Forwards the meeting preparation mutations (updateCallMeetingContext,
-## updateCallChecklist, updateCallChecklistItem, updateCallLabels and
-## updateCallAudience) to the meeting preparation resolver Lambda: the
+## updateCallChecklist, updateCallChecklistItem, updateCallLabels,
+## updateCallAudience, updateCallSummaryProfile and updateCallGuidance) and the
+## listSummaryProfiles
+## query to the meeting preparation resolver Lambda: the
 ## arguments, the verified identity and the field name, which is what the
 ## Lambda's access check reads. VTL rather than APPSYNC_JS so the mutations can
 ## answer through dDbPutCondition.response.vtl, which writes SharedWith in the

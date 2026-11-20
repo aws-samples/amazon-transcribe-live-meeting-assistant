@@ -85,6 +85,10 @@ class Component(str, Enum):
     """
 
     CALL_EVENT_PROCESSOR = "call-event-processor"
+    #: The meeting lifecycle events (docs/meeting-events.md). Published through
+    #: ``lma_events`` in the configuration layer, by the call event processor,
+    #: the summary regenerator and the Virtual Participant status publisher.
+    MEETING_EVENTS = "meeting-events"
     WEBSOCKET_TRANSCRIBER = "websocket-transcriber"
     VIRTUAL_PARTICIPANT = "virtual-participant"
 
@@ -139,6 +143,17 @@ STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = "StreamingSessionsWithoutTranscript"
 # refusals are counted where they happen.
 
 NOVA_SONIC_STREAMS_THROTTLED = "NovaSonicStreamsThrottled"
+
+# ── meeting lifecycle events ────────────────────────────────────────────────
+#
+# Whether the events on the stack's meeting event bus are getting there. A
+# publish that fails is logged and dropped rather than failing the meeting, so
+# the failure count is the only notice of it. The names are spelled out again in
+# ``lma_events`` (configuration layer), which cannot import this module; a gate
+# asserts they agree.
+
+MEETING_EVENTS_PUBLISHED = "MeetingEventsPublished"
+MEETING_EVENTS_PUBLISH_FAILED = "MeetingEventsPublishFailed"
 
 
 CATALOGUE: tuple[MetricDefinition, ...] = (
@@ -259,6 +274,30 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "times counts four. A sustained non-zero value means voice "
             "assistants are degrading: translators staying on one session, "
             "assistants not answering a wake phrase."
+        ),
+    ),
+    MetricDefinition(
+        name=MEETING_EVENTS_PUBLISHED,
+        unit="Count",
+        component=Component.MEETING_EVENTS,
+        records_swallowed_failure=False,
+        meaning=(
+            "A meeting lifecycle event was accepted by the stack's meeting event "
+            "bus: Meeting Started, Meeting Ended, Summary Ready or Virtual "
+            "Participant Status Changed. Counts events put on the bus, whether or "
+            "not any rule matches them."
+        ),
+    ),
+    MetricDefinition(
+        name=MEETING_EVENTS_PUBLISH_FAILED,
+        unit="Count",
+        component=Component.MEETING_EVENTS,
+        records_swallowed_failure=True,
+        meaning=(
+            "A meeting lifecycle event could not be put on the meeting event bus "
+            "after its retries, or the bus rejected it. The meeting itself is "
+            "unaffected and the event is not sent again, so a consumer of the bus "
+            "misses it; polling list_meetings reconciles. Alarmed for that reason."
         ),
     ),
 )

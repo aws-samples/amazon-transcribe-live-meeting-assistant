@@ -171,15 +171,27 @@ def _actions(statement: dict) -> list[str]:
     return [action] if isinstance(action, str) else list(action)
 
 
-def test_the_regenerator_can_only_write_the_one_graphql_field(resources: dict) -> None:
+def test_the_regenerator_can_only_write_its_two_graphql_fields(resources: dict) -> None:
     """Scoped the way the speaker name resolver is: the Lambda writes with its
     own IAM credentials, which take the backend branch of the mutation's access
-    condition, so the field it may call is the boundary."""
+    condition, so the fields it may call are the boundary: the summary, and the
+    meeting's summary_ready notification."""
     role = resources["SummaryRegeneratorFunctionExecutionRole"]
     graphql = [s for s in _statements(role) if "appsync:GraphQL" in _actions(s)]
     assert len(graphql) == 1
-    resource = graphql[0]["Resource"]["Fn::Sub"]
-    assert resource.endswith("/types/Mutation/fields/updateCallSummaryText")
+    fields = sorted(entry["Fn::Sub"].rsplit("/", 1)[-1] for entry in graphql[0]["Resource"])
+    assert fields == ["publishMeetingNotification", "updateCallSummaryText"]
+    for entry in graphql[0]["Resource"]:
+        assert "/types/Mutation/fields/" in entry["Fn::Sub"]
+
+
+def test_the_regenerator_may_publish_only_lma_events_to_the_meeting_event_bus(
+    resources: dict,
+) -> None:
+    role = resources["SummaryRegeneratorFunctionExecutionRole"]
+    (statement,) = [s for s in _statements(role) if "events:PutEvents" in _actions(s)]
+    assert statement["Resource"] == {"Ref": "MeetingEventBusArn"}
+    assert statement["Condition"] == {"StringEquals": {"events:source": "lma"}}
 
 
 def test_the_regenerator_cannot_write_to_the_table(resources: dict) -> None:
@@ -284,15 +296,17 @@ def test_the_share_list_rule_is_stated_where_each_path_applies_it(summary_vtl: s
         assert "entry by entry" in " ".join(rule.split()), name
 
 
-def test_the_summary_write_only_touches_the_two_summary_attributes(summary_vtl: str) -> None:
-    """The write is scoped to the summary: these are the only two attributes it
-    assigns, and the rest of the meeting row keeps whatever the pipeline put
-    there."""
+def test_the_summary_write_only_touches_the_summary_attributes(summary_vtl: str) -> None:
+    """The write is scoped to the summary: its text, its state and the action
+    items listed with it are the only attributes it assigns, and the rest of the
+    meeting row keeps whatever the pipeline put there."""
     # From where the update expression starts being built, so the access
     # condition's own `#Owner = :caller` is not mistaken for an assignment.
     update = summary_vtl[summary_vtl.index('$expression = "SET"') :]
     assigned = set(re.findall(r"#(\w+) = :", update))
-    assert assigned == {"CallSummaryText", "CallSummaryState"}, assigned
+    assert assigned == {"CallSummaryText", "CallSummaryState", "ActionItems"}, assigned
+    # The action items belong to the text they were listed with.
+    assert "ActionItems are written only with CallSummaryText" in summary_vtl
 
 
 def test_the_regeneration_applies_the_same_rule_in_the_lambda(regenerator: str) -> None:
@@ -454,3 +468,20 @@ def test_the_summariser_still_only_writes_the_snapshot_without_an_override() -> 
     handler = summariser[summariser.index("def handler(") :]
     assert "if not prompt_override:" in handler
     assert handler.index("if not prompt_override:") < handler.index("write_to_s3(")
+
+
+def test_both_summary_writers_shape_action_items_with_one_text() -> None:
+    """The orchestrator and the regenerator each take a summary function's action
+    items at their intake; the two copies of the shaping must not drift."""
+    begin, end = "# BEGIN action_item_input", "# END action_item_input"
+    orchestrator = (
+        AI_STACK
+        / "source"
+        / "lambda_functions"
+        / "async_transcript_summary_orchestrator"
+        / "lambda_function.py"
+    ).read_text(encoding="utf-8")
+    regenerator = REGENERATOR.read_text(encoding="utf-8")
+    blocks = [text[text.index(begin) : text.index(end)] for text in (orchestrator, regenerator)]
+    assert blocks[0] == blocks[1]
+    assert "def action_item_input(items):" in blocks[0]

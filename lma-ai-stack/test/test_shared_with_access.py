@@ -697,6 +697,7 @@ def test_every_virtual_participant_create_selects_owner_and_shared_with() -> Non
 LAMBDA_FUNCTIONS = AI_STACK / "source" / "lambda_functions"
 PYTHON_READERS = [
     "agenda_deriver/index.py",
+    "live_guidance_analyzer/index.py",
     "call_cost_resolver/index.py",
     "chat_attachments_resolver/index.py",
     "list_calls_gsi_resolver/index.py",
@@ -704,6 +705,7 @@ PYTHON_READERS = [
     "meeting_archive/index.py",
     "meeting_consent_resolver/index.py",
     "meeting_preparation_resolver/index.py",
+    "meeting_whiteboards/index.py",
     "meeting_controls_resolver/index.py",
     "microvm_vnc_token/vp_access.py",
     "speaker_name_resolver/index.py",

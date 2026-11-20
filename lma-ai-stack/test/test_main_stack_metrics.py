@@ -52,6 +52,7 @@ from ai_stack_templates import all_template_paths, flattened
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
 AI_TEMPLATE = REPO_ROOT / "lma-ai-stack" / "deployment" / "lma-ai-stack.yaml"
+MEETING_EVENTS_TEMPLATE = REPO_ROOT / "lma-ai-stack" / "deployment" / "lma-ai-meeting-events.yaml"
 TRANSCRIBER_TEMPLATE = (
     REPO_ROOT / "lma-websocket-transcriber-stack" / "deployment" / "lma-websocket-transcriber.yaml"
 )
@@ -77,6 +78,12 @@ if str(LAYER_ROOT) not in sys.path:
     sys.path.insert(0, str(LAYER_ROOT))
 
 from metrics_utils import catalogue  # noqa: E402
+
+CONFIG_LAYER_ROOT = REPO_ROOT / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
+if str(CONFIG_LAYER_ROOT) not in sys.path:
+    sys.path.insert(0, str(CONFIG_LAYER_ROOT))
+
+import lma_events  # noqa: E402
 
 ALARM_TYPE = "AWS::CloudWatch::Alarm"
 
@@ -190,6 +197,13 @@ STACK_NAME = "lma-gate-test"
 # deliberately rather than falling out of the gate silently.
 EMITTERS = {
     "CallEventProcessorFunction": (AI_TEMPLATE, catalogue.Component.CALL_EVENT_PROCESSOR),
+    # The meeting event counts come from lma_events, which the call event
+    # processor (above) also uses; these are the other two functions that do.
+    "SummaryRegeneratorFunction": (AI_TEMPLATE, catalogue.Component.MEETING_EVENTS),
+    "VpStatusEventPublisherFunction": (
+        MEETING_EVENTS_TEMPLATE,
+        catalogue.Component.MEETING_EVENTS,
+    ),
     "TranscriberWebsocketTaskDef": (
         TRANSCRIBER_TEMPLATE,
         catalogue.Component.WEBSOCKET_TRANSCRIBER,
@@ -911,3 +925,16 @@ def test_the_monitoring_doc_tabulates_every_emitted_metric():
         if documented[name] != expected[name]
     }
     assert not wrong_unit, f"the metric table states the wrong unit: {wrong_unit}"
+
+
+def test_the_meeting_event_publisher_names_the_catalogues_metrics():
+    """lma_events is in the configuration layer and cannot import the catalogue,
+    so it spells the two names out; a name that drifted would be a series the
+    dashboard and the alarm never read."""
+    assert lma_events.PUBLISHED_METRIC == catalogue.MEETING_EVENTS_PUBLISHED
+    assert lma_events.PUBLISH_FAILED_METRIC == catalogue.MEETING_EVENTS_PUBLISH_FAILED
+    assert lma_events.NAMESPACE_ENV_VAR == catalogue.NAMESPACE_ENV_VAR
+    assert set(catalogue.names_for(catalogue.Component.MEETING_EVENTS)) == {
+        lma_events.PUBLISHED_METRIC,
+        lma_events.PUBLISH_FAILED_METRIC,
+    }

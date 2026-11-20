@@ -48,7 +48,7 @@ Each checklist item has these fields:
 | `Priority` | `must`, `should` (the default) or `could`. |
 | `Source` | An opaque reference of the caller's (for example, where the item came from in another system), returned unchanged. |
 | `Status` | `open` (the default), `covered`, `partial`, `deferred` or `not_applicable`. |
-| `StatusSource` | Who set the status: `user` or `assistant`. |
+| `StatusSource` | Who set the status: `user` or `assistant` (for example [live guidance](live-guidance.md), which marks items covered or partial as a meeting goes). |
 | `Evidence` | Where in the meeting the status is supported: each entry a transcript segment id (`SegmentId`), a time in seconds from the meeting's start (`StartTime`) and a short quote from the transcript (`Quote`). |
 | `Note` | A note on the item. |
 | `UpdatedBy`, `UpdatedAt` | Who last changed the item, and when. |

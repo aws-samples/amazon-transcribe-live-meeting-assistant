@@ -111,6 +111,7 @@ def test_deleting_a_meeting_deletes_its_notifications(monkeypatch) -> None:
     monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url, _earlier: None)
     monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: None)
     monkeypatch.setattr(index, "delete_meeting_notifications", deleted.append)
+    monkeypatch.setattr(index, "delete_meeting_whiteboards", lambda callid: 0)
     monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
     monkeypatch.setattr(index, "DSLMutation", lambda *a: None)
 
@@ -137,3 +138,55 @@ def test_a_meeting_with_no_metering_records_deletes_nothing(monkeypatch) -> None
     monkeypatch.setattr(index, "ddbTable", table)
     assert index.delete_metering_records("m-1") == 0
     assert table.deleted == []
+
+
+def test_every_whiteboard_row_of_the_meeting_is_deleted(monkeypatch) -> None:
+    rows = [
+        {"PK": "wb#m-1", "SK": "b#wb1"},
+        {"PK": "wb#m-1", "SK": "v#wb1#000001"},
+        {"PK": "wb#m-1", "SK": "index"},
+        {"PK": "wb#m-1", "SK": "updater"},
+        {"PK": "wb#m-2", "SK": "b#wb9"},
+    ]
+    table = PartitionTable(rows)
+    monkeypatch.setattr(index, "ddbTable", table)
+    assert index.delete_meeting_whiteboards("m-1") == 4
+    assert table.deleted == rows[:4]
+
+
+def test_deleting_a_meeting_deletes_its_whiteboards(monkeypatch) -> None:
+    deleted = []
+    for step in (
+        "cleanup_virtual_participants",
+        "delete_transcript_items",
+        "delete_recordings_transcripts",
+        "delete_metering_records",
+        "delete_keyframes",
+        "delete_consent_evidence",
+        "delete_chat_attachments",
+        "delete_meeting_notifications",
+    ):
+        monkeypatch.setattr(index, step, lambda callid: 0)
+    monkeypatch.setattr(index, "get_call_details", lambda *a: {"getCall": {}})
+    monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url, _earlier: None)
+    monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: None)
+    monkeypatch.setattr(index, "delete_meeting_whiteboards", deleted.append)
+    monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
+    monkeypatch.setattr(index, "DSLMutation", lambda *a: None)
+
+    class Schema:
+        def __getattr__(self, _name):
+            return self
+
+        def __call__(self, *a, **k):
+            return self
+
+        def args(self, **_k):
+            return self
+
+        def select(self, *a):
+            return self
+
+    session = types.SimpleNamespace(execute=lambda *_a: None)
+    index.delete_meeting(session, Schema(), "m-1", "cls#x", "ts#x", "owner")
+    assert deleted == ["m-1"]

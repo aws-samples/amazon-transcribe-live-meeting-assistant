@@ -29,7 +29,10 @@ import updateCallChecklist from '../graphql/queries/updateCallChecklist';
 import updateCallChecklistItem from '../graphql/queries/updateCallChecklistItem';
 import updateCallLabels from '../graphql/queries/updateCallLabels';
 import updateCallAudience from '../graphql/queries/updateCallAudience';
+import updateCallSummaryProfile from '../graphql/queries/updateCallSummaryProfile';
 import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
+import updateCallGuidance from '../graphql/queries/updateCallGuidance';
+import requestMeetingDigest from '../graphql/queries/requestMeetingDigest';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 import { serializeSummaryState } from '../components/common/summary-state';
@@ -50,6 +53,9 @@ export const PREPARATION_MUTATIONS = {
   checklistItem: ['updateCallChecklistItem', updateCallChecklistItem],
   labels: ['updateCallLabels', updateCallLabels],
   audience: ['updateCallAudience', updateCallAudience],
+  summaryProfile: ['updateCallSummaryProfile', updateCallSummaryProfile],
+  // Live guidance on or off for the meeting (docs/live-guidance.md).
+  guidance: ['updateCallGuidance', updateCallGuidance],
 };
 
 /** The server's own words for a refused write, which name the limit that was broken. */
@@ -117,6 +123,13 @@ export const mergeCallUpdate = (existing, call) => ({
   // onUpdateCall); the pipeline's other updates leave it out. Every write is
   // the whole value, a resume included, so it is never cleared to empty.
   TranscriptionPause: call.TranscriptionPause || existing?.TranscriptionPause,
+  // Selected by getCall and by the writes the meeting page and the Lambdas
+  // make, but not by the Kinesis pipeline's updates or the list query, so an
+  // update without it keeps the value. Every write of it is true or false.
+  GuidanceEnabled: call.GuidanceEnabled ?? existing?.GuidanceEnabled,
+  // Selected by getCall, onUpdateCall and updateCallWhiteboards; every other
+  // write published to onUpdateCall arrives with it null, which is not a change.
+  WhiteboardsEnabled: call.WhiteboardsEnabled ?? existing?.WhiteboardsEnabled,
   ...(call.AgendaUpdatedAt
     ? {}
     : {
@@ -820,17 +833,35 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   }, []);
 
   /**
+   * Ask live guidance for a digest of the meeting so far, which it publishes to
+   * the meeting's notifications. Returns the backend's answer; a request that
+   * failed or that AppSync stopped waiting for answers `{ Success: false,
+   * Failed: true }`, since the digest may still arrive in the notifications.
+   */
+  const sendRequestMeetingDigest = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({ query: requestMeetingDigest, variables: { CallId: callId } });
+      return response?.data?.requestMeetingDigest ?? { Success: false, Failed: true };
+    } catch (error) {
+      logger.error('failed to request a meeting digest', error);
+      return { Success: false, Failed: true };
+    }
+  }, []);
+
+  /**
    * Ask the backend to summarise a meeting again.
    *
    * Nothing is patched into state here: the run outlives the request, and the
    * new summary arrives through onUpdateCall like an end-of-meeting one does.
    * Returns the backend's own answer so the caller can say what happened.
+   * `summaryProfile` writes this summary with that profile; omitted, the
+   * meeting's own.
    */
-  const sendRegenerateCallSummary = useCallback(async (callId) => {
+  const sendRegenerateCallSummary = useCallback(async (callId, summaryProfile = undefined) => {
     try {
       const response = await client.graphql({
         query: regenerateCallSummary,
-        variables: { input: { CallId: callId } },
+        variables: { input: { CallId: callId, ...(summaryProfile ? { SummaryProfile: summaryProfile } : {}) } },
       });
       return response?.data?.regenerateCallSummary ?? { Success: false, Message: 'no answer from the server' };
     } catch (error) {
@@ -852,6 +883,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
     sendUpdateMeetingPreparation,
+    sendRequestMeetingDigest,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

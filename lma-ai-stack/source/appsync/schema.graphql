@@ -120,6 +120,32 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# At most 100 items, and at most 128 KB stored.
 	Checklist: [ChecklistItem]
 	ChecklistUpdatedAt: AWSDateTime
+	# The summary profile the meeting is summarised with: a name from the
+	# summary_profiles configuration section, or absent for the default (the
+	# Transcript Summary prompts). Set when a Virtual Participant creates the
+	# meeting and through updateCallSummaryProfile. The profile that wrote the
+	# stored summary is CallSummaryState's "profile", which a regeneration can
+	# choose differently. See docs/transcript-summarization.md#summary-profiles.
+	SummaryProfile: String
+	# The action items listed with the stored summary, when the profile that
+	# wrote it lists structured action items; [] when a later summary did not.
+	ActionItems: [ActionItem]
+	# Whether live guidance reads this meeting while it is in progress, updating
+	# its checklist and publishing guidance notifications to its owner and the
+	# users it is shared with. Set when the meeting is created (from the Virtual
+	# Participant's choice, else the deployment's Meeting Assistant › Live
+	# guidance › On for new meetings) and through updateCallGuidance. See
+	# docs/live-guidance.md.
+	GuidanceEnabled: Boolean
+	# Whether the assistant keeps the meeting's whiteboards up to date while it
+	# is in progress. Absent or false, nothing runs; whiteboards can still be made
+	# and edited by hand. Changed through updateCallWhiteboards. See
+	# docs/meeting-whiteboards.md.
+	WhiteboardsEnabled: Boolean
+	# The meeting platform a Virtual Participant joined (Zoom, Teams, Chime,
+	# Webex, Google Meet), written when it creates the meeting. Absent for
+	# other capture sources and for meetings created before it was recorded.
+	MeetingPlatform: String
 	# The meeting's consent record: the mode and rule it runs in, its status,
 	# whether it may be recorded and transcribed now, and the notices, replies,
 	# attestation and evidence behind that. Absent on a meeting whose consent was
@@ -279,6 +305,12 @@ input CreateCallInput {
 	MeetingContextUpdatedAt: AWSDateTime
 	Checklist: [ChecklistItemStateInput]
 	ChecklistUpdatedAt: AWSDateTime
+	SummaryProfile: String
+	# Absent, the call event processor sets it from the deployment's setting.
+	GuidanceEnabled: Boolean
+	# The same, for the whiteboards' assistant.
+	WhiteboardsEnabled: Boolean
+	MeetingPlatform: String
 	# How the meeting is captured and transcribed; see these fields on Call.
 	CaptureSource: String
 	TranscriptionEngine: String
@@ -406,6 +438,16 @@ type Mutation @aws_iam {
 	updateCallChecklistItem(input: UpdateCallChecklistItemInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallLabels(input: UpdateCallLabelsInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallAudience(input: UpdateCallAudienceInput!): Call @aws_cognito_user_pools @aws_iam
+	# Sets or clears the meeting's summary profile, on the updateCallAgenda access
+	# rule. A name the configuration does not hold is refused.
+	updateCallSummaryProfile(input: UpdateCallSummaryProfileInput!): Call @aws_cognito_user_pools @aws_iam
+	# Turns live guidance on or off for the meeting, on the updateCallAgenda
+	# access rule. See docs/live-guidance.md.
+	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools @aws_iam
+	# A short digest of the meeting so far, published to its notifications as a
+	# guidance item of type meeting_digest and returned. On the updateCallAgenda
+	# access rule; one model call, billed to the meeting.
+	requestMeetingDigest(CallId: ID!): MeetingDigestResult @aws_cognito_user_pools @aws_iam
 	# The meeting consent record (Call.Consent). One Lambda resolver applies the
 	# access rule of each; see the Meeting consent section below and
 	# docs/meeting-consent.md.
@@ -417,6 +459,21 @@ type Mutation @aws_iam {
 	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
+	# A meeting's whiteboards, answered by the meeting whiteboards resolver on
+	# the updateCallAgenda access rule (an Admin, the meeting's owner, a user it
+	# is shared with, or a backend role). Each answer is published to
+	# onMeetingWhiteboard. A change names the version it was made from
+	# (BaseVersion) and is refused if the whiteboard has moved on. See
+	# docs/meeting-whiteboards.md.
+	createMeetingWhiteboard(input: CreateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
+	updateMeetingWhiteboard(input: UpdateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
+	deleteMeetingWhiteboard(input: DeleteMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
+	# Turns the assistant's updates of the meeting's whiteboards on or off.
+	updateCallWhiteboards(input: UpdateCallWhiteboardsInput!): Call @aws_cognito_user_pools @aws_iam
+	# Updates the meeting's whiteboards from the transcript now, rather than at
+	# the next run. One model call, billed to the meeting, within the meeting's
+	# runs at most.
+	requestWhiteboardUpdate(CallId: ID!): WhiteboardUpdateResult @aws_cognito_user_pools @aws_iam
 	# Starts building a ZIP archive of the meeting's files and returns at once;
 	# the archive is read with getMeetingArchive. Answered to the callers getCall
 	# answers. See docs/web-ui-guide.md.
@@ -561,6 +618,9 @@ input OverallSentimentInput {
 type Query @aws_cognito_user_pools
 @aws_iam {
 	getCall(CallId: ID!): Call
+	# The summary profiles a meeting can name, default first, for the forms that
+	# choose one. Names, labels and descriptions only; no prompts.
+	listSummaryProfiles: [SummaryProfileOption] @aws_cognito_user_pools @aws_iam
 	# What the enrollment portal shows its visitor about their own enrollment,
 	# including the terms text whose hash is stored with a consent.
 	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
@@ -597,6 +657,12 @@ type Query @aws_cognito_user_pools
 	getMyMeetingNotificationState(CallId: ID!): MeetingNotificationState @aws_cognito_user_pools
 	# The signed-in user's categories muted on every meeting.
 	getMyNotificationPreferences: NotificationPreferences @aws_cognito_user_pools
+	# A meeting's whiteboards, in the order they were made, with the panels of
+	# each; one whiteboard, or one earlier version of it (Version); and the
+	# versions of one, newest first. Answered to the callers getCall answers.
+	listMeetingWhiteboards(CallId: ID!): MeetingWhiteboardList @aws_cognito_user_pools @aws_iam
+	getMeetingWhiteboard(CallId: ID!, WhiteboardId: ID!, Version: Int): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
+	listMeetingWhiteboardVersions(CallId: ID!, WhiteboardId: ID!, Limit: Int, NextToken: String): MeetingWhiteboardVersionPage @aws_cognito_user_pools @aws_iam
 	# The deployment's consent mode and rule, and whether a meeting may choose a
 	# less strict one, for the Create Virtual Participant form to show which
 	# choices apply. Read by every signed-in user, before any meeting exists.
@@ -712,6 +778,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemDefinition]
+	# The summary profile the meeting it creates is summarised with; absent for
+	# the default. Put on the meeting like the inputs above.
+	summaryProfile: String
+	# Whether live guidance is on for the meeting it creates; absent, the
+	# deployment's setting decides. Put on the meeting like the inputs above.
+	guidanceEnabled: Boolean
 	# The people the meeting is to be shared with once the VP creates it, as
 	# comma-separated email addresses. Only the meetingSharedWith input sets it,
 	# and it does not share the Virtual Participant itself (that is SharedWith).
@@ -829,6 +901,12 @@ input CreateVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	# Optional: email addresses the meeting is shared with when the VP creates
 	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
 	# Participant itself is not shared.
@@ -899,6 +977,12 @@ input UpdateScheduledVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	# Replaces who the meeting is shared with when the VP creates it; sent
 	# empty, removes it.
 	meetingSharedWith: [String!]
@@ -938,6 +1022,12 @@ input JoinAgainVirtualParticipantInput {
 	audience: String
 	meetingContext: String
 	checklist: [ChecklistItemInput!]
+	# Optional summary profile name for the meeting; sent empty on an edit,
+	# removes it, so the meeting uses the default.
+	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
@@ -1065,7 +1155,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
+		@aws_subscribe(mutations: ["updateCallStatus", "updateCallAggregation", "updateRecordingUrl", "updateVideoRecordingUrl", "updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "updateCallWhiteboards", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -1074,6 +1164,10 @@ type Subscription {
 	# messages are. Without CallId, every meeting the subscriber may see.
 	onMeetingNotification(CallId: ID): MeetingNotification
 		@aws_subscribe(mutations: ["publishMeetingNotification"])
+	# Every change to a meeting's whiteboards, filtered on Owner and SharedWith
+	# by subscription.js. A deleted whiteboard arrives with Deleted true.
+	onMeetingWhiteboard(CallId: ID): MeetingWhiteboard
+		@aws_subscribe(mutations: ["createMeetingWhiteboard", "updateMeetingWhiteboard", "deleteMeetingWhiteboard"])
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
@@ -1398,10 +1492,15 @@ type ChatAttachment implements DynamoDbBase @aws_cognito_user_pools
 	PreviewUrl: String
 }
 
+# EXPORT is the meeting export alone, one JSON file linked for ten minutes
+# (docs/meeting-export.md); EVERYTHING also holds it as meeting-export.json.
+# (AppSync's schema parser refuses a comment between enum values, so this one
+# sits above the enum.)
 enum MeetingArchiveContents {
 	EVERYTHING
 	KEY_FRAMES
 	CHAT_ATTACHMENTS
+	EXPORT
 }
 
 enum MeetingArchiveStatus {
@@ -1470,6 +1569,8 @@ input AddCallSummaryTextInput {
 	# The end-of-meeting run's outcome, written with its text. Same shape as
 	# Call.CallSummaryState.
 	CallSummaryState: String
+	# The action items listed with the summary, when its profile lists them.
+	ActionItems: [ActionItemInput]
 }
 
 input UpdateCallAggregationInput {
@@ -1614,6 +1715,29 @@ input UpdateSpeakerIdentitiesInput {
 # with -- and each enforces it rather than relying on the client.
 # ----------------------------------------------------------------------------
 
+# One action item of a summary (Call.ActionItems). Owner is a name as said
+# in the meeting, never inferred; DueDate is YYYY-MM-DD when a date was said,
+# and DueText how it was said. StartTime is seconds on the transcript
+# timeline, and SegmentId the segment at that time.
+type ActionItem @aws_cognito_user_pools
+@aws_iam {
+	Text: String!
+	Owner: String
+	DueDate: String
+	DueText: String
+	StartTime: Float
+	SegmentId: String
+}
+
+input ActionItemInput {
+	Text: String!
+	Owner: String
+	DueDate: String
+	DueText: String
+	StartTime: Float
+	SegmentId: String
+}
+
 input UpdateCallSummaryTextInput {
 	CallId: ID!
 	# The summary text to store. Optional so the same mutation can record a state
@@ -1622,6 +1746,9 @@ input UpdateCallSummaryTextInput {
 	# one of CallSummaryText and CallSummaryState must be supplied.
 	CallSummaryText: String
 	CallSummaryState: String
+	# The action items listed with this summary text; only with
+	# CallSummaryText. An empty list clears them.
+	ActionItems: [ActionItemInput]
 }
 
 # ----------------------------------------------------------------------------
@@ -1794,6 +1921,36 @@ input UpdateCallChecklistItemInput {
 	StatusSource: String
 	# Backend roles only, as in UpdateCallMeetingContextInput.
 	UpdatedBy: String
+}
+
+input UpdateCallGuidanceInput {
+	CallId: ID!
+	GuidanceEnabled: Boolean!
+}
+
+type MeetingDigestResult @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean!
+	# Why there is no digest, or where it was published.
+	Message: String
+	# The digest, Markdown.
+	Text: String
+	# The notification it was published as.
+	NotificationId: String
+}
+
+input UpdateCallSummaryProfileInput {
+	CallId: ID!
+	# A profile name; null, empty or "default" clears it.
+	SummaryProfile: String
+}
+
+type SummaryProfileOption @aws_cognito_user_pools
+@aws_iam {
+	Name: String!
+	Label: String!
+	Description: String
+	StructuredActionItems: Boolean
 }
 
 input UpdateCallLabelsInput {
@@ -2095,6 +2252,9 @@ type DeriveCallAgendaOutput @aws_cognito_user_pools
 
 input RegenerateCallSummaryInput {
 	CallId: ID!
+	# The summary profile to write this summary with; omitted, the meeting's
+	# SummaryProfile. The meeting's SummaryProfile is not changed.
+	SummaryProfile: String
 }
 
 type RegenerateCallSummaryOutput @aws_cognito_user_pools
@@ -2970,6 +3130,129 @@ input DeleteUserInput {
 type DeleteUserOutput @aws_cognito_user_pools {
 	username: String!
 	success: Boolean!
+}
+
+# ── Meeting whiteboards ─────────────────────────────────────────────────────
+# Named panels the assistant keeps up to date during a meeting and the people
+# who can see the meeting can edit. Stored under PK "wb#<CallId>"; derived from
+# the transcript, so deleted with it. See docs/meeting-whiteboards.md.
+
+type WhiteboardPanel @aws_cognito_user_pools @aws_iam {
+	PanelId: ID!
+	Title: String!
+	# "markdown" or "mermaid" (a restricted subset of Mermaid).
+	Kind: String!
+	Content: String
+	# "user" (a person wrote or changed it; the assistant never changes it) or
+	# "assistant" (the assistant may rewrite it).
+	Source: String!
+	UpdatedBy: String
+	UpdatedAt: AWSDateTime
+}
+
+type MeetingWhiteboard @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	WhiteboardId: ID!
+	Title: String!
+	# The template it was made from: decisions, process, comparison, timeline
+	# or blank.
+	Template: String
+	# What the assistant should keep on this whiteboard, at most 1000 characters.
+	Instructions: String
+	# Whether the assistant updates this whiteboard's panels.
+	AssistantUpdates: Boolean
+	Panels: [WhiteboardPanel]
+	# One more with every change. An earlier version is read with
+	# getMeetingWhiteboard(Version).
+	Version: Int!
+	CreatedBy: String
+	CreatedAt: AWSDateTime
+	UpdatedBy: String
+	UpdatedAt: AWSDateTime
+	# On a version read with getMeetingWhiteboard(Version) and in
+	# listMeetingWhiteboardVersions: who made it ("user" or "assistant") and the
+	# panels it changed.
+	Source: String
+	ChangedPanels: [ID]
+	# True on deleteMeetingWhiteboard's answer.
+	Deleted: Boolean
+	# The meeting's, on the mutations' answers, for the subscription filter.
+	Owner: String
+	SharedWith: String
+}
+
+type MeetingWhiteboardList @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	Items: [MeetingWhiteboard]
+	# The meeting's own switch, and the deployment's limits, for the page.
+	WhiteboardsEnabled: Boolean
+	AssistantAvailable: Boolean
+	MaxWhiteboards: Int
+	# False once the meeting's transcript is deleted: whiteboards follow it.
+	Writable: Boolean
+}
+
+type MeetingWhiteboardVersionPage @aws_cognito_user_pools @aws_iam {
+	Items: [MeetingWhiteboard]
+	NextToken: String
+}
+
+type WhiteboardUpdateResult @aws_cognito_user_pools @aws_iam {
+	Success: Boolean!
+	Message: String
+	# How many whiteboards the run changed.
+	Updated: Int
+}
+
+input WhiteboardPanelInput {
+	# Absent for a new panel.
+	PanelId: ID
+	Title: String!
+	Kind: String
+	Content: String
+	# "assistant" hands the panel to the assistant; absent, a panel the change
+	# alters becomes the caller's.
+	Source: String
+}
+
+input CreateMeetingWhiteboardInput {
+	CallId: ID!
+	Title: String
+	Template: String
+	Instructions: String
+	AssistantUpdates: Boolean
+	# Absent, the template's panels.
+	Panels: [WhiteboardPanelInput]
+	# Backend roles only: "user" when acting for a person, or "assistant".
+	Source: String
+	UpdatedBy: String
+}
+
+input UpdateMeetingWhiteboardInput {
+	CallId: ID!
+	WhiteboardId: ID!
+	# The version the change was made from.
+	BaseVersion: Int!
+	Title: String
+	Instructions: String
+	AssistantUpdates: Boolean
+	# The whole new list of panels, in order. Absent leaves them as they are.
+	Panels: [WhiteboardPanelInput]
+	# Brings back this earlier version's title and panels, instead of the above.
+	RestoreVersion: Int
+	# Backend roles only, as on CreateMeetingWhiteboardInput.
+	Source: String
+	UpdatedBy: String
+}
+
+input DeleteMeetingWhiteboardInput {
+	CallId: ID!
+	WhiteboardId: ID!
+}
+
+input UpdateCallWhiteboardsInput {
+	CallId: ID!
+	WhiteboardsEnabled: Boolean!
 }
 
 schema {

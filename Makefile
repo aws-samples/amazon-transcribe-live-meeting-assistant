@@ -82,6 +82,7 @@ CFN_TEMPLATES := \
 	lma-main.yaml \
 	$(AI_STACK_DIR)/deployment/lma-ai-stack.yaml \
 	$(AI_STACK_DIR)/deployment/lma-ai-lambda-resolvers.yaml \
+	$(AI_STACK_DIR)/deployment/lma-ai-meeting-events.yaml \
 	$(AI_STACK_DIR)/deployment/virtual-participant-enhancements.yaml \
 	$(ASR_DIR)/template.yaml \
 	lma-bedrockagent-stack/template.yaml \

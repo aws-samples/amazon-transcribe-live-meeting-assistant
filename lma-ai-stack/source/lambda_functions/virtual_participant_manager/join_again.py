@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional
 from access import NotAuthorizedError, caller_may_change
 from botocore.exceptions import ClientError
 from lma_meeting_preparation import rules as preparation  # configuration layer
+from lma_summary_profiles import normalize_profile_name  # configuration layer
 from rejoin import start_launch, without_password
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,9 @@ def new_row(
 
     if isinstance(request.get("enableVideoRecording"), bool):
         row["enableVideoRecording"] = request["enableVideoRecording"]
+    # Live guidance for the new meeting; absent, the deployment's setting decides.
+    if isinstance(request.get("guidanceEnabled"), bool):
+        row["guidanceEnabled"] = request["guidanceEnabled"]
 
     agenda = _text(request.get("agenda"))
     if agenda.strip():
@@ -196,6 +200,14 @@ def new_row(
         preparation.check_checklist_size(checklist)
     except preparation.PreparationError as error:
         raise JoinAgainRefused(str(error)) from error
+    # The summary profile's name only: one the configuration no longer holds is
+    # summarised with the default when the meeting ends, and recorded so.
+    try:
+        summary_profile = normalize_profile_name(request.get("summaryProfile"))
+    except ValueError as error:
+        raise JoinAgainRefused(str(error)) from error
+    if summary_profile:
+        row["summaryProfile"] = summary_profile
     if labels:
         row["labels"] = labels
     if audience:

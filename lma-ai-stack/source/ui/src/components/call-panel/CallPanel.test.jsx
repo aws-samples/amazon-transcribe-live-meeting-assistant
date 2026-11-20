@@ -263,7 +263,7 @@ describe('the tabs', () => {
 
   it('offers no Screen share tab for a meeting without key frames', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(4));
     expect(screen.queryByRole('tab', { name: /Screen share/ })).toBeNull();
   });
 });
@@ -752,7 +752,7 @@ describe('the player kept in step with the transcript', () => {
 
   it('plays the video of a meeting without a Virtual Participant even with no key frames', async () => {
     await openRecording();
-    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(4));
     expect(media().tagName).toBe('VIDEO');
   });
 
@@ -1332,7 +1332,15 @@ describe('the Download menu', () => {
     });
     fireEvent.click(screen.getByRole('menuitem', { name }));
   };
-  const GROUPS = ['Summary', 'Transcript', 'Recordings', 'Screen share', 'Chat attachments', 'Everything (.zip)'];
+  const GROUPS = [
+    'Summary',
+    'Transcript',
+    'Recordings',
+    'Screen share',
+    'Chat attachments',
+    'Meeting export (.json)',
+    'Everything (.zip)',
+  ];
   const FORMATS = ['Word (.docx)', 'PDF (.pdf)', 'Web page (.html)', 'Markdown (.md)', 'Plain text (.txt)'];
 
   it('offers each kind of file in its own group', () => {
@@ -1841,6 +1849,22 @@ describe('the meeting preparation', () => {
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(ITEM.callId, 'checklistItem', { ItemId: 'q1', Status: 'deferred' }),
     );
+  });
+
+  it('sends live guidance on as an updateCallGuidance change while the meeting is in progress', async () => {
+    const send = vi.fn(async () => ({ ok: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: send, sendRequestMeetingDigest: vi.fn() };
+    renderPage({ item: { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS }, url: '/calls/m?tab=summary' });
+    fireEvent.click(within(screen.getAllByTestId('live-guidance-panel')[0]).getByRole('checkbox'));
+    await waitFor(() => expect(send).toHaveBeenCalledWith(ITEM.callId, 'guidance', { GuidanceEnabled: true }));
+  });
+
+  it('asks for a digest of the meeting from its Live guidance panel', async () => {
+    const digest = vi.fn(async () => ({ Success: true }));
+    callsContext.value = { calls: [], sendUpdateMeetingPreparation: vi.fn(), sendRequestMeetingDigest: digest };
+    renderPage({ item: ITEM, url: '/calls/m?tab=summary' });
+    fireEvent.click(within(screen.getByTestId('live-guidance-panel')).getByRole('button', { name: 'Digest so far' }));
+    await waitFor(() => expect(digest).toHaveBeenCalledWith(ITEM.callId));
   });
 
   it('shows the checklist on the Transcript tab, with evidence that opens the transcript there', () => {

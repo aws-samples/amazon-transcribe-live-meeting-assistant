@@ -449,6 +449,38 @@ def remove_html(transcript_string):
     return re.sub(html_remover, "", transcript_string)
 
 
+def segment_list(speech, chat_rows, name_speaker):
+    """The segments as ``{segmentId, startTime, endTime, speaker}``, in time order.
+
+    Asked for with IncludeSegments. Speech is named as the transcript names it;
+    a chat message by its sender.
+    """
+    entries = []
+    for row in speech:
+        entries.append((row, name_speaker(row) if name_speaker else row.get("Speaker")))
+    for row in chat_rows:
+        entries.append((row, chat_sender(row)))
+    out = []
+    for row, speaker in entries:
+        if not row.get("SegmentId"):
+            continue
+        start = segment_start(row)
+        try:
+            end = float(row.get("EndTime", start))
+        except (TypeError, ValueError):
+            end = start
+        out.append(
+            {
+                "segmentId": str(row["SegmentId"]),
+                "startTime": start,
+                "endTime": end,
+                "speaker": str(speaker or ""),
+            }
+        )
+    out.sort(key=lambda entry: entry["startTime"])
+    return out
+
+
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
 
@@ -500,6 +532,10 @@ def lambda_handler(event, context):
     if include_chat:
         response["chat"] = chat_document(chat_in_text, chat_omitted)
         response["chatLinks"] = chat_links(chat_rows)
+    if data.get("IncludeSegments"):
+        # Each segment's id and times, with its speaker as named: what the
+        # summary's structured action items are placed on the timeline with.
+        response["segments"] = segment_list(speech, chat_in_text, name_speaker)
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually
     # useful when diagnosing a short or empty transcript.
