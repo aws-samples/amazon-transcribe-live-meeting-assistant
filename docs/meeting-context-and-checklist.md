@@ -83,7 +83,7 @@ Two further limits keep a checklist inside the meeting record, which also holds
 the summary, the speaker names and the consent record:
 
 - **At most 5 evidence entries per item.** A change that gives more than 5
-  entries in `Evidence` or in `AddEvidence` is refused. When entries added with
+  entries, in `Evidence` and `AddEvidence` together, is refused. When entries added with
   `AddEvidence` take the item past 5, its oldest stored entries make way, so
   the 5 newest are kept; this is how the assistant keeps adding evidence
   during a meeting.

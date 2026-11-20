@@ -365,6 +365,11 @@ def _refuse_over_limit_changes(graphql, call_id: str) -> None:
     with pytest.raises(Exception, match="at most 5 evidence entries"):
         graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user", "Status": "covered",
                                         "Evidence": [{"StartTime": n} for n in range(6)]}})
+    # A replace and an addition in one change are counted together.
+    with pytest.raises(Exception, match="at most 5 evidence entries; this change gives 7"):
+        graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user",
+                                        "Evidence": [{"StartTime": n} for n in range(3)],
+                                        "AddEvidence": [{"StartTime": 10 + n} for n in range(4)]}})
     with pytest.raises(Exception, match="longer than 1000"):
         graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user",
                                         "Note": "n" * 1001}})
