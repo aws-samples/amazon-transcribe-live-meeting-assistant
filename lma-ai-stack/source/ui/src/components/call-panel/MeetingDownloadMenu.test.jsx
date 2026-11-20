@@ -169,3 +169,60 @@ describe('a recording', () => {
     await waitFor(() => expect(sign).toHaveBeenCalledWith(ITEM.recordingUrl, undefined));
   });
 });
+
+describe('another meeting', () => {
+  it('shows nothing of the previous meeting archive', async () => {
+    const prepareArchive = vi.fn(async () => ({
+      Status: 'READY',
+      FileName: 'Meeting-A.zip',
+      DownloadUrl: 'https://signed.example.com/a.zip',
+    }));
+    const loadAttachments = vi.fn(async () => ATTACHMENTS);
+    const { rerender } = render(
+      <MeetingDownloadMenu
+        item={ITEM}
+        callTranscriptPerCallId={{}}
+        keyframeCount={2}
+        loadAttachments={loadAttachments}
+        prepareArchive={prepareArchive}
+      />,
+    );
+    openMenu();
+    choose('Everything (.zip)');
+    expect(await screen.findByRole('link', { name: /Download Meeting-A.zip/ })).toBeTruthy();
+    rerender(
+      <MeetingDownloadMenu
+        item={{ ...ITEM, callId: 'Other meeting-2026-11-04-09-00-00-000' }}
+        callTranscriptPerCallId={{}}
+        keyframeCount={2}
+        loadAttachments={loadAttachments}
+        prepareArchive={prepareArchive}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByRole('link', { name: /Download Meeting-A.zip/ })).toBeNull());
+    expect(screen.queryByTestId('meeting-archive-status')).toBeNull();
+  });
+
+  it('stops waiting for an archive of the previous meeting', async () => {
+    let finish;
+    const prepareArchive = vi.fn(
+      (_callId, _contents, { isCancelled }) =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve(isCancelled() ? null : { Status: 'READY', DownloadUrl: 'https://s.example.com/a.zip' });
+        }),
+    );
+    const loadAttachments = vi.fn(async () => ATTACHMENTS);
+    const props = { callTranscriptPerCallId: {}, keyframeCount: 2, loadAttachments, prepareArchive };
+    // eslint-disable-next-line react/jsx-props-no-spreading -- the same dependencies for both meetings
+    const { rerender } = render(<MeetingDownloadMenu item={ITEM} {...props} />);
+    openMenu();
+    choose('Everything (.zip)');
+    expect(await screen.findByText(/Preparing download/)).toBeTruthy();
+    // eslint-disable-next-line react/jsx-props-no-spreading
+    rerender(<MeetingDownloadMenu item={{ ...ITEM, callId: 'Other meeting' }} {...props} />);
+    finish();
+    await waitFor(() => expect(screen.queryByText(/Preparing download/)).toBeNull());
+    expect(screen.queryByRole('link', { name: /Download/ })).toBeNull();
+  });
+});

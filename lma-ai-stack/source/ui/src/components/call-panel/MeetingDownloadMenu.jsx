@@ -97,12 +97,16 @@ const MeetingDownloadMenu = ({
   // The archive being prepared; a newer request, or leaving the meeting, stops the wait for an older one.
   const [archive, setArchive] = useState(null);
   const archiveRun = useRef(0);
-  useEffect(
-    () => () => {
+  // Another meeting starts with nothing beside the menu: an archive, its link
+  // or a notice belongs to the meeting it was asked for, and an archive still
+  // being waited for stops being waited for.
+  useEffect(() => {
+    setArchive(null);
+    setNotice(null);
+    return () => {
       archiveRun.current += 1;
-    },
-    [callId],
-  );
+    };
+  }, [callId]);
 
   const hasSummary = Boolean(item.callSummaryText);
   const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
