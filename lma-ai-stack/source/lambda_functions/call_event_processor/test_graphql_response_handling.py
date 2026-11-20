@@ -1468,6 +1468,24 @@ def test_a_default_summary_records_no_profile(schema, emitted, deletion_function
     assert "ActionItems" not in sent
 
 
+def test_a_summary_without_action_items_clears_the_ones_an_earlier_summary_left(
+    schema, emitted, deletion_function, monkeypatch
+):
+    session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "ActionItems": [],
+        },
+        monkeypatch,
+    )
+    (sent,) = mutation_inputs(session, "addCallSummaryText")
+    assert print_ast(sent["ActionItems"]) == "[]"
+
+
 def test_action_items_are_not_stored_without_their_summary(
     schema, emitted, deletion_function, monkeypatch
 ):

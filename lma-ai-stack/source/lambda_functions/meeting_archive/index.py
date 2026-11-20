@@ -812,9 +812,10 @@ def plan_archive(
 
     # Key frames: every frame image of the meeting, in its own folder.
     frames: Dict[str, str] = {}
+    frame_items: Optional[List[Dict[str, Any]]] = None
     if everything or contents == "KEY_FRAMES":
         frames_folder = f"{KEYFRAMES_PREFIX}{folder}/"
-        items = query_items(f"kf#{call_id}")
+        items = frame_items = query_items(f"kf#{call_id}")
         for item in sorted(items, key=lambda i: str(i.get("SK") or "")):
             frame_id = str(item.get("SK") or "")[2:]
             key = recording_key_in_folder(item.get("ImageUrl"), frames_folder)
@@ -925,7 +926,7 @@ def plan_archive(
 
     plan.add_text(
         "meeting-export.json",
-        export_text(meeting_export(call_id, meeting)),
+        export_text(meeting_export(call_id, meeting, segments=segments, keyframes=frame_items)),
         "Meeting export (docs/meeting-export.md)",
     )
 
@@ -1008,15 +1009,29 @@ def readme(call_id: str, contents: str, plan: Plan, include_consent: bool) -> st
 
 
 def meeting_export(
-    call_id: str, meeting: Mapping[str, Any], include: Optional[List[str]] = None
+    call_id: str,
+    meeting: Mapping[str, Any],
+    include: Optional[List[str]] = None,
+    segments: Optional[List[Dict[str, Any]]] = None,
+    keyframes: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """The meeting export (export.py), read from the meeting's own items."""
+    """The meeting export (export.py), read from the meeting's own items.
+
+    ``segments`` and ``keyframes`` are the meeting's ``trs#`` and ``kf#`` items
+    when the caller has read them already, as the Everything archive has.
+    """
     wanted = include if include is not None else list(export.DEFAULT_INCLUDE)
     retained = not meeting.get("TranscriptDeletedAt")
-    segments = (
-        query_items(f"trs#{call_id}") if retained and {"transcript", "chat"} & set(wanted) else []
-    )
-    keyframes = query_items(f"kf#{call_id}") if {"keyframes", "transcript"} & set(wanted) else []
+    if segments is None:
+        segments = (
+            query_items(f"trs#{call_id}")
+            if retained and {"transcript", "chat"} & set(wanted)
+            else []
+        )
+    if keyframes is None:
+        keyframes = (
+            query_items(f"kf#{call_id}") if {"keyframes", "transcript"} & set(wanted) else []
+        )
     notifications = query_items(f"nt#{call_id}") if "guidance" in wanted else []
     try:
         state = json.loads(meeting.get("CallSummaryState") or "{}")

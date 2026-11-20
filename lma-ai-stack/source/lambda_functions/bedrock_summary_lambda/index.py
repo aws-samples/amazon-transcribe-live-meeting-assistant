@@ -1096,6 +1096,11 @@ def handler(event, context):
             except Exception as error:  # pylint: disable=broad-except
                 print(f"Action items for {callId} not listed: {type(error).__name__}")
                 result["actionItemsStatus"] = "failed"
+        elif choice and (metadata or {}).get("ActionItems"):
+            # The items the meeting holds belong to an earlier summary, written
+            # with a profile that lists them; this one lists none, so they are
+            # cleared with it. A meeting that holds none gets the answer as before.
+            result["actionItems"] = []
     except Exception as e:
         print(e)
         summary = "An error occurred."

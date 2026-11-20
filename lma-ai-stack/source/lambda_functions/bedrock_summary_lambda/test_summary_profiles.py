@@ -254,6 +254,19 @@ def test_a_failed_action_item_call_keeps_the_summary(monkeypatch) -> None:
     assert result["actionItemsStatus"] == "failed"
 
 
+@pytest.mark.parametrize("profile", [None, "stand-up"])
+def test_a_summary_without_action_items_clears_the_ones_an_earlier_summary_left(
+    monkeypatch, profile
+) -> None:
+    earlier = [{"Text": "Send the plan", "Owner": "Priya Shah"}]
+    metadata = {"ActionItems": earlier, **({"SummaryProfile": profile} if profile else {})}
+    bedrock, _ = install(monkeypatch, metadata=metadata)
+    result = index.handler({"CallId": CALL_ID}, None)
+    assert result["actionItems"] == []
+    # No extra model call: clearing needs none.
+    assert len(bedrock.requests) == (2 if profile is None else 1)
+
+
 def test_a_profile_without_structured_items_makes_no_extra_call(monkeypatch) -> None:
     bedrock, fetch = install(monkeypatch, metadata={"SummaryProfile": "stand-up"})
     index.handler({"CallId": CALL_ID}, None)

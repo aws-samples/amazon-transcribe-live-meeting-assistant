@@ -486,7 +486,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "in the chat, key frames as alt text, the summary by section, structured action "
             "items with owners and due dates, and the guidance given. Once the transcript was "
             "deleted under the Retention settings it is left out and meeting.transcriptRetained "
-            "is false. A large export is answered with {exportUrl, expiresAt} instead: a link "
+            "is false. A large export is answered with {exportUrl, expiresAt, sizeBytes} instead: a link "
             "that works for anyone holding it for ten minutes; do not share it. The answer "
             "contains SENSITIVE meeting content."
         ),
