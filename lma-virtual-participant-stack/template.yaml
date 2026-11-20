@@ -4268,6 +4268,13 @@ Resources:
           VP_TABLE_NAME: !Ref VirtualParticipantTableName
           LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
+  #
+  # One of the Virtual Participant table stream's two consumers. The other is
+  # VpStatusEventPublisherEventSourceMapping in
+  # lma-ai-stack/deployment/lma-ai-meeting-events.yaml, which publishes Virtual
+  # Participant Status Changed (docs/meeting-events.md). DynamoDB recommends no
+  # more than two readers per stream shard, so a third reader would be
+  # throttled; anything else that needs the stream must share one of these two.
   VirtualParticipantSchedulerEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
     Properties:

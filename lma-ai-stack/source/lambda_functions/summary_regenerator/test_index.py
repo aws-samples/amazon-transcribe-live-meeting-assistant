@@ -48,6 +48,10 @@ def _load():
     sys.path.
     """
     sys.path.insert(0, str(HERE))
+    # The configuration layer, for lma_events.
+    layer = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+    if str(layer) not in sys.path:
+        sys.path.insert(0, str(layer))
     spec = importlib.util.spec_from_file_location("summary_regenerator_index", HERE / "index.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -1170,3 +1174,112 @@ def test_the_end_of_meeting_patience_matches_the_meeting_page() -> None:
     match = re.search(r"MEETING_END_PATIENCE_MS = (\d+) \* 1000", ui_state)
     assert match, "MEETING_END_PATIENCE_MS is gone from summary-state.js"
     assert int(match.group(1)) == index.MEETING_END_PATIENCE_SECONDS
+
+
+# ── Summary Ready ───────────────────────────────────────────────────────────
+
+
+class RecordingEvents:
+    """Stands in for the EventBridge client lma_events publishes with."""
+
+    def __init__(self, fail=False):
+        self.entries = []
+        self.fail = fail
+
+    def put_events(self, Entries):  # noqa: N803 - the boto3 argument name
+        if self.fail:
+            raise RuntimeError("endpoint unreachable")
+        self.entries.extend(Entries)
+        return {"FailedEntryCount": 0, "Entries": [{"EventId": "1"}]}
+
+
+@pytest.fixture
+def events(monkeypatch):
+    """A configured bus, a recording client, and the notification recorded."""
+    recorder = RecordingEvents()
+    notified = []
+    monkeypatch.setenv("MEETING_EVENT_BUS_NAME", "lma-test-meeting-events")
+    monkeypatch.setattr(index.lma_events, "_CLIENT", recorder)
+    monkeypatch.setattr(
+        index.lma_events,
+        "notify_summary_ready",
+        lambda call_id, regenerated=False, graphql=None: notified.append((call_id, regenerated)),
+    )
+    recorder.notified = notified
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def no_notification(monkeypatch):
+    """No test sends the in-app notification's request; the one above records it."""
+    monkeypatch.setattr(index.lma_events, "notify_summary_ready", lambda *a, **k: False)
+
+
+STORED_MEETING = {
+    "CallId": CALL_ID,
+    "Owner": OWNER,
+    "Status": "ENDED",
+    "UpdatedAt": "2026-11-19T16:00:00.000Z",
+    "Labels": [{"Key": "project", "Value": "acme-claims"}],
+    "Audience": "external",
+    "SummaryProfile": "discovery-session",
+    "CallSummaryText": NEW_SUMMARY,
+    # A regeneration does not move UpdatedAt; the state's time is the summary's.
+    "CallSummaryState": json.dumps({"source": "generated", "updatedAt": "2026-11-20T09:30:00Z"}),
+    "MeetingContext": "the briefing",
+    "Agenda": "the agenda",
+}
+
+
+def _install_storing(monkeypatch, **kwargs):
+    ddb, fake_lambda, starter, written = install(monkeypatch, **kwargs)
+
+    def store(call_id, text=None, state=None, action_items=None):
+        written.append({"call_id": call_id, "text": text, "state": state})
+        return {"data": {"updateCallSummaryText": STORED_MEETING}}
+
+    monkeypatch.setattr(index, "write_summary", store)
+    return ddb, fake_lambda, starter, written
+
+
+def test_a_regenerated_summary_publishes_summary_ready_with_ids_only(monkeypatch, events) -> None:
+    _install_storing(monkeypatch)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
+    (entry,) = events.entries
+    assert entry["Source"] == "lma"
+    assert entry["DetailType"] == "Summary Ready"
+    assert entry["EventBusName"] == "lma-test-meeting-events"
+    assert json.loads(entry["Detail"]) == {
+        "version": 1,
+        "meetingId": CALL_ID,
+        "owner": OWNER,
+        "labels": {"project": "acme-claims"},
+        "audience": "external",
+        "status": "ENDED",
+        "summaryProfile": "discovery-session",
+        "occurredAt": "2026-11-20T09:30:00.000Z",
+    }
+    assert events.notified == [(CALL_ID, True)]
+
+
+def test_a_failed_regeneration_publishes_nothing(monkeypatch, events) -> None:
+    _install_storing(monkeypatch, summary="An error occurred.")
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is False
+    assert events.entries == []
+    assert events.notified == []
+
+
+def test_an_unreachable_bus_does_not_fail_the_regeneration(monkeypatch, events) -> None:
+    events.fail = True
+    _, _, _, written = _install_storing(monkeypatch)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
+    assert written[-1]["text"] == NEW_SUMMARY
+
+
+def test_without_a_bus_a_regeneration_publishes_no_event(monkeypatch, events) -> None:
+    monkeypatch.delenv("MEETING_EVENT_BUS_NAME")
+    _install_storing(monkeypatch)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
+    assert events.entries == []
+    # The in-app notification is a separate mechanism and still goes.
+    assert events.notified == [(CALL_ID, True)]

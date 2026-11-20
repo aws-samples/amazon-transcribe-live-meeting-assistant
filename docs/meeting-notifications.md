@@ -15,11 +15,15 @@ participants.
 
 Every notification has a **category**. `guidance` is guidance for the people
 running the meeting, such as a note an AI assistant leaves through the hosted
-MCP server's `push_meeting_guidance` tool. Other features can publish
+MCP server's `push_meeting_guidance` tool. `meeting` is LMA's own news about
+the meeting: today one notification, type `summary_ready`, published when the
+meeting's summary is stored and updated in place when it is regenerated (see
+[Meeting Lifecycle Events](meeting-events.md#the-summary-ready-notification)).
+Mute the `meeting` category to stop seeing it. Other features can publish
 notifications of their own categories through the same mechanism.
 
-Nothing is published until a feature or an MCP client publishes something, and
-a meeting with no notifications looks as it always has.
+Apart from the summary-ready notification, nothing is published until a
+feature or an MCP client publishes something.
 
 ## Contents
 

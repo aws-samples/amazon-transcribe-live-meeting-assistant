@@ -156,6 +156,10 @@ export default defineConfig({
               label: "Lambda Hook Functions",
               slug: "lambda-hook-functions",
             },
+            {
+              label: "Meeting Lifecycle Events",
+              slug: "meeting-events",
+            },
           ],
         },
         {

@@ -20,6 +20,7 @@ title: "Lambda Hook Functions"
   - [Parameters](#parameters)
   - [Example Payload](#example-payload)
 - [End-of-Call Summary Hook](#end-of-call-summary-hook)
+- [Meeting Lifecycle Events](#meeting-lifecycle-events)
 - [Related Documentation](#related-documentation)
 
 ## Overview
@@ -123,7 +124,16 @@ The ARN for this function is provided in the stack output **FetchTranscriptLambd
 
 LMA supports custom end-of-call summarization via a Lambda function. For details on configuring the LAMBDA option for transcript summarization, see [Transcript Summarization](transcript-summarization.md).
 
+## Meeting Lifecycle Events
+
+The hooks above are invoked synchronously or asynchronously by LMA and are
+configured with a stack parameter each. To learn that a meeting started or
+ended, that its summary is stored, or that a Virtual Participant's status
+changed, without configuring a hook, add a rule to the stack's meeting event bus
+instead. See [Meeting Lifecycle Events](meeting-events.md).
+
 ## Related Documentation
 
 - [Transcript Summarization](transcript-summarization.md)
 - [Transcription & Translation](transcription-and-translation.md)
+- [Meeting Lifecycle Events](meeting-events.md)

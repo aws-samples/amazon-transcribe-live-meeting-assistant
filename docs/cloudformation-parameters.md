@@ -61,11 +61,11 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 68 parameters.
+The template declares 69 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
-| Resource | 49 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
+| Resource | 50 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
@@ -559,6 +559,7 @@ Average CPU utilization that WebSocket transcriber auto scaling aims to hold. Ke
 | [`EndOfCallLambdaHookFunctionArn`](#endofcalllambdahookfunctionarn) | (empty) | Resource |
 | [`StartOfCallLambdaHookFunctionArn`](#startofcalllambdahookfunctionarn) | (empty) | Resource |
 | [`PostCallSummaryLambdaHookFunctionArn`](#postcallsummarylambdahookfunctionarn) | (empty) | Resource |
+| [`EnableMeetingEvents`](#enablemeetingevents) | `true` | Resource |
 
 ### `TranscriptLambdaHookFunctionArn`
 
@@ -609,6 +610,16 @@ Console label: *Lambda Hook Function ARN for Custom Post Processing, after the C
 - **Kind:** Resource. Grants the meeting event processor permission to invoke the named function.
 
 (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed. This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system. For a meeting whose transcript has been deleted by the Retention settings, the payload also carries TranscriptDeletedAt.
+
+### `EnableMeetingEvents`
+
+Console label: *Publish Meeting Lifecycle Events to an EventBridge Bus*
+
+- **Default:** `true`
+- **Allowed values:** `true`, `false`
+- **Kind:** Resource. Decides whether the meeting event bus and its publishing grants exist.
+
+Create the LMA meeting event bus (named &lt;stack name&gt;-meeting-events) and publish Meeting Started, Meeting Ended, Summary Ready and Virtual Participant Status Changed to it. The events carry identifiers and states only, never meeting content. Nothing subscribes until you add a rule to the bus, so with no rule the events have no effect. The bus name and ARN are the MeetingEventBusName and MeetingEventBusArn outputs. Remove the rules you added to the bus before setting this to 'false'. See docs/meeting-events.md.
 
 ## Amazon CloudFront Configuration
 

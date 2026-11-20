@@ -14,6 +14,18 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  MeetingEventBusName:
+    Type: String
+    Default: ""
+    Description: >-
+      Name of the LMA meeting event bus (docs/meeting-events.md), created in
+      the main stack. Empty when EnableMeetingEvents is false, which publishes
+      no meeting events.
+  MeetingEventBusArn:
+    Type: String
+    Default: ""
+    Description: ARN of the LMA meeting event bus; empty when it is not created.
+
   CallDataStream:
     Type: String
     Description: >-
@@ -639,6 +651,8 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # The main stack created the meeting event bus (EnableMeetingEvents).
+  ShouldPublishMeetingEvents: !Not [!Equals [!Ref MeetingEventBusArn, ""]]
   HasTroubleshootingAgent: !Not [!Equals [!Ref TroubleshootingAgentFunctionArn, ""]]
   HasCustomConfigPath: !Not [!Equals [!Ref CustomConfigPath, ""]]
   # The transcript knowledge base, whose entries a transcript deletion removes.
@@ -3055,6 +3069,18 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
+            # Meeting Started, Meeting Ended and Summary Ready: this bus only,
+            # and only events whose source is LMA's own.
+            - !If
+              - ShouldPublishMeetingEvents
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !Ref MeetingEventBusArn
+                Condition:
+                  StringEquals:
+                    "events:source": lma
+              - !Ref AWS::NoValue
             # Two senders share this grant: the event source mapping uses this
             # role to describe unprocessable batches to the on-failure
             # destination queue, and the function writes one message per record
@@ -3105,6 +3131,9 @@ Resources:
           # XXX add trace parameter or map
           POWERTOOLS_TRACE_DISABLED: false
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          # Meeting Started, Meeting Ended and Summary Ready go to this bus;
+          # empty publishes none (docs/meeting-events.md).
+          MEETING_EVENT_BUS_NAME: !Ref MeetingEventBusName
           STATE_DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
           COMPREHEND_LANGUAGE_CODE: !Ref ComprehendLanguageCode
           IS_SENTIMENT_ANALYSIS_ENABLED: !Ref IsSentimentAnalysisEnabled
@@ -4906,6 +4935,15 @@ Resources:
           # to record the failure on the meeting. Both functions stop at
           # Lambda's 900s maximum, so waiting one out in full is not possible.
           SUMMARY_READ_TIMEOUT: 780
+          # Summary Ready for a regenerated summary goes to this bus; empty
+          # publishes none (docs/meeting-events.md). Its publish counts are
+          # Embedded Metric Format records in the LMA stack's namespace.
+          MEETING_EVENT_BUS_NAME: !Ref MeetingEventBusName
+          METRIC_NAMESPACE: !Ref LMAStackName
+      # lma_events and lma_notifications. Pure Python, so compatible with this
+      # function's default architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       # The platform's own retries are off for this function. Its second leg is
       # an asynchronous invoke, which Lambda retries twice by default, and a
       # retry re-runs every model call for a summary already computed in the
@@ -4970,7 +5008,22 @@ Resources:
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallSummaryText"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallSummaryText"
+                  # The meeting's summary_ready notification.
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/publishMeetingNotification"
+              # Summary Ready: this bus only, and only events whose source is
+              # LMA's own.
+              - !If
+                - ShouldPublishMeetingEvents
+                - Effect: Allow
+                  Action:
+                    - events:PutEvents
+                  Resource: !Ref MeetingEventBusArn
+                  Condition:
+                    StringEquals:
+                      "events:source": lma
+                - !Ref AWS::NoValue
               # The configured summariser, plus this function itself for the
               # second leg of a run. Spelled out rather than taken from the
               # function resource, which would be circular.
@@ -6477,6 +6530,25 @@ Resources:
         VncEdgeTokenSigningSecret: !Ref VncEdgeTokenSigningSecret
         VPTaskRegistry: !Ref VPTaskRegistry
         VPTaskRegistryArn: !GetAtt VPTaskRegistry.Arn
+
+  # Virtual Participant Status Changed, read from the Virtual Participant
+  # table's stream. Only when the main stack created the meeting event bus.
+  MeetingEventsStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldPublishMeetingEvents
+    Properties:
+      TemplateURL: ../deployment/lma-ai-meeting-events.yaml
+      Parameters:
+        AIStackName: !Ref AWS::StackName
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        ConfigurationPythonLayer: !Ref ConfigurationPythonLayer
+        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
+        LMAStackName: !Ref LMAStackName
+        LogLevel: !Ref LogLevel
+        MeetingEventBusArn: !Ref MeetingEventBusArn
+        MeetingEventBusName: !Ref MeetingEventBusName
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        VirtualParticipantTableStreamArn: !GetAtt VirtualParticipantTable.StreamArn
 
   AppSyncDataSource:
     Type: AWS::AppSync::DataSource

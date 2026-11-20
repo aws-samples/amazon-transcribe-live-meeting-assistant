@@ -1,0 +1,187 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT-0 License.
+# See the LICENSE file in the project root for full license information.
+
+---
+# Virtual Participant Status Changed, one of the four meeting lifecycle events
+# (docs/meeting-events.md). A nested stack of lma-ai-stack.yaml, created only
+# when the stack publishes meeting events (EnableMeetingEvents), and split out
+# to keep the AI stack under the resource budget test_resource_budget.py holds
+# it to.
+#
+# The event bus itself is in lma-main.yaml, beside the other resources several
+# nested stacks share: rules a customer adds point at it, so it stays in the one
+# template that is never split. This stack holds only the publisher that reads
+# the Virtual Participant table's stream.
+#
+# That stream has two consumers: this function and the Virtual Participant
+# scheduler (VirtualParticipantSchedulerEventSourceMapping in
+# lma-virtual-participant-stack/template.yaml). DynamoDB recommends no more than
+# two readers per stream shard, so a third reader would be throttled; anything
+# else that needs the stream must share one of these two functions.
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: Amazon Transcribe Live Meeting Assist - AI Stack - meeting events
+
+Parameters:
+  AIStackName:
+    Type: String
+    Description: >-
+      The AI stack's own name. Prefixes this stack's log group
+      (/<AI stack name>/meeting-events/lambda/<function>) and names its inline
+      policy.
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+  ConfigurationPythonLayer:
+    Type: String
+    Description: ARN of the AI stack's configuration layer version (lma_events).
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+  LMAStackName:
+    Type: String
+    Description: The LMA stack's name, which is the namespace of its metrics.
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: Logging level for Lambda functions.
+  MeetingEventBusArn:
+    Type: String
+    Description: ARN of the LMA meeting event bus.
+  MeetingEventBusName:
+    Type: String
+    Description: Name of the LMA meeting event bus.
+  PermissionsBoundaryArn:
+    Type: String
+  VirtualParticipantTableStreamArn:
+    Type: String
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Globals:
+  Function:
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+  VpStatusEventPublisherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt VpStatusEventPublisherFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_events_vp_publisher
+      Description: Publishes Virtual Participant Status Changed to the meeting event bus
+      MemorySize: 256
+      # Three attempts of three seconds at most per event, for a batch of up to
+      # 25 records; well inside this.
+      Timeout: 300
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      Environment:
+        Variables:
+          MEETING_EVENT_BUS_NAME: !Ref MeetingEventBusName
+          # The publish counts (MeetingEventsPublished, MeetingEventsPublishFailed)
+          # are Embedded Metric Format records in the namespace every LMA metric
+          # uses, which is the LMA stack's name rather than this nested stack's.
+          METRIC_NAMESPACE: !Ref LMAStackName
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AIStackName}/meeting-events/lambda/VpStatusEventPublisherFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - the function logs and counts a failed publish and never fails its batch"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only the event bus name and the metric namespace"
+    DependsOn:
+      - VpStatusEventPublisherFunctionLogGroup
+
+  VpStatusEventPublisherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AIStackName}/meeting-events/lambda/VpStatusEventPublisherFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VpStatusEventPublisherFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Virtual Participant status event publisher Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-VpStatusEventPublisher
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: !Ref VirtualParticipantTableStreamArn
+              # The table, and so its stream, is encrypted with this key.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              # This bus only, and only events whose source is LMA's own.
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !Ref MeetingEventBusArn
+                Condition:
+                  StringEquals:
+                    "events:source": lma
+
+  VpStatusEventPublisherEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref VirtualParticipantTableStreamArn
+      FunctionName: !GetAtt VpStatusEventPublisherFunction.Arn
+      StartingPosition: LATEST
+      BatchSize: 25
+      MaximumBatchingWindowInSeconds: 1
+      # The function never fails a batch; these bound what an unexpected crash
+      # (a timeout, an out-of-memory) can hold up.
+      MaximumRetryAttempts: 2
+      BisectBatchOnFunctionError: true
+      MaximumRecordAgeInSeconds: 3600
+      # Writes that can carry a status. A REMOVE (the row expiring or being
+      # deleted) is not a status change.
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName": ["INSERT", "MODIFY"]}'
+
+Outputs:
+  VpStatusEventPublisherFunctionArn:
+    Description: The function that publishes Virtual Participant Status Changed.
+    Value: !GetAtt VpStatusEventPublisherFunction.Arn

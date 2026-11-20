@@ -51,6 +51,10 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
+
+# From the configuration layer: Summary Ready on the stack's meeting event bus,
+# and the in-app notification beside it (docs/meeting-events.md).
+import lma_events  # pylint: disable=import-error
 import requests
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.auth import SigV4Auth
@@ -769,7 +773,7 @@ def run(call_id, summary_profile=None):
         return {"ok": False, "reason": "superseded"}
 
     profile_state, action_items = outcome_extras(body, meeting)
-    write_summary(
+    stored = write_summary(
         call_id,
         text=summary,
         state={
@@ -781,7 +785,25 @@ def run(call_id, summary_profile=None):
         action_items=action_items,
     )
     LOGGER.info("Regenerated the summary for %s", call_id)
+    announce_summary_ready(call_id, stored)
     return {"ok": True}
+
+
+def announce_summary_ready(call_id, stored):
+    """Summary Ready on the meeting event bus, and the in-app notification.
+
+    From the meeting as the write answered it, which carries every field the
+    event takes. Neither may fail the run: the summary is stored, and both
+    helpers log and count their own failures rather than raising.
+    """
+    try:
+        meeting = ((stored or {}).get("data") or {}).get("updateCallSummaryText") or {
+            "CallId": call_id
+        }
+        lma_events.publish(lma_events.SUMMARY_READY, lma_events.summary_detail(meeting))
+        lma_events.notify_summary_ready(call_id, regenerated=True)
+    except Exception:  # noqa: BLE001 - see the docstring
+        LOGGER.exception("Could not announce the regenerated summary for %s", call_id)
 
 
 def handler(event, context):
