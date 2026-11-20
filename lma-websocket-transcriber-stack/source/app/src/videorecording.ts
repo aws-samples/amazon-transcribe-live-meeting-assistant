@@ -160,6 +160,15 @@ const s3Client = new S3Client({ region: AWS_REGION });
 
 export type VideoSession = {
     callId: string;
+    /**
+     * The capture session of the audio session this video belongs to, as the
+     * transcriber checked it at the audio START (calleventdata/meeting-session.ts):
+     * undefined or 1 for a meeting's first session. Named on the
+     * ADD_S3_VIDEO_RECORDING_URL event, and part of the key the session is
+     * held under, so a continued meeting's next session records a video of its
+     * own while this one is still being finalized.
+     */
+    sessionNumber?: number;
     // One fMP4 file per START_VIDEO (a reconnect re-sends the init segment,
     // which can't be appended mid-file; the mux concatenates segments).
     segmentPaths: string[];
@@ -249,12 +258,29 @@ const stopKeyframes = (session: VideoSession, server: FastifyInstance): void => 
     );
 };
 
-// Video sessions by callId. A session outlives its websocket: it is removed
-// only after the mux/upload completes (or is abandoned).
+// Video sessions by callId and capture session. A session outlives its
+// websocket: it is removed only after the mux/upload completes (or is
+// abandoned).
 const videoSessions = new Map<string, VideoSession>();
 
-export const getVideoSession = (callId: string): VideoSession | undefined =>
-    videoSessions.get(callId);
+/** A later capture session's number, or undefined for a meeting's first. */
+const laterSession = (sessionNumber: number | undefined): number | undefined =>
+    sessionNumber !== undefined && sessionNumber > 1 ? sessionNumber : undefined;
+
+/**
+ * The key a video session is held under: the callId for a meeting's first
+ * capture session, as before sessions existed, and the callId with the
+ * session for a later one.
+ */
+export const videoSessionKey = (callId: string, sessionNumber?: number): string => {
+    const later = laterSession(sessionNumber);
+    return later === undefined ? callId : `${callId}\u0000s${later}`;
+};
+
+const keyOf = (session: VideoSession): string => videoSessionKey(session.callId, session.sessionNumber);
+
+export const getVideoSession = (callId: string, sessionNumber?: number): VideoSession | undefined =>
+    videoSessions.get(videoSessionKey(callId, sessionNumber));
 
 /**
  * Create a video segment write stream with an 'error' listener attached.
@@ -289,8 +315,14 @@ const createSegmentStream = (
     return stream;
 };
 
-const segmentFileName = (callId: string, index: number): string =>
-    `${posixifyFilename(callId)}_video_${index}.mp4`;
+/** The meeting's file name, with the capture session for a later one. */
+const sessionFileName = (callId: string, sessionNumber?: number): string => {
+    const later = laterSession(sessionNumber);
+    return `${posixifyFilename(callId)}${later === undefined ? '' : `_s${later}`}`;
+};
+
+const segmentFileName = (callId: string, index: number, sessionNumber?: number): string =>
+    `${sessionFileName(callId, sessionNumber)}_video_${index}.mp4`;
 
 /**
  * S3 object name for the muxed recording. Includes a timestamp because
@@ -299,9 +331,9 @@ const segmentFileName = (callId: string, index: number): string =>
  * twice — would otherwise collide and silently overwrite each other. The
  * Virtual Participant uses the same convention.
  */
-const muxedFileName = (callId: string): string => {
+const muxedFileName = (callId: string, sessionNumber?: number): string => {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    return `${posixifyFilename(callId)}_${stamp}.mp4`;
+    return `${sessionFileName(callId, sessionNumber)}_${stamp}.mp4`;
 };
 
 /**
@@ -317,7 +349,11 @@ const muxedFileName = (callId: string): string => {
  * on the meeting's transcript timeline (calleventdata/meeting-session.ts): 0
  * for a meeting's first session, and after the earlier sessions for one that
  * continues a meeting. It moves the key frames' place on the transcript's
- * clock, not their place in the recording.
+ * clock, not their place in the recording. `callMetaData.sessionNumber` is the
+ * capture session of the audio session the video belongs to, as checked at
+ * its START (the caller sets it; the video socket's own frame is not trusted
+ * for it): a later session's video is recorded apart from an earlier
+ * session's that may still be finalizing.
  */
 export const startVideoSession = (
     callMetaData: CallMetaData,
@@ -326,7 +362,9 @@ export const startVideoSession = (
     sessionOffsetSeconds = 0
 ): VideoSession => {
     const callId = callMetaData.callId;
-    let session = videoSessions.get(callId);
+    const sessionNumber = callMetaData.sessionNumber;
+    const key = videoSessionKey(callId, sessionNumber);
+    let session = videoSessions.get(key);
 
     if (!ENABLE_VIDEO_RECORDING) {
         server.log.warn(
@@ -335,7 +373,7 @@ export const startVideoSession = (
         if (!session) {
             session = newSession(callId, callMetaData);
             session.discarding = true;
-            videoSessions.set(callId, session);
+            videoSessions.set(key, session);
         }
         return session;
     }
@@ -393,19 +431,19 @@ export const startVideoSession = (
         return session;
     } else {
         session = newSession(callId, callMetaData);
-        videoSessions.set(callId, session);
+        videoSessions.set(key, session);
         // Absolute lifetime cap: a client that streams forever and never sends
         // END_VIDEO (and never disconnects) would otherwise leak this session,
         // its fd, its temp file, and the adopted audio WAV until task replacement.
         const created = session;
         session.lifetimeTimer = setTimeout(() => {
-            if (videoSessions.get(callId) !== created) {
+            if (videoSessions.get(key) !== created) {
                 return; // superseded by a newer session for this callId
             }
             server.log.warn(
                 `[VIDEO]: [${callId}] - Video session exceeded the maximum lifetime (${VIDEO_MAX_SESSION_MS}ms); finalizing.`
             );
-            endVideoSession(callId, server).catch((err) =>
+            endVideoSession(callId, server, sessionNumber).catch((err) =>
                 server.log.error(
                     `[VIDEO]: [${callId}] - Error finalizing video at max lifetime: ${normalizeErrorForLogging(err)}`
                 )
@@ -423,7 +461,7 @@ export const startVideoSession = (
 
     const segPath = path.resolve(
         LOCAL_TEMP_DIR,
-        segmentFileName(callId, session.segmentPaths.length + 1)
+        segmentFileName(callId, session.segmentPaths.length + 1, sessionNumber)
     );
     session.segmentPaths.push(segPath);
     session.writeStream = createSegmentStream(session, segPath, server);
@@ -435,6 +473,7 @@ const newSession = (
     callMetaData: CallMetaData
 ): VideoSession => ({
     callId,
+    sessionNumber: callMetaData.sessionNumber,
     segmentPaths: [],
     fileSize: 0,
     sizeCapReached: false,
@@ -518,9 +557,11 @@ export const writeVideoChunk = (
  */
 export const videoSocketDropped = (
     callId: string,
-    server: FastifyInstance
+    server: FastifyInstance,
+    sessionNumber?: number
 ): void => {
-    const session = videoSessions.get(callId);
+    const key = videoSessionKey(callId, sessionNumber);
+    const session = videoSessions.get(key);
     if (!session || session.videoEnded || session.muxStarted) {
         return;
     }
@@ -539,10 +580,10 @@ export const videoSocketDropped = (
         // The timer handle lives on THIS session object, but the callId may have
         // been reused by a newer session in the meantime — finalizing then would
         // truncate a live recording. Only act if we are still the current one.
-        if (videoSessions.get(callId) !== dropped) {
+        if (videoSessions.get(key) !== dropped) {
             return;
         }
-        endVideoSession(callId, server).catch((err) =>
+        endVideoSession(callId, server, sessionNumber).catch((err) =>
             server.log.error(
                 `[VIDEO]: [${callId}] - Error finalizing video after reconnect grace period: ${normalizeErrorForLogging(err)}`
             )
@@ -557,9 +598,10 @@ export const videoSocketDropped = (
  */
 export const endVideoSession = async (
     callId: string,
-    server: FastifyInstance
+    server: FastifyInstance,
+    sessionNumber?: number
 ): Promise<void> => {
-    const session = videoSessions.get(callId);
+    const session = videoSessions.get(videoSessionKey(callId, sessionNumber));
     if (!session || session.videoEnded) {
         return;
     }
@@ -622,14 +664,17 @@ export const endVideoSession = async (
  * wavPath is the local WAV file when audio recording produced one (the caller
  * must NOT delete it if this returns true — the mux owns it now), or
  * undefined when audio recording was disabled.
- * Returns true if a video session adopted the WAV file.
+ * Returns true if a video session adopted the WAV file. `sessionNumber` is the
+ * audio session's capture session: only that session's video adopts it.
  */
 export const notifyAudioRecordingDone = (
     callId: string,
     wavPath: string | undefined,
-    server: FastifyInstance
+    server: FastifyInstance,
+    sessionNumber?: number
 ): boolean => {
-    const session = videoSessions.get(callId);
+    const key = videoSessionKey(callId, sessionNumber);
+    const session = videoSessions.get(key);
     if (!session || session.muxStarted || session.discarding) {
         return false;
     }
@@ -650,13 +695,13 @@ export const notifyAudioRecordingDone = (
         const waiting = session;
         session.graceTimer = setTimeout(() => {
             waiting.graceTimer = undefined;
-            if (videoSessions.get(callId) !== waiting) {
+            if (videoSessions.get(key) !== waiting) {
                 return;
             }
             server.log.warn(
                 `[VIDEO]: [${callId}] - Audio ended ${VIDEO_WAIT_FOR_END_AFTER_AUDIO_MS}ms ago and END_VIDEO never arrived; finalizing video now.`
             );
-            endVideoSession(callId, server).catch((err) =>
+            endVideoSession(callId, server, sessionNumber).catch((err) =>
                 server.log.error(
                     `[VIDEO]: [${callId}] - Error finalizing video after audio-end wait: ${normalizeErrorForLogging(err)}`
                 )
@@ -714,7 +759,7 @@ const muxAndUploadInner = async (
     }
 
     const callId = session.callId;
-    const outFileName = muxedFileName(callId);
+    const outFileName = muxedFileName(callId, session.sessionNumber);
     const outPath = path.resolve(LOCAL_TEMP_DIR, outFileName);
 
     try {
@@ -759,8 +804,12 @@ const muxAndUploadInner = async (
 
         const videoUrl = await uploadVideo(outPath, outFileName, server, callId);
         if (videoUrl) {
+            // Named with its capture session: the mux finishes after the
+            // audio session's END, when the meeting may already be in a later
+            // session.
             const callMetaData = {
                 callId,
+                sessionNumber: session.sessionNumber,
                 accessToken: session.tokens.accessToken,
                 idToken: session.tokens.idToken,
                 refreshToken: session.tokens.refreshToken,
@@ -970,7 +1019,10 @@ const cleanupSession = async (
         await deleteQuietly(session.audioWavPath, server, session.callId);
         session.audioWavPath = undefined;
     }
-    videoSessions.delete(session.callId);
+    // Only if it is still the session held under its key.
+    if (videoSessions.get(keyOf(session)) === session) {
+        videoSessions.delete(keyOf(session));
+    }
 };
 
 const deleteQuietly = async (
