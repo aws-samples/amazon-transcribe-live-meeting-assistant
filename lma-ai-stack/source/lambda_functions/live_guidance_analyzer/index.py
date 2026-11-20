@@ -89,6 +89,8 @@ METERING_CONTEXT = "LiveGuidance"
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", "180"))
 RUN_MAX_TOKENS = 3000
 DIGEST_MAX_TOKENS = 1500
+#: The least time between two digests of one meeting.
+DIGEST_INTERVAL_SECONDS = 60
 MAX_TRANSCRIPT_PAGES = 100
 #: Guidance other publishers left on the meeting, shown to the model so it does
 #: not repeat them.
@@ -350,6 +352,37 @@ def claim(
             return None
         raise
     return _plain(_deserialize(response.get("Attributes") or {}))
+
+
+def claim_digest(call_id: str, now: float, expires: Optional[int]) -> bool:
+    """Record a digest on the state row; False when the meeting had one in the last minute.
+
+    The bound on digests, which a person or an MCP client asks for: each is a
+    model call, so one meeting gets at most one a minute, held by one
+    conditional write as the runs' interval is.
+    """
+    values: Dict[str, Any] = {
+        ":now": {"N": str(now)},
+        ":due": {"N": str(now - DIGEST_INTERVAL_SECONDS)},
+        ":call": {"S": call_id},
+    }
+    sets = ["LastDigestAt = :now", "CallId = :call"]
+    if expires:
+        values[":ttl"] = {"N": str(expires)}
+        sets.append("ExpiresAfter = if_not_exists(ExpiresAfter, :ttl)")
+    try:
+        dynamodb.update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_state_key(call_id),
+            UpdateExpression="SET " + ", ".join(sets),
+            ConditionExpression="attribute_not_exists(LastDigestAt) OR LastDigestAt <= :due",
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as error:
+        if _conflict(error):
+            return False
+        raise
+    return True
 
 
 def release(call_id: str, lease: Any, ran: bool, now: float, **fields: Any) -> None:
@@ -698,17 +731,17 @@ def shared_with_entries(value: object) -> list:
 def caller_of(identity: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """Who is asking, as meeting_preparation_resolver's caller_of reads the identity.
 
-    No identity, or an IAM identity of an assumed role with no user-pool claims,
-    is the backend: the MCP server, which checks its own caller first.
+    Only an IAM identity of an assumed role with no user-pool claims is the
+    backend: the MCP server, which checks its own caller first. An empty or
+    absent identity has no username and is refused. (A run, which the call
+    event processor invokes directly, never reaches this: see handler.)
     """
     identity = identity or {}
     claims = identity.get("claims") or {}
     groups = claims.get("cognito:groups") or identity.get("groups") or []
     if isinstance(groups, str):
         groups = [g.strip() for g in groups.split(",") if g.strip()]
-    is_backend = not identity or (
-        not claims and ":assumed-role/" in str(identity.get("userArn") or "")
-    )
+    is_backend = not claims and ":assumed-role/" in str(identity.get("userArn") or "")
     return {
         "username": "" if is_backend else str(identity.get("username") or ""),
         "is_admin": not is_backend and "Admin" in groups,
@@ -744,6 +777,10 @@ def digest(call_id: str, identity: Optional[Mapping[str, Any]] = None) -> Dict[s
     )
     if not segments:
         raise DigestError("Nothing has been said in the meeting yet.")
+    if not claim_digest(call_id, time.time(), _expiry(meeting)):
+        raise DigestError(
+            "A digest of this meeting was made less than a minute ago. Try again in a minute."
+        )
     transcript, _names = pure.transcript_block(segments)
     elapsed = max(s.end for s in segments)
     system, messages = pure.build_digest_request(

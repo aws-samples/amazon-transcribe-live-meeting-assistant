@@ -84,8 +84,9 @@ Each item:
   so a later run that says the same thing again updates the item in place
   rather than adding another, and a run that has nothing new to say publishes
   nothing;
-- carries a **Mark covered** button when it is about a checklist item (it sets
-  the item covered as the user who presses it), and a question carries **Copy
+- carries a **Mark covered** button when it is an `ask_question`,
+  `uncovered_topic` or `time_check` about a checklist item (it sets the item
+  covered as the user who presses it), and a question carries **Copy
   question**.
 
 When a checklist item stops being open, because a run or a user covered it or a
@@ -158,7 +159,8 @@ type `meeting_digest` and shown in the Notifications drawer. It works whether or
 not live guidance is on for the meeting, for anyone who may change the meeting,
 unless an administrator has turned live guidance off for the deployment (Runs
 per meeting at most set to 0). Each request is one model call, billed to the
-meeting.
+meeting, and a meeting gets at most one digest a minute: a second request
+within the minute is answered with a message to try again.
 
 The button waits for the digest. If the model takes longer than the 30 seconds
 the page waits, the page says so; the digest may still arrive in the drawer.

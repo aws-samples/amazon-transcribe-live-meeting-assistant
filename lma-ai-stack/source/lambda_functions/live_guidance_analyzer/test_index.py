@@ -109,6 +109,12 @@ class FakeDynamo:
     def update_item(self, **kwargs):
         values = {k: _value(v) for k, v in kwargs["ExpressionAttributeValues"].items()}
         condition = kwargs["ConditionExpression"]
+        if "LastDigestAt <= :due" in condition:
+            last = self.state.get("LastDigestAt")
+            if last is not None and last > values[":due"]:
+                raise _conditional_failure()
+            self.state.update(LastDigestAt=values[":now"], CallId=values[":call"])
+            return {}
         if "LeaseUntil < :now" in condition:
             self.claims += 1
             lease = self.state.get("LeaseUntil")
@@ -620,3 +626,24 @@ def test_the_checklist_write_selects_every_field_the_meeting_page_subscribes_to(
     }
     assert "GuidanceEnabled" in selected
     assert sorted(field for field in selected if field not in index._CALL_FIELDS) == []
+
+
+def test_a_digest_is_refused_to_a_caller_with_no_identity(world):
+    state = world(answers=[DIGEST])
+    for identity in ({}, {"userArn": ""}):
+        result = press(identity)
+        assert result["Success"] is False, identity
+    assert state["bedrock"].calls == [] and state["published"] == []
+
+
+def test_a_meeting_gets_at_most_one_digest_a_minute(world):
+    state = world(answers=[DIGEST])
+    owner = {"username": OWNER, "claims": {"sub": "x"}}
+    assert press(owner)["Success"] is True
+    second = press(owner)
+    assert second["Success"] is False
+    assert "less than a minute ago" in second["Message"]
+    assert len(state["bedrock"].calls) == 1
+    state["clock"].now += 61
+    assert press(owner)["Success"] is True
+    assert len(state["bedrock"].calls) == 2
