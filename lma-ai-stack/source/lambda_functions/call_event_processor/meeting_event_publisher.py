@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
 import lma_events  # pylint: disable=import-error
@@ -149,7 +150,10 @@ async def meeting_started(
 
     ``occurredAt`` is the meeting's CreatedAt, which no later write changes, or
     for a later session that session's StartedAt; where the read does not have
-    them, the START record's own CreatedAt, which is the same on a redelivery.
+    them, the START record's own CreatedAt, which is the same on a redelivery;
+    and failing both, the time it is processed. That last time is not repeated,
+    because a redelivered START finds the meeting created or the session started
+    and publishes nothing.
     """
     if not lma_events.enabled():
         return False
@@ -159,11 +163,16 @@ async def meeting_started(
             meeting.get("CreatedAt")
             if session_number <= 1
             else session_started_at(meeting, session_number)
-        ) or message.get("CreatedAt")
+        )
+        occurred_at = (
+            lma_events.iso_utc(occurred_at)
+            or lma_events.iso_utc(message.get("CreatedAt"))
+            or lma_events.iso_utc(datetime.now(timezone.utc))
+        )
         detail = lma_events.meeting_detail(
             _known(meeting, message),
             session_number=session_number,
-            occurred_at=occurred_at or None,
+            occurred_at=occurred_at,
             virtual_participant_id=message.get("VirtualParticipantId"),
         )
         return await _publish(lma_events.MEETING_STARTED, detail)

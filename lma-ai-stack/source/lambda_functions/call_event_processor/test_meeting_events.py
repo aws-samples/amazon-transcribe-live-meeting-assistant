@@ -195,6 +195,10 @@ def test_an_unreadable_meeting_still_publishes_what_the_record_says(
     )
     process_event(session, start(), monkeypatch)
     ((_, detail),) = events.published()
+    # Neither the read nor the record has a time, so the event is timed when it
+    # was processed: occurredAt is on every event.
+    occurred_at = detail.pop("occurredAt")
+    assert lma_events.iso_utc(occurred_at) == occurred_at
     assert detail == {"version": 1, "meetingId": "call-1", "owner": OWNER, "sessionNumber": 1}
 
 
