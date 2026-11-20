@@ -868,6 +868,30 @@ voice assistant, or hands-off unattended recording.
   only, so a fresh launch always asks for your password again — that is
   expected, not a fault.
 
+## Automated builds
+
+Every pull request that changes a client's source, and every push to `develop`
+and `main`, builds that client on a GitHub-hosted runner (`windows-latest` for
+Windows, with `build-windows.ps1 -SelfContained`; `macos-latest` for macOS, with
+`make-app.sh`) and runs its `--selftest`; a failing self-test fails the job. The
+`--selftest` checks are offline: the SRP sign-in arithmetic against known
+answers, token refresh scheduling and failure classification, meeting ids, the
+meeting consent step and continuing a meeting. They do not capture audio or
+screen, and the runners grant no microphone or screen recording permission, so
+capture still needs a person on a real machine.
+
+The job uploads the build it made as an artifact, kept for 7 days, for manual
+testing: on the workflow run's page, under **Artifacts**,
+`lma-capture-client-windows-x64` or `lma-capture-client-macos-arm64`. Neither is
+the download a stack serves, so neither knows a stack. The Windows build carries
+the sample `lma-config.json` from the source tree beside the `.exe`: replace it
+with the one from a stack's own Windows download. The macOS build has none:
+start it with `LMACaptureClient.app/Contents/MacOS/LMACaptureClient --gui
+--config /path/to/lma-config.json`, using the file from a stack's macOS
+download. The macOS build has an ad-hoc signature only and is not notarized, so
+remove the quarantine attribute after unzipping (`xattr -dr
+com.apple.quarantine LMACaptureClient.app`), and it runs on Apple silicon only.
+
 ## See also
 
 - [Meeting Sources overview](meeting-sources.md) — compare all capture options

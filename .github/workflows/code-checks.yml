@@ -319,10 +319,10 @@ jobs:
   # `!cancelled() && ... != 'false'` keeps the "doubt runs the step" rule: if
   # `select` fails, its outputs are empty and both jobs run.
   #
-  # Each uploads the client it built, for manual testing, kept for 7 days. The
-  # client carries the sample lma-config.json from the source tree, so it points
-  # at no stack until that file is replaced with a stack's own values (or use the
-  # download the stack itself serves, which has them).
+  # Each uploads the client it built, for manual testing, kept for 7 days. Neither
+  # knows a stack (the Windows build has the source tree's sample lma-config.json,
+  # the macOS build none); docs/desktop-capture-app.md#automated-builds says how
+  # to point one at a stack.
   select:
     name: Select the desktop app jobs
     runs-on: ubuntu-latest
