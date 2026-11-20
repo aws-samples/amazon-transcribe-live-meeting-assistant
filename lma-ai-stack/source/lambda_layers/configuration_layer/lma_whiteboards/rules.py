@@ -351,6 +351,24 @@ def _same_content(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
     )
 
 
+def _with_stored_kinds(panels: Any, by_id: Mapping[str, Mapping[str, Any]]) -> Any:
+    """The panels with each existing panel's stored kind where the change leaves it out.
+
+    A caller that re-sends an existing panel with new content and no ``Kind``
+    means that panel, not a new Markdown one: a diagram stays a diagram.
+    """
+    if not isinstance(panels, (list, tuple)):
+        return panels
+    out = []
+    for panel in panels:
+        if isinstance(panel, Mapping) and not panel.get("Kind"):
+            stored = by_id.get(panel.get("PanelId")) if panel.get("PanelId") else None
+            if stored is not None and stored.get("Kind"):
+                panel = {**panel, "Kind": stored["Kind"]}
+        out.append(panel)
+    return out
+
+
 @dataclass
 class Change:
     """The result of applying a change: the whiteboard as it would be stored,
@@ -419,7 +437,7 @@ def apply_change(  # pylint: disable=too-many-arguments,too-many-locals,too-many
             result["AssistantUpdates"] = flag
 
     if panels is not None:
-        given = panels_input(panels)
+        given = panels_input(_with_stored_kinds(panels, by_id))
         if source == SOURCE_ASSISTANT:
             given_ids = [p["PanelId"] for p in given if p["PanelId"] in by_id]
             stored_ids = [p["PanelId"] for p in stored]

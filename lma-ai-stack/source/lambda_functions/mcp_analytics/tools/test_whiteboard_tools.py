@@ -124,7 +124,8 @@ def test_a_write_is_recorded_as_the_callers(meeting, appsync):
     sent = appsync.calls[0][1]["input"]
     assert sent["Source"] == "user" and sent["UpdatedBy"] == SHARED
     assert sent["Template"] == "comparison"
-    assert sent["Panels"] == [{"Title": "Options", "Kind": "markdown", "Content": "| a |"}]
+    # No kind given, so none is sent: the resolver keeps an existing panel's kind.
+    assert sent["Panels"] == [{"Title": "Options", "Content": "| a |"}]
 
 
 def test_an_update_names_its_base_version_and_can_hand_a_panel_back(meeting, appsync):

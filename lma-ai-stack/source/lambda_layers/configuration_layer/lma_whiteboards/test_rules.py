@@ -207,6 +207,36 @@ def test_a_panel_a_user_changes_becomes_theirs_and_the_version_moves_on() -> Non
     assert change.board["Version"] == 2 and change.board["UpdatedAt"] == LATER
 
 
+def test_a_panel_resent_without_its_kind_keeps_the_kind_it_has() -> None:
+    b = rules.new_whiteboard(
+        whiteboard_id="k",
+        title="",
+        template="process",
+        instructions="",
+        assistant_updates=True,
+        panels=None,
+        source="user",
+        actor="u",
+        now=NOW,
+    )
+    panels = [
+        {"PanelId": p["PanelId"], "Title": p["Title"], "Content": p["Content"]} for p in b["Panels"]
+    ]
+    panels[0]["Content"] = "flowchart TD\n  a-->b"
+    change = rules.apply_change(b, source="user", actor="u", now=LATER, panels=panels)
+    assert [p["Kind"] for p in change.board["Panels"]] == ["mermaid", "markdown"]
+    # The kept kind is the one the content is checked against.
+    panels[0]["Content"] = "flowchart TD\n  click a call x()"
+    with pytest.raises(rules.WhiteboardError, match="click"):
+        rules.apply_change(b, source="user", actor="u", now=LATER, panels=panels)
+    # A new panel without a kind is Markdown.
+    panels[0]["Content"] = "flowchart TD\n  a-->b"
+    added = rules.apply_change(
+        b, source="user", actor="u", now=LATER, panels=panels + [{"Title": "New"}]
+    )
+    assert added.board["Panels"][-1]["Kind"] == "markdown"
+
+
 def test_a_user_hands_a_panel_back_to_the_assistant() -> None:
     b = board()
     b["Panels"][0]["Source"] = "user"

@@ -88,7 +88,8 @@ def panels_input(value: Any) -> List[Dict[str, Any]]:
         panel = {
             "PanelId": item.get("panelId") or None,
             "Title": item.get("title"),
-            "Kind": item.get("kind") or rules.KIND_MARKDOWN,
+            # Absent, the resolver keeps an existing panel's kind (Markdown for a new one).
+            "Kind": item.get("kind") or None,
             "Content": item.get("content") or "",
         }
         if item.get("source"):

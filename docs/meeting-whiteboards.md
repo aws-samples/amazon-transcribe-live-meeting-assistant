@@ -243,8 +243,8 @@ meeting; a meeting's own cost estimate shows what it actually used.
 
 | Model | Per run | Per meeting-hour (20 runs at 180 seconds) | At the 60-run cap | At the cap, every run at the output limit |
 |---|---|---|---|---|
-| Claude Haiku 5.5 (the shipped Meeting assistant model) | about $0.0012 | about $0.024 | about $0.07 | about $0.12 |
-| Claude Sonnet 5.5 | about $0.023 | about $0.47 | about $1.40 | about $2.50 |
+| Claude Haiku 5.5 (the shipped Meeting assistant model) | about $0.0012 | about $0.024 | about $0.07 | about $0.10 |
+| Claude Sonnet 5.5 | about $0.023 | about $0.47 | about $1.40 | about $1.99 |
 
 A quiet meeting runs less often, because a run waits for new segments. To spend
 less, raise **Seconds between runs** or **New transcript segments a run needs**,
