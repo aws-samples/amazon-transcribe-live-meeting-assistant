@@ -127,7 +127,7 @@ def test_the_function_reads_only_the_content_an_archive_holds(ai_stack: dict) ->
 
 def test_meeting_json_holds_only_fields_get_call_answers() -> None:
     """The archive's meeting.json is an allow-list of the schema's Call fields
-    (plus the session lists a continued meeting keeps), never the consent record."""
+    -- every listed field one of them -- never the consent record."""
     import re
 
     schema = (REPO_ROOT / "lma-ai-stack" / "source" / "appsync" / "schema.graphql").read_text()
@@ -142,7 +142,7 @@ def test_meeting_json_holds_only_fields_get_call_answers() -> None:
         )
     )
     assert listed, "DETAILS_FIELDS not found"
-    assert listed - {"RecordingUrls", "VideoRecordingUrls"} <= call_fields
+    assert listed <= call_fields
     assert not listed & {"PK", "SK", "ExpiresAfter", "Consent", "CallSummaryText"}
 
 

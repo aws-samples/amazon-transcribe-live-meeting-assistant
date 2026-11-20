@@ -332,9 +332,9 @@ def _instant(stamp: Any) -> Optional[dt.datetime]:
 
 def built_after_last_change(found: Mapping[str, Any], meeting: Mapping[str, Any]) -> bool:
     """Whether an archive was started after the meeting record last changed, and
-    after its transcript was deleted, so that it still holds what a new archive
-    would. A meeting still going on changes with each update, so an archive of
-    it is not offered again once the meeting has moved on."""
+    after its transcript was deleted. Not every addition to a meeting changes its
+    record (a new key frame or transcript segment does not), so reusable_archive
+    also offers a ready archive again only once the meeting has ended."""
     started = _instant(found.get("CreatedAt"))
     if started is None:
         return False
@@ -348,11 +348,13 @@ def built_after_last_change(found: Mapping[str, Any], meeting: Mapping[str, Any]
 def reusable_archive(
     call_id: str, status: Mapping[str, Any], meeting: Mapping[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """The caller's own archive of the same contents still preparing, or ready,
-    recent and started after the meeting last changed, so that asking again
-    neither starts a second build nor waits, and never answers with an archive
-    older than the meeting it copies."""
+    """The caller's own archive of the same contents that is still preparing, or
+    that is ready and recent, of a meeting that has ended, and was started after
+    the meeting record last changed. Asking again then neither starts a second
+    build nor waits, and a meeting still going on always gets a new archive of
+    what it holds now."""
     folder = f"{ARCHIVE_PREFIX}{posixify_filename(call_id)}/"
+    ended = meeting.get("Status") == "ENDED"
     best: Optional[Dict[str, Any]] = None
     for page in S3.get_paginator("list_objects_v2").paginate(
         Bucket=RECORDINGS_BUCKET, Prefix=folder
@@ -369,7 +371,7 @@ def reusable_archive(
             age = _age_seconds(found.get("CreatedAt"))
             fresh = built_after_last_change(found, meeting) and (
                 (found.get("Status") == PREPARING and age <= STALE_SECONDS)
-                or (found.get("Status") == READY and age <= REUSE_SECONDS)
+                or (found.get("Status") == READY and ended and age <= REUSE_SECONDS)
             )
             if fresh and (best is None or str(found.get("CreatedAt")) > str(best.get("CreatedAt"))):
                 best = found
@@ -740,10 +742,10 @@ def transcript_html(title: str, facts, rows) -> str:
 
 # --- the plan ----------------------------------------------------------------------
 
-#: The meeting record attributes meeting.json holds: fields of the schema's Call
-#: type that getCall answers (lma-ai-stack/test/test_meeting_archive_template.py
-#: holds the list to it), with the session lists of a meeting joined again. The
-#: keys, the summary (in summary/) and the consent record (in consent/, for the
+#: The meeting record attributes meeting.json holds: each one a field of the
+#: schema's Call type that getCall answers, the session lists of a meeting joined
+#: again among them (lma-ai-stack/test/test_meeting_archive_template.py holds the
+#: list to it). The keys, the summary (in summary/) and the consent record (in consent/, for the
 #: owner and Admins) are not among them, nor is any attribute added later.
 DETAILS_FIELDS = (
     "CallId",

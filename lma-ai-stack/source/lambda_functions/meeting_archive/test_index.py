@@ -57,6 +57,7 @@ def meeting_item(**extra) -> Dict[str, Any]:
         "Owner": s("owner@example.com"),
         "SharedWith": {"L": [s("friend@example.com")]},
         "CreatedAt": s("2026-11-03T14:05:09.123Z"),
+        "Status": s("ENDED"),
         "TotalConversationDurationMillis": {"N": "61000"},
         "CallSummaryText": s(
             json.dumps(
@@ -704,3 +705,21 @@ def test_consent_evidence_of_a_meeting_sharing_the_folder_name_is_not_included(f
     names = zipfile.ZipFile(io.BytesIO(s3.stored[status["ArchiveKey"]])).namelist()
     assert "consent/consent.json" in names
     assert not [n for n in names if n.startswith("consent/evidence/")]
+
+
+def test_a_ready_archive_of_a_meeting_still_going_on_is_built_again(fakes):
+    dynamo, s3, lam = fakes(meeting=meeting_item(Status=s("TRANSCRIBING")))
+    first = prepare(OWNER)
+    run_build(lam)
+    assert get(OWNER, first["ArchiveId"])["Status"] == "READY"
+    # A new key frame arrives without changing the meeting record.
+    new_key = f"lma-video-keyframes/{POSIX}/0000090000-ef34gh.jpg"
+    s3.objects[new_key] = 2_000
+    dynamo.partitions[f"kf#{CALL}"].append(
+        {"SK": s("f#0000090000-ef34gh"), "ImageUrl": s(f"{HOST}/{new_key}")}
+    )
+    again = prepare(OWNER)
+    assert again["ArchiveId"] != first["ArchiveId"]
+    assert len(lam.invocations) == 2
+    run_build(lam)
+    assert "keyframes/0000090000-ef34gh.jpg" in archive_of(s3, again).namelist()
