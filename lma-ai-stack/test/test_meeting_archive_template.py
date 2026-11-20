@@ -7,8 +7,8 @@ archives a day after they are written.
 
 Asserted here: the archives' prefix expires after one day, with unfinished
 multipart uploads; the function's role writes only under that prefix, reads
-only the meeting content prefixes an archive holds, lists only the consent
-evidence prefix, reads only the meeting's own DynamoDB partitions, and invokes
+only the meeting content prefixes an archive holds, lists only the archive
+prefix, reads only the meeting's own DynamoDB partitions, and invokes
 only itself; the role can use the bucket's key; both AppSync fields resolve
 through the function.
 """
@@ -120,9 +120,7 @@ def test_the_function_reads_only_the_content_an_archive_holds(ai_stack: dict) ->
     assert read == allowed
     listing = _for_action(ai_stack, "s3:ListBucket")
     assert len(listing) == 1
-    assert listing[0]["Condition"] == {
-        "StringLike": {"s3:prefix": ["lma-consent-evidence/*", f"{ARCHIVE_PREFIX}*"]}
-    }
+    assert listing[0]["Condition"] == {"StringLike": {"s3:prefix": [f"{ARCHIVE_PREFIX}*"]}}
 
 
 def test_meeting_json_holds_only_fields_get_call_answers() -> None:

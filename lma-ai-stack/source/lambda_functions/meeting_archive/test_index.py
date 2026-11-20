@@ -69,7 +69,24 @@ def meeting_item(**extra) -> Dict[str, Any]:
         ),
         "RecordingUrl": s(f"{HOST}/lma-audio-recordings/{POSIX}.wav"),
         "VideoRecordingUrl": s(f"{HOST}/lma-video-recordings/{POSIX}.webm"),
-        "Consent": {"M": {"Mode": s("opt_in"), "Status": s("granted")}},
+        "Consent": {
+            "M": {
+                "Mode": s("opt_in"),
+                "Status": s("granted"),
+                "Evidence": {
+                    "L": [
+                        {"M": {"S3Key": s(EVIDENCE_KEY)}},
+                        {
+                            "M": {
+                                "S3Key": s(f"lma-consent-evidence/{POSIX}/removed.jpg"),
+                                "ImageDeletedAt": s("2026-11-04"),
+                            }
+                        },
+                        {"M": {"S3Key": s("lma-consent-evidence/another_meeting/evidence-9.jpg")}},
+                    ]
+                },
+            }
+        },
         "ExpiresAfter": {"N": "1999999999"},
     }
     found.update(extra)
@@ -648,3 +665,42 @@ def test_an_archive_answers_only_for_the_meeting_it_was_written_for(fakes):
     assert index.handler(prepare_other, Context())["ArchiveId"] != first["ArchiveId"]
     # The build leg reads no other meeting's request either.
     assert index.build(other, first["ArchiveId"]) == {"ok": False}
+
+
+def test_consent_evidence_comes_from_the_meetings_consent_record(fakes):
+    objects = {
+        **OBJECTS,
+        f"lma-consent-evidence/{POSIX}/removed.jpg": 10,
+        "lma-consent-evidence/another_meeting/evidence-9.jpg": 10,
+        f"lma-consent-evidence/{POSIX}/not-in-the-record.jpg": 10,
+    }
+    s3, answer, _ready = build_for(fakes, OWNER, objects=objects)
+    evidence = [n for n in archive_of(s3, answer).namelist() if n.startswith("consent/evidence/")]
+    # Only the record's kept image in the meeting's own folder: not one whose
+    # image was deleted, one in another folder, or one the record does not name.
+    assert evidence == ["consent/evidence/evidence-1.jpg"]
+
+
+def test_consent_evidence_of_a_meeting_sharing_the_folder_name_is_not_included(fakes):
+    # "Weekly sync-..." and "Weekly_sync-..." share one evidence folder name;
+    # the second meeting's record names no evidence.
+    other = CALL.replace(" ", "_")
+    assert index.posixify_filename(other) == POSIX
+    meeting = meeting_item(
+        CallId=s(other),
+        PK=s(f"c#{other}"),
+        SK=s(f"c#{other}"),
+        Consent={"M": {"Mode": s("opt_in"), "Status": s("granted"), "Evidence": {"L": []}}},
+    )
+    dynamo, s3, lam = fakes(meeting=meeting)
+    event = {
+        "arguments": {"CallId": other, "Contents": "EVERYTHING"},
+        "identity": OWNER,
+        "info": {"fieldName": "prepareMeetingArchive"},
+    }
+    answer = index.handler(event, Context())
+    run_build(lam)
+    status = json.loads(s3.stored[index.status_key(other, answer["ArchiveId"])])
+    names = zipfile.ZipFile(io.BytesIO(s3.stored[status["ArchiveKey"]])).namelist()
+    assert "consent/consent.json" in names
+    assert not [n for n in names if n.startswith("consent/evidence/")]

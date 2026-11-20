@@ -6998,8 +6998,9 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-keyframes/*"
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-chat-attachments/*"
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-consent-evidence/*"
-              # Listing, for a meeting's consent evidence folder and its own
-              # archives only (an archive already prepared is offered again).
+              # Listing, for its own archives only (an archive already prepared
+              # is offered again). Consent evidence is read by the keys the
+              # meeting's consent record names.
               - Effect: Allow
                 Action:
                   - s3:ListBucket
@@ -7007,7 +7008,6 @@ Resources:
                 Condition:
                   StringLike:
                     "s3:prefix":
-                      - "lma-consent-evidence/*"
                       - "lma-meeting-archives/*"
               # The archives and their status objects, and nothing else, are written.
               - Effect: Allow

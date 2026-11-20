@@ -445,15 +445,20 @@ def object_size(key: str) -> Optional[int]:
         return None
 
 
-def list_folder(folder: str) -> List[Tuple[str, int]]:
-    found: List[Tuple[str, int]] = []
-    for page in S3.get_paginator("list_objects_v2").paginate(
-        Bucket=RECORDINGS_BUCKET, Prefix=folder
-    ):
-        for entry in page.get("Contents", []):
-            if key_in_folder(entry["Key"], folder):
-                found.append((entry["Key"], int(entry["Size"])))
-    return found
+def consent_evidence_keys(consent: Any, call_id: str) -> List[str]:
+    """The evidence images the meeting's consent record names, each once: the
+    S3Key of each Evidence entry whose image is still kept, inside the meeting's
+    evidence folder, as meeting_consent_resolver signs them."""
+    folder = f"{CONSENT_EVIDENCE_PREFIX}{posixify_filename(call_id)}/"
+    keys: List[str] = []
+    entries = consent.get("Evidence") if isinstance(consent, dict) else None
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict) or entry.get("ImageDeletedAt"):
+            continue
+        key = entry.get("S3Key")
+        if key_in_folder(key, folder) and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def safe_name(name: Any, fallback: str) -> str:
@@ -913,13 +918,13 @@ def plan_archive(
                 json.dumps(meeting.get("Consent"), indent=2, sort_keys=True, default=str) + "\n",
                 "Consent record",
             )
-            for key, size in list_folder(f"{CONSENT_EVIDENCE_PREFIX}{folder}/"):
-                plan.add_object(
-                    f"consent/evidence/{safe_name(key.rsplit('/', 1)[-1], 'evidence')}",
-                    key,
-                    size,
-                    "Consent evidence",
-                )
+            for key in consent_evidence_keys(meeting.get("Consent"), call_id):
+                size = object_size(key)
+                name = safe_name(key.rsplit("/", 1)[-1], "evidence")
+                if size is None:
+                    plan.leave_out(f"Consent evidence {name}", "the image is no longer stored")
+                    continue
+                plan.add_object(f"consent/evidence/{name}", key, size, "Consent evidence")
         else:
             plan.leave_out("Consent record", "the meeting has none")
     else:
