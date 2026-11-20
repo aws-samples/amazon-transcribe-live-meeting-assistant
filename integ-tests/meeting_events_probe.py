@@ -115,130 +115,145 @@ def run_probe(
         "events": [],
     }
 
-    # The queue and the rule, before anything is published.
-    queue_url = sqs.create_queue(
-        QueueName=name, Attributes={"SqsManagedSseEnabled": "true"}
-    )["QueueUrl"]
-    observed["queue_url"] = queue_url
-    queue_arn = sqs.get_queue_attributes(
-        QueueUrl=queue_url, AttributeNames=["QueueArn"]
-    )["Attributes"]["QueueArn"]
-    rule_arn = events.put_rule(
-        Name=name,
-        EventBusName=bus,
-        EventPattern=json.dumps(
-            {"source": ["lma"], "detail": {"meetingId": [call_id]}}
-        ),
-        State="ENABLED",
-        Description="Temporary rule for the meeting events integration test",
-    )["RuleArn"]
-    sqs.set_queue_attributes(
-        QueueUrl=queue_url,
-        Attributes={
-            "Policy": json.dumps(
-                {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"Service": "events.amazonaws.com"},
-                            "Action": "sqs:SendMessage",
-                            "Resource": queue_arn,
-                            "Condition": {"ArnEquals": {"aws:SourceArn": rule_arn}},
-                        }
-                    ],
-                }
+    # From here on every step can raise, and the fixture never receives a
+    # result to clean up after; so whatever this run has made is removed
+    # before the error goes on. ``cleanup`` skips what was never created.
+    try:
+        # The queue and the rule, before anything is published.
+        queue_url = sqs.create_queue(
+            QueueName=name, Attributes={"SqsManagedSseEnabled": "true"}
+        )["QueueUrl"]
+        observed["queue_url"] = queue_url
+        queue_arn = sqs.get_queue_attributes(
+            QueueUrl=queue_url, AttributeNames=["QueueArn"]
+        )["Attributes"]["QueueArn"]
+        rule_arn = events.put_rule(
+            Name=name,
+            EventBusName=bus,
+            EventPattern=json.dumps(
+                {"source": ["lma"], "detail": {"meetingId": [call_id]}}
+            ),
+            State="ENABLED",
+            Description="Temporary rule for the meeting events integration test",
+        )["RuleArn"]
+        sqs.set_queue_attributes(
+            QueueUrl=queue_url,
+            Attributes={
+                "Policy": json.dumps(
+                    {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Principal": {"Service": "events.amazonaws.com"},
+                                "Action": "sqs:SendMessage",
+                                "Resource": queue_arn,
+                                "Condition": {"ArnEquals": {"aws:SourceArn": rule_arn}},
+                            }
+                        ],
+                    }
+                )
+            },
+        )
+        events.put_targets(
+            Rule=name, EventBusName=bus, Targets=[{"Id": "queue", "Arn": queue_arn}]
+        )
+        # A new rule and target take a few seconds to start matching.
+        time.sleep(15)
+
+        def put(record: dict) -> None:
+            kinesis.put_record(
+                StreamName=stream,
+                Data=json.dumps(record).encode("utf-8"),
+                PartitionKey=call_id,
             )
-        },
-    )
-    events.put_targets(
-        Rule=name, EventBusName=bus, Targets=[{"Id": "queue", "Arn": queue_arn}]
-    )
-    # A new rule and target take a few seconds to start matching.
-    time.sleep(15)
 
-    def put(record: dict) -> None:
-        kinesis.put_record(
-            StreamName=stream,
-            Data=json.dumps(record).encode("utf-8"),
-            PartitionKey=call_id,
+        envelope = {
+            "CallId": call_id,
+            "AccessToken": "",
+            "IdToken": "",
+            "RefreshToken": "",
+        }
+        put(
+            {
+                **envelope,
+                "EventType": "START",
+                "CustomerPhoneNumber": "Integ Test Participant",
+                "SystemPhoneNumber": "LMA Integ Test",
+                "AgentId": owner,
+                "CreatedAt": _now(),
+                "Labels": [LABEL],
+                "Audience": "internal",
+            }
+        )
+        time.sleep(5)
+
+        # The Virtual Participant: a new row, a status change, a write that leaves
+        # the status alone, and a prompt for a person.
+        def vp_write(status: str, **extra: Any) -> None:
+            item = {
+                "id": {"S": vp_id},
+                "status": {"S": status},
+                "owner": {"S": owner},
+                "Owner": {"S": owner},
+                "CallId": {"S": call_id},
+                "isScheduled": {"BOOL": False},
+                "meetingName": {
+                    "S": "Integration meeting name that no event may carry"
+                },
+                "updatedAt": {"S": _now()},
+                "ExpiresAfter": {"N": str(int(time.time()) + 86400)},
+            }
+            item.update(extra)
+            ddb.put_item(TableName=vp_table, Item=item)
+
+        vp_write("INITIALIZING")
+        time.sleep(2)
+        vp_write("JOINING")
+        time.sleep(2)
+        vp_write("JOINING", errorMessage={"S": "Waiting in the lobby"})
+        time.sleep(2)
+        vp_write(
+            "MANUAL_ACTION_REQUIRED",
+            manualActionType={"S": "CAPTCHA"},
+            manualActionMessage={"S": "Solve the puzzle"},
         )
 
-    envelope = {"CallId": call_id, "AccessToken": "", "IdToken": "", "RefreshToken": ""}
-    put(
-        {
-            **envelope,
-            "EventType": "START",
-            "CustomerPhoneNumber": "Integ Test Participant",
-            "SystemPhoneNumber": "LMA Integ Test",
-            "AgentId": owner,
-            "CreatedAt": _now(),
-            "Labels": [LABEL],
-            "Audience": "internal",
-        }
-    )
-    time.sleep(5)
+        put({**envelope, "EventType": "ADD_SUMMARY", "CallSummaryText": SUMMARY_TEXT})
+        time.sleep(5)
+        put({**envelope, "EventType": "END", "CreatedAt": _now()})
 
-    # The Virtual Participant: a new row, a status change, a write that leaves
-    # the status alone, and a prompt for a person.
-    def vp_write(status: str, **extra: Any) -> None:
-        item = {
-            "id": {"S": vp_id},
-            "status": {"S": status},
-            "owner": {"S": owner},
-            "Owner": {"S": owner},
-            "CallId": {"S": call_id},
-            "isScheduled": {"BOOL": False},
-            "meetingName": {"S": "Integration meeting name that no event may carry"},
-            "updatedAt": {"S": _now()},
-            "ExpiresAfter": {"N": str(int(time.time()) + 86400)},
-        }
-        item.update(extra)
-        ddb.put_item(TableName=vp_table, Item=item)
-
-    vp_write("INITIALIZING")
-    time.sleep(2)
-    vp_write("JOINING")
-    time.sleep(2)
-    vp_write("JOINING", errorMessage={"S": "Waiting in the lobby"})
-    time.sleep(2)
-    vp_write(
-        "MANUAL_ACTION_REQUIRED",
-        manualActionType={"S": "CAPTCHA"},
-        manualActionMessage={"S": "Solve the puzzle"},
-    )
-
-    put({**envelope, "EventType": "ADD_SUMMARY", "CallSummaryText": SUMMARY_TEXT})
-    time.sleep(5)
-    put({**envelope, "EventType": "END", "CreatedAt": _now()})
-
-    deadline = time.monotonic() + timeout_s
-    seen: list[dict] = []
-    settling = False
-    while time.monotonic() < deadline:
-        response = sqs.receive_message(
-            QueueUrl=queue_url, MaxNumberOfMessages=10, WaitTimeSeconds=10
-        )
-        for message in response.get("Messages", []):
-            seen.append(json.loads(message["Body"]))
-            sqs.delete_message(
-                QueueUrl=queue_url, ReceiptHandle=message["ReceiptHandle"]
+        deadline = time.monotonic() + timeout_s
+        seen: list[dict] = []
+        settling = False
+        while time.monotonic() < deadline:
+            response = sqs.receive_message(
+                QueueUrl=queue_url, MaxNumberOfMessages=10, WaitTimeSeconds=10
             )
-        types = {event["detail-type"] for event in seen}
-        vp_statuses = {
-            event["detail"].get("vpStatus")
-            for event in seen
-            if event["detail-type"] == "Virtual Participant Status Changed"
-        }
-        complete = (
-            set(DETAIL_TYPES) <= types and "MANUAL_ACTION_REQUIRED" in vp_statuses
-        )
-        if complete and not settling:
-            # A little longer, so an event that should not have been published
-            # has the chance to show up.
-            settling = True
-            deadline = min(deadline, time.monotonic() + 20)
-    observed["events"] = seen
+            for message in response.get("Messages", []):
+                seen.append(json.loads(message["Body"]))
+                sqs.delete_message(
+                    QueueUrl=queue_url, ReceiptHandle=message["ReceiptHandle"]
+                )
+            types = {event["detail-type"] for event in seen}
+            vp_statuses = {
+                event["detail"].get("vpStatus")
+                for event in seen
+                if event["detail-type"] == "Virtual Participant Status Changed"
+            }
+            complete = (
+                set(DETAIL_TYPES) <= types and "MANUAL_ACTION_REQUIRED" in vp_statuses
+            )
+            if complete and not settling:
+                # A little longer, so an event that should not have been published
+                # has the chance to show up.
+                settling = True
+                deadline = min(deadline, time.monotonic() + 20)
+        observed["events"] = seen
+    except BaseException:
+        observed["events"] = []
+        cleanup(stack_name, observed, region=region)
+        raise
     return observed
 
 

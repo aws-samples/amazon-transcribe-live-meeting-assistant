@@ -365,3 +365,140 @@ def test_a_redelivered_summary_record_is_stored_with_the_same_time(
         stamps.append(json.loads(sent["CallSummaryState"])["updatedAt"])
     assert stamps == ["2026-11-19T16:02:00.000Z", "2026-11-19T16:02:00.000Z"]
     assert "SummaryCompletedAt" not in sent, "the record's own field is not a mutation input"
+
+
+# ── what a stale read cannot change ─────────────────────────────────────────
+
+
+def test_a_start_whose_meeting_reads_back_empty_is_timed_and_labelled_by_the_record(
+    schema, emitted, events, monkeypatch
+):
+    """getCall is not strongly consistent, so straight after createCall it can
+    miss the meeting. The START record carries what the event needs."""
+    session = QueuedSession(
+        schema, [{"createCall": {"CallId": "call-1", "Owner": OWNER}}, {"getCall": None}]
+    )
+    process_event(
+        session,
+        start(
+            {
+                "CreatedAt": "2026-11-19T15:00:00Z",
+                "Labels": [{"Key": "project", "Value": "acme-claims"}],
+                "Audience": "external",
+            }
+        ),
+        monkeypatch,
+    )
+    ((_, detail),) = events.published()
+    assert detail["occurredAt"] == "2026-11-19T15:00:00.000Z"
+    assert detail["labels"] == {"project": "acme-claims"}
+    assert detail["audience"] == "external"
+
+
+def test_meeting_ended_is_timed_by_the_status_write_not_by_the_read(
+    schema, emitted, events, monkeypatch
+):
+    stale = {**MEETING, "Status": "STARTED", "UpdatedAt": "2026-11-19T15:59:00.000Z"}
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED", "SessionStartedNumber": 1}},
+            {
+                "updateCallStatus": {
+                    "CallId": "call-1",
+                    "Status": "ENDED",
+                    "UpdatedAt": "2026-11-19T16:00:00.000Z",
+                }
+            },
+            {"getCall": stale},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    ((_, detail),) = events.published()
+    assert detail["occurredAt"] == "2026-11-19T16:00:00.000Z"
+    assert detail["status"] == "ENDED"
+    assert detail["labels"] == {"project": "acme-claims"}
+
+
+def test_summary_ready_is_timed_by_the_record_even_if_the_read_is_stale(
+    schema, emitted, events, monkeypatch
+):
+    """A read that misses the summary write returns the END's summarising state;
+    the record's SummaryCompletedAt is what the summary was stored with."""
+    stale = {
+        **ended_meeting(),
+        "CallSummaryState": json.dumps({"status": "running", "updatedAt": "2026-11-19T16:00:00Z"}),
+    }
+    session = QueuedSession(
+        schema, [{"addCallSummaryText": {"CallId": "call-1"}}, {"getCall": stale}]
+    )
+    process_event(
+        session,
+        {
+            "EventType": "ADD_SUMMARY",
+            "CallId": "call-1",
+            "CallSummaryText": SUMMARY_TEXT,
+            "SummaryCompletedAt": "2026-11-19T16:02:00.000Z",
+        },
+        monkeypatch,
+    )
+    ((_, detail),) = events.published()
+    assert detail["occurredAt"] == "2026-11-19T16:02:00.000Z"
+
+
+# ── the summary-ready notification stays off the critical path ──────────────
+
+
+def test_a_slow_notification_does_not_hold_up_the_record(schema, emitted, events, monkeypatch):
+    import time
+
+    publisher = cep.meeting_event_publisher
+    monkeypatch.setattr(publisher, "NOTIFICATION_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(
+        lma_events, "notify_summary_ready", lambda call_id, **_: time.sleep(2) or True
+    )
+    session = QueuedSession(
+        schema, [{"addCallSummaryText": {"CallId": "call-1"}}, {"getCall": ended_meeting()}]
+    )
+    started = time.monotonic()
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": SUMMARY_TEXT},
+        monkeypatch,
+    )
+    assert time.monotonic() - started < 1.5
+    assert [detail_type for detail_type, _ in events.published()] == ["Summary Ready"]
+
+
+def test_a_failing_notification_does_not_fail_the_record(schema, emitted, events, monkeypatch):
+    def fail(call_id, **_):
+        raise RuntimeError("AppSync unreachable")
+
+    monkeypatch.setattr(lma_events, "notify_summary_ready", fail)
+    session = QueuedSession(
+        schema, [{"addCallSummaryText": {"CallId": "call-1"}}, {"getCall": ended_meeting()}]
+    )
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": SUMMARY_TEXT},
+        monkeypatch,
+    )
+    assert [detail_type for detail_type, _ in events.published()] == ["Summary Ready"]
+
+
+def test_the_notification_request_is_given_a_short_timeout(schema, emitted, events, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        lma_events,
+        "notify_summary_ready",
+        lambda call_id, **kwargs: seen.update(kwargs) or True,
+    )
+    session = QueuedSession(
+        schema, [{"addCallSummaryText": {"CallId": "call-1"}}, {"getCall": ended_meeting()}]
+    )
+    process_event(
+        session,
+        {"EventType": "ADD_SUMMARY", "CallId": "call-1", "CallSummaryText": SUMMARY_TEXT},
+        monkeypatch,
+    )
+    assert 0 < seen["timeout"] <= 5

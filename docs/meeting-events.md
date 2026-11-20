@@ -193,8 +193,9 @@ It carries the same `occurredAt` as the first, because the time is the
 summary run's own, so the deduplication key above removes it.
 
 **Publishing to the bus is best effort.** LMA publishes after the transition is
-stored, with a few quick retries, and never fails or delays a meeting because
-the bus could not be reached. An event that still cannot be published is logged
+stored, with a few quick retries, and never fails a meeting because the bus
+could not be reached; an unreachable bus adds at most a few seconds to
+processing the record that made the transition. An event that still cannot be published is logged
 and counted in the `MeetingEventsPublishFailed` metric (see
 [Monitoring](#monitoring)), and is not sent again. A consumer that must not miss
 a transition reconciles by [polling](#polling-instead-of-subscribing) from time

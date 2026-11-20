@@ -294,3 +294,18 @@ def test_summary_ready_is_timed_by_when_the_summary_was_stored():
 def test_summary_ready_falls_back_to_the_meetings_time(state):
     meeting = {**MEETING, "CallSummaryState": state}
     assert lma_events.summary_detail(meeting)["occurredAt"] == "2026-11-19T16:00:00.123Z"
+
+
+def test_the_notification_request_carries_the_short_timeout(monkeypatch):
+    import lma_notifications
+
+    seen = {}
+
+    def request(_query, _variables, timeout=30):
+        seen["timeout"] = timeout
+        return {"publishMeetingNotification": {"Created": True}}
+
+    monkeypatch.setattr(lma_notifications, "appsync_graphql", request)
+    assert lma_events.notify_summary_ready("call-1") is True
+    assert seen["timeout"] == lma_events.NOTIFICATION_TIMEOUT_SECONDS
+    assert lma_events.NOTIFICATION_TIMEOUT_SECONDS <= 5

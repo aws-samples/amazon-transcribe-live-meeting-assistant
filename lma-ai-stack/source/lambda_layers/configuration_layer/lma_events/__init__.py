@@ -368,15 +368,22 @@ SUMMARY_READY_NOTIFICATION_TYPE = "summary_ready"
 SUMMARY_READY_NOTIFICATION_TITLE = "The meeting summary is ready"
 # One notification per meeting: a regenerated summary updates it in place.
 SUMMARY_READY_DEDUP_KEY = "summary-ready"
+# Short, like the bus's own timeouts: the notification is published from the
+# call event processor's Kinesis path as well as from the regenerator.
+NOTIFICATION_TIMEOUT_SECONDS = 3.0
 
 
 def notify_summary_ready(
-    call_id: Optional[str], *, regenerated: bool = False, graphql: Any = None
+    call_id: Optional[str],
+    *,
+    regenerated: bool = False,
+    graphql: Any = None,
+    timeout: float = NOTIFICATION_TIMEOUT_SECONDS,
 ) -> bool:
     """Publish the meeting's ``summary_ready`` notification. Never raises.
 
     Carries no summary text: the title only, and the meeting page shows the
-    summary itself.
+    summary itself. ``timeout`` bounds the request, in seconds.
     """
     if not call_id:
         return False
@@ -396,6 +403,7 @@ def notify_summary_ready(
             source="lma",
             dedup_key=SUMMARY_READY_DEDUP_KEY,
             graphql=graphql,
+            timeout=timeout,
         )
         return True
     except Exception as error:  # pylint: disable=broad-except

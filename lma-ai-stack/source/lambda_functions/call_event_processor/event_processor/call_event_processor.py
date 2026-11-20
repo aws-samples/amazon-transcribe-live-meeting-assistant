@@ -2288,6 +2288,7 @@ async def execute_process_event_api_mutation(
                     session_number_of(message) if "SessionNumber" in message else started_session,
                     appsync_session,
                     LOGGER,
+                    written=response,
                 )
 
     elif event_type == "ADD_SUMMARY":
