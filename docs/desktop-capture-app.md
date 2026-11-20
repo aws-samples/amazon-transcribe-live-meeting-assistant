@@ -614,15 +614,16 @@ deployment does not show it; download the app again after updating the stack.
 
 Limitations:
 
-- **Recordings.** The meeting page shows one audio recording and one screen
-  video. The continued recording's audio (stored as `<meeting ID>_s2.wav`,
-  `_s3` and so on, under the recordings prefix) and video are uploaded as files of their own,
-  and their links replace the earlier recording's on the page. The earlier files
-  stay in the recordings bucket, and the meeting record keeps the links of every
-  recording (`RecordingUrls` and `VideoRecordingUrls`), so deleting the meeting
-  deletes all of them. The player starts the continued recording at 0, while
-  its transcript follows the earlier one, so the player's times do not match
-  the continued transcript's.
+- **Recordings.** Each recording is stored in files of its own, which start at
+  0:00: the continued recording's audio is `<meeting ID>_s2.wav` (`_s3` and so
+  on) under the recordings prefix, and its screen video is a file of its own
+  too. The meeting record keeps the links of every recording's files
+  (`RecordingUrls` and `VideoRecordingUrls`) with the session of each, so
+  deleting the meeting deletes all of them. The meeting page's player plays one
+  session's recording at a time, at that session's place on the transcript
+  timeline, with a selector to choose a session, as for a Virtual Participant
+  rejoin; see
+  [A meeting continued in more than one session](web-ui-guide.md#a-meeting-continued-in-more-than-one-session).
 - **Voice labels.** With **Identify speakers** on, the voices are numbered
   afresh in each recording (`spk_0`, `spk_1`, …), so a name given to a voice on
   the meeting page applies to that label in both recordings. Check the names

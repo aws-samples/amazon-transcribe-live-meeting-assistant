@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
 import boto3
@@ -53,32 +52,11 @@ import lma_sessions
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-#: Statuses of a meeting that is still being captured.
-LIVE_STATUSES = ("STARTED", "TRANSCRIBING")
-
-#: How long a session allowed on the meeting (by a rejoin or an earlier
-#: reopenMeeting) is waited for before another may be allowed: long enough for
-#: a Virtual Participant to launch and be admitted. A session that has not
-#: started by then is taken to have been abandoned.
-PENDING_SESSION_SECONDS = 15 * 60
-
-
-def pending_session(meeting: Mapping[str, Any], now: Optional[datetime] = None) -> bool:
-    """Whether a session allowed on the meeting recently has not started yet."""
-    allowed = lma_sessions.session_number(meeting.get("SessionNumber"))
-    started = lma_sessions.session_number(meeting.get("SessionStartedNumber"))
-    if allowed <= started:
-        return False
-    try:
-        reopened_at = datetime.fromisoformat(str(meeting.get("ReopenedAt")).replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    if reopened_at.tzinfo is None:
-        reopened_at = reopened_at.replace(tzinfo=timezone.utc)
-    elapsed = ((now or datetime.now(timezone.utc)) - reopened_at).total_seconds()
-    # A time a little ahead of this clock (another writer's clock) is still
-    # recent; one far ahead is not read as holding the meeting indefinitely.
-    return -PENDING_SESSION_SECONDS < elapsed < PENDING_SESSION_SECONDS
+#: Statuses of a meeting that is still being captured, and how long an allowed
+#: session is waited for (both in lma_sessions, shared with the rejoin).
+LIVE_STATUSES = lma_sessions.LIVE_STATUSES
+PENDING_SESSION_SECONDS = lma_sessions.PENDING_SESSION_SECONDS
+pending_session = lma_sessions.pending_session
 
 
 def own_pending_session(meeting: Mapping[str, Any], identity: Mapping[str, Any]) -> bool:

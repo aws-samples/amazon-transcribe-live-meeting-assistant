@@ -17,6 +17,8 @@ import {
     MEETING_REFUSALS,
     MeetingRecordView,
     decideMeetingAccess,
+    mayResumeWhenRefused,
+    meetingRefusal,
     recordingBaseName,
     readMeetingRecord,
     readMeetingRecordWithRetries,
@@ -99,6 +101,14 @@ test('continuing a meeting whose transcript was deleted is refused', () => {
 test('the owner check comes before any session check', () => {
     const access = decideMeetingAccess(ended({ sessionNumber: 2 }), OTHER, 2);
     assert.equal(access.kind === 'refuse' && access.code, 'MEETING_NOT_OWNED');
+});
+
+test('only a record that could not be read lets a held session resume', () => {
+    assert.equal(mayResumeWhenRefused(meetingRefusal('MEETING_NOT_CHECKED')), true);
+    for (const code of ['MEETING_NOT_OWNED', 'MEETING_NOT_FOUND', 'SESSION_NOT_ALLOWED', 'TRANSCRIPT_DELETED'] as const) {
+        assert.equal(mayResumeWhenRefused(meetingRefusal(code)), false, code);
+    }
+    assert.equal(mayResumeWhenRefused({ kind: 'append', offsetSeconds: 0 }), false);
 });
 
 test('every refusal carries a message for the client', () => {

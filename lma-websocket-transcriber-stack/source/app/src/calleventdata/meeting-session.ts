@@ -80,6 +80,16 @@ export const meetingRefusal = (code: MeetingRefusalCode): MeetingAccess => ({
 const refuse = meetingRefusal;
 
 /**
+ * Whether a START that was refused may still resume the session its client
+ * holds on this task. Only when the refusal is that the meeting record could
+ * not be read: a held session's meeting and verified caller were checked when
+ * it started, and resume matches both again, so the reconnect carries on as it
+ * did before START read the record. Every other refusal stands.
+ */
+export const mayResumeWhenRefused = (access: MeetingAccess): boolean =>
+    access.kind === 'refuse' && access.code === 'MEETING_NOT_CHECKED';
+
+/**
  * The session a START asks for: undefined when it names none, null when what
  * it names is not a session a reopen allows (an integer from 2).
  */
