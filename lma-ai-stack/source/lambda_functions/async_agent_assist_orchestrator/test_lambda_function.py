@@ -194,7 +194,8 @@ def test_a_wake_phrase_answer_keeps_the_time_of_the_segment_that_asked(written):
         assert segment["Channel"] == "AGENT_ASSISTANT"
         assert segment["StartTime"] == 12.0
         assert segment["EndTime"] == pytest.approx(14.001)
-    assert table.requests == [], "the meeting record is read only for a question from the chat"
+    # The meeting record is read for its capture source only, not its time.
+    assert [request["ProjectionExpression"] for request in table.requests] == ["CaptureSource"]
 
 
 def test_a_wake_phrase_request_is_sent_as_an_in_meeting_request(written):
@@ -209,3 +210,21 @@ def test_a_question_from_the_meeting_pages_chat_carries_no_in_meeting_scope(writ
     written(CHAT_QUESTION, _meeting(0))
     assert len(REQUESTS) == 1
     assert "toolScope" not in REQUESTS[0]
+    assert "requestChannel" not in REQUESTS[0]
+
+
+@pytest.mark.parametrize("channel", ["LOCAL", "REMOTE"])
+def test_a_wake_phrase_request_carries_its_channel_and_the_capture_source(written, channel):
+    """What the meeting assistant tells the owner's own microphone from (inMeetingRequesters)."""
+    table = _Table({"c#call-1": {"CaptureSource": {"S": "STREAM_AUDIO"}}})
+    written({"Channel": channel, "StartTime": 12.0, "EndTime": 14.0}, table)
+    assert REQUESTS[0]["requestChannel"] == channel
+    assert REQUESTS[0]["requestCaptureSource"] == "STREAM_AUDIO"
+
+
+@pytest.mark.parametrize(
+    "table", [_Table(), _Table({"c#call-1": {}}), _Table(error=RuntimeError("throttled"))]
+)
+def test_a_capture_source_that_cannot_be_read_is_sent_as_unknown(written, table):
+    written({"Channel": "LOCAL", "StartTime": 12.0, "EndTime": 14.0}, table)
+    assert REQUESTS[0]["requestCaptureSource"] == ""

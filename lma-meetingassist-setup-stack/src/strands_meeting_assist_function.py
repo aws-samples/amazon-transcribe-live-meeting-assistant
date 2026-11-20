@@ -2376,6 +2376,117 @@ def configured_in_meeting_context_access() -> str:
     return meeting_preparation.DEFAULT_IN_MEETING_CONTEXT_ACCESS
 
 
+# Who in the meeting may make an in-meeting request: the Meeting Assistant
+# section's inMeetingRequesters setting. ``anyone`` is the shipped default.
+IN_MEETING_REQUESTERS_ANYONE = 'anyone'
+IN_MEETING_REQUESTERS_OWNER_ONLY = 'owner_only'
+IN_MEETING_REQUESTERS_OFF = 'off'
+IN_MEETING_REQUESTERS_VALUES = (
+    IN_MEETING_REQUESTERS_ANYONE,
+    IN_MEETING_REQUESTERS_OWNER_ONLY,
+    IN_MEETING_REQUESTERS_OFF,
+)
+DEFAULT_IN_MEETING_REQUESTERS = IN_MEETING_REQUESTERS_ANYONE
+
+# The one in-meeting request that is known to come from the meeting's owner: a
+# wake phrase spoken on the LOCAL channel of a meeting captured on the owner's
+# own signed-in device, where that channel is their microphone. On a meeting a
+# Virtual Participant captures, LOCAL is the voice assistant's own speech, and a
+# chat sender or a speaker is known only by the name the meeting shows, so no
+# request there is the owner's for certain.
+OWNER_CHANNEL = 'LOCAL'
+OWNER_CAPTURE_SOURCES = frozenset({'STREAM_AUDIO', 'DESKTOP_APP', 'BROWSER_EXTENSION'})
+
+IN_MEETING_REQUESTS_OFF_TEXT = (
+    "Requests made in the meeting are turned off on this deployment, so I can't answer here."
+)
+IN_MEETING_REQUESTS_OWNER_ONLY_TEXT = (
+    "On this deployment only the meeting's owner can make requests in the meeting, and LMA "
+    "cannot confirm who made this one, so I can't answer here."
+)
+
+
+def configured_in_meeting_requesters() -> str:
+    """Who in the meeting may make a request: ``anyone``, ``owner_only`` or ``off``.
+
+    The Meeting Assistant section's inMeetingRequesters setting, else the shipped
+    default (anyone). Read per request. A value that is none of those is read as
+    ``off``, the strictest, since it decides who may ask at all.
+    """
+    value = read_setting(
+        'meeting_assist', 'inMeetingRequesters', default=DEFAULT_IN_MEETING_REQUESTERS
+    )
+    if value in IN_MEETING_REQUESTERS_VALUES:
+        return value
+    logger.warning("Unrecognised inMeetingRequesters value; using off")
+    return IN_MEETING_REQUESTERS_OFF
+
+
+def is_owner_request(event: Dict[str, Any]) -> bool:
+    """Whether an in-meeting request is known to come from the meeting's owner.
+
+    Only a wake phrase on the owner's own microphone: the channel and the
+    meeting's capture source are passed by the agent assist orchestrator
+    (``requestChannel``, ``requestCaptureSource``).
+    """
+    return (
+        event.get('toolScope') == 'wake_phrase'
+        and event.get('requestChannel') == OWNER_CHANNEL
+        and event.get('requestCaptureSource') in OWNER_CAPTURE_SOURCES
+    )
+
+
+def in_meeting_request_refusal(event: Dict[str, Any]) -> str:
+    """The answer to an in-meeting request inMeetingRequesters does not allow, or ''.
+
+    A request from the meeting page's own chat carries no in-meeting toolScope
+    and is never refused here.
+    """
+    if event.get('toolScope') not in IN_MEETING_TOOL_SCOPES:
+        return ''
+    requesters = configured_in_meeting_requesters()
+    if requesters == IN_MEETING_REQUESTERS_ANYONE:
+        return ''
+    if requesters == IN_MEETING_REQUESTERS_OWNER_ONLY:
+        return '' if is_owner_request(event) else IN_MEETING_REQUESTS_OWNER_ONLY_TEXT
+    return IN_MEETING_REQUESTS_OFF_TEXT
+
+
+def configured_turned_off_tool_groups() -> frozenset:
+    """The tool groups the Meeting Assistant section turns off for every request.
+
+    webSearchEnabled and mcpServersEnabled, each on unless it is saved as false,
+    so a setting that cannot be read leaves its group as it was.
+    """
+    # One literal read_setting call per switch, for test_parameter_backed_settings.py.
+    web_search = read_setting('meeting_assist', 'webSearchEnabled', default=True)
+    mcp_servers = read_setting('meeting_assist', 'mcpServersEnabled', default=True)
+    groups = set()
+    if web_search is False:
+        groups.add(TOOL_GROUP_WEB_SEARCH)
+    if mcp_servers is False:
+        groups.add(TOOL_GROUP_MCP_SERVERS)
+    return frozenset(groups)
+
+
+TURNED_OFF_TOOL_GROUP_TEXT = {
+    TOOL_GROUP_WEB_SEARCH: 'web search',
+    TOOL_GROUP_MCP_SERVERS: 'the installed MCP servers',
+}
+
+
+def turned_off_tools_note(groups) -> str:
+    """The system prompt note for tool groups this deployment turns off."""
+    if not groups:
+        return ''
+    names = '; '.join(TURNED_OFF_TOOL_GROUP_TEXT[group] for group in sorted(groups))
+    return (
+        "\n\nThese are turned off on this deployment: "
+        f"{names}. If the request needs one of them, say that it is not available here, "
+        "rather than that you cannot do it."
+    )
+
+
 def configured_tool_selection() -> ToolSelection:
     """The active profile's per-item tool selection (meeting_assist.toolSelection).
 
@@ -2474,6 +2585,9 @@ class InMeetingScope(NamedTuple):
     ``item_defaults``: the kinds of ``selection`` (tool_selection.KINDS) whose
     items an in-meeting request is offered when the item has no
     inMeetingRequests flag of its own. Not used for the meeting page's chat.
+    ``turned_off``: the tool groups the request would be offered but that the
+    Meeting Assistant section turns off for every request
+    (configured_turned_off_tool_groups); they are not in ``tool_groups``.
     """
 
     tool_scope: str
@@ -2482,6 +2596,7 @@ class InMeetingScope(NamedTuple):
     mode: str = ''
     selection: ToolSelection = EMPTY_SELECTION
     item_defaults: frozenset = frozenset(KINDS)
+    turned_off: frozenset = frozenset()
 
     @property
     def current_meeting_only(self) -> bool:
@@ -2541,7 +2656,19 @@ def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
     InMeetingScope.allows_item. Under Selected tools, a server whose own
     inMeetingRequests flag is true brings the group in with the switch off;
     under Current meeting only, no flag offers anything.
+
+    Whatever the scope, a tool group the Meeting Assistant section turns off
+    (webSearchEnabled, mcpServersEnabled) is taken out of what it is offered.
     """
+    scope = _in_meeting_scope_before_turned_off(event)
+    turned_off = configured_turned_off_tool_groups() & scope.tool_groups
+    if not turned_off:
+        return scope
+    return scope._replace(tool_groups=scope.tool_groups - turned_off, turned_off=turned_off)
+
+
+def _in_meeting_scope_before_turned_off(event: Dict[str, Any]) -> InMeetingScope:
+    """in_meeting_scope, before the tool groups turned off for every request are taken out."""
     user_email = event.get('userEmail', '') or event.get('user_email', '')
     scope = event.get('toolScope')
     selection = configured_tool_selection()
@@ -2638,7 +2765,9 @@ def handler(event, context):
             mcp_count = 0
             tools_count = 0
             from_cache = False
-            if MCP_LOADER_AVAILABLE:
+            # With MCP servers turned off (mcpServersEnabled), none is connected to.
+            mcp_turned_off = TOOL_GROUP_MCP_SERVERS in configured_turned_off_tool_groups()
+            if MCP_LOADER_AVAILABLE and not mcp_turned_off:
                 try:
                     mcp_clients, from_cache = load_account_mcp_servers()
                     mcp_count = len(mcp_clients)
@@ -2681,6 +2810,15 @@ def handler(event, context):
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
+        # Who may make a request in the meeting (inMeetingRequesters), decided
+        # before anything else is read or any model is called.
+        refusal = in_meeting_request_refusal(event)
+        if refusal:
+            logger.info(
+                "In-meeting request (%s) not answered: inMeetingRequesters",
+                event.get('toolScope'),
+            )
+            return {'message': refusal, 'callId': call_id, 'source': 'in_meeting_requesters'}
         request_scope = in_meeting_scope(event)
         user_email = request_scope.user_email
         # Only the current meeting's tools: everything else below is left out.
@@ -3077,6 +3215,9 @@ def handler(event, context):
             selected_scope_note = SELECTED_TOOLS_SCOPE_NOTE + unavailable_tools_note(
                 unavailable_groups
             )
+        # Tool groups turned off for every request, named so that the assistant
+        # says they are not available here rather than trying them.
+        selected_scope_note += turned_off_tools_note(request_scope.turned_off)
 
         # Initialize Strands Agent
         try:

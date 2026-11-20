@@ -94,3 +94,38 @@ def test_the_query_sends_generation_and_orchestration_prompts(store, monkeypatch
         "$search_results$" in kb["generationConfiguration"]["promptTemplate"]["textPromptTemplate"]
     )
     assert "$query$" in kb["orchestrationConfiguration"]["promptTemplate"]["textPromptTemplate"]
+
+
+def _sent_by(handler_identity, store, monkeypatch) -> dict:
+    store({})
+    sent = {}
+
+    class _KB:
+        def retrieve_and_generate(self, **kwargs):
+            sent.update(kwargs)
+            return {"output": {"text": "ok"}, "citations": []}
+
+    monkeypatch.setattr(index, "KB_CLIENT", _KB())
+    index.handler({"arguments": {"input": "what was decided?"}, "identity": handler_identity}, None)
+    return sent["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+
+
+def test_a_user_searches_only_the_meetings_they_own(store, monkeypatch) -> None:
+    """The Owner key the summary step writes on each document (getKBMetadata)."""
+    kb = _sent_by({"username": "user-1", "groups": []}, store, monkeypatch)
+    assert kb["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": "Owner", "value": "user-1"}
+    }
+
+
+def test_a_user_in_another_group_still_searches_only_their_own(store, monkeypatch) -> None:
+    kb = _sent_by({"username": "user-1", "groups": ["Readers"]}, store, monkeypatch)
+    assert kb["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": "Owner", "value": "user-1"}
+    }
+
+
+def test_an_admin_searches_every_meeting(store, monkeypatch) -> None:
+    """As an Admin reads every meeting on the meetings list."""
+    kb = _sent_by({"username": "admin-1", "groups": ["Admin"]}, store, monkeypatch)
+    assert "retrievalConfiguration" not in kb

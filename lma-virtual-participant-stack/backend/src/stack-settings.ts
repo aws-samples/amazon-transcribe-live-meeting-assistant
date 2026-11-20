@@ -22,7 +22,10 @@
  * Whether the meeting chat is added to the transcript, in the Virtual
  * Participant section, is applied the same way but was never a parameter: the
  * task sets no variable for it, and its reader falls back to the shipped
- * default (CAPTURE_MEETING_CHAT_DEFAULT in meeting-chat.ts).
+ * default (CAPTURE_MEETING_CHAT_DEFAULT in meeting-chat.ts). So is who in the
+ * meeting may make a request (the Meeting Assistant section's
+ * inMeetingRequesters, read by in-meeting-requesters.ts); unless it is anyone,
+ * the voice assistant provider is set to none as well.
  *
  * Rather than change every place that reads one of these variables, this module
  * reads the three sections and sets each variable the configuration holds a
@@ -43,6 +46,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
 import {
     ConfigurationStore,
+    MEETING_ASSIST,
     RECORDING,
     RETENTION,
     SettingType,
@@ -52,9 +56,13 @@ import {
     limitedSetting,
     transcribeOptionsProblem,
 } from './configuration-store.js';
+import { answersInMeetingRequests, inMeetingRequesters } from './in-meeting-requesters.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('stack-settings');
+
+/** The voice assistant provider's variable, read by voice-assistant.ts. */
+const VOICE_ASSISTANT_PROVIDER_VARIABLE = 'VOICE_ASSISTANT_PROVIDER';
 
 interface SettingTarget {
     readonly section: string;
@@ -89,6 +97,7 @@ export const VIRTUAL_PARTICIPANT_SETTINGS: readonly SettingTarget[] = [
     { section: 'virtual_participant', setting: 'captureMeetingChat', envVar: 'CAPTURE_MEETING_CHAT', type: 'boolean' },
     { section: 'virtual_participant', setting: 'captureChatAttachments', envVar: 'CAPTURE_CHAT_ATTACHMENTS', type: 'boolean' },
     { section: 'virtual_participant', setting: 'chatAttachmentSummaries', envVar: 'CHAT_ATTACHMENT_SUMMARIES', type: 'boolean' },
+    { section: 'meeting_assist', setting: 'inMeetingRequesters', envVar: 'IN_MEETING_REQUESTERS', type: 'string' },
 ];
 
 /**
@@ -202,6 +211,18 @@ export const applySections = (sections: Sections, env: Record<string, string | u
         env[CONTENT_REDACTION_REQUESTED_VARIABLE] = String(redactionFlag);
         applied.push(CONTENT_REDACTION_REQUESTED_VARIABLE);
     }
+
+    // The voice assistant answers whoever speaks to it, and this Virtual
+    // Participant cannot tell the owner from a guest, so unless anyone may make
+    // a request in the meeting (inMeetingRequesters) it does not start one.
+    // Applied to the variable, so every reader of the provider sees none.
+    if (!answersInMeetingRequests(env) && (env[VOICE_ASSISTANT_PROVIDER_VARIABLE] || 'none') !== 'none') {
+        env[VOICE_ASSISTANT_PROVIDER_VARIABLE] = 'none';
+        applied.push(VOICE_ASSISTANT_PROVIDER_VARIABLE);
+        notes.push(
+            `the voice assistant is not started: In-meeting requests: who may ask is ${inMeetingRequesters(env)}`,
+        );
+    }
     return { applied, notes };
 };
 
@@ -243,6 +264,7 @@ export const applyConfiguredSettings = async (
                 [TRANSCRIPTION.name]: sectionOf(TRANSCRIPTION.name),
                 [RECORDING.name]: sectionOf(RECORDING.name),
                 [RETENTION.name]: sectionOf(RETENTION.name),
+                [MEETING_ASSIST.name]: sectionOf(MEETING_ASSIST.name),
             },
             env,
         );

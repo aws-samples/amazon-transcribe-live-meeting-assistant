@@ -25,6 +25,19 @@ from lma_config.presets import apply_preset, preset_by_id, preset_offered
 HERE = Path(__file__).resolve().parent
 DEFAULTS = HERE.parents[2] / "lambda_functions" / "configuration_seeder" / "defaults"
 
+#: The meeting assistant and summary settings at their shipped defaults, which
+#: the four presets other than the two hosting presets set.
+ASSISTANT_DEFAULTS = {
+    "meeting_assist": {
+        "inMeetingRequestTools": "current_meeting_only",
+        "inMeetingContextAccess": "none",
+        "inMeetingRequesters": "anyone",
+        "webSearchEnabled": True,
+        "mcpServersEnabled": True,
+    },
+    "meeting_processing": {"defaultSummaryProfile": "default"},
+}
+
 #: Every setting each preset sets, as the Configuration Guide's table of
 #: configuration presets lists them, in the order the presets are listed. A
 #: change to a preset has to change this, and that table, too.
@@ -43,6 +56,7 @@ PRESET_VALUES = {
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
+        **ASSISTANT_DEFAULTS,
     },
     "internal-meetings-notify": {
         "meeting_consent": {
@@ -58,6 +72,7 @@ PRESET_VALUES = {
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
+        **ASSISTANT_DEFAULTS,
     },
     "regulated-consent-required": {
         "meeting_consent": {
@@ -73,6 +88,7 @@ PRESET_VALUES = {
         "virtual_participant": {"captureMeetingChat": False},
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
+        **ASSISTANT_DEFAULTS,
     },
     "regulated-notify": {
         "meeting_consent": {
@@ -88,11 +104,58 @@ PRESET_VALUES = {
         "virtual_participant": {"captureMeetingChat": False},
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
+        **ASSISTANT_DEFAULTS,
+    },
+    "team-hosted-external": {
+        "meeting_consent": {
+            "mode": "opt_in",
+            "consentRule": "each_participant",
+            "allowPerMeetingOverride": False,
+            "keepEvidenceScreenshots": True,
+            "clientsWithoutConsent": "reject",
+            "leaveOnObjection": True,
+        },
+        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "recording": {"recordAudio": False},
+        "virtual_participant": {"captureMeetingChat": True},
+        "transcription": {"contentRedactionEnabled": False},
+        "language_models": {"inferenceGeography": "global"},
+        "meeting_assist": {
+            "inMeetingRequestTools": "current_meeting_only",
+            "inMeetingContextAccess": "none",
+            "inMeetingRequesters": "off",
+            "webSearchEnabled": False,
+            "mcpServersEnabled": False,
+        },
+        "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
+    },
+    "customer-account": {
+        "meeting_consent": {
+            "mode": "opt_in",
+            "consentRule": "each_participant",
+            "allowPerMeetingOverride": True,
+            "keepEvidenceScreenshots": True,
+            "clientsWithoutConsent": "reject",
+            "leaveOnObjection": False,
+        },
+        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "recording": {"recordAudio": False},
+        "virtual_participant": {"captureMeetingChat": True},
+        "transcription": {"contentRedactionEnabled": False},
+        "language_models": {"inferenceGeography": "global"},
+        "meeting_assist": {
+            "inMeetingRequestTools": "current_meeting_only",
+            "inMeetingContextAccess": "none",
+            "inMeetingRequesters": "anyone",
+            "webSearchEnabled": False,
+            "mcpServersEnabled": True,
+        },
+        "meeting_processing": {"defaultSummaryProfile": "default"},
     },
 }
 
 
-def test_the_presets_are_standard_internal_regulated_and_regulated_notify_in_that_order():
+def test_the_presets_are_listed_in_their_documented_order():
     assert [preset["Id"] for preset in library.shipped_presets()] == list(PRESET_VALUES)
     assert {path.stem for path in library.PRESET_DIR.glob("*.json")} == set(PRESET_VALUES)
     for preset in library.shipped_presets():
@@ -137,11 +200,56 @@ def test_the_regulated_presets_name_the_controls_set_at_deploy_time(preset_id):
 def test_regulated_notify_differs_from_regulated_only_in_the_consent_mode():
     """The two Regulated presets keep the same posture apart from when capture starts."""
     # PRESET_VALUES stands for the shipped JSON files only because
-    # test_the_presets_are_standard_internal_regulated_and_regulated_notify_in_that_order
+    # test_the_presets_are_listed_in_their_documented_order
     # holds each file to it; keep the two tests together.
     regulated = json.loads(json.dumps(PRESET_VALUES["regulated-consent-required"]))
     regulated["meeting_consent"]["mode"] = "notify"
     assert PRESET_VALUES["regulated-notify"] == regulated
+
+
+def test_the_team_hosted_preset_answers_no_request_made_in_the_meeting():
+    """Guests from several organizations share the deployment; none of them may ask."""
+    assistant = preset_by_id("team-hosted-external")["Sections"]["meeting_assist"]["values"]
+    assert assistant["inMeetingRequesters"] == "off"
+    assert assistant["inMeetingRequestTools"] == "current_meeting_only"
+    assert assistant["inMeetingContextAccess"] == "none"
+    assert assistant["webSearchEnabled"] is False
+    assert assistant["mcpServersEnabled"] is False
+
+
+def test_the_team_hosted_preset_requires_each_participants_consent():
+    consent = preset_by_id("team-hosted-external")["Sections"]["meeting_consent"]["values"]
+    assert consent["mode"] == "opt_in"
+    assert consent["consentRule"] == "each_participant"
+    # Off: a meeting may not switch to the owner attesting for everyone.
+    assert consent["allowPerMeetingOverride"] is False
+
+
+def test_the_team_hosted_preset_names_the_controls_set_at_deploy_time():
+    description = preset_by_id("team-hosted-external")["Description"]
+    for control in (
+        "EnableVideoRecording",
+        "TranscriptionExpirationInDays",
+        "MeetingRecordExpirationInDays",
+        "AllowedSignUpEmailDomain",
+        "docs/hosting-models.md",
+    ):
+        assert control in description, control
+
+
+def test_the_customer_account_preset_keeps_the_summary_profile_and_requesters_open():
+    sections = preset_by_id("customer-account")["Sections"]
+    assert sections["meeting_assist"]["values"]["inMeetingRequesters"] == "anyone"
+    assert sections["meeting_assist"]["values"]["webSearchEnabled"] is False
+    assert sections["meeting_processing"]["values"]["defaultSummaryProfile"] == "default"
+    assert "docs/hosting-models.md" in preset_by_id("customer-account")["Description"]
+
+
+def test_every_preset_sets_the_meeting_assistant_and_summary_settings():
+    """Applying any preset after a hosting preset puts these settings back."""
+    for preset_id, values in PRESET_VALUES.items():
+        assert set(values["meeting_assist"]) == set(ASSISTANT_DEFAULTS["meeting_assist"]), preset_id
+        assert set(values["meeting_processing"]) == {"defaultSummaryProfile"}, preset_id
 
 
 @pytest.mark.parametrize(

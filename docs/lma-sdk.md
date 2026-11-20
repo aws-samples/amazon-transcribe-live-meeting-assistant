@@ -197,6 +197,34 @@ result = client.vp.create(
 print(result.owner, result.zoom_credentials_used)
 ```
 
+### `client.meetings` — Meetings by Label
+
+Finds the meetings that carry given [labels](meeting-context-and-checklist.md)
+and deletes them, the operations behind
+[`lma meetings delete`](lma-cli.md#lma-meetings-delete--delete-meetings-by-label).
+
+```python
+from lma_sdk.operations.meetings import parse_labels
+
+labels = parse_labels(["engagement=acme"])        # {"engagement": "acme"}
+
+# The meetings jdoe may delete that carry every label: their own, or every
+# user's when jdoe is in the Admin group.
+for meeting in client.meetings.find_by_labels(labels, as_user="jdoe@example.com"):
+    print(meeting.call_id, meeting.owner, meeting.status)
+
+# A dry run unless confirm=True
+result = client.meetings.delete_by_labels(labels, as_user="jdoe@example.com", confirm=True)
+print(len(result.deleted), result.failed, result.skipped_in_progress)
+```
+
+`delete_by_labels` deletes each meeting through the meeting controls function's
+`deleteMeetings`, the per-meeting delete path the meetings list uses, so every
+part of the meeting is removed. A meeting in progress is never deleted and is
+returned in `skipped_in_progress`; a meeting that could not be deleted is in
+`failed` with the reason, and the rest are still deleted. The permissions it
+needs are listed under the CLI command.
+
 ### Data Models
 
 All models are Pydantic `BaseModel` subclasses defined in `lma_sdk.models`:
@@ -213,6 +241,8 @@ All models are Pydantic `BaseModel` subclasses defined in `lma_sdk.models`:
 - **`VpRow`** — Virtual Participant row from AppSync (id, meeting fields, status, CallId, owner, VNC info)
 - **`VpLaunchResult`** — Result of `client.vp.create(...)` (id, status, call_id, elapsed_ms, sfn_execution_arn, …)
 - **`VpStatus`** — Enum of VP lifecycle states (`INITIALIZING`, `JOINING`, `JOINED`, `ACTIVE`, `COMPLETED`, `ENDED`, `FAILED`, …)
+- **`MeetingRef`** — A meeting `client.meetings` found (call_id, owner, created_at, status, labels, and its list entry's keys)
+- **`MeetingDeleteResult`** — Result of `client.meetings.delete_by_labels(...)` (dry_run, user, scope, matched, skipped_in_progress, deleted, failed)
 
 
 ### Exceptions
