@@ -88,6 +88,7 @@ class LMAClient:
         self._vp_ops = None
         self._mcp_ops = None
         self._meetings_ops = None
+        self._skill_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -183,6 +184,20 @@ class LMAClient:
 
             self._meetings_ops = MeetingOperations(self)
         return self._meetings_ops
+
+    @property
+    def skills(self):
+        """The meeting assistant's skills (``list``, ``get``, ``create``, ``update``,
+        ``delete``, ``import_file``, ``export``, ``import_library``, ``export_library``).
+
+        Returns:
+            SkillOperations instance.
+        """
+        if self._skill_ops is None:
+            from lma_sdk.operations.skills import SkillOperations
+
+            self._skill_ops = SkillOperations(self)
+        return self._skill_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

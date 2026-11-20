@@ -1,0 +1,37 @@
+## First function of the createVirtualParticipant and
+## updateScheduledVirtualParticipant pipelines: checks the meeting preparation
+## inputs (labels, audience, meetingContext, checklist) with the meeting
+## preparation resolver Lambda, which applies the limits the meeting's own
+## mutations apply, and returns them normalized for the next function to store.
+##
+## Only the four inputs are sent, never the rest of the request (which can hold
+## a meeting password). A request that carries none of them does not invoke the
+## Lambda at all, so a Virtual Participant started without them is created
+## exactly as before. `present` lists the inputs the request carried, so an
+## edit can tell an input sent empty (remove it) from one left out (keep it).
+#set( $input = $ctx.args.input )
+#set( $present = [] )
+#foreach( $name in ["labels", "audience", "meetingContext", "checklist"] )
+  #if( $input.containsKey($name) )
+    $util.qr( $present.add($name) )
+  #end
+#end
+#if( $present.isEmpty() )
+  #return({ "present": [] })
+#end
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "info": { "fieldName": "validateMeetingPreparation" },
+    "arguments": {
+      "present": $util.toJson($present),
+      "input": {
+        "labels": $util.toJson($input.labels),
+        "audience": $util.toJson($input.audience),
+        "meetingContext": $util.toJson($input.meetingContext),
+        "checklist": $util.toJson($input.checklist)
+      }
+    }
+  }
+}

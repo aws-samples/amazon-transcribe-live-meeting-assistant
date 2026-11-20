@@ -56,11 +56,16 @@ export default defineConfig({
               slug: "microvm-asr",
             },
             { label: "Meeting Assistant", slug: "meeting-assistant" },
+            { label: "Meeting Assistant Skills", slug: "meeting-assistant-skills" },
             {
               label: "Transcript Summarization",
               slug: "transcript-summarization",
             },
             { label: "Meeting Agenda", slug: "meeting-agenda" },
+            {
+              label: "Meeting Context, Labels, Audience and Checklist",
+              slug: "meeting-context-and-checklist",
+            },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript Deletion After the Summary",

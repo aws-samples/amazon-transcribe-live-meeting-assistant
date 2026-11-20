@@ -180,6 +180,26 @@ def asr_embedding_available():
     )
 
 
+def active_bundle_id():
+    return os.environ.get("ASR_MODEL_BUNDLE_ID", "")
+
+
+def enrollment_unavailable_reason():
+    """Why this deployment cannot compute a voiceprint, or None if it can.
+
+    The engine has to exist, and the model bundle baked into its image has to
+    carry a speaker-embedding model: the default bundle labels speakers with an
+    end-to-end diarizer and has none, and its MicroVM refuses ``embed`` mode. Both
+    are deploy-time facts this function is given, so the portal can say so
+    before anybody records a clip.
+    """
+    return pure.enrollment_unavailable_reason(
+        engine_configured=asr_embedding_available(),
+        bundle_id=active_bundle_id(),
+        speaker_model_id=os.environ.get("ASR_SPEAKER_MODEL_ID", ""),
+    )
+
+
 def embed_samples(samples):
     """Turn enrollment recordings into one voiceprint.
 
@@ -202,6 +222,13 @@ def grant_consent(event, who):
     subject_id = who["sub"]
     if not pure.may_grant(pure.ACTION_GRANTED, subject_id, who["sub"], who["groups"]):
         return {"Success": False, "Message": "only you can give your own consent"}
+
+    unavailable = enrollment_unavailable_reason()
+    if unavailable:
+        # A consent to an enrollment that cannot finish here would append a
+        # row and start a pending record for nothing. The portal does not offer
+        # it; this holds for any other caller of the API too.
+        return {"Success": False, "Message": unavailable}
 
     existing = read_enrollment(subject_id)
     action = (
@@ -298,17 +325,22 @@ def store_voiceprint(event, who):
             ),
         }
 
-    if not asr_embedding_available():
-        # Enrolling needs the on-demand engine, which computes the embeddings.
-        # Saying so is better than "could not use those recordings", which
-        # sends somebody off to re-record audio that was never the problem.
-        return {
-            "Success": False,
-            "Message": "voice enrollment needs the on-demand speech engine, which is not deployed",
-        }
+    unavailable = enrollment_unavailable_reason()
+    if unavailable:
+        # Enrolling needs the on-demand engine and a speaker model in its image,
+        # which together compute the embeddings. Saying which is missing is
+        # better than "could not use those recordings", which sends somebody
+        # off to re-record audio that was never the problem.
+        return {"Success": False, "Message": unavailable}
 
     try:
         centroid = pure.centroid_from_embeddings(embed_samples(samples))
+    except pure.EmbeddingUnsupportedError:
+        # The backstop for the check above: the MicroVM itself refused, because
+        # its image has no speaker model, and this function was not told the
+        # bundle had none.
+        LOGGER.warning("The ASR session has no speaker model; cannot enroll %s", subject_id)
+        return {"Success": False, "Message": pure.speaker_model_missing_message(active_bundle_id())}
     except (ValueError, RuntimeError):
         LOGGER.exception("Could not build a voiceprint for %s", subject_id)
         return {"Success": False, "Message": "could not use those recordings"}
@@ -380,8 +412,13 @@ def revoke_consent(event, who):
 def my_enrollment(event, who):
     """What the portal shows its visitor about their own enrollment."""
     existing = read_enrollment(who["sub"]) or {}
+    unavailable = enrollment_unavailable_reason()
     return {
         "Success": True,
+        # Whether a voiceprint can be computed here at all, so the portal can
+        # say why not and not offer a recorder whose clips would be refused.
+        "EnrollmentAvailable": unavailable is None,
+        "EnrollmentUnavailableReason": unavailable or "",
         "Status": existing.get("Status", "none"),
         "DisplayName": existing.get("DisplayName", ""),
         "ConsentExpiresAt": existing.get("ConsentExpiresAt", ""),

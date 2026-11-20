@@ -31,6 +31,7 @@ from lma_config import (  # configuration layer
     read_setting,
     resolve_model_id,
 )
+from lma_meeting_preparation.rules import render_checklist  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -98,9 +99,17 @@ TIMED_TRANSCRIPT_PLACEHOLDER = "{timed_transcript}"
 CHAT_PLACEHOLDER = "{chat}"
 CHAT_LINKS_PLACEHOLDER = "{chat_links}"
 
+# The meeting's preparation: its meeting context (Markdown, as written) and its
+# checklist (one line per item with its status, priority, kind and the times of
+# its evidence; lma_meeting_preparation.rules.render_checklist). A prompt naming
+# either is run only for a meeting that has it, as an agenda prompt is. No
+# shipped section uses them. See docs/meeting-context-and-checklist.md.
+CONTEXT_PLACEHOLDER = "{context}"
+CHECKLIST_PLACEHOLDER = "{checklist}"
+
 PLACEHOLDERS = re.compile(
     r"\{transcript\}|\{agenda\}|\{slides\}|\{screen_share\}|\{timed_transcript\}"
-    r"|\{chat\}|\{chat_links\}"
+    r"|\{chat\}|\{chat_links\}|\{context\}|\{checklist\}"
 )
 
 #: The most links listed under one section; fetch_transcript returns at most 200.
@@ -108,6 +117,14 @@ MAX_LISTED_LINKS = 50
 
 #: What a chat section ends with when nobody shared a link.
 NO_LINKS_SHARED = "No links were shared in the chat."
+
+# The answer for a meeting with nothing to summarise: no speech, no chat and no
+# text read from the shared screen. Returned without calling the model. The
+# end-of-meeting pipeline (call_event_processor) and the summary regenerator
+# read this exact text: they store no summary for it, and record the summary's
+# state as "empty" rather than "failed". Each holds its own copy, and
+# lma-ai-stack/test/test_summary_empty_outcome.py holds the copies to this one.
+EMPTY_SUMMARY_TEXT = "Nothing to summarise: the meeting has no transcript"
 
 # Sent as the system prompt of every summary request. The user message holds
 # the prompt template with the meeting's content inserted: what was said, what
@@ -671,6 +688,8 @@ def generate_summary(
     timed_transcript=None,
     chat=None,
     chat_links=None,
+    meeting_context=None,
+    checklist=None,
 ):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
@@ -680,6 +699,8 @@ def generate_summary(
     # model as it is now saved.
     model_id = summary_model_id()
     agenda_text = numbered_agenda(agenda)
+    context_text = meeting_context.strip() if isinstance(meeting_context, str) else ""
+    checklist_text = render_checklist(checklist if isinstance(checklist, list) else None)
     slides_text = None
     chat_text = (chat or "").strip() if isinstance(chat, str) else ""
     links_text = links_list(chat_links)
@@ -692,6 +713,12 @@ def generate_summary(
             if not agenda_text:
                 print(f"Skipping summary section '{key}': the meeting has no agenda.")
                 continue
+        if CONTEXT_PLACEHOLDER in prompt and not context_text:
+            print(f"Skipping summary section '{key}': the meeting has no meeting context.")
+            continue
+        if CHECKLIST_PLACEHOLDER in prompt and not checklist_text:
+            print(f"Skipping summary section '{key}': the meeting has no checklist.")
+            continue
         if SLIDES_PLACEHOLDER in prompt or SCREEN_SHARE_PLACEHOLDER in prompt:
             if slides_text is None:
                 slides_text = slides_for_prompt(keyframes)
@@ -714,6 +741,8 @@ def generate_summary(
         TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         CHAT_PLACEHOLDER: chat_text,
         CHAT_LINKS_PLACEHOLDER: links_text or NO_LINKS_SHARED,
+        CONTEXT_PLACEHOLDER: context_text,
+        CHECKLIST_PLACEHOLDER: checklist_text,
     }
 
     def render(template):
@@ -865,6 +894,18 @@ def write_to_s3(callId, metadata, transcript, summary, keyframes=None):
     )
 
 
+def has_content(transcript_json):
+    """Whether the meeting has anything to summarise: speech, chat or screen text."""
+    for field in ("transcript", "chat"):
+        value = transcript_json.get(field)
+        if isinstance(value, str) and value.strip():
+            return True
+    return any(
+        isinstance(frame, dict) and str(frame.get("SlideText") or "").strip()
+        for frame in transcript_json.get("keyframes") or []
+    )
+
+
 def handler(event, context):
     print("Received event: ", json.dumps(event))
     callId = event["CallId"]
@@ -876,6 +917,12 @@ def handler(event, context):
         prompt_override = None
         if "Prompt" in event:
             prompt_override = event["Prompt"]
+        # The meeting's summary (at its end, or regenerated) only: a caller's own
+        # prompt is answered by the model as before.
+        if not prompt_override and not has_content(transcript_json):
+            # No model call, and no Knowledge Base copy of an empty meeting.
+            print(f"Nothing to summarise for {callId}: no speech, chat or screen text")
+            return {"summary": EMPTY_SUMMARY_TEXT}
         # The Regenerate button's invoke sets this, because the panel promises
         # that pressing it uses the prompt templates as they are now. An
         # end-of-meeting run does not, and is served from the cache.
@@ -890,6 +937,8 @@ def handler(event, context):
             timed_transcript=transcript_json.get("timedTranscript"),
             chat=transcript_json.get("chat"),
             chat_links=transcript_json.get("chatLinks"),
+            meeting_context=(metadata or {}).get("MeetingContext"),
+            checklist=(metadata or {}).get("Checklist"),
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt

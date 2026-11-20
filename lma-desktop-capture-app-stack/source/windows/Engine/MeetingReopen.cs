@@ -141,7 +141,7 @@ public static class MeetingReopen
                     case "MeetingNotFound": fallback = "There is no meeting with this ID."; break;
                     case "Unauthorized": fallback = "Only the meeting's owner or an Admin can continue this meeting."; break;
                     case "TranscriptDeleted": fallback = "This meeting's transcript has been deleted, so it cannot be continued."; break;
-                    case "MeetingInProgress": fallback = "This meeting is still being captured. Continue it once it shows as Done."; break;
+                    case "MeetingInProgress": fallback = "This meeting is still being captured, or was reopened moments ago. Try again in a few minutes."; break;
                     case "MeetingChanged": fallback = "The meeting changed while it was being reopened. Try again."; break;
                     default:
                         // Not one of reopenMeeting's refusals (an API error, for example).
@@ -225,6 +225,9 @@ public static class MeetingReopen
         Check("refusal without a message has one of its own",
             Describe(new Failure(FailureKind.Refused, "Unauthorized")),
             "Only the meeting's owner or an Admin can continue this meeting.");
+        Check("a pending reopen without a message has one of its own",
+            Describe(new Failure(FailureKind.Refused, "MeetingInProgress")),
+            "This meeting is still being captured, or was reopened moments ago. Try again in a few minutes.");
         Check("other errors say the meeting was not reopened",
             Describe(new Failure(FailureKind.Refused, "Lambda:Unhandled", "boom")),
             "LMA could not reopen the meeting: boom");

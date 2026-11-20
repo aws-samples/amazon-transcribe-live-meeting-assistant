@@ -17,6 +17,8 @@ import GoogleMeet from './google-meet.js';
 import { grantMeetingMediaPermissions } from './meeting-permissions.js';
 import { blankCameraInitScript } from './blank-camera.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
+import { startupMeetingPassword } from './startup-meeting-password.js';
+import { failLaunchIfPasswordUnreadable } from './meeting-password-source.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
 import { readCallSession, type VpCallSession } from './call-session.js';
@@ -324,7 +326,18 @@ const main = async (): Promise<void> => {
     if (vpId && !isLocalTest) {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
-            
+
+            // The meeting password is read from the VP record at startup
+            // (startup-meeting-password.ts). Joining without it would fail at
+            // the meeting's passcode prompt, or join with no password where
+            // one was given, so the launch fails here with the reason instead.
+            const startupManager = statusManager;
+            await failLaunchIfPasswordUnreadable(startupMeetingPassword, {
+                setFailed: (message, endTrigger) => startupManager.setFailed(message, endTrigger),
+                exit: (code) => process.exit(code),
+                logError: (message) => log.error(message),
+            });
+
             // Get existing CallId from VP record first, with the capture session
             // a rejoined VP runs (docs/virtual-participant.md#rejoin). A row
             // without a CallId is a first launch, which makes its own below. A
@@ -376,11 +389,14 @@ const main = async (): Promise<void> => {
                 log.info(`Generated and set new VP CallId: ${callId}`);
             }
             
-            // The agenda the VP was started or scheduled with goes onto the
-            // meeting record in the START event. Read before the meeting
-            // starts; a VP without one starts its meeting exactly as before.
+            // The agenda and the meeting preparation the VP was started or
+            // scheduled with go onto the meeting record in the START event.
+            // Read before the meeting starts; a VP without them starts its
+            // meeting exactly as before.
             const { kinesisStreamManager: agendaStream } = await import('./kinesis-stream.js');
-            agendaStream.setAgenda(await statusManager.getAgenda());
+            const meetingInputs = await statusManager.getMeetingInputs();
+            agendaStream.setAgenda(meetingInputs.agenda);
+            agendaStream.setPreparation(meetingInputs.preparation);
 
             // Start with INITIALIZING status
             await statusManager.setInitializing();

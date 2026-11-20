@@ -8,6 +8,7 @@
 // the stored row, and the updateScheduledVirtualParticipant input for what
 // changed.
 
+import { vpPreparationChanges, vpPreparationForm } from '../common/meeting-preparation';
 import { meetingConsentInput } from './meeting-consent-options';
 import {
   EDIT_MIN_LEAD_MINUTES,
@@ -46,6 +47,7 @@ export const editFormFrom = (vp) => ({
     meetingPassword: '',
     ...formDateAndTime(vp.meetingTime),
     agenda: vp.agenda || '',
+    preparation: vpPreparationForm(vp),
   },
   consentChoice: consentChoiceOf(vp),
   // Absent on rows the form did not write: the launch default is on.
@@ -89,6 +91,10 @@ export const scheduledEditInput = (
 
   const agenda = (form.agenda || '').trim();
   if (agenda !== (vp.agenda || '').trim()) input.agenda = agenda;
+
+  // Labels, audience, meeting context and checklist: each sent when changed,
+  // and sent empty to remove it.
+  if (form.preparation) Object.assign(input, vpPreparationChanges(form.preparation, vp));
 
   if (consentChoice !== consentChoiceOf(vp)) {
     const consent = meetingConsentInput(consentChoice);

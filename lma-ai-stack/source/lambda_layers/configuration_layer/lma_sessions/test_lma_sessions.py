@@ -59,6 +59,7 @@ class Table:
             SessionNumber=values[":session"],
             SessionOffsetSeconds=values[":offset"],
             ReopenedBy=values[":by"],
+            ReopenedVia=values[":via"],
         )
         return {}
 
@@ -100,11 +101,16 @@ def test_every_page_of_the_transcript_is_read() -> None:
 
 def test_a_session_is_allowed_once_on_a_meeting_whose_transcript_is_kept() -> None:
     table = Table({"PK": "x", "SessionNumber": 2})
-    sessions.allow_session(table, CALL_ID, 3, 120, "owner@example.com")
+    sessions.allow_session(
+        table, CALL_ID, 3, 120, "owner@example.com", via=sessions.VIA_REOPEN_MEETING
+    )
     assert table.meeting["SessionNumber"] == 3
     assert table.meeting["SessionOffsetSeconds"] == Decimal(120)
+    assert table.meeting["ReopenedVia"] == "reopenMeeting"
     with pytest.raises(sessions.SessionNotAllowed):
-        sessions.allow_session(table, CALL_ID, 3, 120, "owner@example.com")
+        sessions.allow_session(
+            table, CALL_ID, 3, 120, "owner@example.com", via=sessions.VIA_REOPEN_MEETING
+        )
 
 
 @pytest.mark.parametrize(
@@ -112,7 +118,9 @@ def test_a_session_is_allowed_once_on_a_meeting_whose_transcript_is_kept() -> No
 )
 def test_no_session_is_allowed_on_a_missing_meeting_or_a_deleted_transcript(meeting) -> None:
     with pytest.raises(sessions.SessionNotAllowed):
-        sessions.allow_session(Table(meeting), CALL_ID, 2, 0, "owner@example.com")
+        sessions.allow_session(
+            Table(meeting), CALL_ID, 2, 0, "owner@example.com", via=sessions.VIA_REOPEN_MEETING
+        )
 
 
 def test_an_other_write_failure_is_raised_as_it_is() -> None:
@@ -121,7 +129,14 @@ def test_an_other_write_failure_is_raised_as_it_is() -> None:
             raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "U")
 
     with pytest.raises(ClientError):
-        sessions.allow_session(Failing({"PK": "x"}), CALL_ID, 2, 0, "owner@example.com")
+        sessions.allow_session(
+            Failing({"PK": "x"}),
+            CALL_ID,
+            2,
+            0,
+            "owner@example.com",
+            via=sessions.VIA_REOPEN_MEETING,
+        )
 
 
 @pytest.mark.parametrize(

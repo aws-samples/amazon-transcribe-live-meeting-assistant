@@ -2,14 +2,17 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""The MCP server library import is called by administrators, not by the stack's own roles.
+"""The administrators' IAM-callable mutations are not callable by the stack's own roles.
 
-``importMCPServerLibrary`` accepts the Admin group and IAM-signed callers, so
-that an operator can import with the LMA SDK and CLI. Several roles the stacks
-create are granted ``appsync:GraphQL`` on every mutation (or the whole API) for
-their own work. Each such policy document carries an explicit ``Deny`` on the
-import field, and this test holds every template to that: a new broad grant
-without the Deny fails here.
+``importMCPServerLibrary`` and the meeting assistant skill writes
+(``createSkill``, ``updateSkill``, ``deleteSkill``, ``importSkill`` and
+``importSkillLibrary``) accept the Admin group and IAM-signed callers, so that an
+operator can call them with the LMA SDK and CLI. Several roles the stacks create
+are granted ``appsync:GraphQL`` on every mutation (or the whole API) for their
+own work. Each such policy document carries an explicit ``Deny`` on each of those
+fields, and this test holds every template to that: a new broad grant without
+the Deny, or a new administrator mutation left out of an existing Deny, fails
+here.
 """
 
 from __future__ import annotations
@@ -28,7 +31,19 @@ TEMPLATES = [
     REPO / "lma-meetingassist-setup-stack/template.yaml",
     REPO / "lma-websocket-transcriber-stack/deployment/lma-websocket-transcriber.yaml",
 ]
-FIELD = "types/Mutation/fields/importMCPServerLibrary"
+#: The mutations every broad grant must deny.
+FIELDS = (
+    "importMCPServerLibrary",
+    "createSkill",
+    "updateSkill",
+    "deleteSkill",
+    "importSkill",
+    "importSkillLibrary",
+    # Accept IAM callers for operators (the lma CLI and SDK), as a backend role
+    # that may act on any meeting.
+    "rejoinVirtualParticipant",
+    "reopenMeeting",
+)
 
 
 class _CfnLoader(yaml.SafeLoader):
@@ -106,8 +121,11 @@ def test_the_broad_grants_are_found() -> None:
     assert len(BROAD_GRANTS) >= 5
 
 
+@pytest.mark.parametrize("field", FIELDS)
 @pytest.mark.parametrize("document", BROAD_GRANTS)
-def test_a_role_granted_every_mutation_is_denied_the_library_import(document: dict) -> None:
+def test_a_role_granted_every_mutation_is_denied_the_administrator_mutations(
+    document: dict, field: str
+) -> None:
     denied = [
         text
         for statement in document["Statement"]
@@ -116,27 +134,4 @@ def test_a_role_granted_every_mutation_is_denied_the_library_import(document: di
         for resource in _listed(statement.get("Resource"))
         for text in _texts(resource)
     ]
-    assert any(text.endswith(FIELD) for text in denied), denied
-
-
-#: Mutations that accept IAM callers for operators (the lma CLI and SDK), as a
-#: backend role that may act on any meeting, and so are denied to the stack's
-#: own broadly granted roles as the library import is.
-OPERATOR_FIELDS = (
-    "types/Mutation/fields/rejoinVirtualParticipant",
-    "types/Mutation/fields/reopenMeeting",
-)
-
-
-@pytest.mark.parametrize("document", BROAD_GRANTS)
-@pytest.mark.parametrize("field", OPERATOR_FIELDS)
-def test_a_role_granted_every_mutation_is_denied_rejoin_and_reopen(document: dict, field: str) -> None:
-    denied = [
-        text
-        for statement in document["Statement"]
-        if isinstance(statement, dict) and statement.get("Effect") == "Deny"
-        and "appsync:GraphQL" in _listed(statement.get("Action"))
-        for resource in _listed(statement.get("Resource"))
-        for text in _texts(resource)
-    ]
-    assert any(text.endswith(field) for text in denied), denied
+    assert any(text.endswith(f"types/Mutation/fields/{field}") for text in denied), denied

@@ -33,14 +33,16 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient } from '@aws-sdk/client-translate';
 import markdownRehypePlugins from '../common/markdown-plugins';
-import { getMarkdownSummary, getSummarySection, summarySections } from '../common/summary';
+import { getMarkdownSummary, getSummarySection, orderSummarySections, summarySections } from '../common/summary';
 import {
   SOURCE_MANUAL,
   STATUS_IDLE,
+  SUMMARY_EMPTY_TEXT,
   SUMMARY_IN_PROGRESS_TEXT,
   SUMMARY_OVERDUE_TEXT,
   isHandEdited,
   isRegenerating,
+  isSummaryEmpty,
   isSummaryInProgress,
   isSummaryOverdue,
   msUntilSummaryOverdue,
@@ -64,6 +66,9 @@ import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
+import ChecklistPanel from './ChecklistPanel';
+import MeetingContextPanel from './MeetingContextPanel';
+import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
@@ -93,13 +98,19 @@ import { frameIdSeconds, scrollTranscriptToTime } from '../common/video-keyframe
 import {
   SEEK_STEP_SECONDS,
   chooseMeetingMedia,
-  clockFor,
   defaultMediaPreference,
   currentSegmentId,
+  nextSession,
+  playbackSessions,
   playerShortcut,
   recordingSecondsForFrame,
   sameAnchors,
+  sessionAnchors,
+  sessionAtTranscript,
+  sessionClock,
+  sessionLabel,
   toRecordingSeconds,
+  withinSession,
 } from '../meeting-player/playback-sync';
 import { usePlaybackSelector, usePlaybackStore } from '../meeting-player/playback-store';
 import MeetingPlayer from '../meeting-player';
@@ -188,7 +199,17 @@ const GENERATING_REASON = 'Available once the summary being generated for this m
  * instead: the end-of-meeting summary on its way, a run that failed or is
  * overdue (with the way out, when the viewer can take it), or "Not available".
  */
-const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating, overdue, failed, canRegenerate }) => {
+const SummaryBody = ({
+  callId,
+  sections,
+  keyframes,
+  onKeyframeSelect,
+  generating,
+  overdue,
+  failed,
+  empty,
+  canRegenerate,
+}) => {
   if (!sections.length && generating) {
     return (
       <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
@@ -198,6 +219,11 @@ const SummaryBody = ({ callId, sections, keyframes, onKeyframeSelect, generating
         </Box>
       </Box>
     );
+  }
+  // A statement about the meeting, not an error: nothing was said, typed or
+  // shown, so there is nothing to retry.
+  if (!sections.length && empty) {
+    return <Box color="text-body-secondary">{SUMMARY_EMPTY_TEXT}</Box>;
   }
   if (!sections.length && (failed || overdue)) {
     return (
@@ -254,6 +280,8 @@ export const CallSummary = ({
   const generating = !starting && isSummaryInProgress(summaryState);
   const overdue = !starting && isSummaryOverdue(summaryState);
   const failure = startError || regenerationFailure(summaryState);
+  // The last run found no transcript to summarise.
+  const empty = !starting && !failure && isSummaryEmpty(summaryState);
   const handEdited = isHandEdited(summaryState);
   // Editing waits until the meeting has ended, and then until its
   // end-of-meeting summary has been written. That write replaces the text
@@ -345,9 +373,14 @@ export const CallSummary = ({
 
   // The meeting page shows some sections in their own place -- the chapters as
   // a list, the agenda coverage under the agenda -- and leaves them out here.
-  // The downloads are in the page header's Download menu.
+  // The rest are in the reading order every download uses
+  // (orderSummarySections). The downloads, which hold every section, are in
+  // the page header's Download menu.
   const omitKey = omitSections.join('|');
-  const sections = useMemo(() => summarySections(item.callSummaryText, omitSections), [item.callSummaryText, omitKey]);
+  const sections = useMemo(
+    () => orderSummarySections(summarySections(item.callSummaryText, omitSections)),
+    [item.callSummaryText, omitKey],
+  );
 
   return (
     <Container
@@ -361,6 +394,11 @@ export const CallSummary = ({
                   while the meeting ran); otherwise the body says it. */}
               {generating && sections.length > 0 && (
                 <StatusIndicator type="loading">{SUMMARY_IN_PROGRESS_TEXT}</StatusIndicator>
+              )}
+              {/* In the header only beside text already shown (a summary
+                  kept from before); otherwise the body says it. */}
+              {!regenerating && empty && sections.length > 0 && (
+                <StatusIndicator type="info">{SUMMARY_EMPTY_TEXT}</StatusIndicator>
               )}
               {!regenerating && overdue && !failure && (
                 <StatusIndicator type="warning">{SUMMARY_OVERDUE_TEXT}</StatusIndicator>
@@ -469,6 +507,7 @@ export const CallSummary = ({
           generating={generating}
           overdue={overdue && !regenerating}
           failed={Boolean(failure) && !regenerating}
+          empty={empty && !regenerating}
           canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
       )}
@@ -1818,6 +1857,7 @@ export const CallPanel = ({
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
+    sendUpdateMeetingPreparation,
   } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
@@ -2019,21 +2059,49 @@ export const CallPanel = ({
   const [clockAnchors, setClockAnchors] = useState([]);
   // The viewer's own choice of recording; null until they make one.
   const [chosenMedia, setChosenMedia] = useState(null);
+  // A continued meeting is recorded in one file per capture session, each at
+  // its session's place on the transcript's timeline (playbackSessions). The
+  // player plays one session's recording at a time: the first, until the
+  // viewer chooses another or plays on, or a seek lands in another session.
+  // A meeting never continued is one session at 0.
+  const [chosenSession, setChosenSession] = useState(null);
   useEffect(() => {
     setClockAnchors([]);
     setChosenMedia(null);
+    setChosenSession(null);
   }, [item.callId]);
+  const sessions = useMemo(
+    () => playbackSessions(item),
+    [
+      item.recordingUrl,
+      item.videoRecordingUrl,
+      item.recordingUrls,
+      item.recordingUrlSessions,
+      item.videoRecordingUrls,
+      item.videoRecordingUrlSessions,
+      item.sessions,
+      item.sessionNumber,
+      item.sessionOffsetSeconds,
+      item.sessionStartedNumber,
+    ],
+  );
+  const session = sessions.find((s) => s.number === chosenSession) || sessions[0];
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const anchorsOfSession = useMemo(() => sessionAnchors(session, clockAnchors), [session, clockAnchors]);
   // Without a choice, a Virtual Participant's video with no key frames to
   // line it up gives way to the audio recording (defaultMediaPreference).
   const mediaDefault = defaultMediaPreference({
-    hasBoth: Boolean(item.recordingUrl && item.videoRecordingUrl),
+    hasBoth: Boolean(session?.recordingUrl && session?.videoRecordingUrl),
     isVirtualParticipant: Boolean(meetingVp),
     framesLoaded: keyframes.loaded,
-    hasAnchors: clockAnchors.length > 0,
+    hasAnchors: anchorsOfSession.length > 0,
   });
   const media = chooseMeetingMedia({
-    recordingUrl: item.recordingUrl,
-    videoRecordingUrl: item.videoRecordingUrl,
+    recordingUrl: session?.recordingUrl,
+    videoRecordingUrl: session?.videoRecordingUrl,
     isLive,
     prefer: chosenMedia || mediaDefault.prefer,
   });
@@ -2046,18 +2114,30 @@ export const CallPanel = ({
   const onClockAnchors = useCallback((anchors) => {
     setClockAnchors((previous) => (sameAnchors(previous, anchors) ? previous : anchors));
   }, []);
-  const clock = useMemo(() => clockFor(mediaKind, clockAnchors), [mediaKind, clockAnchors]);
+  const clock = useMemo(() => sessionClock(mediaKind, session, clockAnchors), [mediaKind, session, clockAnchors]);
   const clockRef = useRef(clock);
   clockRef.current = clock;
+  // Set by a request that changes the recording, and carried out once the new
+  // one is shown (see the effect on media?.url below).
+  const pendingSwitchRef = useRef(null);
 
   /**
    * Move the player to a time on the transcript's clock (or to a key frame's
-   * own place in the video recording), and play from there when `play`.
+   * own place in the video recording), and play from there when `play`. A
+   * time in another capture session's part of the transcript switches to that
+   * session's recording first.
    */
   const seekPlayer = useCallback(
     ({ transcriptSeconds = null, frame = null, play = false }) => {
       const player = playerRef.current;
       if (!player || !mediaKind) return;
+      const at = frame ? Number(frame.Timestamp) : transcriptSeconds;
+      const target = sessionAtTranscript(sessionsRef.current, at);
+      if (target && sessionRef.current && target.number !== sessionRef.current.number) {
+        pendingSwitchRef.current = { seconds: at, frame, playing: play };
+        setChosenSession(target.number);
+        return;
+      }
       const seconds = frame
         ? recordingSecondsForFrame(frame, { kind: mediaKind, clock: clockRef.current })
         : toRecordingSeconds(clockRef.current, transcriptSeconds);
@@ -2165,26 +2245,30 @@ export const CallPanel = ({
     [seekPlayer],
   );
   // The Details tab's "Play" on a recording: the Transcript tab, playing that
-  // recording from where the player is.
-  // A change of recording -- chosen, or the default settling -- keeps the
-  // place. Read here, while rendering: the player resets the position when
-  // its recording changes, and its effects run before this component's.
-  const pendingSwitchRef = useRef(null);
+  // recording from where the player is. `sessionNumber` names one capture
+  // session's recording, of a meeting with more than one, which is played
+  // from the session's start.
   const playOnTranscriptTab = useCallback(
-    (kind) => {
+    (kind, sessionNumber = null) => {
       setActiveTab(TAB_TRANSCRIPT);
+      const target = sessionsRef.current.find((s) => s.number === sessionNumber);
       const state = playback.get();
-      const seconds = state.engaged ? state.seconds : 0;
-      if (kind && kind !== mediaKind) {
-        // Played once the other recording has loaded, from the same place.
+      const where = state.engaged ? state.seconds : 0;
+      const seconds = target ? target.offset : where;
+      if ((target && target.number !== sessionRef.current?.number) || (kind && kind !== mediaKind)) {
+        // Played once the other recording has loaded.
         pendingSwitchRef.current = { seconds, playing: true };
-        setChosenMedia(kind);
+        if (target) setChosenSession(target.number);
+        if (kind) setChosenMedia(kind);
         return;
       }
       playerRef.current?.seek(toRecordingSeconds(clockRef.current, seconds), { play: true });
     },
     [setActiveTab, playback, mediaKind],
   );
+  // A change of recording -- chosen, or the default settling -- keeps the
+  // place. Read here, while rendering: the player resets the position when
+  // its recording changes, and its effects run before this component's.
   const shownMediaRef = useRef({ callId: item.callId, url: media?.url });
   if (shownMediaRef.current.url !== media?.url) {
     const { seconds, playing, engaged } = playback.get();
@@ -2199,8 +2283,47 @@ export const CallPanel = ({
   useEffect(() => {
     const pending = pendingSwitchRef.current;
     pendingSwitchRef.current = null;
-    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, play: pending.playing });
+    if (pending) seekPlayer({ transcriptSeconds: pending.seconds, frame: pending.frame, play: pending.playing });
   }, [media?.url]);
+
+  // The session selector: that session's recording, from its start, playing
+  // if the player was.
+  const selectSession = useCallback(
+    (id) => {
+      const target = sessionsRef.current.find((s) => String(s.number) === id);
+      if (!target || target.number === sessionRef.current?.number) return;
+      pendingSwitchRef.current = { seconds: target.offset, playing: playback.get().playing };
+      setChosenSession(target.number);
+    },
+    [playback],
+  );
+  // A session's recording played to its end: on to the next session's.
+  const playNextSession = useCallback(() => {
+    const next = nextSession(sessionsRef.current, sessionRef.current);
+    if (!next) return;
+    pendingSwitchRef.current = { seconds: next.offset, playing: true };
+    setChosenSession(next.number);
+  }, []);
+  const attributeSessions = useMemo(
+    () =>
+      sessions.length > 1
+        ? sessions.map((s, i) => ({ ...s, label: sessionLabel(sessions, s), name: `session ${i + 1}` }))
+        : [],
+    [sessions],
+  );
+  const sessionOptions = useMemo(
+    () => sessions.map((s) => ({ id: String(s.number), label: sessionLabel(sessions, s) })),
+    [sessions],
+  );
+  // The seek bar marks what falls within the recording being played.
+  const sessionChapters = useMemo(
+    () => withinSession(chapters, session, (chapter) => chapter.seconds),
+    [chapters, session],
+  );
+  const sessionScreenShares = useMemo(
+    () => withinSession(screenShares, session, (share) => share.Timestamp),
+    [screenShares, session],
+  );
 
   // Nothing plays out of sight: leaving the Transcript tab pauses the player.
   useEffect(() => {
@@ -2409,8 +2532,54 @@ export const CallPanel = ({
       <AgendaPanel {...agendaProps} collapsible defaultExpanded={isLive} />
     ) : null;
 
+  // The meeting's preparation: labels and audience, meeting context and
+  // checklist. Editable by the people who can change the agenda, and each part
+  // is hidden when it is empty and the viewer cannot change it. See
+  // docs/meeting-context-and-checklist.md.
+  const savePreparation = sendUpdateMeetingPreparation
+    ? (kind, input) => sendUpdateMeetingPreparation(item.callId, kind, input)
+    : undefined;
+  const meetingLabels = (
+    <MeetingLabels
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      onSaveLabels={savePreparation ? (labels) => savePreparation('labels', { Labels: labels }) : undefined}
+      onSaveAudience={savePreparation ? (audience) => savePreparation('audience', { Audience: audience }) : undefined}
+    />
+  );
+  const contextPanel = (
+    <MeetingContextPanel
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      onSave={savePreparation ? (text) => savePreparation('meetingContext', { MeetingContext: text }) : undefined}
+    />
+  );
+  const checklistProps = {
+    item,
+    readOnly: speakerNamesReadOnly,
+    onSaveList: savePreparation
+      ? (definitions, reset) => savePreparation('checklist', { Checklist: definitions, ResetStatuses: reset })
+      : undefined,
+    onUpdateItem: savePreparation
+      ? (itemId, change) => savePreparation('checklistItem', { ItemId: itemId, ...change })
+      : undefined,
+    // Evidence is a time in the meeting: open the transcript there.
+    onShowTime: (seconds) => showInTranscript(seconds, { reveal: true }),
+  };
+  const hasChecklist = Array.isArray(item.checklist) && item.checklist.length > 0;
+  // eslint-disable-next-line react/jsx-props-no-spreading
+  const checklistPanel = <ChecklistPanel {...checklistProps} />;
+  // The checklist again at the top of the Transcript tab, where a live meeting
+  // is followed, as the agenda is.
+  const transcriptChecklist =
+    hasChecklist || (isLive && !speakerNamesReadOnly && savePreparation) ? (
+      // eslint-disable-next-line react/jsx-props-no-spreading
+      <ChecklistPanel {...checklistProps} collapsible defaultExpanded={isLive} />
+    ) : null;
+
   const summaryTab = (
     <SpaceBetween size="l">
+      {meetingLabels}
       {!agendaItems.length && agendaPanel}
       <Grid
         gridDefinition={
@@ -2440,6 +2609,8 @@ export const CallPanel = ({
           </SpaceBetween>
         )}
       </Grid>
+      {contextPanel}
+      {checklistPanel}
       {enableSentimentAnalysis && (
         <Grid gridDefinition={[{ colspan: 12 }]}>
           <CallStatsContainer
@@ -2471,6 +2642,7 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
+      {transcriptChecklist}
       <CallTranscriptContainer
         item={item}
         player={
@@ -2480,12 +2652,16 @@ export const CallPanel = ({
               kind={media.kind}
               url={media.url}
               clock={clock}
-              chapters={chapters}
-              screenShares={screenShares}
+              chapters={sessionChapters}
+              screenShares={sessionScreenShares}
               store={playback}
               alternative={media.alternative}
               onSwitch={setChosenMedia}
               hint={audioDefaultReason}
+              sessions={sessionOptions}
+              sessionId={session ? String(session.number) : null}
+              onSessionChange={selectSession}
+              onEnded={playNextSession}
             />
           ) : null
         }
@@ -2513,6 +2689,7 @@ export const CallPanel = ({
         platform={platform}
         onPlay={canPlayRecording ? playOnTranscriptTab : undefined}
         audioDefaultReason={audioDefaultReason}
+        sessions={attributeSessions}
       />
       <CaptureContextPanel
         item={item}

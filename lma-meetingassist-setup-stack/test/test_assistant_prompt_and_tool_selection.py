@@ -167,15 +167,22 @@ def test_the_fixed_part_says_tool_content_is_quoted_data_and_never_instructions(
         assert content in fixed
 
 
+def _skills_list() -> str:
+    """The skills' list of the stand-in skill every built request is offered."""
+    return handler_module.meeting_skills.catalog_prompt(handler_module.meeting_skills.load_catalog())
+
+
 def test_without_a_profile_prompt_the_shipped_instructions_are_used(built):
     prompt = built({"userEmail": "owner@example.com"})["system_prompt"]
-    assert prompt.startswith(handler_module.DEFAULT_SYSTEM_PROMPT + handler_module.FIXED_INSTRUCTIONS)
+    assert prompt.startswith(
+        handler_module.DEFAULT_SYSTEM_PROMPT + _skills_list() + handler_module.FIXED_INSTRUCTIONS
+    )
 
 
 def test_the_profile_prompt_replaces_the_editable_part_only(built, configured):
     configured({"systemPrompt": PATS_PROMPT})
     prompt = built({"userEmail": "owner@example.com"})["system_prompt"]
-    assert prompt.startswith(PATS_PROMPT + handler_module.FIXED_INSTRUCTIONS)
+    assert prompt.startswith(PATS_PROMPT + _skills_list() + handler_module.FIXED_INSTRUCTIONS)
     assert handler_module.DEFAULT_SYSTEM_PROMPT not in prompt
 
 

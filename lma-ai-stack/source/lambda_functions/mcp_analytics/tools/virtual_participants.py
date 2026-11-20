@@ -10,6 +10,12 @@ getVirtualParticipant answer a signed-in user, and changed by its owner or an
 Admin, as the Virtual Participant Manager's ``caller_may_change`` decides.
 Starting one is start_meeting_now and schedule_meeting.
 
+Changing one that waits for its scheduled launch is the
+updateScheduledVirtualParticipant mutation the VP page's Edit form sends
+(``update_scheduled_vp``); its resolver holds the change to the VP's owner, an
+Admin or a backend role, to a VP that is still SCHEDULED, and to one that starts
+at least five minutes from now.
+
 Ending one is the endVirtualParticipant mutation the VP page's End button
 sends: the Virtual Participant Manager stops its task, sends the meeting's END
 event and, for a scheduled one, cancels its launch; the change is published to
@@ -53,6 +59,22 @@ mutation EndVirtualParticipant($input: EndVirtualParticipantInput!) {
 }
 """
 
+UPDATE_SCHEDULED_VP = """
+mutation UpdateScheduledVirtualParticipant($input: UpdateScheduledVirtualParticipantInput!) {
+  updateScheduledVirtualParticipant(input: $input) {
+    id
+    meetingName
+    meetingPlatform
+    meetingId
+    scheduledFor
+    agenda
+    status
+    Owner
+    SharedWith
+  }
+}
+"""
+
 
 def vp_table():
     """The Virtual Participant table."""
@@ -86,6 +108,30 @@ def active_vps_of_meeting(call_id: str) -> Tuple[List[Dict[str, Any]], bool]:
     """The meeting's Virtual Participants that have not finished, and whether all were read."""
     rows, complete = _scan(Attr("CallId").eq(call_id))
     return [row for row in rows if row.get("status") not in VP_FINISHED_STATUSES], complete
+
+
+def pending_scheduled_vps_of_owner(owner: str) -> List[Dict[str, Any]]:
+    """The owner's Virtual Participants that wait for a scheduled launch, newest first."""
+    rows, _complete = _scan(Attr("Owner").eq(owner))
+    pending = [
+        row
+        for row in rows
+        if row.get("Owner") == owner
+        and row.get("status") == "SCHEDULED"
+        and row.get("isScheduled") is True
+    ]
+    pending.sort(key=lambda row: str(row.get("createdAt") or ""), reverse=True)
+    return pending
+
+
+def update_scheduled_vp(vp_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    """Change a scheduled VP's launch settings with updateScheduledVirtualParticipant."""
+    return (
+        graphql(UPDATE_SCHEDULED_VP, {"input": {"id": vp_id, **changes}}).get(
+            "updateScheduledVirtualParticipant"
+        )
+        or {}
+    )
 
 
 def summary(vp: Dict[str, Any]) -> Dict[str, Any]:

@@ -155,9 +155,9 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `search_lma_meetings` | read | own meetings (Admin: all) | Search transcripts/summaries with natural language |
 | `get_meeting_transcript` | read | owner, shared, Admin | Get full transcript (json, text, or srt format) |
 | `get_meeting_summary` | read | owner, shared, Admin | Get AI summary with action items and topics |
-| `list_meetings` | read | owner, shared, Admin | List meetings with date/participant/status filters |
+| `list_meetings` | read | owner, shared, Admin | List meetings with date and status filters (`participant` matches no meeting LMA recorded) |
 | `get_virtual_participant_status` | read | VP owner, shared, Admin | Poll a Virtual Participant's status |
-| `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant |
+| `schedule_meeting` | read-write (or legacy) | caller | Schedule a future meeting with virtual participant. A meeting the caller has already scheduled is updated rather than scheduled twice; see [Scheduling a Meeting Again](#scheduling-a-meeting-again) |
 | `start_meeting_now` | read-write (or legacy) | caller | Start a meeting immediately with virtual participant |
 | `get_live_transcript` | read | owner, shared, Admin | The lines added to a meeting's transcript since a cursor; see [Following a Meeting Live](#following-a-meeting-live) |
 | `get_meeting_record` | read | owner, shared, Admin; `consent` owner and Admin only | The sections named in `include`: `details`, `summary`, `transcript`, `chat_links`, `key_frames`, `chat_attachments`, `recordings`, `consent` (default `details` and `summary`); see [Meeting Record Links](#meeting-record-links) |
@@ -174,6 +174,12 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `delete_meeting` | read-write | owner, Admin | Permanently delete a meeting and everything stored with it, as the meeting list's Delete does. Nothing is deleted unless `confirm` is `true` |
 
 Virtual Participants are started with `start_meeting_now` and `schedule_meeting`; there is no separate create tool.
+
+### Scheduling a Meeting Again
+
+An assistant often calls `schedule_meeting` more than once for the same meeting, for example when the invitation is updated with a new join link. When the caller already has a Virtual Participant that is waiting for its scheduled launch, with the same `meetingName` (compared trimmed and ignoring case) and a `scheduledTime` within one minute of the new one, `schedule_meeting` updates that Virtual Participant instead of scheduling a second one. It gives it the new `meetingPlatform`, `meetingId` and, when they are passed, `meetingPassword` and `agenda`; when the meeting ID changes and no password is passed, the stored password is removed, since it belonged to the meeting being replaced. The answer has the existing `virtualParticipantId` and `"action": "updated"`; a new Virtual Participant is answered with `"action": "created"`.
+
+The update is the `updateScheduledVirtualParticipant` write the Virtual Participant page's Edit form makes, so its rules apply: a Virtual Participant that starts in less than 5 minutes cannot be changed, and the call then fails with that reason rather than scheduling a second one. Only the caller's own Virtual Participants are matched, an Admin's included; one that has started, finished or been cancelled is never matched, and a different name or time schedules a new one. Pass `allowDuplicate: true` to schedule a second Virtual Participant for the same meeting anyway.
 
 The REST endpoint waits at most 29 seconds for an answer (the API Gateway integration limit). The meeting assistant can take longer than that to answer a question that needs several of its tools; the client then receives a gateway timeout, but the assistant still finishes, and its answer is added to the meeting's assistant conversation, where `get_live_transcript` with `include_assistant: true` returns it.
 

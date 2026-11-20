@@ -334,6 +334,12 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{UI}/src/components/configuration/inference-geography-cases.json", "vp"),
     ("lma-ai-stack/deployment/lma-ai-stack.yaml", ("vp", "lambdas", "vp_template")),
     ("lma-llm-template-setup-stack/**", "vp"),
+    # The summary Lambda's tests check that no shipped summary prompt uses the
+    # meeting context and checklist placeholders.
+    (
+        "lma-llm-template-setup-stack/source/lambda_functions/LLMPromptSummaryTemplate.json",
+        "lambdas",
+    ),
     ("docs/virtual-participant.md", "vp"),
     # ...and the VP stack's own template: the IntroMessage default
     # (chat-commands.test.ts) and the MicroVM terminate-hook timeout
@@ -343,7 +349,10 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # helpers (speaker modes, channels, summary state) to keep the two sides equal.
     (f"{UI}/src/graphql/**", "lambdas"),
     (f"{UI}/src/components/common/**", "lambdas"),
-    # The ASR Lambdas' tests read the runtime's catalogue.
+    # The skills manager's tests import every Amazon Quick skill in the skills pack.
+    ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
+    # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's
+    # catalogue.
     (f"{ASR}/source/catalog.json", "lambdas"),
     (f"{ASR}/template.yaml", "lambdas"),
     # The VP static tests read these Lambdas, the schema and the Launch Stack table.

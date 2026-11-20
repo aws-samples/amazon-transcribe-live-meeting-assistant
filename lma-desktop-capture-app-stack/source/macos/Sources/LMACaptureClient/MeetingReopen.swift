@@ -110,7 +110,7 @@ enum MeetingReopen {
             case "MeetingNotFound": fallback = "There is no meeting with this ID."
             case "Unauthorized": fallback = "Only the meeting's owner or an Admin can continue this meeting."
             case "TranscriptDeleted": fallback = "This meeting's transcript has been deleted, so it cannot be continued."
-            case "MeetingInProgress": fallback = "This meeting is still being captured. Continue it once it shows as Done."
+            case "MeetingInProgress": fallback = "This meeting is still being captured, or was reopened moments ago. Try again in a few minutes."
             case "MeetingChanged": fallback = "The meeting changed while it was being reopened. Try again."
             default:
                 // Not one of reopenMeeting's refusals (an API error, for example).

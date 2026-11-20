@@ -104,7 +104,14 @@ def test_list_meetings_answers_shared_users(monkeypatch):
     from tools import list_meetings
 
     rows = [meeting_row("m1"), meeting_row("m2", Owner=OTHER, SharedWith=[])]
-    monkeypatch.setattr(list_meetings, "query_by_date_range", lambda *_a: rows)
+    # The walk decides who may see a row; this stand-in applies the test list_meetings gives it.
+    monkeypatch.setattr(
+        list_meetings,
+        "walk_date_range",
+        lambda _table, _start, _end, _limit, include=None: list_meetings.WalkResult(
+            [r for r in rows if include is None or include(r)], 0, False, False
+        ),
+    )
     monkeypatch.setattr(list_meetings.boto3, "resource", lambda *_a, **_k: Resource_any())
     listed = list_meetings.execute(user_id=SHARED)
     assert [m["meetingId"] for m in listed["meetings"]] == ["m1"]

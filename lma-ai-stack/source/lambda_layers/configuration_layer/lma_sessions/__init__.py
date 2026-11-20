@@ -25,6 +25,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional
 
+#: What allowed a session, recorded on the meeting as ``ReopenedVia`` beside
+#: ``ReopenedBy``: a Virtual Participant rejoin, or reopenMeeting for a
+#: streaming client. reopenMeeting hands a still-pending session back only to
+#: the caller who allowed it with reopenMeeting, never a rejoin's.
+VIA_REJOIN = "rejoinVirtualParticipant"
+VIA_REOPEN_MEETING = "reopenMeeting"
+
 #: Seconds between the end of the earlier sessions and the start of the new one
 #: on the transcript timeline.
 SESSION_GAP_SECONDS = 1
@@ -119,7 +126,14 @@ def now_iso() -> str:
 
 
 def allow_session(
-    table: Any, call_id: str, session: int, offset: int, reopened_by: str, now: str = ""
+    table: Any,
+    call_id: str,
+    session: int,
+    offset: int,
+    reopened_by: str,
+    *,
+    via: str,
+    now: str = "",
 ) -> None:
     """Record on the meeting the session its next START may open.
 
@@ -135,7 +149,7 @@ def allow_session(
             Key=meeting_key(call_id),
             UpdateExpression=(
                 "SET SessionNumber = :session, SessionOffsetSeconds = :offset, "
-                "ReopenedAt = :now, ReopenedBy = :by"
+                "ReopenedAt = :now, ReopenedBy = :by, ReopenedVia = :via"
             ),
             ConditionExpression=(
                 "attribute_exists(PK) AND attribute_not_exists(TranscriptDeletedAt) "
@@ -146,6 +160,7 @@ def allow_session(
                 ":offset": Decimal(offset),
                 ":now": now or now_iso(),
                 ":by": reopened_by,
+                ":via": via,
             },
         )
     except ClientError as error:

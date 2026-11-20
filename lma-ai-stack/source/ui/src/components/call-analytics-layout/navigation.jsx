@@ -18,6 +18,7 @@ import {
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
+  SKILLS_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   TROUBLESHOOTING_PATH,
@@ -41,6 +42,7 @@ const defaultOnFollowHandler = (ev) => {
 export const NAV_PATHS = [
   CALLS_PATH,
   MCP_SERVERS_PATH,
+  SKILLS_PATH,
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   STREAM_AUDIO_PATH,
@@ -69,6 +71,8 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MEETINGS_QUERY_PATH}`;
   } else if (path.includes(MCP_SERVERS_PATH)) {
     activeHref = `#${MCP_SERVERS_PATH}`;
+  } else if (path.includes(SKILLS_PATH)) {
+    activeHref = `#${SKILLS_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
   } else if (path.includes(TROUBLESHOOTING_PATH)) {

@@ -68,7 +68,7 @@ def ai_stack() -> dict:
 
 
 def _create_vp_request(ai_stack: dict) -> str:
-    request = ai_stack["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    request = ai_stack["CreateVirtualParticipantAppSyncFunction"]["Properties"]["RequestMappingTemplate"]
     assert isinstance(request, dict) and "Fn::Sub" in request
     return request["Fn::Sub"]
 

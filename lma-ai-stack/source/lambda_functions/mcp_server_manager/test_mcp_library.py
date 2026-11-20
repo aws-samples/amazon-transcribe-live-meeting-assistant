@@ -328,7 +328,7 @@ def test_a_signed_in_user_outside_the_admin_group_cannot_use_the_library(field):
 
 @pytest.mark.parametrize("identity", [ADMIN, IAM], ids=["admin", "iam"])
 def test_the_admin_group_and_an_iam_caller_can_export(identity):
-    document = json.loads(_run(FakeTable(RECORDS), "exportMCPServerLibrary", identity))
+    document = _run(FakeTable(RECORDS), "exportMCPServerLibrary", identity)
     assert len(document["servers"]) == len(RECORDS)
 
 
@@ -393,7 +393,7 @@ def test_a_round_trip_preserves_everything_but_the_credentials():
     original = _export(FIVE)
     target = FakeTable([])
     _run(target, "importMCPServerLibrary", IAM, library=json.dumps(original))
-    again = json.loads(_run(target, "exportMCPServerLibrary", IAM))
+    again = _run(target, "exportMCPServerLibrary", IAM)
     original.pop("exportedAt")
     again.pop("exportedAt")
     assert again == original
@@ -410,7 +410,7 @@ def test_every_authentication_type_survives_a_round_trip():
             ADMIN,
             library=json.dumps({**original, "servers": chunk}),
         )
-        again = json.loads(_run(target, "exportMCPServerLibrary", ADMIN))
+        again = _run(target, "exportMCPServerLibrary", ADMIN)
         assert {e["name"]: e for e in again["servers"]} == {e["name"]: e for e in chunk}
         target.items.clear()
 
@@ -569,9 +569,9 @@ def test_an_imported_server_lists_the_settings_its_form_opens_with_and_no_creden
     library = json.dumps(_export([RECORDS[2], RECORDS[5]]))
     _run(target, "importMCPServerLibrary", ADMIN, library=library)
     listed = {s["Name"]: s for s in _run(target, "listInstalledMCPServers", ADMIN)}
-    headers = json.loads(listed["Headers"]["ImportedAuthSettings"])
+    headers = listed["Headers"]["ImportedAuthSettings"]
     assert headers == {"authType": "custom_headers", "headers": {"X-API-Key": "", "X-Team": ""}}
-    oauth = json.loads(listed["Client credentials"]["ImportedAuthSettings"])["oauth"]
+    oauth = listed["Client credentials"]["ImportedAuthSettings"]["oauth"]
     assert oauth["clientId"] == "client-id-123" and oauth["clientSecret"] == ""
     assert all("ImportedAuth" not in s and "AuthConfig" not in s for s in listed.values())
 

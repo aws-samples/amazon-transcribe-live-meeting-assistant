@@ -73,7 +73,7 @@ agents) classify them correctly.
 | `search_lma_meetings` | ✅ | Semantic search across meeting transcripts and summaries |
 | `get_meeting_transcript` | ✅ | Full transcript in `text`, `json`, or `srt` format |
 | `get_meeting_summary` | ✅ | AI-generated summary with action items and topics |
-| `list_meetings` | ✅ | Filter by date range, participant, or status |
+| `list_meetings` | ✅ | Filter by date range or status |
 | `get_virtual_participant_status` | ✅ | Poll VP status (joining, active, manual-action-required, failed) |
 | `schedule_meeting` | — | Schedule a future meeting with the LMA virtual participant |
 | `start_meeting_now` | — | Start an immediate meeting with the LMA virtual participant |
@@ -346,9 +346,35 @@ Common parameters for the most-used tools.
 ### `list_meetings`
 
 - `startDate` / `endDate` — ISO 8601
-- `participant` — filter by name
-- `status` — `ENDED`, `IN_PROGRESS`, or `ALL` (default)
-- `limit` — default 20
+- `participant` — matches a name in a participant list stored on the meeting
+  record, which LMA itself does not write, so it matches no meeting LMA recorded
+- `status` — `ALL` (default), `IN_PROGRESS` (meetings that are running: `STARTED`
+  or `TRANSCRIBING`), `STARTED`, `TRANSCRIBING`, `ERRORED`, or `ENDED`. The value
+  is not case sensitive, and a blank value means `ALL`; any other value is refused
+  with the list of accepted ones
+- `limit` — a whole number from 1 to 1,000, default 20 (a number such as `20.0`
+  or the text `"20"` is accepted; a larger number is read as 1,000, a smaller one
+  as 1, and anything that is not a whole number is refused with "limit must be an
+  integer"). A call never looks at more than 1,000 meetings, so it cannot return
+  more
+
+You see the meetings you own and the ones shared with you (an Admin sees every
+meeting), as on the meeting page. Your access and `status` are applied while the
+meetings are read, so `limit` counts only the meetings you can see that match:
+other people's newer meetings, or a `status` that fits an older meeting, no
+longer leave the list short or empty. At most 1,000 of the most recent meetings
+in the date range are looked at: a call that filters, as every call by a
+non-admin does, reads at least one page of 100 meetings, and up to ten pages
+(1,000) when few of them match. The first read of each page asks only for the few
+fields the filters need, which makes the response smaller; DynamoDB still reads
+whole items, so the read capacity used is that of the meetings read. When that
+limit ends the search with older meetings still in the range, the answer carries
+`truncated: true` and a `note` saying that older matching meetings may not be
+listed; narrow the date range to see them. If some meetings could not be read,
+the `note` says so ("Some meetings could not be read; try again."), and if the
+search itself stopped early because the date index could not be read, it says
+"The search could not be completed; try again." The sentences are joined when
+more than one applies. `truncated` and `note` are absent otherwise.
 
 ### `schedule_meeting`
 

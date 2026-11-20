@@ -1370,8 +1370,8 @@ Resources:
                   - "appsync:EventSubscribe"
                   - "appsync:EventPublish"
                 Resource: "*"
-              # The MCP server library import is for administrators, not for
-              # the Virtual Participant.
+              # The MCP server library import and the skill writes are for
+              # administrators, not for the Virtual Participant.
               # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
               - Effect: Deny
                 Action:
@@ -1380,15 +1380,34 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/importMCPServerLibrary"
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/rejoinVirtualParticipant"
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/reopenMeeting"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/createSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/updateSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/deleteSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/importSkill"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/importSkillLibrary"
         - PolicyName: VirtualParticipantTablePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # entrypoint.sh's status and VNC credential writes.
               - Effect: Allow
                 Action:
                   - "dynamodb:UpdateItem"
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              # The VP's startup read of its own meeting password
+              # (backend/src/startup-meeting-password.ts): a GetItem that
+              # projects the row's id and meetingPassword, and nothing else.
+              - Effect: Allow
+                Action:
                   - "dynamodb:GetItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+                Condition:
+                  ForAllValues:StringEquals:
+                    "dynamodb:Attributes":
+                      - id
+                      - meetingPassword
+                  StringEqualsIfExists:
+                    "dynamodb:Select": SPECIFIC_ATTRIBUTES
         - PolicyName: VPTaskRegistryPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -3568,10 +3587,6 @@ Resources:
               "Value.$": "$.data.meetingID"
               },
               {
-              "Name": "MEETING_PASSWORD",
-              "Value.$": "$.data.meetingPassword"
-              },
-              {
               "Name": "MEETING_NAME",
               "Value.$": "$.data.meetingName"
               },
@@ -3697,7 +3712,6 @@ Resources:
               "RoleArn": "${VPScheduleInvokeLauncherRole.Arn}",
               "Input": {"data": {"meetingPlatform.$": "$.data.meetingPlatform",
               "meetingId.$": "$.data.meetingID",
-              "meetingPassword.$": "$.data.meetingPassword",
               "meetingName.$": "$.data.meetingName",
               "meetingTime.$": "$.data.meetingTime",
               "userName.$": "$.data.userName",
@@ -3719,7 +3733,6 @@ Resources:
               "environment": [{"name": "MEETING_PLATFORM",
               "value.$": "$.data.meetingPlatform"},
               {"name": "MEETING_ID", "value.$": "$.data.meetingID"},
-              {"name": "MEETING_PASSWORD", "value.$": "$.data.meetingPassword"},
               {"name": "MEETING_NAME", "value.$": "$.data.meetingName"},
               {"Name": "LMA_USER", "Value.$": "$.data.userName"}]}]}}
           # Only invoked under MICROVM. A placeholder ARN keeps the definition
@@ -3950,7 +3963,6 @@ Resources:
                               {'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id},
                               {'Name': 'MEETING_PLATFORM', 'Value': new_image.get('meetingPlatform', {}).get('S', '')},
                               {'Name': 'MEETING_ID', 'Value': new_image.get('meetingId', {}).get('S', '')},
-                              {'Name': 'MEETING_PASSWORD', 'Value': new_image.get('meetingPassword', {}).get('S', '')},
                               {'Name': 'MEETING_NAME', 'Value': new_image.get('meetingName', {}).get('S', '')},
                               {'Name': 'MEETING_TIME', 'Value': str(meeting_time_int)},
                               {'Name': 'LMA_USER', 'Value': new_image.get('owner', {}).get('S', '')},
@@ -4021,7 +4033,6 @@ Resources:
                           'virtualParticipantId': vp_id,
                           'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
                           'meetingId': new_image.get('meetingId', {}).get('S', ''),
-                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
                           'meetingName': new_image.get('meetingName', {}).get('S', ''),
                           'meetingTime': str(meeting_time_int),
                           'owner': new_image.get('owner', {}).get('S', ''),
@@ -4054,10 +4065,10 @@ Resources:
 
           # What the schedule's target carries from the row. A change to any of them on a
           # row still waiting for its launch means the schedule has to be rewritten; the
-          # agenda and the meeting consent choice are read from the row by the VP when it
-          # starts, so they need nothing here.
+          # meeting password, the agenda and the meeting consent choice are read from the
+          # row by the VP when it starts, so they need nothing here.
           LAUNCH_FIELDS = (
-              'meetingTime', 'meetingId', 'meetingPassword', 'meetingName', 'meetingPlatform',
+              'meetingTime', 'meetingId', 'meetingName', 'meetingPlatform',
               'owner', 'userSub', 'userZoomSub', 'enableVideoRecording',
           )
 
@@ -4623,7 +4634,7 @@ Resources:
           def lambda_handler(event, context):
               detail = event.get('detail', {}) or {}
               # The task and its state only: the event's overrides carry the
-              # task's environment, meeting password included.
+              # task's environment, user tokens included.
               logger.debug(
                   f"Task state change: taskArn={detail.get('taskArn')} "
                   f"lastStatus={detail.get('lastStatus')} stopCode={detail.get('stopCode')}"

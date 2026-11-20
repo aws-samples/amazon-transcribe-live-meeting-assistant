@@ -160,13 +160,14 @@ def test_the_owner_joins_the_same_meeting_again_with_the_stored_password(world):
     assert row["agenda"] == "Budget\nHiring" and row["agendaSource"] == "scheduled"
     assert (row["consentMode"], row["consentRule"]) == ("opt_in", "owner_attests")
 
-    # Launched from here, since only the server has the password.
+    # Launched from here, without the password: the VP reads it from the new row.
     data = _launched(w)
     assert w.state_machine.executions[0]["stateMachineArn"] == STATE_MACHINE
     assert data["virtualParticipantId"] == row["id"]
     assert data["launchToken"] == row["id"], "the row's first launch"
     assert data["meetingID"] == "123456789"
-    assert data["meetingPassword"] == STORED_PASSWORD
+    assert "meetingPassword" not in data
+    assert STORED_PASSWORD not in json.dumps(w.state_machine.executions[0]["input"])
     assert data["meetingTime"] == ""
     assert data["userSub"] == "sub-owner", "the launching user's browser profile"
     assert data["enableVideoRecording"] == "false"
@@ -222,7 +223,7 @@ def test_a_typed_password_wins_over_the_stored_one(world):
     w = world()
     join_again.join_again_virtual_participant(w.manager, form(meetingPassword="typed-pw"), OWNER)
     assert _new_row(w)["meetingPassword"] == "typed-pw"
-    assert _launched(w)["meetingPassword"] == "typed-pw"
+    assert "meetingPassword" not in _launched(w)
 
 
 @pytest.mark.parametrize(
@@ -238,7 +239,7 @@ def test_another_meeting_gets_no_stored_password(world, change):
     join_again.join_again_virtual_participant(w.manager, form(**change), OWNER)
     row = _new_row(w)
     assert "meetingPassword" not in row
-    assert _launched(w)["meetingPassword"] == ""
+    assert "meetingPassword" not in _launched(w)
 
 
 def test_another_meeting_uses_a_typed_password(world):
@@ -332,7 +333,7 @@ def test_a_scheduled_join_again_is_left_to_the_scheduler(world):
     assert row["status"] == "SCHEDULED" and row["isScheduled"] is True
     assert row["meetingTime"] == meeting_time
     assert row["scheduledFor"].endswith("Z")
-    assert row["meetingPassword"] == STORED_PASSWORD, "read by the scheduler at launch time"
+    assert row["meetingPassword"] == STORED_PASSWORD, "read by the VP from its row at startup"
     assert row["userSub"] == row["userZoomSub"] == "sub-owner"
     assert row["useStoredZoomAccount"] is True
     assert row["scheduledTimeZone"] == "Europe/Paris"
@@ -410,3 +411,41 @@ def test_the_handler_answers_a_caller_who_may_not_as_an_authorization_error(worl
     )
     assert response["statusCode"] == 403
     assert response["body"]["errorType"] == "AuthorizationError"
+
+
+# ── the meeting preparation ─────────────────────────────────────────────────
+
+PREPARATION = {
+    "labels": [{"Key": "project", "Value": "acme"}],
+    "audience": "external",
+    "meetingContext": "# Goals",
+    "checklist": [{"ItemId": "q1", "Text": "Who owns the budget?", "Kind": "question"}],
+}
+
+
+def test_a_new_meeting_carries_the_meeting_preparation_the_form_gives(world):
+    w = world()
+    join_again.join_again_virtual_participant(w.manager, form(**PREPARATION), OWNER)
+    row = _new_row(w)
+    assert row["labels"] == PREPARATION["labels"]
+    assert row["audience"] == "external"
+    assert row["meetingContext"] == "# Goals"
+    assert row["checklist"] == [{**PREPARATION["checklist"][0], "Priority": "should"}]
+
+
+def test_a_form_without_meeting_preparation_stores_none(world):
+    w = world()
+    join_again.join_again_virtual_participant(
+        w.manager, form(labels=[], audience="", meetingContext=""), OWNER
+    )
+    row = _new_row(w)
+    assert not {"labels", "audience", "meetingContext", "checklist"} & row.keys()
+
+
+def test_meeting_preparation_over_a_limit_is_refused_before_anything_is_written(world):
+    w = world()
+    with pytest.raises(join_again.JoinAgainRefused, match="label Key"):
+        join_again.join_again_virtual_participant(
+            w.manager, form(labels=[{"Key": "Project", "Value": "x"}]), OWNER
+        )
+    assert not w.table.puts

@@ -51,6 +51,7 @@ import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
+import { launchStateMachineInput } from './launch-request';
 import {
   CONTINUE_SETTINGS_NOTE,
   JOIN_MODE_CONTINUE,
@@ -66,6 +67,7 @@ import {
   joinAgainVirtualParticipantMutation,
   rejoinVirtualParticipantMutation,
 } from './join-again';
+import { vpPreparationInput } from '../common/meeting-preparation';
 import {
   CREATE_MIN_LEAD_MINUTES,
   EMPTY_VP_FORM,
@@ -647,6 +649,9 @@ const VirtualParticipantList = () => {
       const agendaText = (createForm.agenda || '').trim();
       if (agendaText) vpInput.agenda = agendaText;
 
+      // The meeting preparation, stored and read the same way; only what was given.
+      Object.assign(vpInput, vpPreparationInput(createForm.preparation));
+
       // Stored on the VP row too, and read by the VP when it starts.
       Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
 
@@ -708,12 +713,12 @@ const VirtualParticipantList = () => {
 
           const sfnParams = {
             stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
-            input: JSON.stringify({
-              apiInfo: { httpMethod: 'POST' },
-              data: {
+            // No meeting password: it is saved on the record above, and the
+            // Virtual Participant reads it from there when it starts.
+            input: JSON.stringify(
+              launchStateMachineInput({
                 meetingPlatform: createForm.meetingPlatform,
                 meetingID: effectiveMeetingId,
-                meetingPassword: effectivePassword,
                 meetingName: createForm.meetingName,
                 meetingTime: '',
                 userName,
@@ -725,8 +730,8 @@ const VirtualParticipantList = () => {
                 accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
                 idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
                 rereshToken: '', // Amplify v6 does not expose refresh tokens directly
-              },
-            }),
+              }),
+            ),
           };
 
           const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));

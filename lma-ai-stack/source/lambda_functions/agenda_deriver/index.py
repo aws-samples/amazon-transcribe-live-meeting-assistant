@@ -89,6 +89,33 @@ _CALL_FIELDS = """
       AgendaSource
       AgendaUpdatedBy
       AgendaUpdatedAt
+      Labels {
+        Key
+        Value
+      }
+      Audience
+      MeetingMetadataUpdatedAt
+      MeetingContext
+      MeetingContextUpdatedBy
+      MeetingContextUpdatedAt
+      Checklist {
+        ItemId
+        Text
+        Kind
+        Priority
+        Source
+        Status
+        StatusSource
+        Evidence {
+          SegmentId
+          StartTime
+          Quote
+        }
+        Note
+        UpdatedBy
+        UpdatedAt
+      }
+      ChecklistUpdatedAt
       Status
       UpdatedAt
       CreatedAt
@@ -96,6 +123,14 @@ _CALL_FIELDS = """
       SystemPhoneNumber
       RecordingUrl
       VideoRecordingUrl
+      RecordingUrls
+      RecordingUrlSessions
+      VideoRecordingUrls
+      VideoRecordingUrlSessions
+      SessionNumber
+      SessionOffsetSeconds
+      SessionStartedNumber
+      Sessions { SessionNumber OffsetSeconds StartedAt }
       Owner
       SharedWith
       TotalConversationDurationMillis

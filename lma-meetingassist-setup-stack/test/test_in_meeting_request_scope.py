@@ -18,7 +18,7 @@ The meeting page's own chat sends no scope and is offered every tool whatever
 the setting.
 
 The handler is driven end to end with every tool group's precondition met --
-an MCP server installed, both knowledge bases, web search, AppSync and the
+an MCP server installed, a skill defined, both knowledge bases, web search, AppSync and the
 Event API configured, and a user email on the event -- and the Strands
 ``Agent`` it constructs is a stand-in that records the tools and system prompt
 it was given. So these assert which tools the handler actually builds, rather
@@ -55,7 +55,15 @@ ALL_TOOLS = {
     "get_chat_attachments",
     "control_vnc_preview",
     "control_vp_browser",
+    "load_skill",
+    "read_skill_file",
 }
+
+# The meeting context and checklist: the meeting page's own chat is offered
+# them, and a request made in the meeting is not, whatever inMeetingRequestTools
+# says, unless inMeetingContextAccess is "allowed" (test_meeting_preparation_tools.py).
+CONTEXT_TOOLS = {"get_meeting_context", "get_meeting_checklist"}
+PAGE_TOOLS = ALL_TOOLS | CONTEXT_TOOLS
 
 # The current meeting: its transcript, its agenda, its shared screen and the
 # attachments shared in its chat. Guests in the meeting may read the agenda of
@@ -147,6 +155,11 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         lambda: {"server-1": "Server One"},
         raising=False,
     )
+    monkeypatch.setattr(
+        handler_module.meeting_skills,
+        "load_catalog",
+        lambda: [handler_module.meeting_skills.SkillSummary("skill-1", "skill-one", "One skill.")],
+    )
     monkeypatch.setattr(handler_module.tavily_secret, "is_configured", lambda: True)
     monkeypatch.setattr(
         handler_module, "APPSYNC_GRAPHQL_URL", "https://appsync.example.com/graphql"
@@ -164,6 +177,8 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         ("create_meeting_history_tool", "meeting_history"),
         ("create_current_meeting_transcript_tool", "current_meeting_transcript"),
         ("create_meeting_agenda_tool", "get_meeting_agenda"),
+        ("create_meeting_context_tool", "get_meeting_context"),
+        ("create_meeting_checklist_tool", "get_meeting_checklist"),
         ("create_meeting_frames_tool", "get_meeting_frames"),
         ("create_chat_attachments_tool", "get_chat_attachments"),
         ("create_vnc_preview_control_tool", "control_vnc_preview"),
@@ -295,7 +310,7 @@ def test_the_meeting_pages_assistant_is_given_every_configured_tool_whatever_the
     # a stand-in that builds nothing.
     configured({"inMeetingRequestTools": value})
     agent = built({"userEmail": "owner@example.com"})
-    assert agent["tools"] == ALL_TOOLS
+    assert agent["tools"] == PAGE_TOOLS
     assert handler_module.MEETING_CHAT_NOTE not in agent["system_prompt"]
     assert handler_module.CURRENT_MEETING_SCOPE_NOTE not in agent["system_prompt"]
 
@@ -320,6 +335,7 @@ GROUP_SWITCHES = {
     "inMeetingMeetingHistory": {"recent_meetings_list", "meeting_history"},
     "inMeetingMcpServers": {"mcp_server"},
     "inMeetingVpControls": {"control_vnc_preview", "control_vp_browser"},
+    "inMeetingSkills": {"load_skill", "read_skill_file"},
 }
 
 

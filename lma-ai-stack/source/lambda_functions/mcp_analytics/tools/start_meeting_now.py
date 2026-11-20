@@ -184,13 +184,13 @@ def execute(
         if not state_machine_arn:
             raise ValueError("LMAVirtualParticipantSchedulerStateMachine not found in settings")
 
-        # Invoke state machine (matches UI behavior)
+        # Invoke state machine (matches UI behavior). No meeting password: it is
+        # saved on the VP row above, and the VP reads it from there when it starts.
         sfn_input = {
             "apiInfo": {"httpMethod": "POST"},
             "data": {
                 "meetingPlatform": meeting_platform,
                 "meetingID": meeting_id,
-                "meetingPassword": meeting_password or "",
                 "meetingName": meeting_name,
                 "meetingTime": "",  # Empty string triggers immediate RunTask path
                 "userName": user_id or "mcp-server-user",

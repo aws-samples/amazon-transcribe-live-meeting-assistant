@@ -197,13 +197,12 @@ def redact_server(server: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if server.get("CredentialsRequired"):
         # What the credentials form of an imported server opens with: re-read
         # through the library export's allowlist, so it holds no credential.
-        redacted["ImportedAuthSettings"] = json.dumps(
-            mcp_library.export_auth(
-                {
-                    "ImportedAuth": server.get("ImportedAuth"),
-                    "RequiredAuthType": server.get("RequiredAuthType"),
-                }
-            )
+        # An object, not its JSON text: AppSync encodes an AWSJSON value itself.
+        redacted["ImportedAuthSettings"] = mcp_library.export_auth(
+            {
+                "ImportedAuth": server.get("ImportedAuth"),
+                "RequiredAuthType": server.get("RequiredAuthType"),
+            }
         )
     return redacted
 
@@ -646,14 +645,19 @@ def _installed(table: Any, account_id: str) -> list:
     return response.get("Items", [])
 
 
-def export_mcp_server_library(event: Dict[str, Any], context: Any) -> str:
-    """The installed servers as a library document (AWSJSON), with no credentials."""
+def export_mcp_server_library(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """The installed servers as a library document (AWSJSON), with no credentials.
+
+    Returned as an object, not as its JSON text: the resolver's response template
+    and AppSync's AWSJSON serialization encode it once on the way out, so text
+    here would reach the client encoded twice.
+    """
     del event, context
     account_id = ACCOUNT_ID or os.environ.get("AWS_ACCOUNT_ID", "unknown")
     servers = _installed(dynamodb.Table(MCP_SERVERS_TABLE), account_id) if MCP_SERVERS_TABLE else []
     document = mcp_library.export_library(servers)
     logger.info("Exported an MCP server library of %s servers", len(document["servers"]))
-    return json.dumps(document)
+    return document
 
 
 def _start_build(account_id: str, server_id: str, action: str) -> Optional[str]:

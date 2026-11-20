@@ -78,7 +78,7 @@ def _block(sdl: str, header: str) -> str:
 
 def _create_template(resources: dict) -> str:
     # An !Sub, for the record's expiry (MeetingRecordExpirationInDays).
-    request = resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+    request = resources["CreateVirtualParticipantAppSyncFunction"]["Properties"]["RequestMappingTemplate"]
     return request["Fn::Sub"] if isinstance(request, dict) else request
 
 

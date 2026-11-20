@@ -1131,6 +1131,81 @@ def test_the_voice_enrollment_test_is_marked_as_an_optional_feature() -> None:
     )
 
 
+class _FakeCfn:
+    """list_stack_resources + describe_stacks, for the voice-enrollment probe."""
+
+    def __init__(self, asr_outputs):
+        self._asr_outputs = asr_outputs
+
+    def get_paginator(self, _name):
+        resources = [
+            {
+                "ResourceType": "AWS::CloudFormation::Stack",
+                "LogicalResourceId": "AISTACK",
+                "PhysicalResourceId": "arn:aws:cloudformation:us-east-1:123456789012:stack/ai/1",
+            }
+        ]
+        if self._asr_outputs is not None:
+            resources.append(
+                {
+                    "ResourceType": "AWS::CloudFormation::Stack",
+                    "LogicalResourceId": "ASRMICROVMSTACK",
+                    "PhysicalResourceId": "arn:aws:cloudformation:us-east-1:123456789012:stack/asr/1",
+                }
+            )
+        paginator = mock.Mock()
+        paginator.paginate.return_value = [{"StackResourceSummaries": resources}]
+        return paginator
+
+    def describe_stacks(self, StackName):
+        assert "asr" in StackName
+        return {
+            "Stacks": [
+                {
+                    "Outputs": [
+                        {"OutputKey": key, "OutputValue": value}
+                        for key, value in self._asr_outputs.items()
+                    ]
+                }
+            ]
+        }
+
+
+@pytest.mark.parametrize(
+    ("asr_outputs", "expected"),
+    [
+        (
+            {
+                "AsrModelBundleId": "parakeet-tdt-v3-live-nemotron35-sortformer",
+                "AsrSpeakerModelId": "none",
+            },
+            "the active bundle parakeet-tdt-v3-live-nemotron35-sortformer has none",
+        ),
+        (None, "ASR MicroVM engine"),
+        (
+            {"AsrModelBundleId": "parakeet-tdt-v3-titanet-small", "AsrSpeakerModelId": "titanet-small"},
+            None,
+        ),
+    ],
+)
+def test_the_voice_enrollment_probe_detects_a_stack_that_cannot_enroll(
+    monkeypatch: pytest.MonkeyPatch, asr_outputs, expected
+) -> None:
+    """Skipped with the real reason, not failed with advice to set EnableMicrovmAsr."""
+    import voice_enrollment_probe
+
+    monkeypatch.setattr(
+        voice_enrollment_probe.boto3, "client", lambda *_a, **_k: _FakeCfn(asr_outputs)
+    )
+    reason = voice_enrollment_probe.enrollment_unavailable_reason("lma-test", "us-east-1")
+    if expected is None:
+        assert reason is None
+    else:
+        assert expected in reason
+        if asr_outputs is not None:
+            assert "EnableMicrovmAsr" not in reason
+
+
 def test_the_google_meet_test_is_marked_as_an_external_meeting() -> None:
     """It needs LMA_TEST_MEET_URL, and Google Meet may turn its guest away.
 
@@ -1374,6 +1449,27 @@ def test_the_assistant_profile_tests_are_opt_in_optional_features() -> None:
     names = [m.name for m in test_assistant_profile.pytestmark]
     assert "optional_feature" in names, names
     assert "skipif" in names, names
+
+
+def test_the_assistant_skills_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_ASSISTANT_SKILLS=1, change a deployment-wide setting and write a skill."""
+    import test_assistant_skills
+
+    names = [m.name for m in test_assistant_skills.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_skills_log_line_reader_reads_the_assistants_line() -> None:
+    """The line strands_meeting_assist_function logs for each request offered skills."""
+    import assistant_profile_probe
+
+    match = assistant_profile_probe.SKILLS_LINE.search(
+        "Skills: offered=launch-review, notes not offered=integ-tests-zephyr-checklist"
+    )
+    assert match["offered"] == "launch-review, notes"
+    assert match["not_offered"] == "integ-tests-zephyr-checklist"
+    assert assistant_profile_probe.OFFERED_LINE.search("MCP servers: offered=a not offered=none")
 
 
 class _FakeConfigurationStore:

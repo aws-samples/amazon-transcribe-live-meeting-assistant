@@ -63,6 +63,9 @@ enum MeetingReopenSelfTest {
         check("refusal without a message has one of its own",
               MeetingReopen.describe(.refused(code: "Unauthorized", message: "")),
               "Only the meeting's owner or an Admin can continue this meeting.")
+        check("a pending reopen without a message has one of its own",
+              MeetingReopen.describe(.refused(code: "MeetingInProgress", message: "")),
+              "This meeting is still being captured, or was reopened moments ago. Try again in a few minutes.")
         check("other errors say the meeting was not reopened",
               MeetingReopen.describe(.refused(code: "Lambda:Unhandled", message: "boom")),
               "LMA could not reopen the meeting: boom")

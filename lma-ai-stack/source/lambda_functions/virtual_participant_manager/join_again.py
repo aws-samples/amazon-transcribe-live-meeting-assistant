@@ -17,11 +17,12 @@ password is copied onto the new row. A password the user typed is used instead.
 For another meeting nothing is copied. Only the source's owner or an Admin may
 join again from it.
 
-Because the copied password is on the server only, an immediate launch is
-started here, with the launcher state machine input that rejoin builds
-(rejoin.start_launch), rather than from the browser. A scheduled one is launched
-at its time by the scheduler, which reads the row, as for any scheduled
-Virtual Participant. See docs/virtual-participant.md#join-again.
+An immediate launch is started here, with the launcher state machine input that
+rejoin builds (rejoin.start_launch), rather than from the browser. Like every
+launch it carries no meeting password: the new Virtual Participant reads the
+password from its own row when it starts. A scheduled one is launched at its
+time by the scheduler, as for any scheduled Virtual Participant. See
+docs/virtual-participant.md#join-again.
 """
 
 import logging
@@ -33,6 +34,7 @@ from typing import Any, Dict, Optional
 
 from access import NotAuthorizedError, caller_may_change
 from botocore.exceptions import ClientError
+from lma_meeting_preparation import rules as preparation  # configuration layer
 from rejoin import start_launch, without_password
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,25 @@ def new_row(
             raise JoinAgainRefused(f"The agenda is longer than {MAX_AGENDA_CHARS} characters")
         row["agenda"] = agenda
         row["agendaSource"] = "scheduled"
+
+    # The meeting preparation, with the limits createVirtualParticipant's check
+    # applies (lma_meeting_preparation); only what was given is stored.
+    try:
+        labels = preparation.normalize_labels(request.get("labels"))
+        audience = preparation.normalize_audience(request.get("audience"))
+        meeting_context = preparation.normalize_context(request.get("meetingContext"))
+        checklist = preparation.normalize_definitions(request.get("checklist"))
+        preparation.check_checklist_size(checklist)
+    except preparation.PreparationError as error:
+        raise JoinAgainRefused(str(error)) from error
+    if labels:
+        row["labels"] = labels
+    if audience:
+        row["audience"] = audience
+    if meeting_context:
+        row["meetingContext"] = meeting_context
+    if checklist:
+        row["checklist"] = checklist
 
     mode = _text(request.get("consentMode"))
     rule = _text(request.get("consentRule"))

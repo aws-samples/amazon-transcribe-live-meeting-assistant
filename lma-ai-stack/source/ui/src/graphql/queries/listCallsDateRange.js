@@ -29,6 +29,15 @@ export default /* GraphQL */ `
         # candidate missing -- destroying them. A little extra payload per
         # meeting is much cheaper than that.
         SpeakerIdentities
+        # Labels and audience for the meeting list's filters. The meeting
+        # context and checklist are not listed: the split panel reads each
+        # meeting through getCall.
+        Labels {
+          Key
+          Value
+        }
+        Audience
+        MeetingMetadataUpdatedAt
         CreatedAt
         CustomerPhoneNumber
         Status

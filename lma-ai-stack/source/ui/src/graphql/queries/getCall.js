@@ -18,6 +18,33 @@ export default /* GraphQL */ `
       AgendaSource
       AgendaUpdatedBy
       AgendaUpdatedAt
+      Labels {
+        Key
+        Value
+      }
+      Audience
+      MeetingMetadataUpdatedAt
+      MeetingContext
+      MeetingContextUpdatedBy
+      MeetingContextUpdatedAt
+      Checklist {
+        ItemId
+        Text
+        Kind
+        Priority
+        Source
+        Status
+        StatusSource
+        Evidence {
+          SegmentId
+          StartTime
+          Quote
+        }
+        Note
+        UpdatedBy
+        UpdatedAt
+      }
+      ChecklistUpdatedAt
       TranscriptDeletionScheduledFor
       TranscriptDeletedAt
       TranscriptSegmentsDeleted
@@ -30,6 +57,18 @@ export default /* GraphQL */ `
       UpdatedAt
       RecordingUrl
       VideoRecordingUrl
+      RecordingUrls
+      RecordingUrlSessions
+      VideoRecordingUrls
+      VideoRecordingUrlSessions
+      SessionNumber
+      SessionOffsetSeconds
+      SessionStartedNumber
+      Sessions {
+        SessionNumber
+        OffsetSeconds
+        StartedAt
+      }
       CaptureSource
       TranscriptionEngine
       TranscriptionLanguage

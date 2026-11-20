@@ -20,15 +20,18 @@ import {
   SOURCE_MANUAL,
   STALE_RUN_MS,
   STATUS_FAILED,
+  STATUS_EMPTY,
   STATUS_IDLE,
   STATUS_RUNNING,
   MEETING_END_PATIENCE_MS,
+  SUMMARY_EMPTY_TEXT,
   SUMMARY_FAILED_TEXT,
   SUMMARY_IN_PROGRESS_TEXT,
   SUMMARY_OVERDUE_TEXT,
   TRIGGER_MEETING_END,
   isHandEdited,
   isRegenerating,
+  isSummaryEmpty,
   isSummaryInProgress,
   isSummaryOverdue,
   msUntilSummaryOverdue,
@@ -201,5 +204,41 @@ describe('the end-of-meeting summary', () => {
     expect(summaryStatusText(queued(-MEETING_END_PATIENCE_MS - 1000), NOW)).toBe(SUMMARY_OVERDUE_TEXT);
     expect(summaryStatusText({ status: STATUS_FAILED, trigger: TRIGGER_MEETING_END }, NOW)).toBe(SUMMARY_FAILED_TEXT);
     expect(summaryStatusText({ status: STATUS_IDLE, trigger: TRIGGER_MEETING_END }, NOW)).toBeNull();
+  });
+});
+
+describe('a meeting with nothing to summarise', () => {
+  // What the pipeline and the regenerator write when the summariser found no
+  // speech, chat or screen text.
+  const emptyAtEnd = {
+    source: SOURCE_GENERATED,
+    status: STATUS_EMPTY,
+    trigger: TRIGGER_MEETING_END,
+    message: 'Nothing to summarise: the meeting has no transcript',
+    updatedAt: iso(-86400000),
+  };
+  const emptyRegeneration = { source: SOURCE_MANUAL, status: STATUS_EMPTY, updatedAt: iso(-86400000) };
+
+  it('is its own outcome, not a failure, a run in progress or an overdue one', () => {
+    [emptyAtEnd, emptyRegeneration].forEach((state) => {
+      expect(isSummaryEmpty(state)).toBe(true);
+      expect(regenerationFailure(state, NOW)).toBeNull();
+      expect(isRegenerating(state, NOW)).toBe(false);
+      expect(isSummaryInProgress(state, NOW)).toBe(false);
+      expect(isSummaryOverdue(state, NOW)).toBe(false);
+    });
+  });
+
+  it('is described the same way to every reader, however long ago it was recorded', () => {
+    expect(summaryStatusText(emptyAtEnd, NOW)).toBe(SUMMARY_EMPTY_TEXT);
+    expect(summaryStatusText(emptyRegeneration, NOW)).toBe(SUMMARY_EMPTY_TEXT);
+    expect(SUMMARY_EMPTY_TEXT).toBe('Nothing to summarise: the meeting has no transcript.');
+  });
+
+  it('gives way to a run that starts after it', () => {
+    const running = { source: SOURCE_GENERATED, status: STATUS_RUNNING, startedAt: iso(0) };
+    expect(isSummaryEmpty(running)).toBe(false);
+    expect(summaryStatusText(running, NOW)).toBeNull();
+    expect(isSummaryEmpty({})).toBe(false);
   });
 });

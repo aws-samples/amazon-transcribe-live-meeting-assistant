@@ -407,7 +407,6 @@ class VirtualParticipantOperations:
                 meeting_name=meeting_name,
                 platform=platform,
                 meeting_id=meeting_id_stripped,
-                meeting_password=meeting_password,
                 user_name=user_name,
                 user_sub=user.sub if user else "",
                 user_zoom_sub=user_zoom_sub,
@@ -686,7 +685,6 @@ class VirtualParticipantOperations:
         meeting_name: str,
         platform: str,
         meeting_id: str,
-        meeting_password: str,
         user_name: str,
         user_sub: str = "",
         user_zoom_sub: str = "",
@@ -698,7 +696,9 @@ class VirtualParticipantOperations:
         can send empty tokens here. ``userSub`` becomes the container's
         ``LMA_USER_SUB`` (saved browser profile); a non-empty
         ``userZoomSub`` makes the state machine pass the user's stored
-        Zoom credentials secret name.
+        Zoom credentials secret name. The meeting password is not sent: it
+        is saved on the VP row by ``createVirtualParticipant``, and the VP
+        reads it from there when it starts.
         """
         sfn = self._client.session.client("stepfunctions")
         state_machine_arn = self.scheduler_state_machine_arn
@@ -708,7 +708,6 @@ class VirtualParticipantOperations:
             "data": {
                 "meetingPlatform": platform,
                 "meetingID": meeting_id,
-                "meetingPassword": meeting_password or "",
                 "meetingName": meeting_name,
                 "meetingTime": "",
                 "userName": user_name,

@@ -21,6 +21,7 @@ acquired, so a malformed call cannot start an engine.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib.util
 import json
@@ -281,3 +282,89 @@ def test_a_realistic_enrolment_is_still_accepted(monkeypatch: pytest.MonkeyPatch
     install(monkeypatch)
     five_seconds = base64.b64encode(b"\x01\x00" * (5 * 16000)).decode()
     assert client.embed_utterances([five_seconds] * 6)
+
+
+# --------------------------------------------------------------------------
+# A session whose image has no speaker model
+#
+# Against a real WebSocket server shaped like the ASR server's refusal: it
+# reads the config, sends a fatal BAD_CONFIG error and closes, while this
+# client is still sending utterances. The send is what fails, with a normal
+# closure -- which is what reached the enrollee as a generic failure.
+# --------------------------------------------------------------------------
+
+REFUSAL = {
+    "type": "error",
+    "code": "BAD_CONFIG",
+    "message": "embed mode requires an image built with a speaker-embedding model",
+    "fatal": True,
+}
+
+# Enough audio that the refusal lands while the client is still sending.
+MANY_FRAMES = [b"\x01\x00" * 160000] * 8
+
+
+def _refusing_server(close_reason):
+    async def handler(socket):
+        await socket.recv()
+        await socket.send(json.dumps(REFUSAL))
+        await socket.close(reason=close_reason)
+
+    return handler
+
+
+def _run_against(handler, frames):
+    websockets = pytest.importorskip("websockets")
+
+    async def scenario():
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            return await client._embed(frames, f"ws://127.0.0.1:{port}", "")  # noqa: SLF001
+
+    return asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("close_reason", ["embed_unsupported", ""])
+def test_a_session_with_no_speaker_model_is_told_apart_from_other_failures(
+    close_reason: str,
+) -> None:
+    """Both an image that names the reason on its close frame and one that does not."""
+    with pytest.raises(client.EmbeddingUnsupportedError):
+        _run_against(_refusing_server(close_reason), MANY_FRAMES)
+
+
+def test_a_refusal_read_after_the_frames_were_sent_is_recognised() -> None:
+    async def handler(socket):
+        # Read the config, both frames and the eos first, then refuse, so the
+        # error arrives on the client's recv rather than failing its send.
+        for _ in range(4):
+            await socket.recv()
+        await socket.send(json.dumps(REFUSAL))
+        await socket.close(reason="embed_unsupported")
+
+    with pytest.raises(client.EmbeddingUnsupportedError):
+        _run_against(handler, [b"\x01\x00" * 100] * 2)
+
+
+def test_any_other_session_error_is_still_an_ordinary_failure() -> None:
+    async def handler(socket):
+        await socket.recv()
+        await socket.recv()
+        await socket.send(
+            json.dumps({"type": "error", "code": "INTERNAL", "message": "embedding failed: x"})
+        )
+        await socket.close()
+
+    with pytest.raises(RuntimeError) as raised:
+        _run_against(handler, [b"\x01\x00" * 100])
+    assert not isinstance(raised.value, client.EmbeddingUnsupportedError)
+
+
+def test_the_unsupported_reason_survives_embed_utterances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It is a RuntimeError, so the MicroVM is still released on the way out."""
+    fake, _ = install(monkeypatch, embed_error=client.EmbeddingUnsupportedError("none"))
+    with pytest.raises(client.EmbeddingUnsupportedError):
+        client.embed_utterances([CLIP])
+    assert fake.actions() == ["acquire", "release"]

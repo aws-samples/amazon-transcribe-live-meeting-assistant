@@ -24,6 +24,11 @@ import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
 import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
 import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
 import updateCallAgenda from '../graphql/queries/updateCallAgenda';
+import updateCallMeetingContext from '../graphql/queries/updateCallMeetingContext';
+import updateCallChecklist from '../graphql/queries/updateCallChecklist';
+import updateCallChecklistItem from '../graphql/queries/updateCallChecklistItem';
+import updateCallLabels from '../graphql/queries/updateCallLabels';
+import updateCallAudience from '../graphql/queries/updateCallAudience';
 import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
@@ -38,6 +43,22 @@ const client = generateClient();
  * AppSync reports that as errorType "ExecutionTimeout" with the message
  * "Execution timed out."; both are checked, since the type is not always set.
  */
+/** The meeting preparation mutations, by the name the panels send them under. */
+export const PREPARATION_MUTATIONS = {
+  meetingContext: ['updateCallMeetingContext', updateCallMeetingContext],
+  checklist: ['updateCallChecklist', updateCallChecklist],
+  checklistItem: ['updateCallChecklistItem', updateCallChecklistItem],
+  labels: ['updateCallLabels', updateCallLabels],
+  audience: ['updateCallAudience', updateCallAudience],
+};
+
+/** The server's own words for a refused write, which name the limit that was broken. */
+export const preparationErrorMessage = (error) => {
+  const message = (error?.errors || []).map((e) => e?.message).find(Boolean) || error?.message || '';
+  if (/unauthorized/i.test(message)) return 'You do not have permission to change this meeting.';
+  return message || 'The change could not be saved. Please try again.';
+};
+
 export const isRequestTimeout = (error) =>
   (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 
@@ -64,7 +85,10 @@ export const isRequestTimeout = (error) =>
  * every agenda write sets that timestamp, so an incoming call without one came
  * from a mutation that did not select the agenda, while one with it is
  * authoritative for all four fields -- including an agenda that was cleared,
- * which a per-field `||` would resurrect.
+ * which a per-field `||` would resurrect. The meeting preparation is kept the
+ * same way, as three units: the labels and audience (MeetingMetadataUpdatedAt),
+ * the meeting context (MeetingContextUpdatedAt) and the checklist
+ * (ChecklistUpdatedAt). The list query carries the first and not the others.
  */
 export const mergeCallUpdate = (existing, call) => ({
   ...call,
@@ -101,6 +125,23 @@ export const mergeCallUpdate = (existing, call) => ({
         AgendaUpdatedBy: existing?.AgendaUpdatedBy,
         AgendaUpdatedAt: existing?.AgendaUpdatedAt,
       }),
+  ...(call.MeetingMetadataUpdatedAt
+    ? {}
+    : {
+        Labels: existing?.Labels,
+        Audience: existing?.Audience,
+        MeetingMetadataUpdatedAt: existing?.MeetingMetadataUpdatedAt,
+      }),
+  ...(call.MeetingContextUpdatedAt
+    ? {}
+    : {
+        MeetingContext: existing?.MeetingContext,
+        MeetingContextUpdatedBy: existing?.MeetingContextUpdatedBy,
+        MeetingContextUpdatedAt: existing?.MeetingContextUpdatedAt,
+      }),
+  ...(call.ChecklistUpdatedAt
+    ? {}
+    : { Checklist: existing?.Checklist, ChecklistUpdatedAt: existing?.ChecklistUpdatedAt }),
 });
 
 /**
@@ -730,6 +771,33 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   };
 
   /**
+   * Store part of a meeting's preparation: its labels, audience, meeting
+   * context, checklist or one checklist item (`kind`, one of
+   * PREPARATION_MUTATIONS). `input` is the mutation's input without CallId.
+   *
+   * Not optimistic: the server checks every limit and decides the merge of a
+   * replaced checklist and who an item's status is from, so the page shows
+   * what it stored. The answer is merged at once (the subscription brings the
+   * same to every other open page). Returns `{ ok, message }`, where a refusal
+   * carries the server's message for the panel to show.
+   */
+  const sendUpdateMeetingPreparation = useCallback(async (callId, kind, input) => {
+    const [field, query] = PREPARATION_MUTATIONS[kind] || [];
+    if (!query) return { ok: false, message: `unknown change ${kind}` };
+    try {
+      const response = await client.graphql({ query, variables: { input: { CallId: callId, ...input } } });
+      const stored = response?.data?.[field];
+      if (stored) {
+        setCalls((currentCalls) => currentCalls.map((c) => (c.CallId === callId ? mergeCallUpdate(c, stored) : c)));
+      }
+      return { ok: true, message: '' };
+    } catch (error) {
+      logger.error(`failed to save the meeting ${kind}`, error);
+      return { ok: false, message: preparationErrorMessage(error) };
+    }
+  }, []);
+
+  /**
    * Ask the backend to read a meeting's transcript for a stated agenda.
    *
    * Nothing is patched into state here: a found agenda is stored through
@@ -783,6 +851,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
+    sendUpdateMeetingPreparation,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

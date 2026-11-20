@@ -159,3 +159,32 @@ describe('movesLaunchSchedule', () => {
     expect(movesLaunchSchedule({ consentMode: 'notify', consentRule: 'owner_attests' })).toBe(false);
   });
 });
+
+describe('the meeting preparation in an edit', () => {
+  const PREPARED = {
+    ...SCHEDULED,
+    labels: [{ Key: 'project', Value: 'acme' }],
+    audience: 'internal',
+    meetingContext: 'Goals',
+    checklist: [{ ItemId: 'q1', Text: 'Ask', Kind: 'question', Priority: 'must' }],
+  };
+  const edited = (patch) => {
+    const state = editFormFrom(PREPARED);
+    return { ...state, form: { ...state.form, preparation: { ...state.form.preparation, ...patch } } };
+  };
+
+  it('is pre-filled from the row and sends nothing when untouched', () => {
+    expect(editFormFrom(PREPARED).form.preparation.labelsText).toBe('project=acme');
+    expect(scheduledEditInput(PREPARED, edited({}), OFFERED)).toBeNull();
+  });
+
+  it('sends each changed input, empty to remove it, without moving the launch schedule', () => {
+    const input = scheduledEditInput(
+      PREPARED,
+      edited({ audience: 'external', meetingContext: '', checklist: [] }),
+      OFFERED,
+    );
+    expect(input).toEqual({ id: 'vp-1', audience: 'external', meetingContext: '', checklist: [] });
+    expect(movesLaunchSchedule(input)).toBe(false);
+  });
+});

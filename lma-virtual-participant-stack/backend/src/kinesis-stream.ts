@@ -4,6 +4,7 @@ import { details } from './details.js';
 import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
+import { preparationStartFields, type VpPreparation } from './meeting-preparation.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
@@ -108,6 +109,17 @@ class KinesisStreamManager {
 
   setAgenda(agenda: VpAgenda | null): void {
     this.agenda = agenda;
+  }
+
+  /**
+   * The meeting preparation (labels, audience, meeting context, checklist) the
+   * VP was started or scheduled with, read with the agenda; see
+   * meeting-preparation.ts. Null when there is none.
+   */
+  private preparation: VpPreparation | null = null;
+
+  setPreparation(preparation: VpPreparation | null): void {
+    this.preparation = preparation;
   }
 
   /**
@@ -243,6 +255,7 @@ class KinesisStreamManager {
       // Created with the meeting, so it is there from the first event; nothing
       // is added when the VP has no agenda.
       ...agendaStartFields(this.agenda, details.lmaUser),
+      ...preparationStartFields(this.preparation, details.lmaUser),
       CaptureSource: 'VIRTUAL_PARTICIPANT',
       ...(this.transcriptionContext ?? {}),
       ...this.sessionField(),
@@ -357,6 +370,9 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // The session the file was recorded in, stored with its link so the
+      // meeting page plays it at the session's place on the transcript timeline.
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);
@@ -375,6 +391,9 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // The session the file was recorded in, stored with its link so the
+      // meeting page plays it at the session's place on the transcript timeline.
+      ...this.sessionField(),
     };
 
     await this.sendRecord(record);
@@ -716,6 +735,8 @@ class KinesisStreamManager {
   /**
    * SessionNumber, for START and END: sent for the first session too, so that a
    * late END of session 1 is told apart once a rejoined session has started.
+   * Also on the recording link events, where the call event processor stores
+   * it as the link's session (Call.RecordingUrlSessions).
    */
   private sessionField(): { SessionNumber: number } {
     return { SessionNumber: this.session.number };
