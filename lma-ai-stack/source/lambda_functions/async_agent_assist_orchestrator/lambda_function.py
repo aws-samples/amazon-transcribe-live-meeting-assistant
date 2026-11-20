@@ -91,6 +91,32 @@ def meeting_time_seconds(call_id: str) -> float:
         return 0.0
 
 
+def meeting_capture_source(call_id: str) -> str:
+    """How the meeting was captured: the call record's CaptureSource, or "" when unknown.
+
+    Passed with a wake-phrase request so that the meeting assistant can tell a
+    request spoken on the owner's own microphone (the LOCAL channel of Stream
+    Audio, the Desktop Capture App or the browser extension) from one on a
+    meeting a Virtual Participant captures, where LOCAL is the voice assistant.
+    """
+    if not DYNAMODB_TABLE_NAME or not call_id:
+        return ""
+    key = f"c#{call_id}"
+    try:
+        item = (
+            DYNAMODB_CLIENT.get_item(
+                TableName=DYNAMODB_TABLE_NAME,
+                Key={"PK": {"S": key}, "SK": {"S": key}},
+                ProjectionExpression="CaptureSource",
+            ).get("Item")
+            or {}
+        )
+        return item.get("CaptureSource", {}).get("S", "")
+    except Exception as error:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the meeting's capture source: %s", error)
+        return ""
+
+
 def answer_times(message: Dict[str, Any]) -> Tuple[Any, Any]:
     """The start and end of the answer segment, on the meeting's transcript timeline.
 
@@ -181,6 +207,7 @@ def publish_lambda_agent_assist_transcript_segment(
 
     transcript_segment = get_lambda_agent_assist_transcript(
         **lambda_agent_assist_input,
+        request_channel=channel,
     )
 
     write_agent_assist_to_kds(transcript_segment)
@@ -192,6 +219,7 @@ def publish_lambda_agent_assist_transcript_segment(
 def get_lambda_agent_assist_transcript(
     transcript_segment_args: Dict[str, Any],
     content: str,
+    request_channel: str = "",
 ):
     """Sends Lambda Agent Assist Requests"""
     call_id = transcript_segment_args["CallId"]
@@ -216,6 +244,11 @@ def get_lambda_agent_assist_transcript(
     # the meeting page's chat is the signed-in user's, and carries no scope.
     if transcript_segment_args.get("Channel") != CHAT_ASSISTANT_CHANNEL:
         payload["toolScope"] = WAKE_PHRASE_TOOL_SCOPE
+        # The channel it was spoken on and how the meeting is captured, from
+        # which the meeting assistant tells the owner's own microphone apart
+        # (the Meeting Assistant section's inMeetingRequesters, Owner only).
+        payload["requestChannel"] = request_channel
+        payload["requestCaptureSource"] = meeting_capture_source(call_id)
 
     LOGGER.debug("Agent Assist Lambda Request: %s", content)
 

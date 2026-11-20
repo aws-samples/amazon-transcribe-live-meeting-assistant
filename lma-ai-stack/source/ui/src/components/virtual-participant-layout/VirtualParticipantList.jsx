@@ -30,6 +30,7 @@ import { useCollection } from '@cloudscape-design/collection-hooks';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
 import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
+import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import useLocalStorage from '../common/local-storage';
@@ -50,6 +51,7 @@ import {
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
+import { guidanceCreateInput } from './guidance-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import { launchStateMachineInput } from './launch-request';
 import {
@@ -161,6 +163,8 @@ const VirtualParticipantList = () => {
   // transcript only.
   const [enableVideoRecording, setEnableVideoRecording] = useState(joinAgain ? joinAgain.enableVideoRecording : true);
   const [meetingConsentChoice, setMeetingConsentChoice] = useState(joinAgain?.consentChoice || 'default');
+  // Live guidance for the meeting (guidance-options.js): the deployment's setting unless chosen.
+  const [guidanceChoice, setGuidanceChoice] = useState(joinAgain?.guidanceChoice || 'default');
   // The invitation note belongs to the invitation just parsed: it goes when the
   // form closes (cancel, dismiss or create), and when another platform is
   // chosen. A Join again form is a one-off: closing it empties the form, so
@@ -177,6 +181,7 @@ const VirtualParticipantList = () => {
       setConsentChecked(false);
       setEnableVideoRecording(true);
       setMeetingConsentChoice('default');
+      setGuidanceChoice('default');
     }
   }, [showCreateModal]);
   const continuing = !!joinAgain && joinMode === JOIN_MODE_CONTINUE;
@@ -201,12 +206,15 @@ const VirtualParticipantList = () => {
     setJoinMode(next.mode);
     setMeetingChangedNote(next.changedNote);
     if (next.consentChoice !== undefined) setMeetingConsentChoice(next.consentChoice);
+    if (next.guidanceChoice !== undefined) setGuidanceChoice(next.guidanceChoice);
     if (next.enableVideoRecording !== undefined) setEnableVideoRecording(next.enableVideoRecording);
     setJoinAgainError('');
   };
   // Read each time the form opens. Null until read, or when it cannot be:
   // every choice is then offered, and the VP still applies the deployment's rule.
   const consentDefaults = useMeetingConsentDefaults(showCreateModal);
+  // The summary profiles the form offers, read when it opens.
+  const summaryProfiles = useSummaryProfiles(showCreateModal);
   // A choice the selected platform cannot support, or the deployment would not
   // use, goes back to the default.
   useEffect(() => {
@@ -655,6 +663,9 @@ const VirtualParticipantList = () => {
       // Stored on the VP row too, and read by the VP when it starts.
       Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
 
+      // Live guidance for the meeting, stored on the row; nothing for the deployment's setting.
+      Object.assign(vpInput, guidanceCreateInput(guidanceChoice));
+
       // Recorded so the Virtual Participant page can show the Zoom account
       // choice; only where the form offers it.
       if (createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled) {
@@ -767,6 +778,7 @@ const VirtualParticipantList = () => {
       setConsentChecked(false);
       setEnableVideoRecording(true);
       setMeetingConsentChoice('default');
+      setGuidanceChoice('default');
 
       loadParticipants();
 
@@ -1039,8 +1051,11 @@ const VirtualParticipantList = () => {
               consentChoice={meetingConsentChoice}
               onConsentChoiceChange={setMeetingConsentChoice}
               consentDefaults={consentDefaults}
+              summaryProfiles={summaryProfiles}
               enableVideoRecording={enableVideoRecording}
               onEnableVideoRecordingChange={setEnableVideoRecording}
+              guidanceChoice={guidanceChoice}
+              onGuidanceChoiceChange={setGuidanceChoice}
             />
 
             <Checkbox onChange={({ detail }) => setConsentChecked(detail.checked)} checked={consentChecked}>

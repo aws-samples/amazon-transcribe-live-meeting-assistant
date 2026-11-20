@@ -22,6 +22,8 @@ export const CONTEXT_LABELS = {
   Summary: 'Summary',
   SpeakerNaming: 'Speaker naming',
   AgendaDerivation: 'Agenda derivation',
+  LiveGuidance: 'Live guidance',
+  MeetingWhiteboards: 'Meeting whiteboards',
   SlideText: 'Slide text',
   ChatAttachments: 'Chat attachments',
   ConsentVerification: 'Consent evidence check',

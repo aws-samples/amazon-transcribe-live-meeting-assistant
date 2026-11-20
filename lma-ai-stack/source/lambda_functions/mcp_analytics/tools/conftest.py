@@ -62,6 +62,7 @@ def appsync(monkeypatch):
         notifications,
         preparation,
         virtual_participants,
+        whiteboards,
     )
 
     recorder = Recorder()
@@ -74,6 +75,7 @@ def appsync(monkeypatch):
         notifications,
         preparation,
         virtual_participants,
+        whiteboards,
     ):
         monkeypatch.setattr(module, "graphql", recorder.graphql)
     return recorder
@@ -82,11 +84,12 @@ def appsync(monkeypatch):
 @pytest.fixture
 def lambdas(monkeypatch):
     """Direct Lambda invocations."""
-    from tools import ask_assistant, meeting_actions
+    from tools import ask_assistant, meeting_actions, meeting_export
 
     recorder = Recorder()
-    for module in (ask_assistant, meeting_actions):
+    for module in (ask_assistant, meeting_actions, meeting_export):
         monkeypatch.setattr(module, "invoke_function", recorder.invoke)
+    monkeypatch.setenv("MEETING_ARCHIVE_FUNCTION", "archive-fn")
     monkeypatch.setenv("MEETING_CONTROLS_FUNCTION", "controls-fn")
     monkeypatch.setenv("SUMMARY_REGENERATOR_FUNCTION", "summary-fn")
     monkeypatch.setenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "assistant-fn")

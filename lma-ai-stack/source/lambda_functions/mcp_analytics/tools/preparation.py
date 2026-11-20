@@ -6,13 +6,14 @@
 
 * get_meeting_context / set_meeting_context
 * get_meeting_checklist / set_meeting_checklist / update_checklist_item
-* update_meeting_metadata (labels and audience)
+* update_meeting_metadata (labels, audience and summary profile)
 
 Each reads the meeting's row (tools/access.py), so it answers the callers getCall
 answers: an Admin, the meeting's owner, or a user it is shared with. Each write
 is the mutation the meeting page makes (updateCallMeetingContext,
 updateCallChecklist, updateCallChecklistItem, updateCallLabels and
-updateCallAudience), answered by the meeting preparation resolver, which holds
+updateCallAudience, updateCallSummaryProfile), answered by the meeting
+preparation resolver, which holds
 the same rule. This function's IAM role is a backend caller there, so the write
 names who it is for: ``UpdatedBy`` is the MCP caller and ``StatusSource`` is
 ``user``, because an MCP client acts for its user. See
@@ -31,6 +32,7 @@ from lma_meeting_preparation import rules  # pylint: disable=import-error
 from tools.access import Caller, require_meeting
 from tools.appsync_client import graphql
 from tools.call_fields import with_call_fields
+from tools.summary_profiles import profile_argument
 
 UPDATE_CONTEXT = with_call_fields(
     """
@@ -68,6 +70,22 @@ UPDATE_AUDIENCE = with_call_fields(
     """
 mutation UpdateCallAudience($input: UpdateCallAudienceInput!) {
   updateCallAudience(input: $input) { __SUBSCRIBED_CALL_FIELDS__ }
+}
+"""
+)
+
+UPDATE_SUMMARY_PROFILE = with_call_fields(
+    """
+mutation UpdateCallSummaryProfile($input: UpdateCallSummaryProfileInput!) {
+  updateCallSummaryProfile(input: $input) { __SUBSCRIBED_CALL_FIELDS__ }
+}
+"""
+)
+
+UPDATE_GUIDANCE = with_call_fields(
+    """
+mutation UpdateCallGuidance($input: UpdateCallGuidanceInput!) {
+  updateCallGuidance(input: $input) { __SUBSCRIBED_CALL_FIELDS__ }
 }
 """
 )
@@ -319,22 +337,32 @@ def _metadata_output(call_id: str, call: Mapping[str, Any]) -> Dict[str, Any]:
         "meetingId": call_id,
         "labels": labels_output(call.get("Labels")),
         "audience": call.get("Audience") or None,
+        "summaryProfile": call.get("SummaryProfile") or "default",
+        "guidance": call.get("GuidanceEnabled") is True,
         "updatedAt": call.get("MeetingMetadataUpdatedAt"),
     }
 
 
 def update_metadata(
-    caller: Caller, meeting_id: Any, labels: Any = None, audience: Any = None
+    caller: Caller,
+    meeting_id: Any,
+    labels: Any = None,
+    audience: Any = None,
+    summary_profile: Any = None,
+    guidance: Any = None,
 ) -> Dict[str, Any]:
-    """update_meeting_metadata: replace the labels and/or set the audience.
+    """update_meeting_metadata: the labels, the audience, the summary profile, live guidance.
 
-    Two writes when both are given, labels first; if the audience write then
-    fails, the labels have still changed, and the error says so.
+    One write for each one given, in that order; if a later write fails, the
+    earlier ones have still been made, and the error says which.
     """
-    if labels is None and audience is None:
-        raise ValueError("Give labels, audience or both")
+    if labels is None and audience is None and summary_profile is None and guidance is None:
+        raise ValueError("Give labels, audience, summaryProfile, guidance or a combination")
+    if guidance is not None and not isinstance(guidance, bool):
+        raise ValueError("guidance must be true or false")
     stored_labels = labels_input(labels) if labels is not None else None
     stored_audience = audience_input(audience) if audience is not None else None
+    stored_profile = profile_argument(summary_profile)
     meeting = require_meeting(meeting_id, caller)
     call_id = _call_id(meeting, meeting_id)
     current: Dict[str, Any] = dict(meeting)
@@ -354,5 +382,31 @@ def update_metadata(
                 raise
             raise ValueError(
                 f"The labels were changed, but the audience could not be: {error}"
+            ) from error
+    if stored_profile is not None:
+        try:
+            current = _write(
+                UPDATE_SUMMARY_PROFILE,
+                "updateCallSummaryProfile",
+                {"CallId": call_id, "SummaryProfile": stored_profile or None},
+            )
+        except ValueError as error:
+            if stored_labels is None and audience is None:
+                raise
+            raise ValueError(
+                f"The other changes were made, but the summary profile could not be: {error}"
+            ) from error
+    if guidance is not None:
+        try:
+            current = _write(
+                UPDATE_GUIDANCE,
+                "updateCallGuidance",
+                {"CallId": call_id, "GuidanceEnabled": guidance},
+            )
+        except ValueError as error:
+            if stored_labels is None and audience is None and stored_profile is None:
+                raise
+            raise ValueError(
+                f"The other changes were made, but live guidance could not be: {error}"
             ) from error
     return _metadata_output(call_id, current)

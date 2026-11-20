@@ -52,9 +52,10 @@ What is deleted, for the meeting:
 * the transcript knowledge base's entries for those files;
 * the meeting's notifications of the categories that may quote the transcript
   (``guidance``; ``lma_notifications.TRANSCRIPT_BOUND_CATEGORIES``), with
-  their dedup pointers, and any guidance rows stored under ``gd#<CallId>`` on
-  deployments of a development build only (this sweep can go after the next
-  release). The meeting's other notifications are kept.
+  their dedup pointers, and every row under ``gd#<CallId>``: the live guidance
+  analyzer's state (its summary of the meeting so far and what it published),
+  and guidance rows a development build kept there. The meeting's other
+  notifications are kept.
 
 The meeting record is then stamped with when its transcript was deleted, and
 how many segments and files were removed, which the meeting page shows. The
@@ -426,7 +427,8 @@ def delete_transcript_bound_notifications(call_id: str) -> int:
     The notifications of TRANSCRIPT_BOUND_CATEGORIES and their dedup pointers,
     both of which carry the category, under ``nt#<CallId>``; the partition's
     other rows (other categories, publish counters, users' views) are kept.
-    Also every row under ``gd#<CallId>``, where a development build kept guidance.
+    Also every row under ``gd#<CallId>``: the live guidance analyzer's state, which
+    holds a summary drawn from the transcript, and guidance a development build kept.
     """
     deleted = 0
     with _table().batch_writer() as batch:
@@ -435,6 +437,22 @@ def delete_transcript_bound_notifications(call_id: str) -> int:
                 batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
                 deleted += 1
         for item in _partition_items(f"gd#{call_id}"):
+            batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+            deleted += 1
+    return deleted
+
+
+def delete_whiteboards(call_id: str) -> int:
+    """Delete every row under ``wb#<CallId>``; returns how many.
+
+    A meeting's whiteboards are drawn from its transcript, so they are deleted
+    with it, whoever wrote them: each whiteboard, every version, the count, the
+    write counters and the assistant's state with its notes on the meeting so far.
+    Once the transcript is deleted the resolver refuses any further write.
+    """
+    deleted = 0
+    with _table().batch_writer() as batch:
+        for item in _partition_items(f"wb#{call_id}"):
             batch.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
             deleted += 1
     return deleted
@@ -541,6 +559,10 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     attachments = delete_attachments(call_id)
     notifications = delete_transcript_bound_notifications(call_id)
     record_deletion(call_id, trigger, segments, len(keys) + attachments)
+    # After the record: the whiteboard resolver refuses every write once the
+    # meeting carries TranscriptDeletedAt, so nothing written to them can
+    # outlast this sweep, as for the checklist quotes below.
+    whiteboards = delete_whiteboards(call_id)
     checklist_items = strip_checklist_quotes(call_id)
     LOGGER.info(
         json.dumps(
@@ -553,6 +575,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
                 "attachmentFilesDeleted": attachments,
                 "checklistItemsWithQuotesRemoved": checklist_items,
                 "notificationRowsDeleted": notifications,
+                "whiteboardRowsDeleted": whiteboards,
             }
         )
     )

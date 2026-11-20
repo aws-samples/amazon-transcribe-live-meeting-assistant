@@ -1,0 +1,2 @@
+# No dependencies of its own: lma_events comes from the configuration layer, and
+# boto3 ships with the python3.12 Lambda runtime.

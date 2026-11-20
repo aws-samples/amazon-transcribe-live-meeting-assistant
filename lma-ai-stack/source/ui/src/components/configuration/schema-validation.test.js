@@ -64,6 +64,7 @@ describe('schema-validation', () => {
       'nova_sonic_config',
       'recording',
       'retention',
+      'summary_profiles',
       'summary_prompt_templates',
       'transcription',
       'virtual_participant',

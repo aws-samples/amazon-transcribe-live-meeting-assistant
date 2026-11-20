@@ -19,6 +19,7 @@ from tools import (
     meeting_record,
     notifications,
     virtual_participants,
+    vp_preparation,
 )
 from tools._meeting_fakes import ADMIN, OTHER, OWNER, SHARED, caller, meeting_row
 
@@ -437,6 +438,109 @@ def test_sharing_is_for_the_owner_and_admins_and_takes_addresses_only(calls_tabl
 # ── regenerate_meeting_summary / get_meeting_cost ───────────────────────────
 
 
+PROFILES = {"discovery-session": {"label": "Discovery session", "structuredActionItems": True}}
+
+
+@pytest.fixture
+def profiles(monkeypatch):
+    from tools import summary_profiles
+
+    monkeypatch.setattr(summary_profiles, "_section", lambda: dict(PROFILES))
+
+
+def test_a_summary_is_regenerated_with_a_chosen_profile(calls_table, lambdas, profiles):
+    calls_table.put(meeting_row())
+    lambdas.answers["summary-fn"] = {"Success": True}
+    answer = meeting_actions.regenerate_summary(caller(), "m1", summary_profile="discovery-session")
+    assert answer["summaryProfile"] == "discovery-session"
+    ((_, event),) = lambdas.calls
+    assert event["arguments"]["input"] == {"CallId": "m1", "SummaryProfile": "discovery-session"}
+
+
+def test_regenerating_with_the_default_profile_sends_it(calls_table, lambdas, profiles):
+    calls_table.put(meeting_row())
+    lambdas.answers["summary-fn"] = {"Success": True}
+    meeting_actions.regenerate_summary(caller(), "m1", summary_profile="")
+    assert lambdas.calls[0][1]["arguments"]["input"]["SummaryProfile"] == "default"
+
+
+def test_regenerating_with_an_unknown_profile_is_refused_before_anything_runs(
+    calls_table, lambdas, profiles
+):
+    calls_table.put(meeting_row())
+    with pytest.raises(ValueError, match="default, discovery-session"):
+        meeting_actions.regenerate_summary(caller(), "m1", summary_profile="retro")
+    assert lambdas.calls == []
+
+
+def test_the_summary_profiles_are_listed_default_first(profiles):
+    from tools import summary_profiles
+
+    listed = summary_profiles.list_profiles()
+    assert [p["name"] for p in listed["profiles"]] == ["default", "discovery-session"]
+    assert listed["profiles"][1]["structuredActionItems"] is True
+
+
+def test_a_vp_is_given_its_summary_profile_and_an_edit_can_remove_it():
+    from tools import vp_preparation
+
+    assert vp_preparation.vp_inputs(summary_profile="discovery-session") == {
+        "summaryProfile": "discovery-session"
+    }
+    assert vp_preparation.vp_inputs(summary_profile="default") == {}
+    assert vp_preparation.vp_inputs(summary_profile="default", for_update=True) == {
+        "summaryProfile": ""
+    }
+    with pytest.raises(ValueError, match="summaryProfile"):
+        vp_preparation.vp_inputs(summary_profile="Not A Name")
+
+
+def test_the_export_is_built_by_the_archive_function_as_the_caller(calls_table, lambdas):
+    from tools import meeting_export
+
+    calls_table.put(meeting_row())
+    lambdas.answers["archive-fn"] = {"export": {"schemaVersion": 1, "meeting": {"meetingId": "m1"}}}
+    answer = meeting_export.execute(caller(SHARED), "m1", include=["summary", "actionItems"])
+    assert answer == {"schemaVersion": 1, "meeting": {"meetingId": "m1"}}
+    ((function, event),) = lambdas.calls
+    assert function == "archive-fn"
+    assert event == {
+        "Trigger": "export",
+        "CallId": "m1",
+        "Include": ["summary", "actionItems"],
+        "identity": {"username": SHARED, "groups": []},
+    }
+
+
+def test_a_large_export_is_answered_with_its_link(calls_table, lambdas):
+    from tools import meeting_export
+
+    calls_table.put(meeting_row())
+    lambdas.answers["archive-fn"] = {
+        "exportUrl": "https://signed.example.com/x",
+        "expiresAt": "2026-11-20T10:10:00Z",
+        "sizeBytes": 7000000,
+    }
+    answer = meeting_export.execute(caller(), "m1")
+    assert answer == {
+        "exportUrl": "https://signed.example.com/x",
+        "expiresAt": "2026-11-20T10:10:00Z",
+        "sizeBytes": 7000000,
+    }
+    assert "Include" not in lambdas.calls[0][1]
+
+
+def test_the_export_is_refused_before_the_archive_function_runs(calls_table, lambdas):
+    from tools import meeting_export
+
+    calls_table.put(meeting_row())
+    with pytest.raises(PermissionError, match="not found, or you do not have access"):
+        meeting_export.execute(caller(OTHER), "m1")
+    with pytest.raises(ValueError, match="unknown part"):
+        meeting_export.execute(caller(), "m1", include=["recordings"])
+    assert lambdas.calls == []
+
+
 def test_a_summary_is_regenerated_by_the_regenerator_as_the_caller(calls_table, lambdas):
     calls_table.put(meeting_row())
     lambdas.answers["summary-fn"] = {"Success": True}
@@ -720,3 +824,46 @@ def test_vps_by_call_reads_only_the_link_attributes_and_keeps_the_newest(monkeyp
         "#call": "CallId",
         "#created": "createdAt",
     }
+
+
+# ── live guidance ────────────────────────────────────────────────────────────
+
+
+def test_a_digest_is_requested_for_a_meeting_the_caller_can_see(calls_table, appsync):
+    calls_table.put(meeting_row(SharedWith=[SHARED]))
+    appsync.answers["requestMeetingDigest"] = {
+        "requestMeetingDigest": {
+            "Success": True,
+            "Message": "Published to the meeting's notifications.",
+            "Text": "Price and term agreed.",
+            "NotificationId": "n7",
+        }
+    }
+    answer = guidance.request_digest(caller(SHARED), "m1")
+    ((query, variables),) = appsync.calls
+    assert "mutation RequestMeetingDigest" in query and variables == {"callId": "m1"}
+    assert answer["digest"] == "Price and term agreed." and answer["guidanceId"] == "n7"
+
+
+def test_a_digest_is_refused_for_a_meeting_the_caller_cannot_see(calls_table, appsync):
+    calls_table.put(meeting_row())
+    with pytest.raises(PermissionError):
+        guidance.request_digest(caller(OTHER), "m1")
+    assert appsync.calls == []
+
+
+def test_a_digest_that_could_not_be_made_says_why(calls_table, appsync):
+    calls_table.put(meeting_row())
+    appsync.answers["requestMeetingDigest"] = {
+        "requestMeetingDigest": {"Success": False, "Message": "Nothing has been said yet."}
+    }
+    with pytest.raises(ValueError, match="Nothing has been said yet."):
+        guidance.request_digest(caller(), "m1")
+
+
+def test_live_guidance_is_given_to_a_virtual_participant_as_true_or_false():
+    assert vp_preparation.vp_inputs(guidance=True) == {"guidanceEnabled": True}
+    assert vp_preparation.vp_inputs(guidance=False) == {"guidanceEnabled": False}
+    assert vp_preparation.vp_inputs() == {}
+    with pytest.raises(ValueError, match="guidance must be true or false"):
+        vp_preparation.vp_inputs(guidance="on")

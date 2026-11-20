@@ -14,12 +14,18 @@ voice assistant, never sent by email, and never visible to the meeting's other
 participants.
 
 Every notification has a **category**. `guidance` is guidance for the people
-running the meeting, such as a note an AI assistant leaves through the hosted
-MCP server's `push_meeting_guidance` tool. Other features can publish
+running the meeting: what [live guidance](live-guidance.md) offers while a
+meeting is in progress (source `live-guidance`), and notes an AI assistant
+leaves through the hosted MCP server's `push_meeting_guidance` tool (source
+`mcp`). `meeting` is LMA's own news about
+the meeting: today one notification, type `summary_ready`, published when the
+meeting's summary is stored and updated in place when it is regenerated (see
+[Meeting Lifecycle Events](meeting-events.md#the-summary-ready-notification)).
+Mute the `meeting` category to stop seeing it. Other features can publish
 notifications of their own categories through the same mechanism.
 
-Nothing is published until a feature or an MCP client publishes something, and
-a meeting with no notifications looks as it always has.
+Apart from the summary-ready notification, nothing is published until a
+feature or an MCP client publishes something.
 
 ## Contents
 
@@ -111,7 +117,9 @@ account, so they apply in every browser you sign in from.
   meeting and shows each one again.
 
 The other people who can see the meeting are not affected. The notifications
-stay stored, and MCP tools return them whatever you dismissed or muted.
+stay stored, and MCP tools return them whatever you dismissed or muted. Muting
+`guidance` does not stop [live guidance](live-guidance.md) from running, or its
+cost; turning it off for the meeting does.
 
 ## Buttons on a notification
 

@@ -43,6 +43,7 @@ import { classifyChatReply } from './consent-matcher.js';
 import { toSpokenText } from './spoken-text.js';
 import { createLogger } from './logger.js';
 import { inMeetingRequestPayload } from './meeting-assist-request.js';
+import { answersInMeetingRequests, requestsNotAnsweredText } from './in-meeting-requesters.js';
 
 const log = createLogger('chat-ask');
 
@@ -307,8 +308,10 @@ export function createChatAnswerer(
         available?: () => boolean;
         timeoutMs?: number;
         paused?: () => boolean;
+        requestsAllowed?: () => boolean;
     } = {},
 ) {
+    const requestsAllowed = options.requestsAllowed ?? (() => answersInMeetingRequests());
     // While `LMA pause` is in effect nothing from the meeting is sent on: a
     // question is neither sent nor queued until `LMA start`.
     const paused = options.paused ?? (() => !details.start);
@@ -342,6 +345,11 @@ export function createChatAnswerer(
             return parsed.explicit
                 ? reply('questions in the chat need the Strands meeting assistant, which this deployment does not use.')
                 : noReply();
+        }
+        if (!requestsAllowed()) {
+            // Who may ask (inMeetingRequesters): this VP cannot tell the owner
+            // from a guest, so it answers only when anyone may.
+            return parsed.explicit ? reply(requestsNotAnsweredText()) : noReply();
         }
         if (paused()) {
             return parsed.explicit

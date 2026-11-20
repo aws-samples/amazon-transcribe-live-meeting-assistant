@@ -14,6 +14,18 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  MeetingEventBusName:
+    Type: String
+    Default: ""
+    Description: >-
+      Name of the LMA meeting event bus (docs/meeting-events.md), created in
+      the main stack. Empty when EnableMeetingEvents is false, which publishes
+      no meeting events.
+  MeetingEventBusArn:
+    Type: String
+    Default: ""
+    Description: ARN of the LMA meeting event bus; empty when it is not created.
+
   CallDataStream:
     Type: String
     Description: >-
@@ -296,6 +308,8 @@ Parameters:
       - internal-meetings-notify
       - regulated-consent-required
       - regulated-notify
+      - team-hosted-external
+      - customer-account
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built
@@ -639,6 +653,8 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # The main stack created the meeting event bus (EnableMeetingEvents).
+  ShouldPublishMeetingEvents: !Not [!Equals [!Ref MeetingEventBusArn, ""]]
   HasTroubleshootingAgent: !Not [!Equals [!Ref TroubleshootingAgentFunctionArn, ""]]
   HasCustomConfigPath: !Not [!Equals [!Ref CustomConfigPath, ""]]
   # The transcript knowledge base, whose entries a transcript deletion removes.
@@ -3041,6 +3057,16 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
+            # Live guidance runs, queued for meetings that have it on.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
+            # The whiteboards' assistant runs, queued for meetings that have it on.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsFunctionArn
             # The text of each key frame, read once it is stored.
             - Effect: Allow
               Action:
@@ -3055,6 +3081,18 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
+            # Meeting Started, Meeting Ended and Summary Ready: this bus only,
+            # and only events whose source is LMA's own.
+            - !If
+              - ShouldPublishMeetingEvents
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !Ref MeetingEventBusArn
+                Condition:
+                  StringEquals:
+                    "events:source": lma
+              - !Ref AWS::NoValue
             # Two senders share this grant: the event source mapping uses this
             # role to describe unprocessable batches to the on-failure
             # destination queue, and the function writes one message per record
@@ -3105,6 +3143,9 @@ Resources:
           # XXX add trace parameter or map
           POWERTOOLS_TRACE_DISABLED: false
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          # Meeting Started, Meeting Ended and Summary Ready go to this bus;
+          # empty publishes none (docs/meeting-events.md).
+          MEETING_EVENT_BUS_NAME: !Ref MeetingEventBusName
           STATE_DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
           COMPREHEND_LANGUAGE_CODE: !Ref ComprehendLanguageCode
           IS_SENTIMENT_ANALYSIS_ENABLED: !Ref IsSentimentAnalysisEnabled
@@ -3124,6 +3165,10 @@ Resources:
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt LambdaResolversStack.Outputs.SpeakerNameResolverFunctionArn
           TRANSCRIPT_DELETION_FUNCTION_ARN: !GetAtt TranscriptDeletionFunction.Arn
           AGENDA_DERIVER_ARN: !GetAtt LambdaResolversStack.Outputs.AgendaDeriverFunctionArn
+          # Live guidance runs; see docs/live-guidance.md.
+          LIVE_GUIDANCE_ANALYZER_ARN: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerFunctionArn
+          # The whiteboards' assistant; see docs/meeting-whiteboards.md.
+          MEETING_WHITEBOARDS_ARN: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsFunctionArn
           # Reads the text of each key frame once it is stored.
           KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Gives each stored chat attachment its title and summary.
@@ -4906,6 +4951,15 @@ Resources:
           # to record the failure on the meeting. Both functions stop at
           # Lambda's 900s maximum, so waiting one out in full is not possible.
           SUMMARY_READ_TIMEOUT: 780
+          # Summary Ready for a regenerated summary goes to this bus; empty
+          # publishes none (docs/meeting-events.md). Its publish counts are
+          # Embedded Metric Format records in the LMA stack's namespace.
+          MEETING_EVENT_BUS_NAME: !Ref MeetingEventBusName
+          METRIC_NAMESPACE: !Ref LMAStackName
+      # lma_events and lma_notifications. Pure Python, so compatible with this
+      # function's default architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       # The platform's own retries are off for this function. Its second leg is
       # an asynchronous invoke, which Lambda retries twice by default, and a
       # retry re-runs every model call for a summary already computed in the
@@ -4970,7 +5024,22 @@ Resources:
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallSummaryText"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallSummaryText"
+                  # The meeting's summary_ready notification.
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/publishMeetingNotification"
+              # Summary Ready: this bus only, and only events whose source is
+              # LMA's own.
+              - !If
+                - ShouldPublishMeetingEvents
+                - Effect: Allow
+                  Action:
+                    - events:PutEvents
+                  Resource: !Ref MeetingEventBusArn
+                  Condition:
+                    StringEquals:
+                      "events:source": lma
+                - !Ref AWS::NoValue
               # The configured summariser, plus this function itself for the
               # second leg of a run. Spelled out rather than taken from the
               # function resource, which would be circular.
@@ -5649,8 +5718,8 @@ Resources:
         - arm64
       CodeUri: ../source/lambda_functions/meeting_archive
       Description: >-
-        Lambda resolver that prepares a ZIP archive of a meeting's files, and
-        builds it in the background
+        Lambda resolver that prepares a ZIP archive of a meeting's files, or its
+        meeting export, and builds it in the background
       # The build streams every object, so it needs time rather than memory;
       # the memory buys network throughput.
       MemorySize: 1024
@@ -5663,7 +5732,14 @@ Resources:
           ARCHIVE_PREFIX: "lma-meeting-archives/"
           ADMIN_GROUP: "Admin"
           MAX_ARCHIVE_BYTES: "5368709120"
+          # The release the meeting export names (docs/meeting-export.md).
+          LMA_VERSION: !Ref BootstrapVersion
           LOG_LEVEL: !Ref LogLevel
+      # The meeting export names speakers, finds chat links and describes the
+      # consent record with the configuration layer's rules. Pure Python, so
+      # it does not pin an architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/MeetingArchiveFunction
@@ -5718,7 +5794,9 @@ Resources:
             Version: 2012-10-17
             Statement:
               # Reads only: the meeting row (access, recordings, summary,
-              # consent) and its transcript, key frame and attachment items.
+              # consent) and its transcript, key frame and attachment items,
+              # its notifications, whose guidance the meeting export holds, and
+              # its whiteboards, which the export and the archive hold.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -5731,6 +5809,8 @@ Resources:
                       - "trs#*"
                       - "kf#*"
                       - "att#*"
+                      - "nt#*"
+                      - "wb#*"
               # Reads of the meeting files an archive holds. The function
               # reads only the objects the meeting record and its items name,
               # inside the meeting's own folders.
@@ -6463,11 +6543,31 @@ Resources:
         LogLevel: !Ref LogLevel
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         VirtualParticipantTable: !Ref VirtualParticipantTable
         VirtualParticipantTableArn: !GetAtt VirtualParticipantTable.Arn
         VncEdgeTokenSigningSecret: !Ref VncEdgeTokenSigningSecret
         VPTaskRegistry: !Ref VPTaskRegistry
         VPTaskRegistryArn: !GetAtt VPTaskRegistry.Arn
+
+  # Virtual Participant Status Changed, read from the Virtual Participant
+  # table's stream. Only when the main stack created the meeting event bus.
+  MeetingEventsStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldPublishMeetingEvents
+    Properties:
+      TemplateURL: ../deployment/lma-ai-meeting-events.yaml
+      Parameters:
+        AIStackName: !Ref AWS::StackName
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        ConfigurationPythonLayer: !Ref ConfigurationPythonLayer
+        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
+        LMAStackName: !Ref LMAStackName
+        LogLevel: !Ref LogLevel
+        MeetingEventBusArn: !Ref MeetingEventBusArn
+        MeetingEventBusName: !Ref MeetingEventBusName
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        VirtualParticipantTableStreamArn: !GetAtt VirtualParticipantTable.StreamArn
 
   AppSyncDataSource:
     Type: AWS::AppSync::DataSource
@@ -6897,6 +6997,194 @@ Resources:
         #end
         #if( $ctx.result.errorType )
           $util.error($ctx.result.message, $ctx.result.errorType)
+        #end
+        $util.toJson($ctx.result)
+
+  # The meeting's summary profile, on the same resolver and access rule as its
+  # preparation, and the profiles a meeting may name. See
+  # docs/transcript-summarization.md#summary-profiles.
+  UpdateCallSummaryProfileAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallSummaryProfile
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # Live guidance on or off for a meeting, on the same resolver and access rule
+  # as its preparation. See docs/live-guidance.md.
+  UpdateCallGuidanceAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallGuidance
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # A digest of the meeting so far, made by the live guidance analyzer.
+  RequestMeetingDigestAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.LiveGuidanceAnalyzerLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: requestMeetingDigest
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $util.toJson($ctx.arguments),
+            "identity": $util.toJson($ctx.identity)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # A meeting's whiteboards, answered by the meeting whiteboards Lambda in the
+  # resolvers nested stack. The mutations answer through
+  # dDbPutCondition.response.vtl, which publishes SharedWith in the form the
+  # onMeetingWhiteboard and onUpdateCall filters match. See
+  # docs/meeting-whiteboards.md.
+  ListMeetingWhiteboardsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: listMeetingWhiteboards
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: getMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ListMeetingWhiteboardVersionsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Query
+      FieldName: listMeetingWhiteboardVersions
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: createMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  DeleteMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: deleteMeetingWhiteboard
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  UpdateCallWhiteboardsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallWhiteboards
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  RequestWhiteboardUpdateAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingWhiteboardsLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: requestWhiteboardUpdate
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  OnMeetingWhiteboardAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onMeetingWhiteboard
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  ListSummaryProfilesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Query
+      FieldName: listSummaryProfiles
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
 
@@ -9045,6 +9333,12 @@ Resources:
           $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
         #end
 
+        ## Live guidance for the meeting it creates (Boolean). Absent, the
+        ## deployment's Live guidance setting decides when the meeting starts.
+        #if(!$util.isNull($ctx.args.input.guidanceEnabled))
+          $util.qr($input.put("guidanceEnabled", $ctx.args.input.guidanceEnabled))
+        #end
+
         ## Optional meeting agenda, persisted for immediate and scheduled
         ## meetings alike. The VP container reads it from this row when it
         ## starts and puts it on the meeting record through its START event,
@@ -9065,13 +9359,16 @@ Resources:
         #end
 
         ## Optional meeting preparation (labels, audience, meetingContext,
-        ## checklist), checked and normalized by the pipeline's first function,
-        ## which put them in the stash. Read by the VP container when it starts,
-        ## like the agenda; an empty one is not stored.
+        ## checklist, summaryProfile), checked and normalized by the pipeline's
+        ## first function, which put them in the stash. Read by the VP container
+        ## when it starts, like the agenda; an empty one (or the default summary
+        ## profile) is not stored.
         #set($preparation = $util.defaultIfNull($ctx.stash.preparation, {}))
         #foreach($name in $util.defaultIfNull($preparation.present, []))
           #if(!$util.isNull($preparation.get($name)))
             $util.qr($input.put($name, $preparation.get($name)))
+          #else
+            $util.qr($input.remove($name))
           #end
         #end
 
@@ -11068,6 +11365,8 @@ Resources:
           VP_TABLE_NAME: !Ref VirtualParticipantTable
           MEETING_CONTROLS_FUNCTION: !Ref MeetingControlsResolverFunction
           SUMMARY_REGENERATOR_FUNCTION: !Ref SummaryRegeneratorFunction
+          # get_meeting_export: the meeting archive function builds the export.
+          MEETING_ARCHIVE_FUNCTION: !Ref MeetingArchiveFunction
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           # The release this stack runs, reported as the MCP server's
           # serverInfo.version (the UI shows the same value).
@@ -11118,12 +11417,21 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateScheduledVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/endVirtualParticipant"
                 # The meeting preparation tools' writes (meeting context,
-                # checklist, labels and audience).
+                # checklist, labels, audience and summary profile).
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallMeetingContext"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklist"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklistItem"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallLabels"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAudience"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallSummaryProfile"
+                # Live guidance on or off (update_meeting_metadata) and a digest
+                # on request (request_meeting_digest).
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallGuidance"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/requestMeetingDigest"
+                # The whiteboard tools' writes (create_meeting_whiteboard,
+                # update_meeting_whiteboard); their reads are Query fields.
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createMeetingWhiteboard"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateMeetingWhiteboard"
                 # Query/* covers getVirtualParticipant used by the new
                 # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
@@ -11136,6 +11444,7 @@ Resources:
               Resource:
                 - !GetAtt MeetingControlsResolverFunction.Arn
                 - !GetAtt SummaryRegeneratorFunction.Arn
+                - !GetAtt MeetingArchiveFunction.Arn
                 - !GetAtt AsyncAgentAssistOrchestrator.Arn
             - Effect: Allow
               Action:

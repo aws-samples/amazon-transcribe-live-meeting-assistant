@@ -67,6 +67,8 @@ export default defineConfig({
               slug: "meeting-context-and-checklist",
             },
             { label: "Meeting Notifications", slug: "meeting-notifications" },
+            { label: "Live Guidance", slug: "live-guidance" },
+            { label: "Meeting Whiteboards", slug: "meeting-whiteboards" },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript Deletion After the Summary",
@@ -136,6 +138,10 @@ export default defineConfig({
               slug: "privacy-and-data-handling",
             },
             {
+              label: "Hosting Models",
+              slug: "hosting-models",
+            },
+            {
               label: "Security Scanning (SRT)",
               slug: "security-scanning",
             },
@@ -155,6 +161,10 @@ export default defineConfig({
             {
               label: "Lambda Hook Functions",
               slug: "lambda-hook-functions",
+            },
+            {
+              label: "Meeting Lifecycle Events",
+              slug: "meeting-events",
             },
           ],
         },

@@ -67,6 +67,8 @@ import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
 import ChecklistPanel from './ChecklistPanel';
+import LiveGuidancePanel from './LiveGuidancePanel';
+import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
 import MeetingContextPanel from './MeetingContextPanel';
 import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
@@ -83,7 +85,14 @@ import MeetingAttributes from './MeetingAttributes';
 import MeetingAssistantPanel from './MeetingAssistantPanel';
 import useAssistantPanel from '../../hooks/use-assistant-panel';
 import { NodeSlot, useDetachedNode } from './NodeSlot';
-import { TAB_DETAILS, TAB_SCREEN_SHARE, TAB_SUMMARY, TAB_TRANSCRIPT } from './meeting-tabs';
+import {
+  TAB_DETAILS,
+  TAB_SCREEN_SHARE,
+  TAB_SUMMARY,
+  TAB_TRANSCRIPT,
+  TAB_WHITEBOARDS,
+  whiteboardsTabLabel,
+} from './meeting-tabs';
 import SummarySections from './SummarySections';
 import useMeetingTab from '../../hooks/use-meeting-tab';
 import useTranscriptTranslation from '../../hooks/use-transcript-translation';
@@ -148,6 +157,9 @@ import { meetingLanguages, segmentLanguageMark } from '../common/detected-langua
 import ChatSegment from '../chat-segment/ChatSegment';
 import { ChatAttachmentsContext } from '../chat-segment/ChatAttachments';
 import useChatAttachments, { ATTACHMENT_NOTE } from '../../hooks/use-chat-attachments';
+import useSummaryProfiles from '../../hooks/use-summary-profiles';
+import ActionItemsTable from './ActionItemsTable';
+import { RegenerateDialog, SummaryProfileSetting } from './SummaryProfileControls';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -250,8 +262,13 @@ export const CallSummary = ({
   omitSections = [],
   keyframes = 'image',
   onKeyframeSelect = undefined,
+  summaryProfiles = undefined,
+  onSummaryProfileChange = undefined,
 }) => {
   const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
+  // With a profile to choose, Regenerate asks which one to write the summary with.
+  const [choosingProfile, setChoosingProfile] = useState(false);
+  const profileChoice = (summaryProfiles || []).length > 1;
   // Local, and deliberately not the only source of progress: a second browser
   // tab, or another user, learns that a run is going from the stored state.
   const [starting, setStarting] = useState(false);
@@ -323,12 +340,13 @@ export const CallSummary = ({
     setStartError(null);
   }, [fingerprint]);
 
-  const startRegeneration = async () => {
+  const startRegeneration = async (summaryProfile = undefined) => {
     setConfirmReplace(false);
+    setChoosingProfile(false);
     setStartError(null);
     fingerprintAtStart.current = fingerprint;
     setStarting(true);
-    const result = await onRegenerate();
+    const result = summaryProfile ? await onRegenerate(summaryProfile) : await onRegenerate();
     if (!result?.Success) {
       // Said out loud rather than left as a stopped spinner: the commonest
       // refusals are "a run is already going" and "not permitted", and neither
@@ -339,6 +357,12 @@ export const CallSummary = ({
   };
 
   const handleRegenerateClick = () => {
+    // A profile to choose is asked for in one dialog, which also warns about a
+    // hand-edited summary.
+    if (profileChoice) {
+      setChoosingProfile(true);
+      return;
+    }
     // A hand-written summary is somebody's own work, and regenerating discards
     // it, so that case asks first. A generated one has nothing to lose.
     if (handEdited) {
@@ -456,11 +480,30 @@ export const CallSummary = ({
               )}
             </SpaceBetween>
           }
+          description={
+            summaryProfiles ? (
+              <SummaryProfileSetting
+                value={item.summaryProfile}
+                profiles={summaryProfiles}
+                onChange={onSummaryProfileChange}
+                readOnly={readOnly}
+              />
+            ) : undefined
+          }
         >
           Meeting Summary
         </Header>
       }
     >
+      {choosingProfile && (
+        <RegenerateDialog
+          profiles={summaryProfiles}
+          initial={item.summaryProfile || 'default'}
+          handEdited={handEdited}
+          onCancel={() => setChoosingProfile(false)}
+          onConfirm={(profile) => startRegeneration(profile)}
+        />
+      )}
       {/* Mounted only while it is wanted: Cloudscape renders a Modal's footer
           even when it is not visible, so a permanently mounted one leaves a
           second "Regenerate" button in the page for a click to land on. */}
@@ -510,6 +553,12 @@ export const CallSummary = ({
           empty={empty && !regenerating}
           canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
+      )}
+      {!editing && <ActionItemsTable items={item.actionItems} />}
+      {!editing && !regenerating && summaryState.actionItems === 'failed' && (
+        <Box variant="small" color="text-status-warning">
+          The action items could not be listed for this summary. Regenerate tries again.
+        </Box>
       )}
     </Container>
   );
@@ -1861,6 +1910,7 @@ export const CallPanel = ({
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
     sendUpdateMeetingPreparation,
+    sendRequestMeetingDigest,
   } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
@@ -1883,9 +1933,11 @@ export const CallPanel = ({
     });
 
   const regenerateCallSummaryForItem = useCallback(
-    () => sendRegenerateCallSummary(item.callId),
+    (summaryProfile) => sendRegenerateCallSummary(item.callId, summaryProfile),
     [item.callId, sendRegenerateCallSummary],
   );
+  // The summary profiles the meeting's summary panel offers.
+  const summaryProfiles = useSummaryProfiles(Boolean(sendRegenerateCallSummary || sendUpdateMeetingPreparation));
 
   // Presentation only -- it greys out controls the write would reject anyway.
   // The rule itself is enforced as a condition on the mutation (and, for the
@@ -2034,6 +2086,9 @@ export const CallPanel = ({
     setKeyframes({ count: 0, more: false, loaded: false });
   }, [item.callId]);
   const hasKeyframes = keyframes.count > 0;
+  // The meeting's whiteboards, kept current by their own subscription; held
+  // here so the tab's label can count them. See docs/meeting-whiteboards.md.
+  const whiteboards = useMeetingWhiteboards(item.callId);
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
   // Opening the live view also opens the tab it is on, wherever it was asked for.
   const setVncPreview = useCallback(
@@ -2570,6 +2625,16 @@ export const CallPanel = ({
     onShowTime: (seconds) => showInTranscript(seconds, { reveal: true }),
   };
   const hasChecklist = Array.isArray(item.checklist) && item.checklist.length > 0;
+  // Live guidance, beside the checklist it reads. See docs/live-guidance.md.
+  const liveGuidancePanel = (
+    <LiveGuidancePanel
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      isLive={isLive}
+      onToggle={savePreparation ? (enabled) => savePreparation('guidance', { GuidanceEnabled: enabled }) : undefined}
+      onRequestDigest={sendRequestMeetingDigest ? () => sendRequestMeetingDigest(item.callId) : undefined}
+    />
+  );
   // eslint-disable-next-line react/jsx-props-no-spreading
   const checklistPanel = <ChecklistPanel {...checklistProps} />;
   // The checklist again at the top of the Transcript tab, where a live meeting
@@ -2604,6 +2669,12 @@ export const CallPanel = ({
           // share tab when the meeting has one, and otherwise opens it full size.
           keyframes="image"
           onKeyframeSelect={hasKeyframes ? showKeyframe : undefined}
+          summaryProfiles={summaryProfiles}
+          onSummaryProfileChange={
+            savePreparation
+              ? (name) => savePreparation('summaryProfile', { SummaryProfile: name === 'default' ? null : name })
+              : undefined
+          }
         />
         {sideColumn && (
           <SpaceBetween size="l">
@@ -2613,6 +2684,7 @@ export const CallPanel = ({
         )}
       </Grid>
       {contextPanel}
+      {liveGuidancePanel}
       {checklistPanel}
       {enableSentimentAnalysis && (
         <Grid gridDefinition={[{ colspan: 12 }]}>
@@ -2645,6 +2717,7 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
+      {isLive && liveGuidancePanel}
       {transcriptChecklist}
       <CallTranscriptContainer
         item={item}
@@ -2735,6 +2808,18 @@ export const CallPanel = ({
   const tabs = [
     { id: TAB_SUMMARY, label: 'Summary', content: summaryTab, contentRenderStrategy: 'eager' },
     { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
+    {
+      id: TAB_WHITEBOARDS,
+      label: whiteboardsTabLabel(whiteboards.items.length),
+      content: (
+        <WhiteboardsTab
+          whiteboards={whiteboards}
+          readOnly={speakerNamesReadOnly}
+          assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
+        />
+      ),
+      contentRenderStrategy: 'eager',
+    },
     ...(hasKeyframes
       ? [
           {

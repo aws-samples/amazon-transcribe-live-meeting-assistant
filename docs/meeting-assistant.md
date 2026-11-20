@@ -12,8 +12,11 @@ title: "Meeting Assistant"
   - [Wake Phrase](#wake-phrase)
   - [Chat Interface](#chat-interface)
   - [Chat Shortcut Buttons](#chat-shortcut-buttons)
+  - [Live Guidance](#live-guidance)
 - [Built-in Tools](#built-in-tools)
   - [In-meeting requests](#in-meeting-requests)
+  - [Who may ask](#who-may-ask)
+  - [Web search and MCP servers](#web-search-and-mcp-servers)
   - [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one)
   - [Skills](#skills)
 - [Assistant Instructions](#assistant-instructions)
@@ -62,6 +65,10 @@ Each token is published through the `addChatToken` AppSync mutation and delivere
 
 Pre-configured suggestion buttons appear in the chat panel, allowing users to trigger common queries with a single click. These buttons are configurable by administrators via the LMA UI settings. See [Chat Shortcut Button Configuration](#chat-shortcut-button-configuration) for details.
 
+### Live Guidance
+
+The assistant can also offer guidance without being asked. With [live guidance](live-guidance.md) on for a meeting, it reads the meeting as it goes, marks checklist items covered with evidence from the transcript, and offers the people running the meeting short guidance (a question to ask, a topic not yet covered, something to clarify, a risk to probe, an action with no owner or date, a time check) in the meeting page's Notifications drawer. It is off unless it is turned on, and is never posted to the meeting chat or spoken.
+
 ## Built-in Tools
 
 The Meeting Assistant has access to the following tools. A request made in the meeting — the meeting chat, the voice assistant or the wake phrase — is offered only `current_meeting_transcript`, `get_meeting_agenda`, `get_meeting_frames` and `get_chat_attachments` unless **Meeting Assistant › In-meeting requests** offers more; see [In-meeting requests](#in-meeting-requests).
@@ -83,7 +90,7 @@ The Meeting Assistant has access to the following tools. A request made in the m
 
 ### In-meeting requests
 
-The meeting assistant is asked for things in two ways. The **meeting page's chat** is used by the signed-in LMA user, and is always offered every tool above, acting for that user. An **in-meeting request** is made in the meeting by whoever is in it, and its answer reaches the meeting:
+The meeting assistant is asked for things in two ways. The **meeting page's chat** is used by the signed-in LMA user, and is offered every tool above, acting for that user, except a tool turned off for every request (see [Web search and MCP servers](#web-search-and-mcp-servers)). An **in-meeting request** is made in the meeting by whoever is in it, and its answer reaches the meeting:
 
 | In-meeting request | Where the answer goes |
 |---|---|
@@ -117,6 +124,54 @@ Admin who sets it to `allowed` offers `get_meeting_context` and
 `get_meeting_checklist` to requests made in the meeting too, whose answers are
 then posted or spoken for everyone there. See
 [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md#requests-made-in-the-meeting).
+
+### Who may ask
+
+**Meeting Assistant › In-meeting requests: who may ask**
+(`meeting_assist.inMeetingRequesters`) decides whether a request made in the
+meeting is answered at all. The meeting page's own chat is never affected.
+
+| Value | What is answered |
+|---|---|
+| **Anyone** (`anyone`, the default) | Every in-meeting request, as **In-meeting requests** above allows. |
+| **Owner only** (`owner_only`) | Only a request spoken with the wake phrase on the LMA user's own microphone, in a meeting streamed from Stream Audio, the Desktop Capture App or the browser extension, which capture that microphone as a channel of its own (`LOCAL`). Nothing else is answered: no question typed in the meeting chat, no request spoken in a meeting a Virtual Participant captures, and no wake phrase on the meeting audio. A Virtual Participant does not start its voice assistant. |
+| **Off** (`off`) | No request made in the meeting, on any capture method. A Virtual Participant does not start its voice assistant. |
+
+A Virtual Participant cannot tell the meeting's owner from a guest. It knows a
+chat sender only by the display name the meeting shows, which a guest who joins
+without signing in types themselves, and on the Teams browser join off the
+light-meetings client it sees no sender at all. It knows a speaker only by a
+diarization label. On a meeting it captures, the `LOCAL` channel is its own
+voice assistant's speech, not the owner's microphone. So under **Owner only** it
+answers nothing, as under **Off**. A deployment where only the owner may ask,
+and where meetings are joined by a Virtual Participant, should use **Off**.
+
+A request that is not answered gets a fixed reply, without a model call: a
+question typed in the chat with `LMA ask` is answered in the chat with a line
+saying that questions in the chat are not answered here (an `@LMA` aside is left
+alone), and a wake phrase gets the same line in the transcript. The meeting
+assistant applies the setting to every request it is sent, read within about
+five minutes of a change; a Virtual Participant reads it when it starts, to
+decide whether to start its voice assistant and whether to send questions from
+the chat on at all.
+
+### Web search and MCP servers
+
+Two switches in the Meeting Assistant section turn a kind of tool off for every
+request, the meeting page's chat included. Both are on by default.
+
+- **Web search** (`meeting_assist.webSearchEnabled`): off, `web_search` is
+  offered to no request, whatever **In-meeting requests** says and whether or
+  not the stack has a Tavily API key.
+- **MCP servers** (`meeting_assist.mcpServersEnabled`): off, none of the
+  servers installed on the [MCP Servers](mcp-servers.md) page is connected to
+  or offered, for any request and on the function's keep-warm pings, whatever
+  each server's own setting under **Tool selection** says. The servers stay
+  installed. LMA's own MCP server, through which other applications reach LMA,
+  is not affected.
+
+A request that would otherwise have been offered one of them is told it is
+turned off on this deployment, so that the assistant says so rather than trying.
 
 ### Choosing MCP servers one by one
 
@@ -283,7 +338,7 @@ Shortcut buttons are shared across all users and appear in the chat interface fo
 
 The `web_search` tool enables the Meeting Assistant to search the web for current information during meetings. This tool is powered by Tavily.
 
-To enable web search, set the **TavilyApiKey** CloudFormation parameter to your Tavily API key. Without a valid API key, the `web_search` tool will not be available to the assistant.
+To enable web search, set the **TavilyApiKey** CloudFormation parameter to your Tavily API key. Without a valid API key, the `web_search` tool will not be available to the assistant. With a key, **Meeting Assistant › Web search** on the Configuration page still turns it off for every request; see [Web search and MCP servers](#web-search-and-mcp-servers).
 
 ### Where the key is stored
 
@@ -329,6 +384,7 @@ See [Integration Credentials](infrastructure-and-security.md#rotating-a-credenti
 
 ## Related Documentation
 
+- [Live Guidance](live-guidance.md)
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
 - [MCP Servers](mcp-servers.md)
 - [Transcript Summarization](transcript-summarization.md)

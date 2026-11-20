@@ -46,10 +46,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
+
+# From the configuration layer: Summary Ready on the stack's meeting event bus,
+# and the in-app notification beside it (docs/meeting-events.md).
+import lma_events  # pylint: disable=import-error
 import requests
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.auth import SigV4Auth
@@ -136,6 +141,12 @@ TRIGGER_MEETING_END = "meeting-end"
 MEETING_END_PATIENCE_SECONDS = 600
 
 DESERIALIZER = TypeDeserializer()
+
+# A summary profile name, as the summary_profiles configuration section holds
+# its keys (lma_summary_profiles.PROFILE_NAME in the configuration layer, which
+# this function does not carry). Whether the profile exists is the summariser's
+# to find: one that does not is summarised with the default and recorded so.
+PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 dynamodb = boto3.client("dynamodb")
 lambda_client = boto3.client(
@@ -391,6 +402,18 @@ _CALL_FIELDS = """
         UpdatedAt
       }
       ChecklistUpdatedAt
+      SummaryProfile
+      GuidanceEnabled
+      WhiteboardsEnabled
+      ActionItems {
+        Text
+        Owner
+        DueDate
+        DueText
+        StartTime
+        SegmentId
+      }
+      MeetingPlatform
       Status
       UpdatedAt
       CreatedAt
@@ -423,7 +446,7 @@ _CALL_FIELDS = """
 """
 
 
-def write_summary(call_id, text=None, state=None):
+def write_summary(call_id, text=None, state=None, action_items=None):
     """Store the text and/or the state through AppSync.
 
     Through AppSync rather than straight to DynamoDB so that `onUpdateCall`
@@ -442,6 +465,9 @@ def write_summary(call_id, text=None, state=None):
     variables = {"input": {"CallId": call_id}}
     if text is not None:
         variables["input"]["CallSummaryText"] = text
+        # Only with the text they were listed with; [] clears a previous list.
+        if action_items is not None:
+            variables["input"]["ActionItems"] = action_items
     if state is not None:
         variables["input"]["CallSummaryState"] = json.dumps(state)
     payload = json.dumps({"query": query, "variables": variables})
@@ -478,7 +504,7 @@ def write_summary(call_id, text=None, state=None):
     raise RuntimeError(f"updateCallSummaryText could not be reached: {last_error}")
 
 
-def invoke_summary_function(call_id):
+def invoke_summary_function(call_id, summary_profile=None):
     """Run the configured summariser over the meeting's current transcript.
 
     A CallId and a request to re-read configuration, and nothing else. That is
@@ -496,19 +522,103 @@ def invoke_summary_function(call_id):
     field can ignore it; one that validates its input against a fixed schema has
     to allow it, which docs/transcript-summarization.md says.
     """
+    payload = {"CallId": call_id, "RefreshConfiguration": True}
+    if summary_profile:
+        # A choice made for this run; the meeting's own SummaryProfile otherwise.
+        payload["SummaryProfile"] = summary_profile
     response = lambda_client.invoke(
         FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,
         InvocationType="RequestResponse",
-        Payload=json.dumps({"CallId": call_id, "RefreshConfiguration": True}),
+        Payload=json.dumps(payload),
     )
     body = json.loads(response["Payload"].read().decode("utf-8"))
     if not isinstance(body, dict):
         raise RuntimeError("the summary function did not return a JSON object")
-    return body.get("summary")
+    return body
 
 
-def start(call_id, identity, self_arn):
+# BEGIN action_item_input -- one text in the orchestrator and the regenerator;
+# lma-ai-stack/test/test_summary_regeneration.py holds the copies to each other.
+#: The fields of an ActionItemInput, and the most items stored with a summary.
+ACTION_ITEM_TEXT_FIELDS = ("Owner", "DueDate", "DueText", "SegmentId")
+MAX_ACTION_ITEMS = 50
+
+
+def action_item_input(items):
+    """A summary function's action items as ActionItemInput accepts them.
+
+    A summary function may be a customer's own, so its list is not trusted:
+    only the six fields of an ActionItemInput are kept, an item without text is
+    dropped, and a field of the wrong type is null. A list this leaves empty is
+    an empty list, which clears an earlier one, and never fails the write of
+    the summary it came with.
+    """
+    kept = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("Text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        entry = {"Text": text.strip()[:500]}
+        for field in ACTION_ITEM_TEXT_FIELDS:
+            value = item.get(field)
+            entry[field] = value[:500] if isinstance(value, str) and value else None
+        start = item.get("StartTime")
+        is_number = isinstance(start, (int, float)) and not isinstance(start, bool)
+        entry["StartTime"] = float(start) if is_number else None
+        kept.append(entry)
+        if len(kept) >= MAX_ACTION_ITEMS:
+            break
+    return kept
+
+
+# END action_item_input
+
+
+def chosen_profile(value):
+    """A regeneration's profile choice: None for the meeting's own; ValueError if malformed."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("SummaryProfile is not a summary profile name")
+    name = value.strip()
+    if name != "default" and not PROFILE_NAME.match(name):
+        raise ValueError("SummaryProfile is not a summary profile name")
+    return name
+
+
+def outcome_extras(body, meeting):
+    """What a run's answer adds to the stored result: the state's profile fields,
+    and the action items to write with the text (None to leave them as they are).
+
+    A summary that comes with no list -- from a profile that lists no action
+    items, or one whose list could not be made -- clears a list a previous
+    summary left, so the stored items always belong to the stored text.
+    """
+    state = {}
+    if isinstance(body.get("summaryProfile"), str):
+        state["profile"] = body["summaryProfile"]
+    if isinstance(body.get("summaryProfileFallback"), str):
+        state["requestedProfile"] = body["summaryProfileFallback"]
+    if body.get("actionItemsStatus") in ("generated", "failed"):
+        state["actionItems"] = body["actionItemsStatus"]
+    items = body.get("actionItems")
+    if isinstance(items, list):
+        action_items = action_item_input(items)
+    else:
+        # No list: from a profile that lists none, or a list that failed. Either
+        # way an earlier list does not stay under the new text.
+        action_items = [] if meeting.get("ActionItems") else None
+    return state, action_items
+
+
+def start(call_id, identity, self_arn, summary_profile=None):
     """Accept a regeneration request and hand the work to the second leg."""
+    try:
+        summary_profile = chosen_profile(summary_profile)
+    except ValueError as error:
+        return {"Success": False, "Message": str(error)}
     meeting = read_meeting(call_id)
     if meeting is None:
         return {"Success": False, "Message": "no such meeting"}
@@ -548,7 +658,13 @@ def start(call_id, identity, self_arn):
     starter_client.invoke(
         FunctionName=self_arn,
         InvocationType="Event",
-        Payload=json.dumps({"CallId": call_id, "Trigger": "regenerate"}),
+        Payload=json.dumps(
+            {
+                "CallId": call_id,
+                "Trigger": "regenerate",
+                **({"SummaryProfile": summary_profile} if summary_profile else {}),
+            }
+        ),
     )
     try:
         # The previous source is carried through so that, if the run fails, the
@@ -570,7 +686,7 @@ def start(call_id, identity, self_arn):
     return {"Success": True, "Message": "regenerating the summary"}
 
 
-def run(call_id):
+def run(call_id, summary_profile=None):
     """Do the summarisation and write whatever came of it."""
     now = datetime.now(timezone.utc).isoformat()
     # Re-read rather than trusting what the first leg saw: the two legs are
@@ -584,8 +700,10 @@ def run(call_id):
     previous_source = state.get("source") or SOURCE_GENERATED
     was_live = meeting.get("Status") != STATUS_MEETING_ENDED
 
+    body = {}
     try:
-        summary = invoke_summary_function(call_id)
+        body = invoke_summary_function(call_id, summary_profile)
+        summary = body.get("summary")
     except Exception:  # noqa: BLE001 - recorded for the user, see below
         # Logged in full here; what reaches the browser is the sentence written
         # into the state below, rather than Lambda and model-service internals.
@@ -656,13 +774,38 @@ def run(call_id):
             )
         return {"ok": False, "reason": "superseded"}
 
-    write_summary(
+    profile_state, action_items = outcome_extras(body, meeting)
+    stored = write_summary(
         call_id,
         text=summary,
-        state={"source": SOURCE_GENERATED, "status": STATUS_IDLE, "updatedAt": now},
+        state={
+            "source": SOURCE_GENERATED,
+            "status": STATUS_IDLE,
+            "updatedAt": now,
+            **profile_state,
+        },
+        action_items=action_items,
     )
     LOGGER.info("Regenerated the summary for %s", call_id)
+    announce_summary_ready(call_id, stored)
     return {"ok": True}
+
+
+def announce_summary_ready(call_id, stored):
+    """Summary Ready on the meeting event bus, and the in-app notification.
+
+    From the meeting as the write answered it, which carries every field the
+    event takes. Neither may fail the run: the summary is stored, and both
+    helpers log and count their own failures rather than raising.
+    """
+    try:
+        meeting = ((stored or {}).get("data") or {}).get("updateCallSummaryText") or {
+            "CallId": call_id
+        }
+        lma_events.publish(lma_events.SUMMARY_READY, lma_events.summary_detail(meeting))
+        lma_events.notify_summary_ready(call_id, regenerated=True)
+    except Exception:  # noqa: BLE001 - see the docstring
+        LOGGER.exception("Could not announce the regenerated summary for %s", call_id)
 
 
 def handler(event, context):
@@ -689,10 +832,12 @@ def handler(event, context):
         # function's EventInvokeConfig sets MaximumRetryAttempts to 0, because
         # re-entering here would pay for another set of model calls for a
         # summary this frame had already computed.
-        return run(call_id)
+        return run(call_id, event.get("SummaryProfile"))
 
     try:
-        return start(call_id, identity, context.invoked_function_arn)
+        return start(
+            call_id, identity, context.invoked_function_arn, arguments.get("SummaryProfile")
+        )
     except Exception:  # noqa: BLE001 - reported to the caller, see below
         LOGGER.exception("Could not start a summary regeneration for %s", call_id)
         return {"Success": False, "Message": "could not start regenerating the summary"}

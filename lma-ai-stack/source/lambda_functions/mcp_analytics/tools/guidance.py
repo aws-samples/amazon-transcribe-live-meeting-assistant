@@ -2,7 +2,7 @@
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
-"""Tools: push_meeting_guidance and list_meeting_guidance.
+"""Tools: push_meeting_guidance, list_meeting_guidance and request_meeting_digest.
 
 Guidance is a short note an external agent leaves on a meeting for the people
 following it in LMA: "the customer asked about pricing twice; the 2026 price
@@ -16,7 +16,14 @@ with the meeting's transcript.
 push publishes through lma_notifications.publish_meeting_notification, whose
 resolver puts the meeting's Owner and SharedWith on the published message.
 list reads the meeting's guidance, newest first, with the same query as
-list_meeting_notifications, so it includes guidance from other publishers.
+list_meeting_notifications, so it includes guidance from other publishers: the
+live guidance analyzer's items among them (source ``live-guidance``).
+
+request_meeting_digest asks the live guidance analyzer, through the
+requestMeetingDigest mutation sent with this function's role once
+``require_meeting`` has checked the caller, for a digest of the meeting so far,
+which it publishes as a guidance item of type ``meeting_digest`` and returns.
+See docs/live-guidance.md.
 """
 
 from typing import Any, Dict, Optional
@@ -37,6 +44,17 @@ MAX_LIST_LIMIT = 200
 SOURCE = "mcp"
 # The type within the guidance category of a note pushed over MCP.
 NOTE_TYPE = "note"
+
+REQUEST_MEETING_DIGEST = """
+mutation RequestMeetingDigest($callId: ID!) {
+  requestMeetingDigest(CallId: $callId) {
+    Success
+    Message
+    Text
+    NotificationId
+  }
+}
+"""
 
 
 def _text(value: Any, field: str, limit: int, required: bool) -> Optional[str]:
@@ -128,4 +146,19 @@ def list_items(caller: Caller, meeting_id: str, limit: Any = None) -> Dict[str, 
         "guidance": items,
         "count": len(items),
         "hasMore": bool(page.get("NextToken")),
+    }
+
+
+def request_digest(caller: Caller, meeting_id: str) -> Dict[str, Any]:
+    """A digest of the meeting so far, published to its notifications and returned."""
+    meeting = require_meeting(meeting_id, caller)
+    call_id = meeting.get("CallId") or meeting_id.strip()
+    result = graphql(REQUEST_MEETING_DIGEST, {"callId": call_id}).get("requestMeetingDigest") or {}
+    if not result.get("Success"):
+        raise ValueError(result.get("Message") or "The digest could not be made just now")
+    return {
+        "meetingId": call_id,
+        "digest": result.get("Text"),
+        "guidanceId": result.get("NotificationId"),
+        "delivered": "Shown on the meeting page to its owner and the people it is shared with.",
     }

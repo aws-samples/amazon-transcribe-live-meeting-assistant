@@ -59,6 +59,7 @@ client connects, and the API key scopes, are in
 | `get_meeting_summary` | no | |
 | `get_meeting_transcript` | no | |
 | `get_meeting_record` | no | its `consent` section (with the evidence images): owner and Admin |
+| `get_meeting_export` | no | |
 | `get_meeting_cost` | no | |
 | `get_meeting_agenda` | no | |
 | `get_meeting_context` | no | |
@@ -68,6 +69,9 @@ client connects, and the API key scopes, are in
 | `list_virtual_participants` | no | |
 | `list_meeting_guidance` | no | |
 | `list_meeting_notifications` | no | |
+| `list_summary_profiles` | no | |
+| `list_meeting_whiteboards` | no | |
+| `get_meeting_whiteboard` | no | |
 | `schedule_meeting` | yes | the caller schedules for themselves |
 | `start_meeting_now` | yes | the caller starts it for themselves |
 | `update_scheduled_meeting` | yes | the Virtual Participant's owner and Admin |
@@ -78,13 +82,16 @@ client connects, and the API key scopes, are in
 | `update_meeting_metadata` | yes | |
 | `share_meeting` | yes | owner and Admin |
 | `push_meeting_guidance` | yes | |
+| `request_meeting_digest` | yes | |
+| `create_meeting_whiteboard` | yes | |
+| `update_meeting_whiteboard` | yes | |
 | `ask_meeting_assistant` | yes | |
 | `regenerate_meeting_summary` | yes | |
 | `end_meeting` | yes | the Virtual Participant's owner and Admin |
 | `end_virtual_participant` | yes | the Virtual Participant's owner and Admin |
 | `delete_meeting` | yes | owner and Admin |
 
-That is 29 tools. The examples below show the `arguments` of a `tools/call`
+That is 36 tools. The examples below show the `arguments` of a `tools/call`
 request and the JSON of the answer, shortened where marked.
 
 ## Before the meeting
@@ -97,8 +104,11 @@ optional and checked with the limits in
 [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md#limits):
 `labels` (an object of key to value), `audience` (`internal` or `external`),
 `context` (Markdown), `checklist` (items of `itemId`, `text`, `kind`, and
-optionally `priority` and `source`; each starts `open`) and `shareWith` (email
-addresses). The Virtual Participant stores them and puts them on the meeting
+optionally `priority` and `source`; each starts `open`), `summaryProfile` (the
+[summary profile](transcript-summarization.md#summary-profiles) the meeting is
+summarized with, from `list_summary_profiles`), `guidance` (true or false:
+[live guidance](live-guidance.md) for the meeting; omitted, the deployment's
+setting decides) and `shareWith` (email addresses). The Virtual Participant stores them and puts them on the meeting
 when it creates it; the meeting is then shared with the `shareWith` addresses.
 The Virtual Participant itself is not shared. Calling it again for a meeting
 already scheduled updates that Virtual Participant
@@ -152,8 +162,8 @@ joined; its answer then carries the LMA `meetingId` the meeting tools take.
 
 Changes a Virtual Participant that waits for its scheduled launch: any of
 `scheduledTime`, `meetingName`, `agenda`, `labels`, `audience`, `context`,
-`checklist` and `shareWith`. Each one given replaces that setting, and an empty
-value removes it. It is refused within 5 minutes of the start ("starts in less
+`checklist`, `summaryProfile`, `guidance` and `shareWith`. Each one given replaces that
+setting, and an empty value removes it. It is refused within 5 minutes of the start ("starts in less
 than 5 minutes, so it can no longer be changed"), and a new time must be at least
 5 minutes away. Once the Virtual Participant has started, change the meeting
 with the meeting tools instead.
@@ -301,14 +311,90 @@ the meeting assistant does not change it afterwards.
 ### update_meeting_metadata
 
 Replaces the meeting's labels (`{}` clears them), sets its audience (`""`
-clears it), or both. Answers `{labels, audience}`.
+clears it), sets its `summaryProfile` (`default` or `""` for the default),
+turns its [live guidance](live-guidance.md) on or off (`guidance`, true or
+false), or any of them. Answers `{labels, audience, summaryProfile, guidance}`.
+A summary profile the configuration does not hold is refused, with the names it
+does.
 
 ```json
-{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external"}
+{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session"}
 ```
 
 ```json
-{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "updatedAt": "2026-12-01T15:31:00Z"}
+{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session", "updatedAt": "2026-12-01T15:31:00Z"}
+```
+
+### request_meeting_digest
+
+Makes a short digest of a meeting so far (a summary, what is covered and still
+open, the decisions and the actions) and publishes it to the meeting's
+notifications as guidance of type `meeting_digest`, for the people who can see
+the meeting. Answers with its text. One model call, billed to the meeting; see
+[Live Guidance](live-guidance.md#the-digest).
+
+```json
+{"meeting_id": "e3b9…"}
+```
+
+```json
+{"meetingId": "e3b9…", "digest": "The renewal price and term are agreed. …\n\n**Still open**\n- Who signs off on the budget", "guidanceId": "6f0c…", "delivered": "Shown on the meeting page to its owner and the people it is shared with."}
+```
+
+### list_meeting_whiteboards, get_meeting_whiteboard
+
+A meeting's [whiteboards](meeting-whiteboards.md): named panels, each Markdown or a
+diagram in a subset of Mermaid, that the assistant can keep up to date during the
+meeting and its people can edit. `list_meeting_whiteboards` gives them without their
+panels. `get_meeting_whiteboard` gives one with its panels, each marked `source`
+`user` or `assistant`, or an earlier `version`. Pass `ifNewerThan` with the version
+you have to poll cheaply, and `format: "markdown"` for one Markdown document.
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "ifNewerThan": 7}
+```
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "version": 7, "notModified": true}
+```
+
+### create_meeting_whiteboard, update_meeting_whiteboard
+
+Make a whiteboard from a `template` (`decisions`, `process`, `comparison`, `timeline`
+or `blank`) or with the `panels` given, or change one. An update names the
+`baseVersion` it was made from, is refused if the whiteboard has moved on since, and
+takes the whole new list of `panels`. A panel the tool writes or changes is recorded
+as the caller's (`source: user`), so the assistant does not change it afterwards; send
+a panel with `source: "assistant"` to hand it to the assistant. Read-write key only.
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "baseVersion": 7,
+ "panels": [{"panelId": "decisions", "title": "Decisions", "content": "- Launch on March 4"}]}
+```
+
+```json
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "title": "Plan", "version": 8, "panels": [{"panelId": "decisions", "title": "Decisions", "kind": "markdown", "content": "- Launch on March 4", "source": "user", "updatedBy": "user@example.com", "updatedAt": "…"}], "…": "…"}
+```
+
+### list_summary_profiles
+
+The summary profiles a meeting can be summarized with, `default` first: each
+one's `name` (the value `summaryProfile` takes), `label`, `description` and
+whether it lists `structuredActionItems`. See
+[Summary Profiles](transcript-summarization.md#summary-profiles).
+
+```json
+{}
+```
+
+```json
+{
+  "profiles": [
+    {"name": "default", "label": "Default", "description": "The Transcript Summary sections on the Configuration page.", "structuredActionItems": false},
+    {"name": "discovery-session", "label": "Discovery session", "description": "For discovery workshops …", "structuredActionItems": true}
+  ],
+  "default": "default"
+}
 ```
 
 ### end_virtual_participant
@@ -393,6 +479,48 @@ meeting's owner and Admins.
   ],
   "evidence": {"exists": true, "count": 2}
 }
+```
+
+### get_meeting_export
+
+One structured record of the meeting, the [meeting export](meeting-export.md)
+(`schemaVersion` 1). `include` lists the parts to add: `transcript`, `chat`,
+`summary`, `checklist`, `consent`, `actionItems`, `keyframes` and `guidance`,
+all of them by default. A large export is answered with
+`{exportUrl, expiresAt, sizeBytes}` instead: a link to it, signed for ten
+minutes.
+
+```json
+{"meetingId": "e3b9…", "include": ["summary", "actionItems", "checklist"]}
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-12-01T16:05:00Z",
+  "lmaVersion": "0.4.1",
+  "meeting": {"meetingId": "e3b9…", "name": "Website relaunch review", "summaryProfile": "discovery-session", "transcriptRetained": true, "…": "…"},
+  "agenda": {"text": "Status\nBudget\nNext steps", "source": "mcp"},
+  "context": "Goal: agree the launch budget.",
+  "summary": {"profile": "discovery-session", "source": "generated", "sections": [{"key": "DECISIONS", "label": "Decisions", "markdown": "…"}]},
+  "actionItems": [{"text": "Send the budget", "owner": "Dana", "dueDate": "2026-12-08", "dueText": "next Tuesday", "startTime": 1832.5, "segmentId": "…"}],
+  "checklist": [{"itemId": "q1", "text": "Who owns the budget?", "status": "covered", "…": "…"}]
+}
+```
+
+### regenerate_meeting_summary
+
+Generates the summary again; the new summary replaces the current one when it
+finishes. `summaryProfile` writes this summary with another
+[summary profile](transcript-summarization.md#summary-profiles); the meeting's
+own profile is not changed.
+
+```json
+{"meetingId": "e3b9…", "summaryProfile": "discovery-session"}
+```
+
+```json
+{"meetingId": "e3b9…", "started": true, "summaryProfile": "discovery-session", "message": "A new summary is being generated. …"}
 ```
 
 ## Server version

@@ -47,6 +47,7 @@ const ARCHIVE_LABELS = {
   EVERYTHING: 'Everything',
   KEY_FRAMES: 'Key frames',
   CHAT_ATTACHMENTS: 'Chat attachments',
+  EXPORT: 'Meeting export',
 };
 
 const MeetingDownloadMenu = ({

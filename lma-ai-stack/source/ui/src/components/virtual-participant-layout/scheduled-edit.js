@@ -10,6 +10,7 @@
 
 import { vpPreparationChanges, vpPreparationForm } from '../common/meeting-preparation';
 import { meetingConsentInput } from './meeting-consent-options';
+import { guidanceChoiceOf, guidanceEditInput } from './guidance-options';
 import {
   EDIT_MIN_LEAD_MINUTES,
   browserTimeZone,
@@ -50,6 +51,7 @@ export const editFormFrom = (vp) => ({
     preparation: vpPreparationForm(vp),
   },
   consentChoice: consentChoiceOf(vp),
+  guidanceChoice: guidanceChoiceOf(vp),
   // Absent on rows the form did not write: the launch default is on.
   enableVideoRecording: vp.enableVideoRecording !== false,
   useZoomLogin: vp.useStoredZoomAccount === true,
@@ -62,7 +64,7 @@ export const editFormFrom = (vp) => ({
  */
 export const scheduledEditInput = (
   vp,
-  { form, consentChoice, enableVideoRecording, useZoomLogin },
+  { form, consentChoice, guidanceChoice = undefined, enableVideoRecording, useZoomLogin },
   { zoomChoiceOffered },
 ) => {
   const input = {};
@@ -101,6 +103,9 @@ export const scheduledEditInput = (
     input.consentMode = consent.consentMode || '';
     if (consent.consentRule) input.consentRule = consent.consentRule;
   }
+
+  // Live guidance: sent when changed, and null to go back to the deployment's setting.
+  if (guidanceChoice !== undefined) Object.assign(input, guidanceEditInput(guidanceChoice, vp));
 
   if (enableVideoRecording !== (vp.enableVideoRecording !== false)) {
     input.enableVideoRecording = enableVideoRecording;

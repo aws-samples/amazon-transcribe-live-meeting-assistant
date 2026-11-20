@@ -140,6 +140,23 @@ describe('the Virtual Participant forms', () => {
     expect(vpPreparationChanges({ ...form, meetingContext: ' ' }, VP)).toEqual({ meetingContext: '' });
   });
 
+  it('send a summary profile only when one other than the default is chosen', () => {
+    expect(vpPreparationInput({ ...vpPreparationForm(VP), summaryProfile: 'discovery-session' })).toEqual({
+      ...VP,
+      summaryProfile: 'discovery-session',
+    });
+    expect(vpPreparationInput({ ...vpPreparationForm(VP), summaryProfile: 'default' })).toEqual(VP);
+    const scheduled = { ...VP, summaryProfile: 'discovery-session' };
+    const form = vpPreparationForm(scheduled);
+    expect(form.summaryProfile).toBe('discovery-session');
+    expect(vpPreparationChanges(form, scheduled)).toEqual({});
+    // Back to the default: sent empty, which removes it.
+    expect(vpPreparationChanges({ ...form, summaryProfile: '' }, scheduled)).toEqual({ summaryProfile: '' });
+    expect(vpPreparationChanges({ ...vpPreparationForm(VP), summaryProfile: 'healthcare' }, VP)).toEqual({
+      summaryProfile: 'healthcare',
+    });
+  });
+
   it('refuse what the server would', () => {
     expect(vpPreparationProblem(vpPreparationForm(VP))).toBeNull();
     expect(vpPreparationProblem({ ...vpPreparationForm(VP), labelsText: 'Bad=1' })).toContain('label key');

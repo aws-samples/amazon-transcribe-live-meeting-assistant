@@ -289,7 +289,15 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
     assert "agenda" not in api_key.get("required", [])
     # The meeting preparation arguments are the API key endpoint's alone
     # (test_mcp_tool_schemas.py GATEWAY_WITHOUT).
-    preparation = {"labels", "audience", "context", "checklist", "shareWith"}
+    preparation = {
+        "labels",
+        "audience",
+        "context",
+        "checklist",
+        "shareWith",
+        "summaryProfile",
+        "guidance",
+    }
     assert set(gateway["Properties"]) == set(api_key["properties"]) - preparation
 
 

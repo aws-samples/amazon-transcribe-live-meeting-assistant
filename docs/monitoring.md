@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 # Monitoring & Alerting
 
-LMA deploys an SNS topic for operational alerts, 15 alarms that notify it, and
+LMA deploys an SNS topic for operational alerts, 16 alarms that notify it, and
 one CloudWatch dashboard per deployment. Everything described here is created by
 `lma-main.yaml` as part of the normal stack deployment — there is nothing extra
 to install — but **one manual step is required before any alert is delivered**:
@@ -68,6 +68,7 @@ problem.
 | `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (`Sum`, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcript-segment-write-failures` | One or more transcript segments failed to be written in any of the last three 5-minute windows (`Sum` of `TranscriptSegmentWriteFailed`, `>= 1`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `meetings-without-transcript` | Three or more audio sessions streamed for at least thirty seconds and produced no transcript at all, in any of the last three 5-minute windows (`Sum` of `StreamingSessionsWithoutTranscript`, `>= 3`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `meeting-events-publish-failures` | Five or more meeting lifecycle events could not be put on the meeting event bus in any of the last three 5-minute windows (`Sum` of `MeetingEventsPublishFailed`, `>= 5`). A failed event is dropped so the meeting is unaffected, and a rule on the bus never sees it. Reads a metric LMA publishes. See [Meeting Lifecycle Events](meeting-events.md). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) and `EnableMeetingEvents` (`true`) |
 
 Each alarm carries an `AlarmDescription` written as the first few steps of a
 runbook, because the description is the only context that travels with the
@@ -208,12 +209,14 @@ instead, where its distribution is informative and a single value is not.
 
 ## Metrics LMA publishes
 
-Two of the alarms above, and one band of the dashboard, read metrics the
-application emits rather than metrics an AWS service emits. There are eight of
+Three of the alarms above, and one band of the dashboard, read metrics the
+application emits rather than metrics an AWS service emits. There are ten of
 them. Seven answer one question end to end: a meeting was asked for — did a
 transcript come out of it, how long did that take, and was anything dropped on
 the way? The eighth, from the Virtual Participant, counts the Nova Sonic voice
 assistant streams Amazon Bedrock refused for the account's concurrency quota.
+The last two count the [meeting lifecycle events](meeting-events.md) put on the
+meeting event bus, and the ones that could not be.
 
 They are published in the CloudWatch namespace **`<stack-name>`** — the name of
 the top-level LMA stack, so two deployments in one account never mix. Each
@@ -231,6 +234,8 @@ name without being edited.
 | `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above. |
 | `StreamingSessionsWithoutTranscript` | Count | WebSocket transcriber | A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed. |
 | `NovaSonicStreamsThrottled` | Count | Virtual Participant | Amazon Bedrock refused to open a Nova Sonic stream because the account's concurrent-stream quota for the model (20 per region, not adjustable) was reached. One per refused attempt, so a wake phrase retried four times counts four. Each refusal is handled — a translator keeps the session it has, an assistant retries and then stays silent, the lookup acknowledgement is rendered later or skipped — so this is graphed rather than given an alarm of its own; a sustained non-zero value means voice assistants in this stack are degrading. Amazon Bedrock also counts these refusals in its own `InvocationThrottles` metric (measured: four refused streams appeared there as four), which the `bedrock-throttling` alarm reads account-wide, so five or more in five minutes already notify; this metric is what tells you they came from this stack's voice assistants. See [Nova Sonic Concurrency Quota](voice-assistant.md#nova-sonic-concurrency-quota). |
+| `MeetingEventsPublished` | Count | Meeting events (Call Event Processor, summary regenerator, Virtual Participant status publisher) | A meeting lifecycle event was put on the meeting event bus: Meeting Started, Meeting Ended, Summary Ready or Virtual Participant Status Changed. Counted whether or not a rule matches it. See [Meeting Lifecycle Events](meeting-events.md). |
+| `MeetingEventsPublishFailed` | Count | Meeting events (as above) | A meeting lifecycle event could not be put on the bus after its retries, or the bus rejected it. The meeting is unaffected and the event is not sent again. Alarmed. |
 
 ### How they are published, and what that implies
 
@@ -259,7 +264,7 @@ consequences are worth knowing before you read a graph:
   census.
 - **Datapoints can arrive a little late**, because the log has to be flushed and
   ingested first, and neither Lambda nor the ECS `awslogs` driver lets the
-  application control when. Both alarms on these metrics therefore need only one
+  application control when. Every alarm on these metrics therefore needs only one
   breaching period out of the last three, which is what AWS recommends for this
   case: it absorbs a datapoint landing in the period after the one it belongs to
   without missing the event.
@@ -359,14 +364,16 @@ needing a second round trip through somebody's inbox.
 In us-east-1, a standard-resolution CloudWatch alarm costs $0.10 per alarm
 metric per month, with the first ten alarm metrics included at no charge. **An
 alarm built on a metric-math expression bills per metric referenced in the
-expression, not per alarm**, so the 15 alarms here are 17 billable alarm metrics
-— thirteen reading a single metric each, plus two metric-math alarms reading two
-metrics each. That is $0.70 per month for an account with the free allowance
-still available, and $1.70 per month for one that has already used it elsewhere.
+expression, not per alarm**, so the 16 alarms here are 18 billable alarm metrics
+— fourteen reading a single metric each, plus two metric-math alarms reading two
+metrics each. That is $0.80 per month for an account with the free allowance
+still available, and $1.80 per month for one that has already used it elsewhere.
+With `EnableMeetingEvents` set to `false` the meeting events alarm is not created,
+which takes one alarm metric off these figures.
 
-The seven metrics LMA publishes are **custom metrics**, which are billed
+The ten metrics LMA publishes are **custom metrics**, which are billed
 separately from the alarms that read them: $0.30 per metric per month in
-us-east-1 for the first 10,000, so $2.10 per month per stack, with the first ten
+us-east-1 for the first 10,000, so up to $3.00 per month per stack, with the first ten
 custom metrics in an account included at no charge. None of them carries a
 dimension, which is the thing to keep an eye on if you add more: a custom metric
 is billed per unique combination of name and dimension values, so a dimension
@@ -408,12 +415,13 @@ mislead. Reading top to bottom:
 | Transcriber target health | `HealthyHostCount` and `UnHealthyHostCount` | Whether new meetings can connect at all. Zero healthy targets refuses every new connection. |
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
 | GraphQL API | `4XXError`, `5XXError` and `Latency` p99 | What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is. |
-| Application metrics (band header) | A note naming the namespace these widgets read | The five widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
+| Application metrics (band header) | A note naming the namespace these widgets read | The six widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
 | Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions count only the meetings streamed through the transcriber, so they are lower than meetings started by however many Virtual Participant and uploaded-recording meetings the deployment has — not a fault. |
 | Time to first transcript segment | `TimeToFirstTranscriptSegmentMs` at minimum, average, p90 and p99 | How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing. |
 | Transcript segment writes | `TranscriptSegmentsWritten` and `TranscriptSegmentWriteFailed`, annotated at the alarm threshold | Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue. |
 | Audio sessions that produced no transcript | `StreamingSessionsWithoutTranscript` against `StreamingSessionsStarted`, annotated at the alarm threshold | Sessions that streamed audio and got nothing back. Sessions under thirty seconds are not counted, so a value here is a session that ran long enough for silence to be a fault rather than a user who changed their mind — though a muted room or a meeting abandoned at minute two still lands here, which is why the alarm needs three in a window. Read against sessions opened: one in fifty is a different problem from one in two. |
 | Nova Sonic streams refused | `NovaSonicStreamsThrottled` | Whether this stack's voice assistants are being refused Nova Sonic streams for the account's concurrency quota of 20 per region. Each refusal degrades an assistant rather than failing it — see [Nova Sonic Concurrency Quota](voice-assistant.md#nova-sonic-concurrency-quota) for what each one does — so a value here is a capacity signal: fewer concurrent voice-assistant meetings in the account and region, or another region, is the remedy, since the quota cannot be raised. |
+| Meeting lifecycle events | `MeetingEventsPublished` and `MeetingEventsPublishFailed`, annotated at the alarm threshold | Whether events are reaching the meeting event bus. Published counts every event put on the bus, whether or not a rule matches it; a failed event is dropped, so a rule never sees it. Empty when `EnableMeetingEvents` is `false`. See [Meeting Lifecycle Events](meeting-events.md). |
 | Four error-log tables | The most recent 50 lines matching `/ERROR/` in the Call Event Processor, the Virtual Participant launch state machine, the Virtual Participant container and the WebSocket transcriber container log groups | A first look without leaving the dashboard. These are CloudWatch Logs Insights queries, so they run on demand and are billed per query, not continuously. |
 
 The dashboard is created whether or not `EnableOperationalAlarms` is `true`.

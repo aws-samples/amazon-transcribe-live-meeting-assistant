@@ -42,6 +42,8 @@ title: "Voice Assistant"
 
 LMA can optionally add a voice assistant to the Virtual Participant, allowing it to respond verbally during meetings. The voice assistant uses the meeting transcript as context and looks things up through the meeting assistant; what a lookup may use is described in [What the Voice Assistant Can Look Up](#what-the-voice-assistant-can-look-up).
 
+The voice assistant answers whoever speaks to it, and the Virtual Participant cannot tell the meeting's owner from a guest. So it is started only while **Meeting Assistant › In-meeting requests: who may ask** (`meeting_assist.inMeetingRequesters`) is **Anyone**, the default; under **Owner only** or **Off** the Virtual Participant joins with no voice assistant, whichever provider is chosen. The setting is read when the Virtual Participant starts. See [Who may ask](meeting-assistant.md#who-may-ask).
+
 ## What the Voice Assistant Can Look Up
 
 A request spoken to the voice assistant that needs a lookup (Nova Sonic's `strands_agent` tool, or the ElevenLabs agent's `strands_agent` client tool) is sent to the meeting assistant as an [in-meeting request](meeting-assistant.md#in-meeting-requests): anyone in the meeting can speak to the assistant, and everyone hears the answer. **Meeting Assistant › In-meeting requests** on the Configuration page (`meeting_assist.inMeetingRequestTools`) decides what it is answered with, and a change applies within about five minutes, including in meetings already running:

@@ -121,7 +121,10 @@ Deleted, for the meeting:
   a quote sent after the deletion is not stored;
 - the meeting's [notifications](meeting-notifications.md) of category
   `guidance`, which may quote the transcript, including the guidance an MCP
-  client pushed with `push_meeting_guidance`.
+  client pushed with `push_meeting_guidance`;
+- the meeting's [whiteboards](meeting-whiteboards.md), every version of them
+  and the assistant's notes, which are drawn from the transcript; this includes
+  whiteboards written entirely by hand.
 
 Kept:
 

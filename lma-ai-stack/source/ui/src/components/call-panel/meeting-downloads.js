@@ -17,7 +17,9 @@
  * The menu (downloadMenuItems) has a group for each kind of file: Summary,
  * Transcript, Recordings (each session's audio and video), Screen share (the
  * slide deck, printed by the browser, and the key frames as a .zip), Chat
- * attachments (each file, and all of them as a .zip), and Everything (.zip).
+ * attachments (each file, and all of them as a .zip), the meeting export (one
+ * structured JSON record of the meeting, docs/meeting-export.md), and
+ * Everything (.zip), which holds the export too.
  * An entry with nothing behind it is disabled with the reason. The .zip
  * archives are built on the server (use-meeting-archive.js); every file is
  * fetched through a time-limited signed link, after the same access check as
@@ -246,6 +248,7 @@ export const downloadMenuItems = ({
         },
       ],
     },
+    { id: 'archive:EXPORT', text: 'Meeting export (.json)', iconName: 'download' },
     { id: 'archive:EVERYTHING', text: 'Everything (.zip)', iconName: 'download' },
   ];
 };

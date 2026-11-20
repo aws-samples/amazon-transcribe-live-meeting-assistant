@@ -100,6 +100,48 @@ AGENDA = {
     "type": "string",
     "description": "The agenda, one item per line (at most 10000 characters)",
 }
+SUMMARY_PROFILE = {
+    "type": "string",
+    "description": (
+        "The summary profile the meeting is summarised with, for example discovery-session "
+        "(list_summary_profiles lists them); default, or an empty string, for the default"
+    ),
+}
+GUIDANCE = {
+    "type": "boolean",
+    "description": (
+        "Live guidance on (true) or off (false) for the meeting: while it is in progress, "
+        "its checklist items are marked covered and guidance is offered to the people "
+        "running it, each run a model call billed to the meeting"
+    ),
+}
+
+WHITEBOARD_PANELS = {
+    "type": "array",
+    "description": "At most 12 panels",
+    "items": {
+        "type": "object",
+        "properties": {
+            "panelId": {
+                "type": "string",
+                "description": "An existing panel's id; absent for a new one",
+            },
+            "title": {"type": "string", "description": "At most 80 characters"},
+            "kind": {
+                "type": "string",
+                "enum": ["markdown", "mermaid"],
+                "description": "markdown (at most 8000 characters) or mermaid (at most 6000)",
+            },
+            "content": {"type": "string"},
+            "source": {
+                "type": "string",
+                "enum": ["assistant"],
+                "description": "assistant, to let the assistant update the panel",
+            },
+        },
+        "required": ["title"],
+    },
+}
 
 MEETING_TOOLS: List[Dict[str, Any]] = [
     {
@@ -127,6 +169,22 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["meeting_id", "text"],
+        },
+        "annotations": WRITE,
+    },
+    {
+        "name": "request_meeting_digest",
+        "description": (
+            "Make a short digest of a meeting so far -- a summary, what is covered and still "
+            "open, the decisions and the actions -- and publish it to the meeting's "
+            "notifications as guidance of type meeting_digest for its owner and the people it "
+            "is shared with. Returns the digest's text. One model call, billed to the meeting. "
+            "Requires a read-write API key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"meeting_id": MEETING_ID},
+            "required": ["meeting_id"],
         },
         "annotations": WRITE,
     },
@@ -288,15 +346,129 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "update_meeting_metadata",
         "description": (
-            "Replace a meeting's labels, set its audience, or both. The labels given replace "
-            "all of the meeting's labels; pass {} to clear them. Requires a read-write API key."
+            "Replace a meeting's labels, set its audience, set its summary profile, turn its "
+            "live guidance on or off, or any of them. The labels given replace all of the "
+            "meeting's labels; pass {} to clear them. The summary profile applies to the summary "
+            "written when the meeting ends and to later regenerations. Requires a read-write "
+            "API key."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"meetingId": MEETING_ID, "labels": LABELS, "audience": AUDIENCE},
+            "properties": {
+                "meetingId": MEETING_ID,
+                "labels": LABELS,
+                "audience": AUDIENCE,
+                "summaryProfile": SUMMARY_PROFILE,
+                "guidance": GUIDANCE,
+            },
             "required": ["meetingId"],
         },
         "annotations": DESTRUCTIVE_IDEMPOTENT,
+    },
+    {
+        "name": "list_meeting_whiteboards",
+        "description": (
+            "List a meeting's whiteboards (named panels the assistant can keep up to date during "
+            "the meeting and its people can edit), without their panels: each one's id, title, "
+            "template, version and whether the assistant updates it, and whether the assistant's "
+            "updates are on for the meeting."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"meetingId": MEETING_ID},
+            "required": ["meetingId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "get_meeting_whiteboard",
+        "description": (
+            "Get one whiteboard of a meeting with its panels (Markdown, or a diagram in a subset "
+            "of Mermaid), each marked source user or assistant, or an earlier version of it. "
+            "Pass ifNewerThan with the version you already have to poll cheaply: the answer is "
+            "{notModified: true} while the whiteboard is still at that version."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "whiteboardId": {"type": "string", "description": "The whiteboard's id"},
+                "version": {"type": "integer", "description": "An earlier version to read"},
+                "ifNewerThan": {
+                    "type": "integer",
+                    "description": "The version you have; answered notModified while it is current",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["json", "markdown"],
+                    "description": "json (the default) or markdown (the whiteboard as one document)",
+                },
+            },
+            "required": ["meetingId", "whiteboardId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
+        "name": "create_meeting_whiteboard",
+        "description": (
+            "Make a whiteboard on a meeting, from a template (decisions, process, comparison, "
+            "timeline or blank) or with the panels given. Panels you give are recorded as "
+            "yours (source user), so the assistant does not change them; give a panel source "
+            "assistant to let it. Requires a read-write API key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "title": {"type": "string", "description": "At most 120 characters"},
+                "template": {
+                    "type": "string",
+                    "enum": ["decisions", "process", "comparison", "timeline", "blank"],
+                    "description": "decisions (the default), process, comparison, timeline or blank",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "What the assistant should keep on it, at most 1000 characters",
+                },
+                "assistantUpdates": {
+                    "type": "boolean",
+                    "description": "Whether the assistant updates it (default true)",
+                },
+                "panels": WHITEBOARD_PANELS,
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": WRITE,
+    },
+    {
+        "name": "update_meeting_whiteboard",
+        "description": (
+            "Change a whiteboard made from baseVersion: its title, instructions, whether the "
+            "assistant updates it, or its panels (the whole new list, in order; a panel left out "
+            "is removed). Refused if the whiteboard has changed since baseVersion: read it again "
+            "and retry. Panels you change become yours (source user). Requires a read-write API "
+            "key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "whiteboardId": {"type": "string", "description": "The whiteboard's id"},
+                "baseVersion": {
+                    "type": "integer",
+                    "description": "The version the change is made from",
+                },
+                "title": {"type": "string", "description": "At most 120 characters"},
+                "instructions": {"type": "string", "description": "At most 1000 characters"},
+                "assistantUpdates": {
+                    "type": "boolean",
+                    "description": "Whether the assistant updates it",
+                },
+                "panels": WHITEBOARD_PANELS,
+            },
+            "required": ["meetingId", "whiteboardId", "baseVersion"],
+        },
+        "annotations": WRITE,
     },
     {
         "name": "get_meeting_consent",
@@ -318,8 +490,9 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "name": "update_scheduled_meeting",
         "description": (
             "Change a Virtual Participant that is waiting for its scheduled launch: its "
-            "scheduled time, meeting name, agenda, labels, audience, context, checklist, or "
-            "who the meeting is shared with once it starts. Each argument given replaces "
+            "scheduled time, meeting name, agenda, labels, audience, context, checklist, "
+            "summary profile, live guidance, or who the meeting is shared with once it starts. "
+            "Each argument given replaces "
             "that setting; an empty value removes it. Refused within 5 minutes of the start, "
             "and a new time must be at least 5 minutes away. Only its owner or an Admin may "
             "change it. Requires a read-write API key."
@@ -335,6 +508,8 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "audience": AUDIENCE,
                 "context": CONTEXT,
                 "checklist": CHECKLIST,
+                "summaryProfile": SUMMARY_PROFILE,
+                "guidance": GUIDANCE,
                 "shareWith": SHARE_WITH,
             },
             "required": ["virtualParticipantId"],
@@ -461,6 +636,52 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "annotations": READ_ONLY,
     },
     {
+        "name": "get_meeting_export",
+        "description": (
+            "Get one structured record of a meeting (the LMA meeting export, schemaVersion 1, "
+            "published as docs/schemas/meeting-export-v1.schema.json): the meeting's details "
+            "and labels, its participants and where each name came from (a name is null when "
+            "nobody gave or confirmed one), consent, agenda, context and checklist, the "
+            "transcript with speech, chat and text read from the shared screen, links shared "
+            "in the chat, key frames as alt text, the summary by section, structured action "
+            "items with owners and due dates, and the guidance given. Once the transcript was "
+            "deleted under the Retention settings it is left out and meeting.transcriptRetained "
+            "is false. A large export is answered with {exportUrl, expiresAt, sizeBytes} instead: a link "
+            "that works for anyone holding it for ten minutes; do not share it. The answer "
+            "contains SENSITIVE meeting content."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": MEETING_ID,
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "transcript",
+                            "chat",
+                            "summary",
+                            "checklist",
+                            "consent",
+                            "actionItems",
+                            "keyframes",
+                            "guidance",
+                            "whiteboards",
+                        ],
+                    },
+                    "description": (
+                        "Parts to include (default all): transcript, chat, summary, checklist, "
+                        "consent, actionItems, keyframes, guidance, whiteboards. The meeting, its agenda and "
+                        "its context are always included"
+                    ),
+                },
+            },
+            "required": ["meetingId"],
+        },
+        "annotations": READ_ONLY,
+    },
+    {
         "name": "share_meeting",
         "description": (
             "Change who a meeting is shared with (by email address): action add (the "
@@ -492,14 +713,27 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Generate the meeting's summary again from its transcript. The new summary "
             "REPLACES the current one, including any edits made to it, when it finishes "
-            "(usually within a few minutes). Requires a read-write API key."
+            "(usually within a few minutes). Pass summaryProfile to write this summary with "
+            "another profile; the meeting's own summary profile is not changed. Requires a "
+            "read-write API key."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"meetingId": MEETING_ID},
+            "properties": {"meetingId": MEETING_ID, "summaryProfile": SUMMARY_PROFILE},
             "required": ["meetingId"],
         },
         "annotations": DESTRUCTIVE,
+    },
+    {
+        "name": "list_summary_profiles",
+        "description": (
+            "List the summary profiles a meeting can be summarised with: each one's name (the "
+            "value summaryProfile takes), label, description and whether it lists structured "
+            "action items with owners and due dates. default is the deployment's standard "
+            "summary."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": READ_ONLY,
     },
     {
         "name": "get_meeting_cost",

@@ -11,6 +11,7 @@
 
 export const TAB_SUMMARY = 'summary';
 export const TAB_TRANSCRIPT = 'transcript';
+export const TAB_WHITEBOARDS = 'whiteboards';
 export const TAB_SCREEN_SHARE = 'screen-share';
 export const TAB_DETAILS = 'details';
 
@@ -25,10 +26,14 @@ export const TAB_PARAM = 'tab';
 // eslint-disable-next-line no-unused-vars
 export const defaultTab = ({ isLive = false } = {}) => TAB_TRANSCRIPT;
 
-/** The tabs a meeting has, in order. Screen share only for a meeting with key frames. */
+/**
+ * The tabs a meeting has, in order. Whiteboards for every meeting (a whiteboard
+ * can be made by hand on any of them); Screen share only for one with key frames.
+ */
 export const availableTabs = ({ hasKeyframes = false } = {}) => [
   TAB_SUMMARY,
   TAB_TRANSCRIPT,
+  TAB_WHITEBOARDS,
   ...(hasKeyframes ? [TAB_SCREEN_SHARE] : []),
   TAB_DETAILS,
 ];
@@ -41,3 +46,6 @@ export const resolveTab = (requested, { isLive = false, hasKeyframes = false } =
   const tab = RENAMED_TABS[requested] || requested;
   return availableTabs({ hasKeyframes }).includes(tab) ? tab : defaultTab({ isLive });
 };
+
+/** The Whiteboards tab's label: with the number of whiteboards, once there is one. */
+export const whiteboardsTabLabel = (count) => (count > 0 ? `Whiteboards (${count})` : 'Whiteboards');

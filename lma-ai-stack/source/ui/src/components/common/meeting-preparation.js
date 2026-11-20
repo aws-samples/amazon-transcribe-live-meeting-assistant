@@ -206,13 +206,23 @@ export const statusSummary = (items) => {
 // ── the Virtual Participant forms ───────────────────────────────────────────
 
 /** The empty preparation fields of the Virtual Participant forms. */
-export const EMPTY_VP_PREPARATION = { labelsText: '', audience: '', meetingContext: '', checklist: [] };
+export const EMPTY_VP_PREPARATION = {
+  labelsText: '',
+  audience: '',
+  meetingContext: '',
+  checklist: [],
+  summaryProfile: '',
+};
+
+/** A summary profile as a form holds it: '' for the default. */
+const formProfile = (value) => (value && value !== 'default' ? value : '');
 
 /** A Virtual Participant row's preparation, as its forms hold it. */
 export const vpPreparationForm = (vp) => ({
   labelsText: labelsToText(vp?.labels),
   audience: vp?.audience || '',
   meetingContext: vp?.meetingContext || '',
+  summaryProfile: formProfile(vp?.summaryProfile),
   checklist: (vp?.checklist || []).map(({ ItemId, Text, Kind, Priority, Source }) => ({
     ItemId,
     Text,
@@ -243,6 +253,7 @@ export const vpPreparationInput = (form) => {
   if (form?.audience) input.audience = form.audience;
   if ((form?.meetingContext || '').trim()) input.meetingContext = form.meetingContext;
   if ((form?.checklist || []).length) input.checklist = checklistDefinitions(form.checklist);
+  if (formProfile(form?.summaryProfile)) input.summaryProfile = form.summaryProfile;
   return input;
 };
 
@@ -262,6 +273,9 @@ export const vpPreparationChanges = (form, original) => {
   const checklist = checklistDefinitions(form?.checklist);
   if (JSON.stringify(checklist) !== JSON.stringify(checklistDefinitions(before.checklist))) {
     changes.checklist = checklist;
+  }
+  if (formProfile(form?.summaryProfile) !== before.summaryProfile) {
+    changes.summaryProfile = formProfile(form?.summaryProfile);
   }
   return changes;
 };

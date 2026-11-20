@@ -17,6 +17,8 @@ resources inlined, as the parent sees them:
   is when CloudFormation creates it;
 * the nested stack resource itself is dropped, having been replaced by its
   contents.
+* a conditional nested stack's resources each take its `Condition`, since they
+  exist exactly when it does.
 
 So `!Ref ConfigurationTable` in a nested template, passed `!Ref
 ConfigurationTable` by the parent, reads exactly as it would have in the parent.
@@ -175,8 +177,10 @@ def flattened() -> dict:
 
     for stack, path in nested_templates(parent).items():
         stack_resource = resources.pop(stack)
-        if "Condition" in stack_resource:
-            raise ValueError(f"{stack}: inlining a conditional nested stack is not supported")
+        # A conditional nested stack's resources exist exactly when it does, so
+        # each takes its condition. One that declares a condition of its own as
+        # well would need the two combined, which nothing does yet.
+        stack_condition = stack_resource.get("Condition")
         child = load(path)
         if (child.get("Globals") or {}) != (parent.get("Globals") or {}):
             raise ValueError(f"{path.name} declares different SAM Globals from the AI stack")
@@ -195,6 +199,13 @@ def flattened() -> dict:
             if name in resources or name in inlined:
                 raise ValueError(f"{path.name}: logical id {name} is also declared elsewhere")
             resource = _substitute(resource, values)
+            if stack_condition:
+                if "Condition" in resource:
+                    raise ValueError(
+                        f"{path.name}: {name} has a condition of its own inside the "
+                        f"conditional nested stack {stack}, which inlining does not combine"
+                    )
+                resource["Condition"] = stack_condition
             if inherited:
                 resource["DependsOn"] = list(
                     dict.fromkeys(_as_list(resource.get("DependsOn")) + inherited)

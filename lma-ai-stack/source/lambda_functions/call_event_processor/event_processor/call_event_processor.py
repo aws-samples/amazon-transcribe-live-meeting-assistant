@@ -8,6 +8,7 @@ import asyncio
 import json
 import math
 import re
+import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from os import getenv
@@ -28,6 +29,10 @@ from typing import (
 
 # third-party imports from Lambda layer
 import boto3
+
+# Meeting Started, Meeting Ended and Summary Ready, published to the stack's
+# meeting event bus (docs/meeting-events.md). Never raises.
+import meeting_event_publisher  # noqa: E402
 
 # custom utils/helpers imports from Lambda layer
 # pylint: disable=import-error
@@ -85,11 +90,14 @@ from pure import (  # noqa: E402
     convert_keys_to_uppercamelcase,
     forget_language,
     get_sentiment_per_quarter,
+    guidance_run_due,
+    guidance_settings,
     language_to_record,
     merge_dicts,
     segment_analyses,
     session_number_of,
     transcription_pause_state,
+    whiteboard_settings,
 )
 
 # pylint: enable=import-error
@@ -124,6 +132,14 @@ TRANSCRIPT_DELETION_FUNCTION_ARN = getenv("TRANSCRIPT_DELETION_FUNCTION_ARN", ""
 # agenda_derivation_threshold() seconds in, for an agenda somebody stated. 0
 # turns it off. See agenda_deriver.
 AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
+# Live guidance runs, queued for a finished speech segment of a meeting whose
+# GuidanceEnabled is true, at most every intervalSeconds per meeting here. See
+# live_guidance_analyzer and docs/live-guidance.md.
+LIVE_GUIDANCE_ANALYZER_ARN = getenv("LIVE_GUIDANCE_ANALYZER_ARN", "")
+# The assistant's whiteboard runs, queued the same way for a meeting whose
+# WhiteboardsEnabled is true, and once more at each meeting's end. See
+# meeting_whiteboards and docs/meeting-whiteboards.md.
+MEETING_WHITEBOARDS_ARN = getenv("MEETING_WHITEBOARDS_ARN", "")
 # Reads the text of each key frame, once, after it is stored. See
 # keyframe_text_extractor.
 KEYFRAME_TEXT_EXTRACTOR_ARN = getenv("KEYFRAME_TEXT_EXTRACTOR_ARN", "")
@@ -136,6 +152,11 @@ AGENDA_DERIVATION_AFTER_SECONDS = 300.0
 # Meetings this execution environment has already queued the pass for; see
 # agenda_derivation_due for why this is not what makes the pass run once.
 AGENDA_PASS_QUEUED: set = set()
+# When this execution environment last queued a live guidance run per meeting;
+# see guidance_run_due.
+GUIDANCE_RUN_QUEUED: Dict[str, float] = {}
+# When this execution environment last queued a whiteboard run per meeting.
+WHITEBOARD_RUN_QUEUED: Dict[str, float] = {}
 # The languages this execution environment has added to each meeting's
 # DetectedLanguages; see language_to_record.
 DETECTED_LANGUAGES_NOTED: Dict[str, set] = {}
@@ -157,6 +178,47 @@ def transcript_hook_nonpartial_only() -> bool:
     )
 
 
+#: The summary profile name that means "no profile": the Transcript Summary
+#: prompts (lma_summary_profiles.DEFAULT_PROFILE).
+NO_SUMMARY_PROFILE = "default"
+_SUMMARY_PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def default_summary_profile() -> Optional[str]:
+    """The summary profile a meeting that starts without one is given, or None.
+
+    The Meeting Processing section's defaultSummaryProfile, else the shipped
+    default (``default``, no profile). Anything that is not a profile name, and
+    ``default`` itself, is None: the meeting is summarized as it always was.
+    """
+    value = read_setting(
+        MEETING_PROCESSING.name, "defaultSummaryProfile", default=NO_SUMMARY_PROFILE
+    )
+    if (
+        not isinstance(value, str)
+        or value == NO_SUMMARY_PROFILE
+        or not _SUMMARY_PROFILE_NAME.match(value)
+    ):
+        return None
+    return value
+
+
+def with_default_summary_profile(message: Dict[str, Any]) -> Dict[str, Any]:
+    """A START event's createCall input, given the deployment's default summary profile.
+
+    Only when the event names none: a Virtual Participant started or scheduled
+    with a profile keeps its own. Every capture method's meeting is created by
+    a START event here, uploads included, so this is the one place it is set.
+    """
+    if message.get("SummaryProfile"):
+        return message
+    profile = default_summary_profile()
+    if profile is None:
+        return message
+    LOGGER.info("Meeting %s starts with the summary profile %s", message.get("CallId"), profile)
+    return {**message, "SummaryProfile": profile}
+
+
 def agenda_derivation_threshold() -> float:
     """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
 
@@ -171,6 +233,77 @@ def agenda_derivation_threshold() -> float:
             default=AGENDA_DERIVATION_AFTER_SECONDS,
         )
     )
+
+
+def live_guidance_settings() -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Live guidance: on for new meetings, the interval, available.
+
+    The Configuration page's values, else the shipped defaults; read on the
+    section's standard tier, so a saved change reaches meetings about five
+    minutes later. A read that fails is the shipped values: off for new
+    meetings, which is also what the store holds until an administrator
+    changes it.
+    """
+    try:
+        raw = read_setting(MEETING_ASSIST.name, "guidance", default={})
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the Live guidance settings; using the shipped ones")
+        raw = {}
+    return guidance_settings(raw)
+
+
+def queue_guidance_run(call_id: str) -> None:
+    """Queue a live guidance run for a meeting, fire-and-forget.
+
+    Asynchronous for the reason queue_agenda_derivation gives. The analyzer
+    decides for itself whether a run is due -- another environment may have
+    queued one, or too little has been said -- so queueing one too many costs a
+    conditional write. A failure to queue is logged and the segment processed
+    regardless: guidance is an enhancement.
+    """
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=LIVE_GUIDANCE_ANALYZER_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": "auto"}),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue a live guidance run; continuing", extra=dict(call_id=call_id)
+        )
+
+
+def meeting_whiteboards_settings() -> "tuple[bool, float, bool]":
+    """Meeting Assistant › Whiteboards: on for new meetings, the interval, available.
+
+    Read as live_guidance_settings reads its section; a read that fails is the
+    shipped values, off for new meetings.
+    """
+    try:
+        raw = read_setting(MEETING_ASSIST.name, "whiteboards", default={})
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the Whiteboards settings; using the shipped ones")
+        raw = {}
+    return whiteboard_settings(raw)
+
+
+def queue_whiteboard_run(call_id: str, trigger: str = "auto") -> None:
+    """Queue a run of the whiteboards' assistant, fire-and-forget, as queue_guidance_run.
+
+    The function decides for itself whether the run is due, from the meeting's
+    switch, its lease and what was said; a failure to queue is logged and the
+    event processed regardless.
+    """
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=MEETING_WHITEBOARDS_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": trigger}),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue a whiteboard run; continuing", extra=dict(call_id=call_id)
+        )
 
 
 @lru_cache(maxsize=8)
@@ -207,6 +340,8 @@ if (
     or SPEAKER_NAME_RESOLVER_ARN
     or TRANSCRIPT_DELETION_FUNCTION_ARN
     or AGENDA_DERIVER_ARN
+    or LIVE_GUIDANCE_ANALYZER_ARN
+    or MEETING_WHITEBOARDS_ARN
     or KEYFRAME_TEXT_EXTRACTOR_ARN
     or CHAT_ATTACHMENT_SUMMARIZER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
@@ -472,6 +607,7 @@ async def execute_create_call_mutation(
         owner = message.get("AgentId", "system@lma.aws")
         print(f"Using AgentId as owner: {owner}")
     message.update({"Owner": owner})
+    message.update(with_default_summary_profile(message))
 
     query = dsl_gql(
         DSLMutation(
@@ -560,8 +696,34 @@ def summary_queued_state() -> str:
     )
 
 
-def summary_outcome_state(text: Any) -> str:
-    """The state written beside the end-of-meeting summary: done, empty, or failed."""
+def summary_outcome_state(text: Any, message: Optional[Mapping[str, Any]] = None) -> str:
+    """The state written beside the end-of-meeting summary: done, empty, or failed.
+
+    A summary written with a summary profile also records the profile
+    (``profile``, and ``requestedProfile`` when the one the meeting named could
+    not be used) and whether its structured action items were listed
+    (``actionItems``: generated or failed). A summary from the default profile
+    records none of them, as before.
+    """
+    state = json.loads(_summary_outcome_state(text))
+    extras = message or {}
+    # The orchestrator's own time for the run, when the record carries it: the
+    # same on every redelivery of the record, so a redelivered summary is stored
+    # with, and announced as Summary Ready at, the time it was first written.
+    completed_at = extras.get("SummaryCompletedAt")
+    if isinstance(completed_at, str) and completed_at:
+        state["updatedAt"] = completed_at
+    if summary_was_produced(text):
+        if isinstance(extras.get("SummaryProfileUsed"), str):
+            state["profile"] = extras["SummaryProfileUsed"]
+        if isinstance(extras.get("SummaryProfileFallback"), str):
+            state["requestedProfile"] = extras["SummaryProfileFallback"]
+        if extras.get("ActionItemsStatus") in ("generated", "failed"):
+            state["actionItems"] = extras["ActionItemsStatus"]
+    return json.dumps(state)
+
+
+def _summary_outcome_state(text: Any) -> str:
     if summary_is_empty_outcome(text):
         return json.dumps(
             {
@@ -1639,6 +1801,11 @@ async def execute_add_call_summary_text_mutation(
     call_summary_text = ""
     if summary_was_produced(calltext):
         call_summary_text = calltext
+    # Action items belong to the summary they were listed with: none is stored
+    # without it.
+    inputs = {key: value for key, value in message.items() if key != "ActionItems"}
+    if call_summary_text and isinstance(message.get("ActionItems"), list):
+        inputs["ActionItems"] = message["ActionItems"]
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
@@ -1648,9 +1815,9 @@ async def execute_add_call_summary_text_mutation(
         DSLMutation(
             schema.Mutation.addCallSummaryText.args(
                 input={
-                    **message,
+                    **inputs,
                     "CallSummaryText": call_summary_text,
-                    "CallSummaryState": summary_outcome_state(calltext),
+                    "CallSummaryState": summary_outcome_state(calltext, message),
                 }
             ).select(*call_fields(schema))
         )
@@ -1869,6 +2036,8 @@ async def get_call_details(
             schema.Query.getCall.args(CallId=message["CallId"]).select(
                 *call_fields(schema),
                 schema.Call.TranscriptDeletedAt,
+                *guidance_field(schema),
+                *whiteboards_field(schema),
             )
         )
     )
@@ -1907,7 +2076,31 @@ async def get_call_details(
     # Only when set, so the post-call hook's payload is unchanged otherwise.
     if call.get("TranscriptDeletedAt"):
         details["TranscriptDeletedAt"] = call["TranscriptDeletedAt"]
+    if call.get("GuidanceEnabled") is True:
+        details["GuidanceEnabled"] = True
+    if call.get("WhiteboardsEnabled") is True:
+        details["WhiteboardsEnabled"] = True
     return details
+
+
+def guidance_field(schema: DSLSchema) -> tuple:
+    """Call.GuidanceEnabled, when the schema the API is running declares it.
+
+    Conditional for the reason graphql_helpers.call_fields gives: during a stack
+    update the running schema can be older than this function.
+    """
+    # pylint: disable-next=protected-access
+    if "GuidanceEnabled" in schema.Call._type.fields:
+        return (schema.Call.GuidanceEnabled,)
+    return ()
+
+
+def whiteboards_field(schema: DSLSchema) -> tuple:
+    """Call.WhiteboardsEnabled, when the schema the API is running declares it (see guidance_field)."""
+    # pylint: disable-next=protected-access
+    if "WhiteboardsEnabled" in schema.Call._type.fields:
+        return (schema.Call.WhiteboardsEnabled,)
+    return ()
 
 
 ##########################################################################
@@ -1995,6 +2188,20 @@ async def execute_process_event_api_mutation(
     if event_type == "START":
         # CREATE CALL
         LOGGER.debug("CREATE CALL")
+        # Live guidance for the new meeting: a Virtual Participant's choice,
+        # else the deployment's On for new meetings, stored as true or false.
+        if not isinstance(message.get("GuidanceEnabled"), bool) and input_declares(
+            appsync_session, "CreateCallInput", "GuidanceEnabled"
+        ):
+            default_on, _interval, available = live_guidance_settings()
+            message["GuidanceEnabled"] = default_on and available
+        # The whiteboards' assistant for the new meeting: a choice the event
+        # carries, else the deployment's On for new meetings.
+        if not isinstance(message.get("WhiteboardsEnabled"), bool) and input_declares(
+            appsync_session, "CreateCallInput", "WhiteboardsEnabled"
+        ):
+            default_on, _interval, available = meeting_whiteboards_settings()
+            message["WhiteboardsEnabled"] = default_on and available
         response = await execute_create_call_mutation(
             message=message, appsync_session=appsync_session
         )
@@ -2015,6 +2222,9 @@ async def execute_process_event_api_mutation(
             # that could not be created has not started.
             if not was_already_created(response):
                 METRICS.count(metric_names.MEETINGS_STARTED)
+                await meeting_event_publisher.meeting_started(
+                    message, session_number_of(message), appsync_session, LOGGER
+                )
 
         # A later capture session of a meeting that already exists: its owner or
         # an Admin rejoined it (docs/virtual-participant.md#rejoin), which allowed
@@ -2038,6 +2248,12 @@ async def execute_process_event_api_mutation(
             if not session_started:
                 await end_rejoined_vp_of_deleted_meeting(
                     message=message, appsync_session=appsync_session
+                )
+            else:
+                # A reopened meeting's later session is a Meeting Started of its
+                # own, carrying the session number; it is not a second meeting.
+                await meeting_event_publisher.meeting_started(
+                    message, session_number_of(message), appsync_session, LOGGER
                 )
 
         # The meeting is being captured again, so a transcript deletion
@@ -2180,6 +2396,13 @@ async def execute_process_event_api_mutation(
         # not: a failure redelivers the record with the meeting still open, so
         # the retry schedules it. The function is idempotent, and returns at
         # once while the Retention section leaves transcripts alone.
+        # The whiteboards' last run, so they include the meeting's last minutes.
+        # Queued for every meeting that ends: the function reads the meeting's
+        # WhiteboardsEnabled and returns at once, with no model call, when the
+        # assistant's updates are off.
+        if MEETING_WHITEBOARDS_ARN and not was_already_ended:
+            queue_whiteboard_run(message.get("CallId"), "final")
+
         if TRANSCRIPT_DELETION_FUNCTION_ARN and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
@@ -2237,6 +2460,17 @@ async def execute_process_event_api_mutation(
             # session's END was processed.
             if not was_already_ended and started_session == 1:
                 METRICS.count(metric_names.MEETINGS_ENDED)
+            # Every session's end, unlike the count above: a consumer sees each
+            # session of a reopened meeting start and end. Not for a redelivered
+            # END, which finds the meeting already ENDED.
+            if not was_already_ended:
+                await meeting_event_publisher.meeting_ended(
+                    message,
+                    session_number_of(message) if "SessionNumber" in message else started_session,
+                    appsync_session,
+                    LOGGER,
+                    written=response,
+                )
 
     elif event_type == "ADD_SUMMARY":
         LOGGER.debug("ADD_SUMMARY MUTATION ")
@@ -2279,6 +2513,9 @@ async def execute_process_event_api_mutation(
                         "deletion scheduled at the end of the meeting still applies",
                         extra=dict(call_id=message.get("CallId")),
                     )
+            # A summary was stored, not a failed run's placeholder.
+            if summary_was_produced(message.get("CallSummaryText")):
+                await meeting_event_publisher.summary_ready(message, appsync_session, LOGGER)
 
         if POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN:
             payload = await get_call_details(message=message, appsync_session=appsync_session)
@@ -2409,6 +2646,34 @@ async def execute_process_event_api_mutation(
                 )
             ):
                 queue_agenda_derivation(normalized_message["CallId"])
+            if (
+                LIVE_GUIDANCE_ANALYZER_ARN
+                and payload.get("GuidanceEnabled") is True
+                and not normalized_message["IsPartial"]
+                and is_speech_channel(normalized_message.get("Channel"))
+            ):
+                _default_on, interval, available = live_guidance_settings()
+                if available and guidance_run_due(
+                    normalized_message.get("CallId"),
+                    time.monotonic(),
+                    interval,
+                    GUIDANCE_RUN_QUEUED,
+                ):
+                    queue_guidance_run(normalized_message["CallId"])
+            if (
+                MEETING_WHITEBOARDS_ARN
+                and payload.get("WhiteboardsEnabled") is True
+                and not normalized_message["IsPartial"]
+                and is_speech_channel(normalized_message.get("Channel"))
+            ):
+                _default_on, interval, available = meeting_whiteboards_settings()
+                if available and guidance_run_due(
+                    normalized_message.get("CallId"),
+                    time.monotonic(),
+                    interval,
+                    WHITEBOARD_RUN_QUEUED,
+                ):
+                    queue_whiteboard_run(normalized_message["CallId"])
             if analyses.agent_assist:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,

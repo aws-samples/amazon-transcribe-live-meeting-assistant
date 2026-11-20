@@ -27,6 +27,8 @@ title: "LMA Documentation"
 - [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — An alternative to Amazon Transcribe (the default engine), selected per meeting source: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
 - [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Beta, optional and off by default: people enroll their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
+- [Live Guidance](live-guidance.md) — Guidance offered while a meeting is in progress, without being asked: the checklist progress it records, the guidance types, who sees it, turning it on for a meeting or for every new meeting, how often it runs, the digest, its settings, cost per meeting-hour, and its limits
+- [Meeting Whiteboards](meeting-whiteboards.md) — Named panels (Markdown, or Mermaid diagrams) on the meeting page that the people who can see a meeting edit and the assistant can keep up to date from the transcript: templates, user edits win, versions and restore, who can see them, retention with the transcript, settings, cost, the MCP tools and the export
 - [Meeting Assistant Skills](meeting-assistant-skills.md) — Guidance an administrator writes for the assistant, read only when a request needs it: the Skills page, importing SKILL.md, Agent Skills folders and Amazon Quick skill files, the skill library, choosing skills per profile, and how the assistant loads a skill
 - [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md) — The four inputs a meeting can carry beside its agenda: what each is for, its limits, the Meeting preparation section of the Virtual Participant form, the panels on the meeting page, who can see and change them, the assistant's rule for requests made in the meeting, the summary placeholders, and retention
@@ -58,6 +60,7 @@ title: "LMA Documentation"
 ### MCP Server Integration
 
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
+- [Meeting Export](meeting-export.md) — One structured JSON record of a meeting (schema version 1): what it holds, `include`, participants and where their names come from, retention, large exports, and the Download menu, Everything archive and MCP routes to it
 - [Meeting Notifications](meeting-notifications.md) — Items shown live in a meeting's Notifications panel to the people who can see the meeting (guidance is one category): who sees them, dismissing and muting, buttons, retention, reading them over MCP, and publishing one from a backend function
 - [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, key scopes (read only, read and write), JSON-RPC 2.0 protocol support, and every hosted MCP tool: the transcript read page by page, meeting preparation, meeting guidance and notifications, the meeting record, consent, the meeting assistant and meeting management
 - [MCP Tools Reference](mcp-tools-reference.md) — Every tool the hosted MCP server offers, with an example request and answer for those an AI assistant uses to prepare, follow and close a meeting: scheduling with meeting preparation, transcript paging, agenda, context, checklist, labels, sharing, consent and ending
@@ -76,6 +79,7 @@ title: "LMA Documentation"
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention, and [where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed) (AWS Region, Amazon Bedrock inference geography, optional integrations)
 - [Privacy and Data Handling Controls](privacy-and-data-handling.md) — For administrators and reviewers: the consent options, every kind of meeting data with where it is stored, how long it is kept and what controls that, deleting transcripts, meetings and stacks, where content is processed, and the presets and deploy-time controls for a regulated deployment
+- [Hosting Models](hosting-models.md) — Running LMA in a team's own account for meetings with external organizations, or in the account of the organization whose meetings it records: the two presets, the deploy-time settings, isolating the account, what meeting platforms need to allow, and moving meetings between the two with `lma meetings delete`
 - [Security Scanning (SRT)](security-scanning.md) — Automated security scanning via the AWS Sample Security Review Tool, suppression workflow, GitLab CI integration, DSR → SRT migration
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 
@@ -84,6 +88,7 @@ title: "LMA Documentation"
 - [WebSocket Streaming API](websocket-streaming-api.md) — Full protocol specification for building custom streaming clients
 - [Embeddable Components](embeddable-components.md) — iframe embedding, postMessage API, authentication options
 - [Lambda Hook Functions](lambda-hook-functions.md) — Custom transcript processing, FetchTranscript utility, summarization hooks
+- [Meeting Lifecycle Events](meeting-events.md) — The stack's EventBridge event bus: Meeting Started, Meeting Ended, Summary Ready and Virtual Participant Status Changed, what each event carries (identifiers and states only), reopened meetings, deduplication, an example rule, and polling instead
 
 ### Administration
 

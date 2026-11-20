@@ -5,7 +5,7 @@
 
 """A meeting's files as one ZIP archive, built in the background.
 
-Three entry points share this function:
+Four entry points share this function:
 
 * ``Mutation.prepareMeetingArchive(CallId, Contents)`` -- the AppSync resolver.
   It answers the callers ``getCall`` answers (an Admin, the meeting's owner,
@@ -18,13 +18,21 @@ Three entry points share this function:
   :data:`LINK_SECONDS`.
 * ``{"Trigger": "build", "CallId", "ArchiveId"}`` with no identity -- the
   second leg, invoked only by this function, which builds the archive.
+* ``{"Trigger": "export", "CallId", "Include", "identity"}`` -- the MCP server's
+  get_meeting_export, invoked with the MCP caller's identity, to which the
+  ``getCall`` rule is applied as to an AppSync caller. Answers with the meeting
+  export itself, or, when that is larger than :data:`EXPORT_INLINE_BYTES` as
+  the MCP server encodes it, with a GET link to it signed for
+  :data:`EXPORT_LINK_SECONDS`.
 
 ``Contents`` is EVERYTHING (the summary as HTML and Markdown, the transcript as
 text and HTML unless it was deleted under the Retention settings, every audio
 and video recording, the key frames, the chat attachments, the meeting's
 details as JSON, the consent record and its evidence for the meeting's owner
 or an Admin, and README.md listing every file and anything left out and why),
-KEY_FRAMES or CHAT_ATTACHMENTS (those files and README.md).
+KEY_FRAMES or CHAT_ATTACHMENTS (those files and README.md), or EXPORT: the
+meeting export alone, one JSON file (export.py, docs/meeting-export.md), which
+EVERYTHING also holds as ``meeting-export.json``.
 
 The archive is streamed: each object is read from S3 in chunks of
 :data:`READ_CHUNK_BYTES` into :mod:`zipfile`, which writes to
@@ -57,6 +65,7 @@ from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 import boto3
+import export
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
@@ -87,7 +96,15 @@ READ_CHUNK_BYTES = 1024**2
 #: A build still preparing after this long has stopped (the function's timeout is 15 minutes).
 STALE_SECONDS = 16 * 60
 
-CONTENTS = ("EVERYTHING", "KEY_FRAMES", "CHAT_ATTACHMENTS")
+CONTENTS = ("EVERYTHING", "KEY_FRAMES", "CHAT_ATTACHMENTS", "EXPORT")
+#: The release the meeting export names (its lmaVersion).
+LMA_VERSION = os.environ.get("LMA_VERSION", "") or "unknown"
+#: The largest meeting export the MCP server answers with itself, as it encodes
+#: it: the tool result's indented JSON as a string inside the JSON-RPC answer.
+#: Larger, it answers with a link; a synchronous Lambda answer holds at most 6 MB.
+EXPORT_INLINE_BYTES = int(os.environ.get("EXPORT_INLINE_BYTES", "5000000"))
+#: How long a link to a meeting export works.
+EXPORT_LINK_SECONDS = 600
 PREPARING, READY, FAILED = "PREPARING", "READY", "FAILED"
 ARCHIVE_ID = re.compile(r"^[0-9a-f]{32}$")
 MEDIA_EXTENSIONS = (
@@ -379,6 +396,8 @@ def reusable_archive(
 
 
 def archive_file_name(call_id: str, contents: str) -> str:
+    if contents == "EXPORT":
+        return f"Meeting-{posixify_filename(call_id) or 'meeting'}-export.json"
     suffix = {
         "EVERYTHING": "",
         "KEY_FRAMES": "-key-frames",
@@ -424,13 +443,17 @@ def session_urls(meeting: Mapping[str, Any], single: str, many: str) -> List[str
     return urls
 
 
-def query_items(partition: str) -> List[Dict[str, Any]]:
+def query_items(partition: str, prefix: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Every item of one partition, or only those whose sort key starts with ``prefix``."""
     items: List[Dict[str, Any]] = []
     kwargs: Dict[str, Any] = {
         "TableName": EVENT_SOURCING_TABLE,
         "KeyConditionExpression": "PK = :pk",
         "ExpressionAttributeValues": {":pk": {"S": partition}},
     }
+    if prefix:
+        kwargs["KeyConditionExpression"] = "PK = :pk AND begins_with(SK, :prefix)"
+        kwargs["ExpressionAttributeValues"][":prefix"] = {"S": prefix}
     while True:
         page = DYNAMODB.query(**kwargs)
         items.extend(_item(raw) for raw in page.get("Items", []))
@@ -793,9 +816,10 @@ def plan_archive(
 
     # Key frames: every frame image of the meeting, in its own folder.
     frames: Dict[str, str] = {}
+    frame_items: Optional[List[Dict[str, Any]]] = None
     if everything or contents == "KEY_FRAMES":
         frames_folder = f"{KEYFRAMES_PREFIX}{folder}/"
-        items = query_items(f"kf#{call_id}")
+        items = frame_items = query_items(f"kf#{call_id}")
         for item in sorted(items, key=lambda i: str(i.get("SK") or "")):
             frame_id = str(item.get("SK") or "")[2:]
             key = recording_key_in_folder(item.get("ImageUrl"), frames_folder)
@@ -904,6 +928,35 @@ def plan_archive(
         if not urls:
             plan.leave_out(f"{kind.capitalize()} recording", "the meeting has none")
 
+    # The rest of the archive does not depend on the export, so a failure to
+    # build it leaves it out with a note rather than failing the archive.
+    try:
+        exported = export_text(
+            meeting_export(call_id, meeting, segments=segments, keyframes=frame_items)
+        )
+    except Exception:  # noqa: BLE001 - recorded in the README
+        LOGGER.exception("could not build the meeting export of %s for its archive", call_id)
+        plan.leave_out("Meeting export", "it could not be prepared; download it on its own")
+    else:
+        plan.add_text("meeting-export.json", exported, "Meeting export (docs/meeting-export.md)")
+
+    # Each whiteboard as it is now, one Markdown file each, diagrams as mermaid
+    # code blocks. Deleted with the transcript, as they are drawn from it.
+    if meeting.get("TranscriptDeletedAt"):
+        plan.leave_out("Whiteboards", "deleted with the transcript under the Retention settings")
+    else:
+        boards = [
+            row
+            for row in query_items(f"wb#{call_id}", "b#")
+            if str(row.get("SK") or "").startswith("b#")
+        ]
+        for number, board in enumerate(export.whiteboard_rules.sort_whiteboards(boards), start=1):
+            plan.add_text(
+                f"whiteboards/{number}-{safe_name(board.get('Title'), 'whiteboard')}.md",
+                export.whiteboard_rules.whiteboard_markdown(board),
+                f"Whiteboard: {board.get('Title') or 'untitled'} (Markdown)",
+            )
+
     details = {k: meeting[k] for k in DETAILS_FIELDS if k in meeting}
     details["Participants"] = participants
     details["Sessions"] = sessions
@@ -931,7 +984,10 @@ def plan_archive(
             plan.leave_out("Consent record", "the meeting has none")
     else:
         plan.leave_out(
-            "Consent record and evidence", "included only for the meeting's owner and Admins"
+            "Consent record and evidence",
+            "the full record and its evidence images are included only for the meeting's owner "
+            "and Admins; meeting-export.json holds the consent summary any reader of the meeting "
+            "can see, without images",
         )
     return plan
 
@@ -977,6 +1033,106 @@ def readme(call_id: str, contents: str, plan: Plan, include_consent: bool) -> st
             "",
         ]
     return "\n".join(lines)
+
+
+# --- the meeting export ---------------------------------------------------------
+
+
+def meeting_export(
+    call_id: str,
+    meeting: Mapping[str, Any],
+    include: Optional[List[str]] = None,
+    segments: Optional[List[Dict[str, Any]]] = None,
+    keyframes: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """The meeting export (export.py), read from the meeting's own items.
+
+    ``segments`` and ``keyframes`` are the meeting's ``trs#`` and ``kf#`` items
+    when the caller has read them already, as the Everything archive has.
+    """
+    wanted = include if include is not None else list(export.DEFAULT_INCLUDE)
+    retained = not meeting.get("TranscriptDeletedAt")
+    if segments is None:
+        segments = (
+            query_items(f"trs#{call_id}")
+            if retained and {"transcript", "chat"} & set(wanted)
+            else []
+        )
+    if keyframes is None:
+        keyframes = (
+            query_items(f"kf#{call_id}") if {"keyframes", "transcript"} & set(wanted) else []
+        )
+    notifications = query_items(f"nt#{call_id}") if "guidance" in wanted else []
+    whiteboards = query_items(f"wb#{call_id}", "b#") if retained and "whiteboards" in wanted else []
+    try:
+        state = json.loads(meeting.get("CallSummaryState") or "{}")
+    except (TypeError, ValueError):
+        state = {}
+    return export.build_export(
+        meeting,
+        segments=segments,
+        keyframes=keyframes,
+        notifications=notifications,
+        whiteboards=whiteboards,
+        include=wanted,
+        sections=summary_sections(meeting.get("CallSummaryText")),
+        state=state if isinstance(state, dict) else {},
+        name=str(meeting.get("MeetingTopic") or meeting_title(call_id)),
+        lma_version=LMA_VERSION,
+    )
+
+
+def export_text(document: Mapping[str, Any]) -> str:
+    return json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n"
+
+
+def export_link(key: str, file_name: str) -> str:
+    return S3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": RECORDINGS_BUCKET,
+            "Key": key,
+            "ResponseContentType": "application/json",
+            "ResponseContentDisposition": f'attachment; filename="{file_name}"',
+        },
+        ExpiresIn=EXPORT_LINK_SECONDS,
+    )
+
+
+def mcp_encoded_size(document: Mapping[str, Any]) -> int:
+    """The bytes the export takes in the MCP server's answer: its tool result is the
+    document as indented JSON, carried as a string inside the JSON-RPC answer."""
+    return len(json.dumps(json.dumps(document, indent=2, default=str)).encode("utf-8"))
+
+
+def export_for_mcp(event: Mapping[str, Any]) -> Dict[str, Any]:
+    """get_meeting_export: the export, or a link to it when it is too large to answer with."""
+    call_id = str(event.get("CallId") or "")
+    if not call_id:
+        raise BadRequestError("CallId is required")
+    try:
+        include = export.parse_include(event.get("Include"))
+    except ValueError as error:
+        raise BadRequestError(str(error)) from error
+    caller = caller_of(event)
+    meeting = require_meeting(caller, call_id)
+    document = meeting_export(call_id, meeting, include)
+    if mcp_encoded_size(document) <= EXPORT_INLINE_BYTES:
+        return {"export": document}
+    # Too large for the answer: written under the archive prefix, which the
+    # bucket's lifecycle rule empties after a day, and linked for ten minutes.
+    # The caller's access was checked above, before anything was read.
+    file_name = archive_file_name(call_id, "EXPORT")
+    key = f"{ARCHIVE_PREFIX}{posixify_filename(call_id)}/exports/{uuid.uuid4().hex}/{file_name}"
+    body = export_text(document).encode("utf-8")
+    S3.put_object(Bucket=RECORDINGS_BUCKET, Key=key, Body=body, ContentType="application/json")
+    expires = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=EXPORT_LINK_SECONDS)
+    LOGGER.info("meeting export of %s: %d bytes, answered with a link", call_id, len(body))
+    return {
+        "exportUrl": export_link(key, file_name),
+        "expiresAt": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "sizeBytes": len(body),
+    }
 
 
 # --- streaming ---------------------------------------------------------------------
@@ -1133,7 +1289,15 @@ def public_status(status: Mapping[str, Any]) -> Dict[str, Any]:
         )
     }
     answer["DownloadUrl"] = None
-    if status.get("Status") == READY and status.get("ArchiveKey"):
+    if (
+        status.get("Status") == READY
+        and status.get("ArchiveKey")
+        and status.get("Contents") == "EXPORT"
+    ):
+        answer["DownloadUrl"] = export_link(
+            status["ArchiveKey"], status.get("FileName") or "export.json"
+        )
+    elif status.get("Status") == READY and status.get("ArchiveKey"):
         answer["DownloadUrl"] = S3.generate_presigned_url(
             "get_object",
             Params={
@@ -1195,6 +1359,8 @@ def build(call_id: str, archive_id: str) -> Dict[str, Any]:
         )
         return {"ok": False}
     writer = None
+    if status["Contents"] == "EXPORT":
+        return build_export_file(status, meeting)
     try:
         plan = plan_archive(
             call_id, meeting, status["Contents"], bool(status.get("IncludeConsent"))
@@ -1244,11 +1410,44 @@ def build(call_id: str, archive_id: str) -> Dict[str, Any]:
     return {"ok": False}
 
 
+def build_export_file(status: Mapping[str, Any], meeting: Mapping[str, Any]) -> Dict[str, Any]:
+    """The EXPORT contents: the meeting export as one JSON file beside its status."""
+    call_id, archive_id = status["CallId"], status["ArchiveId"]
+    try:
+        body = export_text(meeting_export(call_id, meeting)).encode("utf-8")
+        key = f"{archive_folder(call_id, archive_id)}{status['FileName']}"
+        S3.put_object(Bucket=RECORDINGS_BUCKET, Key=key, Body=body, ContentType="application/json")
+    except Exception:  # noqa: BLE001 - recorded for the caller, who is polling the status
+        LOGGER.exception("could not build the export %s of %s", archive_id, call_id)
+        write_status(
+            {
+                **status,
+                "Status": FAILED,
+                "Message": "The meeting export could not be prepared.",
+                "UpdatedAt": now_iso(),
+            }
+        )
+        return {"ok": False}
+    write_status(
+        {**status, "Status": READY, "ArchiveKey": key, "Size": len(body), "UpdatedAt": now_iso()}
+    )
+    LOGGER.info("meeting export %s of %s: %d bytes", archive_id, call_id, len(body))
+    return {"ok": True}
+
+
 def handler(event: Mapping[str, Any], context: Any) -> Any:
     # Only this function invokes itself, and only without an identity -- an
     # AppSync caller always arrives with one.
     if event.get("Trigger") == "build" and event.get("identity") is None:
         return build(str(event.get("CallId") or ""), str(event.get("ArchiveId") or ""))
+    # The MCP server, with its caller's identity; an AppSync request never
+    # carries a Trigger (meetingArchiveLambda.js sends arguments, identity and
+    # the field name only).
+    if event.get("Trigger") == "export":
+        try:
+            return export_for_mcp(event)
+        except (ForbiddenError, BadRequestError) as error:
+            raise RuntimeError(str(error)) from None
     field = ((event.get("info") or {}).get("fieldName")) or ""
     try:
         if field == "prepareMeetingArchive":

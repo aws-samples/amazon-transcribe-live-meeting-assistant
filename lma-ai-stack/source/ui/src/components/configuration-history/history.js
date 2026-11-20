@@ -83,6 +83,7 @@ export const PROFILE = 'custom';
 // A section a later release adds and this map does not know is shown by its key.
 const SECTION_LABELS = {
   summary_prompt_templates: 'Transcript summary prompts',
+  summary_profiles: 'Summary profiles',
   nova_sonic_config: 'Nova Sonic',
   chat_buttons: 'Chat buttons',
   asr_engine: 'Transcription engine',

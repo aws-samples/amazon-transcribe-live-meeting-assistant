@@ -91,6 +91,20 @@ describe('Everything (.zip)', () => {
     expect(await screen.findByText(/more than the 5 GB an archive can hold/)).toBeTruthy();
   });
 
+  it('prepares the meeting export as one JSON file', async () => {
+    const prepareArchive = vi.fn(async () => ({
+      Status: 'READY',
+      FileName: 'Meeting-Weekly_sync-export.json',
+      DownloadUrl: 'https://signed.example.com/export.json',
+    }));
+    renderMenu({ prepareArchive });
+    openMenu();
+    choose('Meeting export (.json)');
+    await waitFor(() => expect(prepareArchive).toHaveBeenCalledWith(ITEM.callId, 'EXPORT', expect.any(Object)));
+    const link = await screen.findByRole('link', { name: /Download Meeting-Weekly_sync-export.json/ });
+    expect(link.getAttribute('href')).toBe('https://signed.example.com/export.json');
+  });
+
   it('prepares the key frames and the attachments as archives of their own', async () => {
     const prepareArchive = vi.fn(async () => ({ Status: 'READY', DownloadUrl: 'https://s.example.com/x.zip' }));
     renderMenu({ prepareArchive });
