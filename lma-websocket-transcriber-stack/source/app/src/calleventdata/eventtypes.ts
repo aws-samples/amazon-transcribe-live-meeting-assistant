@@ -61,6 +61,8 @@ export type CallEndEvent = CallEventBase<'END'> & {
 
 export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
     RecordingUrl: string,
+    /** The capture session the recording belongs to, when one is named. */
+    SessionNumber?: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

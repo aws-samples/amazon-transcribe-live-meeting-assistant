@@ -22,7 +22,7 @@ import {
 } from './capture-context';
 import { CallMetaData } from './eventtypes';
 import { sessionSettingsFrom } from './session-settings';
-import { writeCallStartEvent, writeCaptureContextEvent } from './transcribe';
+import { writeCallRecordingEvent, writeCallStartEvent, writeCaptureContextEvent } from './transcribe';
 
 const fakeServer = {
     log: {
@@ -147,4 +147,19 @@ test('UPDATE_CAPTURE_CONTEXT carries the transcription fields for the meeting', 
             AccessToken: 'access',
         },
     ]);
+});
+
+test('a continued session\'s audio recording link names its session', async (t) => {
+    const events = capturedEvents(t);
+    await writeCallRecordingEvent({ ...callMetaData, sessionNumber: 2 }, 'https://b/a_s2.wav', fakeServer);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]['EventType'], 'ADD_S3_RECORDING_URL');
+    assert.equal(events[0]['SessionNumber'], 2);
+});
+
+test('a first session\'s audio recording link names no session, as before', async (t) => {
+    const events = capturedEvents(t);
+    await writeCallRecordingEvent(callMetaData, 'https://b/a.wav', fakeServer);
+    assert.equal(events.length, 1);
+    assert.equal('SessionNumber' in events[0], false);
 });
