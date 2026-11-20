@@ -17,13 +17,16 @@ RECORD = {
         "Status": "granted",
         "CaptureAllowed": True,
         "NoticePostedAt": "2026-11-19T14:00:00Z",
-        "Participants": ["Ana Silva", "Bo Chen", "Unidentified participant 1"],
-        "ParticipantsSeen": ["Ana Silva", "Bo Chen", "Cy Diaz"],
+        "Notices": [
+            {"Channel": "chat", "PostedAt": "2026-11-19T14:00:00Z"},
+            {"Channel": "voice", "PostedAt": "2026-11-19T14:00:05Z"},
+        ],
         "Events": [
             {
                 "ParticipantName": "ana silva",
                 "Decision": "objection",
                 "Source": "chat",
+                "OccurredAt": "2026-11-19T14:00:58Z",
                 "RecordedAt": "2026-11-19T14:01:00Z",
             },
             {
@@ -31,6 +34,12 @@ RECORD = {
                 "Decision": "consent",
                 "Source": "voice",
                 "RecordedAt": "2026-11-19T14:02:00Z",
+            },
+            {
+                "ParticipantName": "Bo Chen",
+                "Decision": "consent",
+                "Source": "ui",
+                "RecordedAt": "2026-11-19T14:02:30Z",
             },
             {"ParticipantName": "Owner", "Decision": "consent", "Source": "attestation"},
         ],
@@ -52,20 +61,71 @@ def test_the_consent_record_is_returned_without_its_images(meeting, who):
     answer = consent.execute(who, "m1")
     query = meeting.calls[0][0]
     assert "SignedUrl" not in query and "S3Key" not in query
-    assert answer["mode"] == "opt-in" and answer["consentGivenBy"] == "each_participant"
-    assert answer["noticePostedAt"] == "2026-11-19T14:00:00Z"
-    assert answer["evidence"] == {"exists": True, "count": 2}
-    assert answer["participants"] == [
-        {
-            "name": "Ana Silva",
-            "status": "consented",
-            "at": "2026-11-19T14:02:00Z",
-            "method": "voice",
-        },
-        {"name": "Bo Chen", "status": "no_reply", "at": None, "method": None},
-        {"name": "Cy Diaz", "status": "no_reply", "at": None, "method": None},
-    ]
-    assert "Evidence" not in str(answer["participants"])
+    assert answer["hasEvidence"] is True
+    assert "Evidence" not in str(answer["events"])
+    assert "evidence" not in answer
+
+
+def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
+    answer = consent.execute(caller(), "m1")
+    assert answer == {
+        "meetingId": "m1",
+        "mode": "opt_in",
+        "rule": "each_participant",
+        "status": "granted",
+        "captureAllowed": True,
+        "noticePostedAt": "2026-11-19T14:00:00Z",
+        "notices": [
+            {"channel": "chat", "postedAt": "2026-11-19T14:00:00Z"},
+            {"channel": "voice", "postedAt": "2026-11-19T14:00:05Z"},
+        ],
+        "events": [
+            {
+                "participantName": "ana silva",
+                "decision": "objection",
+                "source": "chat",
+                "at": "2026-11-19T14:00:58Z",
+                "speakerId": None,
+            },
+            {
+                "participantName": "Ana Silva",
+                "decision": "consent",
+                "source": "voice",
+                "at": "2026-11-19T14:02:00Z",
+                "speakerId": None,
+            },
+            {
+                "participantName": "Bo Chen",
+                "decision": "consent",
+                "source": "ui",
+                "at": "2026-11-19T14:02:30Z",
+                "speakerId": None,
+            },
+            {
+                "participantName": "Owner",
+                "decision": "consent",
+                "source": "attestation",
+                "at": None,
+                "speakerId": None,
+            },
+        ],
+        "attestation": None,
+        "hasEvidence": True,
+        "startedAt": None,
+        "updatedAt": None,
+    }
+
+
+def test_the_notices_are_selected_with_their_channel(meeting):
+    consent.execute(caller(), "m1")
+    query = meeting.calls[0][0]
+    assert "Notices {" in query and "Channel" in query and "PostedAt" in query
+
+
+def test_a_speaker_is_never_matched_to_an_event_by_name(meeting):
+    """The record holds display names only; a name equal to a speaker's is not a link."""
+    answer = consent.execute(caller(), "m1")
+    assert {event["speakerId"] for event in answer["events"]} == {None}
 
 
 def test_another_user_is_refused_the_consent_record(meeting):
@@ -75,12 +135,24 @@ def test_another_user_is_refused_the_consent_record(meeting):
 
 
 @pytest.mark.parametrize(
-    "state", [None, {"CallId": "m1", "Consent": None}, {"CallId": "m1", "Consent": {"Mode": "off"}}]
+    "state",
+    [
+        None,
+        {"CallId": "m1", "Consent": None, "CaptureAllowed": True},
+        {
+            "CallId": "m1",
+            "Consent": {"Mode": "off", "Status": "not_required", "CaptureAllowed": True},
+        },
+    ],
 )
 def test_a_meeting_with_consent_off_returns_mode_off(calls_table, appsync, state):
     calls_table.put(meeting_row())
     appsync.answers["getMeetingConsent"] = {"getMeetingConsent": state}
-    assert consent.execute(caller(), "m1") == {"meetingId": "m1", "mode": "off"}
+    answer = consent.execute(caller(), "m1")
+    assert answer["mode"] == "off" and answer["rule"] is None
+    assert answer["status"] == "not_required"
+    assert answer["captureAllowed"] is (None if state is None else True)
+    assert answer["notices"] == [] and answer["events"] == [] and answer["hasEvidence"] is False
 
 
 def test_an_owner_attestation_is_reported(calls_table, appsync):
@@ -95,27 +167,40 @@ def test_an_owner_attestation_is_reported(calls_table, appsync):
                 "Method": "verbal",
                 "AttestedAt": "2026-11-19T14:03Z",
             },
+            "Events": [
+                {
+                    "ParticipantName": OWNER,
+                    "Decision": "consent",
+                    "Source": "attestation",
+                    "OccurredAt": "2026-11-19T14:03Z",
+                }
+            ],
             "Evidence": [],
         }
     }
     appsync.answers["getMeetingConsent"] = {"getMeetingConsent": record}
     answer = consent.execute(caller(), "m1")
-    assert answer["consentGivenBy"] == "owner_attests"
+    assert answer["rule"] == "owner_attests"
     assert answer["attestation"] == {
         "attestedBy": OWNER,
         "method": "verbal",
         "at": "2026-11-19T14:03Z",
     }
-    assert answer["evidence"] == {"exists": False, "count": 0}
+    assert answer["events"][0]["source"] == "attestation"
+    assert answer["hasEvidence"] is False
 
 
-def test_a_notify_meeting_has_no_consent_rule(calls_table, appsync):
+@pytest.mark.parametrize("status", ["pending", "objected"])
+def test_a_notify_meeting_has_no_consent_rule(calls_table, appsync, status):
     calls_table.put(meeting_row())
     appsync.answers["getMeetingConsent"] = {
-        "getMeetingConsent": {"Consent": {"Mode": "notify", "Rule": None, "Status": "not_required"}}
+        "getMeetingConsent": {
+            "Consent": {"Mode": "notify", "Rule": "each_participant", "Status": status}
+        }
     }
     answer = consent.execute(caller(), "m1")
-    assert answer["mode"] == "notify" and answer["consentGivenBy"] is None
+    assert answer["mode"] == "notify" and answer["rule"] is None
+    assert answer["status"] == status
 
 
 # ── share_meeting ───────────────────────────────────────────────────────────

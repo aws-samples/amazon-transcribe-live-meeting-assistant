@@ -313,6 +313,13 @@ def normalize_evidence(value: Any, *, quotes_allowed: bool) -> List[Dict[str, An
         return []
     if not isinstance(value, list):
         raise PreparationError("Evidence must be a list")
+    if len(value) > MAX_EVIDENCE_PER_ITEM:
+        # Refused rather than cut to the newest five: a request is applied as
+        # given or not at all.
+        raise PreparationError(
+            f"A checklist item has at most {MAX_EVIDENCE_PER_ITEM} evidence entries; "
+            f"this change gives {len(value)}"
+        )
     entries = []
     for position, entry in enumerate(value, start=1):
         where = f"Evidence {position}"
@@ -356,10 +363,14 @@ def apply_item_update(
 
     ``update`` names the item (``ItemId``) and any of ``Status``, ``Note`` (an
     empty note clears it), ``Evidence`` (replaces the item's evidence) and
-    ``AddEvidence`` (added after it). Either way the newest five entries are
-    kept. ``status_source`` is who is making the change: ``user`` or
-    ``assistant``. A status a user set is never changed by the assistant, so
-    an assistant's update to such an item is refused as a whole.
+    ``AddEvidence`` (added after it). The update is refused when the entries
+    it gives, in both lists together, are more than five, so none of them is
+    ever dropped. When ``AddEvidence`` takes the item past five, its oldest
+    stored entries make way, so the newest five are kept.
+
+    ``status_source`` is who is making the change: ``user`` or ``assistant``.
+    A status a user set is never changed by the assistant, so an assistant's
+    update to such an item is refused as a whole.
     """
     if status_source not in STATUS_SOURCES:
         raise PreparationError(f"StatusSource must be one of {', '.join(STATUS_SOURCES)}")
@@ -371,6 +382,16 @@ def apply_item_update(
     ]
     if not changes:
         raise PreparationError("Give a Status, a Note or Evidence to change")
+    given = sum(
+        len(update[key]) for key in ("Evidence", "AddEvidence") if isinstance(update.get(key), list)
+    )
+    if given > MAX_EVIDENCE_PER_ITEM:
+        # Each list is checked again on its own below; this counts both, as a
+        # replace and an addition in one change are stored together.
+        raise PreparationError(
+            f"A checklist item has at most {MAX_EVIDENCE_PER_ITEM} evidence entries; "
+            f"this change gives {given}"
+        )
     updated = [dict(item) for item in items]
     index = next((i for i, item in enumerate(updated) if item.get("ItemId") == item_id), None)
     if index is None:

@@ -6,6 +6,10 @@
   "type": "object",
   "required": ["schemaVersion", "exportedAt", "lmaVersion", "meeting"],
   "properties": {
+    "format": {
+      "const": "lma-meeting-export",
+      "description": "Names the document as an LMA meeting export, so a file can be recognised by its content alone. LMA writes it first in every export. Optional in this schema, so a document validates with or without it."
+    },
     "schemaVersion": { "const": 1 },
     "exportedAt": { "type": "string", "format": "date-time" },
     "lmaVersion": { "type": "string" },
@@ -79,50 +83,163 @@
         "label": { "type": "string", "description": "How LMA shows the speaker." },
         "name": { "type": ["string", "null"], "description": "A person's name, or null when it is not known. Never guessed." },
         "nameSource": { "enum": ["enrolled", "manual", "transcript", "platform", "none"] },
-        "email": { "$ref": "#/$defs/nullableString" }
+        "email": { "$ref": "#/$defs/nullableString" },
+        "consent": {
+          "enum": ["granted", "objected", "unknown"],
+          "description": "The speaker's latest consent or objection among the consent events recorded against this speaker; unknown when none is. A consent event is never matched to a speaker by name."
+        }
       }
     },
     "consent": {
       "type": "object",
-      "required": ["meetingId", "mode"],
+      "description": "The meeting's consent record in LMA's own values, the same shape as the MCP get_meeting_consent tool's answer. The evidence images are never included.",
+      "required": [
+        "meetingId",
+        "mode",
+        "status",
+        "notices",
+        "events",
+        "hasEvidence"
+      ],
       "properties": {
-        "meetingId": { "type": "string" },
-        "mode": { "enum": ["off", "notify", "opt-in"] },
-        "consentGivenBy": { "$ref": "#/$defs/nullableString" },
-        "status": { "$ref": "#/$defs/nullableString" },
-        "captureAllowed": { "type": ["boolean", "null"] },
-        "noticePostedAt": { "$ref": "#/$defs/nullableString" },
-        "startedAt": { "$ref": "#/$defs/nullableString" },
-        "updatedAt": { "$ref": "#/$defs/nullableString" },
+        "meetingId": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "off",
+            "notify",
+            "opt_in"
+          ]
+        },
+        "rule": {
+          "enum": [
+            "each_participant",
+            "owner_attests",
+            null
+          ],
+          "description": "The rule of an opt-in meeting; null otherwise, as only opt-in uses one."
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "granted",
+            "objected",
+            "not_required"
+          ]
+        },
+        "captureAllowed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the meeting may be captured, as the consent record says; null when its consent was never started."
+        },
+        "noticePostedAt": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "notices": {
+          "type": "array",
+          "description": "Each posting of the notice kept on the record.",
+          "items": {
+            "type": "object",
+            "required": [
+              "channel",
+              "postedAt"
+            ],
+            "properties": {
+              "channel": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "chat, voice, banner or invite."
+              },
+              "postedAt": {
+                "$ref": "#/$defs/nullableString"
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "description": "One entry per consent event, in the order recorded.",
+          "items": {
+            "type": "object",
+            "required": [
+              "participantName",
+              "decision",
+              "source",
+              "at",
+              "speakerId"
+            ],
+            "properties": {
+              "participantName": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "decision": {
+                "enum": [
+                  "consent",
+                  "objection",
+                  null
+                ]
+              },
+              "source": {
+                "enum": [
+                  "chat",
+                  "voice",
+                  "ui",
+                  "attestation",
+                  null
+                ]
+              },
+              "at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "When the reply or attestation happened, or when it was recorded if the record holds only that."
+              },
+              "speakerId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The participant's speakerId when the event was recorded against a transcript speaker; null otherwise. A consent event records a display name only, so this is null for every event today; a name is never matched to a speaker."
+              }
+            }
+          }
+        },
         "attestation": {
           "oneOf": [
-            { "type": "null" },
+            {
+              "type": "null"
+            },
             {
               "type": "object",
               "properties": {
-                "attestedBy": { "$ref": "#/$defs/nullableString" },
-                "method": { "$ref": "#/$defs/nullableString" },
-                "at": { "$ref": "#/$defs/nullableString" }
+                "attestedBy": {
+                  "$ref": "#/$defs/nullableString"
+                },
+                "method": {
+                  "$ref": "#/$defs/nullableString"
+                },
+                "at": {
+                  "$ref": "#/$defs/nullableString"
+                }
               }
             }
           ]
         },
-        "participants": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name", "status"],
-            "properties": {
-              "name": { "type": "string" },
-              "status": { "enum": ["consented", "objected", "no_reply"] },
-              "at": { "$ref": "#/$defs/nullableString" },
-              "method": { "$ref": "#/$defs/nullableString" }
-            }
-          }
+        "hasEvidence": {
+          "type": "boolean",
+          "description": "Whether evidence images exist; they are not included."
         },
-        "evidence": {
-          "type": "object",
-          "properties": { "exists": { "type": "boolean" }, "count": { "type": "integer" } }
+        "startedAt": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/nullableString"
         }
       }
     },
@@ -143,7 +260,8 @@
             "type": "object",
             "properties": {
               "segmentId": { "$ref": "#/$defs/nullableString" },
-              "startTime": { "$ref": "#/$defs/nullableNumber" },
+              "startTime": { "$ref": "#/$defs/nullableNumber", "description": "Seconds on the meeting's timeline: the time stored with the evidence, else its segment's start." },
+              "endTime": { "$ref": "#/$defs/nullableNumber", "description": "The end of the segment the evidence names; null when it names none, or the segment is not in the transcript (for example once the transcript was deleted)." },
               "quote": { "type": ["string", "null"], "description": "Null once the transcript was deleted." }
             }
           }
@@ -212,7 +330,8 @@
         "owner": { "type": ["string", "null"], "description": "A name as said in the meeting; null when nobody was named." },
         "dueDate": { "type": ["string", "null"], "format": "date" },
         "dueText": { "$ref": "#/$defs/nullableString" },
-        "startTime": { "$ref": "#/$defs/nullableNumber" },
+        "startTime": { "$ref": "#/$defs/nullableNumber", "description": "Seconds on the meeting's timeline: the time stored with the item, else its segment's start." },
+        "endTime": { "$ref": "#/$defs/nullableNumber", "description": "The end of the segment the item names; null when it names none, or the segment is not in the transcript." },
         "segmentId": { "$ref": "#/$defs/nullableString" }
       }
     },

@@ -116,8 +116,58 @@ def test_labels_find_the_meeting_only_when_all_match(observed) -> None:
         assert field in observed["listed_fields"], field
 
 
+def test_label_values_are_stored_matched_and_returned_unchanged(observed) -> None:
+    opaque = observed["opaque_label"]
+    labels, _audience = observed["metadata"]
+    assert labels.get("opaque") == opaque, labels
+    assert (observed["listed_labels"] or {}).get("opaque") == opaque, observed["listed_labels"]
+    assert observed["listed_by_opaque_label"] == [observed["call_id"]], observed["listed_by_opaque_label"]
+    assert observed["listed_by_trimmed_label"] == [], observed["listed_by_trimmed_label"]
+
+
+def test_a_request_over_a_limit_is_refused_whole_naming_the_limit(observed) -> None:
+    assert observed["too_many_labels"] and "at most 20 labels" in observed["too_many_labels"], observed[
+        "too_many_labels"
+    ]
+    assert observed["too_many_items"] and "at most 100 items" in observed["too_many_items"], observed[
+        "too_many_items"
+    ]
+    # Nothing of the refused label change was applied.
+    assert observed["labels_after_refusals"] == observed["metadata"][0], observed["labels_after_refusals"]
+
+
 def test_a_meeting_without_consent_reports_mode_off(observed) -> None:
-    assert observed["consent"].get("mode") == "off", observed["consent"]
+    consent = observed["consent"]
+    assert consent.get("mode") == "off", consent
+    assert consent.get("rule") is None and consent.get("status") == "not_required", consent
+    assert consent.get("notices") == [] and consent.get("events") == [], consent
+    assert consent.get("hasEvidence") is False and "captureAllowed" in consent, consent
+
+
+def test_the_consent_record_is_given_in_lma_s_own_values(observed) -> None:
+    assert not observed.get("consent_write_error"), observed.get("consent_write_error")
+    consent = observed["consent_started"]
+    assert "error" not in consent, consent
+    assert (consent["mode"], consent["rule"]) == ("opt_in", "each_participant"), consent
+    assert consent["status"] in ("pending", "granted"), consent
+    assert isinstance(consent["captureAllowed"], bool), consent
+    assert [notice["channel"] for notice in consent["notices"]] == ["chat"], consent["notices"]
+    assert consent["notices"][0]["postedAt"], consent["notices"]
+    replies = [event for event in consent["events"] if event["source"] != "attestation"]
+    assert replies == [
+        {
+            "participantName": "Integ Consent Participant",
+            "decision": "consent",
+            # A signed-in user's entry is recorded as made on the page.
+            "source": "ui",
+            "at": replies[0]["at"] if replies else None,
+            "speakerId": None,
+        }
+    ], consent["events"]
+    assert replies[0]["at"], replies
+    assert consent["hasEvidence"] is False, consent
+    for removed in ("consentGivenBy", "participants", "evidence"):
+        assert removed not in consent, consent
 
 
 def test_share_meeting_adds_and_removes(observed) -> None:
