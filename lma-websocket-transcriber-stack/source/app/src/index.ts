@@ -60,7 +60,11 @@ import { bindLogContext, runWithLogContext, LogContext } from './utils/log-conte
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
-import { noteStreamingSessionStarted, noteStreamingSessionEnded } from './metrics/session';
+import {
+    noteStreamingSessionStarted,
+    noteStreamingSessionEnded,
+    noteStreamingStartNotChecked,
+} from './metrics/session';
 import { getSessionSettings } from './calleventdata/session-settings';
 import { startTranscriptionEngine } from './calleventdata/engine-start';
 import {
@@ -714,6 +718,9 @@ const onTextMessage = async (
                     `[START]: [${clientIP}][${callMetaData.callId}] - The meeting record could not be read; resumed the session held for this caller.`
                 );
                 return;
+            }
+            if (access.code === 'MEETING_NOT_CHECKED') {
+                noteStreamingStartNotChecked();
             }
             server.log.warn(
                 `[START]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${access.code}).`

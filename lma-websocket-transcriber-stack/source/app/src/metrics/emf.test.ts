@@ -30,6 +30,7 @@ import {
     MINIMUM_SESSION_MS_FOR_SILENCE_TO_BE_A_FAULT,
     noteStreamingSessionEnded,
     noteStreamingSessionStarted,
+    noteStreamingStartNotChecked,
     noteTranscriptSegment,
     sawTranscriptSegment,
 } from './session';
@@ -234,6 +235,15 @@ test('a session opening is counted once', () => {
     noteStreamingSessionStarted(newMeeting(), newEmitter(recorder), 1000);
 
     assert.equal(recorder.only[catalogue.STREAMING_SESSIONS_STARTED], 1);
+});
+
+test('a START refused because the meeting record could not be read is counted', () => {
+    const recorder = new Recorder();
+    noteStreamingStartNotChecked(newEmitter(recorder));
+
+    const record = recorder.only;
+    assert.equal(record[catalogue.STREAMING_STARTS_NOT_CHECKED], 1);
+    assert.deepEqual(directive(record).Metrics, [{ Name: 'StreamingStartsNotChecked', Unit: 'Count' }]);
 });
 
 test('the first segment reports the time since the session opened', () => {
