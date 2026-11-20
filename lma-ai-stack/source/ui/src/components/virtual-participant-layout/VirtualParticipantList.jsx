@@ -51,6 +51,7 @@ import {
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
 import { meetingConsentChoiceAvailable, meetingConsentInput } from './meeting-consent-options';
+import { guidanceCreateInput } from './guidance-options';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import { launchStateMachineInput } from './launch-request';
 import {
@@ -162,6 +163,8 @@ const VirtualParticipantList = () => {
   // transcript only.
   const [enableVideoRecording, setEnableVideoRecording] = useState(joinAgain ? joinAgain.enableVideoRecording : true);
   const [meetingConsentChoice, setMeetingConsentChoice] = useState(joinAgain?.consentChoice || 'default');
+  // Live guidance for the meeting (guidance-options.js): the deployment's setting unless chosen.
+  const [guidanceChoice, setGuidanceChoice] = useState(joinAgain?.guidanceChoice || 'default');
   // The invitation note belongs to the invitation just parsed: it goes when the
   // form closes (cancel, dismiss or create), and when another platform is
   // chosen. A Join again form is a one-off: closing it empties the form, so
@@ -178,6 +181,7 @@ const VirtualParticipantList = () => {
       setConsentChecked(false);
       setEnableVideoRecording(true);
       setMeetingConsentChoice('default');
+      setGuidanceChoice('default');
     }
   }, [showCreateModal]);
   const continuing = !!joinAgain && joinMode === JOIN_MODE_CONTINUE;
@@ -202,6 +206,7 @@ const VirtualParticipantList = () => {
     setJoinMode(next.mode);
     setMeetingChangedNote(next.changedNote);
     if (next.consentChoice !== undefined) setMeetingConsentChoice(next.consentChoice);
+    if (next.guidanceChoice !== undefined) setGuidanceChoice(next.guidanceChoice);
     if (next.enableVideoRecording !== undefined) setEnableVideoRecording(next.enableVideoRecording);
     setJoinAgainError('');
   };
@@ -658,6 +663,9 @@ const VirtualParticipantList = () => {
       // Stored on the VP row too, and read by the VP when it starts.
       Object.assign(vpInput, meetingConsentInput(meetingConsentChoice));
 
+      // Live guidance for the meeting, stored on the row; nothing for the deployment's setting.
+      Object.assign(vpInput, guidanceCreateInput(guidanceChoice));
+
       // Recorded so the Virtual Participant page can show the Zoom account
       // choice; only where the form offers it.
       if (createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled) {
@@ -770,6 +778,7 @@ const VirtualParticipantList = () => {
       setConsentChecked(false);
       setEnableVideoRecording(true);
       setMeetingConsentChoice('default');
+      setGuidanceChoice('default');
 
       loadParticipants();
 
@@ -1045,6 +1054,8 @@ const VirtualParticipantList = () => {
               summaryProfiles={summaryProfiles}
               enableVideoRecording={enableVideoRecording}
               onEnableVideoRecordingChange={setEnableVideoRecording}
+              guidanceChoice={guidanceChoice}
+              onGuidanceChoiceChange={setGuidanceChoice}
             />
 
             <Checkbox onChange={({ detail }) => setConsentChecked(detail.checked)} checked={consentChecked}>

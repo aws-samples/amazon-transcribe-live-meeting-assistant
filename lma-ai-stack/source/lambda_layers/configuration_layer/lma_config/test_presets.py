@@ -34,6 +34,7 @@ ASSISTANT_DEFAULTS = {
         "inMeetingRequesters": "anyone",
         "webSearchEnabled": True,
         "mcpServersEnabled": True,
+        "guidance": {"defaultEnabled": False},
     },
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
@@ -126,6 +127,7 @@ PRESET_VALUES = {
             "inMeetingRequesters": "off",
             "webSearchEnabled": False,
             "mcpServersEnabled": False,
+            "guidance": {"defaultEnabled": True},
         },
         "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
     },
@@ -149,6 +151,7 @@ PRESET_VALUES = {
             "inMeetingRequesters": "anyone",
             "webSearchEnabled": False,
             "mcpServersEnabled": True,
+            "guidance": {"defaultEnabled": False},
         },
         "meeting_processing": {"defaultSummaryProfile": "default"},
     },
@@ -173,13 +176,20 @@ def test_each_preset_sets_exactly_its_documented_values(preset_id):
     )
 
 
+def _as_named(value, shipped):
+    """The shipped value of what a preset names; of an object, only the keys it names."""
+    if isinstance(value, dict) and isinstance(shipped, dict):
+        return {key: _as_named(part, shipped.get(key)) for key, part in value.items()}
+    return shipped
+
+
 def test_the_standard_preset_holds_the_shipped_defaults():
     """Applied in the editor, it puts back what another preset changed."""
     shipped = shipped_setting_defaults()
     for name, file_name in (("meeting_consent", "MeetingConsent"), ("retention", "Retention")):
         shipped[name] = json.loads((DEFAULTS / f"{file_name}.json").read_text(encoding="utf-8"))
     for name, values in PRESET_VALUES["standard"].items():
-        assert values == {key: shipped[name][key] for key in values}, name
+        assert values == {key: _as_named(values[key], shipped[name][key]) for key in values}, name
 
 
 @pytest.mark.parametrize("preset_id", ["regulated-consent-required", "regulated-notify"])
@@ -215,6 +225,15 @@ def test_the_team_hosted_preset_answers_no_request_made_in_the_meeting():
     assert assistant["inMeetingContextAccess"] == "none"
     assert assistant["webSearchEnabled"] is False
     assert assistant["mcpServersEnabled"] is False
+
+
+def test_the_team_hosted_preset_turns_live_guidance_on_for_new_meetings_and_keeps_its_cadence():
+    """Guidance goes to the owner and shared users only, never to the meeting's guests."""
+    assistant = preset_by_id("team-hosted-external")["Sections"]["meeting_assist"]["values"]
+    assert assistant["guidance"] == {"defaultEnabled": True}
+    shipped = {"guidance": {"defaultEnabled": False, "intervalSeconds": 120}}
+    applied = apply_preset({"meeting_assist": shipped}, preset_by_id("team-hosted-external"))
+    assert applied["meeting_assist"]["guidance"] == {"defaultEnabled": True, "intervalSeconds": 120}
 
 
 def test_the_team_hosted_preset_requires_each_participants_consent():

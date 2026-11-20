@@ -67,6 +67,7 @@ export default defineConfig({
               slug: "meeting-context-and-checklist",
             },
             { label: "Meeting Notifications", slug: "meeting-notifications" },
+            { label: "Live Guidance", slug: "live-guidance" },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript Deletion After the Summary",

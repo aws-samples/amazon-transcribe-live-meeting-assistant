@@ -130,6 +130,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# The action items listed with the stored summary, when the profile that
 	# wrote it lists structured action items; [] when a later summary did not.
 	ActionItems: [ActionItem]
+	# Whether live guidance reads this meeting while it is in progress, updating
+	# its checklist and publishing guidance notifications to its owner and the
+	# users it is shared with. Set when the meeting is created (from the Virtual
+	# Participant's choice, else the deployment's Meeting Assistant › Live
+	# guidance › On for new meetings) and through updateCallGuidance. See
+	# docs/live-guidance.md.
+	GuidanceEnabled: Boolean
 	# The meeting platform a Virtual Participant joined (Zoom, Teams, Chime,
 	# Webex, Google Meet), written when it creates the meeting. Absent for
 	# other capture sources and for meetings created before it was recorded.
@@ -292,6 +299,8 @@ input CreateCallInput {
 	Checklist: [ChecklistItemStateInput]
 	ChecklistUpdatedAt: AWSDateTime
 	SummaryProfile: String
+	# Absent, the call event processor sets it from the deployment's setting.
+	GuidanceEnabled: Boolean
 	MeetingPlatform: String
 	# How the meeting is captured and transcribed; see these fields on Call.
 	CaptureSource: String
@@ -423,6 +432,13 @@ type Mutation @aws_iam {
 	# Sets or clears the meeting's summary profile, on the updateCallAgenda access
 	# rule. A name the configuration does not hold is refused.
 	updateCallSummaryProfile(input: UpdateCallSummaryProfileInput!): Call @aws_cognito_user_pools @aws_iam
+	# Turns live guidance on or off for the meeting, on the updateCallAgenda
+	# access rule. See docs/live-guidance.md.
+	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools @aws_iam
+	# A short digest of the meeting so far, published to its notifications as a
+	# guidance item of type meeting_digest and returned. On the updateCallAgenda
+	# access rule; one model call, billed to the meeting.
+	requestMeetingDigest(CallId: ID!): MeetingDigestResult @aws_cognito_user_pools @aws_iam
 	# The meeting consent record (Call.Consent). One Lambda resolver applies the
 	# access rule of each; see the Meeting consent section below and
 	# docs/meeting-consent.md.
@@ -724,6 +740,9 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# The summary profile the meeting it creates is summarised with; absent for
 	# the default. Put on the meeting like the inputs above.
 	summaryProfile: String
+	# Whether live guidance is on for the meeting it creates; absent, the
+	# deployment's setting decides. Put on the meeting like the inputs above.
+	guidanceEnabled: Boolean
 	# The people the meeting is to be shared with once the VP creates it, as
 	# comma-separated email addresses. Only the meetingSharedWith input sets it,
 	# and it does not share the Virtual Participant itself (that is SharedWith).
@@ -844,6 +863,9 @@ input CreateVirtualParticipantInput {
 	# Optional summary profile name for the meeting; sent empty on an edit,
 	# removes it, so the meeting uses the default.
 	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	# Optional: email addresses the meeting is shared with when the VP creates
 	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
 	# Participant itself is not shared.
@@ -917,6 +939,9 @@ input UpdateScheduledVirtualParticipantInput {
 	# Optional summary profile name for the meeting; sent empty on an edit,
 	# removes it, so the meeting uses the default.
 	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	# Replaces who the meeting is shared with when the VP creates it; sent
 	# empty, removes it.
 	meetingSharedWith: [String!]
@@ -959,6 +984,9 @@ input JoinAgainVirtualParticipantInput {
 	# Optional summary profile name for the meeting; sent empty on an edit,
 	# removes it, so the meeting uses the default.
 	summaryProfile: String
+	# Optional: live guidance on (true) or off (false) for the meeting; left
+	# out, or sent as null on an edit, the deployment's setting decides.
+	guidanceEnabled: Boolean
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
@@ -1075,7 +1103,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -1837,6 +1865,22 @@ input UpdateCallChecklistItemInput {
 	StatusSource: String
 	# Backend roles only, as in UpdateCallMeetingContextInput.
 	UpdatedBy: String
+}
+
+input UpdateCallGuidanceInput {
+	CallId: ID!
+	GuidanceEnabled: Boolean!
+}
+
+type MeetingDigestResult @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean!
+	# Why there is no digest, or where it was published.
+	Message: String
+	# The digest, Markdown.
+	Text: String
+	# The notification it was published as.
+	NotificationId: String
 }
 
 input UpdateCallSummaryProfileInput {

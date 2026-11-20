@@ -42,6 +42,7 @@ export const updateScheduledVirtualParticipantMutation = /* GraphQL */ `
       audience
       meetingContext
       summaryProfile
+      guidanceEnabled
       checklist {
         ItemId
         Text
@@ -191,6 +192,8 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
             summaryProfiles={summaryProfiles}
             enableVideoRecording={state.enableVideoRecording}
             onEnableVideoRecordingChange={(checked) => setState((prev) => ({ ...prev, enableVideoRecording: checked }))}
+            guidanceChoice={state.guidanceChoice}
+            onGuidanceChoiceChange={(value) => setState((prev) => ({ ...prev, guidanceChoice: value }))}
           />
         </SpaceBetween>
       </Form>

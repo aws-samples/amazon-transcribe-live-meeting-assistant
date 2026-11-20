@@ -44,6 +44,20 @@ describe('mapCallsAttributes sentiment', () => {
 });
 
 describe('adoptMeetingCopy', () => {
+  it('maps live guidance and keeps it through a copy that leaves it out', () => {
+    const [mapped] = mapCallsAttributes([
+      {
+        CallId: 'c1',
+        GuidanceEnabled: true,
+        CreatedAt: '2026-11-03T14:05:09.123Z',
+        UpdatedAt: '2026-11-03T14:30:00.000Z',
+      },
+    ]);
+    expect(mapped.guidanceEnabled).toBe(true);
+    expect(adoptMeetingCopy(mapped, { callId: 'c1' }).guidanceEnabled).toBe(true);
+    expect(adoptMeetingCopy(mapped, { callId: 'c1', guidanceEnabled: false }).guidanceEnabled).toBe(false);
+  });
+
   const AGENDA = {
     agenda: 'Budget\nHiring',
     agendaSource: 'scheduled',

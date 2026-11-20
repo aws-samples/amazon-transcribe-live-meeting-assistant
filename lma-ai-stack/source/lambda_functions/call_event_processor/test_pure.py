@@ -494,3 +494,31 @@ def test_anything_that_names_no_later_session_is_the_first(record, expected):
 def test_a_meeting_record_is_read_by_the_session_that_started():
     meeting = {"SessionNumber": 3, "SessionStartedNumber": 2}
     assert session_number_of(meeting, "SessionStartedNumber") == 2
+
+
+# ── live guidance ────────────────────────────────────────────────────────────
+
+
+def test_guidance_settings_are_off_for_new_meetings_and_bounded():
+    from pure import guidance_settings
+
+    assert guidance_settings({}) == (False, 90.0, True)
+    assert guidance_settings(None) == (False, 90.0, True)
+    assert guidance_settings({"defaultEnabled": True, "intervalSeconds": 5}) == (True, 60.0, True)
+    assert guidance_settings({"defaultEnabled": "yes", "maxRunsPerMeeting": 0}) == (
+        False,
+        90.0,
+        False,
+    )
+    assert guidance_settings({"intervalSeconds": "often"})[1] == 90.0
+
+
+def test_a_guidance_run_is_due_at_most_every_interval_per_meeting():
+    from pure import guidance_run_due
+
+    queued = {}
+    assert guidance_run_due("m1", 100.0, 90.0, queued)
+    assert not guidance_run_due("m1", 150.0, 90.0, queued)
+    assert guidance_run_due("m2", 150.0, 90.0, queued)
+    assert guidance_run_due("m1", 190.0, 90.0, queued)
+    assert not guidance_run_due(None, 500.0, 90.0, queued)

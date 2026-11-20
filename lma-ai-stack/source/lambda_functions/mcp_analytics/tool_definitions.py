@@ -107,6 +107,14 @@ SUMMARY_PROFILE = {
         "(list_summary_profiles lists them); default, or an empty string, for the default"
     ),
 }
+GUIDANCE = {
+    "type": "boolean",
+    "description": (
+        "Live guidance on (true) or off (false) for the meeting: while it is in progress, "
+        "its checklist items are marked covered and guidance is offered to the people "
+        "running it, each run a model call billed to the meeting"
+    ),
+}
 
 MEETING_TOOLS: List[Dict[str, Any]] = [
     {
@@ -134,6 +142,22 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["meeting_id", "text"],
+        },
+        "annotations": WRITE,
+    },
+    {
+        "name": "request_meeting_digest",
+        "description": (
+            "Make a short digest of a meeting so far -- a summary, what is covered and still "
+            "open, the decisions and the actions -- and publish it to the meeting's "
+            "notifications as guidance of type meeting_digest for its owner and the people it "
+            "is shared with. Returns the digest's text. One model call, billed to the meeting. "
+            "Requires a read-write API key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"meeting_id": MEETING_ID},
+            "required": ["meeting_id"],
         },
         "annotations": WRITE,
     },
@@ -295,10 +319,11 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "update_meeting_metadata",
         "description": (
-            "Replace a meeting's labels, set its audience, set its summary profile, or any of "
-            "them. The labels given replace all of the meeting's labels; pass {} to clear them. "
-            "The summary profile applies to the summary written when the meeting ends and to "
-            "later regenerations. Requires a read-write API key."
+            "Replace a meeting's labels, set its audience, set its summary profile, turn its "
+            "live guidance on or off, or any of them. The labels given replace all of the "
+            "meeting's labels; pass {} to clear them. The summary profile applies to the summary "
+            "written when the meeting ends and to later regenerations. Requires a read-write "
+            "API key."
         ),
         "inputSchema": {
             "type": "object",
@@ -307,6 +332,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "labels": LABELS,
                 "audience": AUDIENCE,
                 "summaryProfile": SUMMARY_PROFILE,
+                "guidance": GUIDANCE,
             },
             "required": ["meetingId"],
         },
@@ -333,7 +359,8 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Change a Virtual Participant that is waiting for its scheduled launch: its "
             "scheduled time, meeting name, agenda, labels, audience, context, checklist, "
-            "summary profile, or who the meeting is shared with once it starts. Each argument given replaces "
+            "summary profile, live guidance, or who the meeting is shared with once it starts. "
+            "Each argument given replaces "
             "that setting; an empty value removes it. Refused within 5 minutes of the start, "
             "and a new time must be at least 5 minutes away. Only its owner or an Admin may "
             "change it. Requires a read-write API key."
@@ -350,6 +377,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "context": CONTEXT,
                 "checklist": CHECKLIST,
                 "summaryProfile": SUMMARY_PROFILE,
+                "guidance": GUIDANCE,
                 "shareWith": SHARE_WITH,
             },
             "required": ["virtualParticipantId"],

@@ -95,6 +95,12 @@ describe('mergeCallUpdate', () => {
     ).toEqual(['en-US', 'es-US']);
   });
 
+  it('keeps live guidance through an update that does not select it, and takes a change', () => {
+    const on = { ...recorded, GuidanceEnabled: true };
+    expect(mergeCallUpdate(on, { CallId: 'c1', Status: 'TRANSCRIBING' }).GuidanceEnabled).toBe(true);
+    expect(mergeCallUpdate(on, { CallId: 'c1', GuidanceEnabled: false }).GuidanceEnabled).toBe(false);
+  });
+
   it('takes a capture field the update does carry', () => {
     const merged = mergeCallUpdate(recorded, { CallId: 'c1', TranscriptionEngine: 'TRANSCRIBE' });
     expect(merged.TranscriptionEngine).toBe('TRANSCRIBE');

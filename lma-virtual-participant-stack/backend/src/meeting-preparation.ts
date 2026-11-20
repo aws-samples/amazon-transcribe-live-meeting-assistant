@@ -6,7 +6,8 @@
 
 /**
  * The meeting preparation a Virtual Participant carries onto the meeting it
- * records: labels, audience, meeting context, checklist and summary profile.
+ * records: labels, audience, meeting context, checklist, summary profile and
+ * whether live guidance is on (docs/live-guidance.md).
  *
  * Given when the VP is started or scheduled and stored on its own row, checked
  * there by the meeting preparation resolver. The VP reads them from that row
@@ -38,6 +39,8 @@ export interface VpPreparation {
   summaryProfile: string | null;
   /** Who the meeting is shared with when it is created (the row's meetingSharedWith). */
   meetingSharedWith: string[];
+  /** Live guidance on or off for the meeting; null for the deployment's setting. */
+  guidanceEnabled?: boolean | null;
 }
 
 /** The bounds the meeting preparation resolver holds the row to. */
@@ -98,6 +101,7 @@ export function preparationFromVpRow(
         checklist?: unknown;
         summaryProfile?: unknown;
         meetingSharedWith?: unknown;
+        guidanceEnabled?: unknown;
       }
     | null
     | undefined,
@@ -122,13 +126,15 @@ export function preparationFromVpRow(
     isString(row?.summaryProfile) && row.summaryProfile !== 'default' && SUMMARY_PROFILE_NAME.test(row.summaryProfile)
       ? row.summaryProfile
       : null;
+  const guidanceEnabled = typeof row?.guidanceEnabled === 'boolean' ? row.guidanceEnabled : null;
   if (
     !labels.length &&
     !audience &&
     !meetingContext.trim() &&
     !checklist.length &&
     !summaryProfile &&
-    !meetingSharedWith.length
+    !meetingSharedWith.length &&
+    guidanceEnabled === null
   ) {
     return null;
   }
@@ -139,6 +145,7 @@ export function preparationFromVpRow(
     checklist,
     summaryProfile,
     meetingSharedWith,
+    guidanceEnabled,
   };
 }
 
@@ -176,6 +183,8 @@ export function preparationStartFields(
     fields.ChecklistUpdatedAt = at;
   }
   if (preparation.summaryProfile) fields.SummaryProfile = preparation.summaryProfile;
+  // Left out for the deployment's setting, which the call event processor applies.
+  if (typeof preparation.guidanceEnabled === 'boolean') fields.GuidanceEnabled = preparation.guidanceEnabled;
   // Only a VP started or scheduled with meetingSharedWith creates its meeting
   // shared; sharing the VP itself (its SharedWith) does not share the meeting.
   if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');

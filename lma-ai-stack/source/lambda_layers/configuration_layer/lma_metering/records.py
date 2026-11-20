@@ -90,6 +90,7 @@ CONTEXTS = (
     "Summary",
     "SpeakerNaming",
     "AgendaDerivation",
+    "LiveGuidance",
     "SlideText",
     "ChatAttachments",
     "ConsentVerification",

@@ -12,6 +12,7 @@ title: "Meeting Assistant"
   - [Wake Phrase](#wake-phrase)
   - [Chat Interface](#chat-interface)
   - [Chat Shortcut Buttons](#chat-shortcut-buttons)
+  - [Live Guidance](#live-guidance)
 - [Built-in Tools](#built-in-tools)
   - [In-meeting requests](#in-meeting-requests)
   - [Who may ask](#who-may-ask)
@@ -63,6 +64,10 @@ Each token is published through the `addChatToken` AppSync mutation and delivere
 ### Chat Shortcut Buttons
 
 Pre-configured suggestion buttons appear in the chat panel, allowing users to trigger common queries with a single click. These buttons are configurable by administrators via the LMA UI settings. See [Chat Shortcut Button Configuration](#chat-shortcut-button-configuration) for details.
+
+### Live Guidance
+
+The assistant can also offer guidance without being asked. With [live guidance](live-guidance.md) on for a meeting, it reads the meeting as it goes, marks checklist items covered with evidence from the transcript, and offers the people running the meeting short guidance (a question to ask, a topic not yet covered, something to clarify, a risk to probe, an action with no owner or date, a time check) in the meeting page's Notifications drawer. It is off unless it is turned on, and is never posted to the meeting chat or spoken.
 
 ## Built-in Tools
 
@@ -379,6 +384,7 @@ See [Integration Credentials](infrastructure-and-security.md#rotating-a-credenti
 
 ## Related Documentation
 
+- [Live Guidance](live-guidance.md)
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
 - [MCP Servers](mcp-servers.md)
 - [Transcript Summarization](transcript-summarization.md)

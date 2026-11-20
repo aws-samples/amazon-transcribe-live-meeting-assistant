@@ -79,6 +79,7 @@ const getVirtualParticipant = `
       audience
       meetingContext
       summaryProfile
+      guidanceEnabled
       checklist {
         ItemId
         Text

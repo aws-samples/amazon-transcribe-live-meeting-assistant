@@ -302,6 +302,10 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallLabels"),
     ("Mutation", "updateCallAudience"),
     ("Mutation", "updateCallSummaryProfile"),
+    ("Mutation", "updateCallGuidance"),
+    # A digest of one meeting: a Lambda resolver applying the same rule in
+    # `caller_may_edit`.
+    ("Mutation", "requestMeetingDigest"),
     # The consent record of one meeting: one Lambda resolver applies each
     # operation's rule against the meeting's owner and share list, and the
     # evidence mutation accepts backend roles only.

@@ -82,6 +82,14 @@ mutation UpdateCallSummaryProfile($input: UpdateCallSummaryProfileInput!) {
 """
 )
 
+UPDATE_GUIDANCE = with_call_fields(
+    """
+mutation UpdateCallGuidance($input: UpdateCallGuidanceInput!) {
+  updateCallGuidance(input: $input) { __SUBSCRIBED_CALL_FIELDS__ }
+}
+"""
+)
+
 
 def _checked(check, *args, **kwargs):
     """Run one of the rules, reporting a broken one as the tools' ValueError."""
@@ -330,6 +338,7 @@ def _metadata_output(call_id: str, call: Mapping[str, Any]) -> Dict[str, Any]:
         "labels": labels_output(call.get("Labels")),
         "audience": call.get("Audience") or None,
         "summaryProfile": call.get("SummaryProfile") or "default",
+        "guidance": call.get("GuidanceEnabled") is True,
         "updatedAt": call.get("MeetingMetadataUpdatedAt"),
     }
 
@@ -340,14 +349,17 @@ def update_metadata(
     labels: Any = None,
     audience: Any = None,
     summary_profile: Any = None,
+    guidance: Any = None,
 ) -> Dict[str, Any]:
-    """update_meeting_metadata: replace the labels, set the audience, set the summary profile.
+    """update_meeting_metadata: the labels, the audience, the summary profile, live guidance.
 
     One write for each one given, in that order; if a later write fails, the
     earlier ones have still been made, and the error says which.
     """
-    if labels is None and audience is None and summary_profile is None:
-        raise ValueError("Give labels, audience, summaryProfile or a combination")
+    if labels is None and audience is None and summary_profile is None and guidance is None:
+        raise ValueError("Give labels, audience, summaryProfile, guidance or a combination")
+    if guidance is not None and not isinstance(guidance, bool):
+        raise ValueError("guidance must be true or false")
     stored_labels = labels_input(labels) if labels is not None else None
     stored_audience = audience_input(audience) if audience is not None else None
     stored_profile = profile_argument(summary_profile)
@@ -383,5 +395,18 @@ def update_metadata(
                 raise
             raise ValueError(
                 f"The other changes were made, but the summary profile could not be: {error}"
+            ) from error
+    if guidance is not None:
+        try:
+            current = _write(
+                UPDATE_GUIDANCE,
+                "updateCallGuidance",
+                {"CallId": call_id, "GuidanceEnabled": guidance},
+            )
+        except ValueError as error:
+            if stored_labels is None and audience is None and stored_profile is None:
+                raise
+            raise ValueError(
+                f"The other changes were made, but live guidance could not be: {error}"
             ) from error
     return _metadata_output(call_id, current)
