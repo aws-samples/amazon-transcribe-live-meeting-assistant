@@ -193,9 +193,42 @@ def test_a_profiles_action_items_and_profile_are_written_with_the_text(monkeypat
     }
     _, _, _, written = install(monkeypatch, body=body)
     index.handler(RUN_EVENT, FakeContext())
-    assert written[-1]["action_items"] == items
+    assert written[-1]["action_items"] == [
+        {
+            "Text": "Send the plan",
+            "Owner": None,
+            "DueDate": None,
+            "DueText": None,
+            "SegmentId": "s",
+            "StartTime": 1.0,
+        }
+    ]
     assert written[-1]["state"]["profile"] == "discovery-session"
     assert written[-1]["state"]["actionItems"] == "generated"
+
+
+def test_a_hooks_junk_action_items_are_dropped_and_the_summary_still_written(monkeypatch) -> None:
+    body = {
+        "summary": NEW_SUMMARY,
+        "actionItems": [
+            {"Text": "Send the plan", "StartTime": 3, "Unknown": "field"},
+            {"Text": None},
+            42,
+        ],
+    }
+    _, _, _, written = install(monkeypatch, body=body)
+    index.handler(RUN_EVENT, FakeContext())
+    assert written[-1]["text"] == NEW_SUMMARY
+    assert written[-1]["action_items"] == [
+        {
+            "Text": "Send the plan",
+            "Owner": None,
+            "DueDate": None,
+            "DueText": None,
+            "SegmentId": None,
+            "StartTime": 3.0,
+        }
+    ]
 
 
 def test_a_summary_without_action_items_clears_ones_a_previous_summary_left(monkeypatch) -> None:

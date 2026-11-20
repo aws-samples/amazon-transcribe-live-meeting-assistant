@@ -456,3 +456,20 @@ def test_the_summariser_still_only_writes_the_snapshot_without_an_override() -> 
     handler = summariser[summariser.index("def handler(") :]
     assert "if not prompt_override:" in handler
     assert handler.index("if not prompt_override:") < handler.index("write_to_s3(")
+
+
+def test_both_summary_writers_shape_action_items_with_one_text() -> None:
+    """The orchestrator and the regenerator each take a summary function's action
+    items at their intake; the two copies of the shaping must not drift."""
+    begin, end = "# BEGIN action_item_input", "# END action_item_input"
+    orchestrator = (
+        AI_STACK
+        / "source"
+        / "lambda_functions"
+        / "async_transcript_summary_orchestrator"
+        / "lambda_function.py"
+    ).read_text(encoding="utf-8")
+    regenerator = REGENERATOR.read_text(encoding="utf-8")
+    blocks = [text[text.index(begin) : text.index(end)] for text in (orchestrator, regenerator)]
+    assert blocks[0] == blocks[1]
+    assert "def action_item_input(items):" in blocks[0]

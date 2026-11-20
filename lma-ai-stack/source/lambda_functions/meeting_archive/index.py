@@ -924,11 +924,17 @@ def plan_archive(
         if not urls:
             plan.leave_out(f"{kind.capitalize()} recording", "the meeting has none")
 
-    plan.add_text(
-        "meeting-export.json",
-        export_text(meeting_export(call_id, meeting, segments=segments, keyframes=frame_items)),
-        "Meeting export (docs/meeting-export.md)",
-    )
+    # The rest of the archive does not depend on the export, so a failure to
+    # build it leaves it out with a note rather than failing the archive.
+    try:
+        exported = export_text(
+            meeting_export(call_id, meeting, segments=segments, keyframes=frame_items)
+        )
+    except Exception:  # noqa: BLE001 - recorded in the README
+        LOGGER.exception("could not build the meeting export of %s for its archive", call_id)
+        plan.leave_out("Meeting export", "it could not be prepared; download it on its own")
+    else:
+        plan.add_text("meeting-export.json", exported, "Meeting export (docs/meeting-export.md)")
 
     details = {k: meeting[k] for k in DETAILS_FIELDS if k in meeting}
     details["Participants"] = participants

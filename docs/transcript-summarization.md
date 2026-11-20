@@ -338,7 +338,6 @@ The function ARN is available in the stack output **FetchTranscriptLambdaArn**.
 | `ProcessTranscript` | Boolean | No | When `true`, condenses sequential utterances from the same speaker, removes filler words, and strips HTML tags. |
 | `TokenCount` | Integer | No | Trims the returned transcript to approximately N tokens. Useful for staying within model context limits. |
 | `IncludeChat` | Boolean | No | When `true`, the messages typed in the meeting chat are interleaved with the speech as `[chat] <sender>: <message>` lines (`[chat] <message>` without `IncludeSpeaker`), and the response also carries `chat`, one `[MM:SS] <sender>: <message>` line per message, and `chatLinks`, a list of `{"url", "sender", "time"}` for each link shared, `time` in seconds from the start of the meeting. Off by default, so a function that reads the transcript for what was said gets speech only. A message is cut at 1,000 characters, and past 100,000 characters of chat the later messages are left out of the text (and counted in the last line of `chat`); their links are still listed, up to 200. |
-
 | `IncludeSegments` | Boolean | No | When `true`, the response also carries `segments`, one `{"segmentId", "startTime", "endTime", "speaker"}` for each segment of speech (and of chat, with `IncludeChat`), with the speaker named as the transcript names it. The Bedrock summarizer reads it to place [structured action items](#structured-action-items) on the transcript. |
 
 **Example invocation payload:**

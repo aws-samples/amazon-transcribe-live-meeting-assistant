@@ -111,6 +111,45 @@ SUMMARY_EXTRAS = {
 }
 
 
+# BEGIN action_item_input -- one text in the orchestrator and the regenerator;
+# lma-ai-stack/test/test_summary_regeneration.py holds the copies to each other.
+#: The fields of an ActionItemInput, and the most items stored with a summary.
+ACTION_ITEM_TEXT_FIELDS = ("Owner", "DueDate", "DueText", "SegmentId")
+MAX_ACTION_ITEMS = 50
+
+
+def action_item_input(items):
+    """A summary function's action items as ActionItemInput accepts them.
+
+    A summary function may be a customer's own, so its list is not trusted:
+    only the six fields of an ActionItemInput are kept, an item without text is
+    dropped, and a field of the wrong type is null. A list this leaves empty is
+    an empty list, which clears an earlier one, and never fails the write of
+    the summary it came with.
+    """
+    kept = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("Text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        entry = {"Text": text.strip()[:500]}
+        for field in ACTION_ITEM_TEXT_FIELDS:
+            value = item.get(field)
+            entry[field] = value[:500] if isinstance(value, str) and value else None
+        start = item.get("StartTime")
+        is_number = isinstance(start, (int, float)) and not isinstance(start, bool)
+        entry["StartTime"] = float(start) if is_number else None
+        kept.append(entry)
+        if len(kept) >= MAX_ACTION_ITEMS:
+            break
+    return kept
+
+
+# END action_item_input
+
+
 def summary_extras(body: Any) -> Dict[str, Any]:
     """The extras of a summary function's answer, under their event field names."""
     if not isinstance(body, dict):
@@ -120,7 +159,7 @@ def summary_extras(body: Any) -> Dict[str, Any]:
         value = body.get(key)
         if key == "actionItems":
             if isinstance(value, list):
-                extras[field] = [item for item in value if isinstance(item, dict)]
+                extras[field] = action_item_input(value)
         elif isinstance(value, str) and value:
             extras[field] = value
     return extras

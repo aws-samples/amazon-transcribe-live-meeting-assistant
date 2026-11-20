@@ -432,6 +432,26 @@ def test_the_export_download_is_one_json_file_linked_for_ten_minutes(fakes) -> N
     valid(json.loads(stored))
 
 
+def test_an_export_that_cannot_be_built_is_left_out_of_the_archive_with_a_note(
+    fakes, monkeypatch
+) -> None:
+    _dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("an unusual stored attribute")
+
+    monkeypatch.setattr(index.export, "build_export", broken)
+    prepare(OWNER)
+    index.handler(json.loads(lam.invocations[0]["Payload"]), Context())
+    archive = next(v for k, v in s3.stored.items() if k.endswith(".zip"))
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        names = opened.namelist()
+        readme = opened.read("README.md").decode()
+    assert "meeting-export.json" not in names
+    assert "summary/summary.md" in names
+    assert "**Meeting export**: it could not be prepared" in readme
+
+
 def test_the_everything_archive_holds_the_export_and_lists_it(fakes) -> None:
     _dynamo, s3, lam = fakes(meeting=full_meeting(), parts=full_partitions())
     started = prepare(OWNER)
