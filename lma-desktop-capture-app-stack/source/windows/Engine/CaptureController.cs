@@ -296,12 +296,42 @@ public sealed class CaptureController
         Stop(objected ? null : State.Err(text), sendEnd: false);
     }
 
-    public void Start(string? callId = null)
+    /// <summary>
+    /// Whether this download can continue an existing meeting: its
+    /// lma-config.json names LMA's AppSync endpoint.
+    /// </summary>
+    public bool CanContinueMeetings => !string.IsNullOrEmpty(Config.GraphqlEndpoint);
+
+    /// <summary>
+    /// Ask LMA to reopen an existing meeting for one more capture session
+    /// (MeetingReopen.cs). On success, pass the answer's CallId and session number
+    /// to Start(callId, sessionNumber).
+    /// </summary>
+    public async Task<MeetingReopen.Result> ReopenMeetingAsync(string callId)
+    {
+        if (!CanContinueMeetings)
+            return MeetingReopen.Result.Fail(new MeetingReopen.Failure(MeetingReopen.FailureKind.NotConfigured));
+        if (_tokenStore is { NeedsRefreshBeforeUse: true }) await _tokenStore.RefreshIfNeededAsync();
+        var idToken = _tokenStore?.IdToken ?? Config.IdToken;
+        var token = string.IsNullOrEmpty(idToken) ? (_tokenStore?.AccessToken ?? Config.AccessToken) : idToken;
+        if (string.IsNullOrEmpty(token))
+            return MeetingReopen.Result.Fail(new MeetingReopen.Failure(MeetingReopen.FailureKind.Unavailable,
+                Message: "You are not signed in."));
+        return await MeetingReopen.ReopenAsync(Config.GraphqlEndpoint, token, callId);
+    }
+
+    /// <summary>
+    /// Begin capture + streaming. `sessionNumber` is set only to continue an
+    /// existing meeting: the session reopenMeeting answered for `callId`. 0 (the
+    /// default) starts a new meeting.
+    /// </summary>
+    public void Start(string? callId = null, int sessionNumber = 0)
     {
         if (string.IsNullOrEmpty(Config.AccessToken)) { SetState(State.Err("Not signed in")); return; }
         SetState(State.Starting);
 
         Config.CallId = Config.SessionCallId(callId, Config.ConfiguredCallId, DateTime.UtcNow);
+        Config.SessionNumber = sessionNumber;
         ActiveCallId = Config.CallId;
 
         // Apply Settings overrides: speaker labels ride the START frame as

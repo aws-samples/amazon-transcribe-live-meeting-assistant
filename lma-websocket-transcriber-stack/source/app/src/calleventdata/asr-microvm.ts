@@ -447,9 +447,21 @@ const invokeLauncher = async (
     }
 };
 
+/**
+ * The launcher's acquire request. A later capture session of a continued
+ * meeting (meeting-session.ts) names its session, so the launcher starts a
+ * MicroVM of its own for it rather than handing back the first session's; a
+ * meeting's first session names none.
+ */
+export const acquirePayload = (callId: string, session?: number): Record<string, string> =>
+    session !== undefined && Number.isInteger(session) && session >= 2
+        ? { action: 'acquire', callId, session: String(session) }
+        : { action: 'acquire', callId };
+
 export const acquireLease = async (
     callId: string,
-    server: FastifyInstance
+    server: FastifyInstance,
+    session?: number
 ): Promise<AsrLease | undefined> => {
     if (ASR_DIRECT_ENDPOINT) {
         server.log.info(
@@ -458,7 +470,7 @@ export const acquireLease = async (
         return { endpointUrl: ASR_DIRECT_ENDPOINT };
     }
     const started = Date.now();
-    const body = await invokeLauncher({ action: 'acquire', callId }, server);
+    const body = await invokeLauncher(acquirePayload(callId, session), server);
     if (!body) {
         return undefined;
     }
@@ -1065,7 +1077,7 @@ export class AsrChannelSession {
 export const startMicrovmAsr = async (
     socketData: SocketCallData,
     server: FastifyInstance,
-    acquire: (callId: string, server: FastifyInstance) => Promise<AsrLease | undefined> = acquireLease
+    acquire: (callId: string, server: FastifyInstance, session?: number) => Promise<AsrLease | undefined> = acquireLease
 ): Promise<boolean> => {
     const callMetadata = socketData.callMetadata;
 
@@ -1127,13 +1139,13 @@ const startAcquiredSessions = async (
     socketData: SocketCallData,
     server: FastifyInstance,
     asrSet: AsrSessionSet,
-    acquire: (callId: string, server: FastifyInstance) => Promise<AsrLease | undefined>,
+    acquire: (callId: string, server: FastifyInstance, session?: number) => Promise<AsrLease | undefined>,
     enrolledVoices: Promise<EnrolledVoice[]>,
     options: Map<AsrChannelId, AsrSessionOptions>
 ): Promise<boolean> => {
     const callMetadata = socketData.callMetadata;
     const sessions = asrSet.sessions;
-    const lease = await acquire(callMetadata.callId, server);
+    const lease = await acquire(callMetadata.callId, server, callMetadata.sessionNumber);
     if (!lease) {
         if (socketData.asr === asrSet) {
             socketData.asr = undefined;

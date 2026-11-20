@@ -389,6 +389,9 @@ Popover options:
   whole screen.
 - **Recent meeting names** — the clock button beside the meeting-name field
   re-uses a recent name (handy for recurring meetings).
+- **Continue an existing meeting…** — the link under **Start Recording** adds
+  this recording to a meeting that already exists in LMA, even one shown as
+  **Done**. See [Continue an existing meeting](#continue-an-existing-meeting).
 - **What will be captured** — a summary box above **Start Recording** (and again
   while recording) names the **microphone** in use and, when screen video is on,
   **which screen or window** will be recorded, with a small preview of it. This
@@ -491,6 +494,9 @@ Panel options:
   screen.
 - **Recent meeting names** — the clock button beside the meeting-name field
   re-uses a recent name (handy for recurring meetings).
+- **Continue an existing meeting…** — the link under **Start Recording** adds
+  this recording to a meeting that already exists in LMA, even one shown as
+  **Done**. See [Continue an existing meeting](#continue-an-existing-meeting).
 - **What will be captured** — a summary box above **Start Recording** (and again
   while recording) names the **microphone** in use and, when screen video is on,
   **which screen or window** will be recorded. This is deliberately on the main
@@ -532,6 +538,103 @@ can't accidentally end up with two.
 > validates the login crypto offline, and `--capture-test <seconds> <out.wav>`
 > records the exact streamed stereo PCM with no server — useful for confirming
 > **ch0/Left = system, ch1/Right = mic** by measuring per-channel RMS.
+
+## Continue an existing meeting
+
+When the app was closed by mistake, the computer restarted, or you pressed
+**Stop** too early, you can carry on recording into the **same** LMA meeting
+instead of starting a new one. Its transcript, meeting page and consent record
+then stay together, and the meeting keeps its original date in the meeting list.
+
+1. Open the meeting's page in LMA and copy its Meeting ID with the copy button
+   beside the meeting's title (the full ID is also on the **Details** tab), or
+   copy the page's whole address from the browser.
+2. In the app's panel, choose **Continue an existing meeting…** under **Start
+   Recording**.
+3. Paste the meeting ID or the page address into the field, and press
+   **Continue Meeting**. Complete the meeting consent step if the panel shows
+   one, as for any recording.
+
+The app first asks LMA to reopen the meeting, then records into it. The rest of
+the recording works as usual: pause, mute, screen video, **Open this meeting in
+LMA** and **Stop**. **Start a new meeting instead** goes back to the usual
+**Start Recording**. When a continued recording ends, the panel offers a new
+meeting again, so the next **Start Recording** starts a new meeting as before.
+
+What happens to the meeting:
+
+- A meeting shown as **Done** shows as in progress again once the app starts
+  capturing, and returns to **Done** when you stop.
+- The new transcript follows the existing one on the same timeline: it starts
+  one second after the latest time already in the transcript (rounded up to a
+  whole second). The time that passed between the two recordings is not shown.
+- When you stop, the end-of-meeting work runs again: the speaker naming pass,
+  the transcript deletion schedule, and the summary, which is generated again
+  over the whole transcript and replaces the earlier one (including a summary
+  written by hand). A deployment's start-of-call Lambda hook is invoked again,
+  with a `SessionNumber` in its payload, and its post-call hook receives the new
+  summary.
+- A pending transcript deletion (see [Transcript deletion](transcript-deletion.md))
+  is cancelled when the continued recording starts capturing, and scheduled
+  again when it ends.
+- The consent step is asked again, and what you confirm is recorded on the
+  meeting's existing consent record, beside the earlier notices and replies.
+
+Who can continue a meeting, and when:
+
+- The meeting's **owner** or an **Admin**. A user the meeting is shared with
+  cannot.
+- Not while the meeting is still being captured. After a dropped connection the
+  server holds a meeting for 60 seconds for the app to reconnect, so a meeting
+  whose recording stopped unexpectedly may take a minute to show as **Done**.
+- Not within 15 minutes of another reopen of the meeting whose capture has not
+  started yet, such as a Virtual Participant [rejoin](virtual-participant.md#rejoin)
+  that is still joining, or another user's continuation. After 15 minutes that
+  reopen is taken to have been abandoned. Your own continuation is not held off
+  this way: until LMA has recorded that its session started, **Continue
+  Meeting** answers with the same session again, so a recording that did not
+  start (it was refused, the connection failed, or the app was closed) can be
+  retried. LMA cannot tell that retry from a second app signed in as you, so
+  continue a meeting from one app at a time.
+- Not once the meeting's transcript has been deleted by the Retention settings.
+
+If the meeting cannot be continued, the panel says why under the field and
+nothing is recorded:
+
+| Message | What to do |
+|---|---|
+| *There is no meeting with this ID.* | Check the meeting ID; copy it again from the meeting's page. |
+| *Only the meeting's owner or an Admin can continue this meeting.* | Ask the owner to continue it, or start a new meeting. |
+| *This meeting's transcript has been deleted…* | Start a new meeting. |
+| *This meeting is still being captured…* | Wait until the meeting shows as **Done** in LMA, then try again. |
+| *This meeting was reopened a few minutes ago…* | A Virtual Participant rejoin, or another user, reopened the meeting and that capture has not started. Wait until it has ended, or 15 minutes. Your own earlier **Continue Meeting** does not hold you off: until its session has started, pressing it again answers with the same session. |
+
+**Continue an existing meeting…** is shown only by a download that includes
+LMA's API endpoint (`graphqlEndpoint` in `lma-config.json`), which packages
+built by this release and later do. A copy downloaded from an earlier
+deployment does not show it; download the app again after updating the stack.
+
+Limitations:
+
+- **Recordings.** Each recording is stored in files of its own, which start at
+  0:00: the continued recording's audio is `<meeting ID>_s2.wav` (`_s3` and so
+  on) under the recordings prefix, and its screen video is a file of its own
+  too. The meeting record keeps the links of every recording's files
+  (`RecordingUrls` and `VideoRecordingUrls`) with the session of each, so
+  deleting the meeting deletes all of them. The meeting page's player plays one
+  session's recording at a time, at that session's place on the transcript
+  timeline, with a selector to choose a session, as for a Virtual Participant
+  rejoin; see
+  [A meeting continued in more than one session](web-ui-guide.md#a-meeting-continued-in-more-than-one-session).
+- **Voice labels.** With **Identify speakers** on, the voices are numbered
+  afresh in each recording (`spk_0`, `spk_1`, …), so a name given to a voice on
+  the meeting page applies to that label in both recordings. Check the names
+  after continuing.
+- **Retention.** A continued meeting keeps the expiry it was created with, which
+  is also when it leaves the meeting list.
+- **Other streaming clients.** The Stream Audio page and the browser extension
+  cannot continue a meeting yet. API clients can: see
+  [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 
 ## Updating to a new version
 

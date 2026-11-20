@@ -283,6 +283,11 @@ enum SelfTest {
         print("\nMeeting consent step:")
         for (name, got, want) in ConsentSelfTest.cases() { check(name, got, want) }
 
+        print("\nContinue an existing meeting:")
+        for (name, got, want) in MeetingReopenSelfTest.cases() { check(name, got, want) }
+        check("a new meeting names no session", "\(Config.startSessionNumber(0) == nil)", "true")
+        check("a continued meeting names its session", "\(Config.startSessionNumber(3) ?? 0)", "3")
+
         print(failures == 0 ? "\nAll self-tests PASSED ✓" : "\n\(failures) self-test(s) FAILED ✗")
         return failures == 0 ? 0 : 1
     }

@@ -75,7 +75,9 @@ which also lists the retention stack parameters a preset cannot set, and
   a segment the speech engine corrected after the meeting ended.
 
 - **When the meeting is reopened** by a Virtual Participant
-  [rejoin](virtual-participant.md#rejoin) while the setting is on, a pending
+  [rejoin](virtual-participant.md#rejoin), or continued from the Desktop Capture
+  App ([Continue an existing meeting](desktop-capture-app.md#continue-an-existing-meeting)),
+  while the setting is on, a pending
   deletion is cancelled once the rejoined session starts capturing, because the
   meeting is being captured again. The rejoined session's end schedules the
   deletion afresh, by the rules above. A summary written while the meeting is

@@ -39,6 +39,7 @@ import { transcriptChannelFor } from './channels';
 import type { CaptureContext, TranscriptionContext } from './capture-context';
 import { DEFAULT_REMOTE_SPEAKER_NAME, DEFAULT_SYSTEM_LABEL } from './speaker-fields';
 import { pageSpeakersFor } from './speaker-fusion';
+import { sessionEventFields, sessionSegment } from './meeting-session';
 
 import {
     DEFAULT_MAX_SEGMENT_SECONDS,
@@ -201,6 +202,9 @@ export const writeCallStartEvent = async (
         SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
         AgentId: callMetaData.agentId,
         CreatedAt: new Date().toISOString(),
+        // The capture session, when the START was given one (meeting-session.ts):
+        // a later session of an existing meeting reopens it.
+        ...sessionEventFields(callMetaData),
         ...captureContext,
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
@@ -238,6 +242,7 @@ export const writeCallEndEvent = async (
         CallId: callMetaData.callId,
         CustomerPhoneNumber: callMetaData.fromNumber || DEFAULT_REMOTE_SPEAKER_NAME,
         SystemPhoneNumber: callMetaData.toNumber || DEFAULT_SYSTEM_LABEL,
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
@@ -254,6 +259,9 @@ export const writeCallRecordingEvent = async (
         EventType: 'ADD_S3_RECORDING_URL',
         CallId: callMetaData.callId,
         RecordingUrl: recordingUrl,
+        // The session the recording belongs to: the link is written after the
+        // session's END, when the meeting may already be in a later session.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
@@ -270,6 +278,9 @@ export const writeCallVideoRecordingEvent = async (
         EventType: 'ADD_S3_VIDEO_RECORDING_URL',
         CallId: callMetaData.callId,
         VideoRecordingUrl: videoRecordingUrl,
+        // The session the recording belongs to, as the Virtual Participant
+        // names it; the call event processor files the link under it.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
@@ -1068,13 +1079,16 @@ export const writeSegmentToKds = async (
     server: FastifyInstance
 ): Promise<void> => {
     const now = new Date().toISOString();
+    // On the meeting's timeline: a later session of a continued meeting starts
+    // after the earlier ones, and its ids are its own (meeting-session.ts).
+    const placed = sessionSegment(segment, callMetadata);
     const kdsObject: AddTranscriptSegmentEvent = {
         EventType: 'ADD_TRANSCRIPT_SEGMENT',
         CallId: callMetadata.callId,
         Channel: segment.Channel,
-        SegmentId: segment.SegmentId,
-        StartTime: segment.StartTime,
-        EndTime: segment.EndTime,
+        SegmentId: placed.SegmentId,
+        StartTime: placed.StartTime,
+        EndTime: placed.EndTime,
         Transcript: segment.Transcript,
         IsPartial: segment.IsPartial,
         CreatedAt: now,

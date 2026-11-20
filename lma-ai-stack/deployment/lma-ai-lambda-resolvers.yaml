@@ -1871,6 +1871,155 @@ Resources:
         LambdaFunctionArn: !GetAtt MeetingPreparationResolverFunction.Arn
 
   ##########################################################################
+  # Meeting reopen: reopenMeeting allows one more capture session on an
+  # existing meeting, for a streaming client that is to continue it. The
+  # session rules are lma_sessions in the configuration layer, which the
+  # Virtual Participant rejoin uses too. See
+  # docs/desktop-capture-app.md#continue-an-existing-meeting.
+  ##########################################################################
+  MeetingReopenResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt MeetingReopenResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_reopen_resolver
+      Description: >-
+        Lambda resolver for reopenMeeting: allows the next capture session on
+        an existing meeting for its owner or an Admin
+      MemorySize: 256
+      # One read of the meeting, one query of its transcript's end times, one
+      # conditional write.
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          LOG_LEVEL: !Ref LogLevel
+      # Carries lma_sessions. Pure Python, so it does not pin an architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AIStackName}/resolvers/lambda/MeetingReopenResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only a table name and a log level"
+    DependsOn:
+      - MeetingReopenResolverFunctionLogGroup
+
+  MeetingReopenResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AIStackName}/resolvers/lambda/MeetingReopenResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingReopenResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingReopenResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-MeetingReopenResolver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The meeting row (c#) is read for its Owner, Status and sessions
+              # and given the session it allows; the transcript (trs#) is
+              # queried for its latest end time.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "trs#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncMeetingReopenLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingReopenResolverFunction.Arn
+
+  MeetingReopenLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      Name: MeetingReopenFunction
+      Description: Lambda function that allows the next capture session on a meeting
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingReopenLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingReopenResolverFunction.Arn
+
+  ##########################################################################
   # The configuration editor (read every section with its schema, save the
   # sections it changed) and the configuration history (list, read, compare,
   # restore and label the revisions every configuration save records). See
@@ -2356,6 +2505,8 @@ Outputs:
     Value: !GetAtt CallCostLambdaDataSource.Name
   MeetingPreparationLambdaDataSourceName:
     Value: !GetAtt MeetingPreparationLambdaDataSource.Name
+  MeetingReopenLambdaDataSourceName:
+    Value: !GetAtt MeetingReopenLambdaDataSource.Name
   ConfigurationRevisionsLambdaDataSourceName:
     Value: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
   KnowledgeBaseDataSourceName:
