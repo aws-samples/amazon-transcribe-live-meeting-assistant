@@ -262,7 +262,9 @@ def attribution(caller: Mapping[str, Any], data: Mapping[str, Any]) -> str:
         return caller["username"]
     label = data.get("UpdatedBy")
     if isinstance(label, str) and label.strip():
-        return label.strip()[:MAX_ATTRIBUTION_CHARS]
+        if len(label.strip()) > MAX_ATTRIBUTION_CHARS:
+            raise BadRequestError(f"UpdatedBy is longer than {MAX_ATTRIBUTION_CHARS} characters")
+        return label.strip()
     return BACKEND_ATTRIBUTION
 
 

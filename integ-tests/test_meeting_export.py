@@ -20,9 +20,13 @@ it).
     items whose owners are names said in the meeting.
 ``test_the_export_over_mcp_matches_the_published_schema``
     ``get_meeting_export`` on that meeting validates against
-    docs/schemas/meeting-export-v1.schema.json, with its participants, links,
-    summary and action items. With ``LMA_TEST_MEETING_EXPORT_OUT`` set, the
-    export is also written to that file.
+    docs/schemas/meeting-export-v1.schema.json, starts with its ``format``, and
+    holds its participants, links, summary and action items. Checklist evidence
+    and action items carry their segment's start and end times; with a consent
+    reply recorded under a participant's exact name, every participant's
+    ``consent`` is still ``unknown``, as a name is never matched to a speaker.
+    With ``LMA_TEST_MEETING_EXPORT_OUT`` set, the export is also written to that
+    file.
 ``test_the_profile_is_set_on_the_meeting_and_chosen_for_a_regeneration``
     ``list_summary_profiles``; ``update_meeting_metadata`` sets and refuses a
     profile; ``regenerate_meeting_summary`` with ``healthcare`` writes that
@@ -304,6 +308,16 @@ def discovery_meeting(env):
     chat_id, chat_start, chat_sender, chat_text = CHAT
     rows.append(meeting.segment(chat_id, chat_start, chat_start + 1, chat_sender, chat_text, "MEETING_CHAT"))
     meeting.put_segments(rows)
+    # Evidence that names a segment and no time, as a consumer that renumbers
+    # segments would need placing by its times.
+    env.ddb.update_item(
+        TableName=env.table,
+        Key={"PK": {"S": f"c#{meeting.call_id}"}, "SK": {"S": f"c#{meeting.call_id}"}},
+        UpdateExpression="SET Checklist[0].Evidence = :e",
+        ExpressionAttributeValues={
+            ":e": {"L": [{"M": {"SegmentId": {"S": "s6"}, "Quote": {"S": "Who owns the data migration?"}}}]}
+        },
+    )
     # The segments are written to the table directly, so the meeting gets the
     # duration the call event processor's aggregation would have given it.
     env.ddb.update_item(
@@ -356,10 +370,53 @@ def test_a_discovery_session_meeting_is_summarised_with_its_profile(env, discove
     env.state["action_items"] = items
 
 
+#: A consent record with a reply under a participant's exact name, written for
+#: the export test and removed after it.
+NAMED_REPLY_CONSENT = {
+    "M": {
+        "Mode": {"S": "opt_in"},
+        "Rule": {"S": "each_participant"},
+        "Status": {"S": "granted"},
+        "CaptureAllowed": {"BOOL": True},
+        "Events": {
+            "L": [
+                {
+                    "M": {
+                        "ParticipantName": {"S": "Priya Shah"},
+                        "Decision": {"S": "consent"},
+                        "Source": {"S": "chat"},
+                        "OccurredAt": {"S": "2026-11-20T00:00:00Z"},
+                    }
+                }
+            ]
+        },
+    }
+}
+
+
+def _set_consent(env, meeting: Meeting, consent: dict | None) -> None:
+    key = {"PK": {"S": f"c#{meeting.call_id}"}, "SK": {"S": f"c#{meeting.call_id}"}}
+    if consent is None:
+        env.ddb.update_item(TableName=env.table, Key=key, UpdateExpression="REMOVE Consent")
+    else:
+        env.ddb.update_item(
+            TableName=env.table,
+            Key=key,
+            UpdateExpression="SET Consent = :c",
+            ExpressionAttributeValues={":c": consent},
+        )
+
+
 def test_the_export_over_mcp_matches_the_published_schema(env, discovery_meeting) -> None:
-    error, document = env.call("get_meeting_export", {"meetingId": discovery_meeting.call_id})
+    _set_consent(env, discovery_meeting, NAMED_REPLY_CONSENT)
+    try:
+        error, document = env.call("get_meeting_export", {"meetingId": discovery_meeting.call_id})
+    finally:
+        _set_consent(env, discovery_meeting, None)
     assert not error, document
     valid(document)
+    assert list(document)[:2] == ["format", "schemaVersion"], list(document)[:3]
+    assert document["format"] == "lma-meeting-export"
     out = os.environ.get("LMA_TEST_MEETING_EXPORT_OUT")
     if out:
         Path(out).write_text(json.dumps(document, indent=2), encoding="utf-8")
@@ -373,8 +430,23 @@ def test_the_export_over_mcp_matches_the_published_schema(env, discovery_meeting
         {"url": "https://docs.example.com/claims-requirements", "startTime": 53.0, "sharedBy": sharer["speakerId"]}
     ]
     assert {e["kind"] for e in document["transcript"]} == {"speech", "chat"}
+    # A reply under "Priya Shah" is not matched to the speaker of that name.
+    assert {p["consent"] for p in document["participants"]} == {"unknown"}, document["participants"]
+    # The consent part is the record in LMA's own values, as get_meeting_consent gives it.
+    assert (document["consent"]["mode"], document["consent"]["rule"]) == ("opt_in", "each_participant")
+    assert [(e["participantName"], e["decision"], e["source"], e["speakerId"]) for e in document["consent"]["events"]] == [
+        ("Priya Shah", "consent", "chat", None)
+    ], document["consent"]["events"]
+    assert document["consent"]["hasEvidence"] is False
     assert document["actionItems"], "the export holds the structured action items"
+    times = {e["segmentId"]: (e["startTime"], e["endTime"]) for e in document["transcript"]}
+    for item in document["actionItems"]:
+        assert "endTime" in item, item
+        if item["segmentId"] in times:
+            assert item["endTime"] == times[item["segmentId"]][1], (item, times[item["segmentId"]])
     assert [c["itemId"] for c in document["checklist"]] == ["q1", "r1"]
+    evidence = document["checklist"][0]["evidence"]
+    assert [(e["segmentId"], e["startTime"], e["endTime"]) for e in evidence] == [("s6", 39.0, 46.0)], evidence
     error, partial = env.call(
         "get_meeting_export", {"meetingId": discovery_meeting.call_id, "include": ["summary", "actionItems"]}
     )
@@ -492,6 +564,8 @@ def test_an_export_after_the_transcript_was_deleted_leaves_it_out(env, discovery
     assert document["meeting"]["transcriptRetained"] is False
     assert "transcript" not in document and "participants" not in document and "links" not in document
     assert all(e["quote"] is None for item in document["checklist"] for e in item["evidence"])
+    # The segments went with the transcript, so the evidence's end is no longer known.
+    assert all(e["endTime"] is None for item in document["checklist"] for e in item["evidence"])
     assert document["summary"]["sections"], "the summary is kept"
 
 

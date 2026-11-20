@@ -19,9 +19,13 @@ holds one key:
    pushes guidance and reads it back (with list_meeting_guidance and
    list_meeting_notifications), sets and reads the meeting's agenda,
    context, checklist (and one item's status), labels and audience, finds the
-   meeting by its labels with list_meetings, reads its consent record (off),
-   shares the meeting with an example.com address and unshares it again, reads
-   the recording link from get_meeting_record, and deletes the meeting with
+   meeting by its labels with list_meetings (with label values whose case and
+   spacing must come back unchanged), reads its consent record (off), shares
+   the meeting with an example.com address and unshares it again, reads the
+   recording link from get_meeting_record, starts the meeting's consent as
+   opt-in with the each-participant rule (the strictest choice, which every
+   deployment allows), records a notice and a reply as the owner and reads
+   the record back with get_meeting_consent, and deletes the meeting with
    delete_meeting, first without confirm (nothing may be deleted) and then with
    it; and schedules a meeting two days ahead with schedule_meeting twice, the
    second time with a new meeting ID (the scheduled Virtual Participant must be
@@ -50,6 +54,19 @@ import boto3
 import cognito_test_user
 from mcp_api_key_probe import LIST_KEYS, REVOKE_KEY, ProbeError, _graphql, _graphql_url, _post
 from ws_stream_probe import _mint_tokens, _outputs, _stack_resources
+
+#: The consent mutations the meeting page makes, as the meeting's owner.
+START_CONSENT = """
+mutation Start($input: StartMeetingConsentInput!) { startMeetingConsent(input: $input) { CallId } }
+"""
+RECORD_NOTICE = """
+mutation Notice($input: RecordMeetingConsentNoticeInput!) { recordMeetingConsentNotice(input: $input) { CallId } }
+"""
+RECORD_EVENT = """
+mutation Event($input: RecordMeetingConsentEventInput!) { recordMeetingConsentEvent(input: $input) { CallId } }
+"""
+#: The participant the consent step records a reply for.
+CONSENT_PARTICIPANT = "Integ Consent Participant"
 
 GENERATE_KEY = (
     "mutation Generate($scope: String) { generateMCPApiKey(scope: $scope) { keyValue keyPrefix scope } }"
@@ -280,6 +297,9 @@ class Probe:
             self._guidance(key)
             self._preparation(key)
             self._record(key)
+            # After every other read of the meeting, as starting consent can
+            # change whether it may be captured.
+            self._consent(key)
             self._delete(key)
             self._schedule_twice(key)
         finally:
@@ -333,9 +353,34 @@ class Probe:
         kept = call("get_meeting_checklist", {}).get("items", [])
         self.observed["checklist_kept_status"] = [(entry["itemId"], entry["status"]) for entry in kept]
         label = f"integ-{uuid.uuid4().hex[:8]}"
-        metadata = call("update_meeting_metadata", {"labels": {"probe": label, "kind": "mcp"}, "audience": "internal"})
+        # A value with upper case and surrounding spaces must be stored, matched
+        # and returned exactly as given.
+        opaque = f"  Opaque {label.upper()} "
+        labels = {"probe": label, "kind": "mcp", "opaque": opaque}
+        metadata = call("update_meeting_metadata", {"labels": labels, "audience": "internal"})
         self.observed["metadata"] = (metadata.get("labels"), metadata.get("audience"))
+        self.observed["opaque_label"] = opaque
         found = self.list_with_labels(key, {"probe": label, "kind": "mcp"})
+        self.observed["listed_by_opaque_label"] = [
+            entry["meetingId"] for entry in self.list_with_labels(key, {"opaque": opaque})
+        ]
+        self.observed["listed_by_trimmed_label"] = [
+            entry["meetingId"] for entry in self.list_with_labels(key, {"opaque": opaque.strip()})
+        ]
+        self.observed["listed_labels"] = found[0].get("labels") if found else None
+        error, refused = self.call(
+            key,
+            "update_meeting_metadata",
+            {**meeting, "labels": {f"k{n}": "v" for n in range(21)}},
+        )
+        self.observed["too_many_labels"] = refused if error else None
+        error, refused = self.call(
+            key,
+            "set_meeting_checklist",
+            {**meeting, "items": [{"itemId": f"i{n}", "text": "t", "kind": "topic"} for n in range(101)]},
+        )
+        self.observed["too_many_items"] = refused if error else None
+        self.observed["labels_after_refusals"] = call("update_meeting_metadata", {"audience": "internal"}).get("labels")
         self.observed["listed_by_labels"] = [entry["meetingId"] for entry in found]
         self.observed["listed_fields"] = sorted(found[0]) if found else []
         self.observed["listed_by_one_wrong_label"] = [
@@ -389,6 +434,33 @@ class Probe:
         self.observed["record_links_expire_in"] = record.get("linksExpireInSeconds")
         status = _fetch_status(link)
         self.observed["record_link_fetch_status"] = status
+
+    def _consent(self, key: str) -> None:
+        """Start consent as opt-in, record a notice and a reply as the owner, read it back.
+
+        Opt-in with the each-participant rule is the strictest choice, so a
+        deployment that does not let a meeting choose its own still allows it.
+        """
+        url, token = self.d.graphql_url, self.id_token
+        try:
+            _graphql(
+                url,
+                token,
+                START_CONSENT,
+                {"input": {"CallId": self.call_id, "Mode": "opt_in", "Rule": "each_participant"}},
+            )
+            _graphql(url, token, RECORD_NOTICE, {"input": {"CallId": self.call_id, "Channel": "chat"}})
+            _graphql(
+                url,
+                token,
+                RECORD_EVENT,
+                {"input": {"CallId": self.call_id, "ParticipantName": CONSENT_PARTICIPANT, "Decision": "consent"}},
+            )
+        except ProbeError as err:
+            self.observed["consent_write_error"] = str(err)
+            return
+        error, answer = self.call(key, "get_meeting_consent", {"meetingId": self.call_id})
+        self.observed["consent_started"] = {"error": answer} if error else answer
 
     def _delete(self, key: str) -> None:
         error, _ = self.call(key, "delete_meeting", {"meetingId": self.call_id})

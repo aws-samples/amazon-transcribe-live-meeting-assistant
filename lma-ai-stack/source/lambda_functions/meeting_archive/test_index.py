@@ -400,7 +400,7 @@ def test_consent_record_and_evidence_are_left_out_for_everyone_else(fakes, ident
     assert "Consent record and evidence" in readme
     # The export in the archive carries the consent summary, and the README says so.
     assert "meeting-export.json holds the consent summary" in readme
-    assert json.loads(archive.read("meeting-export.json"))["consent"]["evidence"]["exists"]
+    assert json.loads(archive.read("meeting-export.json"))["consent"]["hasEvidence"] is True
 
 
 def test_everything_holds_summary_transcript_recordings_frames_attachments_and_details(fakes):
