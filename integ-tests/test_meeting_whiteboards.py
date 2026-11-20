@@ -120,6 +120,7 @@ def test_mcp_reads_the_whiteboards_and_polls_without_a_change(observed) -> None:
 
 
 def test_the_export_holds_the_whiteboards(observed) -> None:
+    assert observed.get("export_error") is None, observed.get("export_error")
     exported = observed["export_whiteboards"]
     assert exported and exported[0]["panels"]
     assert any(p["content"] == USER_DECISION for p in exported[0]["panels"])

@@ -556,12 +556,15 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
                         "ifNewerThan": current["version"],
                     },
                 )
-                _, export = probe.mcp(
+                export_error, export = probe.mcp(
                     key,
                     "get_meeting_export",
                     {"meetingId": assisted.call_id, "include": ["whiteboards"]},
                 )
-                observed["export_whiteboards"] = export.get("whiteboards")
+                observed["export_error"] = export if export_error else None
+                observed["export_whiteboards"] = (
+                    None if export_error else export.get("whiteboards")
+                )
             finally:
                 probe.revoke(prefix)
 

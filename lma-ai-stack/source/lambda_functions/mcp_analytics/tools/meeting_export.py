@@ -28,6 +28,7 @@ PARTS = (
     "actionItems",
     "keyframes",
     "guidance",
+    "whiteboards",
 )
 
 #: A meeting with hours of transcript is read and assembled within this.
