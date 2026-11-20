@@ -1,0 +1,1341 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT-0 License.
+"""Core publish operations — build and upload LMA artifacts to S3.
+
+This is a Python port of the original publish.sh bash script, providing
+programmatic access to the full LMA publish workflow with Rich progress
+reporting, change detection, and per-stack control.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable
+
+import boto3
+import botocore.exceptions
+
+from lma_sdk.exceptions import LMAPublishError, LMAValidationError
+from lma_sdk.models.publish import (
+    PublishConfig,
+    PublishResult,
+    StackDefinition,
+    StackPackageType,
+    StackPublishResult,
+)
+
+if TYPE_CHECKING:
+    from lma_sdk.client import LMAClient
+
+logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────
+# Stack definitions — describes how each LMA sub-stack is packaged
+# ──────────────────────────────────────────────────────────────
+
+STACK_DEFINITIONS: list[StackDefinition] = [
+    StackDefinition(
+        name="lma-browser-extension-stack",
+        package_type=StackPackageType.ZIP_WITH_TOKEN_REPLACE,
+        template_file="template.yaml",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-virtual-participant-stack",
+        package_type=StackPackageType.ZIP_AND_UPLOAD,
+        template_file="template.yaml",
+        supports_change_detection=False,  # Always publish (fast)
+    ),
+    StackDefinition(
+        name="lma-desktop-capture-app-stack",
+        package_type=StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE,
+        template_file="template.yaml",
+        # The downloadable app sources live under the stack's own source/
+        # subdir (source/macos/ and source/windows/); zip that tree (not the
+        # stack root, so the CloudFormation template itself is excluded from
+        # the download). CodeBuild packages each platform subdir into its own
+        # per-platform download zip.
+        source_dir="source",
+        supports_change_detection=False,  # Always publish (fast, small)
+    ),
+    StackDefinition(
+        name="lma-asr-microvm-stack",
+        package_type=StackPackageType.ASR_MICROVM,
+        template_file="template.yaml",
+        source_dir="source",
+        supports_change_detection=False,  # Always publish (fast, small)
+    ),
+    StackDefinition(
+        name="lma-vpc-stack",
+        package_type=StackPackageType.CFN_PACKAGE,
+        template_file="template.yaml",
+        supports_change_detection=False,
+    ),
+    StackDefinition(
+        name="lma-cognito-stack",
+        package_type=StackPackageType.CFN_PACKAGE,
+        template_file="lma-cognito-stack.yaml",
+        deployment_subdir="deployment",
+        supports_change_detection=False,
+    ),
+    StackDefinition(
+        name="lma-meetingassist-setup-stack",
+        package_type=StackPackageType.DELEGATE_SCRIPT,
+        delegate_script="publish.sh",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-bedrockkb-stack",
+        package_type=StackPackageType.DELEGATE_SCRIPT,
+        delegate_script="publish.sh",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-websocket-transcriber-stack",
+        package_type=StackPackageType.BUILD_SCRIPT,
+        build_script="build-s3-dist.sh",
+        deployment_subdir="deployment",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-ai-stack",
+        package_type=StackPackageType.BUILD_SCRIPT,
+        build_script="build-s3-dist.sh",
+        deployment_subdir="deployment",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-llm-template-setup-stack",
+        package_type=StackPackageType.HASH_AND_PACKAGE,
+        template_file="llm-template-setup.yaml",
+        deployment_subdir="deployment",
+        hash_source_dir="../source",
+        hash_template_field="source_hash",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-chat-button-config-stack",
+        package_type=StackPackageType.HASH_AND_PACKAGE,
+        template_file="chat-button-config.yaml",
+        deployment_subdir="deployment",
+        hash_source_dir="../source",
+        hash_template_field="source_hash",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
+        name="lma-nova-sonic-config-stack",
+        package_type=StackPackageType.HASH_AND_PACKAGE,
+        template_file="nova-sonic-config.yaml",
+        deployment_subdir="deployment",
+        hash_source_dir="../source",
+        hash_template_field="source_hash",
+        s3_template_path="deployment/nova-sonic-config.yaml",
+        supports_change_detection=True,
+    ),
+]
+
+STACK_NAMES = [s.name for s in STACK_DEFINITIONS]
+
+
+# ──────────────────────────────────────────────────────────────
+# Prerequisite checks
+# ──────────────────────────────────────────────────────────────
+
+def _check_command(cmd: str, install_hint: str) -> str | None:
+    """Check if a command is available. Returns error message or None."""
+    if shutil.which(cmd) is None:
+        return f"'{cmd}' is not installed. {install_hint}"
+    return None
+
+
+def _check_docker_running() -> str | None:
+    """Check docker is installed and running."""
+    err = _check_command("docker", "Install: https://docs.docker.com/engine/install/")
+    if err:
+        return err
+    result = subprocess.run(["docker", "ps"], capture_output=True, timeout=10)
+    if result.returncode != 0:
+        return "Docker is not running. Please start Docker."
+    return None
+
+
+def _check_sam_version(min_version: str = "1.118.0") -> str | None:
+    """Check SAM CLI version meets minimum."""
+    err = _check_command(
+        "sam",
+        "Install: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html",
+    )
+    if err:
+        return err
+    result = subprocess.run(["sam", "--version"], capture_output=True, text=True, timeout=10)
+    match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
+    if not match:
+        return "Could not determine SAM CLI version."
+    installed = match.group(1)
+    if _compare_versions(installed, min_version) < 0:
+        return f"SAM CLI version >= {min_version} required (installed: {installed})."
+    return None
+
+
+def _check_node_version() -> str | None:
+    """Check Node.js version is 18, 20, or 22."""
+    err = _check_command("node", "Install Node.js 18, 20, or 22.")
+    if err:
+        return err
+    result = subprocess.run(["node", "-v"], capture_output=True, text=True, timeout=10)
+    match = re.match(r"v(\d+)\.", result.stdout.strip())
+    if not match:
+        return "Could not determine Node.js version."
+    major = int(match.group(1))
+    if major not in (18, 20, 22):
+        return f"Node.js 18, 20, or 22 required (installed: v{major})."
+    return None
+
+
+def _compare_versions(v1: str, v2: str) -> int:
+    """Compare two version strings. Returns -1, 0, or 1."""
+    parts1 = [int(x) for x in v1.split(".")]
+    parts2 = [int(x) for x in v2.split(".")]
+    for a, b in zip(parts1, parts2):
+        if a < b:
+            return -1
+        if a > b:
+            return 1
+    return 0
+
+
+def check_prerequisites() -> list[str]:
+    """Check all publish prerequisites. Returns list of error messages (empty = all OK)."""
+    errors = []
+    # Docker is only a prerequisite because SAM builds the Lambda bundles in a
+    # container. A builder that sets SAM_BUILD_IN_CONTAINER=false has taken
+    # responsibility for already being the Lambda platform (see the flag in
+    # lma-ai-stack/Makefile), and needs no daemon -- so demanding one here would
+    # reject a build that is going to succeed.
+    checks: list[Callable[[], str | None]] = []
+    if os.environ.get("SAM_BUILD_IN_CONTAINER", "true").strip().lower() != "false":
+        checks.append(_check_docker_running)
+    for check in checks + [
+        _check_sam_version,
+        lambda: _check_command("zip", "Install zip."),
+        lambda: _check_command("pip3", "Install pip3."),
+        lambda: _check_command("npm", "Install npm."),
+        # `cfn package` shells out to the AWS CLI. Checked here so a builder
+        # without it is told up front, rather than after several minutes of
+        # building, by eight nested stacks failing with "command not found".
+        lambda: _check_command(
+            "aws",
+            "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+        ),
+        _check_node_version,
+    ]:
+        err = check()
+        if err:
+            errors.append(err)
+    return errors
+
+
+# ──────────────────────────────────────────────────────────────
+# Change detection (SHA256-based, same logic as publish.sh)
+# ──────────────────────────────────────────────────────────────
+
+def _calculate_dir_hash(directory: str | Path) -> str:
+    """Calculate a SHA256 hash of directory contents (excluding node_modules, build)."""
+    directory = Path(directory)
+    hasher = hashlib.sha256()
+    # .pytest_cache and .ruff_cache are here because a hash of a source tree is
+    # also what decides whether a deploy-time custom resource re-runs: a local
+    # `make test-lambdas` leaving a cache directory inside a hashed tree would
+    # otherwise change the digest, and the stack events would show an update
+    # nobody made.
+    skip_dirs = {
+        "node_modules",
+        "build",
+        "dist",
+        ".aws-sam",
+        "__pycache__",
+        ".git",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+
+    files = []
+    for root, dirs, filenames in os.walk(directory):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for fname in sorted(filenames):
+            if fname == ".checksum":
+                continue
+            fpath = Path(root) / fname
+            files.append(fpath)
+
+    files.sort()
+    for fpath in files:
+        rel = fpath.relative_to(directory)
+        hasher.update(str(rel).encode())
+        try:
+            hasher.update(fpath.read_bytes())
+        except OSError:
+            pass
+
+    return hasher.hexdigest()[:16]
+
+
+def _inject_source_hash(template_path: Path, field: str, content_hash: str) -> None:
+    """Set ``field`` to ``content_hash`` in the template file at ``template_path``.
+
+    Called on the packaged copy of a template, never on the tracked source. The
+    value is quoted so a digest that happens to look numeric stays a string. A
+    template with no such field is an error rather than a silent no-op: without
+    the property, a changed source would no longer re-run the seeder.
+    """
+    pattern = re.compile(rf"^([ \t]*{re.escape(field)}:[ \t]*).*$", re.MULTILINE)
+    content = template_path.read_text()
+    patched, count = pattern.subn(lambda m: f'{m.group(1)}"{content_hash}"', content)
+    if count == 0:
+        raise LMAPublishError(f"{template_path.name} has no '{field}:' property to set the source hash on")
+    template_path.write_text(patched)
+
+
+#: Everything whose contents decide what the configuration seeder writes: the
+#: shipped baseline content and the handler that reads it, plus the accessor
+#: that encodes it. Relative to the project root.
+CONFIGURATION_SEED_PATHS = (
+    "lma-ai-stack/source/lambda_functions/configuration_seeder",
+    "lma-ai-stack/source/lambda_layers/configuration_layer",
+)
+
+
+def calculate_configuration_seed_hash(project_dir: str | Path) -> str:
+    """A digest of the shipped configuration content and the code processing it.
+
+    Substituted into ``<CONFIGURATION_SEED_HASH_TOKEN>`` in lma-main.yaml and
+    carried through to a property of the seeding custom resource. CloudFormation
+    re-invokes a custom resource only when one of its properties changes, so
+    without this a release whose prompts or whose encoding changed would never
+    reach an existing deployment's table.
+
+    Both the content and the processing code are covered, which is the point:
+    hashing the content alone would miss a change to how it is written, and that
+    is just as much a reason to re-run the seeder.
+    """
+    project_dir = Path(project_dir)
+    hasher = hashlib.sha256()
+    for relative in CONFIGURATION_SEED_PATHS:
+        path = project_dir / relative
+        # The path is named so a digest covers a known set rather than whatever
+        # happens to exist; a missing one is recorded as missing rather than
+        # silently skipped, so a move shows up as a changed hash.
+        hasher.update(relative.encode())
+        hasher.update(
+            _calculate_dir_hash(path).encode() if path.is_dir() else b"missing"
+        )
+    return hasher.hexdigest()[:16]
+
+
+def _has_changed(
+    stack_dir: Path,
+    bucket: str,
+    prefix_and_version: str,
+    region: str,
+) -> bool:
+    """Check if a stack directory has changed since last publish."""
+    checksum_file = stack_dir / ".checksum"
+    dir_hash = _calculate_dir_hash(stack_dir)
+    combined = f"{bucket} {prefix_and_version} {region} {dir_hash}"
+    current_checksum = hashlib.sha256(combined.encode()).hexdigest()
+
+    if checksum_file.exists():
+        previous_checksum = checksum_file.read_text().strip()
+        if current_checksum == previous_checksum:
+            return False
+
+    return True
+
+
+def _update_checksum(
+    stack_dir: Path,
+    bucket: str,
+    prefix_and_version: str,
+    region: str,
+) -> None:
+    """Save the current checksum for a stack directory."""
+    checksum_file = stack_dir / ".checksum"
+    dir_hash = _calculate_dir_hash(stack_dir)
+    combined = f"{bucket} {prefix_and_version} {region} {dir_hash}"
+    current_checksum = hashlib.sha256(combined.encode()).hexdigest()
+    checksum_file.write_text(current_checksum + "\n")
+
+
+# ──────────────────────────────────────────────────────────────
+# Git working-tree safety check
+# ──────────────────────────────────────────────────────────────
+# BUILD_SCRIPT stacks package their source with `git ls-files`, which
+# excludes untracked files and produces broken bundles. Fail fast if any
+# untracked files exist under a BUILD_SCRIPT stack dir (override with
+# allow_untracked=True).
+
+def _list_untracked_files(directory: Path) -> list[str]:
+    """Return untracked-but-not-ignored files under ``directory``.
+
+    Uses ``git ls-files --others --exclude-standard`` so the result honours
+    .gitignore. Returns an empty list if the directory is not in a git repo
+    or if there are no untracked files.
+    """
+    if not directory.exists() or not directory.is_dir():
+        return []
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(directory), "ls-files", "--others", "--exclude-standard"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as err:
+        logger.debug("Could not run 'git ls-files --others' under %s: %s", directory, err)
+        return []
+    if proc.returncode != 0:
+        # Directory is not inside a git repo, or git reported an error.
+        logger.debug(
+            "git ls-files --others under %s failed (rc=%s): %s",
+            directory,
+            proc.returncode,
+            proc.stderr.strip(),
+        )
+        return []
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _git_untracked_preflight(
+    project_dir: Path,
+    stacks_to_publish: list[StackDefinition],
+    *,
+    allow_untracked: bool,
+) -> None:
+    """Abort the publish if BUILD_SCRIPT stacks contain untracked files.
+
+    Raises:
+        LMAPublishError: when any targeted BUILD_SCRIPT stack has untracked
+            files in its directory and ``allow_untracked`` is False.
+    """
+    offenders: list[tuple[str, list[str]]] = []
+    for stack_def in stacks_to_publish:
+        if stack_def.package_type is not StackPackageType.BUILD_SCRIPT:
+            continue
+        stack_dir = project_dir / stack_def.name
+        untracked = _list_untracked_files(stack_dir)
+        if untracked:
+            offenders.append((stack_def.name, untracked))
+
+    if not offenders:
+        return
+
+    # Build a readable, actionable error message.
+    lines = [
+        "Refusing to publish: the following BUILD_SCRIPT stack(s) contain "
+        "untracked files that would be EXCLUDED from the deployed source "
+        "bundle (the stack Makefile uses `git ls-files`):",
+        "",
+    ]
+    total = 0
+    display_cap = 25  # avoid walls of text for bigger additions
+    for stack_name, files in offenders:
+        lines.append(f"  {stack_name}:")
+        for rel in files[:display_cap]:
+            lines.append(f"    - {rel}")
+        if len(files) > display_cap:
+            lines.append(f"    … {len(files) - display_cap} more")
+        total += len(files)
+    lines.extend(
+        [
+            "",
+            f"Resolve by staging the new files before publishing ({total} total), e.g.:",
+            "  git add <paths above>",
+            "",
+            "Then retry the publish/deploy. You do NOT need to commit — a staged",
+            "path is enough for `git ls-files` to pick it up.",
+            "",
+            "To override (NOT recommended, produces an incomplete bundle):",
+            "  lma publish --allow-untracked … / lma deploy --from-code --allow-untracked …",
+            "  or PublishConfig(allow_untracked=True) programmatically.",
+        ]
+    )
+    message = "\n".join(lines)
+
+    if allow_untracked:
+        logger.warning("%s", message)
+        return
+
+    raise LMAPublishError(message)
+
+
+# ──────────────────────────────────────────────────────────────
+# Publisher — main publish orchestrator
+# ──────────────────────────────────────────────────────────────
+
+class Publisher:
+    """Orchestrates building and publishing LMA artifacts to S3."""
+
+    def __init__(self, client: LMAClient) -> None:
+        self._client = client
+
+    @property
+    def _s3(self):
+        return self._client.session.client("s3", region_name=self._client.region)
+
+    @property
+    def _cfn(self):
+        return self._client.session.client("cloudformation", region_name=self._client.region)
+
+    def publish(
+        self,
+        config: PublishConfig,
+        progress_callback: Callable[[str, str], None] | None = None,
+    ) -> PublishResult:
+        """Execute the full publish workflow.
+
+        Args:
+            config: Publish configuration.
+            progress_callback: Optional callback(stack_name, message) for progress.
+
+        Returns:
+            PublishResult with outcomes for each stack.
+        """
+        start_time = time.time()
+
+        # Resolve project directory
+        project_dir = Path(config.project_dir).resolve()
+        if not (project_dir / "lma-main.yaml").exists():
+            raise LMAPublishError(
+                f"Not an LMA project directory: {project_dir} (lma-main.yaml not found)"
+            )
+
+        # Resolve version
+        version = config.version
+        if not version:
+            version_file = project_dir / "VERSION"
+            if version_file.exists():
+                version = version_file.read_text().strip()
+            else:
+                raise LMAPublishError("VERSION file not found and no version specified.")
+
+        # Resolve bucket and prefix
+        bucket = f"{config.bucket_basename}-{config.region}"
+        prefix = config.prefix.rstrip("/")
+        prefix_and_version = f"{prefix}/{version}"
+        region = config.region
+
+        # Check prerequisites
+        if progress_callback:
+            progress_callback("prerequisites", "Checking prerequisites...")
+        errors = check_prerequisites()
+        if errors:
+            raise LMAPublishError(
+                "Prerequisites not met:\n" + "\n".join(f"  • {e}" for e in errors)
+            )
+
+        # Ensure S3 bucket exists
+        if progress_callback:
+            progress_callback("s3", f"Ensuring bucket '{bucket}' exists...")
+        self._ensure_bucket(bucket, region)
+
+        # Create temp directory
+        tmpdir = Path(tempfile.mkdtemp(prefix="lma-publish-"))
+        logger.info("Using temp dir: %s", tmpdir)
+
+        # Determine which stacks to publish
+        if config.stacks:
+            # Validate requested stack names
+            valid_names = {s.name for s in STACK_DEFINITIONS}
+            invalid = set(config.stacks) - valid_names
+            if invalid:
+                raise LMAValidationError(
+                    f"Unknown stack(s): {', '.join(sorted(invalid))}. "
+                    f"Valid stacks: {', '.join(sorted(valid_names))}"
+                )
+            stacks_to_publish = [s for s in STACK_DEFINITIONS if s.name in config.stacks]
+        else:
+            stacks_to_publish = STACK_DEFINITIONS
+
+        # See _git_untracked_preflight() — fail fast so untracked files don't
+        # get silently excluded from the `git ls-files`-based source bundle.
+        if progress_callback:
+            progress_callback("git", "Checking for untracked files...")
+        _git_untracked_preflight(
+            project_dir,
+            stacks_to_publish,
+            allow_untracked=config.allow_untracked,
+        )
+
+        # Track S3 locations for main template substitution
+        vp_src_s3_location = ""
+        vp_microvm_src_s3_location = ""
+        vp_launcher_s3_key = ""
+        artifact_bucket = ""
+        browser_ext_src_s3_location = ""
+        desktop_capture_app_src_s3_location = ""
+        asr_microvm_src_s3_location = ""
+        asr_launcher_s3_key = ""
+        asr_image_source_s3_key = ""
+
+        # Publish each stack
+        stack_results: list[StackPublishResult] = []
+        for stack_def in stacks_to_publish:
+            stack_start = time.time()
+            stack_dir = project_dir / stack_def.name
+
+            if not stack_dir.exists():
+                stack_results.append(StackPublishResult(
+                    stack_name=stack_def.name,
+                    success=False,
+                    message=f"Directory not found: {stack_dir}",
+                ))
+                continue
+
+            # Change detection
+            if (
+                stack_def.supports_change_detection
+                and not config.force
+                and not _has_changed(stack_dir, bucket, prefix_and_version, region)
+            ):
+                # Even when skipped, compute S3 locations needed for main template tokens
+                if stack_def.name == "lma-browser-extension-stack":
+                    content_hash = _calculate_dir_hash(stack_dir)
+                    zip_filename = f"src-{content_hash}.zip"
+                    s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+                    browser_ext_src_s3_location = f"{bucket}/{s3_zip_key}"
+
+                if progress_callback:
+                    progress_callback(stack_def.name, "Skipped (unchanged)")
+                stack_results.append(StackPublishResult(
+                    stack_name=stack_def.name,
+                    success=True,
+                    skipped=True,
+                    message="Unchanged since last publish",
+                ))
+                continue
+
+            if progress_callback:
+                progress_callback(stack_def.name, "Packaging...")
+
+            try:
+                result = self._publish_stack(
+                    stack_def=stack_def,
+                    project_dir=project_dir,
+                    bucket=bucket,
+                    bucket_basename=config.bucket_basename,
+                    prefix_and_version=prefix_and_version,
+                    region=region,
+                    version=version,
+                    tmpdir=tmpdir,
+                )
+
+                # Capture source locations for main template
+                if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_src_s3_location"):
+                    vp_src_s3_location = result["vp_src_s3_location"]
+                if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_microvm_src_s3_location"):
+                    vp_microvm_src_s3_location = result["vp_microvm_src_s3_location"]
+                if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_launcher_s3_key"):
+                    vp_launcher_s3_key = result["vp_launcher_s3_key"]
+                    artifact_bucket = result.get("artifact_bucket", "")
+                if stack_def.name == "lma-browser-extension-stack" and result.get("browser_ext_src_s3_location"):
+                    browser_ext_src_s3_location = result["browser_ext_src_s3_location"]
+                if stack_def.name == "lma-desktop-capture-app-stack" and result.get("desktop_capture_app_src_s3_location"):
+                    desktop_capture_app_src_s3_location = result["desktop_capture_app_src_s3_location"]
+                if stack_def.name == "lma-asr-microvm-stack" and result.get("asr_microvm_src_s3_location"):
+                    asr_microvm_src_s3_location = result["asr_microvm_src_s3_location"]
+                    asr_launcher_s3_key = result.get("asr_launcher_s3_key", "")
+                    asr_image_source_s3_key = result.get("asr_image_source_s3_key", "")
+                    artifact_bucket = artifact_bucket or result.get("artifact_bucket", "")
+
+                duration = time.time() - stack_start
+                stack_results.append(StackPublishResult(
+                    stack_name=stack_def.name,
+                    success=True,
+                    message=result.get("message", "Published successfully"),
+                    s3_template_url=result.get("s3_template_url", ""),
+                    duration_seconds=round(duration, 1),
+                ))
+
+                # Update checksum on success
+                if stack_def.supports_change_detection:
+                    _update_checksum(stack_dir, bucket, prefix_and_version, region)
+
+                if progress_callback:
+                    progress_callback(stack_def.name, f"Done ({duration:.1f}s)")
+
+            except Exception as e:
+                duration = time.time() - stack_start
+                logger.error("Failed to publish %s: %s", stack_def.name, e)
+                stack_results.append(StackPublishResult(
+                    stack_name=stack_def.name,
+                    success=False,
+                    message=str(e),
+                    duration_seconds=round(duration, 1),
+                ))
+                if progress_callback:
+                    progress_callback(stack_def.name, f"FAILED: {e}")
+
+        # Package main template
+        if progress_callback:
+            progress_callback("lma-main", "Packaging main template...")
+
+        main_result = self._publish_main_template(
+            project_dir=project_dir,
+            bucket=bucket,
+            prefix=prefix,
+            prefix_and_version=prefix_and_version,
+            region=region,
+            version=version,
+            vp_src_s3_location=vp_src_s3_location,
+            vp_microvm_src_s3_location=vp_microvm_src_s3_location,
+            vp_launcher_s3_key=vp_launcher_s3_key,
+            artifact_bucket=artifact_bucket,
+            browser_ext_src_s3_location=browser_ext_src_s3_location,
+            desktop_capture_app_src_s3_location=desktop_capture_app_src_s3_location,
+            asr_microvm_src_s3_location=asr_microvm_src_s3_location,
+            asr_launcher_s3_key=asr_launcher_s3_key,
+            asr_image_source_s3_key=asr_image_source_s3_key,
+            tmpdir=tmpdir,
+        )
+
+        # Set public ACLs if requested
+        if config.public:
+            if progress_callback:
+                progress_callback("acl", "Setting public read ACLs...")
+            self._set_public_acls(bucket, prefix_and_version, prefix)
+
+        # Cleanup
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+        total_duration = time.time() - start_time
+        all_success = all(r.success for r in stack_results) and main_result["success"]
+        template_url = main_result.get("template_url", "")
+        console_url = (
+            f"https://{region}.console.aws.amazon.com/cloudformation/home"
+            f"?region={region}#/stacks/create/review"
+            f"?templateURL={template_url}&stackName=LMA"
+        )
+        cli_command = (
+            f"aws cloudformation deploy --region {region} "
+            f"--template-file {tmpdir / 'lma-main.yaml'} "
+            f"--capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND "
+            f"--stack-name LMA --parameter-overrides AdminEmail='jdoe+admin@example.com'"
+        )
+
+        return PublishResult(
+            success=all_success,
+            bucket=bucket,
+            prefix=prefix_and_version,
+            region=region,
+            version=version,
+            template_url=template_url,
+            console_url=console_url,
+            cli_deploy_command=cli_command,
+            stack_results=stack_results,
+            duration_seconds=round(total_duration, 1),
+            message="Publish completed successfully" if all_success else "Publish completed with errors",
+        )
+
+    # ── S3 helpers ────────────────────────────────────────────
+
+    def _ensure_bucket(self, bucket: str, region: str) -> None:
+        """Create S3 bucket if it doesn't exist."""
+        try:
+            self._s3.head_bucket(Bucket=bucket)
+            logger.info("Using existing bucket: %s", bucket)
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in ("404", "NoSuchBucket"):
+                logger.info("Creating S3 bucket: %s", bucket)
+                create_kwargs: dict[str, Any] = {"Bucket": bucket}
+                if region != "us-east-1":
+                    create_kwargs["CreateBucketConfiguration"] = {
+                        "LocationConstraint": region
+                    }
+                self._s3.create_bucket(**create_kwargs)
+                self._s3.put_bucket_versioning(
+                    Bucket=bucket,
+                    VersioningConfiguration={"Status": "Enabled"},
+                )
+            else:
+                raise LMAPublishError(f"Cannot access S3 bucket '{bucket}': {e}") from e
+
+    # ── Per-stack publish handlers ────────────────────────────
+
+    def _publish_stack(
+        self,
+        stack_def: StackDefinition,
+        project_dir: Path,
+        bucket: str,
+        bucket_basename: str,
+        prefix_and_version: str,
+        region: str,
+        version: str,
+        tmpdir: Path,
+    ) -> dict[str, Any]:
+        """Publish a single stack based on its definition."""
+        handlers = {
+            StackPackageType.ZIP_AND_UPLOAD: self._publish_zip_and_upload,
+            StackPackageType.ZIP_WITH_TOKEN_REPLACE: self._publish_zip_with_token_replace,
+            StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE: self._publish_zip_app_src_with_token_replace,
+            StackPackageType.CFN_PACKAGE: self._publish_cfn_package,
+            StackPackageType.DELEGATE_SCRIPT: self._publish_delegate_script,
+            StackPackageType.BUILD_SCRIPT: self._publish_build_script,
+            StackPackageType.HASH_AND_PACKAGE: self._publish_hash_and_package,
+            StackPackageType.ASR_MICROVM: self._publish_asr_microvm,
+        }
+        handler = handlers.get(stack_def.package_type)
+        if not handler:
+            raise LMAPublishError(f"Unknown package type: {stack_def.package_type}")
+        return handler(
+            stack_def=stack_def,
+            project_dir=project_dir,
+            bucket=bucket,
+            bucket_basename=bucket_basename,
+            prefix_and_version=prefix_and_version,
+            region=region,
+            version=version,
+            tmpdir=tmpdir,
+        )
+
+    def _publish_zip_and_upload(self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw) -> dict:
+        """Zip source and upload (for lma-virtual-participant-stack)."""
+        stack_dir = project_dir / stack_def.name
+        content_hash = _calculate_dir_hash(stack_dir)
+        zip_filename = f"src-{content_hash}.zip"
+        zip_path = tmpdir / zip_filename
+
+        # Create zip excluding node_modules, build, dist
+        skip_dirs = {"node_modules", "build", "dist", ".git", "__pycache__"}
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(stack_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = Path(root) / fname
+                    arcname = fpath.relative_to(stack_dir)
+                    zf.write(fpath, arcname)
+
+        # Upload zip
+        s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+        vp_src_s3_location = f"{bucket}/{s3_zip_key}"
+        logger.info("Uploading %s to s3://%s", zip_filename, vp_src_s3_location)
+        self._s3.upload_file(str(zip_path), bucket, s3_zip_key)
+
+        # Second artifact: the MicroVM build context.
+        #
+        # CreateMicrovmImage requires the Dockerfile at the ROOT of the zip, but
+        # the zip above is rooted at the stack directory (so the Dockerfile lands
+        # at backend/Dockerfile) and codeArtifact takes only a URI — there is no
+        # way to point at a subdirectory. So package backend/ separately, rooted
+        # at backend/, for VPLaunchType=MICROVM.
+        microvm_zip_filename = f"microvm-{content_hash}.zip"
+        microvm_zip_path = tmpdir / microvm_zip_filename
+        backend_dir = stack_dir / "backend"
+        vp_microvm_src_s3_location = ""
+        if backend_dir.is_dir():
+            with zipfile.ZipFile(microvm_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(backend_dir):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs]
+                    for fname in files:
+                        fpath = Path(root) / fname
+                        zf.write(fpath, fpath.relative_to(backend_dir))
+            s3_microvm_key = f"{prefix_and_version}/{stack_def.name}/{microvm_zip_filename}"
+            vp_microvm_src_s3_location = f"{bucket}/{s3_microvm_key}"
+            logger.info(
+                "Uploading %s to s3://%s", microvm_zip_filename, vp_microvm_src_s3_location
+            )
+            self._s3.upload_file(str(microvm_zip_path), bucket, s3_microvm_key)
+
+        # Third artifact: the MicroVM launcher Lambda deployment package.
+        #
+        # It cannot be inline `Code: ZipFile` — that is a single file capped at
+        # 4 KB, and the handler imports microvm_client.py (which exists because
+        # the Lambda runtime's bundled botocore has no lambda-microvms service
+        # model). The VP stack is plain CloudFormation with no SAM transform, so
+        # CodeUri is not available either; hence an explicit S3 zip.
+        launcher_dir = stack_dir / "lambda_functions" / "microvm_launcher"
+        vp_launcher_s3_key = ""
+        if launcher_dir.is_dir():
+            launcher_zip = tmpdir / f"microvm-launcher-{content_hash}.zip"
+            with zipfile.ZipFile(launcher_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fpath in sorted(launcher_dir.rglob("*")):
+                    if fpath.is_file() and "__pycache__" not in fpath.parts:
+                        zf.write(fpath, fpath.relative_to(launcher_dir))
+            vp_launcher_s3_key = (
+                f"{prefix_and_version}/{stack_def.name}/{launcher_zip.name}"
+            )
+            logger.info("Uploading %s to s3://%s/%s", launcher_zip.name, bucket, vp_launcher_s3_key)
+            self._s3.upload_file(str(launcher_zip), bucket, vp_launcher_s3_key)
+
+        # Upload template
+        template_path = stack_dir / stack_def.template_file
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_path), bucket, s3_template_key)
+
+        # Validate template
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        return {
+            "vp_src_s3_location": vp_src_s3_location,
+            "vp_microvm_src_s3_location": vp_microvm_src_s3_location,
+            "vp_launcher_s3_key": vp_launcher_s3_key,
+            "artifact_bucket": bucket,
+            "s3_template_url": https_url,
+            "message": f"Zipped and uploaded ({zip_filename})",
+        }
+
+    def _publish_asr_microvm(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw
+    ) -> dict:
+        """Zip the ASR MicroVM image source and its Lambdas (lma-asr-microvm-stack).
+
+        The image source zip is rooted at ``source/`` because CreateMicrovmImage
+        requires the Dockerfile at the ROOT of the artifact and codeArtifact takes
+        only a URI, so a subdirectory cannot be pointed at. The stack's custom
+        resource rewrites this zip per deployment with the selected model, so what
+        is published here is the model-agnostic build context.
+        """
+        stack_dir = project_dir / stack_def.name
+        content_hash = _calculate_dir_hash(stack_dir)
+        # .venv matters here: the ASR runtime's test virtualenv lives inside
+        # source/, and zipping it would bloat the image build context by ~100 MB.
+        skip_dirs = {
+            "node_modules",
+            "build",
+            "dist",
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+        }
+
+        def zip_tree(root: Path, zip_path: Path) -> None:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for dirpath, dirs, files in os.walk(root):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs]
+                    for fname in files:
+                        fpath = Path(dirpath) / fname
+                        zf.write(fpath, fpath.relative_to(root))
+
+        source_dir = stack_dir / stack_def.source_dir
+        if not source_dir.is_dir():
+            raise LMAPublishError(f"ASR MicroVM source directory not found: {source_dir}")
+        source_zip = tmpdir / f"asr-microvm-src-{content_hash}.zip"
+        zip_tree(source_dir, source_zip)
+        source_key = f"{prefix_and_version}/{stack_def.name}/{source_zip.name}"
+        logger.info("Uploading %s to s3://%s/%s", source_zip.name, bucket, source_key)
+        self._s3.upload_file(str(source_zip), bucket, source_key)
+
+        lambda_keys: dict[str, str] = {}
+        for function_name, result_key in (
+            ("asr_launcher", "asr_launcher_s3_key"),
+            ("asr_image_source", "asr_image_source_s3_key"),
+        ):
+            function_dir = stack_dir / "lambda_functions" / function_name
+            if not function_dir.is_dir():
+                raise LMAPublishError(f"ASR Lambda directory not found: {function_dir}")
+            function_zip = tmpdir / f"{function_name.replace('_', '-')}-{content_hash}.zip"
+            zip_tree(function_dir, function_zip)
+            key = f"{prefix_and_version}/{stack_def.name}/{function_zip.name}"
+            logger.info("Uploading %s to s3://%s/%s", function_zip.name, bucket, key)
+            self._s3.upload_file(str(function_zip), bucket, key)
+            lambda_keys[result_key] = key
+
+        template_path = stack_dir / stack_def.template_file
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_path), bucket, s3_template_key)
+
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        return {
+            "asr_microvm_src_s3_location": f"{bucket}/{source_key}",
+            "artifact_bucket": bucket,
+            "s3_template_url": https_url,
+            "message": f"Zipped and uploaded ({source_zip.name})",
+            **lambda_keys,
+        }
+
+    def _publish_zip_with_token_replace(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, version, tmpdir, **_kw
+    ) -> dict:
+        """Zip source with VERSION token replacement, upload zip and template (for browser extension)."""
+        stack_dir = project_dir / stack_def.name
+        content_hash = _calculate_dir_hash(stack_dir)
+        zip_filename = f"src-{content_hash}.zip"
+
+        # Copy to temp dir for token replacement
+        temp_stack_dir = tmpdir / f"{stack_def.name}-temp"
+        skip_dirs = {"node_modules", "build", "dist", ".git", "__pycache__"}
+        shutil.copytree(stack_dir, temp_stack_dir, ignore=shutil.ignore_patterns(*skip_dirs))
+
+        # Replace <VERSION_TOKEN> in key files
+        token_files = ["package.json", "public/manifest.json", "template.yaml"]
+        for rel_path in token_files:
+            fpath = temp_stack_dir / rel_path
+            if fpath.exists():
+                content = fpath.read_text()
+                fpath.write_text(content.replace("<VERSION_TOKEN>", version))
+
+        # Create zip from token-replaced copy
+        zip_path = tmpdir / zip_filename
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(temp_stack_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = Path(root) / fname
+                    arcname = fpath.relative_to(temp_stack_dir)
+                    zf.write(fpath, arcname)
+
+        # Upload zip
+        s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+        src_s3_location = f"{bucket}/{s3_zip_key}"
+        logger.info("Uploading %s to s3://%s", zip_filename, src_s3_location)
+        self._s3.upload_file(str(zip_path), bucket, s3_zip_key)
+
+        # Upload token-replaced template
+        template_path = temp_stack_dir / stack_def.template_file
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_path), bucket, s3_template_key)
+
+        # Validate template
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        # Cleanup temp copy
+        shutil.rmtree(temp_stack_dir, ignore_errors=True)
+
+        return {
+            "browser_ext_src_s3_location": src_s3_location,
+            "s3_template_url": https_url,
+            "message": f"Zipped with token replacement and uploaded ({zip_filename})",
+        }
+
+    def _publish_zip_app_src_with_token_replace(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, version, tmpdir, **_kw
+    ) -> dict:
+        """Zip an app source subtree (source_dir, relative to the stack dir) with
+        <VERSION_TOKEN> replacement, and upload both the zip and the stack's
+        template. Used by lma-desktop-capture-app-stack, whose downloadable app
+        lives under source/macos/ (kept separate from the stack's template.yaml
+        so the template isn't shipped in the download). CodeBuild later bakes the
+        deployment config into the zip.
+        """
+        stack_dir = project_dir / stack_def.name
+        src_dir = (stack_dir / stack_def.source_dir).resolve()
+        if not src_dir.is_dir():
+            raise LMAPublishError(f"App source dir not found: {src_dir}")
+
+        content_hash = _calculate_dir_hash(src_dir)
+        zip_filename = f"src-{content_hash}.zip"
+
+        # Copy source to a temp dir for token replacement (skip build artifacts
+        # and any local/dev secrets so they never ship in the public download).
+        temp_src_dir = tmpdir / f"{stack_def.name}-src"
+        skip_dirs = {".build", "build", ".git", "__pycache__", "node_modules"}
+        skip_files = {".env.local", "lma-config.json", ".DS_Store"}
+        shutil.copytree(
+            src_dir, temp_src_dir,
+            ignore=shutil.ignore_patterns(*skip_dirs, *skip_files),
+        )
+
+        # Replace <VERSION_TOKEN> anywhere it appears in text files (e.g. the
+        # install scripts / README reference the versioned zip name).
+        for root, dirs, files in os.walk(temp_src_dir):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fname in files:
+                fpath = Path(root) / fname
+                try:
+                    content = fpath.read_text()
+                except (UnicodeDecodeError, OSError):
+                    continue  # binary/unreadable — leave as-is
+                if "<VERSION_TOKEN>" in content:
+                    fpath.write_text(content.replace("<VERSION_TOKEN>", version))
+
+        # Zip the token-replaced source tree.
+        zip_path = tmpdir / zip_filename
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(temp_src_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = Path(root) / fname
+                    arcname = fpath.relative_to(temp_src_dir)
+                    zf.write(fpath, arcname)
+
+        # Upload the source zip.
+        s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+        src_s3_location = f"{bucket}/{s3_zip_key}"
+        logger.info("Uploading %s to s3://%s", zip_filename, src_s3_location)
+        self._s3.upload_file(str(zip_path), bucket, s3_zip_key)
+
+        # Upload the stack template (with VERSION token replaced).
+        template_src = stack_dir / stack_def.template_file
+        template_out = tmpdir / f"{stack_def.name}-template.yaml"
+        template_out.write_text(template_src.read_text().replace("<VERSION_TOKEN>", version))
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_out), bucket, s3_template_key)
+
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        shutil.rmtree(temp_src_dir, ignore_errors=True)
+
+        return {
+            "desktop_capture_app_src_s3_location": src_s3_location,
+            "s3_template_url": https_url,
+            "message": f"Zipped app source with token replacement and uploaded ({zip_filename})",
+        }
+
+    def _publish_cfn_package(self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw) -> dict:
+        """Package with `aws cloudformation package`."""
+        if stack_def.deployment_subdir:
+            work_dir = project_dir / stack_def.name / stack_def.deployment_subdir
+        else:
+            work_dir = project_dir / stack_def.name
+
+        template_file = stack_def.template_file
+        output_file = tmpdir / template_file
+        s3_prefix = f"{prefix_and_version}/{stack_def.name}"
+
+        cmd = [
+            "aws", "cloudformation", "package",
+            "--template-file", template_file,
+            "--output-template-file", str(output_file),
+            "--s3-bucket", bucket,
+            "--s3-prefix", s3_prefix,
+            "--region", region,
+        ]
+        self._run_command(cmd, cwd=str(work_dir), desc=f"cfn package {stack_def.name}")
+
+        # Upload packaged template
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(output_file), bucket, s3_template_key)
+
+        # Validate
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        return {"s3_template_url": https_url, "message": "Packaged and validated"}
+
+    def _publish_delegate_script(self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw) -> dict:
+        """Delegate to stack's own publish.sh."""
+        stack_dir = project_dir / stack_def.name
+        script = stack_dir / stack_def.delegate_script
+
+        if not script.exists():
+            raise LMAPublishError(f"Delegate script not found: {script}")
+
+        script.chmod(0o755)
+        cmd = [str(script), bucket, prefix_and_version, region]
+        self._run_command(cmd, cwd=str(stack_dir), desc=f"delegate {stack_def.name}")
+
+        return {"message": f"Delegated to {stack_def.delegate_script}"}
+
+    def _publish_build_script(
+        self, *, stack_def, project_dir, bucket, bucket_basename, prefix_and_version, region, version, tmpdir, **_kw
+    ) -> dict:
+        """Run build-s3-dist.sh (for lma-ai-stack, lma-websocket-transcriber-stack)."""
+        stack_dir = project_dir / stack_def.name
+        deployment_dir = stack_dir / (stack_def.deployment_subdir or "deployment")
+        script = deployment_dir / stack_def.build_script
+
+        if not script.exists():
+            raise LMAPublishError(f"Build script not found: {script}")
+
+        # Clean previous output
+        out_dir = stack_dir / "out"
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+
+        script.chmod(0o755)
+        s3_prefix = f"{prefix_and_version}/{stack_def.name}"
+        cmd = [str(script), bucket_basename, s3_prefix, version, region]
+        self._run_command(cmd, cwd=str(deployment_dir), desc=f"build {stack_def.name}")
+
+        return {"message": f"Built via {stack_def.build_script}"}
+
+    def _publish_hash_and_package(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw
+    ) -> dict:
+        """cfn package the template, then write the source hash into the packaged copy.
+
+        The hash is a property of the stack's seeding custom resource, so a change
+        to the seeded content changes a property and CloudFormation re-runs the
+        seeder. It is written into the packaged output in ``tmpdir`` rather than
+        into the tracked template, so publishing leaves the checkout unmodified.
+        """
+        stack_dir = project_dir / stack_def.name
+        deployment_dir = stack_dir / (stack_def.deployment_subdir or "deployment")
+        source_dir = (deployment_dir / stack_def.hash_source_dir).resolve() if stack_def.hash_source_dir else stack_dir
+
+        # Compute hash of source
+        content_hash = _calculate_dir_hash(source_dir)
+        logger.info("Source hash for %s: %s", stack_def.name, content_hash)
+
+        # cfn package the tracked template as-is. It is packaged in place, not
+        # from a copy, because its local artifact paths are relative to it.
+        output_file = tmpdir / stack_def.template_file
+        s3_prefix = f"{prefix_and_version}/{stack_def.name}"
+        cmd = [
+            "aws", "cloudformation", "package",
+            "--template-file", stack_def.template_file,
+            "--output-template-file", str(output_file),
+            "--s3-bucket", bucket,
+            "--s3-prefix", s3_prefix,
+            "--region", region,
+        ]
+        self._run_command(cmd, cwd=str(deployment_dir), desc=f"cfn package {stack_def.name}")
+
+        _inject_source_hash(output_file, stack_def.hash_template_field, content_hash)
+
+        # Upload
+        s3_path = stack_def.s3_template_path or f"{stack_def.template_file}"
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/{s3_path}"
+        self._s3.upload_file(str(output_file), bucket, s3_template_key)
+
+        return {
+            "s3_template_url": f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}",
+            "message": f"Hashed ({content_hash}), packaged and uploaded",
+        }
+
+    # ── Main template ─────────────────────────────────────────
+
+    def _publish_main_template(
+        self,
+        project_dir: Path,
+        bucket: str,
+        prefix: str,
+        prefix_and_version: str,
+        region: str,
+        version: str,
+        vp_src_s3_location: str,
+        vp_microvm_src_s3_location: str,
+        vp_launcher_s3_key: str,
+        artifact_bucket: str,
+        browser_ext_src_s3_location: str = "",
+        desktop_capture_app_src_s3_location: str = "",
+        asr_microvm_src_s3_location: str = "",
+        asr_launcher_s3_key: str = "",
+        asr_image_source_s3_key: str = "",
+        tmpdir: Path = None,
+    ) -> dict[str, Any]:
+        """Replace tokens in lma-main.yaml, upload, and validate."""
+        main_template_path = project_dir / "lma-main.yaml"
+        content = main_template_path.read_text()
+
+        # ISO 8601 UTC timestamp — matches the format used by lma-ai-stack/Makefile
+        # so the value rendered in the Cognito welcome email footer is consistent
+        # with the BuildDateTime shown in the UI nav panel.
+        build_date_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        replacements = {
+            "<ARTIFACT_BUCKET_TOKEN>": bucket,
+            "<ARTIFACT_PREFIX_TOKEN>": prefix_and_version,
+            "<VERSION_TOKEN>": version,
+            "<REGION_TOKEN>": region,
+            "<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>": browser_ext_src_s3_location,
+            "<DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>": desktop_capture_app_src_s3_location,
+            "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
+            "<VIRTUAL_PARTICIPANT_MICROVM_SRC_S3_LOCATION_TOKEN>": vp_microvm_src_s3_location,
+            "<VIRTUAL_PARTICIPANT_LAUNCHER_S3_KEY_TOKEN>": vp_launcher_s3_key,
+            "<ASR_MICROVM_SRC_S3_LOCATION_TOKEN>": asr_microvm_src_s3_location,
+            "<ASR_MICROVM_LAUNCHER_S3_KEY_TOKEN>": asr_launcher_s3_key,
+            "<ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>": asr_image_source_s3_key,
+            "<ARTIFACT_BUCKET_NAME_TOKEN>": artifact_bucket,
+            "<BUILD_DATE_TIME_TOKEN>": build_date_time,
+            "<CONFIGURATION_SEED_HASH_TOKEN>": calculate_configuration_seed_hash(project_dir),
+        }
+        for token, value in replacements.items():
+            content = content.replace(token, value)
+
+        # Write to temp
+        output_path = tmpdir / "lma-main.yaml"
+        output_path.write_text(content)
+
+        # Upload
+        s3_key = f"{prefix}/lma-main.yaml"
+        self._s3.upload_file(str(output_path), bucket, s3_key)
+
+        # Validate
+        template_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_key}"
+        try:
+            self._validate_template(template_url)
+            return {"success": True, "template_url": template_url}
+        except LMAPublishError as e:
+            return {"success": False, "template_url": template_url, "error": str(e)}
+
+    # ── Utilities ─────────────────────────────────────────────
+
+    def _validate_template(self, template_url: str) -> None:
+        """Validate a CloudFormation template URL."""
+        try:
+            self._cfn.validate_template(TemplateURL=template_url)
+        except botocore.exceptions.ClientError as e:
+            raise LMAPublishError(f"Template validation failed: {e}") from e
+
+    def _set_public_acls(self, bucket: str, prefix_and_version: str, prefix: str) -> None:
+        """Set public-read ACLs on all published artifacts."""
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix_and_version):
+            for obj in page.get("Contents", []):
+                self._s3.put_object_acl(ACL="public-read", Bucket=bucket, Key=obj["Key"])
+
+        # Also the main template
+        self._s3.put_object_acl(
+            ACL="public-read", Bucket=bucket, Key=f"{prefix}/lma-main.yaml"
+        )
+
+    @staticmethod
+    def _run_command(
+        cmd: list[str],
+        cwd: str | None = None,
+        desc: str = "",
+        timeout: int = 1200,
+    ) -> subprocess.CompletedProcess:
+        """Run a shell command, raising LMAPublishError on failure.
+
+        Automatically sets DOCKER_DEFAULT_PLATFORM=linux/amd64 on Apple Silicon
+        Macs to ensure Lambda-compatible container builds.
+        """
+        import platform as _platform
+
+        logger.info("Running: %s (cwd=%s)", " ".join(cmd), cwd)
+
+        # On Apple Silicon (arm64) Macs, Lambda containers need linux/amd64
+        env = os.environ.copy()
+        if _platform.system() == "Darwin" and _platform.machine() == "arm64":
+            env.setdefault("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
+            # Also set SAM CLI to use container for correct architecture
+            env.setdefault("SAM_CLI_CONTAINER_CONNECTION_TIMEOUT", "60")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+            )
+            if result.returncode != 0:
+                stderr = result.stderr.strip() or result.stdout.strip()
+                raise LMAPublishError(
+                    f"Command failed ({desc}): {stderr}"
+                )
+            return result
+        except subprocess.TimeoutExpired:
+            raise LMAPublishError(f"Command timed out ({desc}): {' '.join(cmd)}")
+        except FileNotFoundError:
+            raise LMAPublishError(f"Command not found ({desc}): {cmd[0]}")

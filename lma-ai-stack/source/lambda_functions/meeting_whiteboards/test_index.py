@@ -364,6 +364,19 @@ def test_a_change_that_changes_nothing_makes_no_version(table) -> None:
     assert len([k for k in table.rows if k[1].startswith("v#")]) == 1
 
 
+def test_every_version_expires_with_its_whiteboard(table, monkeypatch) -> None:
+    board = create()
+    # Later in the transcript's retention, the transcript's expiry is later.
+    monkeypatch.setattr(index, "transcript_expires_after", lambda: 1_950_000_000)
+    panels = panels_of(board)
+    panels[0]["Content"] = "- decided"
+    update(board, panels)
+    head = table.plain(f"wb#{CALL}", f"b#{board['WhiteboardId']}")
+    versions = [r for (pk, sk), r in table.rows.items() if sk.startswith("v#")]
+    assert head["ExpiresAfter"] == 1_900_000_000
+    assert {v["ExpiresAfter"] for v in versions} == {1_900_000_000}
+
+
 def test_restoring_a_version_makes_a_new_one(table) -> None:
     board = create()
     panels = panels_of(board)

@@ -90,7 +90,8 @@ def panels_input(value: Any) -> List[Dict[str, Any]]:
             "Title": item.get("title"),
             # Absent, the resolver keeps an existing panel's kind (Markdown for a new one).
             "Kind": item.get("kind") or None,
-            "Content": item.get("content") or "",
+            # Absent, the resolver keeps an existing panel's content.
+            "Content": item.get("content") if isinstance(item.get("content"), str) else None,
         }
         if item.get("source"):
             panel["Source"] = item.get("source")

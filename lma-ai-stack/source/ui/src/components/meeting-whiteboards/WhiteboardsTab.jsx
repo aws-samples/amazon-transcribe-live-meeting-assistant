@@ -432,7 +432,7 @@ const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = unde
           canChange && (
             <SpaceBetween direction="horizontal" size="xs">
               {assistantAvailable && enabled && (
-                <Button onClick={updateNow} loading={updating} disabled={items.length === 0}>
+                <Button onClick={updateNow} loading={updating}>
                   Update now
                 </Button>
               )}

@@ -181,6 +181,7 @@ def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
         ("sequenceDiagram\n  link Alice: Site @ https://example.com", "click"),
         ('flowchart TD\n  a["<img src=x>"] --> b', "HTML"),
         ('flowchart TD\n  a["javascript:void"] --> b', "HTML"),
+        ('flowchart TD\n  a["JavaScript :void"] --> b', "HTML"),
     ],
 )
 def test_diagrams_outside_the_subset_are_refused(text: str, message: str) -> None:
@@ -235,6 +236,24 @@ def test_a_panel_resent_without_its_kind_keeps_the_kind_it_has() -> None:
         b, source="user", actor="u", now=LATER, panels=panels + [{"Title": "New"}]
     )
     assert added.board["Panels"][-1]["Kind"] == "markdown"
+
+
+def test_a_panel_resent_without_its_content_keeps_it() -> None:
+    b = board()
+    b["Panels"][0].update(Source="user", Content="- The user's decision")
+    # Handed to the assistant with only its id, title and source.
+    panels = [
+        {"PanelId": p["PanelId"], "Title": p["Title"], "Kind": p["Kind"], "Content": p["Content"]}
+        for p in b["Panels"]
+    ]
+    panels[0] = {"PanelId": "decisions", "Title": "Decisions", "Source": "assistant"}
+    change = rules.apply_change(b, source="user", actor="u", now=LATER, panels=panels)
+    stored = change.board["Panels"][0]
+    assert stored["Content"] == "- The user's decision" and stored["Source"] == "assistant"
+    # An empty content is a change to it.
+    panels[0] = {"PanelId": "decisions", "Title": "Decisions", "Content": ""}
+    emptied = rules.apply_change(b, source="user", actor="u", now=LATER, panels=panels)
+    assert emptied.board["Panels"][0]["Content"] == ""
 
 
 def test_a_user_hands_a_panel_back_to_the_assistant() -> None:

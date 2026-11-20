@@ -774,13 +774,16 @@ def update_whiteboard(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dic
         return _answer(call_id, board, meeting)
     expires = expiry(meeting)
     count_write(call_id, expires)
+    # Every version expires with its whiteboard, which keeps the expiry it was
+    # given when it was made, so no version outlives the whiteboard it belongs to.
+    board_expiry = board.get("ExpiresAfter") or expires
     reasons = _transact(
         [
             check,
             {
                 "Put": {
                     "TableName": EVENT_SOURCING_TABLE,
-                    "Item": _head_row(call_id, change.board, board.get("ExpiresAfter") or expires),
+                    "Item": _head_row(call_id, change.board, board_expiry),
                     "ConditionExpression": "#v = :base",
                     "ExpressionAttributeNames": {"#v": "Version"},
                     "ExpressionAttributeValues": {":base": {"N": str(base)}},
@@ -790,7 +793,7 @@ def update_whiteboard(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dic
                 "Put": {
                     "TableName": EVENT_SOURCING_TABLE,
                     "Item": _version_row(
-                        call_id, change.board, source, change.changed_panels, expires
+                        call_id, change.board, source, change.changed_panels, board_expiry
                     ),
                     "ConditionExpression": "attribute_not_exists(PK)",
                 }

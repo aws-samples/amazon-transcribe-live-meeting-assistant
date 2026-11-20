@@ -194,7 +194,7 @@ def check_mermaid(text: str) -> None:
         word = line.split(None, 1)[0].lower() if line.split() else ""
         if word in ("click", "callback", "link", "links", "href"):
             raise _invalid("A diagram may not hold click handlers, callbacks or links")
-    if "javascript:" in lowered or re.search(r"<\s*/?\s*[a-z!]", lowered):
+    if re.search(r"javascript\s*:", lowered) or re.search(r"<\s*/?\s*[a-z!]", lowered):
         raise _invalid("A diagram may not hold HTML")
 
 
@@ -352,19 +352,25 @@ def _same_content(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
 
 
 def _with_stored_kinds(panels: Any, by_id: Mapping[str, Mapping[str, Any]]) -> Any:
-    """The panels with each existing panel's stored kind where the change leaves it out.
+    """The panels with each existing panel's stored kind and content where the
+    change leaves them out.
 
-    A caller that re-sends an existing panel with new content and no ``Kind``
-    means that panel, not a new Markdown one: a diagram stays a diagram.
+    A caller that re-sends an existing panel without ``Kind`` means that panel,
+    not a new Markdown one: a diagram stays a diagram. One that re-sends it
+    without ``Content`` (to hand it to the assistant, or to rename it) keeps
+    what it holds. An empty ``Content`` still empties the panel.
     """
     if not isinstance(panels, (list, tuple)):
         return panels
     out = []
     for panel in panels:
-        if isinstance(panel, Mapping) and not panel.get("Kind"):
-            stored = by_id.get(panel.get("PanelId")) if panel.get("PanelId") else None
-            if stored is not None and stored.get("Kind"):
-                panel = {**panel, "Kind": stored["Kind"]}
+        stored = by_id.get(panel.get("PanelId")) if isinstance(panel, Mapping) else None
+        if stored is not None:
+            panel = dict(panel)
+            if not panel.get("Kind") and stored.get("Kind"):
+                panel["Kind"] = stored["Kind"]
+            if panel.get("Content") is None:
+                panel["Content"] = stored.get("Content") or ""
         out.append(panel)
     return out
 

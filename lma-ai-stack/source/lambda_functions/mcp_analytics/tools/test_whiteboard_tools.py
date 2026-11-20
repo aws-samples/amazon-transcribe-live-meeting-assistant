@@ -150,6 +150,22 @@ def test_an_update_names_its_base_version_and_can_hand_a_panel_back(meeting, app
     assert sent["BaseVersion"] == 3 and sent["Panels"][0]["Source"] == "assistant"
 
 
+def test_a_panel_handed_back_without_its_content_sends_none(meeting, appsync):
+    appsync.answers["updateMeetingWhiteboard"] = {"updateMeetingWhiteboard": BOARD}
+    whiteboards.update_whiteboard(
+        caller(OWNER),
+        "m1",
+        {
+            "whiteboardId": "wb1",
+            "baseVersion": 3,
+            "panels": [{"panelId": "decisions", "title": "Decisions", "source": "assistant"}],
+        },
+    )
+    # No content given, so none is sent: the resolver keeps what the panel holds.
+    sent = appsync.calls[0][1]["input"]["Panels"][0]
+    assert sent == {"PanelId": "decisions", "Title": "Decisions", "Source": "assistant"}
+
+
 @pytest.mark.parametrize(
     "args, message",
     [
