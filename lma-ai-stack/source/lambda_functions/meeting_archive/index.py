@@ -1055,7 +1055,9 @@ def meeting_export(
     if segments is None:
         segments = (
             query_items(f"trs#{call_id}")
-            if retained and {"transcript", "chat"} & set(wanted)
+            # The checklist evidence and the action items take their end
+            # times from the segments they name.
+            if retained and {"transcript", "chat", "checklist", "actionItems"} & set(wanted)
             else []
         )
     if keyframes is None:

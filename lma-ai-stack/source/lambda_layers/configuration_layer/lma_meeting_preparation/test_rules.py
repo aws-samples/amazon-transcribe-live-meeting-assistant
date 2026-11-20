@@ -33,6 +33,17 @@ def test_labels_are_kept_in_order():
     assert rules.normalize_labels(labels) == labels
 
 
+def test_label_values_are_stored_exactly_as_given():
+    values = ["  Padded  ", "MiXeD Case", "ünïcode ✓", "a=b,c", ""]
+    labels = [{"Key": f"k{i}", "Value": value} for i, value in enumerate(values)]
+    assert rules.normalize_labels(labels) == labels
+
+
+def test_a_label_key_is_refused_rather_than_lowercased():
+    with pytest.raises(PreparationError, match="label Key"):
+        rules.normalize_labels([{"Key": "Project", "Value": "v"}])
+
+
 def test_no_labels_is_an_empty_list():
     assert rules.normalize_labels(None) == []
     assert rules.normalize_labels([]) == []
@@ -381,6 +392,43 @@ def test_evidence_keeps_the_newest_five():
     _, item = update(items, AddEvidence=[{"StartTime": 10}, {"StartTime": 11}])
     assert [entry["StartTime"] for entry in item["Evidence"]] == [1, 2, 3, 10, 11]
     assert len(item["Evidence"]) == rules.MAX_EVIDENCE_PER_ITEM
+
+
+@pytest.mark.parametrize("field", ["Evidence", "AddEvidence"])
+def test_a_change_giving_more_than_five_evidence_entries_is_refused_whole(field):
+    items, _ = update(checklist(definition("a")), Evidence=[{"StartTime": 1}])
+    with pytest.raises(PreparationError, match="at most 5 evidence entries; this change gives 6"):
+        update(items, Status="covered", **{field: [{"StartTime": t} for t in range(6)]})
+    # Nothing of the refused change is applied.
+    assert items[0]["Status"] == "open"
+    assert [entry["StartTime"] for entry in items[0]["Evidence"]] == [1]
+
+
+@pytest.mark.parametrize("replace, add", [(3, 3), (1, 5), (5, 1)])
+def test_evidence_and_add_evidence_together_over_five_are_refused_whole(replace, add):
+    items, _ = update(checklist(definition("a")), Evidence=[{"StartTime": 1}])
+    with pytest.raises(
+        PreparationError,
+        match=f"at most 5 evidence entries; this change gives {replace + add}",
+    ):
+        update(
+            items,
+            Status="covered",
+            Evidence=[{"StartTime": 10 + t} for t in range(replace)],
+            AddEvidence=[{"StartTime": 20 + t} for t in range(add)],
+        )
+    assert items[0]["Status"] == "open"
+    assert [entry["StartTime"] for entry in items[0]["Evidence"]] == [1]
+
+
+def test_evidence_and_add_evidence_together_up_to_five_are_all_kept():
+    items, _ = update(checklist(definition("a")), Evidence=[{"StartTime": 1}])
+    _, item = update(
+        items,
+        Evidence=[{"StartTime": 10}, {"StartTime": 11}],
+        AddEvidence=[{"StartTime": 20}, {"StartTime": 21}, {"StartTime": 22}],
+    )
+    assert [entry["StartTime"] for entry in item["Evidence"]] == [10, 11, 20, 21, 22]
 
 
 def test_evidence_replaces_and_add_evidence_appends():

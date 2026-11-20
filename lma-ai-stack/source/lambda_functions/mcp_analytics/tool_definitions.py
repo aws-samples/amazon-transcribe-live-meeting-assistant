@@ -473,11 +473,14 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "get_meeting_consent",
         "description": (
-            "Get a meeting's consent record: its mode (off, notify or opt-in), how consent "
-            "is given in an opt-in meeting (each_participant or owner_attests), when the "
-            "notice was posted, the owner's attestation, and one row per participant with "
-            "their latest reply (consented, objected or no_reply), when and how it was given. "
-            "Says whether evidence exists; the evidence images are not returned."
+            "Get a meeting's consent record in LMA's own values: mode (off, notify or "
+            "opt_in), rule for an opt-in meeting (each_participant or owner_attests, else "
+            "null), status (pending, granted, objected or not_required), captureAllowed, "
+            "the notices posted (channel, postedAt), the owner's attestation, and one entry "
+            "per consent event (participantName, decision consent or objection, source "
+            "chat, voice, ui or attestation, at, and speakerId, which is null because a "
+            "consent event is not linked to a transcript speaker). hasEvidence says whether "
+            "evidence exists; the evidence images are not returned."
         ),
         "inputSchema": {
             "type": "object",

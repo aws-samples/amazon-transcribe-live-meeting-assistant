@@ -35,6 +35,20 @@ Pin your new LMA extension to the browser tool bar - select the `extensions` ico
 
    <p align="center"><img src="../images/readme-pin-chrome-extension.png" alt="Pin the Chrome Extension" width="250"/></p>
 
+### Extension version
+
+Chrome shows the LMA version the extension was built from, such as `0.4.1` or `0.4.1.dev1`. Chrome accepts only one to four dot-separated integers in an extension's manifest `version`, so the build puts the LMA version in the manifest's `version_name`, which Chrome displays, and derives `version` from it as follows:
+
+| LMA version | Manifest `version` |
+|-------------|--------------------|
+| `X.Y.Z.devN` | `X.Y.Z.N` |
+| `X.Y.ZaN` | `X.Y.Z.(10000 + N)` |
+| `X.Y.ZbN` | `X.Y.Z.(20000 + N)` |
+| `X.Y.ZrcN` | `X.Y.Z.(30000 + N)` |
+| `X.Y.Z` (a release) | `X.Y.Z.65535` |
+
+Chrome compares the manifest `version` numerically, so a release sorts above every pre-release build of the same `X.Y.Z`, and every build sorts below any build of a later version. Other forms of the LMA version are rejected when the stack is published.
+
 ## How to use
 
 Once you have the extension installed, login with your LMA credentials.

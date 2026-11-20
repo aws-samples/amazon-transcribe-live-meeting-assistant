@@ -286,6 +286,16 @@ def test_labels_and_audience_are_written_with_their_own_mutations(meeting, appsy
     }
 
 
+def test_label_values_are_sent_and_returned_unchanged(meeting, appsync):
+    labels = {"team": "  Web Platform ", "region": "ÜBER-Nord", "empty": ""}
+    stored = [{"Key": key, "Value": value} for key, value in labels.items()]
+    appsync.answers["updateCallLabels"] = {"updateCallLabels": {"Labels": stored}}
+    answer = preparation.update_metadata(caller(SHARED), "m1", labels=labels)
+    ((_query, variables),) = appsync.calls
+    assert variables["input"]["Labels"] == stored
+    assert answer["labels"] == labels
+
+
 def test_the_summary_profile_is_written_with_its_own_mutation(meeting, appsync):
     appsync.answers["updateCallSummaryProfile"] = {
         "updateCallSummaryProfile": {"SummaryProfile": "discovery-session"}

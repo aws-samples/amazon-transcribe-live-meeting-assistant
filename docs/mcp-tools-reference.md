@@ -450,15 +450,35 @@ also lists one that ended earlier and was changed after it.
 ### get_meeting_consent
 
 The meeting's [consent record](meeting-consent.md), without the evidence
-images: `mode` (`off`, `notify` or `opt-in`), `consentGivenBy` for an opt-in
-meeting (`each_participant` or `owner_attests`), `status`, `captureAllowed`,
-`noticePostedAt`, the owner's `attestation`, one row per participant (`name`,
-`status` `consented`, `objected` or `no_reply`, `at` and `method`, the channel
-the reply came by), and `evidence` (`exists` and `count`). The record holds
-participants' display names only, so a row has no email address. A meeting
-whose consent is off, or was never started, answers `{"mode": "off"}`. The
-evidence images are in `get_meeting_record`'s `consent` section, for the
-meeting's owner and Admins.
+images. Every value is LMA's own, as the record stores it:
+
+| Field | Values |
+|---|---|
+| `mode` | `off`, `notify` or `opt_in` |
+| `rule` | `each_participant` or `owner_attests` for an opt-in meeting; null otherwise, as only opt-in uses a rule |
+| `status` | `pending`, `granted`, `objected` or `not_required` |
+| `captureAllowed` | Whether the meeting may be captured now |
+| `noticePostedAt` | When the notice was first posted |
+| `notices` | Each posting of the notice kept on the record: `channel` (`chat`, `voice`, `banner` or `invite`) and `postedAt` |
+| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or `attestation`), `at` and `speakerId` |
+| `attestation` | The owner's attestation (`attestedBy`, `method`, `at`), or null |
+| `hasEvidence` | Whether evidence images exist; the images are not returned |
+| `startedAt`, `updatedAt` | When consent was started, and when the record last changed |
+
+The names are those the record stores, so no value is translated. `at` is when
+the reply or attestation happened, or when it was recorded if the record holds
+only that. `speakerId` is null for every event: a consent event records the
+participant's display name, not the transcript speaker it was heard from, and
+LMA does not match a name to a speaker, because two people can show the same
+name. The record holds display names only, so an event has no email address.
+
+A meeting whose consent was never started answers with `mode` `off`, `status`
+`not_required`, no notices or events, and `captureAllowed` as the meeting's
+capture gate. The evidence images are in `get_meeting_record`'s `consent`
+section, for the meeting's owner and Admins.
+
+The meeting export's `consent` part is the same record in the same shape; see
+[the meeting export](meeting-export.md#consent).
 
 ```json
 {"meetingId": "e3b9…"}
@@ -467,17 +487,20 @@ meeting's owner and Admins.
 ```json
 {
   "meetingId": "e3b9…",
-  "mode": "opt-in",
-  "consentGivenBy": "each_participant",
+  "mode": "opt_in",
+  "rule": "each_participant",
   "status": "granted",
   "captureAllowed": true,
   "noticePostedAt": "2026-12-01T15:00:30Z",
-  "attestation": null,
-  "participants": [
-    {"name": "Dana", "status": "consented", "at": "2026-12-01T15:01:02Z", "method": "chat"},
-    {"name": "Bo", "status": "consented", "at": "2026-12-01T15:01:40Z", "method": "voice"}
+  "notices": [{"channel": "chat", "postedAt": "2026-12-01T15:00:30Z"}],
+  "events": [
+    {"participantName": "Dana", "decision": "consent", "source": "chat", "at": "2026-12-01T15:01:02Z", "speakerId": null},
+    {"participantName": "Bo", "decision": "consent", "source": "voice", "at": "2026-12-01T15:01:40Z", "speakerId": null}
   ],
-  "evidence": {"exists": true, "count": 2}
+  "attestation": null,
+  "hasEvidence": true,
+  "startedAt": "2026-12-01T15:00:00Z",
+  "updatedAt": "2026-12-01T15:01:40Z"
 }
 ```
 
