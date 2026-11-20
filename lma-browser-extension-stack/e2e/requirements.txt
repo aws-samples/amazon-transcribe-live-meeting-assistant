@@ -1,0 +1,6 @@
+# Python deps for the browser extension's Playwright tests (this directory) and
+# the live test that reuses its helper (integ-tests/test_browser_extension.py).
+# Chromium itself comes from `python -m playwright install --no-shell chromium`,
+# which `make test-browser-extension-e2e` runs; it must match this version.
+playwright==1.65.2
+pytest>=8

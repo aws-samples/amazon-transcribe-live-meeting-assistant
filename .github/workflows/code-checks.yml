@@ -34,6 +34,12 @@
 #     to this workflow, the Makefile or other shared configuration, and when the
 #     changed files cannot be listed.
 #
+# The Desktop Capture App's Windows and macOS clients are built and self-tested
+# by two further jobs at the end of this file, on windows-latest and
+# macos-latest. They are selected the same way, by a small `select` job, but
+# gated as whole jobs, and they are GitHub-only (GITHUB_ONLY_STEPS in
+# scripts/ci/changed_areas.py).
+#
 # Third-party actions are pinned to a full commit SHA (GitHub's hardening
 # guidance for public repositories); the `github-actions` entry in
 # .github/dependabot.yml keeps the pins and the trailing version comments
@@ -115,12 +121,13 @@ jobs:
             lma-virtual-participant-stack/backend/package-lock.json
             lma-websocket-transcriber-stack/source/app/package-lock.json
             utilities/websocket-client/package-lock.json
+            lma-browser-extension-stack/package-lock.json
 
       - name: Cache pip downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt', 'lma-meetingassist-setup-stack/strands_layer/requirements.txt') }}
+          key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt', 'lma-meetingassist-setup-stack/strands_layer/requirements.txt', 'lma-browser-extension-stack/e2e/requirements.txt') }}
           restore-keys: |
             pip-${{ runner.os }}-py313-
 
@@ -273,9 +280,192 @@ jobs:
           CI: 'false'
         run: npm run build
 
+      # Playwright's Chromium (~170 MB) and its version are fixed by the pin in
+      # the e2e requirements file, so that file is the cache key.
+      - name: Cache Playwright Chromium
+        if: steps.areas.outputs.browser_extension != 'false'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('lma-browser-extension-stack/e2e/requirements.txt') }}
+
+      # The build above, loaded into headless Chromium as an unpacked extension:
+      # its service worker and side panel start, its id is the one the Cognito
+      # app client accepts as a sign-in callback, the sign-in screen renders, the
+      # Login button starts the hosted sign-in and exchanges the code, the
+      # signed-in panel renders, and the recorder is injected into a page. Every
+      # network request is answered or refused by the test; no AWS. The live
+      # counterpart is integ-tests/test_browser_extension.py.
+      - name: Browser extension browser smoke test
+        if: steps.areas.outputs.browser_extension != 'false'
+        run: make test-browser-extension-e2e PLAYWRIGHT_DEPS=--with-deps
+
       # Fastify 5 websocket smoke test (boots the server, round-trips a frame) —
       # runtime coverage the unit tests do not provide.
       - name: WebSocket transcriber smoke test
         if: steps.areas.outputs.transcriber != 'false'
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm run smoke
+
+  # ── Desktop Capture App ─────────────────────────────────────────────────────
+  # The Windows and macOS clients need runners of their own operating system, so
+  # they are separate jobs, gated as a whole rather than step by step: on a pull
+  # request that changes neither client, no Windows or macOS runner starts. The
+  # `select` job runs the same scripts/ci/changed_areas.py selection as the job
+  # above, and is the only thing these two wait for. They are not required
+  # checks, and GitLab has no counterpart (it has no Windows or macOS runners;
+  # see GITHUB_ONLY_STEPS in that script).
+  #
+  # `!cancelled() && ... != 'false'` keeps the "doubt runs the step" rule: if
+  # `select` fails, its outputs are empty and both jobs run.
+  #
+  # Each uploads the client it built, for manual testing, kept for 7 days. Neither
+  # knows a stack (the Windows build has the source tree's sample lma-config.json,
+  # the macOS build none); docs/desktop-capture-app.md#automated-builds says how
+  # to point one at a stack.
+  select:
+    name: Select the desktop app jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      desktop_windows: ${{ steps.areas.outputs.desktop_windows }}
+      desktop_macos: ${{ steps.areas.outputs.desktop_macos }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Select the checks this change needs
+        id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            python3 scripts/ci/changed_areas.py --base HEAD^1 --head HEAD \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            python3 scripts/ci/changed_areas.py \
+              --all "a $EVENT_NAME run on $GITHUB_REF_NAME runs every check" \
+              --github-output "$GITHUB_OUTPUT"
+          fi
+
+  desktop-windows:
+    name: Desktop app (Windows)
+    needs: select
+    if: ${{ !cancelled() && needs.select.outputs.desktop_windows != 'false' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: lma-desktop-capture-app-stack/source/windows
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
+        with:
+          dotnet-version: '8.0.x'
+
+      # The project has no NuGet lock file, so the package cache is keyed on the
+      # csproj, which pins every package version.
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('lma-desktop-capture-app-stack/source/windows/LMACaptureClient.Windows.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      # What the docs tell a user to run: a self-contained win-x64 publish,
+      # followed by the script's own --selftest gate, which fails the build on a
+      # failing self-test. Nothing is installed (no -Install).
+      - name: Build the Windows client
+        run: ./build-windows.ps1 -SelfContained
+
+      # --selftest again, here so its output is in the job summary and so the job
+      # also fails if the run reports a failure or never reaches its summary line,
+      # whatever its exit code. It runs before any window is created, so it needs
+      # no desktop session.
+      - name: Windows client self-test
+        run: |
+          $exe = (Resolve-Path "bin/Release/net8.0-windows/win-x64/publish/LMACaptureClient.exe").Path
+          $out = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $proc = Start-Process $exe -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow `
+                      -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+          $text = Get-Content $out -Raw -Encoding UTF8
+          Write-Host $text
+          Get-Content "$out.err" -Raw -ErrorAction SilentlyContinue | Write-Host
+          $passed = ([regex]::Matches($text, '\[PASS\]')).Count
+          $failed = ([regex]::Matches($text, '\[FAIL\]')).Count
+          "### Windows client self-test`n`n$passed passed, $failed failed, exit code $($proc.ExitCode)`n" |
+              Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          if ($proc.ExitCode -ne 0 -or $failed -ne 0 -or $text -notmatch 'All self-tests PASSED') {
+              throw "Windows client self-test failed (exit $($proc.ExitCode), $failed failed)"
+          }
+
+      - name: Upload the Windows client
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: lma-capture-client-windows-x64
+          path: lma-desktop-capture-app-stack/source/windows/bin/Release/net8.0-windows/win-x64/publish/
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop-macos:
+    name: Desktop app (macOS)
+    needs: select
+    if: ${{ !cancelled() && needs.select.outputs.desktop_macos != 'false' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: lma-desktop-capture-app-stack/source/macos
+    # SwiftPM has no dependencies to cache here: Package.swift uses system
+    # frameworks only.
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Swift toolchain
+        run: swift --version
+
+      # make-app.sh: `swift build -c release` and the .app bundle. LMA_ADHOC_SIGN=1
+      # is the script's switch for CI: an ad-hoc signature (no identity, which
+      # every arm64 executable needs to run at all), instead of creating a
+      # self-signed identity in the runner's keychain. No Developer ID signing and
+      # no notarization.
+      - name: Build the macOS client
+        env:
+          LMA_ADHOC_SIGN: '1'
+        run: ./make-app.sh
+
+      # Runs before the menu-bar app would start, so it needs no window server.
+      - name: macOS client self-test
+        run: |
+          set -o pipefail
+          ./build/LMACaptureClient.app/Contents/MacOS/LMACaptureClient --selftest \
+            | tee "$RUNNER_TEMP/selftest.txt"
+          passed=$(grep -c '✓' "$RUNNER_TEMP/selftest.txt" || true)
+          failed=$(grep -c '✗' "$RUNNER_TEMP/selftest.txt" || true)
+          printf '### macOS client self-test\n\n%s passed, %s failed\n' "$passed" "$failed" \
+            >> "$GITHUB_STEP_SUMMARY"
+          [ "$failed" = 0 ] && grep -q 'All self-tests PASSED' "$RUNNER_TEMP/selftest.txt"
+
+      # ditto keeps the bundle's symlinks, permissions and signature, which the
+      # artifact upload's own zip would not. A downloaded copy is quarantined by
+      # macOS; see the macOS README for opening an unsigned build.
+      - name: Package the macOS client
+        run: |
+          ditto -c -k --keepParent build/LMACaptureClient.app "$RUNNER_TEMP/LMACaptureClient-macos.zip"
+          codesign --verify --verbose build/LMACaptureClient.app
+
+      - name: Upload the macOS client
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: lma-capture-client-macos-arm64
+          path: ${{ runner.temp }}/LMACaptureClient-macos.zip
+          if-no-files-found: error
+          retention-days: 7
