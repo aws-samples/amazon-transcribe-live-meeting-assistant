@@ -15,7 +15,8 @@ holds one key:
 1. a key with the read scope, with which a write tool must be refused and must
    leave nothing behind;
 2. a key with the read-write scope, with which it polls get_live_transcript
-   with its cursor while segments are added, pushes guidance and reads it back,
+   with its cursor while segments are added, pushes guidance and reads it back
+   (with list_meeting_guidance and list_meeting_notifications),
    reads the recording link from get_meeting_record, and deletes the meeting
    with delete_meeting, first without confirm (nothing may be deleted) and then
    with it; and schedules a meeting two days ahead with schedule_meeting twice,
@@ -168,7 +169,7 @@ class Probe:
 
     def cleanup(self) -> None:
         """Remove whatever is left of this probe's meeting, by its CallId only."""
-        for pk in (f"c#{self.call_id}", f"trs#{self.call_id}", f"gd#{self.call_id}"):
+        for pk in (f"c#{self.call_id}", f"trs#{self.call_id}", f"nt#{self.call_id}"):
             items = self.d.ddb.query(
                 TableName=self.d.table,
                 KeyConditionExpression="PK = :pk",
@@ -249,10 +250,11 @@ class Probe:
         self.observed["meeting_after_read_key"] = self.meeting_row() is not None
 
     def _guidance_rows(self) -> int:
+        """The meeting's stored notifications (guidance is one category of them)."""
         return self.d.ddb.query(
             TableName=self.d.table,
-            KeyConditionExpression="PK = :pk",
-            ExpressionAttributeValues={":pk": {"S": f"gd#{self.call_id}"}},
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :n)",
+            ExpressionAttributeValues={":pk": {"S": f"nt#{self.call_id}"}, ":n": {"S": "n#"}},
             Select="COUNT",
         )["Count"]
 
@@ -289,6 +291,13 @@ class Probe:
         self.observed["guidance_listed"] = any(
             item["text"] == text and item["level"] == "WARNING" for item in listed["guidance"]
         )
+        _, notifications = self.call(
+            key, "list_meeting_notifications", {"meeting_id": self.call_id, "category": "guidance"}
+        )
+        self.observed["notifications_listed"] = [
+            {name: item.get(name) for name in ("category", "type", "severity", "body", "refs", "dedupKey")}
+            for item in notifications["notifications"]
+        ]
 
     def _record(self, key: str) -> None:
         self.put_recording()
@@ -316,7 +325,7 @@ class Probe:
         while time.monotonic() < deadline and self.meeting_row():
             time.sleep(3)
         self.observed["meeting_after_delete"] = self.meeting_row() is not None
-        # Read before cleanup() runs, which removes gd# rows itself.
+        # Read before cleanup() runs, which removes nt# rows itself.
         self.observed["guidance_after_delete"] = self._guidance_rows()
 
     def _schedule_twice(self, key: str) -> None:

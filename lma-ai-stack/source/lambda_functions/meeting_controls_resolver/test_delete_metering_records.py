@@ -70,16 +70,32 @@ def test_every_metering_record_of_the_meeting_is_deleted(monkeypatch) -> None:
     assert len(table.queries) == 3
 
 
-def test_every_guidance_item_of_the_meeting_is_deleted(monkeypatch) -> None:
-    keys = [{"PK": "gd#m-1", "SK": f"g#2026-11-19T10:0{i}:00Z#id{i}"} for i in range(3)]
-    table = FakeTable(keys)
+class PartitionTable(FakeTable):
+    """Answers each query with the keys of the partition it names."""
+
+    def query(self, **kwargs):
+        self.queries.append(kwargs)
+        pk = kwargs["ExpressionAttributeValues"][":pk"]
+        return {"Items": [key for key in self.keys if key["PK"] == pk]}
+
+
+def test_every_notification_row_of_the_meeting_is_deleted(monkeypatch) -> None:
+    rows = [
+        {"PK": "nt#m-1", "SK": "n#2026-11-19T10:00:00Z#a"},
+        {"PK": "nt#m-1", "SK": "d#guidance#ask_question:c1"},
+        {"PK": "nt#m-1", "SK": "r#29000000"},
+        {"PK": "nt#m-1", "SK": "u#user@example.com"},
+        {"PK": "gd#m-1", "SK": "g#2026-11-19T10:00:00Z#id0"},
+        {"PK": "nt#m-2", "SK": "n#2026-11-19T10:00:00Z#b"},
+    ]
+    table = PartitionTable(rows)
     monkeypatch.setattr(index, "ddbTable", table)
-    assert index.delete_meeting_guidance("m-1") == 3
-    assert table.deleted == keys
-    assert {q["ExpressionAttributeValues"][":pk"] for q in table.queries} == {"gd#m-1"}
+    assert index.delete_meeting_notifications("m-1") == 5
+    assert table.deleted == rows[:5]
+    assert {q["ExpressionAttributeValues"][":pk"] for q in table.queries} == {"nt#m-1", "gd#m-1"}
 
 
-def test_deleting_a_meeting_deletes_its_guidance(monkeypatch) -> None:
+def test_deleting_a_meeting_deletes_its_notifications(monkeypatch) -> None:
     deleted = []
     for step in (
         "cleanup_virtual_participants",
@@ -94,7 +110,7 @@ def test_deleting_a_meeting_deletes_its_guidance(monkeypatch) -> None:
     monkeypatch.setattr(index, "get_call_details", lambda *a: {"getCall": {}})
     monkeypatch.setattr(index, "delete_audio_recording", lambda callid, url, _earlier: None)
     monkeypatch.setattr(index, "delete_video_recordings", lambda callid, url, _earlier: None)
-    monkeypatch.setattr(index, "delete_meeting_guidance", deleted.append)
+    monkeypatch.setattr(index, "delete_meeting_notifications", deleted.append)
     monkeypatch.setattr(index, "dsl_gql", lambda *a: None)
     monkeypatch.setattr(index, "DSLMutation", lambda *a: None)
 

@@ -116,7 +116,10 @@ Deleted, for the meeting:
   has one;
 - the quote in each piece of [checklist](meeting-context-and-checklist.md)
   evidence, which is transcript content. Its segment id and time are kept, and
-  a quote sent after the deletion is not stored.
+  a quote sent after the deletion is not stored;
+- the meeting's [notifications](meeting-notifications.md) of category
+  `guidance`, which may quote the transcript, including the guidance an MCP
+  client pushed with `push_meeting_guidance`.
 
 Kept:
 
@@ -132,7 +135,9 @@ Kept:
   not be kept either;
 - shared-screen key frames and the text read from them, which follow
   **Days to keep transcript segments** in full;
-- the consent record, which is the evidence that participants were told.
+- the consent record, which is the evidence that participants were told;
+- the meeting's notifications of other categories, and each user's dismissals
+  and mutes.
 
 ## What users see
 

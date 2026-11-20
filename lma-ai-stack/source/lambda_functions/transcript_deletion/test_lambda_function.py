@@ -696,3 +696,35 @@ def test_an_attachment_file_that_cannot_be_deleted_fails_the_invocation_for_a_re
     aws.s3.fail_deletes = True
     with pytest.raises(RuntimeError):
         lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+
+
+# ── notifications that may quote the transcript ─────────────────────────────
+
+
+def _with_notifications(aws):
+    pk = f"nt#{CALL_ID}"
+    aws.table.put(PK=pk, SK="n#2026-11-19T10:00:00Z#g1", Category="guidance", Body="quoted")
+    aws.table.put(PK=pk, SK="d#guidance#ask_question:c1", Category="guidance")
+    aws.table.put(PK=pk, SK="n#2026-11-19T10:01:00Z#s1", Category="status", Body="kept")
+    aws.table.put(PK=pk, SK="d#status#k", Category="status")
+    aws.table.put(PK=pk, SK="u#user@example.com", Dismissed={"g1"})
+    aws.table.put(PK=pk, SK="r#29000000", Count=3)
+    aws.table.put(PK=f"gd#{CALL_ID}", SK="g#2026-11-19T10:00:00Z#x", Text="older guidance")
+    aws.table.put(PK="nt#another-meeting", SK="n#2026-11-19T10:00:00Z#g9", Category="guidance")
+
+
+def test_deleting_the_transcript_deletes_the_guidance_notifications_only(aws):
+    _with_notifications(aws)
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    left = sorted(sk for pk, sk in aws.table.items if pk == f"nt#{CALL_ID}")
+    assert left == ["d#status#k", "n#2026-11-19T10:01:00Z#s1", "r#29000000", "u#user@example.com"]
+    assert [k for k in aws.table.items if k[0] == f"gd#{CALL_ID}"] == []
+    assert ("nt#another-meeting", "n#2026-11-19T10:00:00Z#g9") in aws.table.items
+
+
+def test_the_guidance_categories_are_the_publish_helpers():
+    """One list decides what follows the transcript: the helper's, which sets the expiry too."""
+    import lma_notifications
+
+    assert lf.TRANSCRIPT_BOUND_CATEGORIES is lma_notifications.TRANSCRIPT_BOUND_CATEGORIES
+    assert "guidance" in lf.TRANSCRIPT_BOUND_CATEGORIES

@@ -72,7 +72,7 @@ import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
-import MeetingGuidanceBanner from './MeetingGuidanceBanner';
+import MeetingNotificationsInline from '../meeting-notifications/MeetingNotificationsInline';
 import CaptureContextPanel, { CONSENT_SETTING_ID } from './CaptureContextPanel';
 import { consentEnforced } from '../common/meeting-context';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
@@ -1841,6 +1841,9 @@ export const CallPanel = ({
   tabInUrl = false,
   assistantDefaultOpen = undefined,
   onRefreshMeeting = undefined,
+  // Where the page has no Notifications drawer (an embedded meeting page), the
+  // meeting's notifications are shown above the tabs instead.
+  notificationsInline = false,
 }) => {
   const { currentCredentials, user } = useAppContext();
   const { isAdmin: isAdminUser } = useUserGroups();
@@ -2831,7 +2834,7 @@ export const CallPanel = ({
           onShowRecord={showConsentRecordPanel ? showConsent : undefined}
         />
         <TranscriptionPauseAlert isLive={isLive} transcriptionPause={item.transcriptionPause} />
-        <MeetingGuidanceBanner callId={item.callId} />
+        {notificationsInline && <MeetingNotificationsInline callId={item.callId} />}
         <div ref={bodyRef} className={bodyClass}>
           <div className="meeting-main">
             <Tabs
