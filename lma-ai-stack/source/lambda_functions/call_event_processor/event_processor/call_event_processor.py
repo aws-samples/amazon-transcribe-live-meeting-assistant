@@ -161,6 +161,47 @@ def transcript_hook_nonpartial_only() -> bool:
     )
 
 
+#: The summary profile name that means "no profile": the Transcript Summary
+#: prompts (lma_summary_profiles.DEFAULT_PROFILE).
+NO_SUMMARY_PROFILE = "default"
+_SUMMARY_PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def default_summary_profile() -> Optional[str]:
+    """The summary profile a meeting that starts without one is given, or None.
+
+    The Meeting Processing section's defaultSummaryProfile, else the shipped
+    default (``default``, no profile). Anything that is not a profile name, and
+    ``default`` itself, is None: the meeting is summarized as it always was.
+    """
+    value = read_setting(
+        MEETING_PROCESSING.name, "defaultSummaryProfile", default=NO_SUMMARY_PROFILE
+    )
+    if (
+        not isinstance(value, str)
+        or value == NO_SUMMARY_PROFILE
+        or not _SUMMARY_PROFILE_NAME.match(value)
+    ):
+        return None
+    return value
+
+
+def with_default_summary_profile(message: Dict[str, Any]) -> Dict[str, Any]:
+    """A START event's createCall input, given the deployment's default summary profile.
+
+    Only when the event names none: a Virtual Participant started or scheduled
+    with a profile keeps its own. Every capture method's meeting is created by
+    a START event here, uploads included, so this is the one place it is set.
+    """
+    if message.get("SummaryProfile"):
+        return message
+    profile = default_summary_profile()
+    if profile is None:
+        return message
+    LOGGER.info("Meeting %s starts with the summary profile %s", message.get("CallId"), profile)
+    return {**message, "SummaryProfile": profile}
+
+
 def agenda_derivation_threshold() -> float:
     """Seconds into a meeting with no agenda at which it is read for one; 0 is off.
 
@@ -476,6 +517,7 @@ async def execute_create_call_mutation(
         owner = message.get("AgentId", "system@lma.aws")
         print(f"Using AgentId as owner: {owner}")
     message.update({"Owner": owner})
+    message.update(with_default_summary_profile(message))
 
     query = dsl_gql(
         DSLMutation(

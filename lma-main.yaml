@@ -524,6 +524,8 @@ Parameters:
       - internal-meetings-notify
       - regulated-consent-required
       - regulated-notify
+      - team-hosted-external
+      - customer-account
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built
@@ -534,9 +536,15 @@ Parameters:
       is deleted 15 minutes after the summary, no audio is recorded, personal
       information is redacted, and Amazon Bedrock runs within this Region's
       geography; LogLevel and the retention-day parameters are set here, not by
-      the preset) or regulated-notify (as regulated-consent-required, except that
+      the preset), regulated-notify (as regulated-consent-required, except that
       participants are notified, capture runs from the start and stops when one
-      objects). Each preset is also offered on the Configuration page as a
+      objects), team-hosted-external (for a deployment in a team's own account
+      that records meetings with external organizations: each participant must
+      consent first, no audio is recorded, requests made in the meeting are off,
+      and web search and the installed MCP servers are not used) or
+      customer-account (a starting point for a deployment in the account of the
+      organization whose meetings it records; see docs/hosting-models.md). Each
+      preset is also offered on the Configuration page as a
       read-only Managed profile. none is accepted as standard, for stacks deployed
       with it. CustomConfigPath is applied over this when provided.
 

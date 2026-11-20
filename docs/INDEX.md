@@ -77,6 +77,7 @@ title: "LMA Documentation"
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention, and [where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed) (AWS Region, Amazon Bedrock inference geography, optional integrations)
 - [Privacy and Data Handling Controls](privacy-and-data-handling.md) — For administrators and reviewers: the consent options, every kind of meeting data with where it is stored, how long it is kept and what controls that, deleting transcripts, meetings and stacks, where content is processed, and the presets and deploy-time controls for a regulated deployment
+- [Hosting Models](hosting-models.md) — Running LMA in a team's own account for meetings with external organizations, or in the account of the organization whose meetings it records: the two presets, the deploy-time settings, isolating the account, what meeting platforms need to allow, and moving meetings between the two with `lma meetings delete`
 - [Security Scanning (SRT)](security-scanning.md) — Automated security scanning via the AWS Sample Security Review Tool, suppression workflow, GitLab CI integration, DSR → SRT migration
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 

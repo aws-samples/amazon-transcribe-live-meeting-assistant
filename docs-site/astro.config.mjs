@@ -136,6 +136,10 @@ export default defineConfig({
               slug: "privacy-and-data-handling",
             },
             {
+              label: "Hosting Models",
+              slug: "hosting-models",
+            },
+            {
               label: "Security Scanning (SRT)",
               slug: "security-scanning",
             },

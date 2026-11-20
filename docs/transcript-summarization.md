@@ -125,6 +125,21 @@ A meeting's profile is its `SummaryProfile`. It can be set:
   `start_meeting_now`, `update_scheduled_meeting` and `update_meeting_metadata`
   ([MCP tools reference](mcp-tools-reference.md)). `list_summary_profiles`
   lists the profiles a meeting can name.
+- **For every new meeting that names none**, with **Meeting Processing ›
+  Default summary profile for new meetings**
+  (`meeting_processing.defaultSummaryProfile`) on the Configuration page. It is
+  `default` as shipped, so such a meeting has no profile and is summarized with
+  the Transcript Summary prompts. Set to another profile's name, it is written on
+  each meeting when the meeting starts, whatever captured it (a Virtual
+  Participant started or scheduled with the Default profile, Stream Audio, the
+  Desktop Capture App, the browser extension or an uploaded recording), so the
+  meeting page shows it and the owner can change it before the summary. A
+  meeting whose Virtual Participant names a profile keeps that one. Choosing
+  **Default** in the Virtual Participant form is the same as naming none, so
+  such a meeting is given the deployment's default too; change it on the meeting
+  page to summarize that meeting with the Transcript Summary prompts. A change to
+  the setting applies, within about five minutes, to meetings that start after
+  it.
 
 The people who may change the meeting's preparation may change its profile: its
 owner, the users it is shared with, and Admins. A name the configuration does not

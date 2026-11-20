@@ -280,6 +280,20 @@ export const VIRTUAL_PARTICIPANT = declareSection({
 });
 
 /**
+ * The meeting assistant's settings. The Virtual Participant reads one of them,
+ * who in the meeting may make a request (inMeetingRequesters), once when it
+ * starts. Standard, as in the Python half, where the meeting assistant reads
+ * the section per answer.
+ */
+export const MEETING_ASSIST = declareSection({
+    name: 'meeting_assist',
+    cacheTier: 'standard',
+    description:
+        'The meeting assistant: its wake phrase, prompt caching, reasoning effort, what and who in-meeting ' +
+        'requests may use, its instructions, and which MCP servers and skills it uses.',
+});
+
+/**
  * How long meeting records and transcript segments are kept. Each stack
  * parameter is both the default and the upper limit of its setting, so a writer
  * uses the smaller of the section's value and the parameter's; see

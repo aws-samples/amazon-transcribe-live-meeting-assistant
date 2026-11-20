@@ -88,6 +88,7 @@ class LMAClient:
         self._vp_ops = None
         self._mcp_ops = None
         self._skill_ops = None
+        self._meeting_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -184,6 +185,19 @@ class LMAClient:
 
             self._skill_ops = SkillOperations(self)
         return self._skill_ops
+
+    @property
+    def meetings(self):
+        """Meetings by their labels (``find_by_labels``, ``delete_by_labels``).
+
+        Returns:
+            MeetingOperations instance.
+        """
+        if self._meeting_ops is None:
+            from lma_sdk.operations.meetings import MeetingOperations
+
+            self._meeting_ops = MeetingOperations(self)
+        return self._meeting_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

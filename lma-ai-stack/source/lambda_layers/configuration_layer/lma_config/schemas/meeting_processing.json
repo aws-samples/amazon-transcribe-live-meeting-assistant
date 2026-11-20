@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_processing",
   "title": "Meeting processing",
-  "description": "How transcript segments reach a transcript Lambda hook, and when and how far back meetings that were never ended are looked for. The defaults are the shipped values, or the default profile's; a value set here is used instead until it is reset.",
+  "description": "How transcript segments reach a transcript Lambda hook, when and how far back meetings that were never ended are looked for, and the summary profile a meeting that names none starts with. The defaults are the shipped values, or the default profile's; a value set here is used instead until it is reset.",
   "sectionLabel": "Meeting Processing",
   "appliesText": "A saved change applies within about five minutes.",
   "order": 10,
@@ -32,6 +32,14 @@
       "description": "How long a meeting may go without a finished transcript segment before the inactive-meeting reaper ends it on its behalf; 0 leaves such meetings open. Keep it longer than the longest quiet stretch your meetings have.",
       "minimum": 0,
       "maximum": 10080
+    },
+    "defaultSummaryProfile": {
+      "order": 3,
+      "type": "string",
+      "title": "Default summary profile for new meetings",
+      "description": "The summary profile a meeting is given when it starts without one: a Virtual Participant started or scheduled with the Default profile, Stream Audio, the Desktop Capture App, the browser extension and uploaded recordings. default, the shipped value, gives such a meeting no profile, so it is summarized with the Transcript Summary prompts. Another name is written on the meeting when it starts, where its owner can see it and change it on the meeting page before the summary. A name that is not in the Summary Profiles section when the summary is written is summarized with the default, and the summary records the profile it asked for.",
+      "examples": ["default", "discovery-session"],
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
     }
   },
   "additionalProperties": false

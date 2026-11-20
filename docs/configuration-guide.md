@@ -190,8 +190,8 @@ of them is **active**: the one every meeting uses. They work as IDP's do.
   stack parameters name, and the stack parameters that are defaults of settings.
   Every stack update rewrites it, so it is read-only. A new deployment runs on it.
 - **Managed** profiles are the shipped presets (`standard`,
-  `internal-meetings-notify`, `regulated-consent-required` and
-  `regulated-notify`; see
+  `internal-meetings-notify`, `regulated-consent-required`,
+  `regulated-notify`, `team-hosted-external` and `customer-account`; see
   [Configuration presets](#configuration-presets)), each
   the default with the preset applied. They are read-only and rewritten by every
   stack update too. Activate one to use it as it is.
@@ -382,27 +382,52 @@ installed** and has no effect.
 
 ### Configuration presets
 
-A **preset** is a complete organizational default for consent, retention and
-privacy. All four set the same settings, listed below, and change only those,
-so applying one sets every one of them whichever preset was applied before, and every other setting stays as it is. They are the choices
-of the `ConfigurationPreset` stack parameter, and each is also stored as a
-read-only **Managed** profile of the same name, which the deployment rewrites on
-every stack update; activate it as it is, or copy it to a Custom profile to
-change it.
+A **preset** is a complete organizational default for consent, retention,
+privacy and what the meeting assistant may reach. All six set the same settings,
+listed below, and change only those, so applying one sets every one of them
+whichever preset was applied before, and every other setting stays as it is.
+They are the choices of the `ConfigurationPreset` stack parameter, and each is
+also stored as a read-only **Managed** profile of the same name, which the
+deployment rewrites on every stack update; activate it as it is, or copy it to a
+Custom profile to change it.
 
-| Setting | Standard (`standard`, the default) | Internal meetings – notify participants (`internal-meetings-notify`) | Regulated – consent required, transcript not retained (`regulated-consent-required`) | Regulated – notify with opt-out, transcript not retained (`regulated-notify`) |
-|---|---|---|---|---|
-| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify |
-| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
-| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) |
-| Meeting Consent › Keep evidence screenshots | On | On | On | On |
-| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting |
-| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On |
-| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary |
-| Meeting Recording › Record meeting audio | On | On | Off | Off |
-| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off |
-| Amazon Transcribe › Redact personal information | Off | Off | On | On |
-| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment |
+The presets, by id:
+
+- `standard`: **Standard**, the shipped defaults and the stack parameter's default.
+- `internal-meetings-notify`: **Internal meetings – notify participants**.
+- `regulated-consent-required`: **Regulated – consent required, transcript not retained**.
+- `regulated-notify`: **Regulated – notify with opt-out, transcript not retained**.
+- `team-hosted-external`: **Team-hosted (external meetings)**, for a deployment
+  in a team's own account that records meetings with several external
+  organizations. See [Hosting Models](hosting-models.md).
+- `customer-account`: **Customer account**, a starting point for a deployment
+  in the account of the organization whose meetings it records. See
+  [Hosting Models](hosting-models.md).
+
+| Setting | `standard` | `internal-meetings-notify` | `regulated-consent-required` | `regulated-notify` | `team-hosted-external` | `customer-account` |
+|---|---|---|---|---|---|---|
+| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in |
+| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
+| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | On |
+| Meeting Consent › Keep evidence screenshots | On | On | On | On | On | On |
+| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting |
+| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
+| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off |
+| Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off |
+| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off | On | On |
+| Amazon Transcribe › Redact personal information | Off | Off | On | On | Off | Off |
+| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment | Global | Global |
+| Meeting Assistant › Web search | On | On | On | On | Off | Off |
+| Meeting Assistant › MCP servers | On | On | On | On | Off | On |
+| Meeting Assistant › In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
+| Meeting Assistant › In-meeting requests: meeting context and checklist | None | None | None | None | None | None |
+| Meeting Assistant › In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone |
+| Meeting Processing › Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` |
+
+The last six rows are set by every preset, at their shipped defaults in the first
+four, so applying any preset puts them back after a hosting preset changed them,
+and resets **In-meeting requests** to Current meeting only on a deployment that
+had chosen Unrestricted or Selected tools.
 
 Under the Regulated – consent required preset (`regulated-consent-required`)
 nothing is recorded or kept until each participant
@@ -436,6 +461,13 @@ objected**. Clients that show no consent step (the browser extension, the
 Stream Audio embed and Desktop Capture App builds from before the consent step)
 are refused, as under Regulated. See
 [Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+
+The two hosting presets, Team-hosted (external meetings) and Customer account,
+are described with every setting they change, and the reason for each, in
+[Hosting Models](hosting-models.md). Team-hosted uses the same consent settings
+as the Regulated – consent required preset, with the same consequences for Stream
+Audio, the Desktop Capture App and the Webex join, keeps the transcript, and
+turns requests made in the meeting, web search and the installed MCP servers off.
 
 Standard holds the shipped defaults, so applying it in the editor puts these
 settings back after another preset changed them. The layer's tests

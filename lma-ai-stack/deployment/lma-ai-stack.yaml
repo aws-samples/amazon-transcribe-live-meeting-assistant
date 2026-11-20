@@ -308,6 +308,8 @@ Parameters:
       - internal-meetings-notify
       - regulated-consent-required
       - regulated-notify
+      - team-hosted-external
+      - customer-account
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built

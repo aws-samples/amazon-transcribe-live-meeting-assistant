@@ -40,6 +40,7 @@ More demos, including meeting consent and compliance, an AI coach for a requirem
 **Consent and retention you can prove**
 - **Meeting consent:** Off, Notify or Opt-in for each meeting. LMA posts its notice, any objection stops capture, and every meeting keeps a consent record of the notice, the replies (typed or spoken) and the evidence. ([Meeting Consent](./docs/meeting-consent.md))
 - **Retention:** keep records and transcripts for as many days as you choose, or delete each transcript once its summary is written. Organisation presets set consent, retention and privacy together. ([Privacy & Data Handling](./docs/privacy-and-data-handling.md))
+- **Hosting models:** presets for a deployment in your own account that records meetings with external organizations, and for one in the account of the organization whose meetings it records, plus a command that deletes an engagement's meetings by label. ([Hosting Models](./docs/hosting-models.md))
 - **Cost per meeting:** each meeting shows an itemised estimate of what it cost. ([Meeting Cost Estimate](./docs/meeting-cost-estimate.md))
 
 **Yours to run, yours to shape**

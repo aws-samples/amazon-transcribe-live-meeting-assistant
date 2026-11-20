@@ -1774,6 +1774,8 @@ PRESETS = (
     "internal-meetings-notify",
     "regulated-consent-required",
     "regulated-notify",
+    "team-hosted-external",
+    "customer-account",
 )
 
 #: A preset needing the on-demand ASR engine, for the paths no shipped preset takes.
@@ -1871,6 +1873,30 @@ def test_the_regulated_notify_preset_builds_the_baseline(seeder) -> None:
     assert baseline["meeting_consent"]["clientsWithoutConsent"] == "reject"
     assert baseline["recording"]["recordAudio"] is False
     assert outcome["ConfigurationPreset"] == "regulated-notify"
+
+
+def test_the_team_hosted_preset_builds_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", configuration_preset="team-hosted-external")
+    baseline = dynamo.body("Config#default")
+    assert baseline["meeting_consent"]["mode"] == "opt_in"
+    assert baseline["meeting_consent"]["allowPerMeetingOverride"] is False
+    assert baseline["meeting_assist"]["inMeetingRequesters"] == "off"
+    assert baseline["meeting_assist"]["webSearchEnabled"] is False
+    assert baseline["meeting_processing"]["defaultSummaryProfile"] == "discovery-session"
+    assert outcome["ConfigurationPreset"] == "team-hosted-external"
+
+
+def test_the_stack_parameters_offer_every_shipped_preset(seeder) -> None:
+    root = Path(__file__).resolve().parents[4]
+    shipped = {preset["Id"] for preset in seeder.shipped_presets()}
+    for template in (root / "lma-main.yaml", root / "lma-ai-stack/deployment/lma-ai-stack.yaml"):
+        allowed = re.search(
+            r"\n  ConfigurationPreset:\n(?:    .*\n)*?    AllowedValues:\n((?:      - .*\n)+)",
+            template.read_text(encoding="utf-8"),
+        )
+        assert allowed, f"{template.name} declares ConfigurationPreset with AllowedValues"
+        assert shipped <= set(re.findall(r"- (\S+)", allowed.group(1))), template.name
 
 
 @pytest.mark.parametrize("choice", ["", "none", "standard"])
