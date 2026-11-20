@@ -727,7 +727,7 @@ def test_update_virtual_participant_writes_status_only_when_one_is_supplied() ->
     """
     resolver = _resolver("Mutation", "updateVirtualParticipant")
     status_set = re.search(
-        r'#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*'
+        r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*"
         r'\$util\.qr\( \$expSet\.put\("#status", ":status"\) \)',
         resolver.block,
     )
@@ -994,6 +994,11 @@ MCP_TOOLS_DIR = AI_STACK / "source" / "lambda_functions" / "mcp_analytics" / "to
 _PY_OPERATION = re.compile(r'"""\s*((?:query|mutation)\s+\w+\s*[({].*?)"""', re.S)
 
 
+def _subscribed_call_fields() -> str:
+    source = (MCP_TOOLS_DIR / "call_fields.py").read_text()
+    return re.search(r'SUBSCRIBED_CALL_FIELDS = """(.*?)"""', source, re.S).group(1)
+
+
 # The publish helper the MCP tools call (guidance.push) sends its mutation from
 # the configuration layer, with the MCP server function's role.
 NOTIFICATIONS_HELPER = (
@@ -1012,6 +1017,9 @@ def _mcp_operations() -> list[tuple[str, str]]:
         if path.name.startswith("test_"):
             continue
         for body in _PY_OPERATION.findall(path.read_text()):
+            # A document that selects the Call fields onUpdateCall subscribers
+            # need names them by a placeholder (tools/call_fields.py).
+            body = body.replace("__SUBSCRIBED_CALL_FIELDS__", _subscribed_call_fields())
             named = re.search(r"\b(?:query|mutation)\s+(\w+)", body)
             operations.append((f"{path.name}::{named.group(1)}", body))
     return operations
@@ -1033,6 +1041,11 @@ def test_mcp_operations_were_found() -> None:
         "GetVideoKeyframes",
         "GetChatAttachments",
         "GetMeetingConsent",
+        "UpdateCallMeetingContext",
+        "UpdateCallChecklist",
+        "UpdateCallChecklistItem",
+        "UpdateCallLabels",
+        "UpdateCallAudience",
     ):
         assert name in names, name
 

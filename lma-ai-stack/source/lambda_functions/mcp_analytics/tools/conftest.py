@@ -54,21 +54,25 @@ def vp_table(monkeypatch):
 def appsync(monkeypatch):
     """AppSync, for every module that sends a request."""
     from tools import (
+        consent,
         guidance,
         meeting_actions,
         meeting_agenda,
         meeting_record,
         notifications,
+        preparation,
         virtual_participants,
     )
 
     recorder = Recorder()
     for module in (
+        consent,
         guidance,
         meeting_actions,
         meeting_agenda,
         meeting_record,
         notifications,
+        preparation,
         virtual_participants,
     ):
         monkeypatch.setattr(module, "graphql", recorder.graphql)
