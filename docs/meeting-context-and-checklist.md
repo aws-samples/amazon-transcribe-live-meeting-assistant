@@ -63,7 +63,9 @@ refused as a whole: nothing in it is shortened, dropped or partly applied.
 Label keys and values are opaque to LMA. A key must match the pattern below,
 and a key that does not is refused rather than changed; a value may be any
 text within its length. LMA stores, filters on and returns both exactly as
-given, without changing their case, spacing or characters.
+given, without changing their case, spacing or characters. The meeting page's
+label editor and the meeting list's label filter keep what is typed too: the
+key is everything before the first `=` and the value everything after it.
 
 | Input | Limit |
 |---|---|

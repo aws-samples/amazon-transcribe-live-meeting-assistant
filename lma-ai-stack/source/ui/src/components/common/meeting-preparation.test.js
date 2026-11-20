@@ -27,7 +27,7 @@ import { mergeCallUpdate } from '../../hooks/use-calls-graphql-api';
 
 describe('labels', () => {
   it('read one key=value per line and write them back the same way', () => {
-    const { labels, error } = parseLabelsText(' project = website-relaunch \n\nteam=a\nflag');
+    const { labels, error } = parseLabelsText('project=website-relaunch\n\n  \nteam=a\nflag');
     expect(error).toBeNull();
     expect(labels).toEqual([
       { Key: 'project', Value: 'website-relaunch' },
@@ -36,6 +36,29 @@ describe('labels', () => {
     ]);
     expect(labelsToText(labels)).toBe('project=website-relaunch\nteam=a\nflag=');
   });
+
+  it('keep a value exactly as typed, spaces, case and "=" included', () => {
+    const stored = [
+      { Key: 'customer', Value: '  Opaque ACME Corp ' },
+      { Key: 'region', Value: 'ÜBER-Nord' },
+      { Key: 'query', Value: 'a=b, c' },
+      { Key: 'empty', Value: '' },
+    ];
+    const { labels, error } = parseLabelsText(labelsToText(stored));
+    expect(error).toBeNull();
+    // Opening the editor and saving it unchanged sends the labels as stored.
+    expect(labels).toEqual(stored);
+    expect(labelsToText(labels)).toBe(labelsToText(stored));
+  });
+
+  it.each([' project=x', 'project =x', 'Project=x'])(
+    'refuse the key in %j rather than trim or lowercase it',
+    (text) => {
+      const { labels, error } = parseLabelsText(text);
+      expect(error).toContain('not a label key');
+      expect(labels).toEqual([]);
+    },
+  );
 
   it.each([
     ['Project=x', 'not a label key'],
@@ -58,9 +81,20 @@ describe('the meeting list filters', () => {
 
   it('match a label by key=value or by key alone', () => {
     expect(ids({ label: 'project=acme' })).toEqual(['a']);
-    expect(ids({ label: 'Project' })).toEqual(['a', 'b']);
+    expect(ids({ label: 'project' })).toEqual(['a', 'b']);
     expect(ids({ label: '' })).toEqual(['a', 'b', 'c']);
     expect(parseLabelFilter('  ')).toBeNull();
+  });
+
+  it('match a label exactly as typed, without trimming or lowercasing it', () => {
+    const padded = [{ callId: 'p', labels: [{ Key: 'customer', Value: '  Opaque X ' }] }];
+    const match = (label) => filterMeetingsByPreparation(padded, { label }).map((m) => m.callId);
+    expect(parseLabelFilter('customer=  Opaque X ')).toEqual({ key: 'customer', value: '  Opaque X ' });
+    expect(match('customer=  Opaque X ')).toEqual(['p']);
+    expect(match('customer=Opaque X')).toEqual([]);
+    expect(match('customer=  opaque x ')).toEqual([]);
+    expect(ids({ label: 'Project' })).toEqual([]);
+    expect(ids({ label: 'project=ACME' })).toEqual([]);
   });
 
   it('match an audience, or meetings with none', () => {

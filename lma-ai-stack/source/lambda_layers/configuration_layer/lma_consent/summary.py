@@ -12,9 +12,11 @@ stored values unchanged -- ``mode``, ``rule``, ``status``, each event's
 ``decision`` and ``source`` are LMA's own names -- with one entry per consent
 event, and says only whether evidence exists.
 
-:func:`consent_output` is the export's ``consent`` part (schema version 1),
-whose field names and values are fixed by that schema: one row per
-participant, ``opt-in`` for ``opt_in``, ``consented`` for ``consent``.
+:func:`consent_output` is the export's ``consent`` part, in the shape the
+export schema (docs/schemas/meeting-export-v1.schema.json) describes today:
+one row per participant, ``opt-in`` for ``opt_in``, ``consented`` for
+``consent``. The two shapes differ because only the MCP tool's answer was
+changed to LMA's own values; the export's part was left as it is.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .rules import normalize_name
 
-#: The stored modes, as the export's consent part (schema version 1) names them.
+#: The stored modes, as the export's consent part names them.
 MODES = {"off": "off", "notify": "notify", "opt_in": "opt-in"}
 DECISIONS = {"consent": "consented", "objection": "objected"}
 PLACEHOLDER_SEAT = re.compile(r"^unidentified participant \d+$")

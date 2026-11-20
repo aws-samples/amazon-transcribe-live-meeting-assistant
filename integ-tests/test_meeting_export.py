@@ -432,7 +432,7 @@ def test_the_export_over_mcp_matches_the_published_schema(env, discovery_meeting
     assert {e["kind"] for e in document["transcript"]} == {"speech", "chat"}
     # A reply under "Priya Shah" is not matched to the speaker of that name.
     assert {p["consent"] for p in document["participants"]} == {"unknown"}, document["participants"]
-    assert document["consent"]["mode"] == "opt-in", "the export's consent part keeps its v1 values"
+    assert document["consent"]["mode"] == "opt-in", "the export's consent part has its own shape"
     assert document["actionItems"], "the export holds the structured action items"
     times = {e["segmentId"]: (e["startTime"], e["endTime"]) for e in document["transcript"]}
     for item in document["actionItems"]:

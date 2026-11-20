@@ -8,7 +8,7 @@
   "properties": {
     "format": {
       "const": "lma-meeting-export",
-      "description": "Names the document as an LMA meeting export, so a file can be recognised by its content alone. LMA writes it first in every export. Optional, as every field added within schema version 1 is."
+      "description": "Names the document as an LMA meeting export, so a file can be recognised by its content alone. LMA writes it first in every export. Optional in this schema, so a document validates with or without it."
     },
     "schemaVersion": { "const": 1 },
     "exportedAt": { "type": "string", "format": "date-time" },

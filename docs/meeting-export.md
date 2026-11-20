@@ -115,7 +115,7 @@ any field it does not know. A change that cannot follow those rules gets a new
 **Recognising an export.** Every export starts with
 `"format": "lma-meeting-export"`, before `schemaVersion`, so a file can be
 recognised by its content alone. LMA always writes it. The schema lists it as
-optional, as its rule for a field added within schema version 1 requires.
+optional, so a document validates with or without it.
 
 ### `meeting`
 
@@ -189,13 +189,14 @@ images**, and no links to them; the summary's pictures become their alt text.
 
 ### `consent`
 
-`consent` is the consent record in the shape schema version 1 fixed: `mode`
+`consent` is the consent record in the export's own shape: `mode`
 (`off`, `notify` or `opt-in`), `consentGivenBy` (the rule of an opt-in
 meeting), the status, the attestation, and one row per participant with their
 latest reply (`consented`, `objected` or `no_reply`). The evidence is described
 only by whether it exists and how many entries there are. The MCP
 `get_meeting_consent` tool gives the record in LMA's own values instead
-(`opt_in`, `rule`, one entry per consent event, `hasEvidence`). The evidence images themselves are only in the
+(`opt_in`, `rule`, one entry per consent event, `hasEvidence`), so the two
+shapes differ. The evidence images themselves are only in the
 Everything archive, for the meeting's owner and Admins
 ([meeting consent](meeting-consent.md)).
 
