@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/docs/schemas/meeting-export-v1.schema.json",
+  "title": "LMA meeting export, schema version 1",
+  "description": "One structured record of a meeting: who was there and whether they consented, what was said, typed and shown, what was prepared and covered, the summary, and the action items. Within schema version 1 a field's name and meaning never change; a new field is optional, and a consumer must ignore any field it does not know. See docs/meeting-export.md.",
+  "type": "object",
+  "required": ["schemaVersion", "exportedAt", "lmaVersion", "meeting"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "exportedAt": { "type": "string", "format": "date-time" },
+    "lmaVersion": { "type": "string" },
+    "meeting": { "$ref": "#/$defs/meeting" },
+    "participants": {
+      "description": "Every speaker of the transcript and every sender in the meeting chat. Absent when the transcript was deleted, or when neither transcript nor chat was included.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/participant" }
+    },
+    "consent": { "$ref": "#/$defs/consent" },
+    "agenda": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string" },
+            "source": { "type": ["string", "null"], "description": "scheduled, mcp, ui or derived" }
+          }
+        }
+      ]
+    },
+    "context": { "type": ["string", "null"], "description": "The meeting context (Markdown)." },
+    "checklist": { "type": "array", "items": { "$ref": "#/$defs/checklistItem" } },
+    "transcript": {
+      "description": "Absent when the transcript was deleted under the Retention settings (meeting.transcriptRetained is false).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/segment" }
+    },
+    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+    "keyframes": { "type": "array", "items": { "$ref": "#/$defs/keyframe" } },
+    "summary": { "$ref": "#/$defs/summary" },
+    "actionItems": { "type": "array", "items": { "$ref": "#/$defs/actionItem" } },
+    "guidance": { "type": "array", "items": { "$ref": "#/$defs/guidanceItem" } }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "nullableNumber": { "type": ["number", "null"] },
+    "meeting": {
+      "type": "object",
+      "required": ["meetingId", "name", "status", "summaryProfile", "transcriptRetained"],
+      "properties": {
+        "meetingId": { "type": "string" },
+        "name": { "type": "string" },
+        "platform": { "type": ["string", "null"], "description": "Zoom, Teams, Chime, Webex or Google Meet for a meeting a Virtual Participant joined; otherwise null." },
+        "captureSource": { "type": ["string", "null"], "description": "VIRTUAL_PARTICIPANT, STREAM_AUDIO, BROWSER_EXTENSION, DESKTOP_APP, UPLOAD or API." },
+        "owner": { "type": ["string", "null"] },
+        "sharedWith": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": ["string", "null"], "description": "STARTED, TRANSCRIBING, ERRORED or ENDED." },
+        "startTime": { "type": ["string", "null"], "format": "date-time" },
+        "endTime": { "type": ["string", "null"], "format": "date-time", "description": "Approximate: when an ended meeting last changed. Null while it runs." },
+        "durationSeconds": { "$ref": "#/$defs/nullableNumber" },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "audience": { "enum": ["internal", "external", null] },
+        "summaryProfile": { "type": "string", "description": "The meeting's summary profile; default when it has none." },
+        "transcriptRetained": { "type": "boolean" },
+        "transcriptDeletedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "participant": {
+      "type": "object",
+      "required": ["speakerId", "label", "name", "nameSource"],
+      "properties": {
+        "speakerId": { "type": "string", "description": "Opaque, unique within the export." },
+        "label": { "type": "string", "description": "How LMA shows the speaker." },
+        "name": { "type": ["string", "null"], "description": "A person's name, or null when it is not known. Never guessed." },
+        "nameSource": { "enum": ["enrolled", "manual", "transcript", "platform", "none"] },
+        "email": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "required": ["meetingId", "mode"],
+      "properties": {
+        "meetingId": { "type": "string" },
+        "mode": { "enum": ["off", "notify", "opt-in"] },
+        "consentGivenBy": { "$ref": "#/$defs/nullableString" },
+        "status": { "$ref": "#/$defs/nullableString" },
+        "captureAllowed": { "type": ["boolean", "null"] },
+        "noticePostedAt": { "$ref": "#/$defs/nullableString" },
+        "startedAt": { "$ref": "#/$defs/nullableString" },
+        "updatedAt": { "$ref": "#/$defs/nullableString" },
+        "attestation": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "attestedBy": { "$ref": "#/$defs/nullableString" },
+                "method": { "$ref": "#/$defs/nullableString" },
+                "at": { "$ref": "#/$defs/nullableString" }
+              }
+            }
+          ]
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status"],
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "enum": ["consented", "objected", "no_reply"] },
+              "at": { "$ref": "#/$defs/nullableString" },
+              "method": { "$ref": "#/$defs/nullableString" }
+            }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "properties": { "exists": { "type": "boolean" }, "count": { "type": "integer" } }
+        }
+      }
+    },
+    "checklistItem": {
+      "type": "object",
+      "required": ["itemId", "text", "kind", "status"],
+      "properties": {
+        "itemId": { "type": "string" },
+        "text": { "type": "string" },
+        "kind": { "enum": ["question", "topic", "risk", "confirm", "decision", "action"] },
+        "priority": { "enum": ["must", "should", "could"] },
+        "source": { "$ref": "#/$defs/nullableString" },
+        "status": { "enum": ["open", "covered", "partial", "deferred", "not_applicable"] },
+        "statusSource": { "$ref": "#/$defs/nullableString" },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "segmentId": { "$ref": "#/$defs/nullableString" },
+              "startTime": { "$ref": "#/$defs/nullableNumber" },
+              "quote": { "type": ["string", "null"], "description": "Null once the transcript was deleted." }
+            }
+          }
+        },
+        "note": { "$ref": "#/$defs/nullableString" },
+        "updatedBy": { "$ref": "#/$defs/nullableString" },
+        "updatedAt": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "required": ["segmentId", "startTime", "endTime", "kind", "text"],
+      "properties": {
+        "segmentId": { "type": "string" },
+        "startTime": { "type": "number", "description": "Seconds on the meeting's timeline." },
+        "endTime": { "type": "number" },
+        "speakerId": { "type": ["string", "null"], "description": "A participant's speakerId; null for screen text." },
+        "channel": { "type": ["string", "null"], "description": "REMOTE, LOCAL or MEETING_CHAT; null for screen text." },
+        "kind": { "enum": ["speech", "chat", "screen"] },
+        "text": { "type": "string" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["url", "startTime"],
+      "properties": {
+        "url": { "type": "string" },
+        "startTime": { "type": "number" },
+        "sharedBy": { "type": ["string", "null"], "description": "The speakerId of the chat sender who shared it first." }
+      }
+    },
+    "keyframe": {
+      "type": "object",
+      "required": ["keyframeId", "startTime", "altText"],
+      "properties": {
+        "keyframeId": { "type": "string" },
+        "startTime": { "type": "number" },
+        "altText": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["profile", "sections"],
+      "properties": {
+        "profile": { "type": "string", "description": "The summary profile that wrote the stored summary; default for the default." },
+        "source": { "type": "string", "description": "generated, or manual when somebody edited it." },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "label", "markdown"],
+            "properties": {
+              "key": { "type": "string" },
+              "label": { "type": "string" },
+              "markdown": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "actionItem": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "owner": { "type": ["string", "null"], "description": "A name as said in the meeting; null when nobody was named." },
+        "dueDate": { "type": ["string", "null"], "format": "date" },
+        "dueText": { "$ref": "#/$defs/nullableString" },
+        "startTime": { "$ref": "#/$defs/nullableNumber" },
+        "segmentId": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "guidanceItem": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/nullableString" },
+        "title": { "$ref": "#/$defs/nullableString" },
+        "body": { "$ref": "#/$defs/nullableString" },
+        "refs": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "$ref": "#/$defs/nullableString" }
+      }
+    }
+  }
+}

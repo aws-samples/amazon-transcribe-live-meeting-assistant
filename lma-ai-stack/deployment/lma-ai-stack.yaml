@@ -5649,8 +5649,8 @@ Resources:
         - arm64
       CodeUri: ../source/lambda_functions/meeting_archive
       Description: >-
-        Lambda resolver that prepares a ZIP archive of a meeting's files, and
-        builds it in the background
+        Lambda resolver that prepares a ZIP archive of a meeting's files, or its
+        meeting export, and builds it in the background
       # The build streams every object, so it needs time rather than memory;
       # the memory buys network throughput.
       MemorySize: 1024
@@ -5663,7 +5663,14 @@ Resources:
           ARCHIVE_PREFIX: "lma-meeting-archives/"
           ADMIN_GROUP: "Admin"
           MAX_ARCHIVE_BYTES: "5368709120"
+          # The release the meeting export names (docs/meeting-export.md).
+          LMA_VERSION: !Ref BootstrapVersion
           LOG_LEVEL: !Ref LogLevel
+      # The meeting export names speakers, finds chat links and describes the
+      # consent record with the configuration layer's rules. Pure Python, so
+      # it does not pin an architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/MeetingArchiveFunction
@@ -5718,7 +5725,8 @@ Resources:
             Version: 2012-10-17
             Statement:
               # Reads only: the meeting row (access, recordings, summary,
-              # consent) and its transcript, key frame and attachment items.
+              # consent) and its transcript, key frame and attachment items,
+              # and its notifications, whose guidance the meeting export holds.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -5731,6 +5739,7 @@ Resources:
                       - "trs#*"
                       - "kf#*"
                       - "att#*"
+                      - "nt#*"
               # Reads of the meeting files an archive holds. The function
               # reads only the objects the meeting record and its items name,
               # inside the meeting's own folders.
@@ -6877,6 +6886,35 @@ Resources:
       # Published to onUpdateCall, filtered on SharedWith in subscription.js,
       # so it answers in the form that filter matches.
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # The meeting's summary profile, on the same resolver and access rule as its
+  # preparation, and the profiles a meeting may name. See
+  # docs/transcript-summarization.md#summary-profiles.
+  UpdateCallSummaryProfileAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallSummaryProfile
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  ListSummaryProfilesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Query
+      FieldName: listSummaryProfiles
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   AddCallSummaryTextAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -9043,13 +9081,16 @@ Resources:
         #end
 
         ## Optional meeting preparation (labels, audience, meetingContext,
-        ## checklist), checked and normalized by the pipeline's first function,
-        ## which put them in the stash. Read by the VP container when it starts,
-        ## like the agenda; an empty one is not stored.
+        ## checklist, summaryProfile), checked and normalized by the pipeline's
+        ## first function, which put them in the stash. Read by the VP container
+        ## when it starts, like the agenda; an empty one (or the default summary
+        ## profile) is not stored.
         #set($preparation = $util.defaultIfNull($ctx.stash.preparation, {}))
         #foreach($name in $util.defaultIfNull($preparation.present, []))
           #if(!$util.isNull($preparation.get($name)))
             $util.qr($input.put($name, $preparation.get($name)))
+          #else
+            $util.qr($input.remove($name))
           #end
         #end
 
@@ -11045,6 +11086,8 @@ Resources:
           VP_TABLE_NAME: !Ref VirtualParticipantTable
           MEETING_CONTROLS_FUNCTION: !Ref MeetingControlsResolverFunction
           SUMMARY_REGENERATOR_FUNCTION: !Ref SummaryRegeneratorFunction
+          # get_meeting_export: the meeting archive function builds the export.
+          MEETING_ARCHIVE_FUNCTION: !Ref MeetingArchiveFunction
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           # The release this stack runs, reported as the MCP server's
           # serverInfo.version (the UI shows the same value).
@@ -11095,12 +11138,13 @@ Resources:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateScheduledVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/endVirtualParticipant"
                 # The meeting preparation tools' writes (meeting context,
-                # checklist, labels and audience).
+                # checklist, labels, audience and summary profile).
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallMeetingContext"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklist"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallChecklistItem"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallLabels"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallAudience"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/updateCallSummaryProfile"
                 # Query/* covers getVirtualParticipant used by the new
                 # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
@@ -11113,6 +11157,7 @@ Resources:
               Resource:
                 - !GetAtt MeetingControlsResolverFunction.Arn
                 - !GetAtt SummaryRegeneratorFunction.Arn
+                - !GetAtt MeetingArchiveFunction.Arn
                 - !GetAtt AsyncAgentAssistOrchestrator.Arn
             - Effect: Allow
               Action:

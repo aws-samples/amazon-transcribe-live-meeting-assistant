@@ -43,6 +43,7 @@ from tools import (
     list_meetings,
     meeting_actions,
     meeting_agenda,
+    meeting_export,
     meeting_record,
     notifications,
     preparation,
@@ -50,6 +51,7 @@ from tools import (
     scheduled_meeting,
     search_meetings,
     start_meeting_now,
+    summary_profiles,
     virtual_participants,
     vp_preparation,
 )
@@ -493,6 +495,10 @@ MCP_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
                 },
+                "summaryProfile": {
+                    "type": "string",
+                    "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
@@ -613,6 +619,10 @@ MCP_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
                 },
+                "summaryProfile": {
+                    "type": "string",
+                    "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
@@ -715,7 +725,14 @@ def _meeting(caller: CallerInfo) -> Any:
 # The arguments schedule_meeting and start_meeting_now gained with the meeting
 # preparation tools. A legacy key and the gateway keep those two tools as they
 # were, so they are refused these.
-PREPARATION_ARGUMENTS = ("labels", "audience", "context", "checklist", "shareWith")
+PREPARATION_ARGUMENTS = (
+    "labels",
+    "audience",
+    "context",
+    "checklist",
+    "shareWith",
+    "summaryProfile",
+)
 
 
 def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Dict[str, Any]:
@@ -734,7 +751,12 @@ def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Di
             "Generate a read-write key on the MCP Servers page (Hosted MCP Access) to use them."
         )
     return vp_preparation.vp_inputs(
-        a.get("labels"), a.get("audience"), a.get("context"), a.get("checklist"), a.get("shareWith")
+        a.get("labels"),
+        a.get("audience"),
+        a.get("context"),
+        a.get("checklist"),
+        a.get("shareWith"),
+        a.get("summaryProfile"),
     )
 
 
@@ -850,7 +872,11 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         note=a.get("note"),
     ),
     "update_meeting_metadata": lambda caller, a: preparation.update_metadata(
-        _meeting(caller), a.get("meetingId"), labels=a.get("labels"), audience=a.get("audience")
+        _meeting(caller),
+        a.get("meetingId"),
+        labels=a.get("labels"),
+        audience=a.get("audience"),
+        summary_profile=a.get("summaryProfile"),
     ),
     "get_meeting_consent": lambda caller, a: consent.execute(_meeting(caller), a.get("meetingId")),
     "update_scheduled_meeting": lambda caller, a: scheduled_meeting.execute(
@@ -864,6 +890,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         context=a.get("context"),
         checklist=a.get("checklist"),
         share_with=a.get("shareWith"),
+        summary_profile=a.get("summaryProfile"),
     ),
     "end_meeting": lambda caller, a: meeting_actions.end_meeting(
         _meeting(caller), a.get("meetingId"), reason=a.get("reason")
@@ -880,12 +907,16 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
     "get_meeting_record": lambda caller, a: meeting_record.execute(
         _meeting(caller), a.get("meetingId"), include=a.get("include")
     ),
+    "get_meeting_export": lambda caller, a: meeting_export.execute(
+        _meeting(caller), a.get("meetingId"), include=a.get("include")
+    ),
     "share_meeting": lambda caller, a: meeting_actions.share_meeting(
         _meeting(caller), a.get("meetingId"), a.get("users"), action=a.get("action")
     ),
     "regenerate_meeting_summary": lambda caller, a: meeting_actions.regenerate_summary(
-        _meeting(caller), a.get("meetingId")
+        _meeting(caller), a.get("meetingId"), summary_profile=a.get("summaryProfile")
     ),
+    "list_summary_profiles": lambda caller, a: summary_profiles.list_profiles(),
     "get_meeting_cost": lambda caller, a: meeting_actions.meeting_cost(
         _meeting(caller), a.get("meetingId")
     ),

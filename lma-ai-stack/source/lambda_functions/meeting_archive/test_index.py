@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -25,6 +26,10 @@ from typing import Any, Dict, List
 import pytest
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer the deployed function carries (export.py reads it).
+for _path in (HERE, HERE.parents[1] / "lambda_layers" / "configuration_layer"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ["EVENT_SOURCING_TABLE"] = "calls"
 os.environ["RECORDINGS_BUCKET"] = "rec-bucket"

@@ -18,6 +18,9 @@ the same four inputs before they store them on the Virtual Participant's row:
 ``updateCallChecklistItem``      Changes one item's status, note or evidence.
 ``updateCallLabels``             Replaces the labels.
 ``updateCallAudience``           Sets or clears the audience.
+``updateCallSummaryProfile``     Sets or clears the summary profile; a name the
+                                 configuration does not hold is refused.
+``listSummaryProfiles``          The query: the profiles a meeting may name.
 ``validateMeetingPreparation``   Not in the schema: the first function of the
                                  createVirtualParticipant and
                                  updateScheduledVirtualParticipant pipelines.
@@ -52,7 +55,13 @@ from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
+from lma_config import SUMMARY_PROFILES, ConfigurationStore  # configuration layer
 from lma_meeting_preparation import rules  # configuration layer
+from lma_summary_profiles import (  # configuration layer
+    UnknownSummaryProfile,
+    profile_listing,
+    require_profile,
+)
 
 # pylint: enable=import-error
 
@@ -272,13 +281,14 @@ def write(
         names[f"#s{index}"] = name
         values[f":s{index}"] = _value(value)
         parts.append(f"#s{index} = :s{index}")
-    expression = "SET " + ", ".join(parts)
+    clauses = ["SET " + ", ".join(parts)] if parts else []
     if removes:
         removed = []
         for index, name in enumerate(removes):
             names[f"#r{index}"] = name
             removed.append(f"#r{index}")
-        expression += " REMOVE " + ", ".join(removed)
+        clauses.append("REMOVE " + ", ".join(removed))
+    expression = " ".join(clauses)
     conditions = ["attribute_exists(PK)"]
     for condition, condition_names, condition_values in (access, extra_condition):
         if condition:
@@ -405,6 +415,45 @@ def update_labels(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     )
 
 
+_CONFIG_STORE: Optional[ConfigurationStore] = None
+
+
+def summary_profiles_section() -> Dict[str, Any]:
+    """The configuration's summary_profiles section, read through its declared tier."""
+    global _CONFIG_STORE  # pylint: disable=global-statement
+    if _CONFIG_STORE is None:
+        _CONFIG_STORE = ConfigurationStore()
+    return dict(_CONFIG_STORE.get_section(SUMMARY_PROFILES.name).values)
+
+
+def checked_profile(value: Any) -> Optional[str]:
+    """A summary profile name the configuration holds, None for the default."""
+    try:
+        return require_profile(value, summary_profiles_section())
+    except (UnknownSummaryProfile, ValueError) as error:
+        raise BadRequestError(str(error)) from error
+
+
+def update_summary_profile(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    profile = checked_profile(data.get("SummaryProfile"))
+    if profile is None:
+        return write_once(caller, _call_id(data), {}, ("SummaryProfile",))
+    return write_once(caller, _call_id(data), {"SummaryProfile": profile})
+
+
+def list_summary_profiles() -> List[Dict[str, Any]]:
+    """Every profile a meeting may name, default first: names, labels, descriptions."""
+    return [
+        {
+            "Name": entry["name"],
+            "Label": entry["label"],
+            "Description": entry["description"],
+            "StructuredActionItems": entry["structuredActionItems"],
+        }
+        for entry in profile_listing(summary_profiles_section())
+    ]
+
+
 def update_audience(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     audience = _checked(rules.normalize_audience, data.get("Audience"))
     if audience is None:
@@ -468,7 +517,7 @@ def update_checklist_item(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
 
 #: The four inputs as createVirtualParticipant and updateScheduledVirtualParticipant
 #: name them, which are also their names on the Virtual Participant's row.
-VP_FIELDS = ("labels", "audience", "meetingContext", "checklist")
+VP_FIELDS = ("labels", "audience", "meetingContext", "checklist", "summaryProfile")
 
 
 def validate_meeting_preparation(arguments: Mapping[str, Any]) -> Dict[str, Any]:
@@ -494,6 +543,8 @@ def validate_meeting_preparation(arguments: Mapping[str, Any]) -> Dict[str, Any]
             checklist = rules.normalize_definitions(data.get("checklist"))
             rules.check_checklist_size(checklist)
             out["checklist"] = checklist or None
+        if "summaryProfile" in present:
+            out["summaryProfile"] = checked_profile(data.get("summaryProfile"))
     except rules.PreparationError as error:
         raise BadRequestError(str(error)) from error
     return out
@@ -505,6 +556,7 @@ MUTATIONS = {
     "updateCallChecklistItem": update_checklist_item,
     "updateCallLabels": update_labels,
     "updateCallAudience": update_audience,
+    "updateCallSummaryProfile": update_summary_profile,
 }
 
 
@@ -514,6 +566,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     arguments = event.get("arguments") or {}
     if field == "validateMeetingPreparation":
         return validate_meeting_preparation(arguments)
+    if field == "listSummaryProfiles":
+        caller = caller_of(event)
+        if not caller["is_backend"] and not caller["username"]:
+            raise ForbiddenError("Unauthorized")
+        return list_summary_profiles()
     operation = MUTATIONS.get(field)
     if operation is None:
         raise BadRequestError(f"unsupported field {field}")

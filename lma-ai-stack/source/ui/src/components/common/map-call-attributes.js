@@ -29,6 +29,11 @@ const mapCallsAttributes = (calls) => {
       MeetingContextUpdatedAt: meetingContextUpdatedAt,
       Checklist: checklist,
       ChecklistUpdatedAt: checklistUpdatedAt,
+      // The meeting's summary profile (absent: the default), the action items
+      // listed with its summary, and the platform a Virtual Participant joined.
+      SummaryProfile: summaryProfile,
+      ActionItems: actionItems,
+      MeetingPlatform: meetingPlatform,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
@@ -115,6 +120,9 @@ const mapCallsAttributes = (calls) => {
       meetingContextUpdatedAt,
       checklist,
       checklistUpdatedAt,
+      summaryProfile,
+      actionItems,
+      meetingPlatform,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
@@ -230,6 +238,11 @@ export const adoptMeetingCopy = (current, incoming) => {
     sessionNumber: keep('sessionNumber'),
     sessionOffsetSeconds: keep('sessionOffsetSeconds'),
     sessionStartedNumber: keep('sessionStartedNumber'),
+    // Selected by every write published to onUpdateCall but not by the list
+    // query. A null is a cleared profile, so only an absent one is kept.
+    summaryProfile: incoming.summaryProfile === undefined ? current.summaryProfile : incoming.summaryProfile,
+    actionItems: keep('actionItems'),
+    meetingPlatform: keep('meetingPlatform'),
   };
 };
 

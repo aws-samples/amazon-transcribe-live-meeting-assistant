@@ -151,6 +151,27 @@ SUMMARY_PROMPT_TEMPLATES = register(
     )
 )
 
+#: Named summary profiles: each a set of summary sections in the form of the
+#: section above ("N#Title" prompts), with a label, a description and whether
+#: the summariser also lists the meeting's action items as structured data. A
+#: meeting names one in its SummaryProfile; a meeting that names none, or
+#: ``default``, is summarised from the section above, which is the profile
+#: ``default`` and is not listed here. See lma_summary_profiles in this layer.
+#:
+#: Standard tier, for the reason the section above is: the summariser reads it
+#: unattended, and Regenerate drops the cached copy before reading.
+SUMMARY_PROFILES = register(
+    SectionSpec(
+        name="summary_profiles",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "Named summary profiles a meeting can be summarised with, each a set of "
+            "'N#Title' summary sections with a label, a description and whether "
+            "structured action items are listed."
+        ),
+    )
+)
+
 #: The voice assistant's settings: the Nova Sonic system prompt and how it
 #: combines with the shipped one, the model and voice, turn-taking sensitivity,
 #: the meeting mode, and the translator languages and trigger phrases. Read by

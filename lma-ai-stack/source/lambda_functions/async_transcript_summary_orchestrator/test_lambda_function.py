@@ -109,6 +109,33 @@ def test_a_summary_is_written_to_the_stream(monkeypatch) -> None:
     ]
 
 
+def test_a_summary_profile_and_its_action_items_are_carried_on_the_event(monkeypatch) -> None:
+    items = [{"Text": "Send the plan", "Owner": None, "StartTime": 3.0, "SegmentId": "s1"}]
+    records = run_orchestrator(
+        monkeypatch,
+        FakeSummaryFunction(
+            {
+                "summary": '{"SUMMARY": "ok"}',
+                "summaryProfile": "discovery-session",
+                "actionItemsStatus": "generated",
+                "actionItems": [*items, "not an item"],
+                "unknown": "left out",
+            }
+        ),
+    )
+    assert records == [
+        {
+            "CallId": "call-1",
+            "EventType": "ADD_SUMMARY",
+            "ExpiresAfter": 1234567890,
+            "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryProfileUsed": "discovery-session",
+            "ActionItemsStatus": "generated",
+            "ActionItems": items,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "outcome",
     [

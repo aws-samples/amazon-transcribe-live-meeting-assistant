@@ -11,6 +11,11 @@ title: "Transcript Summarization"
   - [Regenerate](#regenerate)
   - [Edit](#edit)
   - [Who Can Do It](#who-can-do-it)
+- [Summary Profiles](#summary-profiles)
+  - [Choosing a Meeting's Profile](#choosing-a-meetings-profile)
+  - [The Shipped Profiles](#the-shipped-profiles)
+  - [Editing Profiles](#editing-profiles)
+  - [Structured Action Items](#structured-action-items)
 - [BEDROCK Option (Default)](#bedrock-option-default)
   - [Prompt Template Storage](#prompt-template-storage)
   - [Attribute Naming Convention](#attribute-naming-convention)
@@ -55,6 +60,12 @@ Four things are worth knowing about how it behaves:
 - **A failed run keeps the previous summary.** If the model cannot be reached or the summarizer returns nothing usable, the panel shows the error and the stored summary is left exactly as it was. A summary that was there is never replaced by an error message.
 - **A run the meeting outlives is discarded.** You can regenerate while a meeting is still going -- that is one of the reasons above -- but such a run summarizes the transcript as it stood when the run started. If the meeting ends before the run finishes, the summary it produced is thrown away rather than stored, because the end-of-meeting summary covers the whole transcript and this one would not. The Knowledge Base copy is the exception: under the BEDROCK option the summarizer writes that to S3 itself as it runs, so it can be left holding the partial summary. **Press Regenerate once more after the meeting has ended** if you regenerated during it and rely on meeting-history search; that writes both the stored summary and the Knowledge Base copy from the whole transcript.
 
+When the deployment has [summary profiles](#summary-profiles) besides the
+default, **Regenerate** first asks which profile to write the new summary with,
+starting at the meeting's own. The choice applies to that one summary; the
+meeting's summary profile stays as it is, and the stored summary records which
+profile wrote it.
+
 ### Edit
 
 **Edit** opens the summary as text you can change, and **Save summary** stores it. What you save is what every reader of the stored summary then shows: the meeting page, the summary download, the Word and email exports, and the embeddable meeting panel.
@@ -70,6 +81,113 @@ A hand-edited summary is marked **Edited** on the panel, and regenerating one as
 ### Who Can Do It
 
 Both controls are available to a meeting's **owner**, a user the meeting has been **shared with**, and an **administrator** -- the same rule that decides who can see a meeting at all and who can name its speakers. For anyone else both controls appear disabled, and the write is refused by the API even if it is attempted directly.
+
+## Summary Profiles
+
+Different meetings need different summaries. A discovery workshop needs the
+decisions made, the open questions, the risks, the requirements heard and the
+action items with their owners. A stand-up does not. A **summary profile** is a
+named set of summary sections, and each meeting can name the one it is
+summarized with.
+
+- **`default`** is the **Transcript Summary** section described below, and
+  every meeting uses it unless it names another profile. A meeting with no
+  profile, or with `default`, is summarized exactly as it would be without
+  profiles: the same sections, the same model calls and the same answer.
+- **The other profiles** are the entries of the **Summary Profiles** section of
+  the [Configuration page](configuration-guide.md). Each has a name, a label, a
+  description, its sections, and whether it lists
+  [structured action items](#structured-action-items).
+
+A profile's sections use the same form as the Transcript Summary prompts: a
+title with a number in front that orders the sections, a prompt with the same
+placeholders, and `NONE` to turn a section off. The section of a profile that
+names a meeting's agenda, context, checklist, key frames or chat is written only
+for a meeting that has one, as with the default.
+
+Summary profiles live in the shared configuration store
+([configuration store](configuration-store.md)), so they are edited, validated,
+versioned and copied with the rest of the configuration. They are not the
+store's configuration profiles: a configuration profile is a copy of every
+setting of the deployment, and one is active at a time. A summary profile is one
+setting inside it, which each meeting chooses.
+
+### Choosing a Meeting's Profile
+
+A meeting's profile is its `SummaryProfile`. It can be set:
+
+- **When a Virtual Participant is started or scheduled**, with **Summary
+  profile** in the form's Meeting preparation section, and changed while it
+  waits for its scheduled launch. **Join again** keeps it.
+- **On the meeting page**, with the edit button beside **Summary profile** in
+  the Meeting Summary panel.
+- **Through MCP**, as `summaryProfile` on `schedule_meeting`,
+  `start_meeting_now`, `update_scheduled_meeting` and `update_meeting_metadata`
+  ([MCP tools reference](mcp-tools-reference.md)). `list_summary_profiles`
+  lists the profiles a meeting can name.
+
+The people who may change the meeting's preparation may change its profile: its
+owner, the users it is shared with, and Admins. A name the configuration does not
+hold is refused, with the names it does. If a profile is removed from the
+configuration later, a meeting that names it is summarized with the default, and
+the summary's state records the profile it asked for.
+
+### The Shipped Profiles
+
+| Profile | Sections |
+|---|---|
+| `discovery-session` | SUMMARY (as the default); DECISIONS, each with who decided, when it applies and the time; ACTION ITEMS, each with its owner and due date, saying "no owner" or "no due date" plainly when missing, and the time; OPEN QUESTIONS, each with who should answer and when it was asked; RISKS AND CONSTRAINTS; REQUIREMENTS HEARD, each a short statement with the speaker, a word-for-word quote of up to 200 characters and the time, and only what was said; CHECKLIST COVERAGE, from the meeting's checklist, each item covered, partial or open with the times of its evidence; AGENDA COVERAGE (as the default). Lists [structured action items](#structured-action-items). |
+| `healthcare` | The healthcare sections: SUMMARY, DETAILS, SOAP and BIRP. |
+
+A deployment with the stack parameter `Domain` set to `Healthcare` also keeps the
+healthcare sections as its default, as before.
+
+### Editing Profiles
+
+The **Summary Profiles** section of **Configuration ▸ Configuration** lists each
+profile, with its label, description, the **Structured action items** switch and
+its sections. A link can open it directly:
+
+```
+/#/configuration/settings?section=summary_profiles
+```
+
+Add a profile by giving it a name: 1 to 63 lower-case letters, digits and `-`,
+starting with a letter or digit. `default` is reserved. Saving requires
+membership of the **Admin** group. A change applies to summaries generated
+within about five minutes of the save; **Regenerate** uses it at once.
+
+### Structured Action Items
+
+A profile with **Structured action items** on makes one more model call per
+summary. That call returns the meeting's action items as data, and each item has
+the following fields:
+
+| Field | Meaning |
+|---|---|
+| `Text` | What is to be done. |
+| `Owner` | A name as said in the meeting, or null. |
+| `DueDate` | `YYYY-MM-DD` when a date was said, or null. |
+| `DueText` | How the due date was said, for example "end of next week". |
+| `StartTime` | Seconds into the meeting. |
+| `SegmentId` | The transcript segment at that time. |
+
+Every item is checked before it is stored:
+
+- An owner the meeting did not name is dropped rather than kept. A kept owner
+  must be one of the meeting's speakers as named, or appear in what was said.
+- A date that is not a real date is dropped, and its wording is kept.
+- A time outside the meeting is dropped.
+- The segment is found from the time rather than taken from the model.
+
+An answer that is not a JSON list stores no action items. The summary itself is
+kept either way, and the summary's state records whether the list was made.
+
+The items are stored on the meeting as `ActionItems`, with the summary they were
+listed with. The meeting page shows them below the summary as a table, with
+**No owner** and **No due date** flagged. A later summary from a profile without
+structured action items clears them. They are also in the
+[meeting export](meeting-export.md).
 
 ## BEDROCK Option (Default)
 
@@ -176,6 +294,14 @@ Configure the LAMBDA option by setting the **EndOfCallLambdaHookFunctionArn** Cl
 Your Lambda function:
 - Receives the `CallId` in the event payload. When the run comes from the **Regenerate** button, the payload also carries `"RefreshConfiguration": true`, which asks the function to re-read any configuration it caches rather than use a cached copy. A function that caches nothing can ignore it, but one that validates its input against a fixed schema must allow the extra field, or every Regenerate will fail.
 - Must return a JSON object with a `summary` key: `{"summary": "..."}`.
+- Receives `"SummaryProfile"` when a regeneration chose a
+  [summary profile](#summary-profiles); the meeting's own is on the meeting
+  record that FetchTranscript returns, as `SummaryProfile`. A function may
+  ignore both. It may also return `summaryProfile` (the profile it used),
+  `actionItems` (a list of
+  [structured action items](#structured-action-items), in the stored form) and
+  `actionItemsStatus` (`generated` or `failed`) beside `summary`; a function
+  that returns the summary alone is handled as before.
 - May return `{"summary": "Nothing to summarise: the meeting has no transcript"}` for a meeting with nothing to summarize. That exact text (compared ignoring case and a final full stop) is not stored as the summary; the meeting is shown as having nothing to summarise, as the Bedrock summarizer's own answer for such a meeting is.
 - The summary value supports Markdown formatting.
 
@@ -211,6 +337,8 @@ The function ARN is available in the stack output **FetchTranscriptLambdaArn**.
 | `TokenCount` | Integer | No | Trims the returned transcript to approximately N tokens. Useful for staying within model context limits. |
 | `IncludeChat` | Boolean | No | When `true`, the messages typed in the meeting chat are interleaved with the speech as `[chat] <sender>: <message>` lines (`[chat] <message>` without `IncludeSpeaker`), and the response also carries `chat`, one `[MM:SS] <sender>: <message>` line per message, and `chatLinks`, a list of `{"url", "sender", "time"}` for each link shared, `time` in seconds from the start of the meeting. Off by default, so a function that reads the transcript for what was said gets speech only. A message is cut at 1,000 characters, and past 100,000 characters of chat the later messages are left out of the text (and counted in the last line of `chat`); their links are still listed, up to 200. |
 
+| `IncludeSegments` | Boolean | No | When `true`, the response also carries `segments`, one `{"segmentId", "startTime", "endTime", "speaker"}` for each segment of speech (and of chat, with `IncludeChat`), with the speaker named as the transcript names it. The Bedrock summarizer reads it to place [structured action items](#structured-action-items) on the transcript. |
+
 **Example invocation payload:**
 
 ```json
@@ -225,3 +353,4 @@ The function ARN is available in the stack output **FetchTranscriptLambdaArn**.
 
 - [Meeting Assistant](meeting-assistant.md)
 - [Lambda Hook Functions](lambda-hook-functions.md)
+- [Meeting Export](meeting-export.md)

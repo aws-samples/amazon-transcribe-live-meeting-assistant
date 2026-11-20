@@ -148,6 +148,9 @@ import { meetingLanguages, segmentLanguageMark } from '../common/detected-langua
 import ChatSegment from '../chat-segment/ChatSegment';
 import { ChatAttachmentsContext } from '../chat-segment/ChatAttachments';
 import useChatAttachments, { ATTACHMENT_NOTE } from '../../hooks/use-chat-attachments';
+import useSummaryProfiles from '../../hooks/use-summary-profiles';
+import ActionItemsTable from './ActionItemsTable';
+import { RegenerateDialog, SummaryProfileSetting } from './SummaryProfileControls';
 
 const client = generateClient();
 const logger = new ConsoleLogger('CallPanel');
@@ -250,8 +253,13 @@ export const CallSummary = ({
   omitSections = [],
   keyframes = 'image',
   onKeyframeSelect = undefined,
+  summaryProfiles = undefined,
+  onSummaryProfileChange = undefined,
 }) => {
   const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
+  // With a profile to choose, Regenerate asks which one to write the summary with.
+  const [choosingProfile, setChoosingProfile] = useState(false);
+  const profileChoice = (summaryProfiles || []).length > 1;
   // Local, and deliberately not the only source of progress: a second browser
   // tab, or another user, learns that a run is going from the stored state.
   const [starting, setStarting] = useState(false);
@@ -323,12 +331,13 @@ export const CallSummary = ({
     setStartError(null);
   }, [fingerprint]);
 
-  const startRegeneration = async () => {
+  const startRegeneration = async (summaryProfile = undefined) => {
     setConfirmReplace(false);
+    setChoosingProfile(false);
     setStartError(null);
     fingerprintAtStart.current = fingerprint;
     setStarting(true);
-    const result = await onRegenerate();
+    const result = summaryProfile ? await onRegenerate(summaryProfile) : await onRegenerate();
     if (!result?.Success) {
       // Said out loud rather than left as a stopped spinner: the commonest
       // refusals are "a run is already going" and "not permitted", and neither
@@ -339,6 +348,12 @@ export const CallSummary = ({
   };
 
   const handleRegenerateClick = () => {
+    // A profile to choose is asked for in one dialog, which also warns about a
+    // hand-edited summary.
+    if (profileChoice) {
+      setChoosingProfile(true);
+      return;
+    }
     // A hand-written summary is somebody's own work, and regenerating discards
     // it, so that case asks first. A generated one has nothing to lose.
     if (handEdited) {
@@ -456,11 +471,30 @@ export const CallSummary = ({
               )}
             </SpaceBetween>
           }
+          description={
+            summaryProfiles ? (
+              <SummaryProfileSetting
+                value={item.summaryProfile}
+                profiles={summaryProfiles}
+                onChange={onSummaryProfileChange}
+                readOnly={readOnly}
+              />
+            ) : undefined
+          }
         >
           Meeting Summary
         </Header>
       }
     >
+      {choosingProfile && (
+        <RegenerateDialog
+          profiles={summaryProfiles}
+          initial={item.summaryProfile || 'default'}
+          handEdited={handEdited}
+          onCancel={() => setChoosingProfile(false)}
+          onConfirm={(profile) => startRegeneration(profile)}
+        />
+      )}
       {/* Mounted only while it is wanted: Cloudscape renders a Modal's footer
           even when it is not visible, so a permanently mounted one leaves a
           second "Regenerate" button in the page for a click to land on. */}
@@ -511,6 +545,7 @@ export const CallSummary = ({
           canRegenerate={Boolean(onRegenerate) && !readOnly}
         />
       )}
+      {!editing && <ActionItemsTable items={item.actionItems} />}
     </Container>
   );
 };
@@ -1883,9 +1918,11 @@ export const CallPanel = ({
     });
 
   const regenerateCallSummaryForItem = useCallback(
-    () => sendRegenerateCallSummary(item.callId),
+    (summaryProfile) => sendRegenerateCallSummary(item.callId, summaryProfile),
     [item.callId, sendRegenerateCallSummary],
   );
+  // The summary profiles the meeting's summary panel offers.
+  const summaryProfiles = useSummaryProfiles(Boolean(sendRegenerateCallSummary || sendUpdateMeetingPreparation));
 
   // Presentation only -- it greys out controls the write would reject anyway.
   // The rule itself is enforced as a condition on the mutation (and, for the
@@ -2604,6 +2641,12 @@ export const CallPanel = ({
           // share tab when the meeting has one, and otherwise opens it full size.
           keyframes="image"
           onKeyframeSelect={hasKeyframes ? showKeyframe : undefined}
+          summaryProfiles={summaryProfiles}
+          onSummaryProfileChange={
+            savePreparation
+              ? (name) => savePreparation('summaryProfile', { SummaryProfile: name === 'default' ? null : name })
+              : undefined
+          }
         />
         {sideColumn && (
           <SpaceBetween size="l">

@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -136,6 +137,12 @@ TRIGGER_MEETING_END = "meeting-end"
 MEETING_END_PATIENCE_SECONDS = 600
 
 DESERIALIZER = TypeDeserializer()
+
+# A summary profile name, as the summary_profiles configuration section holds
+# its keys (lma_summary_profiles.PROFILE_NAME in the configuration layer, which
+# this function does not carry). Whether the profile exists is the summariser's
+# to find: one that does not is summarised with the default and recorded so.
+PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 dynamodb = boto3.client("dynamodb")
 lambda_client = boto3.client(
@@ -391,6 +398,16 @@ _CALL_FIELDS = """
         UpdatedAt
       }
       ChecklistUpdatedAt
+      SummaryProfile
+      ActionItems {
+        Text
+        Owner
+        DueDate
+        DueText
+        StartTime
+        SegmentId
+      }
+      MeetingPlatform
       Status
       UpdatedAt
       CreatedAt
@@ -423,7 +440,7 @@ _CALL_FIELDS = """
 """
 
 
-def write_summary(call_id, text=None, state=None):
+def write_summary(call_id, text=None, state=None, action_items=None):
     """Store the text and/or the state through AppSync.
 
     Through AppSync rather than straight to DynamoDB so that `onUpdateCall`
@@ -442,6 +459,9 @@ def write_summary(call_id, text=None, state=None):
     variables = {"input": {"CallId": call_id}}
     if text is not None:
         variables["input"]["CallSummaryText"] = text
+        # Only with the text they were listed with; [] clears a previous list.
+        if action_items is not None:
+            variables["input"]["ActionItems"] = action_items
     if state is not None:
         variables["input"]["CallSummaryState"] = json.dumps(state)
     payload = json.dumps({"query": query, "variables": variables})
@@ -478,7 +498,7 @@ def write_summary(call_id, text=None, state=None):
     raise RuntimeError(f"updateCallSummaryText could not be reached: {last_error}")
 
 
-def invoke_summary_function(call_id):
+def invoke_summary_function(call_id, summary_profile=None):
     """Run the configured summariser over the meeting's current transcript.
 
     A CallId and a request to re-read configuration, and nothing else. That is
@@ -496,19 +516,63 @@ def invoke_summary_function(call_id):
     field can ignore it; one that validates its input against a fixed schema has
     to allow it, which docs/transcript-summarization.md says.
     """
+    payload = {"CallId": call_id, "RefreshConfiguration": True}
+    if summary_profile:
+        # A choice made for this run; the meeting's own SummaryProfile otherwise.
+        payload["SummaryProfile"] = summary_profile
     response = lambda_client.invoke(
         FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,
         InvocationType="RequestResponse",
-        Payload=json.dumps({"CallId": call_id, "RefreshConfiguration": True}),
+        Payload=json.dumps(payload),
     )
     body = json.loads(response["Payload"].read().decode("utf-8"))
     if not isinstance(body, dict):
         raise RuntimeError("the summary function did not return a JSON object")
-    return body.get("summary")
+    return body
 
 
-def start(call_id, identity, self_arn):
+def chosen_profile(value):
+    """A regeneration's profile choice: None for the meeting's own; ValueError if malformed."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("SummaryProfile is not a summary profile name")
+    name = value.strip()
+    if name != "default" and not PROFILE_NAME.match(name):
+        raise ValueError("SummaryProfile is not a summary profile name")
+    return name
+
+
+def outcome_extras(body, meeting):
+    """What a run's answer adds to the stored result: the state's profile fields,
+    and the action items to write with the text (None to leave them as they are).
+
+    A summary from a profile that lists no action items clears a list a
+    previous summary left, so the stored items always belong to the stored text.
+    """
+    state = {}
+    if isinstance(body.get("summaryProfile"), str):
+        state["profile"] = body["summaryProfile"]
+    if isinstance(body.get("summaryProfileFallback"), str):
+        state["requestedProfile"] = body["summaryProfileFallback"]
+    if body.get("actionItemsStatus") in ("generated", "failed"):
+        state["actionItems"] = body["actionItemsStatus"]
+    items = body.get("actionItems")
+    if isinstance(items, list):
+        action_items = [item for item in items if isinstance(item, dict)]
+    elif body.get("actionItemsStatus") == "failed":
+        action_items = None
+    else:
+        action_items = [] if meeting.get("ActionItems") else None
+    return state, action_items
+
+
+def start(call_id, identity, self_arn, summary_profile=None):
     """Accept a regeneration request and hand the work to the second leg."""
+    try:
+        summary_profile = chosen_profile(summary_profile)
+    except ValueError as error:
+        return {"Success": False, "Message": str(error)}
     meeting = read_meeting(call_id)
     if meeting is None:
         return {"Success": False, "Message": "no such meeting"}
@@ -548,7 +612,13 @@ def start(call_id, identity, self_arn):
     starter_client.invoke(
         FunctionName=self_arn,
         InvocationType="Event",
-        Payload=json.dumps({"CallId": call_id, "Trigger": "regenerate"}),
+        Payload=json.dumps(
+            {
+                "CallId": call_id,
+                "Trigger": "regenerate",
+                **({"SummaryProfile": summary_profile} if summary_profile else {}),
+            }
+        ),
     )
     try:
         # The previous source is carried through so that, if the run fails, the
@@ -570,7 +640,7 @@ def start(call_id, identity, self_arn):
     return {"Success": True, "Message": "regenerating the summary"}
 
 
-def run(call_id):
+def run(call_id, summary_profile=None):
     """Do the summarisation and write whatever came of it."""
     now = datetime.now(timezone.utc).isoformat()
     # Re-read rather than trusting what the first leg saw: the two legs are
@@ -584,8 +654,10 @@ def run(call_id):
     previous_source = state.get("source") or SOURCE_GENERATED
     was_live = meeting.get("Status") != STATUS_MEETING_ENDED
 
+    body = {}
     try:
-        summary = invoke_summary_function(call_id)
+        body = invoke_summary_function(call_id, summary_profile)
+        summary = body.get("summary")
     except Exception:  # noqa: BLE001 - recorded for the user, see below
         # Logged in full here; what reaches the browser is the sentence written
         # into the state below, rather than Lambda and model-service internals.
@@ -656,10 +728,17 @@ def run(call_id):
             )
         return {"ok": False, "reason": "superseded"}
 
+    profile_state, action_items = outcome_extras(body, meeting)
     write_summary(
         call_id,
         text=summary,
-        state={"source": SOURCE_GENERATED, "status": STATUS_IDLE, "updatedAt": now},
+        state={
+            "source": SOURCE_GENERATED,
+            "status": STATUS_IDLE,
+            "updatedAt": now,
+            **profile_state,
+        },
+        action_items=action_items,
     )
     LOGGER.info("Regenerated the summary for %s", call_id)
     return {"ok": True}
@@ -689,10 +768,12 @@ def handler(event, context):
         # function's EventInvokeConfig sets MaximumRetryAttempts to 0, because
         # re-entering here would pay for another set of model calls for a
         # summary this frame had already computed.
-        return run(call_id)
+        return run(call_id, event.get("SummaryProfile"))
 
     try:
-        return start(call_id, identity, context.invoked_function_arn)
+        return start(
+            call_id, identity, context.invoked_function_arn, arguments.get("SummaryProfile")
+        )
     except Exception:  # noqa: BLE001 - reported to the caller, see below
         LOGGER.exception("Could not start a summary regeneration for %s", call_id)
         return {"Success": False, "Message": "could not start regenerating the summary"}

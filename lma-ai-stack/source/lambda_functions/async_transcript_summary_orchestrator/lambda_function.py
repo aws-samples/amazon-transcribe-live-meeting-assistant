@@ -6,7 +6,7 @@
 import json
 import time
 from os import getenv
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import boto3
 
@@ -99,8 +99,41 @@ def _invoke_summary_function(message: Dict[str, Any]) -> Dict[str, Any]:
     raise RuntimeError("unreachable")  # pragma: no cover - the loop returns or raises
 
 
+#: What the summary function may answer beside the summary, and the field of the
+#: ADD_SUMMARY event each is carried in: the profile it wrote the summary with,
+#: and its structured action items (docs/transcript-summarization.md). A summary
+#: function that answers with the summary alone carries none of them.
+SUMMARY_EXTRAS = {
+    "summaryProfile": "SummaryProfileUsed",
+    "summaryProfileFallback": "SummaryProfileFallback",
+    "actionItemsStatus": "ActionItemsStatus",
+    "actionItems": "ActionItems",
+}
+
+
+def summary_extras(body: Any) -> Dict[str, Any]:
+    """The extras of a summary function's answer, under their event field names."""
+    if not isinstance(body, dict):
+        return {}
+    extras: Dict[str, Any] = {}
+    for key, field in SUMMARY_EXTRAS.items():
+        value = body.get(key)
+        if key == "actionItems":
+            if isinstance(value, list):
+                extras[field] = [item for item in value if isinstance(item, dict)]
+        elif isinstance(value, str) and value:
+            extras[field] = value
+    return extras
+
+
 def get_call_summary(message: Dict[str, Any]) -> str:
-    """The summary the configured summary function produced, or the placeholder.
+    """The summary the configured summary function produced, or the placeholder."""
+    return get_call_summary_result(message)[0]
+
+
+def get_call_summary_result(message: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """The summary the configured summary function produced, or the placeholder,
+    and what it answered beside it (summary_extras).
 
     Never raises. The meeting is marked "summary in progress" when it ends, and
     only the summary event this function's caller writes clears that mark; a
@@ -116,18 +149,18 @@ def get_call_summary(message: Dict[str, Any]) -> str:
             "The transcript summary function failed or returned something unreadable",
             extra=dict(call_id=message.get("CallId")),
         )
-        return FAILED_SUMMARY_TEXT
+        return FAILED_SUMMARY_TEXT, {}
     summary = body.get("summary") if isinstance(body, dict) else None
     if not isinstance(summary, str):
         LOGGER.error(
             "The transcript summary function returned no summary",
             extra=dict(call_id=message.get("CallId")),
         )
-        return FAILED_SUMMARY_TEXT
-    return summary
+        return FAILED_SUMMARY_TEXT, {}
+    return summary, summary_extras(body)
 
 
-def write_call_summary_to_kds(message: Dict[str, Any]):
+def write_call_summary_to_kds(message: Dict[str, Any], extras: Optional[Dict[str, Any]] = None):
     callId = message.get("CallId", None)
     expiresAfter = message.get("ExpiresAfter", get_meeting_ttl())
 
@@ -136,6 +169,7 @@ def write_call_summary_to_kds(message: Dict[str, Any]):
         EventType="ADD_SUMMARY",
         ExpiresAfter=expiresAfter,
         CallSummaryText=message["CallSummaryText"],
+        **(extras or {}),
     )
 
     if callId:
@@ -196,6 +230,6 @@ def handler(event, context: LambdaContext):
 
     name_speakers(data.get("CallId", ""))
 
-    data["CallSummaryText"] = get_call_summary(message=data)
+    data["CallSummaryText"], extras = get_call_summary_result(message=data)
 
-    write_call_summary_to_kds(data)
+    write_call_summary_to_kds(data, extras)

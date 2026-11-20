@@ -111,6 +111,16 @@
   $util.qr( $expValues.put(":CallSummaryState", $util.dynamodb.toDynamoDB($ctx.args.input.CallSummaryState)) )
   #set( $expression = "${expression} #CallSummaryState = :CallSummaryState" )
 #end
+## The structured action items belong to the summary they were listed with, so
+## they are written only together with its text; an empty list clears them.
+#if( !$util.isNull($ctx.args.input.ActionItems) )
+  #if( !$hasText )
+    $util.error("ActionItems are written only with CallSummaryText", "BadRequest")
+  #end
+  $util.qr( $expNames.put("#ActionItems", "ActionItems") )
+  $util.qr( $expValues.put(":ActionItems", $util.dynamodb.toDynamoDB($ctx.args.input.ActionItems)) )
+  #set( $expression = "${expression}, #ActionItems = :ActionItems" )
+#end
 
 {
   "version" : "2018-05-29",

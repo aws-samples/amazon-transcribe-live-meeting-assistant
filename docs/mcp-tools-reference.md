@@ -59,6 +59,7 @@ client connects, and the API key scopes, are in
 | `get_meeting_summary` | no | |
 | `get_meeting_transcript` | no | |
 | `get_meeting_record` | no | its `consent` section (with the evidence images): owner and Admin |
+| `get_meeting_export` | no | |
 | `get_meeting_cost` | no | |
 | `get_meeting_agenda` | no | |
 | `get_meeting_context` | no | |
@@ -68,6 +69,7 @@ client connects, and the API key scopes, are in
 | `list_virtual_participants` | no | |
 | `list_meeting_guidance` | no | |
 | `list_meeting_notifications` | no | |
+| `list_summary_profiles` | no | |
 | `schedule_meeting` | yes | the caller schedules for themselves |
 | `start_meeting_now` | yes | the caller starts it for themselves |
 | `update_scheduled_meeting` | yes | the Virtual Participant's owner and Admin |
@@ -84,7 +86,7 @@ client connects, and the API key scopes, are in
 | `end_virtual_participant` | yes | the Virtual Participant's owner and Admin |
 | `delete_meeting` | yes | owner and Admin |
 
-That is 29 tools. The examples below show the `arguments` of a `tools/call`
+That is 31 tools. The examples below show the `arguments` of a `tools/call`
 request and the JSON of the answer, shortened where marked.
 
 ## Before the meeting
@@ -97,7 +99,9 @@ optional and checked with the limits in
 [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md#limits):
 `labels` (an object of key to value), `audience` (`internal` or `external`),
 `context` (Markdown), `checklist` (items of `itemId`, `text`, `kind`, and
-optionally `priority` and `source`; each starts `open`) and `shareWith` (email
+optionally `priority` and `source`; each starts `open`), `summaryProfile` (the
+[summary profile](transcript-summarization.md#summary-profiles) the meeting is
+summarized with, from `list_summary_profiles`) and `shareWith` (email
 addresses). The Virtual Participant stores them and puts them on the meeting
 when it creates it; the meeting is then shared with the `shareWith` addresses.
 The Virtual Participant itself is not shared. Calling it again for a meeting
@@ -152,7 +156,7 @@ joined; its answer then carries the LMA `meetingId` the meeting tools take.
 
 Changes a Virtual Participant that waits for its scheduled launch: any of
 `scheduledTime`, `meetingName`, `agenda`, `labels`, `audience`, `context`,
-`checklist` and `shareWith`. Each one given replaces that setting, and an empty
+`checklist`, `summaryProfile` and `shareWith`. Each one given replaces that setting, and an empty
 value removes it. It is refused within 5 minutes of the start ("starts in less
 than 5 minutes, so it can no longer be changed"), and a new time must be at least
 5 minutes away. Once the Virtual Participant has started, change the meeting
@@ -301,14 +305,37 @@ the meeting assistant does not change it afterwards.
 ### update_meeting_metadata
 
 Replaces the meeting's labels (`{}` clears them), sets its audience (`""`
-clears it), or both. Answers `{labels, audience}`.
+clears it), sets its `summaryProfile` (`default` or `""` for the default), or
+any of them. Answers `{labels, audience, summaryProfile}`. A summary profile
+the configuration does not hold is refused, with the names it does.
 
 ```json
-{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external"}
+{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session"}
 ```
 
 ```json
-{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "updatedAt": "2026-12-01T15:31:00Z"}
+{"meetingId": "e3b9…", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": "discovery-session", "updatedAt": "2026-12-01T15:31:00Z"}
+```
+
+### list_summary_profiles
+
+The summary profiles a meeting can be summarized with, `default` first: each
+one's `name` (the value `summaryProfile` takes), `label`, `description` and
+whether it lists `structuredActionItems`. See
+[Summary Profiles](transcript-summarization.md#summary-profiles).
+
+```json
+{}
+```
+
+```json
+{
+  "profiles": [
+    {"name": "default", "label": "Default", "description": "The Transcript Summary sections on the Configuration page.", "structuredActionItems": false},
+    {"name": "discovery-session", "label": "Discovery session", "description": "For discovery workshops …", "structuredActionItems": true}
+  ],
+  "default": "default"
+}
 ```
 
 ### end_virtual_participant
@@ -393,6 +420,48 @@ meeting's owner and Admins.
   ],
   "evidence": {"exists": true, "count": 2}
 }
+```
+
+### get_meeting_export
+
+One structured record of the meeting, the [meeting export](meeting-export.md)
+(`schemaVersion` 1). `include` lists the parts to add: `transcript`, `chat`,
+`summary`, `checklist`, `consent`, `actionItems`, `keyframes` and `guidance`,
+all of them by default. A large export is answered with
+`{exportUrl, expiresAt, sizeBytes}` instead: a link to it, signed for ten
+minutes.
+
+```json
+{"meetingId": "e3b9…", "include": ["summary", "actionItems", "checklist"]}
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-12-01T16:05:00Z",
+  "lmaVersion": "0.4.1",
+  "meeting": {"meetingId": "e3b9…", "name": "Website relaunch review", "summaryProfile": "discovery-session", "transcriptRetained": true, "…": "…"},
+  "agenda": {"text": "Status\nBudget\nNext steps", "source": "mcp"},
+  "context": "Goal: agree the launch budget.",
+  "summary": {"profile": "discovery-session", "source": "generated", "sections": [{"key": "DECISIONS", "label": "Decisions", "markdown": "…"}]},
+  "actionItems": [{"text": "Send the budget", "owner": "Dana", "dueDate": "2026-12-08", "dueText": "next Tuesday", "startTime": 1832.5, "segmentId": "…"}],
+  "checklist": [{"itemId": "q1", "text": "Who owns the budget?", "status": "covered", "…": "…"}]
+}
+```
+
+### regenerate_meeting_summary
+
+Generates the summary again; the new summary replaces the current one when it
+finishes. `summaryProfile` writes this summary with another
+[summary profile](transcript-summarization.md#summary-profiles); the meeting's
+own profile is not changed.
+
+```json
+{"meetingId": "e3b9…", "summaryProfile": "discovery-session"}
+```
+
+```json
+{"meetingId": "e3b9…", "started": true, "summaryProfile": "discovery-session", "message": "A new summary is being generated. …"}
 ```
 
 ## Server version

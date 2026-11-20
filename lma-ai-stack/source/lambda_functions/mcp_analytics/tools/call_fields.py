@@ -56,6 +56,16 @@ SUBSCRIBED_CALL_FIELDS = """
     UpdatedAt
   }
   ChecklistUpdatedAt
+  SummaryProfile
+  ActionItems {
+    Text
+    Owner
+    DueDate
+    DueText
+    StartTime
+    SegmentId
+  }
+  MeetingPlatform
   Status
   UpdatedAt
   CreatedAt

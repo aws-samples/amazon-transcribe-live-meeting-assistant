@@ -1360,8 +1360,8 @@ Resources:
         - arm64
       CodeUri: ../source/lambda_functions/meeting_preparation_resolver
       Description: >-
-        Lambda resolver for a meeting's labels, audience, meeting context and
-        checklist
+        Lambda resolver for a meeting's labels, audience, meeting context,
+        checklist and summary profile
       MemorySize: 256
       # One read and one write, repeated a few times on a conflict.
       Timeout: 30
@@ -1371,8 +1371,10 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           ADMIN_GROUP: "Admin"
           LOG_LEVEL: !Ref LogLevel
-      # Carries lma_meeting_preparation (the rules). Pure Python, so it does
-      # not pin an architecture.
+          # The summary profiles a meeting may name are read from it.
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      # Carries lma_meeting_preparation (the rules) and lma_summary_profiles.
+      # Pure Python, so it does not pin an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -1437,6 +1439,12 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "c#*"
+              # Read-only, on the shared configuration table: the summary
+              # profiles a meeting may name (its summary_profiles section).
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Ref ConfigurationTableArn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -1479,7 +1487,7 @@ Resources:
     Properties:
       ApiId: !Ref AppSyncApiId
       Name: MeetingPreparationFunction
-      Description: Lambda function for a meeting's labels, audience, meeting context and checklist
+      Description: Lambda function for a meeting's labels, audience, meeting context, checklist and summary profile
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncMeetingPreparationLambdaRole.Arn
       LambdaConfig:

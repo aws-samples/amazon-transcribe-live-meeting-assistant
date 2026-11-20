@@ -78,6 +78,7 @@ const getVirtualParticipant = `
       }
       audience
       meetingContext
+      summaryProfile
       checklist {
         ItemId
         Text

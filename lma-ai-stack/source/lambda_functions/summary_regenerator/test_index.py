@@ -139,11 +139,90 @@ def install(
     monkeypatch.setattr(
         index,
         "write_summary",
-        lambda call_id, text=None, state=None: written.append(
-            {"call_id": call_id, "text": text, "state": state}
+        lambda call_id, text=None, state=None, action_items=None: written.append(
+            {
+                "call_id": call_id,
+                "text": text,
+                "state": state,
+                **({"action_items": action_items} if action_items is not None else {}),
+            }
         ),
     )
     return ddb, fake_lambda, fake_starter, written
+
+
+# ── summary profiles ────────────────────────────────────────────────────────
+
+
+def test_a_chosen_profile_reaches_the_second_leg_and_the_summariser(monkeypatch) -> None:
+    _, fake_lambda, starter, _ = install(monkeypatch)
+    event = start_event({"username": OWNER})
+    event["arguments"]["input"]["SummaryProfile"] = "discovery-session"
+    assert index.handler(event, FakeContext())["Success"] is True
+    queued = json.loads(starter.calls[0]["Payload"])
+    assert queued["SummaryProfile"] == "discovery-session"
+    index.handler(queued, FakeContext())
+    assert fake_lambda.payloads[-1]["SummaryProfile"] == "discovery-session"
+
+
+def test_no_choice_leaves_the_summariser_to_the_meetings_profile(monkeypatch) -> None:
+    _, fake_lambda, starter, _ = install(monkeypatch)
+    index.handler(start_event({"username": OWNER}), FakeContext())
+    queued = json.loads(starter.calls[0]["Payload"])
+    assert "SummaryProfile" not in queued
+    index.handler(queued, FakeContext())
+    assert "SummaryProfile" not in fake_lambda.payloads[-1]
+
+
+def test_a_malformed_profile_choice_is_refused_before_anything_runs(monkeypatch) -> None:
+    _, _, starter, written = install(monkeypatch)
+    event = start_event({"username": OWNER})
+    event["arguments"]["input"]["SummaryProfile"] = "Not A Profile"
+    result = index.handler(event, FakeContext())
+    assert result["Success"] is False
+    assert not starter.calls and not written
+
+
+def test_a_profiles_action_items_and_profile_are_written_with_the_text(monkeypatch) -> None:
+    items = [{"Text": "Send the plan", "Owner": None, "StartTime": 1.0, "SegmentId": "s"}]
+    body = {
+        "summary": NEW_SUMMARY,
+        "summaryProfile": "discovery-session",
+        "actionItemsStatus": "generated",
+        "actionItems": items,
+    }
+    _, _, _, written = install(monkeypatch, body=body)
+    index.handler(RUN_EVENT, FakeContext())
+    assert written[-1]["action_items"] == items
+    assert written[-1]["state"]["profile"] == "discovery-session"
+    assert written[-1]["state"]["actionItems"] == "generated"
+
+
+def test_a_summary_without_action_items_clears_ones_a_previous_summary_left(monkeypatch) -> None:
+    meeting = {**MEETING_ROW, "ActionItems": {"L": [{"M": {"Text": {"S": "old"}}}]}}
+    _, _, _, written = install(monkeypatch, meeting=meeting)
+    index.handler(RUN_EVENT, FakeContext())
+    assert written[-1]["action_items"] == []
+
+
+def test_a_default_summary_of_a_meeting_without_action_items_writes_none(monkeypatch) -> None:
+    _, _, _, written = install(monkeypatch)
+    index.handler(RUN_EVENT, FakeContext())
+    assert "action_items" not in written[-1]
+    assert set(written[-1]["state"]) == {"source", "status", "updatedAt"}
+
+
+def test_a_failed_action_item_list_keeps_the_previous_one(monkeypatch) -> None:
+    meeting = {**MEETING_ROW, "ActionItems": {"L": [{"M": {"Text": {"S": "old"}}}]}}
+    body = {
+        "summary": NEW_SUMMARY,
+        "summaryProfile": "discovery-session",
+        "actionItemsStatus": "failed",
+    }
+    _, _, _, written = install(monkeypatch, meeting=meeting, body=body)
+    index.handler(RUN_EVENT, FakeContext())
+    assert "action_items" not in written[-1]
+    assert written[-1]["state"]["actionItems"] == "failed"
 
 
 def row_with_state(state, **extra):

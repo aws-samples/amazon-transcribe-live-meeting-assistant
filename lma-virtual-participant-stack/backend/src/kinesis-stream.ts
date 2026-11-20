@@ -4,7 +4,7 @@ import { details } from './details.js';
 import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
-import { preparationStartFields, type VpPreparation } from './meeting-preparation.js';
+import { meetingPlatformName, preparationStartFields, type VpPreparation } from './meeting-preparation.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
@@ -257,6 +257,10 @@ class KinesisStreamManager {
       ...agendaStartFields(this.agenda, details.lmaUser),
       ...preparationStartFields(this.preparation, details.lmaUser),
       CaptureSource: 'VIRTUAL_PARTICIPANT',
+      // The platform joined, as the meeting record names it (Call.MeetingPlatform).
+      ...(meetingPlatformName(details.invite.meetingPlatform)
+        ? { MeetingPlatform: meetingPlatformName(details.invite.meetingPlatform) }
+        : {}),
       ...(this.transcriptionContext ?? {}),
       ...this.sessionField(),
       // Names this VP, so the call event processor can end it when its rejoined

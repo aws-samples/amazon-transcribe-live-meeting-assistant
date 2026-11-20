@@ -175,8 +175,11 @@ class FakeDynamo:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
         self.updates.append(kwargs)
         expression = kwargs["UpdateExpression"]
-        sets, _, removes = expression.partition(" REMOVE ")
-        for part in sets[len("SET ") :].split(", "):
+        if expression.startswith("REMOVE "):
+            sets, removes = "", expression[len("REMOVE ") :]
+        else:
+            sets, _, removes = expression.partition(" REMOVE ")
+        for part in filter(None, sets[len("SET ") :].split(", ")):
             name, value = part.split(" = ")
             item[names[name]] = index._plain(DES.deserialize(values[value]))
         for name in filter(None, removes.split(", ")):
@@ -533,3 +536,76 @@ def test_the_vp_check_leaves_out_what_was_not_sent():
 def test_the_vp_check_refuses_an_invalid_input():
     with pytest.raises(index.BadRequestError, match="Kind must be one of"):
         validate(["checklist"], checklist=[{"ItemId": "a", "Text": "x", "Kind": "idea"}])
+
+
+# ── the summary profile ─────────────────────────────────────────────────────
+
+PROFILES = {
+    "discovery-session": {"label": "Discovery session", "structuredActionItems": True},
+    "stand-up": {"label": "Stand-up", "description": "Daily"},
+}
+
+
+@pytest.fixture
+def profiles(monkeypatch):
+    monkeypatch.setattr(index, "summary_profiles_section", lambda: dict(PROFILES))
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [user(OWNER), user(SHARED), user("admin@example.com", admin=True), BACKEND],
+    ids=["owner", "shared", "admin", "backend"],
+)
+def test_the_summary_profile_is_set_by_whoever_may_change_the_meeting(table, profiles, identity):
+    row = call("updateCallSummaryProfile", identity, SummaryProfile="discovery-session")
+    assert row["SummaryProfile"] == "discovery-session"
+    assert table.row["SummaryProfile"] == "discovery-session"
+
+
+def test_anyone_else_may_not_set_the_summary_profile(table, profiles):
+    with pytest.raises(index.ForbiddenError):
+        call("updateCallSummaryProfile", user("other@example.com"), SummaryProfile="stand-up")
+    assert "SummaryProfile" not in table.row
+
+
+@pytest.mark.parametrize("cleared", [None, "", "default"])
+def test_the_default_clears_the_summary_profile(table, profiles, cleared):
+    table.put(Owner=OWNER, SharedWith=[SHARED], SummaryProfile="stand-up")
+    call("updateCallSummaryProfile", user(OWNER), SummaryProfile=cleared)
+    assert "SummaryProfile" not in table.row
+
+
+def test_a_profile_the_configuration_does_not_hold_is_refused_with_the_ones_it_does(
+    table, profiles
+):
+    with pytest.raises(index.BadRequestError, match="default, discovery-session, stand-up"):
+        call("updateCallSummaryProfile", user(OWNER), SummaryProfile="retro")
+    with pytest.raises(index.BadRequestError, match="lower-case"):
+        call("updateCallSummaryProfile", user(OWNER), SummaryProfile="Retro Session")
+    assert not table.updates
+
+
+def test_the_summary_profiles_are_listed_for_any_signed_in_user(profiles):
+    listed = index.handler(
+        {"info": {"fieldName": "listSummaryProfiles"}, "identity": user("anyone@example.com")},
+        None,
+    )
+    assert [entry["Name"] for entry in listed] == ["default", "discovery-session", "stand-up"]
+    assert listed[1] == {
+        "Name": "discovery-session",
+        "Label": "Discovery session",
+        "Description": "",
+        "StructuredActionItems": True,
+    }
+    with pytest.raises(index.ForbiddenError):
+        index.handler({"info": {"fieldName": "listSummaryProfiles"}, "identity": {}}, None)
+
+
+def test_the_vp_check_takes_the_summary_profile(profiles):
+    assert validate(["summaryProfile"], summaryProfile="stand-up") == {
+        "present": ["summaryProfile"],
+        "summaryProfile": "stand-up",
+    }
+    assert validate(["summaryProfile"], summaryProfile="default")["summaryProfile"] is None
+    with pytest.raises(index.BadRequestError, match="no summary profile"):
+        validate(["summaryProfile"], summaryProfile="retro")
