@@ -343,3 +343,25 @@ def test_without_a_bus_a_stored_summary_still_notifies(schema, emitted, notifica
         monkeypatch,
     )
     assert notifications == ["call-1"]
+
+
+def test_a_redelivered_summary_record_is_stored_with_the_same_time(
+    schema, emitted, events, monkeypatch
+):
+    """Summary Ready's occurredAt is the stored state's updatedAt. Taken from the
+    record's SummaryCompletedAt, it is the same on every delivery of the record,
+    so a consumer's deduplication removes the repeat."""
+    record = {
+        "EventType": "ADD_SUMMARY",
+        "CallId": "call-1",
+        "CallSummaryText": SUMMARY_TEXT,
+        "SummaryCompletedAt": "2026-11-19T16:02:00.000Z",
+    }
+    stamps = []
+    for _ in range(2):
+        session = QueuedSession(schema, [{"addCallSummaryText": {"CallId": "call-1"}}])
+        process_event(session, dict(record), monkeypatch)
+        (sent,) = harness.mutation_inputs(session, "addCallSummaryText")
+        stamps.append(json.loads(sent["CallSummaryState"])["updatedAt"])
+    assert stamps == ["2026-11-19T16:02:00.000Z", "2026-11-19T16:02:00.000Z"]
+    assert "SummaryCompletedAt" not in sent, "the record's own field is not a mutation input"

@@ -5,6 +5,7 @@
 
 import json
 import time
+from datetime import datetime, timezone
 from os import getenv
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -199,6 +200,17 @@ def get_call_summary_result(message: Dict[str, Any]) -> Tuple[str, Dict[str, Any
     return summary, summary_extras(body)
 
 
+def summary_completed_at() -> str:
+    """When this run's summary was finished, in UTC.
+
+    Carried on the ADD_SUMMARY record as SummaryCompletedAt, so the call event
+    processor records the same time however often the record is redelivered:
+    it is the stored summary state's updatedAt, and Summary Ready's occurredAt
+    (docs/meeting-events.md).
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def write_call_summary_to_kds(message: Dict[str, Any], extras: Optional[Dict[str, Any]] = None):
     callId = message.get("CallId", None)
     expiresAfter = message.get("ExpiresAfter", get_meeting_ttl())
@@ -208,6 +220,7 @@ def write_call_summary_to_kds(message: Dict[str, Any], extras: Optional[Dict[str
         EventType="ADD_SUMMARY",
         ExpiresAfter=expiresAfter,
         CallSummaryText=message["CallSummaryText"],
+        SummaryCompletedAt=summary_completed_at(),
         **(extras or {}),
     )
 

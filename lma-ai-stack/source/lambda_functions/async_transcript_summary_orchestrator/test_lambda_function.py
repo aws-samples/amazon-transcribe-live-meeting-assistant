@@ -81,12 +81,16 @@ class FakeStream:
         return {}
 
 
+COMPLETED_AT = "2026-11-19T16:02:00.000Z"
+
+
 def run_orchestrator(monkeypatch, summary_function: FakeSummaryFunction) -> List[Dict[str, Any]]:
     stream = FakeStream()
     monkeypatch.setattr(orchestrator, "SUMMARY_CLIENT", summary_function)
     monkeypatch.setattr(orchestrator, "KINESIS_CLIENT", stream)
     monkeypatch.setattr(orchestrator, "SPEAKER_NAME_RESOLVER_ARN", "")
     monkeypatch.setattr(orchestrator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(orchestrator, "summary_completed_at", lambda: COMPLETED_AT)
     orchestrator.handler({"CallId": "call-1", "EventType": "END"}, None)
     return stream.records
 
@@ -105,6 +109,7 @@ def test_a_summary_is_written_to_the_stream(monkeypatch) -> None:
             "EventType": "ADD_SUMMARY",
             "ExpiresAfter": 1234567890,
             "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryCompletedAt": COMPLETED_AT,
         }
     ]
 
@@ -129,6 +134,7 @@ def test_a_summary_profile_and_its_action_items_are_carried_on_the_event(monkeyp
             "EventType": "ADD_SUMMARY",
             "ExpiresAfter": 1234567890,
             "CallSummaryText": '{"SUMMARY": "ok"}',
+            "SummaryCompletedAt": COMPLETED_AT,
             "SummaryProfileUsed": "discovery-session",
             "ActionItemsStatus": "generated",
             "ActionItems": [
@@ -255,3 +261,15 @@ def test_the_waits_fit_inside_the_functions_timeout() -> None:
     naming = int(re.search(r"SPEAKER_NAME_READ_TIMEOUT: (\d+)", function).group(1))
     summary = int(re.search(r"SUMMARY_READ_TIMEOUT: (\d+)", function).group(1))
     assert naming + summary + 30 <= timeout, (naming, summary, timeout)
+
+
+def test_the_summary_record_carries_when_the_run_finished(monkeypatch) -> None:
+    """The call event processor stores this as the summary's time, and a
+    redelivered record carries the same one, so Summary Ready is the same event."""
+    records = run_orchestrator(monkeypatch, FakeSummaryFunction({"summary": "text"}))
+    assert records[0]["SummaryCompletedAt"] == COMPLETED_AT
+
+
+def test_the_completion_time_is_utc_iso_8601() -> None:
+    stamp = orchestrator.summary_completed_at()
+    assert stamp.endswith("Z") and "T" in stamp

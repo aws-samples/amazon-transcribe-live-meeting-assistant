@@ -51,10 +51,12 @@ publisher of Virtual Participant events and every function's permission to
 publish. Remove the rules you added to the bus before you set it to `false` or
 delete the stack.
 
-Only three functions may put events on the bus, and only with `source` `lma`:
-the call event processor, the summary regenerator and the Virtual Participant
-status publisher. Each role is granted `events:PutEvents` on this bus alone,
-with the `events:source` condition key set to `lma`.
+Of the roles this stack creates, only those of the call event processor, the
+summary regenerator and the Virtual Participant status publisher are granted
+`events:PutEvents` on the bus: on this bus alone, with the `events:source`
+condition key set to `lma`. Publishing to the bus is governed by IAM in the
+stack's account, as for any bus without a resource policy: grant
+`events:PutEvents` on it only to what should publish meeting events.
 
 The bus is encrypted with an AWS owned key, as EventBridge encrypts every bus
 by default. The events hold no meeting content.
@@ -72,7 +74,9 @@ Every event has `source` `lma` and one of four `detail-type`s:
 
 `Meeting Ended` is not published again for a meeting that is already `ENDED`,
 and `Meeting Started` is not published again when a start is redelivered for a
-meeting that already exists.
+meeting that already exists. A redelivered summary record can publish `Summary
+Ready` a second time, with the same `occurredAt`, which the
+[deduplication](#delivery-and-deduplication) below removes.
 
 ## The detail
 
@@ -182,6 +186,11 @@ deliver an event to a target more than once, so consumers must deduplicate:
   `sessionNumber`, when present);
 - Virtual Participant events on `virtualParticipantId` + `vpStatus` +
   `occurredAt`.
+
+**LMA can publish the same event twice.** A summary record that is redelivered
+on the call data stream is stored again and publishes `Summary Ready` again.
+It carries the same `occurredAt` as the first, because the time is the
+summary run's own, so the deduplication key above removes it.
 
 **Publishing to the bus is best effort.** LMA publishes after the transition is
 stored, with a few quick retries, and never fails or delays a meeting because
@@ -312,8 +321,9 @@ or Virtual Participant id, and the error code. See
 - `Meeting Started`, `Meeting Ended` and the end-of-meeting `Summary Ready` are
   published by the call event processor, which every capture source's start and
   end reaches and which stores the end-of-meeting summary. Each is published on
-  the write that made the transition, and not on a redelivery that finds it
-  already made.
+  the write that made the transition. A redelivered start or end finds the
+  transition already made and publishes nothing; a redelivered summary record
+  is stored again and publishes again, with the same `occurredAt`.
 - A regenerated summary's `Summary Ready` is published by the summary
   regenerator once the new summary is stored.
 - `Virtual Participant Status Changed` is published by a small function that

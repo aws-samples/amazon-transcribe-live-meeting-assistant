@@ -403,7 +403,7 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 ## IAM
 
 - **Least-privilege policies** for all IAM roles created by the stack
-- Only the call event processor, the summary regenerator and the Virtual Participant status publisher may put events on the meeting event bus: `events:PutEvents` on that bus alone, with the `events:source` condition key set to `lma` (see [Meeting Lifecycle Events](meeting-events.md#the-event-bus))
+- Of the roles the stack creates, only the call event processor's, the summary regenerator's and the Virtual Participant status publisher's are granted `events:PutEvents` on the meeting event bus: on that bus alone, with the `events:source` condition key set to `lma` (see [Meeting Lifecycle Events](meeting-events.md#the-event-bus))
 - Optional **permissions boundary** via the `InstallationPermissionsBoundaryArn` parameter, applied to all roles created during installation
 - The Virtual Participant's task role, which is also its MicroVM execution role, may read one thing from the VirtualParticipant table: a `GetItem` of a record's `id` and `meetingPassword`, limited with the `dynamodb:Attributes` and `dynamodb:Select` condition keys. The Virtual Participant reads its meeting password that way when it starts, and no launch request carries the password (see [How the VP gets the meeting password](virtual-participant.md#how-the-vp-gets-the-meeting-password))
 

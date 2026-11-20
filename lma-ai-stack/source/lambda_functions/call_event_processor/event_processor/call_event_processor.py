@@ -575,6 +575,12 @@ def summary_outcome_state(text: Any, message: Optional[Mapping[str, Any]] = None
     """
     state = json.loads(_summary_outcome_state(text))
     extras = message or {}
+    # The orchestrator's own time for the run, when the record carries it: the
+    # same on every redelivery of the record, so a redelivered summary is stored
+    # with, and announced as Summary Ready at, the time it was first written.
+    completed_at = extras.get("SummaryCompletedAt")
+    if isinstance(completed_at, str) and completed_at:
+        state["updatedAt"] = completed_at
     if summary_was_produced(text):
         if isinstance(extras.get("SummaryProfileUsed"), str):
             state["profile"] = extras["SummaryProfileUsed"]

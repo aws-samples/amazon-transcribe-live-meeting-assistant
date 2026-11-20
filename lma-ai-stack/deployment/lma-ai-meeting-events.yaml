@@ -82,8 +82,9 @@ Resources:
       CodeUri: ../source/lambda_functions/meeting_events_vp_publisher
       Description: Publishes Virtual Participant Status Changed to the meeting event bus
       MemorySize: 256
-      # Three attempts of three seconds at most per event, for a batch of up to
-      # 25 records; well inside this.
+      # A publish is at most three attempts of a 2 s connect and a 3 s read, so
+      # 15 s per record; a batch of 10 records that all change status is 150 s
+      # at worst, half of this.
       Timeout: 300
       Layers:
         - !Ref ConfigurationPythonLayer
@@ -168,7 +169,7 @@ Resources:
       EventSourceArn: !Ref VirtualParticipantTableStreamArn
       FunctionName: !GetAtt VpStatusEventPublisherFunction.Arn
       StartingPosition: LATEST
-      BatchSize: 25
+      BatchSize: 10
       MaximumBatchingWindowInSeconds: 1
       # The function never fails a batch; these bound what an unexpected crash
       # (a timeout, an out-of-memory) can hold up.
