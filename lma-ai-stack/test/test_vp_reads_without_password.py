@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 AI_STACK = Path(__file__).resolve().parents[1]
 REPO = AI_STACK.parent
@@ -60,7 +61,8 @@ _CfnLoader.add_multi_constructor("!", _intrinsic)
 
 @pytest.fixture(scope="module")
 def resources() -> dict:
-    return yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    return flattened()["Resources"]
 
 
 def _create_response(resources: dict) -> str:

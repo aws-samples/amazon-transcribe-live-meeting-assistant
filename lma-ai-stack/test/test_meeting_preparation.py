@@ -18,10 +18,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
+from ai_stack_templates import flattened
 
 AI_STACK = Path(__file__).resolve().parents[1]
-TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
 APPSYNC = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC / "schema.graphql"
 VALIDATE_VTL = APPSYNC / "validateMeetingPreparation.request.vtl"
@@ -48,25 +47,10 @@ CALL_FIELDS = (
 )
 
 
-class _CfnLoader(yaml.SafeLoader):
-    """YAML loader that tolerates CloudFormation short-form intrinsics."""
-
-
-def _intrinsic(loader: yaml.Loader, tag_suffix: str, node: yaml.Node):  # noqa: ANN202
-    name = f"Fn::{tag_suffix}" if tag_suffix != "Ref" else "Ref"
-    if isinstance(node, yaml.ScalarNode):
-        return {name: loader.construct_scalar(node)}
-    if isinstance(node, yaml.SequenceNode):
-        return {name: loader.construct_sequence(node, deep=True)}
-    return {name: loader.construct_mapping(node, deep=True)}
-
-
-_CfnLoader.add_multi_constructor("!", _intrinsic)
-
-
 @pytest.fixture(scope="module")
 def resources() -> dict:
-    return yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    """The AI stack's resources, its nested templates' included; see ai_stack_templates."""
+    return flattened()["Resources"]
 
 
 @pytest.fixture(scope="module")

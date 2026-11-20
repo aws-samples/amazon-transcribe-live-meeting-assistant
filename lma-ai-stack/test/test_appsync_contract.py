@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from ai_stack_templates import all_template_paths, flattened
 
 # graphql-core is a dev dependency of lib/lma_sdk, installed by
 # `make setup-cli-dev`. Imported unconditionally on purpose: skipping the whole
@@ -52,6 +53,8 @@ from graphql.language.ast import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AI_STACK = REPO_ROOT / "lma-ai-stack"
 TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
+# Every AI stack template file, the nested ones included; see ai_stack_templates.
+_ALL_TEMPLATES_TEXT = "\n".join(path.read_text() for path in all_template_paths())
 APPSYNC_DIR = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC_DIR / "schema.graphql"
 UI_SRC = AI_STACK / "source" / "ui" / "src"
@@ -532,7 +535,7 @@ class Resolver:
 
 def _load_resolvers() -> list[Resolver]:
     resolvers: list[Resolver] = []
-    for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text()):
+    for block in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT):
         if "Type: AWS::AppSync::Resolver" not in block:
             continue
         logical_id = block.split(":", 1)[0].strip()
@@ -608,32 +611,45 @@ LAMBDA_AWSJSON_FIELDS = {
 }
 
 
-def _template_resources(kind: str) -> dict[str, str]:
-    return {
-        block.split(":", 1)[0].strip(): block
-        for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
-        if f"Type: {kind}" in block
-    }
+# Read with the AI stack's nested templates inlined, so a resolver whose data
+# source is declared in one (named through `!GetAtt <Stack>.Outputs.<Name>`)
+# resolves to that data source; see ai_stack_templates.
+_FLAT_RESOURCES = flattened()["Resources"]
+
+
+def _getatt_target(value) -> str | None:
+    target = value.get("Fn::GetAtt") if isinstance(value, dict) else None
+    if isinstance(target, list):
+        return str(target[0])
+    if isinstance(target, str):
+        return target.split(".", 1)[0]
+    return None
 
 
 def _lambda_backed(resolver: Resolver) -> bool:
     """Whether a Lambda data source serves the resolver, directly or in its pipeline."""
-    lambdas = {
-        logical_id
-        for logical_id, block in _template_resources("AWS::AppSync::DataSource").items()
-        if re.search(r"^      Type: AWS_LAMBDA$", block, re.M)
-    }
-    functions = _template_resources("AWS::AppSync::FunctionConfiguration")
-    blocks = [resolver.block] + [
-        functions[function_id]
-        for function_id in re.findall(r"!GetAtt (\w+)\.FunctionId", resolver.block)
-        if function_id in functions
+    properties = _FLAT_RESOURCES[resolver.logical_id].get("Properties") or {}
+    pipeline = (properties.get("PipelineConfig") or {}).get("Functions") or []
+    candidates = [properties] + [
+        _FLAT_RESOURCES[function_id].get("Properties") or {}
+        for function_id in map(_getatt_target, pipeline)
+        if function_id in _FLAT_RESOURCES
     ]
     return any(
-        source in lambdas
-        for block in blocks
-        for source in re.findall(r"DataSourceName: !GetAtt (\w+)\.Name", block)
+        ((_FLAT_RESOURCES.get(_getatt_target(c.get("DataSourceName"))) or {}).get("Properties") or {})
+        .get("Type")
+        == "AWS_LAMBDA"
+        for c in candidates
     )
+
+
+def test_lambda_backed_detection_sees_data_sources_in_nested_templates() -> None:
+    """Guards the selector below: getAsrConfig's data source is declared in a
+    nested template, and the meeting preparation fields' validation runs in a
+    pipeline function there; both must count as Lambda-backed."""
+    assert _lambda_backed(_resolver("Query", "getAsrConfig"))
+    assert _lambda_backed(_resolver("Mutation", "updateCallLabels"))
+    assert _lambda_backed(_resolver("Query", "listInstalledMCPServers"))
 
 
 def _holds_awsjson(graphql_type, seen: tuple[str, ...] = ()) -> bool:
@@ -885,7 +901,7 @@ def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
-    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", TEMPLATE.read_text()))
+    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", _ALL_TEMPLATES_TEXT))
     on_disk = {path.name for path in APPSYNC_DIR.iterdir() if path.is_file()}
     assert not (on_disk - referenced), (
         f"files in {APPSYNC_DIR.name}/ that no template resource references: "
@@ -1034,7 +1050,7 @@ def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
     """Every mutation an MCP tool sends is named in the function's appsync:GraphQL grant."""
     block = next(
         b
-        for b in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
+        for b in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT)
         if b.startswith("MCPServerAnalyticsFunction:")
     )
     granted = set(re.findall(r"/types/Mutation/fields/(\w+)", block))

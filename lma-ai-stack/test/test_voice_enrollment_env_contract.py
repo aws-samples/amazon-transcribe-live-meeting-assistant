@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "deployment" / "lma-ai-stack.yaml"
 
@@ -66,7 +67,8 @@ _Loader.add_multi_constructor("!", _tagged)
 
 
 def _voice_functions():
-    template = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_Loader)
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    template = flattened()
     out = {}
     for name, resource in (template.get("Resources") or {}).items():
         if resource.get("Type") != "AWS::Serverless::Function":
