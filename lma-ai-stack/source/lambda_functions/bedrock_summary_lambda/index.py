@@ -31,6 +31,7 @@ from lma_config import (  # configuration layer
     read_setting,
     resolve_model_id,
 )
+from lma_meeting_preparation.rules import render_checklist  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -98,9 +99,17 @@ TIMED_TRANSCRIPT_PLACEHOLDER = "{timed_transcript}"
 CHAT_PLACEHOLDER = "{chat}"
 CHAT_LINKS_PLACEHOLDER = "{chat_links}"
 
+# The meeting's preparation: its meeting context (Markdown, as written) and its
+# checklist (one line per item with its status, priority, kind and the times of
+# its evidence; lma_meeting_preparation.rules.render_checklist). A prompt naming
+# either is run only for a meeting that has it, as an agenda prompt is. No
+# shipped section uses them. See docs/meeting-context-and-checklist.md.
+CONTEXT_PLACEHOLDER = "{context}"
+CHECKLIST_PLACEHOLDER = "{checklist}"
+
 PLACEHOLDERS = re.compile(
     r"\{transcript\}|\{agenda\}|\{slides\}|\{screen_share\}|\{timed_transcript\}"
-    r"|\{chat\}|\{chat_links\}"
+    r"|\{chat\}|\{chat_links\}|\{context\}|\{checklist\}"
 )
 
 #: The most links listed under one section; fetch_transcript returns at most 200.
@@ -679,6 +688,8 @@ def generate_summary(
     timed_transcript=None,
     chat=None,
     chat_links=None,
+    meeting_context=None,
+    checklist=None,
 ):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
@@ -688,6 +699,8 @@ def generate_summary(
     # model as it is now saved.
     model_id = summary_model_id()
     agenda_text = numbered_agenda(agenda)
+    context_text = meeting_context.strip() if isinstance(meeting_context, str) else ""
+    checklist_text = render_checklist(checklist if isinstance(checklist, list) else None)
     slides_text = None
     chat_text = (chat or "").strip() if isinstance(chat, str) else ""
     links_text = links_list(chat_links)
@@ -700,6 +713,12 @@ def generate_summary(
             if not agenda_text:
                 print(f"Skipping summary section '{key}': the meeting has no agenda.")
                 continue
+        if CONTEXT_PLACEHOLDER in prompt and not context_text:
+            print(f"Skipping summary section '{key}': the meeting has no meeting context.")
+            continue
+        if CHECKLIST_PLACEHOLDER in prompt and not checklist_text:
+            print(f"Skipping summary section '{key}': the meeting has no checklist.")
+            continue
         if SLIDES_PLACEHOLDER in prompt or SCREEN_SHARE_PLACEHOLDER in prompt:
             if slides_text is None:
                 slides_text = slides_for_prompt(keyframes)
@@ -722,6 +741,8 @@ def generate_summary(
         TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         CHAT_PLACEHOLDER: chat_text,
         CHAT_LINKS_PLACEHOLDER: links_text or NO_LINKS_SHARED,
+        CONTEXT_PLACEHOLDER: context_text,
+        CHECKLIST_PLACEHOLDER: checklist_text,
     }
 
     def render(template):
@@ -916,6 +937,8 @@ def handler(event, context):
             timed_transcript=transcript_json.get("timedTranscript"),
             chat=transcript_json.get("chat"),
             chat_links=transcript_json.get("chatLinks"),
+            meeting_context=(metadata or {}).get("MeetingContext"),
+            checklist=(metadata or {}).get("Checklist"),
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt

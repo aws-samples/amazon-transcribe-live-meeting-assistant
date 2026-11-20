@@ -66,6 +66,9 @@ import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 import SpeakerAssignmentModal from './SpeakerAssignmentModal';
 import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
+import ChecklistPanel from './ChecklistPanel';
+import MeetingContextPanel from './MeetingContextPanel';
+import MeetingLabels from './MeetingLabels';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
@@ -1854,6 +1857,7 @@ export const CallPanel = ({
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
     sendDeriveCallAgenda,
+    sendUpdateMeetingPreparation,
   } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
@@ -2528,8 +2532,54 @@ export const CallPanel = ({
       <AgendaPanel {...agendaProps} collapsible defaultExpanded={isLive} />
     ) : null;
 
+  // The meeting's preparation: labels and audience, meeting context and
+  // checklist. Editable by the people who can change the agenda, and each part
+  // is hidden when it is empty and the viewer cannot change it. See
+  // docs/meeting-context-and-checklist.md.
+  const savePreparation = sendUpdateMeetingPreparation
+    ? (kind, input) => sendUpdateMeetingPreparation(item.callId, kind, input)
+    : undefined;
+  const meetingLabels = (
+    <MeetingLabels
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      onSaveLabels={savePreparation ? (labels) => savePreparation('labels', { Labels: labels }) : undefined}
+      onSaveAudience={savePreparation ? (audience) => savePreparation('audience', { Audience: audience }) : undefined}
+    />
+  );
+  const contextPanel = (
+    <MeetingContextPanel
+      item={item}
+      readOnly={speakerNamesReadOnly}
+      onSave={savePreparation ? (text) => savePreparation('meetingContext', { MeetingContext: text }) : undefined}
+    />
+  );
+  const checklistProps = {
+    item,
+    readOnly: speakerNamesReadOnly,
+    onSaveList: savePreparation
+      ? (definitions, reset) => savePreparation('checklist', { Checklist: definitions, ResetStatuses: reset })
+      : undefined,
+    onUpdateItem: savePreparation
+      ? (itemId, change) => savePreparation('checklistItem', { ItemId: itemId, ...change })
+      : undefined,
+    // Evidence is a time in the meeting: open the transcript there.
+    onShowTime: (seconds) => showInTranscript(seconds, { reveal: true }),
+  };
+  const hasChecklist = Array.isArray(item.checklist) && item.checklist.length > 0;
+  // eslint-disable-next-line react/jsx-props-no-spreading
+  const checklistPanel = <ChecklistPanel {...checklistProps} />;
+  // The checklist again at the top of the Transcript tab, where a live meeting
+  // is followed, as the agenda is.
+  const transcriptChecklist =
+    hasChecklist || (isLive && !speakerNamesReadOnly && savePreparation) ? (
+      // eslint-disable-next-line react/jsx-props-no-spreading
+      <ChecklistPanel {...checklistProps} collapsible defaultExpanded={isLive} />
+    ) : null;
+
   const summaryTab = (
     <SpaceBetween size="l">
+      {meetingLabels}
       {!agendaItems.length && agendaPanel}
       <Grid
         gridDefinition={
@@ -2559,6 +2609,8 @@ export const CallPanel = ({
           </SpaceBetween>
         )}
       </Grid>
+      {contextPanel}
+      {checklistPanel}
       {enableSentimentAnalysis && (
         <Grid gridDefinition={[{ colspan: 12 }]}>
           <CallStatsContainer
@@ -2590,6 +2642,7 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
+      {transcriptChecklist}
       <CallTranscriptContainer
         item={item}
         player={

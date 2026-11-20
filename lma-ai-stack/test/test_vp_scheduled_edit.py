@@ -70,6 +70,9 @@ def test_the_mutation_reads_the_row_then_writes(resources: dict) -> None:
     resolver = resources["UpdateScheduledVirtualParticipantResolver"]["Properties"]
     assert resolver["Kind"] == "PIPELINE"
     assert resolver["PipelineConfig"]["Functions"] == [
+        # The meeting preparation inputs are checked first; see
+        # test_meeting_preparation.py.
+        {"Fn::GetAtt": "ValidateMeetingPreparationAppSyncFunction.FunctionId"},
         {"Fn::GetAtt": "ReadScheduledVirtualParticipantAppSyncFunction.FunctionId"},
         {"Fn::GetAtt": "UpdateScheduledVirtualParticipantAppSyncFunction.FunctionId"},
     ]

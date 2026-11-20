@@ -895,6 +895,53 @@ def test_a_start_event_creates_the_meeting_with_the_agenda_it_carries(schema, em
     assert 'AgendaUpdatedAt: "2026-10-31T10:00:00.000Z"' in sent
 
 
+def test_a_start_event_creates_the_meeting_with_the_preparation_it_carries(
+    schema, emitted, monkeypatch
+):
+    """The labels, audience, meeting context and checklist a Virtual
+    Participant was started with reach createCall the way the agenda does:
+    through the fields CreateCallInput declares."""
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    at = "2026-11-19T10:00:00.000Z"
+    process_event(
+        session,
+        {
+            "EventType": "START",
+            "CallId": "call-1",
+            "AgentId": "someone@example.com",
+            "Labels": [{"Key": "project", "Value": "website-relaunch"}],
+            "Audience": "external",
+            "MeetingMetadataUpdatedAt": at,
+            "MeetingContext": "# Goals",
+            "MeetingContextUpdatedBy": "someone@example.com",
+            "MeetingContextUpdatedAt": at,
+            "Checklist": [
+                {
+                    "ItemId": "q1",
+                    "Text": "Who owns the budget?",
+                    "Kind": "question",
+                    "Priority": "must",
+                    "Status": "open",
+                    "Evidence": [],
+                    "UpdatedBy": "someone@example.com",
+                    "UpdatedAt": at,
+                }
+            ],
+            "ChecklistUpdatedAt": at,
+        },
+        monkeypatch,
+    )
+    sent = print_ast(session.queries[0])
+    assert 'Labels: [{Key: "project", Value: "website-relaunch"}]' in sent
+    assert 'Audience: "external"' in sent
+    assert 'MeetingContext: "# Goals"' in sent
+    assert 'MeetingContextUpdatedBy: "someone@example.com"' in sent
+    assert 'ItemId: "q1"' in sent and 'Status: "open"' in sent and 'Priority: "must"' in sent
+    assert f'ChecklistUpdatedAt: "{at}"' in sent
+    assert f'MeetingMetadataUpdatedAt: "{at}"' in sent
+
+
 def test_a_start_event_without_an_agenda_creates_the_meeting_without_one(
     schema, emitted, monkeypatch
 ):

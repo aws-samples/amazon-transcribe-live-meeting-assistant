@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState } from 'react';
-import { Table, Pagination, TextFilter } from '@cloudscape-design/components';
+import { Input, Pagination, Select, SpaceBetween, Table, TextFilter } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import useCallsContext from '../../contexts/calls';
 
@@ -13,6 +13,7 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
 import { exportToExcel } from '../common/download-func';
+import { exportableMeeting, filterMeetingsByPreparation } from '../common/meeting-preparation';
 
 import {
   CallsPreferences,
@@ -31,8 +32,20 @@ import '@cloudscape-design/global-styles/index.css';
 
 const logger = new ConsoleLogger('CallList');
 
+/** The audience filter's choices; see filterMeetingsByPreparation. */
+export const AUDIENCE_FILTER_OPTIONS = [
+  { value: '', label: 'Any audience' },
+  { value: 'internal', label: 'Internal' },
+  { value: 'external', label: 'External' },
+  { value: 'unspecified', label: 'Unspecified' },
+];
+
 const CallList = () => {
   const [callList, setCallList] = useState([]);
+  // The label (key=value, or key alone) and audience filters, applied before
+  // the text filter.
+  const [labelFilter, setLabelFilter] = useState('');
+  const [audienceFilter, setAudienceFilter] = useState(AUDIENCE_FILTER_OPTIONS[0]);
 
   const {
     calls,
@@ -53,7 +66,7 @@ const CallList = () => {
   // prettier-ignore
   const {
     items, actions, filteredItemsCount, collectionProps, filterProps, paginationProps,
-  } = useCollection(callList, {
+  } = useCollection(filterMeetingsByPreparation(callList, { label: labelFilter, audience: audienceFilter.value }), {
     filtering: {
       empty: <TableEmptyState resourceName="Meeting" />,
       noMatch: <TableNoMatchState onClearFilter={() => actions.setFiltering('')} />,
@@ -99,7 +112,7 @@ const CallList = () => {
           totalCallCount={totalCallCount}
           totalCallCountTruncated={totalCallCountTruncated}
           loadedCallCount={calls.length}
-          downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
+          downloadToExcel={() => exportToExcel(callList.map(exportableMeeting), 'Meeting-List')}
           // eslint-disable-next-line max-len, prettier/prettier
         />
       }
@@ -110,12 +123,27 @@ const CallList = () => {
       selectionType="multi"
       ariaLabels={SELECTION_LABELS}
       filter={
-        <TextFilter
-          {...filterProps}
-          filteringAriaLabel="Filter meetings"
-          filteringPlaceholder="Find meetings"
-          countText={getFilterCounterText(filteredItemsCount)}
-        />
+        <SpaceBetween size="xs" direction="horizontal">
+          <TextFilter
+            {...filterProps}
+            filteringAriaLabel="Filter meetings"
+            filteringPlaceholder="Find meetings"
+            countText={getFilterCounterText(filteredItemsCount)}
+          />
+          <Input
+            type="search"
+            value={labelFilter}
+            onChange={({ detail }) => setLabelFilter(detail.value)}
+            placeholder="Label, e.g. project=acme"
+            ariaLabel="Filter meetings by label (key=value)"
+          />
+          <Select
+            selectedOption={audienceFilter}
+            options={AUDIENCE_FILTER_OPTIONS}
+            onChange={({ detail }) => setAudienceFilter(detail.selectedOption)}
+            ariaLabel="Filter meetings by audience"
+          />
+        </SpaceBetween>
       }
       wrapLines={preferences.wrapLines}
       pagination={<Pagination {...paginationProps} ariaLabels={paginationLabels} />}

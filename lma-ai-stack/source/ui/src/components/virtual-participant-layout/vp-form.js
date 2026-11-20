@@ -10,6 +10,7 @@
 import { googleMeetCode, googleMeetIdError } from './google-meet';
 import { MAX_AGENDA_CHARS } from '../common/agenda';
 import { isMeetingUrl } from './launch-settings';
+import { EMPTY_VP_PREPARATION, vpPreparationProblem } from '../common/meeting-preparation';
 
 export const EMPTY_VP_FORM = {
   meetingName: '',
@@ -19,6 +20,9 @@ export const EMPTY_VP_FORM = {
   meetingDate: '',
   meetingTime: '',
   agenda: '',
+  // Labels, audience, meeting context and checklist: the collapsed Meeting
+  // preparation section. See docs/meeting-context-and-checklist.md.
+  preparation: EMPTY_VP_PREPARATION,
 };
 
 export const PLATFORM_OPTIONS = [
@@ -103,6 +107,10 @@ export const submittedMeetingFields = (form) => {
   };
 };
 
-/** Whether the shared fields can be submitted (name, ID, agenda length). */
+/** Whether the shared fields can be submitted (name, ID, agenda length, meeting preparation). */
 export const formFieldsAreValid = (form) =>
-  !!form.meetingName && !!form.meetingId && !meetingIdError(form) && !agendaIsTooLong(form.agenda);
+  !!form.meetingName &&
+  !!form.meetingId &&
+  !meetingIdError(form) &&
+  !agendaIsTooLong(form.agenda) &&
+  !vpPreparationProblem(form.preparation);

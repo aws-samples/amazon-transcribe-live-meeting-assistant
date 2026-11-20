@@ -334,6 +334,12 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{UI}/src/components/configuration/inference-geography-cases.json", "vp"),
     ("lma-ai-stack/deployment/lma-ai-stack.yaml", ("vp", "lambdas", "vp_template")),
     ("lma-llm-template-setup-stack/**", "vp"),
+    # The summary Lambda's tests check that no shipped summary prompt uses the
+    # meeting context and checklist placeholders.
+    (
+        "lma-llm-template-setup-stack/source/lambda_functions/LLMPromptSummaryTemplate.json",
+        "lambdas",
+    ),
     ("docs/virtual-participant.md", "vp"),
     # ...and the VP stack's own template: the IntroMessage default
     # (chat-commands.test.ts) and the MicroVM terminate-hook timeout
