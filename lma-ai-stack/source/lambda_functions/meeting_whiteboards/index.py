@@ -813,6 +813,7 @@ def delete_whiteboard(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dic
     board = read_board(call_id, whiteboard_id)
     if board is None:
         raise refuse("WhiteboardNotFound", "There is no such whiteboard on this meeting")
+    count_write(call_id, expiry(meeting))
     reasons = _transact(
         [
             check,
@@ -945,7 +946,10 @@ CREATE_MUTATION = (
     "  createMeetingWhiteboard(input: $input) {" + _BOARD_FIELDS + "}\n}"
 )
 
-#: Triggers that do not wait for the interval or for new segments.
+#: Triggers that need only one new segment rather than minNewSegments: a run
+#: on request (which waits REQUEST_GAP_SECONDS after the previous run instead
+#: of the interval) and the run at a meeting's end (which waits only for the
+#: lease).
 EAGER_TRIGGERS = ("request", "final")
 #: The least time between a run on request and the run before it, so repeated
 #: presses of Update now cannot use up a meeting's runs at most.
@@ -962,7 +966,7 @@ def why_not(
         return "no such meeting"
     if meeting.get("TranscriptDeletedAt"):
         return "the meeting's transcript is deleted"
-    if trigger != "request" and meeting.get("WhiteboardsEnabled") is not True:
+    if meeting.get("WhiteboardsEnabled") is not True:
         return "the assistant's whiteboard updates are off for this meeting"
     if trigger == "auto" and meeting.get("Status") == "ENDED":
         return "the meeting has ended"
@@ -1203,13 +1207,15 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
         LIVE.release(call_id, lease, ran=False, now=now)
         return {"ran": False, "reason": f"{len(fresh)} new transcript segments"}
     boards = read_boards(call_id)
-    if meeting.get("WhiteboardsEnabled") is True:
+    # The default whiteboard once per meeting: a meeting whose people have
+    # deleted every whiteboard does not get it back at the next run.
+    if not state.get("DefaultMade"):
         boards = ensure_default_board(call_id, boards)
     # A whiteboard whose panels are all a user's is still a target: the
     # assistant may add a panel to it.
     targets = [b for b in boards if b.get("AssistantUpdates") is not False]
     if not targets:
-        LIVE.release(call_id, lease, ran=False, now=now)
+        LIVE.release(call_id, lease, ran=False, now=now, DefaultMade=1)
         return {"ran": False, "reason": "no whiteboard the assistant updates"}
     screen, screen_marker = updater.screen_block(_frame_rows(call_id), state.get("LastScreenTime"))
     system, messages = updater.build_request(
@@ -1226,7 +1232,7 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
     marker = {"LastSegmentEndTime": max(s.end for s in fresh), "LastScreenTime": screen_marker}
     if plan is None:
         LOGGER.warning("Whiteboards answer for %s was malformed; dropped", call_id)
-        LIVE.release(call_id, lease, ran=True, now=now, **marker)
+        LIVE.release(call_id, lease, ran=True, now=now, DefaultMade=1, **marker)
         return {"ran": True, "reason": "malformed answer", "updated": 0}
     by_id = {b["WhiteboardId"]: b for b in targets}
     updated = sum(
@@ -1238,6 +1244,7 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
         ran=True,
         now=now,
         Notes=plan.notes or str(state.get("Notes") or ""),
+        DefaultMade=1,
         **marker,
     )
     LOGGER.info(

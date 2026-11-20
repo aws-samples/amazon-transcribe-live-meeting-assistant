@@ -54,6 +54,7 @@ export default /* GraphQL */ `
       }
       ChecklistUpdatedAt
       SummaryProfile
+      GuidanceEnabled
       ActionItems {
         Text
         Owner

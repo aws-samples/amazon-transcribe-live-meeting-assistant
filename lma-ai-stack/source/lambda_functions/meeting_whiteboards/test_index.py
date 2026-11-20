@@ -515,6 +515,8 @@ class FakeLease:
 
     def release(self, call_id, lease, **kwargs):
         self.releases.append(kwargs)
+        # What a run leaves is what the next one reads, as on the state row.
+        self.state.update({k: v for k, v in kwargs.items() if k not in ("ran", "now")})
 
 
 def _segments(table: FakeTable, count: int, start: float = 0.0) -> None:
@@ -652,10 +654,16 @@ def test_a_panel_a_user_takes_during_a_run_keeps_their_content(table, running) -
     assert stored["Panels"][2]["Content"] == "- a note"
 
 
-def test_update_now_runs_without_waiting_and_with_the_meeting_switch_off(table, running) -> None:
-    table.rows[(f"c#{CALL}", f"c#{CALL}")]["WhiteboardsEnabled"] = False
+def test_update_now_runs_after_a_short_gap_and_only_with_the_meeting_switch_on(
+    table, running
+) -> None:
     create()
     _segments(table, 2)
+    table.rows[(f"c#{CALL}", f"c#{CALL}")]["WhiteboardsEnabled"] = False
+    off = call("requestWhiteboardUpdate", user(SHARED), CallId=CALL)
+    assert off["Success"] is False and running["calls"] == []
+    assert running["lease"].claims == []
+    table.rows[(f"c#{CALL}", f"c#{CALL}")]["WhiteboardsEnabled"] = True
     result = call("requestWhiteboardUpdate", user(SHARED), CallId=CALL)
     assert result["Success"] is True and len(running["calls"]) == 1
     # Not the interval, but a short gap, so repeated presses cannot use up the runs.
@@ -671,6 +679,34 @@ def test_no_run_once_the_meeting_has_ended_except_the_last_one(table, running) -
     _segments(table, 20)
     assert index.run(CALL, "auto")["ran"] is False
     assert index.run(CALL, "final")["ran"] is True
+
+
+def test_the_default_whiteboard_is_made_once_and_not_again_after_it_is_deleted(
+    table, running
+) -> None:
+    _segments(table, 20)
+    assert index.run(CALL)["ran"] is True
+    board = index.read_boards(CALL)[0]
+    call(
+        "deleteMeetingWhiteboard",
+        user(OWNER),
+        input={"CallId": CALL, "WhiteboardId": board["WhiteboardId"]},
+    )
+    _segments(table, 20, start=100.0)
+    result = index.run(CALL)
+    assert result == {"ran": False, "reason": "no whiteboard the assistant updates"}
+    assert index.read_boards(CALL) == []
+
+
+def test_deleting_a_whiteboard_counts_as_a_change(table, monkeypatch) -> None:
+    monkeypatch.setattr(index, "WRITES_PER_MINUTE", 1)
+    board = create()
+    with refused("WhiteboardRateLimited"):
+        call(
+            "deleteMeetingWhiteboard",
+            user(OWNER),
+            input={"CallId": CALL, "WhiteboardId": board["WhiteboardId"]},
+        )
 
 
 def test_a_malformed_answer_changes_nothing_and_counts_the_run(table, running) -> None:

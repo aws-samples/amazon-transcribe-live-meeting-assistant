@@ -117,11 +117,14 @@ finished speech segment of the meeting can start one. A run happens:
 - one at a time for each meeting;
 - at most **Runs per meeting at most** (60 by default) times per meeting,
   **Update now** included, which waits at least 30 seconds after the previous run;
-- once more when the meeting ends, so the whiteboards include its last minutes;
+- once more when the meeting ends, so the whiteboards include its last minutes,
+  unless a run is still in progress at that moment, in which case that run is
+  the last;
 - never after the transcript has been deleted.
 
 A meeting whose assistant updates are on and that has no whiteboard gets one
-from the default template on its first run.
+from the default template on its first run, once: if its people delete every
+whiteboard afterwards, the assistant does not make another.
 
 One run makes **one model call for all of the meeting's whiteboards** the
 assistant updates, so a meeting with more whiteboards does not run more often.
@@ -310,7 +313,7 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
 | A Markdown panel | 8,000 characters |
 | A diagram panel | 6,000 characters |
 | A whiteboard as stored | 32 KB |
-| Attempts to change one meeting's whiteboards | 60 a minute, people and assistant together, counted whether or not the change is stored |
+| Attempts to create, change or delete one meeting's whiteboards | 60 a minute, people and assistant together, counted whether or not the change is stored |
 
 ## Limitations
 

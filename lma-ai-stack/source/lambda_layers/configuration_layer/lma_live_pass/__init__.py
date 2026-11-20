@@ -12,7 +12,8 @@ holds when:
 
 * no other run holds the lease (``LeaseUntil`` absent or past);
 * the last run was at least ``interval_seconds`` ago, unless the run ignores the
-  interval (a run on request, or the last run at the meeting's end);
+  interval (the last run at a meeting's end); a caller that allows a shorter gap,
+  such as a run on request, passes a smaller ``interval_seconds``;
 * the meeting has used fewer than ``max_runs`` runs.
 
 So of the invocations a busy stream produces, one runs and the others stop after
