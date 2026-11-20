@@ -38,6 +38,9 @@ ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 ALLOWED_SIGNUP_EMAIL_DOMAINS = os.environ.get("ALLOWED_SIGNUP_EMAIL_DOMAINS", "")
 
 VALID_ROLES = ("Admin", "User")
+# The table that holds each user's meeting notification preferences
+# (PK "usr#<username>", SK "notification-prefs"), deleted with the user.
+EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
@@ -232,7 +235,22 @@ def delete_user(event, args):
     except cognito.exceptions.UserNotFoundException as exc:
         raise ValidationError(f"User {username} not found") from exc
 
+    _delete_notification_preferences(username)
     return {"username": username, "success": True}
+
+
+def _delete_notification_preferences(username):
+    """Delete the user's categories muted on every meeting. Best effort: the user is gone."""
+    if not EVENT_SOURCING_TABLE:
+        return
+    try:
+        boto3.resource("dynamodb").Table(EVENT_SOURCING_TABLE).delete_item(
+            Key={"PK": f"usr#{username}", "SK": "notification-prefs"}
+        )
+    except ClientError:
+        logger.warning(
+            "Could not delete the notification preferences of %s", username, exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------

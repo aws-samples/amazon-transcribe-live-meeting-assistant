@@ -126,8 +126,8 @@ The server checks access itself before calling anything else, because it calls A
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for the API Gateway path, including the key scope check; on the BedrockAgentCore path, resolves the caller from the forwarded claims (see [Connecting with a User Identity](#connecting-with-a-user-identity)) |
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tool_definitions.py` | MCP definitions of the meeting tools, with the annotations the scope check reads |
 | `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/access.py` | The access rule every meeting tool applies (see [Access to Meetings](#access-to-meetings)) |
-| `lma-ai-stack/source/appsync/addMeetingGuidance.request.vtl` | Stores a guidance item under the meeting; published to `onAddMeetingGuidance` |
-| `lma-ai-stack/source/ui/src/components/call-panel/MeetingGuidanceBanner.jsx` | The meeting page's guidance notifications |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/guidance.py` | `push_meeting_guidance` and `list_meeting_guidance`, as meeting notifications of category `guidance` |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/tools/notifications.py` | `list_meeting_notifications` (see [Meeting Notifications](meeting-notifications.md)) |
 | `lma-ai-stack/source/ui/src/graphql/mutations.js` | generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
@@ -162,7 +162,8 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `get_live_transcript` | read | owner, shared, Admin | The lines added to a meeting's transcript since a cursor; see [Following a Meeting Live](#following-a-meeting-live) |
 | `get_meeting_record` | read | owner, shared, Admin; `consent` owner and Admin only | The sections named in `include`: `details`, `summary`, `transcript`, `chat_links`, `key_frames`, `chat_attachments`, `recordings`, `consent` (default `details` and `summary`); see [Meeting Record Links](#meeting-record-links) |
 | `get_meeting_cost` | read | owner, shared, Admin | The meeting's itemised cost estimate, as on its Cost panel |
-| `list_meeting_guidance` | read | owner, shared, Admin | The guidance pushed to a meeting, newest first |
+| `list_meeting_guidance` | read | owner, shared, Admin | The guidance given on a meeting, newest first |
+| `list_meeting_notifications` | read | owner, shared, Admin | The meeting's notifications, of every category or one, oldest first, with `since` and a cursor; see [Meeting Notifications](meeting-notifications.md#reading-them-over-mcp) |
 | `list_virtual_participants` | read | VP owner, shared, Admin | Virtual Participants the caller can see, newest first; optional `status` filter |
 | `push_meeting_guidance` | read-write | owner, shared, Admin | Show a note on the meeting page; see [Meeting Guidance](#meeting-guidance) |
 | `update_meeting_agenda` | read-write | meeting: owner, shared, Admin; VP: owner, Admin | Replace the agenda of a meeting in progress (`meeting_id`) or of a scheduled Virtual Participant at least 5 minutes before its launch (`virtual_participant_id`), through the same writes the Agenda panel and the Edit form make |
@@ -197,9 +198,11 @@ Lines are returned in the order they end on the meeting's timeline, each with it
 
 ### Meeting Guidance
 
-`push_meeting_guidance(meeting_id, text, title?, level?)` leaves a short note on a meeting for the people following it in LMA. It appears at once on the meeting page, above the tabs, as a dismissible notification for the meeting's owner, the people it is shared with and Admins who have the page open; `level` (`info`, `warning` or `urgent`) sets how prominently it is shown. It is never posted to the meeting's own chat, so the meeting's other participants do not see it. Dismissing a note hides it on that page only. A page opened after a note was pushed does not show it; `list_meeting_guidance` returns every note the meeting has.
+`push_meeting_guidance(meeting_id, text, title?, level?)` leaves a short note on a meeting for the people following it in LMA. It is a [meeting notification](meeting-notifications.md) of category `guidance` and type `note`: it appears at once in the meeting page's **Notifications** panel for the meeting's owner, the people it is shared with and Admins, and a page opened later shows it too. `level` (`info`, `warning` or `urgent`) sets how prominently it is shown. It is never posted to the meeting's own chat, so the meeting's other participants do not see it. Dismissing a note hides it for that user only. `text` is shown as Markdown, at most 2000 characters; `title` is at most 200.
 
-Each note is stored in the EventSourcing table under `PK = gd#<CallId>`, `SK = g#<CreatedAt>#<GuidanceId>`, with `Text`, `Title`, `Level`, `Source` (`mcp`), `CreatedBy` (the API key's user), the meeting's `Owner` and `SharedWith`, and the meeting's `ExpiresAfter`, so it expires with the meeting. Anything that wants a meeting's guidance in order queries that one partition. The write is the IAM-only `addMeetingGuidance` mutation, published to the `onAddMeetingGuidance(CallId)` subscription, which is filtered on `Owner` and `SharedWith` like the meeting's other subscriptions.
+Guidance may quote the meeting, so it is kept as long as the meeting's transcript: it is deleted with the transcript, by the Retention section's **Delete the transcript after the summary** setting or when the transcript expires, and with the meeting when the meeting is deleted. A meeting whose transcript has been deleted has no guidance left.
+
+`list_meeting_guidance(meeting_id, limit?)` returns the meeting's most recent guidance newest first (`hasMore` is true when it stopped before reading all of the meeting's notifications), including guidance other features publish (its `type` says which), each with `guidanceId`, `createdAt`, `createdBy`, `source`, `type`, `level`, `title` and `text`. `list_meeting_notifications` returns the same items with every field, and the meeting's other categories.
 
 ### Meeting Record Links
 

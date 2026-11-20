@@ -88,6 +88,16 @@ def test_pushed_guidance_is_stored_on_the_meeting(observed) -> None:
     assert observed["guidance_listed"], "list_meeting_guidance did not return the pushed note"
 
 
+def test_pushed_guidance_is_a_guidance_notification(observed) -> None:
+    """list_meeting_notifications returns the note with the fields a reader relies on."""
+    listed = observed["notifications_listed"]
+    assert len(listed) == 1, listed
+    (note,) = listed
+    assert note["category"] == "guidance" and note["type"] == "note"
+    assert note["severity"] == "warning"
+    assert note["refs"] == [] and "dedupKey" in note
+
+
 # ── get_meeting_record ──────────────────────────────────────────────────────
 
 

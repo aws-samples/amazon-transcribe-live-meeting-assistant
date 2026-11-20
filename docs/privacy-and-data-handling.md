@@ -277,6 +277,7 @@ are rewritten or expire (see
 | **Agenda** | On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row | Deleted, from the meeting and from its Virtual Participant records |
 | **Consent record** | On the meeting record (`Consent`) | As the meeting record | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
 | **Consent evidence images** | The recordings bucket, `lma-consent-evidence/<meeting>/` | 90 days | The lifecycle rule, from `TranscriptionExpirationInDays`; **Keep evidence screenshots** off deletes each image once checked | Deleted, every version |
+| **Meeting notifications**: guidance for the people running the meeting, and other categories a feature publishes; each user's dismissals and categories muted on that meeting | The meetings table, under the meeting. A user's categories muted on every meeting are one item per user | Guidance: as the transcript. Other categories and users' views: as the meeting record | Guidance follows the transcript, including **Delete the transcript after the summary**; the others follow **Days to keep meeting records**. A user's every-meeting mutes are deleted with the user. See [Meeting Notifications](meeting-notifications.md#retention) | Deleted |
 | **Usage records** behind the meeting's cost estimate | The meetings table | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
 | **Virtual Participant records**: meeting name, platform, meeting ID and password, schedule, agenda, per-meeting consent and video choices, status | The Virtual Participant DynamoDB table | 90 days from when the record was created, or from the time it is scheduled for if that is later. A record written before these records were given an expiry has none, and is kept until it is deleted | `MeetingRecordExpirationInDays`, the stack parameter only; deleted from the **Virtual Participants** page | Every record that names the meeting is deleted |
 | **Pending uploads**: a file uploaded for batch transcription, before it is processed | The recordings bucket, `lma-uploads-pending/` | 7 days | Fixed lifecycle rule | Not applicable |
@@ -411,6 +412,7 @@ Deleting a meeting removes, for that meeting:
 - the usage records behind its cost estimate;
 - its key-frame items and images, and its consent evidence images;
 - its chat attachments: their items, and every version of their files;
+- its notifications, and every user's dismissals and mutes on it;
 - its audio recording and its video recording, with any video segments still in
   the bucket;
 - the transcript and summary files in `lma-transcripts/` whose names begin with
