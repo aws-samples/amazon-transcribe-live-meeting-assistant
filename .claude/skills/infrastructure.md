@@ -219,9 +219,16 @@ rather than raising the number:
   moved log group, data source or named function needs a new name;
   `test_ai_stack_nested_templates.py` checks the log group and data source rules.
 
-The AI stack tests read the stack with its nested templates inlined
-(`lma-ai-stack/test/ai_stack_templates.py`), so a test that looks a resource up
-by logical id keeps working when the resource moves.
+Tests that read the AI stack's resources (those under `lma-ai-stack/test/`,
+the VP stack's `test_ai_stack_vnc_alb.py`) read them through
+`lma-ai-stack/test/ai_stack_templates.py`: `flattened()` for the stack with its
+nested templates inlined, `all_template_paths()` for the files. A test that
+loads `lma-ai-stack.yaml` directly sees only the parent's resources and stops
+checking anything that moves, without failing, so a new test should use the
+helper. The exceptions check each file on purpose: `test_resource_budget.py`,
+`test_ai_stack_nested_templates.py` and `test_log_destinations.py`. The Lambda
+suites' own tests under `source/lambda_functions/` read only resources that are
+still in the parent.
 
 ## Common Red Flags
 

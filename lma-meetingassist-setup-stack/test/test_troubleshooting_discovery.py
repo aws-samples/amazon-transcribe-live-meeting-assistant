@@ -30,7 +30,7 @@ REAL_GROUPS: List[tuple[str, int]] = [
     # Nested-stack namespace -- the overwhelming majority.
     (f"/{AISTACK}/lambda/CallEventProcessorFunction", 4096),
     (f"/{AISTACK}/lambda/StaleMeetingReaperFunction", 512),
-    (f"/{AISTACK}/lambda/SpeakerNameResolverFunction", 256),
+    (f"/{AISTACK}/resolvers/lambda/SpeakerNameResolverFunction", 256),
     (f"/{AISTACK}/lambda/StrandsMeetingAssistFunction", 2048),
     (f"/{AISTACK}/lambda/BedrockSummaryLambda", 1024),
     (f"/{AISTACK}/lambda/VirtualParticipantManager", 700),
@@ -311,7 +311,15 @@ def test_discovery_works_without_an_appsync_api_id() -> None:
         (f"/{AISTACK}/lambda/AsrLauncherFunction", discovery.ASR_MICROVM),
         (f"/{AISTACK}/lambda/CallEventProcessorFunction", discovery.TRANSCRIPT_PIPELINE),
         (f"/{AISTACK}/lambda/StaleMeetingReaperFunction", discovery.TRANSCRIPT_PIPELINE),
-        (f"/{AISTACK}/lambda/SpeakerNameResolverFunction", discovery.TRANSCRIPT_PIPELINE),
+        # The AI stack's Lambda resolver functions log under its nested
+        # LambdaResolversStack's resolvers/ segment, still within its prefix.
+        (f"/{AISTACK}/resolvers/lambda/SpeakerNameResolverFunction", discovery.TRANSCRIPT_PIPELINE),
+        (f"/{AISTACK}/resolvers/lambda/VncEdgeTokenFunction", discovery.VIRTUAL_PARTICIPANT),
+        (
+            f"/{AISTACK}/resolvers/lambda/QueryKnowledgeBaseResolverFunction",
+            discovery.MEETING_ASSISTANT,
+        ),
+        (f"/{AISTACK}/resolvers/lambda/UpdateAsrConfigResolverFunction", discovery.DEPLOYMENT),
         (f"/{AISTACK}/lambda/StrandsMeetingAssistFunction", discovery.MEETING_ASSISTANT),
         # The agent's own log group, so "why did the last diagnosis fail" is
         # answerable by component like anything else.

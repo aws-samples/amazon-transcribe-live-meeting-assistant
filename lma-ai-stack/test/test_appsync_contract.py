@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from ai_stack_templates import flattened
+from ai_stack_templates import all_template_paths, flattened
 
 # graphql-core is a dev dependency of lib/lma_sdk, installed by
 # `make setup-cli-dev`. Imported unconditionally on purpose: skipping the whole
@@ -53,6 +53,8 @@ from graphql.language.ast import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AI_STACK = REPO_ROOT / "lma-ai-stack"
 TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
+# Every AI stack template file, the nested ones included; see ai_stack_templates.
+_ALL_TEMPLATES_TEXT = "\n".join(path.read_text() for path in all_template_paths())
 APPSYNC_DIR = AI_STACK / "source" / "appsync"
 SCHEMA = APPSYNC_DIR / "schema.graphql"
 UI_SRC = AI_STACK / "source" / "ui" / "src"
@@ -529,7 +531,7 @@ class Resolver:
 
 def _load_resolvers() -> list[Resolver]:
     resolvers: list[Resolver] = []
-    for block in _RESOURCE_SPLIT.split(TEMPLATE.read_text()):
+    for block in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT):
         if "Type: AWS::AppSync::Resolver" not in block:
             continue
         logical_id = block.split(":", 1)[0].strip()
@@ -895,7 +897,7 @@ def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
-    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", TEMPLATE.read_text()))
+    referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", _ALL_TEMPLATES_TEXT))
     on_disk = {path.name for path in APPSYNC_DIR.iterdir() if path.is_file()}
     assert not (on_disk - referenced), (
         f"files in {APPSYNC_DIR.name}/ that no template resource references: "
@@ -1044,7 +1046,7 @@ def test_mcp_signed_mutations_are_the_ones_its_role_may_call() -> None:
     """Every mutation an MCP tool sends is named in the function's appsync:GraphQL grant."""
     block = next(
         b
-        for b in _RESOURCE_SPLIT.split(TEMPLATE.read_text())
+        for b in _RESOURCE_SPLIT.split(_ALL_TEMPLATES_TEXT)
         if b.startswith("MCPServerAnalyticsFunction:")
     )
     granted = set(re.findall(r"/types/Mutation/fields/(\w+)", block))

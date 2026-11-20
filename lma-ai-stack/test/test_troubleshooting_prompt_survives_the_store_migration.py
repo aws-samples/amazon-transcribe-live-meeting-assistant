@@ -38,6 +38,7 @@ from unittest import mock
 
 import pytest
 import yaml
+from ai_stack_templates import flattened
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from botocore.exceptions import ClientError
 
@@ -304,10 +305,8 @@ def test_the_legacy_seeder_still_reruns_when_the_prompt_file_changes() -> None:
 
 def test_the_configuration_seeder_can_only_read_the_legacy_table() -> None:
     """GetItem alone, so the migration cannot write over the agent's prompt."""
-    resources = yaml.load(
-        (REPO / "lma-ai-stack" / "deployment" / "lma-ai-stack.yaml").read_text(),
-        Loader=_CfnLoader,
-    )["Resources"]
+    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
+    resources = flattened()["Resources"]
     statements = [
         statement
         for policy in resources["ConfigurationSeederRole"]["Properties"]["Policies"]
