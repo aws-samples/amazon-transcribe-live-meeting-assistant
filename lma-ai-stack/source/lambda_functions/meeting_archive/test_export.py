@@ -266,6 +266,123 @@ def test_a_meeting_with_everything_matches_the_schema(fakes) -> None:
     assert document["checklist"][0]["evidence"][0]["quote"] == "We need SSO"
 
 
+def test_the_format_is_named_first_so_a_file_is_recognised_by_its_content(fakes) -> None:
+    for document in (export_of(fakes), export_of(fakes, include=["summary"])):
+        assert list(document)[:2] == ["format", "schemaVersion"]
+        assert document["format"] == "lma-meeting-export"
+    assert export.FORMAT == "lma-meeting-export"
+
+
+def test_an_export_without_the_format_still_matches_the_schema(fakes) -> None:
+    """Exports made before the format was added are still schema version 1."""
+    document = export_of(fakes)
+    del document["format"]
+    valid(document)
+    document["format"] = "something-else"
+    assert list(VALIDATOR.iter_errors(document))
+
+
+def test_checklist_evidence_and_action_items_carry_their_segment_s_times(fakes) -> None:
+    document = export_of(fakes)
+    assert document["checklist"][0]["evidence"] == [
+        {"segmentId": "s1", "startTime": 1.0, "endTime": 3.0, "quote": "We need SSO"}
+    ]
+    first, second = document["actionItems"]
+    assert (first["segmentId"], first["startTime"], first["endTime"]) == ("s4", 9.0, 11.0)
+    # No segment named: no time is made up.
+    assert (second["segmentId"], second["startTime"], second["endTime"]) == (None, None, None)
+
+
+def test_evidence_with_a_segment_id_alone_takes_both_times_from_the_segment(fakes) -> None:
+    item = {
+        "M": {
+            "ItemId": s("q2"),
+            "Text": s("Timeline?"),
+            "Kind": s("question"),
+            "Evidence": {
+                "L": [
+                    {"M": {"SegmentId": s("s2")}},
+                    {"M": {"SegmentId": s("not-a-segment"), "StartTime": n(50)}},
+                    {"M": {"Quote": s("only a quote")}},
+                ]
+            },
+        }
+    }
+    meeting = full_meeting()
+    meeting["Checklist"] = {"L": [item]}
+    document = export_of(fakes, meeting=meeting)
+    valid(document)
+    assert [
+        (e["segmentId"], e["startTime"], e["endTime"]) for e in document["checklist"][0]["evidence"]
+    ] == [
+        ("s2", 4.0, 6.0),
+        ("not-a-segment", 50.0, None),
+        (None, None, None),
+    ]
+
+
+def test_the_checklist_alone_still_reads_the_segments_for_its_times(fakes) -> None:
+    document = export_of(fakes, include=["checklist", "actionItems"])
+    valid(document)
+    assert "transcript" not in document and "participants" not in document
+    assert document["checklist"][0]["evidence"][0]["endTime"] == 3.0
+    assert document["actionItems"][0]["endTime"] == 11.0
+
+
+def test_a_participant_s_consent_is_unknown_without_a_recorded_link(fakes) -> None:
+    """A consent event under a participant's exact name is not matched to them."""
+    consent = {
+        "M": {
+            "Mode": s("opt_in"),
+            "Rule": s("each_participant"),
+            "Status": s("granted"),
+            "Events": {
+                "L": [
+                    {
+                        "M": {
+                            "ParticipantName": s("Priya Shah"),
+                            "Decision": s("consent"),
+                            "Source": s("chat"),
+                        }
+                    },
+                    {
+                        "M": {
+                            "ParticipantName": s("Sam Lee"),
+                            "Decision": s("objection"),
+                            "Source": s("voice"),
+                        }
+                    },
+                ]
+            },
+        }
+    }
+    document = export_of(fakes, meeting=full_meeting(Consent=consent))
+    valid(document)
+    assert {p["consent"] for p in document["participants"]} == {"unknown"}
+
+
+@pytest.mark.parametrize(
+    "decisions, expected",
+    [
+        ([], "unknown"),
+        ([("consent", "chat")], "granted"),
+        ([("objection", "voice")], "objected"),
+        ([("objection", "chat"), ("consent", "voice")], "granted"),
+        ([("consent", "chat"), ("objection", "ui")], "objected"),
+        ([("consent", "attestation")], "unknown"),
+    ],
+)
+def test_a_participant_s_consent_follows_their_latest_linked_reply(decisions, expected) -> None:
+    linked = [
+        {"speakerId": "remote-spk_0", "decision": decision, "source": source}
+        for decision, source in decisions
+    ]
+    other = [{"speakerId": "remote-spk_1", "decision": "objection", "source": "chat"}]
+    unlinked = [{"speakerId": None, "decision": "objection", "source": "chat"}]
+    assert export.participant_consent("remote-spk_0", linked + other + unlinked) == expected
+    assert export.participant_consent(None, unlinked) == "unknown"
+
+
 def test_participants_are_named_only_from_a_name_given_or_confirmed(fakes) -> None:
     people = {p["speakerId"]: p for p in export_of(fakes)["participants"]}
     assert people["remote-spk_0"]["name"] == "Priya Shah"
@@ -350,9 +467,12 @@ def test_a_meeting_whose_transcript_was_deleted_matches_the_schema_without_it(fa
     assert document["meeting"]["transcriptDeletedAt"] == "2026-11-04T00:00:00Z"
     assert "transcript" not in document and "links" not in document
     assert "participants" not in document
+    # The segment is deleted with the transcript, so its end time is not known.
     assert document["checklist"][0]["evidence"] == [
-        {"segmentId": "s1", "startTime": 1.0, "quote": None}
+        {"segmentId": "s1", "startTime": 1.0, "endTime": None, "quote": None}
     ]
+    assert document["actionItems"][0]["startTime"] == 9.0
+    assert document["actionItems"][0]["endTime"] is None
     # The summary is kept, as the meeting keeps it.
     assert document["summary"]["sections"]
     # The whiteboards are drawn from the transcript, and deleted with it.
@@ -373,6 +493,7 @@ def test_include_chooses_the_parts(fakes) -> None:
     document = export_of(fakes, include=["summary", "actionItems"])
     valid(document)
     assert set(document) == {
+        "format",
         "schemaVersion",
         "exportedAt",
         "lmaVersion",

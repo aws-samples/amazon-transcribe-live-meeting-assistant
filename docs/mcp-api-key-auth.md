@@ -163,7 +163,7 @@ The **Scope** column is the key scope a tool needs; **Access** is who it answers
 | `get_meeting_agenda` | read | owner, shared, Admin | The agenda, with its source and who last changed it and when |
 | `get_meeting_context` | read | owner, shared, Admin | The [meeting context](meeting-context-and-checklist.md), with who last changed it and when |
 | `get_meeting_checklist` | read | owner, shared, Admin | The checklist items, each with its status, who set it, its evidence and note |
-| `get_meeting_consent` | read | owner, shared, Admin | The consent record without its evidence images: mode, how consent is given, the notice, the attestation and one row per participant |
+| `get_meeting_consent` | read | owner, shared, Admin | The consent record without its evidence images, in LMA's own values: mode, rule, status, the notices, the attestation and one entry per consent event |
 | `list_meeting_guidance` | read | owner, shared, Admin | The guidance given on a meeting, newest first |
 | `list_meeting_notifications` | read | owner, shared, Admin | The meeting's notifications, of every category or one, oldest first, with `since` and a cursor; see [Meeting Notifications](meeting-notifications.md#reading-them-over-mcp) |
 | `list_virtual_participants` | read | VP owner, shared, Admin | Virtual Participants the caller can see, newest first; optional `status` filter |

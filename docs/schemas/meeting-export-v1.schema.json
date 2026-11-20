@@ -6,6 +6,10 @@
   "type": "object",
   "required": ["schemaVersion", "exportedAt", "lmaVersion", "meeting"],
   "properties": {
+    "format": {
+      "const": "lma-meeting-export",
+      "description": "Names the document as an LMA meeting export, so a file can be recognised by its content alone. Every export LMA makes now has it, first; it is not required, because exports made before it was added are schema version 1 too."
+    },
     "schemaVersion": { "const": 1 },
     "exportedAt": { "type": "string", "format": "date-time" },
     "lmaVersion": { "type": "string" },
@@ -79,7 +83,11 @@
         "label": { "type": "string", "description": "How LMA shows the speaker." },
         "name": { "type": ["string", "null"], "description": "A person's name, or null when it is not known. Never guessed." },
         "nameSource": { "enum": ["enrolled", "manual", "transcript", "platform", "none"] },
-        "email": { "$ref": "#/$defs/nullableString" }
+        "email": { "$ref": "#/$defs/nullableString" },
+        "consent": {
+          "enum": ["granted", "objected", "unknown"],
+          "description": "The speaker's latest consent or objection among the consent events recorded against this speaker; unknown when none is. A consent event is never matched to a speaker by name. Absent from exports made before it was added."
+        }
       }
     },
     "consent": {
@@ -143,7 +151,8 @@
             "type": "object",
             "properties": {
               "segmentId": { "$ref": "#/$defs/nullableString" },
-              "startTime": { "$ref": "#/$defs/nullableNumber" },
+              "startTime": { "$ref": "#/$defs/nullableNumber", "description": "Seconds on the meeting's timeline: the time stored with the evidence, else its segment's start." },
+              "endTime": { "$ref": "#/$defs/nullableNumber", "description": "The end of the segment the evidence names; null when it names none, or the segment is not in the transcript (for example once the transcript was deleted). Absent from exports made before it was added." },
               "quote": { "type": ["string", "null"], "description": "Null once the transcript was deleted." }
             }
           }
@@ -212,7 +221,8 @@
         "owner": { "type": ["string", "null"], "description": "A name as said in the meeting; null when nobody was named." },
         "dueDate": { "type": ["string", "null"], "format": "date" },
         "dueText": { "$ref": "#/$defs/nullableString" },
-        "startTime": { "$ref": "#/$defs/nullableNumber" },
+        "startTime": { "$ref": "#/$defs/nullableNumber", "description": "Seconds on the meeting's timeline: the time stored with the item, else its segment's start." },
+        "endTime": { "$ref": "#/$defs/nullableNumber", "description": "The end of the segment the item names; null when it names none, or the segment is not in the transcript. Absent from exports made before it was added." },
         "segmentId": { "$ref": "#/$defs/nullableString" }
       }
     },

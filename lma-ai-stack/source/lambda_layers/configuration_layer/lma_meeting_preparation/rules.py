@@ -313,6 +313,13 @@ def normalize_evidence(value: Any, *, quotes_allowed: bool) -> List[Dict[str, An
         return []
     if not isinstance(value, list):
         raise PreparationError("Evidence must be a list")
+    if len(value) > MAX_EVIDENCE_PER_ITEM:
+        # Refused rather than cut to the newest five: a request is applied as
+        # given or not at all.
+        raise PreparationError(
+            f"A checklist item has at most {MAX_EVIDENCE_PER_ITEM} evidence entries; "
+            f"this change gives {len(value)}"
+        )
     entries = []
     for position, entry in enumerate(value, start=1):
         where = f"Evidence {position}"
@@ -356,8 +363,9 @@ def apply_item_update(
 
     ``update`` names the item (``ItemId``) and any of ``Status``, ``Note`` (an
     empty note clears it), ``Evidence`` (replaces the item's evidence) and
-    ``AddEvidence`` (added after it). Either way the newest five entries are
-    kept. ``status_source`` is who is making the change: ``user`` or
+    ``AddEvidence`` (added after it). Either list may hold at most five
+    entries, or the update is refused; when added evidence takes the item past
+    five, its oldest stored entries make way, so the newest five are kept. ``status_source`` is who is making the change: ``user`` or
     ``assistant``. A status a user set is never changed by the assistant, so
     an assistant's update to such an item is refused as a whole.
     """

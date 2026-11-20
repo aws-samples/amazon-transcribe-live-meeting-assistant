@@ -31,7 +31,11 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 # pylint: disable=import-error
 from lma_channels import canonical_channel  # configuration layer
 from lma_chat_links import extract_links  # configuration layer
-from lma_consent.summary import consent_output  # configuration layer
+from lma_consent.summary import (  # configuration layer
+    consent_events,
+    consent_output,
+    participant_consent,
+)
 from lma_speakers import (  # configuration layer
     DEFAULT_OTHER_SPEAKER_NAME,
     is_unknown_name,
@@ -49,6 +53,8 @@ from lma_whiteboards import rules as whiteboard_rules  # configuration layer
 # pylint: enable=import-error
 
 SCHEMA_VERSION = 1
+#: What every export says it is, first, so a file is recognised by its content.
+FORMAT = "lma-meeting-export"
 
 #: The parts ``include`` names; every one by default.
 PARTS = (
@@ -279,6 +285,38 @@ def final_segments(segments: Iterable[Mapping[str, Any]]) -> List[Mapping[str, A
     )
 
 
+SegmentTimes = Dict[str, Tuple[Optional[float], Optional[float]]]
+
+
+def segment_times(rows: Iterable[Mapping[str, Any]]) -> SegmentTimes:
+    """Each final segment's (startTime, endTime), by its segment id."""
+    times: SegmentTimes = {}
+    for row in rows:
+        segment_id = row.get("SegmentId")
+        if segment_id is None or str(segment_id) in times:
+            continue
+        start = _seconds(row.get("StartTime"))
+        end = _seconds(row.get("EndTime"))
+        times[str(segment_id)] = (start, end if end is not None else start)
+    return times
+
+
+def with_times(reference: Dict[str, Any], start: Any, times: SegmentTimes) -> Dict[str, Any]:
+    """``reference`` (which holds a ``segmentId``) with its ``startTime`` and ``endTime``.
+
+    The start is the one stored with the reference, else its segment's; the end
+    is its segment's. Either is null when the reference has no segment id, or
+    names a segment the export was not given (the transcript was deleted, or
+    the segment was not found), so a consumer that renumbers segments can still
+    place it in time wherever LMA knows the time.
+    """
+    segment = times.get(str(reference.get("segmentId"))) if reference.get("segmentId") else None
+    stored = _seconds(start)
+    reference["startTime"] = stored if stored is not None else (segment[0] if segment else None)
+    reference["endTime"] = segment[1] if segment else None
+    return reference
+
+
 def shared_frames(keyframes: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """The key frames of shared content (not the camera, not a repeat), in time order."""
     frames = []
@@ -398,8 +436,11 @@ def summary_part(
     }
 
 
-def checklist_part(meeting: Mapping[str, Any], quotes: bool) -> List[Dict[str, Any]]:
-    """The checklist as get_meeting_checklist gives its items; quotes only while the transcript is kept."""
+def checklist_part(
+    meeting: Mapping[str, Any], quotes: bool, times: Optional[SegmentTimes] = None
+) -> List[Dict[str, Any]]:
+    """The checklist as get_meeting_checklist gives its items, each piece of
+    evidence with its segment's end time too; quotes only while the transcript is kept."""
     items = []
     for item in meeting.get("Checklist") or []:
         if not isinstance(item, Mapping):
@@ -415,8 +456,11 @@ def checklist_part(meeting: Mapping[str, Any], quotes: bool) -> List[Dict[str, A
                 "statusSource": item.get("StatusSource"),
                 "evidence": [
                     {
-                        "segmentId": entry.get("SegmentId"),
-                        "startTime": _seconds(entry.get("StartTime")),
+                        **with_times(
+                            {"segmentId": entry.get("SegmentId")},
+                            entry.get("StartTime"),
+                            times or {},
+                        ),
                         "quote": entry.get("Quote") if quotes else None,
                     }
                     for entry in item.get("Evidence") or []
@@ -483,6 +527,7 @@ def build_export(
     retained = not meeting.get("TranscriptDeletedAt")
     call_id = str(meeting.get("CallId") or "")
     export: Dict[str, Any] = {
+        "format": FORMAT,
         "schemaVersion": SCHEMA_VERSION,
         "exportedAt": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "lmaVersion": lma_version or "unknown",
@@ -495,8 +540,9 @@ def build_export(
     export["context"] = meeting.get("MeetingContext") or None
 
     frames = shared_frames(keyframes)
+    rows = final_segments(segments) if retained else []
+    times = segment_times(rows)
     if retained and wanted & {"transcript", "chat"}:
-        rows = final_segments(segments)
         speakers = Speakers(rows, meeting)
         export["transcript"] = transcript_part(
             rows,
@@ -508,11 +554,15 @@ def build_export(
         )
         if "chat" in wanted:
             export["links"] = links_part(rows, speakers)
-        export["participants"] = speakers.participants()
+        events = consent_events(meeting.get("Consent") or {})
+        export["participants"] = [
+            {**entry, "consent": participant_consent(entry["speakerId"], events)}
+            for entry in speakers.participants()
+        ]
     if "consent" in wanted:
         export["consent"] = consent_output(call_id, {"Consent": meeting.get("Consent")})
     if "checklist" in wanted:
-        export["checklist"] = checklist_part(meeting, quotes=retained)
+        export["checklist"] = checklist_part(meeting, quotes=retained, times=times)
     if "keyframes" in wanted:
         export["keyframes"] = [
             {
@@ -527,7 +577,10 @@ def build_export(
         if summary is not None:
             export["summary"] = summary
     if "actionItems" in wanted:
-        export["actionItems"] = action_items_output(meeting.get("ActionItems"))
+        export["actionItems"] = [
+            with_times(item, item.get("startTime"), times)
+            for item in action_items_output(meeting.get("ActionItems"))
+        ]
     if "guidance" in wanted:
         export["guidance"] = guidance_part(notifications)
     if "whiteboards" in wanted:
