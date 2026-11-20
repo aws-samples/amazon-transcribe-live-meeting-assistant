@@ -377,6 +377,24 @@ def test_every_version_expires_with_its_whiteboard(table, monkeypatch) -> None:
     assert {v["ExpiresAfter"] for v in versions} == {1_900_000_000}
 
 
+def test_the_count_of_whiteboards_outlives_every_whiteboard_it_counts(table, monkeypatch) -> None:
+    create()
+    # A whiteboard made later in the transcript's retention expires later.
+    monkeypatch.setattr(index, "transcript_expires_after", lambda: 1_950_000_000)
+    later = create()
+    counter = table.plain(f"wb#{CALL}", "index")
+    heads = [r for (pk, sk), r in table.rows.items() if sk.startswith("b#")]
+    assert counter["ExpiresAfter"] >= max(h["ExpiresAfter"] for h in heads)
+    # It takes the meeting record's expiry, which caps every whiteboard's.
+    assert counter["ExpiresAfter"] == 2_000_000_000
+    gone = call(
+        "deleteMeetingWhiteboard",
+        user(OWNER),
+        input={"CallId": CALL, "WhiteboardId": later["WhiteboardId"]},
+    )
+    assert gone["Deleted"] is True
+
+
 def test_restoring_a_version_makes_a_new_one(table) -> None:
     board = create()
     panels = panels_of(board)
@@ -490,12 +508,14 @@ def test_nothing_is_written_once_the_transcript_is_deleted(table) -> None:
     assert listed["Items"] == [] and listed["Writable"] is False
 
 
-def test_every_row_takes_the_transcripts_expiry(table) -> None:
+def test_every_row_that_holds_content_takes_the_transcripts_expiry(table) -> None:
     create()
+    # The write counters and the count of whiteboards hold no meeting content;
+    # the count expires with the meeting record (see the test below).
     rows = [
         r
         for (pk, _), r in table.rows.items()
-        if pk == f"wb#{CALL}" and not r["SK"].startswith("r#")
+        if pk == f"wb#{CALL}" and not r["SK"].startswith("r#") and r["SK"] != "index"
     ]
     assert rows and {r.get("ExpiresAfter") for r in rows} == {1_900_000_000}
 

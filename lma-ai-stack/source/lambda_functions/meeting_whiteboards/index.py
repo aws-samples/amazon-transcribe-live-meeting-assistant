@@ -680,8 +680,18 @@ def create_whiteboard(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dic
     }
     index_update = "ADD Boards :one"
     if expires:
-        index_values[":ttl"] = {"N": str(expires)}
-        index_update += " SET ExpiresAfter = if_not_exists(ExpiresAfter, :ttl)"
+        # The count expires with the meeting record, never before any of the
+        # whiteboards it counts (each is capped at the meeting's expiry), so a
+        # whiteboard made late in the transcript's retention is still counted
+        # and can still be deleted.
+        meeting_expiry = meeting.get("ExpiresAfter")
+        counter_expiry = (
+            int(meeting_expiry)
+            if isinstance(meeting_expiry, (int, float)) and meeting_expiry > 0
+            else expires
+        )
+        index_values[":ttl"] = {"N": str(max(counter_expiry, expires))}
+        index_update += " SET ExpiresAfter = :ttl"
     reasons = _transact(
         [
             check,
