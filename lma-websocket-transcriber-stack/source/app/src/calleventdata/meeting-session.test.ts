@@ -22,6 +22,8 @@ import {
     recordingBaseName,
     readMeetingRecord,
     readMeetingRecordWithRetries,
+    MEETING_READ_ATTEMPT_TIMEOUT_MS,
+    MEETING_READ_RETRY_DELAYS_MS,
     requestedSessionNumber,
     sessionEventFields,
     sessionSegment,
@@ -191,6 +193,25 @@ test('a record that could not be read is read again, and the last failure is rai
     const fails = answering(new Error('a'), new Error('b'), new Error('c'));
     await assert.rejects(readMeetingRecordWithRetries(fails, 'm', [5, 10], sleep), /c/);
     assert.equal(fails.calls, 3);
+});
+
+test('a meeting record read that does not answer is given up quickly', async () => {
+    let calls = 0;
+    const hangs: GraphqlCaller = () => {
+        calls += 1;
+        return new Promise(() => undefined);
+    };
+    const started = Date.now();
+    await assert.rejects(readMeetingRecordWithRetries(hangs, 'm', [5], undefined, 20), /no answer within 20 ms/);
+    assert.equal(calls, 2);
+    assert.ok(Date.now() - started < 1000, 'both attempts are given up within their timeouts');
+});
+
+test('the START read waits a few seconds at most before refusing', () => {
+    const attempts = MEETING_READ_RETRY_DELAYS_MS.length + 1;
+    const delays = MEETING_READ_RETRY_DELAYS_MS.reduce((sum, delay) => sum + delay, 0);
+    assert.ok(attempts <= 2);
+    assert.ok(attempts * MEETING_READ_ATTEMPT_TIMEOUT_MS + delays <= 7_000);
 });
 
 test('each capture session stores its recording under a name of its own', () => {

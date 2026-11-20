@@ -181,22 +181,44 @@ export const readMeetingRecord = async (call: GraphqlCaller, callId: string): Pr
     };
 };
 
-/** Delays between the attempts to read the meeting record. */
-export const MEETING_READ_RETRY_DELAYS_MS: readonly number[] = [250, 1000];
+/**
+ * Delays between the attempts to read the meeting record: two attempts. The
+ * client's audio waits while the record is read, so a START whose record cannot
+ * be read is refused within a few seconds and the client can start again.
+ */
+export const MEETING_READ_RETRY_DELAYS_MS: readonly number[] = [250];
+
+/** How long one attempt to read the meeting record is waited for. */
+export const MEETING_READ_ATTEMPT_TIMEOUT_MS = 3_000;
+
+/** One read of the meeting record, given up as failed after `timeoutMs`. */
+const readWithin = async (call: GraphqlCaller, callId: string, timeoutMs: number): Promise<MeetingRecordView | null> => {
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`getCall: no answer within ${timeoutMs} ms`)), timeoutMs);
+    });
+    try {
+        return await Promise.race([readMeetingRecord(call, callId), timedOut]);
+    } finally {
+        clearTimeout(timer);
+    }
+};
 
 /**
- * readMeetingRecord, tried again after each of `delays` when it throws. Throws
- * the last error when every attempt failed.
+ * readMeetingRecord, each attempt given `attemptTimeoutMs`, and tried again
+ * after each of `delays` when it fails. Throws the last error when every
+ * attempt failed.
  */
 export const readMeetingRecordWithRetries = async (
     call: GraphqlCaller,
     callId: string,
     delays: readonly number[] = MEETING_READ_RETRY_DELAYS_MS,
-    sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    attemptTimeoutMs: number = MEETING_READ_ATTEMPT_TIMEOUT_MS
 ): Promise<MeetingRecordView | null> => {
     for (let attempt = 0; ; attempt += 1) {
         try {
-            return await readMeetingRecord(call, callId);
+            return await readWithin(call, callId, attemptTimeoutMs);
         } catch (error) {
             const delay = delays[attempt];
             if (delay === undefined) {

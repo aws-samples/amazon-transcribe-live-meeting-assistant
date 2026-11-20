@@ -359,7 +359,10 @@ sessions, are in [What a rejoin does](virtual-participant.md#what-a-rejoin-does)
 A `reopenMeeting` whose session never starts leaves the meeting as it was; a
 later `reopenMeeting` allows the next session number. Each continuation is a
 new session: a client that only lost its connection reconnects with the same
-START instead (see [Reconnection](#reconnection)).
+START instead (see [Reconnection](#reconnection)). A START naming the session
+is accepted for as long as the meeting record allows that session, including
+after the session has ended: its transcript is added at the session's offset,
+and the meeting stays **Done**, since the session has already started once.
 
 > **Older field names.** Clients written for LMA before 0.4.0 send the two
 > speaker names as `agentId` (for `localSpeakerName`) and `fromNumber` (for
