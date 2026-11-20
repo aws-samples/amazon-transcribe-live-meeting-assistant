@@ -955,8 +955,10 @@ const onTextMessage = async (
         // audio connection was down, as the recording and transcript do.
         // A later session of a continued meeting is placed after the earlier
         // ones on the timeline, as its transcript is.
+        // The video belongs to the audio session's capture session, as the
+        // audio START checked it; the video frame's own field is not used.
         const session = startVideoSession(
-            callMetaData,
+            { ...callMetaData, sessionNumber: audioSession.callMetadata.sessionNumber },
             server,
             recordedAudioSeconds(audioSession),
             audioSession.callMetadata.sessionOffsetSeconds ?? 0
@@ -971,7 +973,7 @@ const onTextMessage = async (
             return;
         }
         videoSocketMap.delete(ws);
-        await endVideoSession(session.callId, server);
+        await endVideoSession(session.callId, server, session.sessionNumber);
     } else if (callMetaData.callEvent === 'END') {
         const socketData = sessions.sessionOf(ws);
         if (!socketData || !socketData.callMetadata) {
@@ -1146,10 +1148,11 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
         const sharedWithAnother = sessions.connectedSessions().some(
             (other) => other !== socketData && !other.ended && other.callMetadata.callId === callMetaData.callId
         );
-        const video = getVideoSession(callMetaData.callId);
+        const sessionNumber = socketData.callMetadata.sessionNumber;
+        const video = getVideoSession(callMetaData.callId, sessionNumber);
         if (video && !sharedWithAnother && !video.muxStarted) {
             video.discarding = true;
-            await endVideoSession(callMetaData.callId, server);
+            await endVideoSession(callMetaData.callId, server, sessionNumber);
         }
     }
     // A capture already ended: its connection may still be open.
@@ -1169,7 +1172,7 @@ const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, 
     const callId = socketData.callMetadata.callId;
     server.log.info(`[CONSENT]: [${callId}] - Ending the meeting: ${reason}.`);
     try {
-        await endVideoSession(callId, server);
+        await endVideoSession(callId, server, socketData.callMetadata.sessionNumber);
     } catch (error) {
         server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting's video: ${normalizeErrorForLogging(error)}`);
     }
@@ -1200,7 +1203,7 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
             `[ON WSCLOSE]: [${videoSession.callId}] - Video socket closed without END_VIDEO.`
         );
         videoSocketMap.delete(ws);
-        videoSocketDropped(videoSession.callId, server);
+        videoSocketDropped(videoSession.callId, server, videoSession.sessionNumber);
         return;
     }
     await sessions.onConnectionClosed(ws);
@@ -1271,7 +1274,8 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
             const wavAdopted = notifyAudioRecordingDone(
                 callMetaData.callId,
                 wavPath,
-                server
+                server,
+                socketData.callMetadata.sessionNumber
             );
             if (!wavAdopted) {
                 await deleteTempFile(callMetaData, wavPath);
@@ -1291,7 +1295,7 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
         } else {
             // No audio WAV to mux; let any video session finalize
             // video-only. The raw audio is not kept either.
-            notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+            notifyAudioRecordingDone(callMetaData.callId, undefined, server, socketData.callMetadata.sessionNumber);
             await rawFlushed;
             if (socketData.recordingTempPath) {
                 await deleteTempFile(callMetaData, socketData.recordingTempPath);
@@ -1310,7 +1314,7 @@ const finishRecording = async (socketData: SocketCallData, callMetaData: CallMet
     } else {
         // No audio recording was produced (e.g. no audio bytes ever
         // arrived); let any video session finalize video-only.
-        notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+        notifyAudioRecordingDone(callMetaData.callId, undefined, server, socketData.callMetadata.sessionNumber);
         await rawFlushed;
         if (socketData.recordingTempPath) {
             await deleteTempFile(callMetaData, socketData.recordingTempPath);

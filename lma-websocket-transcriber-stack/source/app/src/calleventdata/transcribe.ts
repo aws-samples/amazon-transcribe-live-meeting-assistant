@@ -275,6 +275,9 @@ export const writeCallVideoRecordingEvent = async (
         EventType: 'ADD_S3_VIDEO_RECORDING_URL',
         CallId: callMetaData.callId,
         VideoRecordingUrl: videoRecordingUrl,
+        // The session the recording belongs to, as the Virtual Participant
+        // names it; the call event processor files the link under it.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
