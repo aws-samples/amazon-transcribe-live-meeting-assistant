@@ -529,3 +529,33 @@ def test_a_users_view_takes_the_meetings_expiry(client) -> None:
         },
     )
     assert "was not found" in _error(missing)
+
+
+def _mark(args: dict) -> dict:
+    payload = json.dumps({"action": "set_checklist_item_status", "args": args})
+    return {"Label": "Mark covered", "Kind": "MUTATION", "Payload": payload}
+
+
+def test_the_checklist_status_action_is_accepted(client) -> None:
+    _ok(_evaluate(client, "notificationPublishMeeting.js", "request", {
+        "arguments": _publish(Actions=[_mark({"itemId": "c1", "status": "covered"})]),
+        "identity": BACKEND,
+    }))
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        ({"itemId": "c1", "status": "done"}, "must be one of"),
+        ({"itemId": "c 1", "status": "covered"}, "not a valid value"),
+        ({"itemId": "c1"}, "status is required"),
+        ({"itemId": "c1", "status": "covered", "StatusSource": "assistant"}, "does not take StatusSource"),
+        ({"itemId": "c1", "status": "covered", "callId": "m2"}, "does not take callId"),
+    ],
+)
+def test_a_checklist_status_action_the_resolver_refuses(client, args, message) -> None:
+    response = _evaluate(client, "notificationPublishMeeting.js", "request", {
+        "arguments": _publish(Actions=[_mark(args)]),
+        "identity": BACKEND,
+    })
+    assert message in _error(response)

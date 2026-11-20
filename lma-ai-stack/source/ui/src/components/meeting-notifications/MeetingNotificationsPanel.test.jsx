@@ -183,8 +183,49 @@ describe('MeetingNotificationsInline', () => {
 });
 
 describe('notification actions', () => {
-  it('ships with no mutation action', () => {
-    expect(Object.keys(MUTATION_ACTIONS)).toEqual([]);
+  it('offers setting a checklist item status as its one mutation action', () => {
+    expect(Object.keys(MUTATION_ACTIONS)).toEqual(['set_checklist_item_status']);
+  });
+
+  const markCovered = (args) => ({
+    Label: 'Mark covered',
+    Kind: 'MUTATION',
+    Payload: JSON.stringify({ action: 'set_checklist_item_status', args }),
+  });
+
+  it('sets the status as the user, for the notification meeting', async () => {
+    const resolved = resolveAction(
+      notification('a', { CallId: 'm1' }),
+      markCovered({ itemId: 'c1', status: 'covered' }),
+    );
+    const client = { graphql: vi.fn(() => Promise.resolve({})) };
+    await resolved.run(client);
+    const [{ query, variables }] = client.graphql.mock.calls[0];
+    expect(query).toContain('updateCallChecklistItem(input: $input)');
+    expect(variables).toEqual({ input: { CallId: 'm1', ItemId: 'c1', Status: 'covered', StatusSource: 'user' } });
+  });
+
+  it.each([
+    ['another meeting', { itemId: 'c1', status: 'covered', callId: 'm2' }],
+    ['its own source', { itemId: 'c1', status: 'covered', StatusSource: 'assistant' }],
+    ['a status there is not', { itemId: 'c1', status: 'done' }],
+    ['an item id that is not one', { itemId: 'c 1', status: 'covered' }],
+    ['no item', { status: 'covered' }],
+    ['no status', { itemId: 'c1' }],
+  ])('shows no button for a payload naming %s', (_name, args) => {
+    expect(resolveAction(notification('a'), markCovered(args))).toBeNull();
+  });
+
+  it('shows the Mark covered button and runs it from the panel', async () => {
+    const answers = answersWith([notification('a', { Actions: [markCovered({ itemId: 'c1', status: 'covered' })] })]);
+    answers.updateCallChecklistItem = { CallId: 'm1' };
+    const { client, state } = fakeClient(answers);
+    render(<PanelWithHook client={client} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mark covered' })).toBeTruthy());
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Mark covered' })));
+    const update = state.requests.find((request) => request.query.includes('updateCallChecklistItem('));
+    expect(update.variables.input).toEqual({ CallId: 'm1', ItemId: 'c1', Status: 'covered', StatusSource: 'user' });
+    expect(screen.getByText('Done')).toBeTruthy();
   });
 
   it('never takes a name every object has for an action', () => {

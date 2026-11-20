@@ -45,12 +45,24 @@ const MAX_COPY_TEXT = 2000;
 const MAX_ARG = 200;
 
 // BEGIN notificationMutationActions -- the actions a MUTATION button may name,
-// each with the argument names it accepts. The UI's registry
+// each with the arguments it takes, all of them required. The UI's registry
 // (ui/src/components/meeting-notifications/notification-actions.js) holds the
-// same names; test_appsync_contract.py holds the two to each
-// other. Empty: no action is offered yet.
-const MUTATION_ACTIONS = {};
+// same names; test_appsync_contract.py holds the two to each other.
+const MUTATION_ACTIONS = {
+    // Sets one checklist item's status (updateCallChecklistItem), as the
+    // signed-in user who presses the button.
+    set_checklist_item_status: ['itemId', 'status'],
+};
 // END notificationMutationActions
+
+// The values an action's argument may take, where they are fixed: a list of
+// values, or the characters allowed with the most there may be.
+const MUTATION_ACTION_VALUES = {
+    set_checklist_item_status: {
+        status: ['open', 'covered', 'partial', 'deferred', 'not_applicable'],
+        itemId: { chars: `${LOWER}${UPPER}${DIGITS}._:-`, max: 64 },
+    },
+};
 
 function bad(message) {
     util.error(message, 'BadRequest');
@@ -116,7 +128,17 @@ function checkMutation(payload) {
         if (!allowed.includes(key)) {
             bad(`Action ${name} does not take ${key}`);
         }
+    });
+    const fixed = MUTATION_ACTION_VALUES[name] || {};
+    allowed.forEach((key) => {
         checkText(args[key], `Action ${name} ${key}`, MAX_ARG, true);
+        const rule = fixed[key];
+        if (Array.isArray(rule) && !rule.includes(args[key])) {
+            bad(`Action ${name} ${key} must be one of: ${rule.join(', ')}`);
+        }
+        if (rule && !Array.isArray(rule) && (args[key].length > rule.max || !onlyChars(args[key], rule.chars))) {
+            bad(`Action ${name} ${key} is not a valid value`);
+        }
     });
 }
 

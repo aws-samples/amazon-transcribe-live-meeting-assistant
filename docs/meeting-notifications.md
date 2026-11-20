@@ -132,10 +132,22 @@ with the user's own sign-in, so its resolver decides whether that user may do
 it. The meeting it acts on is always the notification's own meeting, never one
 named in the payload.
 
-The list is empty in this release, so only `COPY` buttons can be published. An
-action is added by one entry on each side: its name and the argument names it
-takes in the resolver, and its operation and variables in the page. A contract
-test holds the two lists to each other.
+The list holds one action:
+
+| Action | Arguments (all required) | What it does |
+|---|---|---|
+| `set_checklist_item_status` | `itemId` (an item id of the meeting's [checklist](meeting-context-and-checklist.md)), `status` (`open`, `covered`, `partial`, `deferred` or `not_applicable`) | `updateCallChecklistItem` for the notification's meeting, as the user who presses it, with `StatusSource: user` set by the page; the payload cannot set either. A status set this way is the user's, which the assistant never changes. |
+
+For example, a "Mark covered" button:
+
+```python
+{"label": "Mark covered", "kind": "mutation",
+ "payload": {"action": "set_checklist_item_status", "args": {"itemId": "item-3", "status": "covered"}}}
+```
+
+An action is added by one entry on each side: its name, its arguments and any
+fixed values in the resolver, and its operation and variables in the page. A
+contract test holds the two lists to each other.
 
 ## Retention
 
@@ -297,8 +309,7 @@ function.
   notifications; older ones are still returned over MCP.
 - After a share is removed, a page that user already had open keeps what it had
   loaded until it is reloaded.
-- No `MUTATION` button action is offered yet; only `COPY` buttons can be
-  published.
+- `set_checklist_item_status` is the only `MUTATION` button action.
 - Notifications are delivered in LMA only. There is no email, chat or other
   channel, and adding one would be a separate, per-category choice.
 

@@ -18,11 +18,29 @@
  * MUTATION action whose name is not on its own list;
  * test_appsync_contract.py holds the two lists to each other.
  */
+import updateCallChecklistItem from '../../graphql/queries/updateCallChecklistItem';
+import { ITEM_ID, STATUS_DISPLAY } from '../common/meeting-preparation';
 
-// BEGIN notificationMutationActions -- one entry per action, each with the
-// argument names it takes, its operation and how its variables are built from
-// the notification and the arguments. Empty: no action is offered yet.
-export const MUTATION_ACTIONS = {};
+// BEGIN notificationMutationActions -- one entry per action: the arguments it
+// takes (all required), whether their values are ones it accepts, its
+// operation, and how its variables are built from the notification's meeting
+// and the arguments.
+export const MUTATION_ACTIONS = {
+  // Sets one checklist item's status as the signed-in user. StatusSource is
+  // fixed here, never taken from the payload, and the meeting is always the
+  // notification's own; updateCallChecklistItem applies its own access rule.
+  set_checklist_item_status: {
+    args: ['itemId', 'status'],
+    accepts: ({ itemId, status }) =>
+      typeof itemId === 'string' &&
+      ITEM_ID.test(itemId) &&
+      Object.prototype.hasOwnProperty.call(STATUS_DISPLAY, status),
+    query: updateCallChecklistItem,
+    variables: ({ callId, args }) => ({
+      input: { CallId: callId, ItemId: args.itemId, Status: args.status, StatusSource: 'user' },
+    }),
+  },
+};
 // END notificationMutationActions
 
 const parsePayload = (payload) => {
@@ -52,6 +70,8 @@ export const resolveAction = (notification, action) => {
   const definition = MUTATION_ACTIONS[name];
   const args = payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args) ? payload.args : {};
   if (!Object.keys(args).every((key) => definition.args.includes(key))) return null;
+  if (!definition.args.every((key) => typeof args[key] === 'string' && args[key])) return null;
+  if (definition.accepts && !definition.accepts(args)) return null;
   return {
     label: action.Label,
     kind: 'mutation',

@@ -1119,8 +1119,10 @@ def test_mutation_actions_are_the_same_on_the_server_and_in_the_page() -> None:
         "// BEGIN notificationMutationActions",
         "// END notificationMutationActions",
     )
-    server_names = re.findall(r"^\s*(\w+): \[", server, re.M)
-    page_names = re.findall(r"^\s*(\w+): \{", page, re.M)
+    # The top-level keys of each object: four spaces in the resolver, two in the page.
+    server_names = re.findall(r"^    (\w+): \[", server, re.M)
+    page_names = re.findall(r"^  (\w+): \{", page, re.M)
+    assert server_names, "no action found in the resolver's list"
     assert sorted(server_names) == sorted(page_names)
     # A name inherited by every object is never taken for an action.
     assert (
