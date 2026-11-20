@@ -202,6 +202,78 @@ def _check_node_version() -> str | None:
     return None
 
 
+# Chrome accepts a manifest `version` of one to four dot-separated integers,
+# each from 0 to 65535 with no leading zeros, and compares versions numerically
+# component by component, treating a missing component as 0. LMA's ./VERSION
+# follows PEP 440 (`0.4.1.dev1`, `0.4.1rc1`, `0.4.1`), so the extension gets a
+# mapped `version` and the full string in `version_name`, which Chrome displays.
+#
+# The fourth component encodes the release phase, in PEP 440 order:
+#
+#   X.Y.Z.devN  -> X.Y.Z.N            (N from 0 to 9999)
+#   X.Y.ZaN     -> X.Y.Z.(10000 + N)
+#   X.Y.ZbN     -> X.Y.Z.(20000 + N)
+#   X.Y.ZrcN    -> X.Y.Z.(30000 + N)
+#   X.Y.Z       -> X.Y.Z.65535
+#
+# A release therefore sorts above every dev, alpha, beta and rc build of the
+# same X.Y.Z, so Chrome will update a pre-release install to the release; and
+# every build of X.Y.Z sorts below any build of a later X.Y.Z. A release cannot
+# keep a bare `X.Y.Z`: Chrome reads it as X.Y.Z.0, below X.Y.Z.devN. The
+# separator before the phase may be `.`, `-`, `_` or nothing, as PEP 440 allows.
+# A plain fourth integer (`X.Y.Z.N`, used by some past dev builds) is treated as
+# a dev build number.
+CHROME_EXTENSION_RELEASE_BUILD = 65535
+CHROME_EXTENSION_PHASE_BASE = {"dev": 0, "a": 10000, "b": 20000, "rc": 30000}
+CHROME_EXTENSION_PHASE_SPAN = 10000
+_PHASE_ALIASES = {"dev": "dev", "a": "a", "alpha": "a", "b": "b", "beta": "b", "rc": "rc", "c": "rc"}
+_LMA_VERSION_RE = re.compile(
+    r"^(\d+)\.(\d+)\.(\d+)"
+    r"(?:[._-]?(?P<phase>dev|alpha|beta|rc|a|b|c)(?P<phase_n>\d*)|\.(?P<plain_n>\d+))?$",
+    re.IGNORECASE,
+)
+
+
+def chrome_extension_version(version: str) -> str:
+    """Map an LMA version string to a valid Chrome extension manifest `version`.
+
+    See the comment above for the scheme. Raises LMAPublishError for a version it
+    cannot map, so a publish stops instead of shipping an extension Chrome rejects.
+    """
+    match = _LMA_VERSION_RE.match(version.strip())
+    if not match:
+        raise LMAPublishError(
+            f"Cannot derive a Chrome extension version from '{version}'. Expected X.Y.Z, "
+            "optionally followed by devN, aN, bN, rcN or a fourth integer."
+        )
+    major, minor, patch = (int(match.group(i)) for i in (1, 2, 3))
+    if match.group("phase"):
+        phase = _PHASE_ALIASES[match.group("phase").lower()]
+        number = int(match.group("phase_n") or 0)
+    elif match.group("plain_n") is not None:
+        phase, number = "dev", int(match.group("plain_n"))
+    else:
+        phase, number = None, 0
+
+    if phase is None:
+        build = CHROME_EXTENSION_RELEASE_BUILD
+    else:
+        if number >= CHROME_EXTENSION_PHASE_SPAN:
+            raise LMAPublishError(
+                f"Cannot derive a Chrome extension version from '{version}': the {phase} "
+                f"number must be below {CHROME_EXTENSION_PHASE_SPAN}."
+            )
+        build = CHROME_EXTENSION_PHASE_BASE[phase] + number
+
+    parts = (major, minor, patch, build)
+    if any(part > 65535 for part in parts):
+        raise LMAPublishError(
+            f"Cannot derive a Chrome extension version from '{version}': each component "
+            "must be at most 65535."
+        )
+    return ".".join(str(part) for part in parts)
+
+
 def _compare_versions(v1: str, v2: str) -> int:
     """Compare two version strings. Returns -1, 0, or 1."""
     parts1 = [int(x) for x in v1.split(".")]
@@ -982,13 +1054,21 @@ class Publisher:
         skip_dirs = {"node_modules", "build", "dist", ".git", "__pycache__"}
         shutil.copytree(stack_dir, temp_stack_dir, ignore=shutil.ignore_patterns(*skip_dirs))
 
-        # Replace <VERSION_TOKEN> in key files
+        # Replace the version tokens in key files. The manifest's `version` takes
+        # <CHROME_VERSION_TOKEN>, because Chrome accepts only dotted integers there
+        # (see chrome_extension_version); its `version_name` takes the full version.
+        replacements = {
+            "<CHROME_VERSION_TOKEN>": chrome_extension_version(version),
+            "<VERSION_TOKEN>": version,
+        }
         token_files = ["package.json", "public/manifest.json", "template.yaml"]
         for rel_path in token_files:
             fpath = temp_stack_dir / rel_path
             if fpath.exists():
                 content = fpath.read_text()
-                fpath.write_text(content.replace("<VERSION_TOKEN>", version))
+                for token, value in replacements.items():
+                    content = content.replace(token, value)
+                fpath.write_text(content)
 
         # Create zip from token-replaced copy
         zip_path = tmpdir / zip_filename

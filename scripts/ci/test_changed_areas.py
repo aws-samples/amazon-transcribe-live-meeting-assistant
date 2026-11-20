@@ -337,6 +337,9 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("test-fixtures/speaker-modes.json", "ui"),
         ("test-fixtures/speaker-modes.json", "lambdas"),
         ("test-fixtures/google-meet-inputs.json", "sdk_cli"),
+        # The SDK's publish tests package the browser extension and read its tokens.
+        ("lma-browser-extension-stack/public/manifest.json", "sdk_cli"),
+        ("lma-browser-extension-stack/template.yaml", "sdk_cli"),
         # The review harness's false-positive test reads every docs page, and the demo
         # recorder's tests read the agent instructions and the demo page.
         ("docs/monitoring.md", "pr_review"),
