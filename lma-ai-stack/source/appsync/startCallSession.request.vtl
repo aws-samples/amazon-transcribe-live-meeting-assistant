@@ -1,8 +1,8 @@
 ## startCallSession: the START event of a session that a Virtual Participant
-## rejoin or reopenMeeting allowed (rejoinVirtualParticipant and reopenMeeting
-## write Call.SessionNumber) makes the meeting live again under the same CallId. Only that session number is accepted, and only
-## once: a redelivered START, or one naming any other session, fails the
-## condition, which dDbPutCondition.response.vtl reports as
+## rejoin or reopenMeeting allowed (both write Call.SessionNumber) makes the
+## meeting live again under the same CallId. Only that session number is
+## accepted, and only once: a redelivered START, or one naming any other
+## session, fails the condition, which dDbPutCondition.response.vtl reports as
 ## "item put condition failure" and the call event processor drops.
 ##
 ## The meeting's transcript, recordings, consent record and summary text are
@@ -28,9 +28,9 @@
 } )
 ## The session, with where it starts on the transcript timeline, appended to
 ## Call.Sessions for the meeting page's player: only when the call event
-## processor could read the offset recorded when the session was allowed. The condition
-## below lets this write succeed once per session, so the list names each
-## session once.
+## processor could read the offset recorded when the session was allowed. The
+## condition below lets this write succeed once per session, so the list names
+## each session once.
 #if( $util.isNumber($ctx.args.input.SessionOffsetSeconds) )
   #set( $expression = "${expression}, #Sessions = list_append(if_not_exists(#Sessions, :emptyList), :session)" )
   $util.qr( $expNames.put("#Sessions", "Sessions") )

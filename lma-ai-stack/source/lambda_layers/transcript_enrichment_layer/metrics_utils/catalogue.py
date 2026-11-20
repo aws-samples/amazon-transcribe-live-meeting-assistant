@@ -134,6 +134,7 @@ TRANSCRIPT_SEGMENT_WRITE_FAILED = "TranscriptSegmentWriteFailed"
 STREAMING_SESSIONS_STARTED = "StreamingSessionsStarted"
 TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS = "TimeToFirstTranscriptSegmentMs"
 STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = "StreamingSessionsWithoutTranscript"
+STREAMING_STARTS_NOT_CHECKED = "StreamingStartsNotChecked"
 
 # ── voice assistant capacity ────────────────────────────────────────────────
 #
@@ -253,6 +254,23 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "error anywhere. Alarmed for that reason. Covers only meetings "
             "streamed through the transcriber, so a Virtual Participant that "
             "transcribes nothing is not counted -- it has no equivalent yet."
+        ),
+    ),
+    MetricDefinition(
+        name=STREAMING_STARTS_NOT_CHECKED,
+        unit="Count",
+        component=Component.WEBSOCKET_TRANSCRIBER,
+        # The client is sent the refusal and can try again, so this is graphed
+        # rather than alarmed.
+        records_swallowed_failure=False,
+        meaning=(
+            "A START was refused because the meeting record could not be read "
+            "through the AppSync API after its retries, so whether the caller "
+            "may capture that meeting could not be checked. The client is told "
+            "and may try again. A reconnect that resumes the session held for "
+            "the same caller on the task is not refused and is not counted. A "
+            "sustained value means new and continued meetings streamed through "
+            "the transcriber are being turned away at START."
         ),
     ),
     MetricDefinition(
