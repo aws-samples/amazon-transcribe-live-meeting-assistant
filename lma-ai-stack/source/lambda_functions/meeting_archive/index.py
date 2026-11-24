@@ -70,6 +70,9 @@ from boto3.dynamodb.types import TypeDeserializer
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
 
+# pylint: disable-next=import-error
+from lma_consent.summary import has_speaker_links  # configuration layer
+
 # Stdlib logging rather than aws_lambda_powertools: this function carries no
 # layer and uses the runtime's own boto3.
 LOGGER = logging.getLogger()
@@ -1061,7 +1064,7 @@ def meeting_export(
             if retained
             and (
                 {"transcript", "chat", "checklist", "actionItems"} & set(wanted)
-                or ("consent" in wanted and export.has_speaker_links(meeting.get("Consent")))
+                or ("consent" in wanted and has_speaker_links(meeting.get("Consent")))
             )
             else []
         )

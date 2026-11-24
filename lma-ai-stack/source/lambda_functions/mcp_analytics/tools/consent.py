@@ -88,5 +88,5 @@ def execute(caller: Caller, meeting_id: Any) -> Dict[str, Any]:
     speakers = None
     if has_speaker_links((state or {}).get("Consent")) and not meeting.get("TranscriptDeletedAt"):
         # The ids the meeting export gives its speakers, from the same lines.
-        speakers = Speakers(final_segments(read_final_rows(call_id)), meeting)
+        speakers = Speakers(final_segments(read_final_rows(call_id, finals_only=False)), meeting)
     return meeting_consent_output(call_id, state, speakers)

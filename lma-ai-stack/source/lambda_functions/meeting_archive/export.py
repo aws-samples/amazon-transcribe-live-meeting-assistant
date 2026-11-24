@@ -33,7 +33,6 @@ from lma_channels import canonical_channel  # configuration layer
 from lma_chat_links import extract_links  # configuration layer
 from lma_consent.summary import (  # configuration layer
     consent_events,
-    has_speaker_links,  # noqa: F401 -- index.py reads it through this module
     meeting_consent_output,
     participant_consent,
 )
