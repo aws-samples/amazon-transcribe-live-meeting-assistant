@@ -44,8 +44,9 @@ client connects, and the API key scopes, are in
   `get_meeting_transcript`, `get_virtual_participant_status`, `schedule_meeting`
   and `start_meeting_now`), without the meeting preparation arguments.
 - **Legacy keys** keep `schedule_meeting` and `start_meeting_now` with their
-  original arguments: their `labels`, `audience`, `context`, `checklist` and
-  `shareWith` arguments need a **Read and write** key. The answers are the
+  original arguments: their `labels`, `audience`, `context`, `checklist`,
+  `shareWith`, `summaryProfile` and `guidance` arguments need a **Read and
+  write** key. The answers are the
   current ones on every endpoint and for every key.
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered

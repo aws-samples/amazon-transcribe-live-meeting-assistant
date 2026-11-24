@@ -190,7 +190,7 @@ class TestOwnerFilter(unittest.TestCase):
 
     ENV = {"AWS_REGION": "us-west-2", "AWS_ACCOUNT_ID": "123456789012", "MODEL_ARN": ""}
 
-    def _filter(self, is_admin):
+    def _filter(self, is_admin, **dates):
         with (
             patch.dict(os.environ, self.ENV, clear=False),
             patch.object(
@@ -201,17 +201,23 @@ class TestOwnerFilter(unittest.TestCase):
             mock_kb = MagicMock()
             mock_kb.retrieve_and_generate.return_value = {"output": {"text": "ok"}, "citations": []}
             mock_boto3.client.return_value = mock_kb
-            search_meetings.execute(query="q", user_id="user-1", is_admin=is_admin)
+            search_meetings.execute(query="q", user_id="user-1", is_admin=is_admin, **dates)
             kb = mock_kb.retrieve_and_generate.call_args[1]["retrieveAndGenerateConfiguration"][
                 "knowledgeBaseConfiguration"
             ]
         return kb["retrievalConfiguration"]["vectorSearchConfiguration"].get("filter")
 
     def test_non_admin_search_filters_on_the_owner_metadata_key(self):
+        """One condition is sent bare: a RetrievalFilter's andAll takes two or more."""
         self.assertEqual(
             self._filter(is_admin=False),
-            {"andAll": [{"equals": {"key": "Owner", "value": "user-1"}}]},
+            {"equals": {"key": "Owner", "value": "user-1"}},
         )
+
+    def test_several_conditions_are_combined_with_and_all(self):
+        conditions = self._filter(is_admin=False, start_date="2026-11-01")["andAll"]
+        self.assertEqual(len(conditions), 2)
+        self.assertIn({"equals": {"key": "Owner", "value": "user-1"}}, conditions)
 
     def test_admin_search_is_not_filtered_by_owner(self):
         self.assertIsNone(self._filter(is_admin=True))

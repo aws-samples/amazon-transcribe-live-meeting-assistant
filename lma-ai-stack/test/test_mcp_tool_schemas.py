@@ -32,9 +32,9 @@ TEMPLATE = AI_STACK / "deployment" / "lma-ai-stack.yaml"
 MCP_LAMBDA = AI_STACK / "source" / "lambda_functions" / "mcp_analytics"
 ON_UPDATE_CALL = AI_STACK / "source" / "ui" / "src" / "graphql" / "queries" / "onUpdateCall.js"
 GATEWAY_KEYS = {"Type", "Description", "Properties", "Items", "Required"}
-# The arguments schedule_meeting and start_meeting_now take on the API key
-# endpoint only (index.PREPARATION_ARGUMENTS). They are left out of every gateway
-# tool, so the gateway's list_meetings has no labels or audience filter either.
+# Every meeting preparation argument (index.PREPARATION_ARGUMENTS), left out of
+# every gateway tool's schema: schedule_meeting's and start_meeting_now's, and the
+# gateway's list_meetings has no labels or audience filter either.
 GATEWAY_WITHOUT = (
     "labels",
     "audience",

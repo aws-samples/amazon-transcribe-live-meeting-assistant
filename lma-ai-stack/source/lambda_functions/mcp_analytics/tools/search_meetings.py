@@ -125,7 +125,10 @@ def execute(
     # Build retrieval configuration
     retrieval_config = {"vectorSearchConfiguration": {"numberOfResults": max_results}}
 
-    if filters:
+    # A RetrievalFilter's andAll takes two conditions or more, so one is sent bare.
+    if len(filters) == 1:
+        retrieval_config["vectorSearchConfiguration"]["filter"] = filters[0]
+    elif filters:
         retrieval_config["vectorSearchConfiguration"]["filter"] = {"andAll": filters}
 
     # In the function for the reason given in _configured_model_id's docstring.
