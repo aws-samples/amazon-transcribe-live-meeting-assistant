@@ -244,6 +244,12 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         if let consent = consent {
             meta["consent"] = consent
         }
+        // A stream that continues an existing meeting names the capture session
+        // reopenMeeting allowed, on every START (reconnects included). A new
+        // meeting names none.
+        if let session = Config.startSessionNumber(config.sessionNumber) {
+            meta["sessionNumber"] = session
+        }
         sendJSON(meta, label: "START")
         queue.async {
             self.startSent = true

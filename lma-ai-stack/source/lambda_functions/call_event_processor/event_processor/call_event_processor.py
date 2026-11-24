@@ -423,10 +423,10 @@ def is_put_condition_failure(error: Any) -> bool:
       different reason -- ``get_call_details`` reads the meeting earlier in the
       same record and has already failed it on a null ``getCall``, so the
       aggregation write is not reached.
-    * ``startCallSession`` writes only for the session a rejoin allowed and only
-      once, so a rejection is a redelivered START of a session that has started,
-      or a START naming a session nobody allowed; neither may reopen the
-      meeting. ``execute_start_call_session_mutation`` answers with
+    * ``startCallSession`` writes only for the session a rejoin or reopenMeeting
+      allowed, and only once, so a rejection is a redelivered START of a session
+      that has started, or a START naming a session nobody allowed; neither may
+      reopen the meeting. ``execute_start_call_session_mutation`` answers with
       :data:`SESSION_NOT_STARTED`.
     * ``addCallSummaryText`` writes through the same template, with no
       ``UpdatedAt`` of its own, so the template stamps it with the resolver's
@@ -1411,11 +1411,11 @@ async def recording_session_field(
     the transcript timeline, so each link is stored with its session
     (Call.RecordingUrlSessions, Call.VideoRecordingUrlSessions). A writer that
     names the session in the event (the Virtual Participant) is taken at its
-    word. For one that does not -- a streaming client's transcriber, whose
-    meetings have one session, or a Virtual Participant image that predates
-    naming it -- the link is taken to belong to the session the meeting is in:
-    a recording is uploaded as its session ends, before a rejoin can start the
-    next. Empty when the meeting could not be read, which stores the link with
+    word. For one that does not -- the WebSocket transcriber, whose sessions
+    reopenMeeting allows, or a Virtual Participant image that predates naming
+    it -- the link is taken to belong to the session the meeting is in: a
+    recording is uploaded as its session ends, before a rejoin or a reopen can
+    start the next. Empty when the meeting could not be read, which stores the link with
     no session rather than a guessed one.
     """
     field = f"{link_field}Session"
@@ -2344,10 +2344,12 @@ async def execute_process_event_api_mutation(
         # The END of an earlier capture session, arriving after a rejoin has
         # started a later one (a redelivery, or the earlier participant still
         # shutting down), must not end the live session. The Virtual
-        # Participant and the End button name the session in every END, the
-        # first session's included. One that names none -- from a streaming
-        # client, the stale meeting reaper, or a Virtual Participant of an
-        # earlier release -- is taken to be the current session's.
+        # Participant, the End button and the WebSocket transcriber name the
+        # session in every END, the first session's included. One that names
+        # none -- a transcriber session that added to an existing meeting
+        # without naming a session (a reconnect that reached another task),
+        # the stale meeting reaper, or a Virtual Participant of an earlier
+        # release -- is taken to be the current session's.
         if "SessionNumber" in message and session_number_of(message) < started_session:
             LOGGER.info(
                 "END event for capture session %s of a meeting now in session %s; ignored",

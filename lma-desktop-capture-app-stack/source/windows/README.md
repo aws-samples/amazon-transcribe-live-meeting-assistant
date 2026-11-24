@@ -409,6 +409,7 @@ bakes the deployment's real values into it; the checked-in copy is a placeholder
 |---|---|---|---|
 | `wssEndpoint` | `--endpoint` | `LMA_WS_ENDPOINT` | WebSocket transcriber URL |
 | `webEndpoint` | `--web-endpoint` | `LMA_WEB_ENDPOINT` | Web UI base (for "Open in LMA"; a **different** CloudFront distro than the WS host) |
+| `graphqlEndpoint` | `--graphql-endpoint` | `LMA_GRAPHQL_ENDPOINT` | LMA's AppSync GraphQL URL, for **Continue an existing meeting…** (the option is hidden when empty) |
 | `userPoolId` | `--user-pool-id` | `LMA_USER_POOL_ID` | Cognito pool id |
 | `clientId` | `--client-id` | `LMA_CLIENT_ID` | Cognito app client id |
 | `region` | `--region` | `LMA_REGION` | Region (else inferred from pool id prefix) |

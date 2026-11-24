@@ -4,7 +4,7 @@
 """Put the configuration layer on the path for the tests beside it.
 
 The function carries the configuration layer (for lma_meeting_preparation, the
-rules a Join again's meeting preparation is checked by), which Lambda puts on
+rules a Join again's meeting preparation is checked by, and lma_sessions), which Lambda puts on
 the path at /opt/python; here it is the layer's source directory.
 """
 

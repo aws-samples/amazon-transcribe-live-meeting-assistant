@@ -1,6 +1,7 @@
 {
   "wssEndpoint": "wss://REPLACE-ME.cloudfront.net/api/v1/ws",
   "webEndpoint": "https://REPLACE-ME-webapp.cloudfront.net/",
+  "graphqlEndpoint": "https://REPLACE-ME.appsync-api.us-east-1.amazonaws.com/graphql",
   "userPoolId": "us-east-1_REPLACEME",
   "clientId": "REPLACEMECLIENTID",
   "region": "us-east-1",

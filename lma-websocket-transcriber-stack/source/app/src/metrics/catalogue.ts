@@ -45,10 +45,19 @@ export const TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS = 'TimeToFirstTranscriptSegment
  */
 export const STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = 'StreamingSessionsWithoutTranscript';
 
+/**
+ * A START was refused because the meeting record could not be read, so whether
+ * the caller may capture that meeting could not be checked. The client is told
+ * and may try again; a session held for the same caller on this task is resumed
+ * instead and is not counted.
+ */
+export const STREAMING_STARTS_NOT_CHECKED = 'StreamingStartsNotChecked';
+
 export const CATALOGUE: readonly MetricDefinition[] = [
     { name: STREAMING_SESSIONS_STARTED, unit: 'Count' },
     { name: TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS, unit: 'Milliseconds' },
     { name: STREAMING_SESSIONS_WITHOUT_TRANSCRIPT, unit: 'Count' },
+    { name: STREAMING_STARTS_NOT_CHECKED, unit: 'Count' },
 ];
 
 export const UNIT_BY_NAME: Readonly<Record<string, MetricUnit>> = Object.fromEntries(

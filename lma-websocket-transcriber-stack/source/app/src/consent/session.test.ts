@@ -330,6 +330,17 @@ test('the step is not recorded on another user\'s meeting, and capture stops', a
     assert.match(String(h.frames.find((f) => f['code'] === 'MEETING_NOT_OWNED')?.['message']), /another user/);
 });
 
+test('an Admin records the step on another user\'s meeting', async () => {
+    const { api, calls } = fakeApi({ owner: 'bo' });
+    const h = harness(api);
+    const session = new ConsentSession('m', NOTIFY, confirmed('notify'), { ...h.deps, callerIsAdmin: true });
+    await session.begin();
+    assert.equal(calls[0]?.field, 'getCall');
+    assert.ok(calls.some((c) => c.field === 'startMeetingConsent'), 'the consent record is started');
+    assert.equal(session.isStopped, false);
+    assert.equal(h.frames.find((f) => f['code'] === 'MEETING_NOT_OWNED'), undefined);
+});
+
 test('a caller without a username records nothing', async () => {
     const { api, calls } = fakeApi();
     const h = harness(api);

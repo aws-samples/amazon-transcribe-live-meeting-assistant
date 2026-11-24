@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { PutOutcome, RecordingStore, uploadRecording } from './recording-upload';
+import { recordingBaseName } from '../calleventdata/meeting-session';
 
 const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
@@ -54,4 +55,19 @@ test('a failed upload is reported, not mistaken for an existing recording', asyn
     const upload = await uploadRecording(store, files, quiet);
 
     assert.deepEqual(upload, { wavKey: 'lma-audio-recordings/Meeting_1.wav', outcome: 'failed', storedSeparately: false });
+});
+
+test('a continued meeting links only the first recording of each session', async () => {
+    // The meeting's first session already has its recording.
+    const store = bucket(['lma-audio-recordings/Meeting_1.wav', 'lma-audio-recordings/Meeting_1.raw']);
+    const session2 = { ...files, baseName: recordingBaseName('Meeting_1', { sessionNumber: 2 }) };
+
+    const first = await uploadRecording(store, session2, quiet);
+    assert.deepEqual(first, { wavKey: 'lma-audio-recordings/Meeting_1_s2.wav', outcome: 'stored', storedSeparately: false });
+
+    // A reconnect within session 2 that reached another task: stored beside it, so not linked.
+    const reconnect = await uploadRecording(store, { ...session2, stamp: '2026-11-19T10-00-00-000Z' }, quiet);
+    assert.equal(reconnect.storedSeparately, true);
+    assert.equal(reconnect.wavKey, 'lma-audio-recordings/Meeting_1_s2_2026-11-19T10-00-00-000Z.wav');
+    assert.equal(store.keys.get('lma-audio-recordings/Meeting_1.wav'), 'earlier', 'the first session\'s recording is kept');
 });

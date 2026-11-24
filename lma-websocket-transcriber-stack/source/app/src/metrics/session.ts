@@ -119,6 +119,16 @@ export const noteStreamingSessionEnded = (
     emitter.count(catalogue.STREAMING_SESSIONS_WITHOUT_TRANSCRIPT);
 };
 
+/**
+ * Count a START refused because the meeting record could not be read.
+ *
+ * Called only when the refusal stands: a reconnect that resumes the session
+ * held for its caller is not refused, so it is not counted.
+ */
+export const noteStreamingStartNotChecked = (emitter: MetricEmitter = METRICS): void => {
+    emitter.count(catalogue.STREAMING_STARTS_NOT_CHECKED);
+};
+
 /** Whether this meeting has produced a transcript segment. For tests. */
 export const sawTranscriptSegment = (meeting: CallMetaData): boolean =>
     stateByMeeting.get(meeting)?.sawTranscriptSegment ?? false;
