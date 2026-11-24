@@ -135,14 +135,17 @@ export const parseLabelFilter = (text) => {
   return { key: text.slice(0, at), value: text.slice(at + 1) };
 };
 
+/** What the meeting list shows when its label filter's key is not a label key. */
+export const LABEL_FILTER_KEY_PROBLEM = 'Not a label key: keys are lower case and match exactly';
+
 /**
  * Why a meeting list label filter can match no meeting, or null. A key that is
- * not a label key (say "Project" or "project ") is told the same way the label
- * editor tells it, since the filter is matched exactly.
+ * not a label key (say "Project" or "project ") can match no meeting, since the
+ * filter is matched exactly. The message is short, to fit the list's toolbar.
  */
 export const labelFilterProblem = (text) => {
   const wanted = parseLabelFilter(text);
-  return wanted ? labelKeyProblem(wanted.key) : null;
+  return wanted && labelKeyProblem(wanted.key) ? LABEL_FILTER_KEY_PROBLEM : null;
 };
 
 /**

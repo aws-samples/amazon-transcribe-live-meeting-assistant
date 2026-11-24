@@ -337,4 +337,44 @@ describe('a web page download that fails', () => {
     });
     expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
   });
+
+  it('is saved without pictures, and with no message, when the key frames cannot be fetched', async () => {
+    const offline = () => Promise.reject(new TypeError('Failed to fetch'));
+    const saved = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      saved.push(blob);
+      return 'blob:x';
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const linked = async (callId, ids) =>
+      Object.fromEntries(ids.map((id) => [id, { ImageSignedUrl: `https://frames.example.com/${id}` }]));
+    // First the frames' links cannot be read; then the pictures behind them cannot be fetched.
+    const loaders = [
+      (callId, frameIds) => fetchKeyframeThumbnails(callId, frameIds, { loadFrames: offline }),
+      (callId, frameIds) => fetchKeyframeThumbnails(callId, frameIds, { loadFrames: linked, fetchImage: offline }),
+    ];
+    const alerts = [];
+    // eslint-disable-next-line no-restricted-syntax -- one download at a time, so each is read on its own
+    for (const loadThumbnails of loaders) {
+      // eslint-disable-next-line no-await-in-loop
+      alerts.push(...(await failedWith({ loadThumbnails, loadRenderer })));
+    }
+    expect(alerts).toEqual([]);
+    expect(saved).toHaveLength(2);
+    const pages = await Promise.all(saved.map((blob) => blob.text()));
+    pages.map(parse).forEach((page) => {
+      expect(page.querySelectorAll('img')).toHaveLength(0);
+      expect(page.body.textContent).toContain('(Slide at 00:30)');
+      expect(page.body.textContent).toContain('(Slide at 01:30)');
+    });
+  });
+
+  it('says the page could not be prepared when a thumbnail loader rejects', async () => {
+    const alerts = await failedWith({
+      loadThumbnails: () => Promise.reject(new TypeError('Failed to fetch')),
+      loadRenderer,
+    });
+    expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
+  });
 });

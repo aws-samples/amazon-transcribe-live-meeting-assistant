@@ -11,6 +11,7 @@ import {
   exportableMeeting,
   filterMeetingsByPreparation,
   formatElapsed,
+  LABEL_FILTER_KEY_PROBLEM,
   labelFilterProblem,
   labelsToText,
   moveItem,
@@ -98,13 +99,16 @@ describe('the meeting list filters', () => {
     expect(ids({ label: 'project=ACME' })).toEqual([]);
   });
 
-  it('say why a filter whose key is not a label key matches nothing, as the label editor does', () => {
+  it('say why a filter whose key is not a label key matches nothing, short enough for the toolbar', () => {
     expect(labelFilterProblem('project=acme')).toBeNull();
     expect(labelFilterProblem('project')).toBeNull();
     expect(labelFilterProblem('')).toBeNull();
-    expect(labelFilterProblem('Project=acme')).toMatch(/"Project" is not a label key/);
-    expect(labelFilterProblem('project ')).toMatch(/"project " is not a label key/);
-    expect(labelFilterProblem('Project=acme')).toBe(parseLabelsText('Project=acme').error);
+    expect(labelFilterProblem('Project=acme')).toBe(LABEL_FILTER_KEY_PROBLEM);
+    expect(labelFilterProblem('project ')).toBe(LABEL_FILTER_KEY_PROBLEM);
+    // A key the filter refuses is one the label editor refuses too.
+    expect(parseLabelsText('Project=acme').error).toMatch(/"Project" is not a label key/);
+    expect(LABEL_FILTER_KEY_PROBLEM.length).toBeLessThanOrEqual(60);
+    expect(LABEL_FILTER_KEY_PROBLEM).toMatch(/exactly/);
   });
 
   it('match an audience, or meetings with none', () => {
