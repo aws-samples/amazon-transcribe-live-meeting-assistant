@@ -9,8 +9,8 @@ file, no network) and the live test against a deployed stack
 
 The extension is staged the way the stack's CodeBuild project packages it (see the
 BuildSpec in ``lma-browser-extension-stack/template.yaml``): the ``npm run build``
-output, with ``<VERSION_TOKEN>`` in ``manifest.json`` replaced and ``lma_config.json``
-written. Chromium then loads the staged copy unpacked, through
+output, with ``<CHROME_VERSION_TOKEN>`` and ``<VERSION_TOKEN>`` in ``manifest.json``
+replaced and ``lma_config.json`` written. Chromium then loads the staged copy unpacked, through
 ``launch_persistent_context`` with ``--load-extension``; extensions need a persistent
 profile.
 
@@ -104,9 +104,14 @@ def stage_extension(
     shutil.copytree(build_dir, dest)
     staged = dest / "manifest.json"
     text = staged.read_text()
-    if "<VERSION_TOKEN>" in text:
-        text = text.replace("<VERSION_TOKEN>", chrome_version(version or repo_version()))
-        staged.write_text(text)
+    full = version or repo_version()
+    # As the stack's build does: ``version`` takes a form Chrome accepts and
+    # ``version_name`` the full version, which the extension's screens show.
+    finished = text.replace("<CHROME_VERSION_TOKEN>", chrome_version(full)).replace(
+        "<VERSION_TOKEN>", full
+    )
+    if finished != text:
+        staged.write_text(finished)
     if config is not None:
         (dest / "lma_config.json").write_text(json.dumps(dict(config), indent=2))
     return dest

@@ -152,6 +152,7 @@ def test_manifest_is_the_staged_release_version(browser) -> None:
     manifest = worker.evaluate("chrome.runtime.getManifest()")
     assert manifest["manifest_version"] == 3
     assert manifest["version"] == eb.chrome_version(eb.repo_version())
+    assert manifest["version_name"] == eb.repo_version()
     assert manifest["side_panel"]["default_path"] == eb.PANEL_PAGE
 
 
@@ -169,7 +170,7 @@ def test_side_panel_shows_the_sign_in_screen(browser, network, signed_out) -> No
         login = page.get_by_role("button", name="Login")
         sync_api.expect(login).to_be_visible(timeout=15_000)
         sync_api.expect(page.locator("h2.header")).to_contain_text("Meeting Assistant")
-        sync_api.expect(page.locator(".version")).to_have_text(eb.chrome_version(eb.repo_version()))
+        sync_api.expect(page.locator(".version")).to_have_text(eb.repo_version())
         sync_api.expect(page.get_by_role("button", name="Start Listening")).to_have_count(0)
         assert not errors, errors
     finally:
