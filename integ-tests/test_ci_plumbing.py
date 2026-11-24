@@ -1498,6 +1498,10 @@ def test_the_browser_extension_probe_records_the_meeting_at_the_start_frame() ->
     probe.record_start(result, json.dumps({"callEvent": "START", "callId": "m-2"}))
     assert result.call_id == "m-1"
     assert result.start_frame["callId"] == "m-1"
+    # A START without an id leaves nothing to clean up, not a meeting named "None".
+    nameless = probe.Result()
+    probe.record_start(nameless, json.dumps({"callEvent": "START", "callId": None}))
+    assert nameless.call_id == ""
 
 
 def test_the_browser_extension_probe_reports_a_failed_user_teardown() -> None:

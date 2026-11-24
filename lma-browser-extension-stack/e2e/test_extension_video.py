@@ -339,10 +339,15 @@ PLAIN_SHARE_PICKER = """
 
 def _tab_page(route) -> None:
     title = "Meeting" if route.request.url.startswith(MEETING_URL) else OTHER_TITLE
-    route.fulfill(content_type="text/html", body=f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>")
+    route.fulfill(
+        content_type="text/html",
+        body=f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>",
+    )
 
 
-def _record_real_share(browser, tmp_path_factory, share_switch: str, *, plain_picker: bool = False) -> list[dict]:
+def _record_real_share(
+    browser, tmp_path_factory, share_switch: str, *, plain_picker: bool = False
+) -> list[dict]:
     """Start a capture with video from the meeting tab's own recorder, Chromium answering the share with ``share_switch``."""
     root = tmp_path_factory.mktemp("extension-real-share")
     extension = eb.stage_extension(root / "extension", config=eb.OFFLINE_CONFIG)
@@ -372,7 +377,9 @@ def _record_real_share(browser, tmp_path_factory, share_switch: str, *, plain_pi
         time.sleep(1.0)
         # To the meeting tab only, as the side panel sends it.
         send = (
-            "(async (message) => { const [tab] = await chrome.tabs.query({ url: '" + MEETING_URL + "*' });"
+            "(async (message) => { const [tab] = await chrome.tabs.query({ url: '"
+            + MEETING_URL
+            + "*' });"
             " chrome.tabs.sendMessage(tab.id, message).catch(() => undefined); return tab.id; })"
         )
         worker.evaluate(send, {"action": "StartTranscription", "video": True})
@@ -397,7 +404,10 @@ def test_a_real_share_of_the_meeting_tab_records_video(browser, tmp_path_factory
 
 def test_a_real_share_of_another_tab_records_no_video(browser, tmp_path_factory) -> None:
     messages = _record_real_share(
-        browser, tmp_path_factory, f"--auto-select-tab-capture-source-by-title={OTHER_TITLE}", plain_picker=True
+        browser,
+        tmp_path_factory,
+        f"--auto-select-tab-capture-source-by-title={OTHER_TITLE}",
+        plain_picker=True,
     )
     actions = [m["action"] for m in messages]
     assert actions == ["VideoUnavailable"], actions

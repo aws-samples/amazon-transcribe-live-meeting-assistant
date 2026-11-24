@@ -416,7 +416,7 @@ def record_start(result: Result, payload: Any) -> None:
         return
     if isinstance(message, dict) and message.get("callEvent") == "START":
         result.start_frame = message
-        result.call_id = str(message.get("callId", ""))
+        result.call_id = str(message.get("callId") or "")
 
 
 def wait_for_transcript(
