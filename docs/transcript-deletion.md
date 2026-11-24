@@ -220,9 +220,7 @@ version and delete marker of each file:
   of a meeting that was rejoined or continued, whether it was stored by the
   WebSocket transcriber, a Virtual Participant or an upload;
 - the raw audio the WebSocket transcriber stores beside each of its WAV
-  recordings, and a recording it stored for the meeting without linking it (a
-  second recording of the same session, stored beside the first under the
-  meeting's name and a time);
+  recordings;
 - every meeting video recording the meeting record links to, from a Virtual
   Participant or from a streaming client, in every session;
 - a Virtual Participant's video segments still under `lma-video-chunks/`;
@@ -351,10 +349,14 @@ them. Copies also pass through these places, each with its own lifetime:
 - A meeting that ended before the setting was turned on keeps its transcript
   for **Days to keep transcript segments**, and its recordings for
   `AudioRecordingExpirationInDays`.
-- A meeting video is found only through its link on the meeting record: the
-  producers turn the meeting's ID into a file name by replacing characters, so
-  a video's name is not proof of which meeting it belongs to. A video whose
-  link never reached the meeting record (its upload succeeded but the event
-  announcing it was lost) is not deleted after the summary, and follows
-  `AudioRecordingExpirationInDays`. The WebSocket transcriber's audio is also
-  found by its file name, which follows a fixed pattern for each meeting.
+- A recording is found only through its link on the meeting record, never by
+  its file name: the producers turn the meeting's ID into a file name by
+  replacing characters, so two meetings can be given the same file name, and a
+  name is not proof of which meeting a recording belongs to. A recording with
+  no link on the meeting record is not deleted after the summary, and follows
+  `AudioRecordingExpirationInDays`. That happens when a recording's upload
+  succeeded but the event announcing it was lost, and when a session's
+  recording name was already taken (a client that reconnected within one
+  session, for example): the WebSocket transcriber then keeps the first
+  recording linked and stores the later one beside it, under the same name
+  with a time added, without a link.

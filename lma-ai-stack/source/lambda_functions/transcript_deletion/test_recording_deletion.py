@@ -313,15 +313,18 @@ def test_a_virtual_participant_recording_is_found_through_its_encoded_link(aws):
     assert VP_AUDIO not in aws.s3.versions
 
 
-def test_an_unlinked_transcriber_recording_of_the_meeting_is_deleted_by_its_name(aws):
-    # Stored beside a session's own recording, which keeps the link.
-    beside = f"lma-audio-recordings/{NAME}_2026-11-02T09-31-00-000Z"
-    beside_2 = f"lma-audio-recordings/{NAME}_s2_2026-11-02T10-31-00-000Z"
-    for key in (beside, beside_2):
+def test_a_recording_named_like_the_meetings_but_not_linked_is_kept(aws):
+    # Another meeting whose id gives the same file name: the transcriber stores
+    # its recording under that name with a time added, and links it from that
+    # meeting, not this one. A name is no proof of whose recording it is.
+    other = f"lma-audio-recordings/{NAME}_2026-11-02T09-31-00-000Z"
+    later = f"lma-audio-recordings/{NAME}_s3"
+    for key in (other, later):
         aws.s3.put(key + ".wav")
         aws.s3.put(key + ".raw")
     _scheduled_recordings()
-    assert _recording_keys(aws) == []
+    for key in (other, later):
+        assert key + ".wav" in aws.s3.versions and key + ".raw" in aws.s3.versions, key
 
 
 def test_links_outside_the_recordings_prefixes_or_the_bucket_are_not_followed(aws):
@@ -382,12 +385,13 @@ def test_links_that_never_stop_changing_fail_the_run_so_it_is_retried(aws, monke
     assert "RecordingsDeletedAt" not in _meeting(aws)
 
 
-def test_a_meeting_with_no_record_still_has_its_recordings_deleted(aws):
+def test_a_meeting_with_no_record_has_only_its_video_segments_deleted(aws):
     del aws.table.items[(f"c#{CALL_ID}", f"c#{CALL_ID}")]
+    aws.s3.put(f"lma-video-chunks/{CALL_ID}/chunk-0.webm")
     outcome = _scheduled_recordings()
-    # Only the transcriber's files are found without the record's links.
-    assert outcome["filesDeleted"] == 4
-    assert VIDEO_1 in aws.s3.versions
+    # Without the record's links, only its own segment folder is known.
+    assert outcome["filesDeleted"] == 1
+    assert AUDIO_1 in aws.s3.versions and VIDEO_1 in aws.s3.versions
 
 
 def test_a_second_run_keeps_the_first_time_and_adds_to_the_count(aws):
@@ -469,6 +473,16 @@ def test_the_two_settings_are_independent(aws, monkeypatch):
     recordings = _schedule(aws, "recordings")
     assert transcript["Name"] != recordings["Name"]
     assert json.loads(transcript["Target"]["Input"]) == {"CallId": CALL_ID, "Trigger": "scheduled"}
+
+
+@pytest.mark.parametrize("kind", ["recording", "Recordings", "", None])
+def test_a_scheduled_deletion_of_an_unknown_kind_deletes_nothing(aws, monkeypatch, kind):
+    deleted = []
+    monkeypatch.setattr(lf, "delete_transcript", lambda *args: deleted.append(args))
+    with pytest.raises(ValueError, match="Kind"):
+        _run("scheduled", Kind=kind)
+    assert deleted == []
+    assert len(_recording_keys(aws)) == 6
 
 
 def test_a_scheduled_transcript_deletion_keeps_the_recordings(aws, monkeypatch):

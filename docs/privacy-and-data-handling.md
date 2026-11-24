@@ -425,8 +425,8 @@ other. It ships set to Off.
 
 - **What is deleted.** Every audio and video recording the meeting record links
   to, in every capture session, every version and delete marker of each file;
-  the WebSocket transcriber's raw audio beside each recording and any recording
-  it stored for the meeting without a link; a Virtual Participant's leftover
+  the WebSocket transcriber's raw audio beside each recording; a Virtual
+  Participant's leftover
   video segments; and the meeting record's links to them.
 - **What is kept.** The summary, the transcript (which follows its own setting),
   key frames and their text, chat attachments, the consent record and its

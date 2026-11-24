@@ -75,8 +75,8 @@ summary, the meeting record, the recordings and the consent record are kept.
 
 The recordings, when their own setting says so (delete_recordings): every
 version of every audio and video recording file the meeting record links to,
-in every capture session, with the transcriber's raw audio beside each WAV
-and any WAV it stored for the meeting without a link; and the Virtual
+in every capture session, with the transcriber's raw audio beside each WAV;
+and the Virtual
 Participant's video segments (``lma-video-chunks/<CallId>/``). The record's
 links are removed and it is stamped with when, and how many files went. Key
 frames, chat attachments, consent evidence, the summary and the transcript are
@@ -747,10 +747,6 @@ LINK_SESSION_FIELDS = ("RecordingUrlSessions", "VideoRecordingUrlSessions")
 #: Attempts at removing the links while a recording link is being added.
 LINK_REMOVE_ATTEMPTS = 4
 
-#: The transcriber's stamp on a WAV it stores beside the meeting's own
-#: (recordingStamp in its utils/recording-upload.ts).
-_STAMP = r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z"
-
 
 class RecordingLinksKeptChanging(RuntimeError):
     """Recording links kept being added while the recordings were being deleted."""
@@ -807,18 +803,6 @@ def linked_recording_keys(meeting: Dict[str, Any]) -> List[str]:
     return keys
 
 
-def transcriber_audio_pattern(call_id: str) -> "re.Pattern[str]":
-    """The names the transcriber gives a meeting's audio, whether or not a link names them.
-
-    ``<name>.wav`` and ``.raw``, ``<name>_s<N>`` for a later session, and either
-    with ``_<stamp>`` when the session already had a recording and this one
-    was stored beside it, unlinked. ``<name>`` is the meeting id as a file name
-    (posixify_filename), which is how the transcriber names it.
-    """
-    name = re.escape(f"{AUDIO_PREFIX}{posixify_filename(call_id)}")
-    return re.compile(rf"^{name}(_s\d+)?(_{_STAMP})?\.(wav|raw)$")
-
-
 def _delete_versions(entries: List[Dict[str, str]], what: str) -> None:
     """Delete the listed versions, a thousand at a time; raise when S3 keeps any."""
     for start in range(0, len(entries), 1000):
@@ -848,26 +832,20 @@ def _listed_versions(prefix: str, keep) -> List[Dict[str, str]]:
 def delete_recording_files(call_id: str, meeting: Dict[str, Any]) -> int:
     """Delete every version of the meeting's recording files; the number of files that had any.
 
-    The files the record links to (linked_recording_keys), the transcriber's
-    audio by its names (transcriber_audio_pattern), and the Virtual
+    The files the record links to (linked_recording_keys), and the Virtual
     Participant's video segments in ``<chunks prefix><CallId>/`` -- the meeting
     id as it is, with a trailing slash so that one meeting's folder never
-    matches another whose id merely begins the same way. The video files'
-    names are not searched: both producers turn the meeting id into a file
-    name by replacing characters, and add more, so a name is no proof of whose
-    video it is; a video is found through its link.
+    matches another whose id merely begins the same way. No recording is found
+    by its file name: the producers turn the meeting id into a file name by
+    replacing characters, so two meetings can share one, and the transcriber
+    stores a second meeting's recording of a taken name under that name with
+    a time added. A name is no proof of whose recording it is.
     """
     if not RECORDINGS_BUCKET:
         return 0
     entries: List[Dict[str, str]] = []
     for key in linked_recording_keys(meeting):
         entries.extend(_listed_versions(key, lambda k, key=key: k == key))
-    pattern = transcriber_audio_pattern(call_id)
-    named = _listed_versions(
-        f"{AUDIO_PREFIX}{posixify_filename(call_id)}", lambda k: bool(pattern.match(k))
-    )
-    linked = {(e["Key"], e["VersionId"]) for e in entries}
-    entries.extend(e for e in named if (e["Key"], e["VersionId"]) not in linked)
     folder = f"{VIDEO_CHUNKS_PREFIX}{call_id}/"
     entries.extend(_listed_versions(folder, lambda k: k.startswith(folder)))
     _delete_versions(entries, f"the recordings of {call_id}")
@@ -1186,9 +1164,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # A scheduled deletion runs whatever the setting says now: participants may
     # have been told the transcript, or the recordings, would be deleted then.
     if trigger == SCHEDULED:
-        return delete_kind(
-            call_id, trigger, RECORDINGS if event.get("Kind") == RECORDINGS else TRANSCRIPT
-        )
+        # No Kind is the transcript's, as in every schedule made before the
+        # recordings could be deleted. Any other value is refused, so that a
+        # deletion run again by hand with a mistyped Kind deletes nothing.
+        kind = event.get("Kind", TRANSCRIPT)
+        if kind not in KINDS:
+            raise ValueError("expected a Kind of " + ", ".join(KINDS))
+        return delete_kind(call_id, trigger, kind)
     if trigger == RECORDING_ADDED:
         return recording_added(call_id)
 
