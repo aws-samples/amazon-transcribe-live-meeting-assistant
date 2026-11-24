@@ -13,8 +13,11 @@
  * every client, whatever client type it declares: video is recorded when the
  * deployment records video (the EnableVideoRecording stack parameter) and
  * Meeting Recording › Record screen video from streaming clients is on, as the
- * meeting's audio START read it. The client type names only what the key
- * frames are recorded as (keyframeSourceFor).
+ * meeting's audio START read it. With the setting off a START_VIDEO is refused;
+ * with only the stack parameter off it is accepted and discarded, as it always
+ * has been, so a client that reconnects after any close it did not start
+ * keeps one connection. The client type names only what the key frames are
+ * recorded as (keyframeSourceFor).
  *
  * Kept free of AWS clients so it can be tested directly.
  */
@@ -50,6 +53,21 @@ export interface VideoSwitches {
  */
 export const videoAllowed = (switches: VideoSwitches): boolean =>
     switches.stackRecordsVideo && switches.recordScreenVideo;
+
+/** What becomes of a START_VIDEO; see the module comment. */
+export type VideoAdmission = 'record' | 'discard' | 'refuse';
+
+/**
+ * How a START_VIDEO is answered: refused (VIDEO_NOT_ENABLED_CLOSE) with the
+ * setting off, accepted and discarded (no VIDEO_STARTED) on a deployment that
+ * does not record video, and recorded otherwise. The same for every client.
+ */
+export const videoAdmission = (switches: VideoSwitches): VideoAdmission => {
+    if (!switches.recordScreenVideo) {
+        return 'refuse';
+    }
+    return switches.stackRecordsVideo ? 'record' : 'discard';
+};
 
 /**
  * The key frame Source of a client's video: the client's own name for the two

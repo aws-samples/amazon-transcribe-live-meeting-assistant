@@ -662,12 +662,16 @@ received.
 | `no active call for callId` | No audio session of this `callId` is live on this server. Send `START_VIDEO` only once the audio is streaming |
 | `not authorized for callId` | The meeting's audio is being streamed by another user |
 | `meeting consent does not allow capture` | The meeting's [consent](#615-meeting-consent-frames) does not allow capture yet, or no longer does. In opt-in, wait for the `CONSENT_STATE` with `status: "granted"` on the audio connection before sending `START_VIDEO` |
-| `screen video is not enabled for this client` | The deployment (`EnableVideoRecording`) or Meeting Recording › Record screen video from streaming clients does not allow screen video |
+| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off |
 
 A refused video stream does not affect the audio: stop the video, tell the
 user, and carry on streaming audio. A client should not reconnect a refused
-video stream. A `START_VIDEO` that arrives after the meeting's video, or its
-mux, has ended is accepted and discarded, and gets no `VIDEO_STARTED`.
+video stream. On a deployment that does not record video
+(`EnableVideoRecording=false`) a `START_VIDEO` is accepted and discarded, from
+every client, and gets no `VIDEO_STARTED`; so is one that arrives after the
+meeting's video, or its mux, has ended. The settings answer's `videoAllowed` is
+`false` in both of the first two cases, so a client that reads it first sends
+no video.
 
 **Consent.** An objection ends
 the meeting and its video: the video recorded until then is kept with the
@@ -694,9 +698,9 @@ When the server has a video session for the stream, it answers the
 From then on, a connection that drops can resume the stream (`videoResume:
 true`); before it, the server may have no session for it, so start the stream
 again from its initialization segment. A client that reads no frames on its
-video connection can ignore it. A stream from a client other than the two
-browser clients on a deployment that does not record video gets no
-`VIDEO_STARTED`, since it is discarded.
+video connection can ignore it. A stream sent to a deployment that does not
+record video (`EnableVideoRecording=false`) gets no `VIDEO_STARTED`, whatever
+client sends it, since it is discarded.
 
 **Continued meetings.** A meeting continued with `sessionNumber` (see
 [Continuing an existing meeting](#continuing-an-existing-meeting)) records the

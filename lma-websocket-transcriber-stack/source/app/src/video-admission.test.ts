@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
     PendingVideoChunks,
     keyframeSourceFor,
+    videoAdmission,
     videoAllowed,
     videoStartedFrame,
 } from './video-admission';
@@ -28,9 +29,11 @@ test('screen video is recorded only when the stack and the setting both allow it
     assert.equal(videoAllowed({ stackRecordsVideo: false, recordScreenVideo: false }), false);
 });
 
-test('the rule takes no client type, so every client gets the same answer', () => {
-    // One argument: the switches. A client's declared type cannot reach it.
-    assert.equal(videoAllowed.length, 1);
+test('START_VIDEO is refused with the setting off, discarded with only the stack off, else recorded', () => {
+    assert.equal(videoAdmission(ON), 'record');
+    assert.equal(videoAdmission(SETTING_OFF), 'refuse');
+    assert.equal(videoAdmission(STACK_OFF), 'discard');
+    assert.equal(videoAdmission({ stackRecordsVideo: false, recordScreenVideo: false }), 'refuse');
 });
 
 test('key frames are recorded under the client that streamed the video', () => {

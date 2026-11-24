@@ -28,8 +28,9 @@ namespace LMA;
 /// frame, which this client reads and ignores. It closes the connection with
 /// code 1008 when it will not take the video. Two of its reasons are final for
 /// this meeting: screen video is off for the deployment (Meeting Recording ›
-/// Record screen video from streaming clients, or the EnableVideoRecording
-/// stack parameter), and the meeting's consent stops capture. For those the
+/// Record screen video from streaming clients), and the meeting's consent
+/// stops capture. (On a deployment with EnableVideoRecording false the video
+/// is accepted and discarded instead.) For those the
 /// socket does not reconnect, and OnRefused tells the caller why (audio
 /// continues). Any other close, a 1008 such as "no active call for callId"
 /// while the audio START is still being handled included, reconnects.

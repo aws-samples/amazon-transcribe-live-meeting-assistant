@@ -88,6 +88,7 @@ import {
     PendingVideoChunks,
     VIDEO_NOT_ENABLED_CLOSE,
     keyframeSourceFor,
+    videoAdmission,
     videoAllowed,
     videoStartedFrame,
 } from './video-admission';
@@ -1005,18 +1006,20 @@ const onTextMessage = async (
             pendingVideoChunks.drop(ws);
             return;
         }
-        // Every streaming client sends video only when the deployment records
-        // it and Meeting Recording › Record screen video from streaming clients,
-        // as the meeting's START read it, is on. The client type plays no part.
+        // Every streaming client's video follows Meeting Recording › Record
+        // screen video from streaming clients, as the meeting's START read it:
+        // refused with it off. On a deployment that does not record video the
+        // stream is accepted and discarded (startVideoSession). The client type
+        // plays no part (video-admission.ts videoAdmission).
         if (
-            !videoAllowed({
+            videoAdmission({
                 stackRecordsVideo: videoRecordingEnabled(),
                 recordScreenVideo:
                     audioSession.sessionSettings?.recording.recordScreenVideo ?? RECORD_SCREEN_VIDEO_DEFAULT,
-            })
+            }) === 'refuse'
         ) {
             server.log.warn(
-                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video is not enabled on this deployment; refusing video stream.`
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video from streaming clients is off on this deployment; refusing video stream.`
             );
             ws.close(VIDEO_NOT_ENABLED_CLOSE.code, VIDEO_NOT_ENABLED_CLOSE.reason);
             pendingVideoChunks.drop(ws);
