@@ -626,7 +626,7 @@ test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
         integ-deploy-and-test test-lambdas \
         test-vp test-vp-template test-vp-microvm-e2e test-ai-stack \
         test-integ-plumbing test-coverage test-coverage-python test-asr \
-        test-pr-review ai-pr-review
+        test-pr-review ai-pr-review test-browser-extension-e2e
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then

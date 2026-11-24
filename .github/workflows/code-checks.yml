@@ -456,8 +456,8 @@ jobs:
           set -o pipefail
           ./build/LMACaptureClient.app/Contents/MacOS/LMACaptureClient --selftest \
             | tee "$RUNNER_TEMP/selftest.txt"
-          passed=$(grep -c '✓' "$RUNNER_TEMP/selftest.txt" || true)
-          failed=$(grep -c '✗' "$RUNNER_TEMP/selftest.txt" || true)
+          passed=$(grep -c '^  ✓' "$RUNNER_TEMP/selftest.txt" || true)
+          failed=$(grep -c '^  ✗' "$RUNNER_TEMP/selftest.txt" || true)
           printf '### macOS client self-test\n\n%s passed, %s failed\n' "$passed" "$failed" \
             >> "$GITHUB_STEP_SUMMARY"
           [ "$failed" = 0 ] && grep -q 'All self-tests PASSED' "$RUNNER_TEMP/selftest.txt"

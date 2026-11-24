@@ -23,10 +23,11 @@ What it does, in order:
    prompt of the recorder's ``getDisplayMedia({preferCurrentTab: true})``.
 5. Streams for a while, clicks Stop Listening, and reads the meeting and its
    transcript segments from the stack's EventSourcing table.
-6. Continues the meeting: ``reopenMeeting`` as the same user, then a second session
-   streamed with that ``sessionNumber``, as the Desktop Capture App does. The
-   extension has no Continue action of its own, so this checks that a meeting the
-   extension created can be continued by its owner.
+6. Continues the meeting through the API: ``reopenMeeting`` as the same user, then
+   a second session streamed with that ``sessionNumber`` over a WebSocket of the
+   probe's own. This checks that a meeting the extension created can be continued
+   by its owner; it does not drive the panel's own **Continue an existing
+   meeting…** control, which the extension's unit tests cover.
 
 The panel is driven from an ordinary tab rather than the side panel (Playwright cannot
 open a side panel), and the meeting page is brought to the front before Start
@@ -176,12 +177,16 @@ def stage_for_chrome(served: Path, dest: Path) -> tuple[Path, str]:
     refuses is replaced by its release part here, so the rest of the run can go on;
     :func:`chrome_accepts_version` on the returned version is the test of it.
     """
-    served_version = json.loads((served / "manifest.json").read_text())["version"]
+    served_manifest = json.loads((served / "manifest.json").read_text())
+    served_version = served_manifest["version"]
     config = json.loads((served / "lma_config.json").read_text())
     build = os.environ.get("LMA_TEST_EXTENSION_BUILD")
     source = Path(build) if build else served
     staged = eb.stage_extension(
-        dest, build_dir=source, config=config, version=eb.chrome_version(served_version)
+        dest,
+        build_dir=source,
+        config=config,
+        version=served_manifest.get("version_name") or served_version,
     )
     manifest_path = staged / "manifest.json"
     manifest = json.loads(manifest_path.read_text())

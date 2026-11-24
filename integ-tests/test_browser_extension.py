@@ -144,7 +144,7 @@ def test_extension_streams_the_tab_and_the_microphone(run, user) -> None:
     )
 
 
-def test_owner_continues_the_extension_meeting(run, user, stack) -> None:
+def test_owner_continues_the_extension_meeting_through_the_api(run, user, stack) -> None:
     import browser_extension_probe as probe
 
     assert run.meeting, "no meeting to continue"

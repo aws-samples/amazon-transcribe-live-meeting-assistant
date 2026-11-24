@@ -7,12 +7,14 @@ Shared by the per-pull-request smoke test (``test_extension_smoke.py`` beside th
 file, no network) and the live test against a deployed stack
 (``integ-tests/test_browser_extension.py``).
 
-The extension is staged the way the stack's CodeBuild project packages it (see the
-BuildSpec in ``lma-browser-extension-stack/template.yaml``): the ``npm run build``
-output, with ``<CHROME_VERSION_TOKEN>`` and ``<VERSION_TOKEN>`` in ``manifest.json``
-replaced and ``lma_config.json`` written. Chromium then loads the staged copy unpacked, through
-``launch_persistent_context`` with ``--load-extension``; extensions need a persistent
-profile.
+The extension is staged as a deployment ships it: the ``npm run build`` output,
+with ``<CHROME_VERSION_TOKEN>`` and ``<VERSION_TOKEN>`` in ``manifest.json``
+replaced as ``lma publish`` replaces them (``_publish_zip_with_token_replace`` in
+``lib/lma_sdk/lma_sdk/_core/publish.py``), and ``lma_config.json`` written as the
+stack's CodeBuild project writes it (the BuildSpec in
+``lma-browser-extension-stack/template.yaml``). Chromium then loads the staged copy
+unpacked, through ``launch_persistent_context`` with ``--load-extension``;
+extensions need a persistent profile.
 
 Headless needs Playwright's full Chromium build (``channel="chromium"``, installed
 by ``playwright install --no-shell chromium``). The separate headless shell does not
@@ -29,6 +31,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from lma_sdk._core.publish import chrome_extension_version
+
 E2E_DIR = Path(__file__).resolve().parent
 EXTENSION_DIR = E2E_DIR.parent
 REPO_ROOT = EXTENSION_DIR.parent
@@ -39,10 +43,11 @@ COGNITO_TEMPLATE = REPO_ROOT / "lma-cognito-stack" / "deployment" / "lma-cognito
 #: The page the side panel opens (``side_panel.default_path`` in the manifest).
 PANEL_PAGE = "index.html"
 
-#: What the stack's CodeBuild project writes to ``lma_config.json``, with values that
-#: resolve nowhere (RFC 2606), for runs that must not reach a stack.
+#: The keys the stack's CodeBuild project writes to ``lma_config.json``, with values
+#: that resolve nowhere (RFC 2606), for runs that must not reach a stack.
 OFFLINE_CONFIG: dict[str, str] = {
     "wssEndpoint": "wss://transcriber.example.invalid/api/v1/ws",
+    "graphqlEndpoint": "https://api.example.invalid/graphql",
     "clientId": "e2e-test-client",
     "cognitoDomain": "https://auth.example.invalid",
     "cloudfrontEndpoint": "https://app.example.invalid/",
@@ -53,15 +58,13 @@ OFFLINE_CONFIG: dict[str, str] = {
 
 
 def chrome_version(version: str) -> str:
-    """The release part of an LMA version, in the form a Chrome manifest accepts.
+    """An LMA version as the manifest ``version`` that ``lma publish`` gives it.
 
-    Chrome accepts one to four dot-separated integers, so a pre-release ``VERSION``
-    such as ``0.4.1.dev1`` is staged as ``0.4.1``.
+    Chrome accepts one to four dot-separated integers, so ``0.4.1.dev1`` becomes
+    ``0.4.1.1`` and a release ``0.4.1`` becomes ``0.4.1.65535``; this is the SDK's
+    own mapping, so the staged extension carries the version a deployment ships.
     """
-    match = re.match(r"\d+(?:\.\d+){0,3}", version.strip())
-    if not match:
-        raise ValueError(f"no numeric version in {version!r}")
-    return match.group(0)
+    return chrome_extension_version(version)
 
 
 def repo_version() -> str:
@@ -105,7 +108,7 @@ def stage_extension(
     staged = dest / "manifest.json"
     text = staged.read_text()
     full = version or repo_version()
-    # As the stack's build does: ``version`` takes a form Chrome accepts and
+    # As ``lma publish`` does: ``version`` takes a form Chrome accepts and
     # ``version_name`` the full version, which the extension's screens show.
     finished = text.replace("<CHROME_VERSION_TOKEN>", chrome_version(full)).replace(
         "<VERSION_TOKEN>", full
