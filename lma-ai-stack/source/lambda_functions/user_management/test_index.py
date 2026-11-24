@@ -1166,6 +1166,8 @@ def test_the_own_account_guards_ignore_letter_case(cognito: FakeCognito) -> None
         index.handler(admin_event("deleteUser", delete_input(CALLER.upper())), None)
 
     assert cognito.names_called() == []
+
+
 def _no_sign_in(result: dict) -> dict:
     """``result`` without its last sign-in fields, which must say nothing was read.
 

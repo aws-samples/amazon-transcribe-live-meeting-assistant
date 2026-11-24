@@ -384,6 +384,7 @@ class TestLogOutputOmitsKey(unittest.TestCase):
         result = index.handler(event, None)
         self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
 
+
 class TestOwnerRole(unittest.TestCase):
     """The key owner's role is read from the user pool on every request."""
 
