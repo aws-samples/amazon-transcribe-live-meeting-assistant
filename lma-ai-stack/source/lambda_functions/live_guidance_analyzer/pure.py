@@ -378,6 +378,30 @@ def new_segments(
     ]
 
 
+def next_marker(fresh: Sequence[Segment], marker: Any) -> float:
+    """The marker after a run that read ``fresh``: never earlier than the last one."""
+    return max([s.end for s in fresh] + [_seconds(marker)])
+
+
+def shown_after_run(
+    segments: Sequence[Segment],
+    marker: Any,
+    shown: Optional[Iterable[str]],
+    fresh: Sequence[Segment],
+) -> List[str]:
+    """The ShownSegmentIds to record after a run that read ``fresh``.
+
+    For a state row without them (``shown`` None, a row from before they were
+    recorded), the earlier runs are taken to have read every segment up to
+    their marker, as the marker-only reading did, so those are not read again.
+    """
+    if shown is None:
+        old = _seconds(marker) if marker is not None else None
+        shown = [s.segment_id for s in segments if old is not None and s.end <= old]
+    every = [*shown, *(s.segment_id for s in fresh)]
+    return shown_near(segments, every, next_marker(fresh, marker))
+
+
 def shown_near(segments: Sequence[Segment], shown: Iterable[str], marker: float) -> List[str]:
     """The ids of the segments shown so far that end within OVERLAP_SECONDS of ``marker``.
 

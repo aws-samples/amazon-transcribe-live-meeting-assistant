@@ -165,6 +165,28 @@ def test_the_shown_ids_kept_are_those_near_the_marker():
     assert pure.shown_near(segments, ["old", "a", "b"], 110) == ["a", "b"]
 
 
+def test_after_a_row_without_shown_ids_what_its_marker_covered_is_not_read_again():
+    """A meeting running during a stack update: its earlier runs read up to the marker."""
+    segments = [_segment("a", 90), _segment("b", 110), _segment("c", 150)]
+    fresh = pure.new_segments(segments, 110, None)
+    assert [s.segment_id for s in fresh] == ["c"]
+    recorded = pure.shown_after_run(segments, 110, None, fresh)
+    assert recorded == ["a", "b", "c"]
+    # The next run, after a late segment ending inside the overlap, reads only that one.
+    later = [*segments, _segment("late", 100), _segment("d", 200)]
+    assert [s.segment_id for s in pure.new_segments(later, 150, recorded)] == ["late", "d"]
+
+
+def test_a_first_run_records_its_segments_near_its_marker():
+    segments = [_segment("a", 10), _segment("b", 200)]
+    assert pure.next_marker(segments, None) == 200
+    assert pure.shown_after_run(segments, None, None, segments) == ["b"]
+
+
+def test_the_marker_never_moves_back():
+    assert pure.next_marker([_segment("late", 95)], 110) == 110
+
+
 def test_a_long_transcript_keeps_its_most_recent_part(monkeypatch):
     monkeypatch.setattr(pure, "MAX_TRANSCRIPT_CHARS", 300)
     text, names = pure.transcript_block(SEGMENTS)
