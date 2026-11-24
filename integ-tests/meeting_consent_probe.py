@@ -231,6 +231,21 @@ class ConsentSettingsOverride:
         self.had_section = self.section in record.body
         self.saved = dict(record.body.get(self.section) or {}) if self.had_section else None
 
+    def save_on(self, profile: str) -> None:
+        """As ``save``, on a profile another override's ``save`` already chose.
+
+        For a second section changed in the same run: it reads this section
+        from that profile and creates no profile of its own, so its
+        ``restore`` has to run before the first override's, which may remove
+        the profile.
+        """
+        record = self.store.read_profile(profile, consistent_read=True)
+        if not record.exists:
+            raise RuntimeError(f"the configuration profile {profile!r} is not stored")
+        self.profile = profile
+        self.had_section = self.section in record.body
+        self.saved = dict(record.body.get(self.section) or {}) if self.had_section else None
+
     def apply(self, **overrides: Any) -> None:
         if self.profile is None:
             raise RuntimeError("save() must run before apply()")

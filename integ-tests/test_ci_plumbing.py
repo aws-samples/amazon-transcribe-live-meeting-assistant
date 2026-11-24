@@ -1432,6 +1432,40 @@ def test_the_stream_page_video_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_stream_page_audio_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_STREAM_PAGE_AUDIO=1, Chromium and a display, and change two settings for the run."""
+    import test_stream_page_audio
+
+    names = [m.name for m in test_stream_page_audio.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_stream_page_audio_tab_is_the_one_the_share_picks() -> None:
+    """The picker flag picks a tab by title, so the stand-in tab has to carry it."""
+    from stream_page_probe import MEETING_TAB_TITLE, meeting_tab_html
+
+    html = meeting_tab_html("remote.wav")
+    assert f"<title>{MEETING_TAB_TITLE}</title>" in html
+    assert 'src="remote.wav"' in html and "autoplay" in html and "loop" in html
+
+
+def test_the_stream_page_audio_probe_reads_the_frames_the_page_sent() -> None:
+    from stream_page_probe import AudioPageRun, _read_sent_frames
+
+    run = AudioPageRun()
+    _read_sent_frames(run, [
+        '{"callEvent": "CONSENT_SETTINGS"}',
+        '{"callEvent": "START", "callId": "Weekly - 1", "clientType": "STREAM_AUDIO"}',
+        b"\x00\x01", b"\x02\x03", "not json",
+    ])
+    assert run.start_frame["callId"] == "Weekly - 1"
+    assert run.audio_frames == 2
+    assert run.start_video_sent is False
+    _read_sent_frames(run, ['{"callEvent": "START_VIDEO", "callId": "Weekly - 1"}'])
+    assert run.start_video_sent is True
+
+
 def test_the_stream_page_probe_finds_the_meeting_in_the_page_link() -> None:
     from stream_page_probe import _call_id_from
 
@@ -1600,6 +1634,24 @@ def test_consent_override_puts_back_the_saved_section() -> None:
     assert store.body["meeting_consent"]["notifyNoticeText"] == "Recorded."
     override.restore()
     assert store.body == {"meeting_consent": saved}
+
+
+def test_a_second_override_saved_on_the_first_ones_profile_puts_back_its_own_section() -> None:
+    """test_stream_page_audio.py changes Recording and Meeting Consent in one run."""
+    import meeting_consent_probe
+
+    store = _FakeConfigurationStore({"recording": {"recordAudio": False}})
+    recording = meeting_consent_probe.ConsentSettingsOverride(store=store, section="recording")
+    consent = meeting_consent_probe.ConsentSettingsOverride(store=store, section="meeting_consent")
+    recording.save()
+    consent.save_on(recording.profile)
+    assert consent.profile == recording.profile and consent.had_section is False
+    recording.apply(recordAudio=True)
+    consent.apply(mode="notify")
+    assert store.body == {"recording": {"recordAudio": True}, "meeting_consent": {"mode": "notify"}}
+    consent.restore()
+    recording.restore()
+    assert store.body == {"recording": {"recordAudio": False}}
 
 
 def test_an_override_of_another_section_changes_only_that_section() -> None:
@@ -1775,11 +1827,24 @@ def _key_frame_default(name: str) -> int:
     return int(match.group(1).replace("_", ""))
 
 
+#: The longest gap between the key frames a streaming client's encoder emits,
+#: each of which the transcriber samples (videokeyframes.ts). Set by the
+#: clients, not the transcriber; the Stream page asks for one every 1.8 s.
+KEY_FRAME_SAMPLE_MS = 2000
+
+
 def test_the_stream_page_slides_change_too_rarely_to_make_the_screen_busy() -> None:
-    """Slides that change sooner than KEYFRAME_BUSY_GAP_MS make the screen busy, and a busy slide is not reliably kept."""
+    """Slides that change sooner than KEYFRAME_BUSY_GAP_MS make the screen busy, and a busy slide is not reliably kept.
+
+    The detector sees a slide change only at the next key frame sample, two
+    seconds apart, so two detected changes can be up to one sample interval
+    closer together than SLIDE_SECONDS: a slide has to outlast the busy gap by
+    that interval as well.
+    """
     import stream_page_probe  # imports playwright only when a run starts
 
-    assert stream_page_probe.SLIDE_SECONDS * 1000 > _key_frame_default("KEYFRAME_BUSY_GAP_MS")
+    busy_gap = _key_frame_default("KEYFRAME_BUSY_GAP_MS")
+    assert stream_page_probe.SLIDE_SECONDS * 1000 >= busy_gap + KEY_FRAME_SAMPLE_MS
 
 
 def test_every_two_stream_page_slides_differ_by_more_than_the_detectors_pixel_delta() -> None:
