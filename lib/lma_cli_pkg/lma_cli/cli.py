@@ -89,6 +89,7 @@ from lma_cli.commands.stack import delete_cmd, deploy_cmd, logs_cmd, outputs_cmd
 from lma_cli.commands.mcp import mcp_cmd
 from lma_cli.commands.meetings import meetings_cmd
 from lma_cli.commands.skills import skills_cmd
+from lma_cli.commands.users import users_cmd
 from lma_cli.commands.vp import vp_cmd
 
 main.add_command(publish_cmd)
@@ -102,6 +103,7 @@ main.add_command(vp_cmd)
 main.add_command(mcp_cmd)
 main.add_command(skills_cmd)
 main.add_command(meetings_cmd)
+main.add_command(users_cmd)
 
 
 # ── Optional plugins (entry-point group "lma_cli.plugins") ──────
