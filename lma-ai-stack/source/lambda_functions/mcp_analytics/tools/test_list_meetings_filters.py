@@ -847,6 +847,14 @@ class TestAnswerShape(unittest.TestCase):
         self.assertTrue(entry["hasSummary"])
         self.assertEqual(entry["owner"], ME)
 
+    def test_each_meeting_carries_its_summary_profile(self):
+        table = FakeTable([meeting("a", SummaryProfile="discovery-session"), meeting("b")])
+
+        entries = {entry["meetingId"]: entry for entry in run(table)["meetings"]}
+
+        self.assertEqual(entries["a"]["summaryProfile"], "discovery-session")
+        self.assertIsNone(entries["b"]["summaryProfile"])
+
     def test_given_dates_are_used_for_the_walk(self):
         table = FakeTable([meeting("a")])
 

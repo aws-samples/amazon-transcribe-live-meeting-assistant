@@ -43,12 +43,17 @@ client connects, and the API key scopes, are in
   (`search_lma_meetings`, `list_meetings`, `get_meeting_summary`,
   `get_meeting_transcript`, `get_virtual_participant_status`, `schedule_meeting`
   and `start_meeting_now`), without the meeting preparation arguments.
-- **Legacy keys** keep `schedule_meeting` and `start_meeting_now` as they were:
-  their `labels`, `audience`, `context`, `checklist` and `shareWith` arguments
-  need a **Read and write** key.
+- **Legacy keys** keep `schedule_meeting` and `start_meeting_now` with their
+  original arguments: their `labels`, `audience`, `context`, `checklist` and
+  `shareWith` arguments need a **Read and write** key. The answers are the
+  current ones on every endpoint and for every key.
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered
-  for, the read-only tools only.
+  for, the read-only tools only. `destructiveHint` is true for the tools whose
+  change cannot be taken back or takes something away from people, including
+  every tool that replaces a stored value and clears it when sent an empty one
+  (`update_meeting_agenda`, `update_scheduled_meeting`, `set_meeting_context`,
+  `set_meeting_checklist` and `update_meeting_metadata`).
 
 ## Every tool
 
@@ -419,8 +424,9 @@ Participant's owner or an Admin may end it.
 Beside `startDate`, `endDate`, `status`, `participant` and `limit`, it takes
 `labels` (every pair must match), `audience`, `updatedSince` and `endedSince`
 (ISO 8601). Each meeting has `labels`, `audience`, `status`, `startTime`,
-`endTime` (null until it has ended), `owner`, `summaryReady`, and
-`virtualParticipantId` when a Virtual Participant captured it, beside the
+`endTime` (null until it has ended), `owner`, `summaryProfile` (the summary
+profile the meeting is summarised with, null for the default), `summaryReady`,
+and `virtualParticipantId` when a Virtual Participant captured it, beside the
 earlier fields. The filters are applied before `limit`.
 
 Meetings are found by when they were created: `startDate` and `endDate` bound
@@ -439,7 +445,7 @@ also lists one that ended earlier and was changed after it.
 ```json
 {
   "meetings": [
-    {"meetingId": "e3b9…", "meetingName": "Website relaunch review", "status": "ENDED", "startTime": "2026-12-01T15:00:04Z", "endTime": "2026-12-01T15:58:40Z", "owner": "user@example.com", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryReady": true, "virtualParticipantId": "5f0c2c1e-…", "meetingUrl": "https://…"}
+    {"meetingId": "e3b9…", "meetingName": "Website relaunch review", "status": "ENDED", "startTime": "2026-12-01T15:00:04Z", "endTime": "2026-12-01T15:58:40Z", "owner": "user@example.com", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": null, "summaryReady": true, "virtualParticipantId": "5f0c2c1e-…", "meetingUrl": "https://…"}
   ],
   "count": 1,
   "filters": {"labels": {"project": "website-relaunch"}, "endedSince": "2026-12-01T00:00:00Z", "createdFrom": "2026-11-24T…", "…": "…"},

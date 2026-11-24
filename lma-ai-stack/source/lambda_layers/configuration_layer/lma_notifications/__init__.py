@@ -165,18 +165,22 @@ def _refs(values: Optional[Iterable[Any]]) -> Optional[List[str]]:
 
 
 def _iso(value: Any) -> Optional[str]:
+    """``expires_at`` as AppSync's ``AWSDateTime`` takes it: UTC, ``...SSSZ``.
+
+    A datetime or string without an offset is taken as UTC, so a string such as
+    ``2026-12-01T10:00:00`` is sent with one rather than refused by AppSync.
+    """
     if value is None or value == "":
         return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("expires_at must be an ISO 8601 time") from error
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    if isinstance(value, str):
-        try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError as error:
-            raise ValueError("expires_at must be an ISO 8601 time") from error
-        return value
     raise ValueError("expires_at must be a datetime or an ISO 8601 string")
 
 

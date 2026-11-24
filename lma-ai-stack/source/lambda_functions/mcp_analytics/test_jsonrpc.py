@@ -626,6 +626,22 @@ class TestReadOnlyHintAnnotations(unittest.TestCase):
                     f"{tool['name']} must NOT declare readOnlyHint=True",
                 )
 
+    # The tools that replace a stored value and clear it when sent an empty one.
+    REPLACING_TOOLS = {
+        "update_meeting_agenda",
+        "update_scheduled_meeting",
+        "set_meeting_context",
+        "set_meeting_checklist",
+        "update_meeting_metadata",
+    }
+
+    def test_tools_that_replace_a_value_are_destructive_and_idempotent(self):
+        tools = {tool["name"]: tool["annotations"] for tool in self._get_tools()}
+        for name in self.REPLACING_TOOLS:
+            with self.subTest(tool=name):
+                self.assertIs(tools[name]["destructiveHint"], True)
+                self.assertIs(tools[name]["idempotentHint"], True)
+
 
 class TestJSONRPCResponseFormat(unittest.TestCase):
     """Test JSON-RPC response formatting."""
@@ -647,10 +663,6 @@ class TestJSONRPCResponseFormat(unittest.TestCase):
         self.assertEqual(body["id"], 42)
         self.assertEqual(body["error"]["code"], -32600)
         self.assertEqual(body["error"]["message"], "Invalid Request")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestServerVersion(unittest.TestCase):
@@ -754,7 +766,7 @@ class TestGatewayRouting(unittest.TestCase):
 
 
 class TestLegacyKeyPreparationArguments(unittest.TestCase):
-    """A legacy key keeps schedule_meeting and start_meeting_now as they were."""
+    """A legacy key keeps schedule_meeting and start_meeting_now with their original arguments."""
 
     def _call(self, name, arguments, scope):
         body = {
@@ -783,3 +795,7 @@ class TestLegacyKeyPreparationArguments(unittest.TestCase):
         # Without them the legacy key keeps both tools.
         result = self._call("start_meeting_now", base, scope=None)
         self.assertNotIn("isError", result)
+
+
+if __name__ == "__main__":
+    unittest.main()

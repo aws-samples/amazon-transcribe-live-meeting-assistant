@@ -828,6 +828,8 @@ def format_meeting(meeting: Dict[str, Any], vp_id: Optional[str] = None) -> Dict
         "owner": meeting.get("Owner", meeting.get("AgentId", "")),
         "labels": labels_of(meeting),
         "audience": meeting.get("Audience") or None,
+        # As the meeting lifecycle events carry it; null for the default profile.
+        "summaryProfile": meeting.get("SummaryProfile") or None,
         "summaryReady": ready,
         "hasSummary": ready or bool(meeting.get("Summary")),
         "hasTranscript": bool(meeting.get("TranscriptUri") or meeting.get("RecordingUrl")),

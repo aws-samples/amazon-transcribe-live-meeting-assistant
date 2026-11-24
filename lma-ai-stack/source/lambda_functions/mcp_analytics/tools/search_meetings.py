@@ -17,6 +17,9 @@ from tools.url_helper import get_meeting_url
 
 logger = logging.getLogger()
 
+# The metadata key that holds a meeting's owner in the transcript knowledge base.
+OWNER_METADATA_KEY = "Owner"
+
 
 def _configured_model_id() -> str:
     """The model the transcript knowledge base answers with.
@@ -107,9 +110,10 @@ def execute(
     # Build metadata filters for UBAC and date range
     filters = []
 
-    # UBAC: Non-admin users see only their meetings
+    # UBAC: Non-admin users see only their meetings. The key is the one the summary
+    # step writes into each document's metadata (getKBMetadata in bedrock_summary_lambda).
     if not is_admin and user_id:
-        filters.append({"equals": {"key": "owner", "value": user_id}})
+        filters.append({"equals": {"key": OWNER_METADATA_KEY, "value": user_id}})
 
     # Date range filters
     if start_date:

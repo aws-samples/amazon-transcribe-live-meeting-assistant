@@ -410,7 +410,7 @@ def test_a_refused_deletion_is_reported(calls_table, lambdas):
         meeting_actions.delete_meeting(caller(), "m1", confirm=True)
 
 
-# ── share_meeting / unshare_meeting ─────────────────────────────────────────
+# ── share_meeting (action: add / remove) ────────────────────────────────────
 
 
 def test_sharing_adds_to_and_unsharing_removes_from_the_share_list(calls_table, lambdas):

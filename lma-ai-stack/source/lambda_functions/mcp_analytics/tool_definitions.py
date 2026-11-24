@@ -11,7 +11,10 @@ A tool whose annotations carry ``readOnlyHint: true`` changes nothing and is
 answered for any key. Every other tool here changes something and is answered
 only for a key with the read-write scope (index.scope_allows); a key without it
 is not offered them in tools/list either. ``destructiveHint`` marks the tools
-whose change cannot be taken back or takes something away from people, and
+whose change cannot be taken back or takes something away from people, which
+includes every tool that replaces a stored value and clears it when sent an
+empty one (update_meeting_agenda, update_scheduled_meeting, set_meeting_context,
+set_meeting_checklist and update_meeting_metadata), and
 ``idempotentHint`` the ones that change nothing more when called again with
 the same arguments.
 
@@ -253,7 +256,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "properties": {"meetingId": MEETING_ID, "agenda": AGENDA},
             "required": ["meetingId", "agenda"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "get_meeting_context",
@@ -517,7 +520,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             },
             "required": ["virtualParticipantId"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "end_meeting",
