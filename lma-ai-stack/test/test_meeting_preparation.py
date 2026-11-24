@@ -170,6 +170,9 @@ def test_a_virtual_participant_is_checked_before_it_is_stored(resources):
     assert create["Kind"] == "PIPELINE"
     assert create["PipelineConfig"]["Functions"] == [
         {"Fn::GetAtt": "ValidateMeetingPreparationAppSyncFunction.FunctionId"},
+        # Meeting Recording › Record Virtual Participant meeting video
+        # (test_vp_video_recording_setting.py).
+        {"Fn::GetAtt": "CheckVirtualParticipantVideoRecordingAppSyncFunction.FunctionId"},
         {"Fn::GetAtt": "CreateVirtualParticipantAppSyncFunction.FunctionId"},
     ]
     edit = _resolver(resources, "updateScheduledVirtualParticipant")

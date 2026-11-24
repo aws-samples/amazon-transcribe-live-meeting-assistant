@@ -34,6 +34,11 @@ import { isMeetingUrl, zoomMeetingLinkHint } from './launch-settings';
 import { PLATFORM_OPTIONS, agendaIsTooLong, meetingIdError } from './vp-form';
 import { summaryProfileOptions } from '../../hooks/use-summary-profiles';
 
+/** Shown under a Record meeting video switch the deployment's setting has turned off. */
+export const VIDEO_RECORDING_OFF_TEXT =
+  'Meeting video is not recorded: Record Virtual Participant meeting video is off on the Configuration page ' +
+  '(Meeting Recording). The meeting is recorded as audio and transcript only.';
+
 /**
  * The fields of the Virtual Participant form, from the meeting name to video
  * recording, shared by the Create Virtual Participant form and the form that
@@ -67,6 +72,10 @@ const VirtualParticipantFormFields = ({
   consentDefaults = null,
   enableVideoRecording,
   onEnableVideoRecordingChange,
+  // Meeting Recording › Record Virtual Participant meeting video: false when
+  // the deployment's setting is off, which no launch can override; true or null
+  // (not known) leave the switch to the user.
+  videoRecordingAllowed = null,
   summaryProfiles = undefined,
   // Live guidance for the meeting (guidance-options.js); not offered when omitted.
   guidanceChoice = undefined,
@@ -345,15 +354,17 @@ const VirtualParticipantFormFields = ({
       <FormField
         label="Video recording"
         description={
-          'Capture the meeting screen (screen shares, slides, participants) as an MP4 alongside the audio ' +
-          'recording. Adds CPU/storage cost. Turn off to record audio and transcript only.'
+          videoRecordingAllowed === false
+            ? VIDEO_RECORDING_OFF_TEXT
+            : 'Capture the meeting screen (screen shares, slides, participants) as an MP4 alongside the audio ' +
+              'recording. Adds CPU/storage cost. Turn off to record audio and transcript only.'
         }
         stretch
       >
         <Toggle
-          checked={enableVideoRecording}
+          checked={videoRecordingAllowed === false ? false : enableVideoRecording}
           onChange={({ detail }) => onEnableVideoRecordingChange(detail.checked)}
-          disabled={settingsLocked}
+          disabled={settingsLocked || videoRecordingAllowed === false}
         >
           Record meeting video
         </Toggle>
@@ -401,6 +412,7 @@ VirtualParticipantFormFields.propTypes = {
   }),
   enableVideoRecording: PropTypes.bool.isRequired,
   onEnableVideoRecordingChange: PropTypes.func.isRequired,
+  videoRecordingAllowed: PropTypes.bool,
   // The profiles listSummaryProfiles answers with; omitted, the default alone.
   summaryProfiles: PropTypes.arrayOf(
     PropTypes.shape({ Name: PropTypes.string, Label: PropTypes.string, Description: PropTypes.string }),

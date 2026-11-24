@@ -193,7 +193,7 @@ const CaptureContextPanel = ({
   const source = captureSource(item, vp);
   const retention = transcriptRetention(item);
   const consent = consentSummary(consentState);
-  const videoOff = Boolean(vp) && vp.enableVideoRecording === false;
+  const videoOff = Boolean(vp) && (vp.enableVideoRecording === false || Boolean(vp.videoRecordingOffReason));
   const engine = transcriptionEngine(item);
   const language = transcriptionLanguage(item);
   const detected = languages || meetingLanguages(item.detectedLanguages);

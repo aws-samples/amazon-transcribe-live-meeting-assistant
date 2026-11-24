@@ -24,6 +24,14 @@ the same four inputs before they store them on the Virtual Participant's row:
 ``validateMeetingPreparation``   Not in the schema: the first function of the
                                  createVirtualParticipant and
                                  updateScheduledVirtualParticipant pipelines.
+``getVirtualParticipantVideoRecording``
+                                 The query: whether Meeting Recording › Record
+                                 Virtual Participant meeting video is on, for
+                                 the Create Virtual Participant form.
+``virtualParticipantVideoRecording``
+                                 Not in the schema: the same answer, for the
+                                 createVirtualParticipant pipeline's second
+                                 function.
 ================================ =================================================
 
 Who may write is the rule ``updateCallAgenda`` applies: an Admin, the meeting's
@@ -55,7 +63,7 @@ from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
-from lma_config import SUMMARY_PROFILES, ConfigurationStore  # configuration layer
+from lma_config import RECORDING, SUMMARY_PROFILES, ConfigurationStore  # configuration layer
 from lma_meeting_preparation import rules  # configuration layer
 from lma_summary_profiles import (  # configuration layer
     UnknownSummaryProfile,
@@ -428,6 +436,28 @@ def summary_profiles_section() -> Dict[str, Any]:
     return dict(_CONFIG_STORE.get_section(SUMMARY_PROFILES.name).values)
 
 
+#: The shipped default of recording.recordVpMeetingVideo (setting_defaults.json).
+RECORD_VP_MEETING_VIDEO_DEFAULT = True
+
+
+def record_vp_meeting_video() -> Optional[bool]:
+    """Whether Meeting Recording › Record Virtual Participant meeting video is on.
+
+    None when the configuration cannot be read: the form then leaves its switch
+    alone and the create stores no reason, and the Virtual Participant applies
+    the setting itself when it starts, which is what decides.
+    """
+    global _CONFIG_STORE  # pylint: disable=global-statement
+    try:
+        if _CONFIG_STORE is None:
+            _CONFIG_STORE = ConfigurationStore()
+        value = _CONFIG_STORE.get_section(RECORDING.name).values.get("recordVpMeetingVideo")
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception("could not read the Meeting Recording settings")
+        return None
+    return value if isinstance(value, bool) else RECORD_VP_MEETING_VIDEO_DEFAULT
+
+
 def checked_profile(value: Any) -> Optional[str]:
     """A summary profile name the configuration holds, None for the default."""
     try:
@@ -577,6 +607,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     arguments = event.get("arguments") or {}
     if field == "validateMeetingPreparation":
         return validate_meeting_preparation(arguments)
+    if field == "virtualParticipantVideoRecording":
+        return record_vp_meeting_video()
+    if field == "getVirtualParticipantVideoRecording":
+        caller = caller_of(event)
+        if not caller["is_backend"] and not caller["username"]:
+            raise ForbiddenError("Unauthorized")
+        return record_vp_meeting_video()
     if field == "listSummaryProfiles":
         caller = caller_of(event)
         if not caller["is_backend"] and not caller["username"]:

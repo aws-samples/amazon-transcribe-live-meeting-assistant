@@ -78,6 +78,9 @@ def _appsync_response(payload):
 class _ToolHarness(unittest.TestCase):
     """Runs a tool with AWS and HTTP replaced, keeping the mutation it sent."""
 
+    #: More fields of the row createVirtualParticipant answers with.
+    row_extra: dict = {}
+
     def run_tool(self, module, **kwargs):
         sent = []
 
@@ -92,6 +95,7 @@ class _ToolHarness(unittest.TestCase):
                             "meetingPlatform": "ZOOM",
                             "meetingId": "123",
                             "status": "SCHEDULED",
+                            **self.row_extra,
                         }
                     }
                 }
@@ -117,7 +121,7 @@ class _ToolHarness(unittest.TestCase):
             patch("botocore.auth.SigV4Auth", return_value=MagicMock()),
             patch("requests.post", side_effect=post),
         ):
-            module.execute(**kwargs)
+            self.result = module.execute(**kwargs)
         self.sfn = sfn
         return sent[0]["variables"]["input"]
 
@@ -160,6 +164,34 @@ class TestScheduleMeeting(_ToolHarness):
     def test_without_an_agenda_the_row_is_written_as_before(self):
         vp_input = self.run_tool(schedule_meeting, **self.base())
         self.assertNotIn("agenda", vp_input)
+
+
+class TestVideoRecordingSetting(_ToolHarness):
+    """Both VP tools say when Record Virtual Participant meeting video is off."""
+
+    def base(self):
+        when = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        return {"meeting_name": "Weekly", "meeting_platform": "zoom", "meeting_id": "123"}, when
+
+    def test_a_row_with_a_reason_is_answered_with_video_off_and_why(self):
+        self.row_extra = {"videoRecordingOffReason": "configuration"}
+        common, when = self.base()
+        for module, extra in (
+            (start_meeting_now, {}),
+            (schedule_meeting, {"scheduled_time": when}),
+        ):
+            self.run_tool(module, **common, **extra)
+            self.assertEqual(self.result["videoRecording"], "off")
+            self.assertIn(
+                "Record Virtual Participant meeting video", self.result["videoRecordingNote"]
+            )
+        # The scheduled one says the setting at its start decides.
+        self.assertIn("before the Virtual Participant starts", self.result["videoRecordingNote"])
+
+    def test_a_row_without_one_says_nothing_about_video(self):
+        common, _when = self.base()
+        self.run_tool(start_meeting_now, **common)
+        self.assertNotIn("videoRecording", self.result)
 
 
 class TestToolSchemas(unittest.TestCase):

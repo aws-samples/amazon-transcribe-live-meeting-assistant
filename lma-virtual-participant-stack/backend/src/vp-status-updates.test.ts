@@ -220,6 +220,17 @@ test('the join method is written on its own: no status, and the detail line is l
   assert.match(found[0].query, /^\s+joinMethod$/m);
 });
 
+test('the video recording outcome is written on its own: a reason, or a clear when nothing stops the video', async () => {
+  const { manager, sent } = harness({ id: VP_ID, status: VP_STATUS.INITIALIZING });
+  await manager.setVideoRecordingOffReason('configuration');
+  await manager.setVideoRecordingOffReason(null);
+  const found = mutations(sent);
+  assert.equal(found.length, 2);
+  assert.deepEqual(found[0].variables.input, { id: VP_ID, videoRecordingOffReason: 'configuration' });
+  assert.deepEqual(found[1].variables.input, { id: VP_ID, clearVideoRecordingOffReason: true });
+  assert.match(found[0].query, /^\s+videoRecordingOffReason$/m);
+});
+
 test('a failure writes its message and does not clear it', async () => {
   const { manager, sent } = harness();
   await manager.setFailed('Wrong meeting password');
@@ -435,7 +446,7 @@ test('every mutation selects at least the fields the UI subscribes to', () => {
   assert.deepEqual(missing, [], 'SUBSCRIBED_FIELDS does not cover the subscription');
 
   const mutations = source.split('mutation UpdateVirtualParticipant').slice(1);
-  assert.equal(mutations.length, 8, 'the mutation count in this test needs updating');
+  assert.equal(mutations.length, 9, 'the mutation count in this test needs updating');
   for (const [index, mutation] of mutations.entries()) {
     const selection = mutation.slice(0, mutation.indexOf('`;'));
     assert.ok(

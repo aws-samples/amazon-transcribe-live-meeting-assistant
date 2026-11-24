@@ -1168,6 +1168,7 @@ class TroubleshootingTools:
             "taskPrivateIp",
             # Per-VP toggles that change what evidence exists.
             "enableVideoRecording",
+            "videoRecordingOffReason",
         }
     )
 

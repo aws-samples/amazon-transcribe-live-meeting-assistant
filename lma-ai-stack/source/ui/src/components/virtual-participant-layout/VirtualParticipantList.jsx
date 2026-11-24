@@ -30,6 +30,7 @@ import { useCollection } from '@cloudscape-design/collection-hooks';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
 import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
+import useVpVideoRecordingSetting from '../../hooks/use-vp-video-recording-setting';
 import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
@@ -213,6 +214,8 @@ const VirtualParticipantList = () => {
   // Read each time the form opens. Null until read, or when it cannot be:
   // every choice is then offered, and the VP still applies the deployment's rule.
   const consentDefaults = useMeetingConsentDefaults(showCreateModal);
+  // Meeting Recording › Record Virtual Participant meeting video, read when the form opens.
+  const videoRecordingAllowed = useVpVideoRecordingSetting(showCreateModal);
   // The summary profiles the form offers, read when it opens.
   const summaryProfiles = useSummaryProfiles(showCreateModal);
   // A choice the selected platform cannot support, or the deployment would not
@@ -1053,6 +1056,7 @@ const VirtualParticipantList = () => {
               consentDefaults={consentDefaults}
               summaryProfiles={summaryProfiles}
               enableVideoRecording={enableVideoRecording}
+              videoRecordingAllowed={videoRecordingAllowed}
               onEnableVideoRecordingChange={setEnableVideoRecording}
               guidanceChoice={guidanceChoice}
               onGuidanceChoiceChange={setGuidanceChoice}

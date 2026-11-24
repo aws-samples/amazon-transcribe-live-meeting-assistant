@@ -9341,9 +9341,41 @@ Resources:
       PipelineConfig:
         Functions:
           - !GetAtt ValidateMeetingPreparationAppSyncFunction.FunctionId
+          - !GetAtt CheckVirtualParticipantVideoRecordingAppSyncFunction.FunctionId
           - !GetAtt CreateVirtualParticipantAppSyncFunction.FunctionId
       RequestMappingTemplate: "{}"
       ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+  # Reads Meeting Recording > Record Virtual Participant meeting video, by the
+  # meeting preparation resolver Lambda (which reads the configuration already),
+  # so createVirtualParticipant can record on the row why its video will not be
+  # recorded. A request that turns the video off does not invoke the Lambda.
+  CheckVirtualParticipantVideoRecordingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: CheckVirtualParticipantVideoRecording
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/checkVirtualParticipantVideoRecording.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/checkVirtualParticipantVideoRecording.response.vtl
+
+  # The same setting, for the Create Virtual Participant form.
+  GetVirtualParticipantVideoRecordingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Query
+      FieldName: getVirtualParticipantVideoRecording
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   CreateVirtualParticipantAppSyncFunction:
     Type: AWS::AppSync::FunctionConfiguration
@@ -9414,6 +9446,15 @@ Resources:
         ## launches; immediate launches also pass it via the Step Functions input.
         #if(!$util.isNull($ctx.args.input.enableVideoRecording))
           $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
+        #end
+
+        ## Why the video will not be recorded although the request asks for it
+        ## (or says nothing, which means on): Meeting Recording > Record Virtual
+        ## Participant meeting video is off, as the pipeline's second function
+        ## read it. The VP container reads the setting again when it starts,
+        ## which decides, and rewrites or removes this then.
+        #if($ctx.stash.recordVpMeetingVideo == false && $util.defaultIfNull($ctx.args.input.enableVideoRecording, true) != false)
+          $util.qr($input.put("videoRecordingOffReason", "configuration"))
         #end
 
         ## Live guidance for the meeting it creates (Boolean). Absent, the
@@ -9691,6 +9732,23 @@ Resources:
             $util.qr( $expSet.put("#joinMethod", ":joinMethod") )
             $util.qr( $expNames.put("#joinMethod", "joinMethod") )
             $util.qr( $expValues.put(":joinMethod", $util.dynamodb.toDynamoDB($ctx.args.input.joinMethod)) )
+        #end
+
+        ## Why the meeting's video is not recorded although the launch asked **
+        ## for it ("configuration" or "deployment"), written by the VP when it **
+        ## starts; clearVideoRecordingOffReason removes it when nothing stops **
+        ## the video. **
+        #if( $util.defaultIfNull($ctx.args.input.clearVideoRecordingOffReason, false) == true )
+            $util.qr( $expNames.put("#videoRecordingOffReason", "videoRecordingOffReason") )
+            $util.qr( $expRemove.add("#videoRecordingOffReason") )
+        #elseif( !$util.isNullOrBlank($ctx.args.input.videoRecordingOffReason) )
+            #set( $videoOffReasons = ["configuration", "deployment"] )
+            #if( !$videoOffReasons.contains($ctx.args.input.videoRecordingOffReason) )
+                $util.error("videoRecordingOffReason must be configuration or deployment", "BadRequest")
+            #end
+            $util.qr( $expSet.put("#videoRecordingOffReason", ":videoRecordingOffReason") )
+            $util.qr( $expNames.put("#videoRecordingOffReason", "videoRecordingOffReason") )
+            $util.qr( $expValues.put(":videoRecordingOffReason", $util.dynamodb.toDynamoDB($ctx.args.input.videoRecordingOffReason)) )
         #end
 
         ## Build the update expression. updatedAt is always set, so the SET **
