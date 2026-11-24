@@ -13,7 +13,8 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
 import { exportToExcel } from '../common/download-func';
-import { exportableMeeting, filterMeetingsByPreparation, labelFilterProblem } from '../common/meeting-preparation';
+import { exportableMeeting, filterMeetingsByPreparation } from '../common/meeting-preparation';
+import useLabelFilterProblem from './use-label-filter-problem';
 
 import {
   CallsPreferences,
@@ -45,7 +46,7 @@ const CallList = () => {
   // The label (key=value, or key alone) and audience filters, applied before
   // the text filter.
   const [labelFilter, setLabelFilter] = useState('');
-  const labelProblem = labelFilterProblem(labelFilter);
+  const labelProblem = useLabelFilterProblem(labelFilter);
   const [audienceFilter, setAudienceFilter] = useState(AUDIENCE_FILTER_OPTIONS[0]);
 
   const {
