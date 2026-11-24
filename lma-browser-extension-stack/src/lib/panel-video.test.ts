@@ -79,6 +79,13 @@ describe('the panel\'s screen video', () => {
     expect(h.recorder).toEqual(['StartVideo']);
   });
 
+  test('a consent granted in notify, after the video has started, does not start it again', () => {
+    const h = setup();
+    h.video.begin('m', true, false);
+    h.video.granted();
+    expect(h.recorder).toEqual(['StartVideo']);
+  });
+
   test('records nothing when the switch is off', () => {
     const h = setup();
     h.video.begin('m', false, false);

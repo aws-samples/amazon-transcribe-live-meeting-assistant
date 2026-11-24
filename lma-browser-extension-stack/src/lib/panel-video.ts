@@ -66,6 +66,7 @@ export const createPanelVideo = ({
   endWaitMs = 3000, setTimer = (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimer = (t: ReturnType<typeof setTimeout>) => clearTimeout(t),
 }: Options) => {
   let endTimer: ReturnType<typeof setTimeout> | null = null;
+  let awaitingGrant = false;
   let state: VideoState = VIDEO_OFF;
   let callId: string | null = null;
   let since = 0;
@@ -95,6 +96,7 @@ export const createPanelVideo = ({
     state = VIDEO_OFF;
     if (!wantVideo) return;
     set({ status: 'waiting' });
+    awaitingGrant = waitForGrant;
     if (!waitForGrant) {
       since = now();
       sendToRecorder({ action: 'StartVideo' });
@@ -103,7 +105,10 @@ export const createPanelVideo = ({
 
   /** The transcriber granted the meeting's consent (opt-in). */
   const granted = () => {
-    if (!wanted || state.status !== 'waiting' || uplink) return;
+    // Only for a capture told to wait for it: in notify the transcriber reports
+    // the consent granted too, after the video has already been started.
+    if (!awaitingGrant || !wanted || state.status !== 'waiting' || uplink) return;
+    awaitingGrant = false;
     since = now();
     sendToRecorder({ action: 'StartVideo' });
   };

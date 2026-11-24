@@ -11,7 +11,7 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
-import { OBJECTION_NOT_SENT, captureStopped, consentPayload, emptyStep, parseServerFrame, transcriberUrl, withoutConsent } from '../lib/consent';
+import { CONSENT_MODE_OPT_IN, OBJECTION_NOT_SENT, captureStopped, consentPayload, emptyStep, parseServerFrame, transcriberUrl, withoutConsent } from '../lib/consent';
 import { VIDEO_OFF, VideoState, createPanelVideo } from '../lib/panel-video';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
@@ -380,7 +380,7 @@ function IntegrationProvider({ children }: any) {
           sendMessage(JSON.stringify(currentCall));
           startSentRef.current = true;
           setIsTranscribing(true);
-          panelVideo.begin(currentCall.callId, wantVideoRef.current, (currentCall.consent as { mode?: string } | undefined)?.mode === "opt_in");
+          panelVideo.begin(currentCall.callId, wantVideoRef.current, (currentCall.consent as { mode?: string } | undefined)?.mode === CONSENT_MODE_OPT_IN);
           sendRecordingMessage();
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN && startSentRef.current) {
