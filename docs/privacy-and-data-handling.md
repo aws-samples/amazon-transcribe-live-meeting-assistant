@@ -641,9 +641,11 @@ they expire.
 
 The **Minimised content – summary only** preset (`minimised-content`) is for a
 deployment that must keep as little personal content as possible. Under it the
-summary is the only meeting content LMA keeps, and the model that writes the
-summary, and the meeting assistant, are told to leave sensitive personal
-information out of what they write.
+summary is the only record of what was said that LMA keeps once the meeting is
+summarized, and the model that writes the summary, and the meeting assistant,
+are told to leave sensitive personal information out of what they write. Some
+other content is still kept; see
+[What can still hold sensitive personal information](#what-can-still-hold-sensitive-personal-information).
 
 ### What the preset sets
 
