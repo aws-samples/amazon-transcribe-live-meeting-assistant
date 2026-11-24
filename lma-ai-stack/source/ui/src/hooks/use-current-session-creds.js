@@ -23,10 +23,20 @@ let refreshedForRole = false;
  * Every token the user pool issues names the caller's role in cognito:groups
  * (its pre token generation trigger). A token cached from before that trigger
  * existed names none, and the GraphQL API refuses it, so such a session is
- * refreshed once, which issues tokens through the trigger.
+ * refreshed once, which issues tokens through the trigger. The identity pool
+ * gives such a token no credentials either, which can fail the first read
+ * outright; that failure is answered with the same one refresh.
  */
 export const fetchSessionNamingRole = async () => {
-  const session = await fetchAuthSession();
+  let session;
+  try {
+    session = await fetchAuthSession();
+  } catch (error) {
+    if (refreshedForRole) throw error;
+    refreshedForRole = true;
+    logger.debug('session could not be read; refreshing its tokens once', error);
+    return fetchAuthSession({ forceRefresh: true });
+  }
   const groups = session?.tokens?.accessToken?.payload?.['cognito:groups'] || [];
   if (!session?.tokens || groupsNameARole(groups) || refreshedForRole) {
     return session;

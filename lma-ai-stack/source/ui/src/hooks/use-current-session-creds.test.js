@@ -52,6 +52,22 @@ describe('the session the app starts with', () => {
     expect(fetchAuthSession.mock.calls.filter((call) => call[0]?.forceRefresh)).toHaveLength(1);
   });
 
+  it('is refreshed once when the first read fails, as it can when the identity pool refuses an old token', async () => {
+    const fresh = session(['User']);
+    fetchAuthSession.mockRejectedValueOnce(new Error('no role')).mockResolvedValueOnce(fresh);
+
+    expect(await fetchSessionNamingRole()).toBe(fresh);
+    expect(fetchAuthSession).toHaveBeenLastCalledWith({ forceRefresh: true });
+  });
+
+  it('reports a second failure rather than refreshing again', async () => {
+    fetchAuthSession.mockRejectedValue(new Error('signed out'));
+
+    await expect(fetchSessionNamingRole()).rejects.toThrow('signed out');
+    await expect(fetchSessionNamingRole()).rejects.toThrow('signed out');
+    expect(fetchAuthSession.mock.calls.filter((call) => call[0]?.forceRefresh)).toHaveLength(1);
+  });
+
   it('is not refreshed when there are no tokens to refresh', async () => {
     fetchAuthSession.mockResolvedValue({});
 
