@@ -65,3 +65,61 @@ export const videoAllowedFor = (source: StreamingCaptureSource | undefined, swit
  */
 export const keyframeSourceFor = (source: StreamingCaptureSource | undefined): StreamedKeyframeSource =>
     source === 'STREAM_AUDIO' || source === 'BROWSER_EXTENSION' ? source : 'DESKTOP_CAPTURE';
+
+/** What became of a chunk offered to {@link PendingVideoChunks.hold}. */
+export type VideoChunkHoldResult = 'held' | 'full' | 'no-start';
+
+/**
+ * Video chunks that arrive while the START_VIDEO before them is still being
+ * handled.
+ *
+ * A client sends its first chunks, the initialization segment first, straight
+ * behind START_VIDEO (docs/websocket-streaming-api.md, "6.1.6 Screen Video").
+ * The socket hands each frame to its handler as it arrives, without waiting for
+ * the handler of the frame before it, and START_VIDEO has its connection's
+ * video session only after an await, so a chunk right behind it would find no
+ * session. Chunks for a connection whose START_VIDEO is in progress are held
+ * here and handed back, in order, once it has a session. At most `limitBytes`
+ * are held per connection: the most a browser client keeps before its stream
+ * is confirmed.
+ */
+export class PendingVideoChunks<K> {
+    private readonly pending = new Map<K, { chunks: Uint8Array[], bytes: number }>();
+
+    private readonly limitBytes: number;
+
+    constructor(limitBytes = 32 * 1024 * 1024) {
+        this.limitBytes = limitBytes;
+    }
+
+    /** A START_VIDEO began on this connection: hold its chunks until it has finished. */
+    begin(key: K): void {
+        this.pending.set(key, { chunks: [], bytes: 0 });
+    }
+
+    /** Hold a chunk for a START_VIDEO in progress on this connection. */
+    hold(key: K, chunk: Uint8Array): VideoChunkHoldResult {
+        const held = this.pending.get(key);
+        if (!held) {
+            return 'no-start';
+        }
+        if (held.bytes + chunk.length > this.limitBytes) {
+            return 'full';
+        }
+        held.chunks.push(chunk);
+        held.bytes += chunk.length;
+        return 'held';
+    }
+
+    /** The START_VIDEO has a session: the chunks held for it, in the order they arrived. */
+    release(key: K): Uint8Array[] {
+        const chunks = this.pending.get(key)?.chunks ?? [];
+        this.pending.delete(key);
+        return chunks;
+    }
+
+    /** The START_VIDEO was refused or the connection closed: forget its chunks. */
+    drop(key: K): void {
+        this.pending.delete(key);
+    }
+}

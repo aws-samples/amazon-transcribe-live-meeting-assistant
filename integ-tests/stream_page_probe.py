@@ -30,6 +30,8 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 
+# The page's route in the web UI (STREAM_AUDIO_PATH in the UI's routes/constants.js).
+STREAM_PAGE_PATH = "/stream"
 SLIDE_SECONDS = 6
 SLIDESHOW_TITLE = "LMA slideshow probe"
 SLIDESHOW_HTML = f"""<!doctype html><title>{SLIDESHOW_TITLE}</title>
@@ -87,7 +89,7 @@ def run_stream_page(url: str, username: str, password: str, *, seconds: float, t
         page.get_by_label("Password", exact=True).fill(password)
         page.get_by_role("button", name="Sign in").click()
         page.wait_for_load_state("networkidle")
-        page.goto(url.rstrip("/") + "/#/stream-audio")
+        page.goto(url.rstrip("/") + "/#" + STREAM_PAGE_PATH)
         switch = page.get_by_role("checkbox", name=re.compile("Also record screen video"))
         switch.wait_for(timeout=30000)
         switch.check()
