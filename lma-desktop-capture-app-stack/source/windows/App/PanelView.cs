@@ -723,6 +723,10 @@ public sealed class PanelView : Border
             // Show/hide the source picker in place (settings live in their own
             // window now, so there's no panel rebuild to piggyback on).
             SyncVideoSourceHost();
+            // The consent notice ends with the video sentence while video is on:
+            // rebuild the panel so the notice shown and copied is the one START
+            // records.
+            Refresh();
         };
         // A ComboBox inside a ScrollViewer takes the wheel and changes its
         // SELECTION, which here persists a different device to the registry.

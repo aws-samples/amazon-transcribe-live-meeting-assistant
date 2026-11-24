@@ -282,6 +282,19 @@ def test_the_shipped_video_sentence_is_used_when_none_is_saved(dynamo, monkeypat
     )
 
 
+def test_a_blank_video_sentence_is_the_shipped_one(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", videoNoticeText="   ")
+    record = call("startMeetingConsent", BACKEND, LmaUser="Ana", IncludesVideo=True)["Consent"]
+    assert record["NoticeText"].endswith(index.consent.DEFAULT_SETTINGS["videoNoticeText"])
+
+
+def test_a_long_notice_keeps_the_whole_video_sentence(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", notifyNoticeText="x" * 2000, videoNoticeText="Video too.")
+    record = call("startMeetingConsent", BACKEND, IncludesVideo=True)["Consent"]
+    assert record["NoticeText"].endswith(" Video too.")
+    assert len(record["NoticeText"]) <= index.consent.MAX_NOTICE_LENGTH
+
+
 def test_a_shared_user_cannot_start_or_change_it(dynamo) -> None:
     with pytest.raises(index.ForbiddenError):
         call("startMeetingConsent", user(SHARED), Mode="off")

@@ -208,10 +208,17 @@ def with_video_sentence(notice: str, settings: Mapping[str, Any], includes_video
     The sentence is part of the notice text the record keeps, so the record
     says that the participants were told the video is recorded.
     """
-    sentence = str(settings.get("videoNoticeText") or "").strip()
-    if not includes_video or not sentence:
+    if not includes_video:
         return notice
-    return consent.clip(f"{notice} {sentence}", consent.MAX_NOTICE_LENGTH) or notice
+    # A blank value is the shipped sentence, as every client reads it.
+    sentence = (
+        str(settings.get("videoNoticeText") or "").strip()
+        or consent.DEFAULT_SETTINGS["videoNoticeText"]
+    )
+    # The notice is shortened, not the sentence, so a long notice still ends
+    # with the whole sentence the record has to keep.
+    room = max(consent.MAX_NOTICE_LENGTH - len(sentence) - 1, 0)
+    return f"{(consent.clip(notice, room) or '').rstrip()} {sentence}".strip()
 
 
 def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
