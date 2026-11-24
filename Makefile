@@ -75,7 +75,8 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/scripts/ux_test_session.py \
 	$(CURDIR)/scripts/meeting_guest \
 	$(CURDIR)/scripts/tests \
-	$(CURDIR)/scripts/testing
+	$(CURDIR)/scripts/testing \
+	$(CURDIR)/scripts/solution_profile
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
@@ -211,8 +212,10 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 		black \
 		cfn-lint \
 		flake8 \
+		jsonschema \
 		mypy \
 		pylint \
+		pyyaml \
 		ruff==$(RUFF_VERSION) \
 		virtualenv \
 		yamllint \
@@ -391,7 +394,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-load-simulator test-pr-review test-ux-recorder test-ci-tooling ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-load-simulator test-pr-review test-ux-recorder test-ci-tooling test-solution-profile ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -504,6 +507,27 @@ test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no mod
 	@echo "Running advisory AI review tests..."
 	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
 	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
+
+# The solution profile (solution-profile/, docs/solution-profile.md): the vendored
+# reference validator, run with the contract form of VERSION, then cross-checks
+# that fail when the code gains an MCP tool, Virtual Participant platform,
+# configuration preset or release Region the profile does not cover. The release
+# rules (reviewed_for_version == version, a changes.yaml entry for it) apply when
+# VERSION is a final X.Y.Z, or with SOLUTION_PROFILE_RELEASE=1.
+solution-profile-check: ## Validate solution-profile/ against its contract and cross-check it with the code (no AWS)
+	@$(PYTHON) scripts/solution_profile/check.py || \
+		(echo -e "$(RED)ERROR: the solution profile is invalid or behind the code (see docs/solution-profile.md)$(NC)" && exit 1)
+
+test-solution-profile: ## Unit tests for the solution profile check and its deterministic release build (no AWS)
+	@echo "Running solution profile tests..."
+	$(PYTHON) -m pytest scripts/solution_profile -q
+	@echo -e "$(GREEN)✅ Solution profile tests passed!$(NC)"
+
+# The release asset. Not a gate: .github/workflows/solution-profile-release.yml
+# builds it when a GitHub Release is published, and test-solution-profile proves
+# two builds byte-identical.
+solution-profile-build: ## Build the solution-profile release tarball, .sha256 and .build.json into dist/ (TAG=v<x.y.z> optional)
+	@$(PYTHON) scripts/solution_profile/build.py --out-dir dist --validate $(if $(TAG),--tag $(TAG),)
 
 # The CI step selection (scripts/ci/changed_areas.py): which steps of the "Lint and
 # unit tests" job a pull request's changed files need, plus the check that every
@@ -932,6 +956,8 @@ endif
 	@echo "  lib/lma_cli_pkg/pyproject.toml"
 	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/lma_cli_pkg/lma_cli/__init__.py && rm -f lib/lma_cli_pkg/lma_cli/__init__.py.bak
 	@echo "  lib/lma_cli_pkg/lma_cli/__init__.py"
+	@# Solution profile manifest, in the contract's version form (0.4.1.dev1 -> 0.4.1-dev1)
+	@$(PYTHON) scripts/solution_profile/check.py --stamp-version $(V)
 	@echo -e "$(GREEN)✅ Version updated to $(V) in all locations$(NC)"
 
 ##@ Git Workflow

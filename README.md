@@ -93,6 +93,7 @@ The [documentation site](https://aws-samples.github.io/amazon-transcribe-live-me
 - [Virtual Participant](./docs/virtual-participant.md) and [Meeting Consent](./docs/meeting-consent.md)
 - [Meeting Assistant](./docs/meeting-assistant.md), [Voice Assistant](./docs/voice-assistant.md) and [MCP Servers](./docs/mcp-servers.md)
 - [Configuration Guide](./docs/configuration-guide.md) and [Developer Guide](./docs/developer-guide.md)
+- [Solution Profile](./docs/solution-profile.md), the machine-readable description of LMA's capabilities, extension points and limits attached to each release
 
 ## Contributing
 

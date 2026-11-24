@@ -84,6 +84,37 @@ If the buggy code was introduced after the last tag, the fix is intra-cycle → 
    section — releasing (turning `[Unreleased]` into `## [x.y.z] - DATE` and adding
    the template URLs block) is a separate step the maintainer does at tag time.
 
+## Review the solution profile
+
+The [solution profile](../../docs/solution-profile.md) in `solution-profile/` is
+attached to every GitHub Release, and a release build fails until a person has
+reviewed it for that release. Do this after the `[Unreleased]` section is final,
+with the release's version in hand:
+
+1. **Read the final `[Unreleased]` section against the curated files.** For each
+   entry, update what it changes: a new or changed feature in `capabilities.yaml`
+   (with `evidence` paths to its doc and code), a new setting or hook in
+   `extension-points.yaml`, a new or lifted limit in `limitations.yaml`, and a
+   question in `discovery-questions.yaml` when the feature changes what decides fit.
+   Keep ids stable; mark a removed item `status: retired` and keep it for at least
+   one release.
+2. **Add a `changes.yaml` entry for the release**, newest first: its `version`,
+   `date`, a one-paragraph `summary`, every ⚠️ or action item as `action_required`
+   (with `affects` naming the items it touches), and `evidence: [CHANGELOG.md]`.
+   Keep at least the last ten releases.
+3. **Set `reviewed_for_version`** in `solution-profile/solution-profile.yaml` to the
+   release's version, in the contract's form (`0.4.1`, or `0.4.1-rc1` for a
+   pre-release).
+4. **Run `make solution-profile-check`** after `make version V=<x.y.z>`. With a final
+   `VERSION` it applies the release rules, so it fails until steps 2 and 3 are done.
+5. **Keep it public-safe.** The profile is published with the release: describe
+   features generically, name no customer, consumer or internal programme, and
+   follow CLAUDE.md's Security Disclosure Hygiene in limitation text as anywhere else.
+
+After the GitHub Release is published,
+`.github/workflows/solution-profile-release.yml` attaches the tarball, its
+`.sha256` and its `.build.json`. Check the release page shows all three.
+
 ## Style reference (match the existing file)
 
 ```markdown
