@@ -1636,6 +1636,24 @@ def test_consent_override_puts_back_the_saved_section() -> None:
     assert store.body == {"meeting_consent": saved}
 
 
+def test_a_second_override_saved_on_the_first_ones_profile_puts_back_its_own_section() -> None:
+    """test_stream_page_audio.py changes Recording and Meeting Consent in one run."""
+    import meeting_consent_probe
+
+    store = _FakeConfigurationStore({"recording": {"recordAudio": False}})
+    recording = meeting_consent_probe.ConsentSettingsOverride(store=store, section="recording")
+    consent = meeting_consent_probe.ConsentSettingsOverride(store=store, section="meeting_consent")
+    recording.save()
+    consent.save_on(recording.profile)
+    assert consent.profile == recording.profile and consent.had_section is False
+    recording.apply(recordAudio=True)
+    consent.apply(mode="notify")
+    assert store.body == {"recording": {"recordAudio": True}, "meeting_consent": {"mode": "notify"}}
+    consent.restore()
+    recording.restore()
+    assert store.body == {"recording": {"recordAudio": False}}
+
+
 def test_an_override_of_another_section_changes_only_that_section() -> None:
     """test_transcript_deletion.py overrides Retention with the same class."""
     import meeting_consent_probe
@@ -1809,7 +1827,9 @@ def _key_frame_default(name: str) -> int:
     return int(match.group(1).replace("_", ""))
 
 
-#: The interval at which the transcriber samples key frames from a streamed video.
+#: The longest gap between the key frames a streaming client's encoder emits,
+#: each of which the transcriber samples (videokeyframes.ts). Set by the
+#: clients, not the transcriber; the Stream page asks for one every 1.8 s.
 KEY_FRAME_SAMPLE_MS = 2000
 
 

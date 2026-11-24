@@ -79,30 +79,34 @@ def setup(client):
         pytest.fail(f"{client.stack_name} has no ApplicationCloudfrontEndpoint output")
     user_stack = extension.resolve_stack(client.stack_name, client.region)
     user = extension.create_test_user(user_stack)
-    scratch = Path.home() / ".lma-scratch"
-    scratch.mkdir(exist_ok=True)
-    workdir = tempfile.TemporaryDirectory(prefix="stream-page-audio-", dir=scratch)
-    media = Path(workdir.name)
-    # A minute of each channel: the fake microphone and the tab both loop.
-    remote, local = extension.split_channels(extension.CALL_WAV, media, 60)
-    (media / "meeting.html").write_text(meeting_tab_html(remote.name))
-    origin, server = extension.serve(media)
-    recording = ConsentSettingsOverride(stack, section="recording")
-    consent = ConsentSettingsOverride(store=recording.store, section="meeting_consent")
     try:
-        recording.save()
-        record = recording.store.read_profile(recording.profile, consistent_read=True)
-        consent.profile = recording.profile
-        consent.had_section = "meeting_consent" in record.body
-        consent.saved = dict(record.body.get("meeting_consent") or {}) if consent.had_section else None
-        recording.apply(recordAudio=True)
-        yield {"stack": stack, "url": url, "user": user, "consent": consent,
-               "meeting_url": f"{origin}/meeting.html", "microphone": str(local)}
+        scratch = Path.home() / ".lma-scratch"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="stream-page-audio-", dir=scratch) as workdir:
+            media = Path(workdir)
+            # A minute of each channel: the fake microphone and the tab both loop.
+            remote, local = extension.split_channels(extension.CALL_WAV, media, 60)
+            (media / "meeting.html").write_text(meeting_tab_html(remote.name))
+            origin, server = extension.serve(media)
+            try:
+                recording = ConsentSettingsOverride(stack, section="recording")
+                consent = ConsentSettingsOverride(store=recording.store, section="meeting_consent")
+                try:
+                    recording.save()
+                    # The same profile: recording.save() may have made a temporary copy.
+                    consent.save_on(recording.profile)
+                    recording.apply(recordAudio=True)
+                    yield {"stack": stack, "url": url, "user": user, "consent": consent,
+                           "meeting_url": f"{origin}/meeting.html", "microphone": str(local)}
+                finally:
+                    # Consent first: restoring Recording removes a temporary profile.
+                    try:
+                        consent.restore()
+                    finally:
+                        recording.restore()
+            finally:
+                server.shutdown()
     finally:
-        consent.restore()
-        recording.restore()
-        server.shutdown()
-        workdir.cleanup()
         extension.delete_test_user(user_stack, user["email"])
 
 
