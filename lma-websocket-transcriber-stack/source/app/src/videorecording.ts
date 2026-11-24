@@ -3,7 +3,9 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  *
- * Optional desktop-video recording lane for the websocket transcriber.
+ * Optional video recording lane for the websocket transcriber: the screen video
+ * of the Desktop Capture App, the Stream Audio page and the browser
+ * extension (which clients may send it: video-admission.ts).
  *
  * Wire protocol (fully backward compatible — servers that predate this module
  * silently ignore the unknown callEvent values, and clients that never send
@@ -41,6 +43,7 @@ import { CallMetaData } from './calleventdata/eventtypes';
 import { writeCallVideoRecordingEvent } from './calleventdata/transcribe';
 import { posixifyFilename, normalizeErrorForLogging } from './utils/common';
 import { KeyframeLane, keyframesConfigured } from './videokeyframes';
+import type { StreamedKeyframeSource } from './video-admission';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 // Partition-aware S3 hostname suffix (amazonaws.com, amazonaws.com.cn, ...),
@@ -53,6 +56,9 @@ const VIDEO_RECORDINGS_KEY_PREFIX =
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
 const ENABLE_VIDEO_RECORDING =
     (process.env['ENABLE_VIDEO_RECORDING'] || 'true') === 'true';
+
+/** Whether this task records video at all: the EnableVideoRecording stack parameter. */
+export const videoRecordingEnabled = (): boolean => ENABLE_VIDEO_RECORDING;
 const FFMPEG_PATH = process.env['FFMPEG_PATH'] || 'ffmpeg';
 
 /**
@@ -215,6 +221,11 @@ export type VideoSession = {
      * fresh encoder session gets a new one.
      */
     keyframes?: KeyframeLane;
+    /**
+     * What this stream's key frames are recorded as: the client of the audio
+     * session it joined (video-admission.ts keyframeSourceFor).
+     */
+    keyframeSource: StreamedKeyframeSource;
 };
 
 /**
@@ -239,6 +250,7 @@ const startKeyframes = (
             timelineBaseSeconds,
             videoOffsetBaseSeconds,
             tokens: session.tokens,
+            source: session.keyframeSource,
         },
         server
     );
@@ -353,13 +365,16 @@ const muxedFileName = (callId: string, sessionNumber?: number): string => {
  * capture session of the audio session the video belongs to, as checked at
  * its START (the caller sets it; the video socket's own frame is not trusted
  * for it): a later session's video is recorded apart from an earlier
- * session's that may still be finalizing.
+ * session's that may still be finalizing. `keyframeSource` is what the
+ * stream's key frames are recorded as, from the audio session's client; a
+ * stream that continues an existing video session keeps that session's.
  */
 export const startVideoSession = (
     callMetaData: CallMetaData,
     server: FastifyInstance,
     audioPositionSeconds?: number,
-    sessionOffsetSeconds = 0
+    sessionOffsetSeconds = 0,
+    keyframeSource: StreamedKeyframeSource = 'DESKTOP_CAPTURE'
 ): VideoSession => {
     const callId = callMetaData.callId;
     const sessionNumber = callMetaData.sessionNumber;
@@ -371,7 +386,7 @@ export const startVideoSession = (
             `[START_VIDEO]: [${callId}] - Video recording is disabled (ENABLE_VIDEO_RECORDING=false). Discarding video stream.`
         );
         if (!session) {
-            session = newSession(callId, callMetaData);
+            session = newSession(callId, callMetaData, keyframeSource);
             session.discarding = true;
             videoSessions.set(key, session);
         }
@@ -430,7 +445,7 @@ export const startVideoSession = (
         session.discarding = true;
         return session;
     } else {
-        session = newSession(callId, callMetaData);
+        session = newSession(callId, callMetaData, keyframeSource);
         videoSessions.set(key, session);
         // Absolute lifetime cap: a client that streams forever and never sends
         // END_VIDEO (and never disconnects) would otherwise leak this session,
@@ -470,10 +485,12 @@ export const startVideoSession = (
 
 const newSession = (
     callId: string,
-    callMetaData: CallMetaData
+    callMetaData: CallMetaData,
+    keyframeSource: StreamedKeyframeSource
 ): VideoSession => ({
     callId,
     sessionNumber: callMetaData.sessionNumber,
+    keyframeSource,
     segmentPaths: [],
     fileSize: 0,
     sizeCapReached: false,

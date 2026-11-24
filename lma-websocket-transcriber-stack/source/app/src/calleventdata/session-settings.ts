@@ -59,7 +59,23 @@ export interface TranscriptionSettings {
 export interface RecordingSettings {
     /** The default for recording a meeting's audio; a client's own choice wins. */
     readonly recordAudio: boolean;
+    /**
+     * Whether the Stream Audio page and the browser extension may send
+     * screen video (START_VIDEO). The Desktop Capture App is not affected, and
+     * the EnableVideoRecording stack parameter still decides whether any video
+     * is recorded (see video-admission.ts).
+     */
+    readonly recordBrowserVideo: boolean;
 }
+
+/**
+ * The shipped default of Meeting Recording › Record screen video from Stream
+ * Audio and the browser extension, used when the configuration does not
+ * hold the setting or cannot be read. No stack parameter backs it.
+ * lma-ai-stack/test/test_parameter_backed_settings.py holds it to
+ * setting_defaults.json.
+ */
+export const RECORD_BROWSER_VIDEO_DEFAULT = false;
 
 export interface SessionSettings {
     readonly transcription: TranscriptionSettings;
@@ -91,7 +107,7 @@ export const TRANSCRIPTION_SETTINGS: Readonly<
 };
 
 /** As TRANSCRIPTION_SETTINGS, for the Meeting Recording section. */
-export const RECORDING_SETTINGS: Readonly<Record<keyof RecordingSettings, SettingSource>> = {
+export const RECORDING_SETTINGS: Readonly<Record<Exclude<keyof RecordingSettings, 'recordBrowserVideo'>, SettingSource>> = {
     recordAudio: { envVar: 'SHOULD_RECORD_CALL', type: 'boolean' },
 };
 
@@ -151,6 +167,12 @@ export const sessionSettingsFrom = (
     },
     recording: {
         recordAudio: flag(recording, RECORDING_SETTINGS.recordAudio, 'recordAudio'),
+        // A saved true or false is used; a value of any other type, or none,
+        // is the shipped default, which is off.
+        recordBrowserVideo:
+            typeof recording['recordBrowserVideo'] === 'boolean'
+                ? recording['recordBrowserVideo']
+                : RECORD_BROWSER_VIDEO_DEFAULT,
     },
 });
 

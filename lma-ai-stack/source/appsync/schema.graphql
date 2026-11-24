@@ -1269,8 +1269,9 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	ThumbnailUrl: String!
 	Width: Int
 	Height: Int
-	# What took the frame: VIRTUAL_PARTICIPANT, or DESKTOP_CAPTURE for the
-	# desktop capture app's video.
+	# What took the frame: VIRTUAL_PARTICIPANT; DESKTOP_CAPTURE for the
+	# Desktop Capture App's video; STREAM_AUDIO for the Stream Audio
+	# page's; BROWSER_EXTENSION for the browser extension's.
 	Source: String
 	# Whether the meeting platform showed a screen share when the frame was
 	# taken; absent where the platform gives no such signal.

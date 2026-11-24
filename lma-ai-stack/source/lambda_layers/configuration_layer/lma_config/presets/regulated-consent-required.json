@@ -23,7 +23,8 @@
     "recording": {
       "mode": "merge",
       "values": {
-        "recordAudio": false
+        "recordAudio": false,
+        "recordBrowserVideo": false
       }
     },
     "virtual_participant": {

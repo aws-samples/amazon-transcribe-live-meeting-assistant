@@ -62,15 +62,16 @@ def test_optional_fields_left_unset_are_not_written():
         assert absent not in item
 
 
-def test_a_desktop_frame_has_no_share_signal_and_is_stored_without_one():
+@pytest.mark.parametrize("source", ["DESKTOP_CAPTURE", "STREAM_AUDIO", "BROWSER_EXTENSION"])
+def test_a_streaming_client_frame_has_no_share_signal_and_keeps_its_source(source):
     item = build_keyframe_input(
-        {**EVENT, "ShareDetected": None, "Source": "DESKTOP_CAPTURE"},
+        {**EVENT, "ShareDetected": None, "Source": source},
         owner="o",
         shared_with=None,
         expires_after=1,
     )
     assert "ShareDetected" not in item
-    assert item["Source"] == "DESKTOP_CAPTURE"
+    assert item["Source"] == source
 
 
 @pytest.mark.parametrize(

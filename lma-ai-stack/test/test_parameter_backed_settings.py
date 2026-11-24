@@ -432,6 +432,31 @@ def test_the_transcriber_task_carries_the_fallback_variable(section, setting, en
         assert entry.parameter not in passed
 
 
+#: The transcriber's own copy of the default of each setting it applies that no
+#: stack parameter backs: (section, setting) -> exported name in session-settings.ts.
+TRANSCRIBER_SHIPPED_FALLBACKS = {
+    ("recording", "recordBrowserVideo"): "RECORD_BROWSER_VIDEO_DEFAULT",
+}
+
+
+@pytest.mark.parametrize("key", sorted(TRANSCRIBER_SHIPPED_FALLBACKS))
+def test_a_transcriber_fallback_is_the_shipped_default(key) -> None:
+    """Used when the configuration cannot be read; pinned so the two cannot drift."""
+    name = TRANSCRIBER_SHIPPED_FALLBACKS[key]
+    text = TRANSCRIBER_SETTINGS.read_text(encoding="utf-8")
+    match = re.search(rf"^export const {name}\b[^=]*= (.+);$", text, re.M)
+    assert match, f"session-settings.ts declares no {name}"
+    section, setting = key
+    assert json.loads(match.group(1)) == parameters.shipped_setting_defaults()[section][setting]
+
+
+def test_every_recording_setting_is_applied_by_the_transcriber() -> None:
+    """Each Meeting Recording setting is a parameter-backed table entry or a pinned fallback."""
+    applied = {setting for section, setting, *_ in TYPESCRIPT_ENTRIES if section == "recording"}
+    applied |= {setting for section, setting in TRANSCRIBER_SHIPPED_FALLBACKS if section == "recording"}
+    assert applied == set(schema.section_schema("recording")["properties"])
+
+
 def test_the_transcriber_task_can_read_the_configuration_table() -> None:
     environment = _transcriber_environment()
     assert environment["CONFIGURATION_TABLE_NAME"] == {"Ref": "ConfigurationTableName"}

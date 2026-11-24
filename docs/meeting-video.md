@@ -399,7 +399,8 @@ Bedrock:
 |---|---|
 | **Virtual Participant** | Yes, when **Record meeting video** is on for the Virtual Participant (the toggle in the Create Virtual Participant modal; the deployment default is the `EnableVideoRecording` stack parameter). The VP samples its own meeting display, the same picture its screen recording captures. |
 | **Desktop Capture App** | Yes, when **Also record screen video** is on in the app and the deployment records video (`EnableVideoRecording`). The WebSocket transcriber samples the video the app streams, as it arrives; see [Desktop video](#desktop-video). |
-| **Stream Audio, Browser Extension, Upload Audio** | No. These sources carry no video. |
+| **Stream Audio, Browser Extension** | When the client sends screen video, which the WebSocket transcriber accepts from them only when the deployment records video (`EnableVideoRecording`) and **Meeting Recording › Record screen video from Stream Audio and the browser extension** is on (off by default and in every preset). The video is sent the way the desktop app sends it ([Screen video](websocket-streaming-api.md#616-screen-video)), and is sampled the same way; its key frames' `Source` is `STREAM_AUDIO` or `BROWSER_EXTENSION`. |
+| **Upload Audio** | No. An upload carries no video. |
 
 Sampling follows the meeting's recording: in the Virtual Participant it runs
 only while the meeting is being transcribed, so nothing is captured before the
@@ -660,7 +661,7 @@ finds the images. The item has:
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
 | `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. Measured from the recording's first captured frame, which FFmpeg reports, not from when FFmpeg was launched. |
 | `ImageUrl`, `ThumbnailUrl` | Where the two images are stored. |
-| `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
+| `Source` | What took the frame: `VIRTUAL_PARTICIPANT`, or the WebSocket transcriber for the video of `DESKTOP_CAPTURE` (the Desktop Capture App, and any client of the streaming API that does not name itself), `STREAM_AUDIO` (the Stream Audio page) or `BROWSER_EXTENSION` (the browser extension). |
 | `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
 | `SlideText` | The text on the frame, read once after it is stored (see [Slide text](#slide-text)); empty when it holds none. |

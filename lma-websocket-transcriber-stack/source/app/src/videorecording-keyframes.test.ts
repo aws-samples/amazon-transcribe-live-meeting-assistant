@@ -35,6 +35,22 @@ const quietServer = {
 type LaneOptions = { timelineBaseSeconds: number, videoOffsetBaseSeconds: number | null };
 const optionsOf = (lane: unknown): LaneOptions => (lane as { options: LaneOptions }).options;
 
+test('a stream\'s key frames carry the source its caller names, and its restarts keep it', async () => {
+    const meta = { callId: 'source-call', videoTimeOffsetMs: 0 } as Parameters<typeof startVideoSession>[0];
+    const first = startVideoSession(meta, quietServer, 0, 0, 'BROWSER_EXTENSION');
+    assert.equal(first.keyframeSource, 'BROWSER_EXTENSION');
+    assert.equal((first.keyframes as unknown as { options: { source?: string } }).options.source, 'BROWSER_EXTENSION');
+    // A restart joins the same video session, whatever its caller passes.
+    const restarted = startVideoSession({ ...meta, videoResume: false }, quietServer, 5, 0, 'DESKTOP_CAPTURE');
+    assert.equal(restarted, first);
+    assert.equal((restarted.keyframes as unknown as { options: { source?: string } }).options.source, 'BROWSER_EXTENSION');
+    await endVideoSession('source-call', quietServer);
+
+    const unnamed = startVideoSession({ callId: 'unnamed-call' } as typeof meta, quietServer, 0);
+    assert.equal(unnamed.keyframeSource, 'DESKTOP_CAPTURE', 'the desktop app\'s source, as before');
+    await endVideoSession('unnamed-call', quietServer);
+});
+
 test('first stream, resumed stream and fresh restart each get the lane they need', async () => {
     // Sixty seconds of audio received, however long the meeting has run.
     const audioPositionSeconds = 60;

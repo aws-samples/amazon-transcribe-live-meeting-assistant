@@ -82,7 +82,9 @@ import {
     notifyAudioRecordingDone,
     awaitPendingMuxes,
     getVideoSession,
+    videoRecordingEnabled,
 } from './videorecording';
+import { VIDEO_NOT_ENABLED_CLOSE, isBrowserVideoClient, keyframeSourceFor, videoAllowedFor } from './video-admission';
 
 import { ConsentApi, createSignedGraphqlCaller } from './consent/appsync';
 import { decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
@@ -209,6 +211,29 @@ const videoSocketMap = new Map<WebSocket, VideoSession>();
  * per frame).
  */
 const findAudioSessionByCallId = (callId: string): SocketCallData | undefined => sessions.findLive(callId);
+
+/**
+ * Close the video connections of a meeting's capture session whose video has
+ * been ended on the server (its consent stopped capture), so their client stops
+ * sending rather than streaming into a finished recording. Unbound first, so
+ * their close is not taken for a drop to wait for a reconnect from.
+ */
+const closeVideoConnections = (
+    callId: string,
+    sessionNumber: number | undefined,
+    close: { code: number, reason: string }
+): void => {
+    for (const [videoWs, video] of [...videoSocketMap]) {
+        if (video.callId === callId && (video.sessionNumber ?? 1) === (sessionNumber ?? 1)) {
+            videoSocketMap.delete(videoWs);
+            try {
+                videoWs.close(close.code, close.reason);
+            } catch {
+                // already closed
+            }
+        }
+    }
+};
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -825,6 +850,7 @@ const onTextMessage = async (
             // later authorizes START_VIDEO for the same callId.
             ownerSub: getAuthenticatedCaller(request)?.sub,
             recordedTranscriptionEngine: captureContext.TranscriptionEngine,
+            captureSource: captureContext.CaptureSource,
         };
         // The consent session sends to connection.ws, which follows the
         // meeting to the connection its client reconnects with.
@@ -950,6 +976,23 @@ const onTextMessage = async (
             ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
             return;
         }
+        // The Stream Audio page and the browser extension send video only
+        // when the deployment records it and the Meeting Recording setting, as
+        // the meeting's START read it, allows it. Other clients keep the stack
+        // switch alone: with it off, their stream is accepted and discarded.
+        if (
+            isBrowserVideoClient(audioSession.captureSource) &&
+            !videoAllowedFor(audioSession.captureSource, {
+                stackRecordsVideo: videoRecordingEnabled(),
+                recordBrowserVideo: audioSession.sessionSettings?.recording.recordBrowserVideo ?? false,
+            })
+        ) {
+            server.log.warn(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video is not enabled for ${audioSession.captureSource} on this deployment; refusing video stream.`
+            );
+            ws.close(VIDEO_NOT_ENABLED_CLOSE.code, VIDEO_NOT_ENABLED_CLOSE.reason);
+            return;
+        }
         // Where the meeting's timeline is now, by the audio received: a video
         // stream that restarts is placed there, which leaves out any time the
         // audio connection was down, as the recording and transcript do.
@@ -961,7 +1004,8 @@ const onTextMessage = async (
             { ...callMetaData, sessionNumber: audioSession.callMetadata.sessionNumber },
             server,
             recordedAudioSeconds(audioSession),
-            audioSession.callMetadata.sessionOffsetSeconds ?? 0
+            audioSession.callMetadata.sessionOffsetSeconds ?? 0,
+            keyframeSourceFor(audioSession.captureSource)
         );
         videoSocketMap.set(ws, session);
     } else if (callMetaData.callEvent === 'END_VIDEO') {
@@ -1007,6 +1051,11 @@ const onTextMessage = async (
  * The three consent frames: CONSENT_SETTINGS (what a client's consent step
  * shows), CONSENT_OBJECTION and CONSENT_EVIDENCE (for the meeting this socket
  * started). True when the frame was one of them.
+ *
+ * The CONSENT_SETTINGS answer also says whether the client the frame names
+ * (`clientType`, as in START) may send screen video, so the Stream Audio
+ * page and the browser extension offer video only where START_VIDEO would be
+ * accepted. A meeting reads the setting again when it starts.
  */
 const onConsentFrame = async (
     clientIP: string,
@@ -1015,15 +1064,27 @@ const onConsentFrame = async (
 ): Promise<boolean> => {
     const kind = frame['callEvent'];
     if (kind === 'CONSENT_SETTINGS') {
-        const settings = await readConsentSettings(server.log);
+        // The Meeting Recording setting is read as a meeting's START reads it
+        // (one consistent read of the configuration, on the immediate tier), so
+        // the answer matches what a START sent now would be held to. A client
+        // asks once per connection, before its START.
+        const [settings, sessionSettings] = await Promise.all([
+            readConsentSettings(server.log),
+            getSessionSettings(server.log),
+        ]);
+        const videoAllowed = videoAllowedFor(captureSourceFor(frame['clientType']), {
+            stackRecordsVideo: videoRecordingEnabled(),
+            recordBrowserVideo: sessionSettings.recording.recordBrowserVideo,
+        });
         sendFrame(
             ws,
             settings
-                ? settingsFrame(settings)
+                ? { ...settingsFrame(settings), videoAllowed }
                 : {
                     event: 'CONSENT_SETTINGS',
                     available: false,
                     message: 'The meeting consent settings could not be read; try again.',
+                    videoAllowed,
                 }
         );
         return true;
@@ -1153,6 +1214,7 @@ const discardCaptureForConsent = async (ws: WebSocket, socketData: SocketCallDat
         if (video && !sharedWithAnother && !video.muxStarted) {
             video.discarding = true;
             await endVideoSession(callMetaData.callId, server, sessionNumber);
+            closeVideoConnections(callMetaData.callId, sessionNumber, CONSENT_CLOSE);
         }
     }
     // A capture already ended: its connection may still be open.
@@ -1176,6 +1238,7 @@ const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, 
     } catch (error) {
         server.log.error(`[CONSENT]: [${callId}] - Error ending the meeting's video: ${normalizeErrorForLogging(error)}`);
     }
+    closeVideoConnections(callId, socketData.callMetadata.sessionNumber, CONSENT_CLOSE);
     try {
         // The connection is closed as soon as the session is marked ended; the
         // rows of the audio received before then are finished, and written
