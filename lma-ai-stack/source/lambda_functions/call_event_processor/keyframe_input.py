@@ -4,8 +4,9 @@
 """The addVideoKeyframe input for an ADD_VIDEO_KEYFRAME event.
 
 A key frame is one picture of the shared screen, sent by the Virtual Participant
-(keyframe-sampler.ts) or by the WebSocket transcriber for the desktop capture app
-(videokeyframes.ts), with the same fields; see docs/meeting-video.md.
+(keyframe-sampler.ts) or by the WebSocket transcriber (videokeyframes.ts) for the
+screen video of the Desktop Capture App, the Stream Audio/Video page or the
+browser extension, with the same fields; see docs/meeting-video.md.
 
 Kept free of AWS imports, like pure.py, so the validation can be tested without
 the Lambda layer on the path.
@@ -16,7 +17,11 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Mapping, Optional
 
-KEYFRAME_SOURCES = frozenset({"VIRTUAL_PARTICIPANT", "DESKTOP_CAPTURE"})
+#: What took a frame: the Virtual Participant, or the WebSocket transcriber for
+#: the video of the client named (DESKTOP_CAPTURE is the Desktop Capture App's).
+KEYFRAME_SOURCES = frozenset(
+    {"VIRTUAL_PARTICIPANT", "DESKTOP_CAPTURE", "STREAM_AUDIO", "BROWSER_EXTENSION"}
+)
 
 # A frame id is a zero-padded millisecond position plus a short suffix (see
 # frameIdFor in keyframe-sampler.ts); it becomes part of the item's sort key.

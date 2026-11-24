@@ -9,7 +9,8 @@ import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
 import type { SessionSettings } from './session-settings';
 import type { ConsentSession } from '../consent/session';
-import type { CaptureContext, TranscriptionContext, TranscriptionEngineName } from './capture-context';
+import type { CaptureContext, StreamingCaptureSource, TranscriptionContext, TranscriptionEngineName } from './capture-context';
+import type { StreamedKeyframeSource } from '../video-admission';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -79,7 +80,7 @@ export type CallVideoRecordingEvent = CallEventBase<'ADD_S3_VIDEO_RECORDING_URL'
     RefreshToken?: string,
 };
 
-// One key frame of the desktop capture app's video (see videokeyframes.ts). The
+// One key frame of a streaming client's video (see videokeyframes.ts). The
 // Virtual Participant sends the same fields; see docs/meeting-video.md.
 export type CallVideoKeyframeEvent = CallEventBase<'ADD_VIDEO_KEYFRAME'> & {
     FrameId: string,
@@ -89,7 +90,7 @@ export type CallVideoKeyframeEvent = CallEventBase<'ADD_VIDEO_KEYFRAME'> & {
     ThumbnailUrl: string,
     Width: number,
     Height: number,
-    Source: 'DESKTOP_CAPTURE',
+    Source: StreamedKeyframeSource,
     ShareDetected: null,
     ChangeScore: number,
     AccessToken?: string,
@@ -279,6 +280,13 @@ export type SocketCallData = {
      * that predate the check (defensive; the handler treats that as a denial).
      */
     ownerSub?: string
+    /**
+     * The client that opened this session, from its START's clientType
+     * (capture-context.ts captureSourceFor). Decides whether a START_VIDEO for
+     * the session is admitted and what its key frames are recorded as
+     * (video-admission.ts).
+     */
+    captureSource?: StreamingCaptureSource
     /**
      * The meeting's Amazon Transcribe options and recording default, read once
      * from the configuration when it started and kept for its whole life, so

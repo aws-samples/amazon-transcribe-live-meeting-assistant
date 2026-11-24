@@ -70,6 +70,10 @@
       "type": "boolean",
       "default": true,
       "formerParameter": "EnableAudioRecording"
+    },
+    "recordBrowserVideo": {
+      "type": "boolean",
+      "default": false
     }
   },
   "meeting_assist": {

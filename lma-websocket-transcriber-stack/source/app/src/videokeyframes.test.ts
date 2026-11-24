@@ -20,6 +20,7 @@ import { FastifyInstance } from 'fastify';
 import {
     KeyframeLane,
     KeyframeLaneIo,
+    KeyframeLaneOptions,
     SAMPLE_BYTES,
     frameIdFor,
     keyframeKeys,
@@ -37,7 +38,10 @@ const showinfo = (n: number, ptsSeconds: number, size = '1920x1080') =>
     `pts_time:${ptsSeconds} duration:2560 pos:1234 fmt:yuv420p sar:1/1 s:${size} i:P iskey:1 type:I\n`;
 const tick = () => new Promise((r) => setImmediate(r));
 
-const harness = (videoOffsetBaseSeconds: number | null = 12.5) => {
+const harness = (
+    videoOffsetBaseSeconds: number | null = 12.5,
+    source?: KeyframeLaneOptions['source']
+) => {
     const emitted: CallVideoKeyframeEvent[] = [];
     const uploads: string[] = [];
     const removed: string[] = [];
@@ -59,6 +63,7 @@ const harness = (videoOffsetBaseSeconds: number | null = 12.5) => {
             timelineBaseSeconds: 12.5,
             videoOffsetBaseSeconds,
             tokens: { accessToken: 'a' },
+            source,
         },
         quietServer,
         io
@@ -73,6 +78,20 @@ test('showinfo lines give the frame number, time and size', () => {
     // A frame without a time is still a frame, so the pairing stays in step.
     const noTime = parseShowinfo('[Parsed_showinfo_0 @ 0x1] n:   4 pts:NOPTS pts_time:NOPTS pos:1 fmt:yuv420p sar:1/1 s:640x360 i:P');
     assert.ok(noTime && Number.isNaN(noTime.ptsSeconds) && noTime.n === 4 && noTime.width === 640);
+});
+
+test('a key frame names the client whose video it came from', async () => {
+    for (const source of ['STREAM_AUDIO', 'BROWSER_EXTENSION'] as const) {
+        const h = harness(12.5, source);
+        for (let i = 0; i < 6; i++) {
+            h.lane.onStdout(flat(200));
+            h.lane.onStderr(showinfo(i, i * 2));
+            await tick();
+            await tick();
+        }
+        assert.equal(h.emitted.length, 1, source);
+        assert.equal(h.emitted[0].Source, source);
+    }
 });
 
 test('a settled picture is kept once, with both clocks offset from the stream start', async () => {

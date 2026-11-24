@@ -3,15 +3,16 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  *
- * Key frames of the desktop capture app's video: the slides and documents that
+ * Key frames of a streaming client's video (the Desktop Capture App, the Stream
+ * Audio/Video page or the browser extension): the slides and documents that
  * were on screen, kept when they change and stored on the meeting, as the
  * Virtual Participant does for its own display (docs/meeting-video.md).
  *
  * The video arrives as a fragmented MP4 over the video socket (see
  * videorecording.ts). Each chunk written to disk is also written to the stdin of
  * one FFmpeg process per stream, which decodes only the stream's H.264 key
- * frames -- both desktop encoders emit one at least every two seconds -- and for
- * each writes:
+ * frames -- every client's encoder is set to emit one at least every two seconds
+ * -- and for each writes:
  *
  *   - a 64x36 grayscale sample to stdout, for keyframe-detector.ts;
  *   - a 1568-wide JPEG and a 320-wide thumbnail to a scratch folder;
@@ -23,7 +24,7 @@
  * are deleted once their sample has been judged, and swept again at each later
  * sample in case FFmpeg wrote them after it.
  *
- * The desktop app gives no screen-share signal, so every sample is judged
+ * No streaming client gives a screen-share signal, so every sample is judged
  * against the stricter thresholds the Virtual Participant uses where its
  * platform gives none.
  *
@@ -49,6 +50,7 @@ import { FastifyInstance } from 'fastify';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { KeyframeDetector, KeyframeThresholds } from './keyframe-detector';
 import { CallVideoKeyframeEvent } from './calleventdata/eventtypes';
+import type { StreamedKeyframeSource } from './video-admission';
 import { writeCallEvent } from './calleventdata/transcribe';
 import { posixifyFilename, normalizeErrorForLogging } from './utils/common';
 
@@ -163,6 +165,8 @@ export type KeyframeLaneOptions = {
     /** Recording seconds at which the stream's presentation time is zero, or null when unknown. */
     videoOffsetBaseSeconds: number | null,
     tokens: { accessToken?: string, idToken?: string, refreshToken?: string },
+    /** The key frames' Source: the client that streamed the video (default DESKTOP_CAPTURE). */
+    source?: StreamedKeyframeSource,
 };
 
 /** The parts of a lane that touch the outside world, replaceable in tests. */
@@ -488,7 +492,7 @@ export class KeyframeLane {
             ThumbnailUrl: url(keys.thumbnail),
             Width: width,
             Height: height,
-            Source: 'DESKTOP_CAPTURE',
+            Source: this.options.source ?? 'DESKTOP_CAPTURE',
             ShareDetected: null,
             ChangeScore: round(changeScore),
             CreatedAt: new Date().toISOString(),

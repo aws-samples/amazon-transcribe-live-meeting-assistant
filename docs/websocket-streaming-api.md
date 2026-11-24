@@ -498,6 +498,7 @@ The server answers:
 | `supported` | `false` when the deployment's opt-in rule cannot be met by a streaming client, with the `reason`; the server refuses such a meeting |
 | `noticeTemplate` | The notice (notify) or consent request (opt-in) to show. Fill `{LMA_USER}` (the user, or "The meeting organizer"), `{meeting}` (the meeting's name, or "this meeting"), `{consent_phrase}` and `{objection_phrase}` (the two phrases below); leave other text in braces as written |
 | `clientsWithoutConsent` | What the server does with a `START` that has no `consent` field: `accept_with_warning` or `reject` |
+| `videoAllowed` | Whether the client named by the request's `clientType` may send screen video; see [Screen Video](#616-screen-video) |
 
 **Send the step with START**, in a `consent` field:
 
@@ -594,6 +595,102 @@ meeting owned by the signed-in user who sent `START`.
 A refused `START` is answered with a `CONSENT_STATE` frame and the connection is
 closed with code `1008`; no meeting is created.
 
+#### 6.1.6 Screen Video
+
+A client can record the screen, window or browser tab its user shares, beside
+the meeting's audio. The video is stored with the meeting as its video
+recording, muxed with the audio when the meeting ends, and its key frames
+become the meeting's shared-screen slides
+([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App sends it this way,
+and so may the Stream Audio/Video page and the browser extension.
+
+**Whether a client may send video.** The deployment must record video (the
+`EnableVideoRecording` stack parameter). The Stream Audio/Video page and the
+browser extension (`clientType` `STREAM_AUDIO` and `BROWSER_EXTENSION`) also
+need **Meeting Recording › Record screen video from Stream Audio/Video and the
+browser extension** to be on, as it was when the meeting's `START` was handled;
+it is off by default and in every configuration preset. Other clients follow
+the stack parameter alone. To find out before offering video, send
+`clientType` with `CONSENT_SETTINGS`, and read `videoAllowed` in the answer:
+
+```json
+{ "callEvent": "CONSENT_SETTINGS", "clientType": "STREAM_AUDIO" }
+```
+
+```json
+{ "event": "CONSENT_SETTINGS", "available": true, "mode": "off", "videoAllowed": true }
+```
+
+`videoAllowed` is in every `CONSENT_SETTINGS` answer, including one with
+`available: false`. It describes the client the frame names, or the streaming
+API's when it names none; it is read afresh for each answer.
+
+**The video connection.** Open a second WebSocket to the same endpoint, with
+the same user's tokens, after the audio connection's `START` has been sent and
+while its audio is streaming. Its first frame is:
+
+```json
+{ "callEvent": "START_VIDEO", "callId": "550e8400-e29b-41d4-a716-446655440000", "videoTimeOffsetMs": 1800 }
+```
+
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `callEvent` | `string` | **Yes** | `"START_VIDEO"` |
+| `callId` | `string` | **Yes** | The `callId` of the meeting whose audio this connection's user is streaming on this server |
+| `videoTimeOffsetMs` | `number` | No | How many milliseconds after the audio started the video's first frame was captured (0 to 3,600,000; default 0). Lines the video and its key frames up with the transcript |
+| `videoResume` | `boolean` | No | `true` on a reconnect that continues the same encoder's byte stream (see below) |
+
+Every binary frame after it is a chunk of one fragmented MP4 stream: H.264
+video only, no audio, the initialization segment first. Send chunks as the
+encoder produces them. Key frames (H.264 IDR pictures) must be no more than two
+seconds apart, because only they are sampled for key frames; LMA's clients
+capture at 5 frames a second. End the stream with:
+
+```json
+{ "callEvent": "END_VIDEO", "callId": "550e8400-e29b-41d4-a716-446655440000" }
+```
+
+and close the connection. Ending the audio with `END` also finishes the video:
+the server waits up to two minutes for `END_VIDEO`, then finalizes with what it
+received.
+
+**When it is refused.** The server closes the video connection with code
+`1008` when:
+
+| Close reason | Meaning |
+|---|---|
+| `no active call for callId` | No audio session of this `callId` is live on this server. Send `START_VIDEO` only once the audio is streaming |
+| `not authorized for callId` | The meeting's audio is being streamed by another user |
+| `meeting consent does not allow capture` | The meeting's [consent](#615-meeting-consent-frames) does not allow capture yet, or no longer does. In opt-in, wait for the `CONSENT_STATE` with `status: "granted"` on the audio connection before sending `START_VIDEO` |
+| `screen video is not enabled for this client` | The deployment or the Meeting Recording setting does not allow video from this client |
+
+A refused video stream does not affect the audio: stop the video, tell the
+user, and carry on streaming audio. A client should not reconnect a refused
+video stream. On a deployment that does not record video
+(`EnableVideoRecording=false`), a stream from a client other than the two
+browser clients is accepted and discarded.
+
+**Consent.** An objection ends
+the meeting and its video: the video recorded until then is kept with the
+meeting, and the server closes the video connection with code `1008` (`meeting
+consent does not allow capture`). Do not reconnect it.
+
+**Reconnecting.** A video connection that drops without `END_VIDEO` is held for
+two minutes. Reconnect with a new `START_VIDEO` for the same `callId`: with
+`videoResume: true` when the encoder carried on and the chunks continue the same
+byte stream (send every chunk produced since the drop, in order and with no gap,
+which would leave the rest of the stream undecodable; do not
+send the initialization segment again), or without it when the encoder started
+again, in which case the stream begins with its own initialization segment.
+See [Reconnection](#reconnection) for how a restarted stream's key frames are
+placed.
+
+**Continued meetings.** A meeting continued with `sessionNumber` (see
+[Continuing an existing meeting](#continuing-an-existing-meeting)) records the
+video of each session separately, and places the later session's key frames
+after the earlier sessions' on the transcript's timeline. The `START_VIDEO` is
+the same; the server takes the session from the audio connection.
+
 #### Full CallMetaData Schema
 
 For reference, here is the complete TypeScript type used by the server:
@@ -601,7 +698,7 @@ For reference, here is the complete TypeScript type used by the server:
 ```typescript
 type CallMetaData = {
   callId: string;           // UUID v4
-  callEvent: string;        // "START" | "SPEAKER_CHANGE" | "END"
+  callEvent: string;        // "START" | "SPEAKER_CHANGE" | "END" | "START_VIDEO" | "END_VIDEO" | consent frames
   localSpeakerName?: string;  // Speaker name for microphone channel (ch_1); older name agentId
   remoteSpeakerName?: string; // Speaker name for meeting channel (ch_0); older name fromNumber
   toNumber?: string;        // Older clients only: stored as SystemPhoneNumber, otherwise unused
@@ -613,6 +710,8 @@ type CallMetaData = {
   consent?: object;         // START only: the client's consent step (6.1.5)
   clientType?: string;      // START only: STREAM_AUDIO | BROWSER_EXTENSION | DESKTOP_APP (Capture Context)
   sessionNumber?: number;   // START only: the session reopenMeeting allowed, to continue a meeting
+  videoTimeOffsetMs?: number; // START_VIDEO only: ms from the start of the audio to the first video frame
+  videoResume?: boolean;    // START_VIDEO only: the stream continues the previous connection's bytes
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -641,8 +740,10 @@ The engine is the one the meeting is expected to start with when its record is
 created. If another one transcribes it — Amazon Transcribe taking over because
 no MicroVM could be started, or an opt-in meeting that waited for consent while
 the engine setting changed — the server writes the transcription fields again
-when transcription starts. The `clientType` is the client's own statement: it is
-informational, and does not change how the meeting is processed. All four fields are absent on meetings recorded before LMA stored
+when transcription starts. The `clientType` is the client's own statement. Apart
+from deciding which [screen video](#616-screen-video) settings apply
+and what the video's key frames are recorded as, it does not change how the
+meeting is processed. All four fields are absent on meetings recorded before LMA stored
 them, and a client that does not send `clientType` keeps working unchanged.
 
 ### 6.2 Binary Messages (Audio Data)

@@ -1413,6 +1413,27 @@ def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_browser_video_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_BROWSER_VIDEO=1, and change two deployment-wide settings while they run."""
+    import test_browser_video
+
+    names = [m.name for m in test_browser_video.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_browser_video_probe_expects_a_key_frame_for_each_slide_it_showed() -> None:
+    """A slide counts once its first two seconds of video went out, placed after the session's offset."""
+    from browser_video_probe import Leg, expected_timestamps
+    from desktop_video_probe import LEAD_SECONDS, Media
+
+    media = Media(Path("."), (), [8, 8, 8], [0.0, 8.0, 16.0], b"", Path("x.mp4"))
+    leg = Leg(call_id="c", client_type="STREAM_AUDIO", fragments_sent=5)
+    # Ten seconds sent: the first two slides were shown, the third was not.
+    assert expected_timestamps(media, leg) == [LEAD_SECONDS, LEAD_SECONDS + 8.0]
+    assert expected_timestamps(media, leg, 100.0) == [100.0 + LEAD_SECONDS, 108.0 + LEAD_SECONDS]
+
+
 def test_every_marker_used_in_the_suite_is_registered() -> None:
     """An unregistered marker is silently ignored, so the exemption would lapse."""
     registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()

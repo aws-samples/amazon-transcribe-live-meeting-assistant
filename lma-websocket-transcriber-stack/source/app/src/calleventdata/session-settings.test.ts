@@ -108,6 +108,18 @@ test('the sections win over the environment', async () => {
     assert.equal(settings.recording.recordAudio, false);
 });
 
+test('browser video is off unless the Meeting Recording section saves it on', async () => {
+    withEnv();
+    assert.equal(sessionSettingsFrom({}, {}).recording.recordBrowserVideo, false);
+    assert.equal(sessionSettingsFrom({}, { recordBrowserVideo: 'true' }).recording.recordBrowserVideo, false);
+    assert.equal(sessionSettingsFrom({}, { recordBrowserVideo: true }).recording.recordBrowserVideo, true);
+    // No stack parameter backs it, so an unreadable table leaves it off.
+    useSessionSettingsStore(fakeStore('fail').store);
+    assert.equal((await getSessionSettings(log)).recording.recordBrowserVideo, false);
+    useSessionSettingsStore(fakeStore({ transcription: {}, recording: { recordBrowserVideo: true } }).store);
+    assert.equal((await getSessionSettings(log)).recording.recordBrowserVideo, true);
+});
+
 test('a stored value of the wrong type is passed over for the environment', () => {
     withEnv({ SHOW_SPEAKER_LABEL: 'true' });
     const settings = sessionSettingsFrom({ showSpeakerLabel: 'sometimes' }, {});

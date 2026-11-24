@@ -86,6 +86,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_vp_live_meeting.py` *(opt-in, `LMA_TEST_VP_LIVE_MEETING=1`)* | a VP launched as `lma vp create` launches one joins a real meeting nobody else attends, starts transcribing, and gets a meeting record; left alone it leaves by itself as `COMPLETED` (`attendees-left`); ended from LMA it shows the end reason and a clean status; the meeting record ends both times | the VP's join, its empty-meeting exit, and the end path, against a real platform |
 | `test_meeting_preparation.py` | a VP scheduled a day ahead with labels, audience, meeting context and checklist stores them, and an edit before it starts changes them (one input over a limit refused; the VP is cancelled afterwards); a synthetic START carrying them creates a meeting that has them; a status set for a user survives a checklist replace and cannot be changed by the assistant; the transcript deletion function removes each evidence quote and keeps its segment id and time. With `LMA_TEST_VP_LIVE_MEETING=1` it also schedules a VP six minutes ahead, edits it, and checks the meeting it creates in the real meeting has the edits | the meeting preparation resolver, the VP create and scheduled-edit pipelines, the START path, and transcript deletion |
 | `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | a narrated synthetic slideshow streamed as the desktop capture app streams it → one key frame per slide, at the right times, with both images in S3; the meeting assistant reads the last slide | desktop video key frames and the assistant's shared-screen tool |
+| `test_browser_video.py` *(opt-in, `LMA_TEST_BROWSER_VIDEO=1`)* | with Meeting Recording and Meeting Consent changed for the run and put back afterwards: the slideshow streamed as the Stream Audio/Video page and as the browser extension (`clientType`) → the settings answer allows video, one key frame per slide under each client's `Source`, a video recording and the capture source on the meeting; a meeting continued for a second session records each session's video and places its key frames after the first's; a meeting refused for its consent admits no video, a granted opt-in one does once the grant arrives, and an objection closes the video connection and keeps the video so far; with the setting off, `START_VIDEO` from either client is refused and the audio carries on | the transcriber's browser video admission, key frame source, consent and continued-meeting paths |
 | `test_meeting_consent.py` *(opt-in, `LMA_TEST_CONSENT=1`)* | with the Meeting Consent setting changed for the run and put back afterwards: an unconfirmed opt-in stream is refused and captures nothing; an attested one is transcribed, with its attestation, evidence image and evidence check stored; a notify stream stops, and is recorded as objected and ended, on an objection | the transcriber's consent gate on the Stream Audio path |
 | `test_hosting_presets.py` | the `team-hosted-external` and `customer-account` Managed profiles hold every value their presets set; synthetic meetings with a unique label, owned by a temporary user and by another owner, one with another label value and one still in progress, are found by `lma meetings delete` run through the CLI as the temporary user (their own) and as a temporary Admin (every user's); the dry run deletes nothing, the meeting in progress is skipped, and `--confirm` removes each matching meeting's record, list entry, transcript items and files in the recordings bucket and nothing else (the two temporary Cognito users, created with no password and no invitation message, in the default run, and the meetings are removed afterwards). With `LMA_TEST_HOSTING_ASSISTANT=1` it also sets **In-meeting requests: who may ask** to Off for the run (put back afterwards) and checks a meeting-chat request is refused while the meeting page's is answered | the configuration seeder's Managed profiles; the SDK's meeting search and the per-meeting delete path; the meeting assistant's requester check |
 | `test_assistant_profile.py` *(opt-in, `LMA_TEST_ASSISTANT_PROFILE=1`)* | with the Meeting Assistant section changed for the run and put back afterwards: the profile's assistant instructions shape an answer; under Selected tools, an installed MCP server flagged off for in-meeting requests is not offered to a meeting-chat request and is to the owner's (read from the assistant's log); the MCP server library export holds no credential, re-importing it changes no server, and an imported server is created waiting for its credentials (its probe row removed afterwards). Needs an installed, active MCP server for the per-server check | the profile's assistant instructions and tool selection; the MCP server library export and import |
@@ -200,6 +201,33 @@ looked at on the meeting page. To build only the media, for a look at the slides
 and the fragment sizes, without a stack:
 `AWS_PROFILE=default python integ-tests/desktop_video_probe.py --region us-west-2 --media-only /tmp/slides`
 (this calls Polly).
+
+## Browser video
+
+`test_browser_video.py` streams the same slideshow as the Stream Audio/Video
+page and the browser extension send screen video: the same second connection
+as the desktop app, with the START's `clientType` naming the client
+(`browser_video_probe.py`). It is opt-in, because it takes about eight minutes,
+calls Polly, and changes two deployment-wide settings for the run:
+
+```bash
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    make integ-tests STACK=lma-integtest1 LMA_TEST_BROWSER_VIDEO=1
+```
+
+It turns **Meeting Recording › Record screen video from Stream Audio/Video and
+the browser extension** on and Meeting Consent off, and later to opt-in and
+notify, on the active profile (in a temporary Custom copy of it when the
+active profile is read-only, as `test_meeting_consent.py` does), and puts both
+sections back afterwards. It needs a stack with `EnableVideoRecording=true`; on
+one without it the first fixture fails, saying so. The two continued-meeting
+tests call `reopenMeeting` through the SDK, which accepts an assumed role, and
+skip with an IAM user's keys. The meetings (`browser-video-probe-<leg>-<UTC
+time>`) are not deleted; they expire with the deployment's retention.
+
+The browser clients' own capture (MediaRecorder in the page and the
+extension) is not exercised here: this file covers what the transcriber does
+with their stream.
 
 ## Transcript deletion after the summary
 
