@@ -86,7 +86,7 @@
         "email": { "$ref": "#/$defs/nullableString" },
         "consent": {
           "enum": ["granted", "objected", "unknown"],
-          "description": "The speaker's latest consent or objection among the consent events recorded against this speaker; unknown when none is. A consent event is never matched to a speaker by name."
+          "description": "The speaker's latest consent or objection among the consent events linked to this speaker; unknown when none is, or when the same participant replied otherwise afterwards in a reply not linked to this speaker. A consent event is never matched to a speaker by name."
         }
       }
     },
@@ -205,7 +205,15 @@
                   "string",
                   "null"
                 ],
-                "description": "The participant's speakerId when the event was recorded against a transcript speaker; null otherwise. A consent event records a display name only, so this is null for every event today; a name is never matched to a speaker."
+                "description": "The speakerId of the participant the event is linked to, while the transcript still holds the linked line under that speaker; null otherwise. A name is never matched to a speaker."
+              },
+              "speakerLinkBasis": {
+                "enum": ["same_segment", null],
+                "description": "How the event was linked to the transcript speaker who gave it, when it was recorded: same_segment, the reply is that speaker's own line of the transcript. Null for an event that was never linked. LMA always writes it."
+              },
+              "speakerLinkedAt": {
+                "type": ["string", "null"],
+                "description": "When the event was linked to its speaker; null for an event that was never linked. LMA always writes it."
               }
             }
           }

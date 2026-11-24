@@ -1,0 +1,983 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# What the solution does. Solution Profile contract v1 (schema/v1/README.md).
+# Every item names the docs or code that show it. Three kinds of tag are checked
+# against the code by scripts/solution_profile/check.py:
+#   vp-platform:<VALUE>  every platform the Virtual Participant accepts
+#                        (lma-ai-stack/source/lambda_functions/mcp_analytics/tools/platform_helper.py)
+#   mcp-tool:<name>      every tool the hosted MCP server offers
+#                        (mcp_analytics/index.py MCP_TOOLS and tool_definitions.py MEETING_TOOLS)
+#   preset:<id>          every shipped configuration preset
+#                        (lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/)
+capabilities:
+  # ---------------------------------------------------------------------------
+  # Capturing a meeting
+  # ---------------------------------------------------------------------------
+  - id: virtual-participant
+    title: Virtual Participant that joins online meetings as a guest
+    description: >-
+      A headless Chromium browser joins a meeting from its link or ID, as a guest
+      under a display name such as "LMA - <user>", now or at a scheduled time. It
+      introduces itself in the meeting chat, records and transcribes the meeting,
+      names speakers from the meeting page, answers chat commands and leaves when the
+      meeting ends. It runs on AWS Lambda MicroVMs by default (one per meeting), or on
+      warm EC2 hosts or Fargate tasks. A live view lets the owner watch the browser
+      and step in when the platform asks for a CAPTCHA, a sign-in or a passcode.
+    evidence:
+      - docs/virtual-participant.md
+      - docs/virtual-participant.md#launch-types
+      - docs/virtual-participant.md#manual-action-required-captcha-2fa-sso
+      - lma-virtual-participant-stack/backend/src/index.ts
+    configuration: [VPLaunchType, virtual_participant]
+    tags: [capture, bot]
+    related:
+      - capability:vp-zoom
+      - capability:vp-microsoft-teams
+      - capability:vp-google-meet
+      - capability:vp-webex
+      - capability:vp-amazon-chime
+      - limitation:vp-is-a-visible-guest
+      - limitation:vp-microvm-eight-hour-ceiling
+
+  - id: vp-zoom
+    title: Virtual Participant on Zoom (web client or Zoom Meeting SDK)
+    description: >-
+      The Virtual Participant joins Zoom through the Zoom web client by default, from a
+      meeting ID and passcode or a join link, including personal meeting links. A user
+      can save their own Zoom credentials so it signs in for meetings that admit only
+      signed-in users. With Zoom Meeting SDK credentials configured it joins through
+      the Meeting SDK instead. Chat sender names, the active speaker, the screen-share
+      signal for key frames and per-participant consent are supported.
+    evidence:
+      - docs/virtual-participant.md#zoom-passcodes-and-join-links
+      - docs/zoom-credentials-and-join-reliability.md
+      - docs/zoom-meeting-sdk.md
+      - lma-virtual-participant-stack/backend/src/zoom.ts
+      - lma-virtual-participant-stack/backend/src/zoom-sdk.ts
+    configuration: [ZoomMeetingSdkClientId, ZoomMeetingSdkClientSecret]
+    tags: [vp-platform:ZOOM, capture]
+    related: [capability:virtual-participant, limitation:zoom-sdk-needs-zoom-approval]
+
+  - id: vp-microsoft-teams
+    title: Virtual Participant on Microsoft Teams (web client or Azure Communication Services)
+    description: >-
+      The Virtual Participant joins Teams as an anonymous guest through the Teams web
+      client, or through Azure Communication Services Teams interoperability when an
+      ACS connection string is configured, falling back to the browser when the
+      meeting's tenant refuses ACS. Joins by meeting link or by numeric ID and
+      passcode. On the browser join, chat senders are read only on the anonymous
+      light-meetings client, and who is present is read from the People pane.
+    evidence:
+      - docs/virtual-participant.md#supported-platforms
+      - docs/teams-acs-sdk.md
+      - lma-virtual-participant-stack/backend/src/teams.ts
+      - lma-virtual-participant-stack/backend/src/teams-sdk.ts
+    configuration: [AcsConnectionString]
+    tags: [vp-platform:TEAMS, capture]
+    related:
+      - capability:virtual-participant
+      - limitation:teams-browser-join-reads-fewer-signals
+      - limitation:teams-acs-tenant-and-meeting-types
+
+  - id: vp-google-meet
+    title: Virtual Participant on Google Meet
+    description: >-
+      The Virtual Participant joins a Google Meet meeting as a guest without a Google
+      account, from the meeting code or link, and always from a fresh browser
+      profile. The meeting has to accept guests from a browser and someone has to
+      admit it unless the meeting is open. Joining, the introduction, chat commands,
+      the voice assistant and leaving at the meeting's end are confirmed in live
+      meetings; speaker names from the tiles are not yet confirmed.
+    evidence:
+      - docs/virtual-participant.md#google-meet
+      - lma-virtual-participant-stack/backend/src/google-meet.ts
+    tags: [vp-platform:GOOGLE_MEET, capture]
+    related: [capability:virtual-participant, limitation:google-meet-guest-acceptance]
+
+  - id: vp-webex
+    title: Virtual Participant on Webex
+    description: >-
+      The Virtual Participant joins Webex meetings as a guest from the browser. Chat
+      sender names and the active speaker are read, but the participant list is not,
+      so the "each participant consents" opt-in rule cannot be granted on Webex and
+      key frames are judged without a screen-share signal.
+    evidence:
+      - docs/virtual-participant.md#supported-platforms
+      - docs/meeting-consent.md#what-each-platform-supports
+      - lma-virtual-participant-stack/backend/src/webex.ts
+    tags: [vp-platform:WEBEX, capture]
+    related: [capability:virtual-participant, limitation:webex-no-participant-list]
+
+  - id: vp-amazon-chime
+    title: Virtual Participant on Amazon Chime
+    description: >-
+      The Virtual Participant joins Amazon Chime meetings from the browser, reading
+      chat senders, the active speaker and the attendee count. Every consent rule is
+      supported; key frames are judged without a screen-share signal.
+    evidence:
+      - docs/virtual-participant.md#supported-platforms
+      - docs/meeting-consent.md#what-each-platform-supports
+      - lma-virtual-participant-stack/backend/src/chime.ts
+    tags: [vp-platform:CHIME, capture]
+    related: [capability:virtual-participant]
+
+  - id: vp-scheduling-and-invitations
+    title: Scheduling a Virtual Participant and filling the form from a pasted invitation
+    description: >-
+      A Virtual Participant can be started now or scheduled for a later time, changed
+      while it is scheduled, and created from a calendar invitation pasted into the
+      form, which reads the platform, meeting ID, passcode and time. The same
+      operations are available from the CLI, the SDK and the hosted MCP server.
+    evidence:
+      - docs/virtual-participant.md#meeting-scheduling
+      - docs/virtual-participant.md#meeting-invitation-parsing
+      - lma-ai-stack/source/lambda_functions/meeting_invitation_parser/index.py
+    tags:
+      - mcp-tool:schedule_meeting
+      - mcp-tool:start_meeting_now
+      - mcp-tool:update_scheduled_meeting
+      - mcp-tool:get_virtual_participant_status
+      - mcp-tool:list_virtual_participants
+      - mcp-tool:end_virtual_participant
+    related: [capability:virtual-participant, capability:mcp-server-api-key]
+
+  - id: vp-join-again
+    title: Join again, to continue a meeting or start a new one from it
+    description: >-
+      From a Virtual Participant's page, Join again sends it back to the meeting an
+      earlier one attended. Continue adds to the same LMA meeting, for a Virtual
+      Participant that left too early; Start a new meeting creates a new meeting from
+      the same details, for a recurring link. The stored meeting password is reused
+      without being shown to the browser, and a continued meeting's recordings play
+      session by session on the transcript timeline.
+    evidence:
+      - docs/virtual-participant.md#join-again
+      - lma-ai-stack/source/lambda_functions/virtual_participant_manager/join_again.py
+    related: [capability:virtual-participant]
+
+  - id: vp-meeting-chat
+    title: Meeting chat in the transcript, chat commands, and chat attachments
+    description: >-
+      On Zoom, Teams and Meet the messages sent to everyone become transcript lines
+      under their sender. Chat commands addressed to LMA (help, pause, start, leave,
+      ask and the voice-assistant switches) control the Virtual Participant, and
+      "LMA ask" sends a question to the meeting assistant and posts the answer in the
+      chat. Images and files shared in the chat can be stored with an AI title and
+      summary (off by default).
+    evidence:
+      - docs/virtual-participant.md#meeting-chat-in-the-transcript
+      - docs/virtual-participant.md#in-meeting-chat-commands
+      - docs/virtual-participant.md#chat-attachments
+    configuration: [virtual_participant]
+    related: [capability:virtual-participant, capability:in-meeting-requests]
+
+  - id: stream-audio
+    title: Stream Audio from the web app (microphone and a Chrome tab)
+    description: >-
+      The web app's Stream Audio page captures the user's microphone and the audio of
+      any Chrome tab, such as a meeting joined in the browser, and streams both
+      channels for transcription without adding a bot to the meeting. It needs no
+      install, but it has no meeting-platform metadata, so remote speakers are told
+      apart by voice separation rather than named from the platform.
+    evidence:
+      - docs/stream-audio.md
+      - docs/meeting-sources.md#at-a-glance-comparison
+    tags: [capture]
+    related: [capability:meeting-consent, limitation:no-bot-capture-needs-the-user-present]
+
+  - id: browser-extension
+    title: Chrome extension for meeting tabs
+    description: >-
+      A Chrome extension, built for each deployment and downloaded from the web app or
+      the stack outputs, adds a side panel to Zoom, Teams, Chime, Webex and Google Meet
+      tabs. It captures the user's microphone and the tab's audio without a bot, and
+      reads the platform's participant names and active speaker from the page. Only
+      Chromium browsers are supported, and it has no consent step yet.
+    evidence:
+      - docs/browser-extension.md
+      - lma-browser-extension-stack/template.yaml
+    tags: [capture]
+    related: [limitation:capture-methods-without-consent-step]
+
+  - id: desktop-capture-app
+    title: Desktop Capture App for macOS and Windows
+    description: >-
+      A menu-bar (macOS 13+) or system-tray (Windows 10/11) app captures system audio
+      and the microphone for meetings joined from native desktop apps, without a bot,
+      and can also stream screen video for key frames. Each download is preconfigured
+      for the deployment; the user builds and installs it on their own computer and
+      signs in with their LMA account. It shows the consent step in builds that
+      include it.
+    evidence:
+      - docs/desktop-capture-app.md
+      - docs/desktop-capture-app.md#supported-platforms
+      - lma-desktop-capture-app-stack/template.yaml
+    tags: [capture]
+    related: [capability:video-keyframes-and-slides]
+
+  - id: upload-audio
+    title: Upload a recorded meeting for transcription and summary
+    description: >-
+      A recorded audio or video file (wav, mp3, m4a, flac, ogg, amr, mp4, webm) of up
+      to 5 GB is uploaded from the web app and transcribed by an Amazon Transcribe
+      batch job with speaker diarization, then summarized like a live meeting.
+    evidence:
+      - docs/upload-audio.md
+      - docs/upload-audio.md#limits--best-practices
+      - lma-ai-stack/source/lambda_functions/upload_meeting_initiator
+    tags: [capture]
+
+  - id: websocket-streaming-api
+    title: WebSocket streaming API for custom capture clients
+    description: >-
+      Any client that can open an authenticated WebSocket and send PCM audio (mono or
+      two-channel) can stream a meeting into LMA, with optional active-speaker
+      updates, the same way the browser and desktop clients do. The protocol, token
+      handling and reference clients are documented.
+    evidence:
+      - docs/websocket-streaming-api.md
+      - utilities/websocket-client
+    tags: [capture, integration]
+    related: [extension:custom-capture-client]
+
+  - id: embeddable-components
+    title: Embeddable transcript, assistant, stream and Virtual Participant views
+    description: >-
+      LMA views (Stream Audio, Upload Audio, a meeting's transcript, summary and
+      assistant, and a Virtual Participant with its live view) can be embedded in
+      another web application in an iframe, with a postMessage API and three
+      authentication options.
+    evidence:
+      - docs/embeddable-components.md
+    tags: [integration, ui]
+    related: [extension:embed-components]
+
+  # ---------------------------------------------------------------------------
+  # Speech and speakers
+  # ---------------------------------------------------------------------------
+  - id: transcribe-streaming
+    title: Live transcription with Amazon Transcribe (the default engine)
+    description: >-
+      Amazon Transcribe streams each meeting's audio into a live transcript, each
+      line seconds after it is spoken. One language can be set, or the language
+      identified automatically among chosen options; content redaction of personal
+      information, custom vocabularies and custom language models are available.
+      It is the default engine for every meeting source, and the fallback when the
+      on-demand engine cannot start.
+    evidence:
+      - docs/transcription-and-translation.md
+      - docs/transcription-and-translation.md#language-configuration
+      - docs/transcription-and-translation.md#content-redaction-pii
+    configuration: [transcription, TranscribeContentRedactionType]
+    tags: [asr]
+    related: [capability:microvm-asr, limitation:transcribe-concurrent-streams]
+
+  - id: microvm-asr
+    title: On-demand speech engine on AWS Lambda MicroVMs, selected per meeting source
+    description: >-
+      An alternative to Amazon Transcribe runs open speech-recognition and
+      speaker-diarization models on AWS Lambda MicroVMs in the deployment's account,
+      one MicroVM per meeting, and returns text and per-voice speaker labels together.
+      An administrator moves a meeting source onto it in the Transcription Engine
+      section of the Configuration page; the model bundle is swappable, and an
+      English-only full-precision bundle is offered beside the default multilingual
+      one. It is deployed by default in Regions with Lambda MicroVMs, and meetings
+      stay on Amazon Transcribe until an administrator switches a source.
+    evidence:
+      - docs/microvm-asr.md
+      - docs/microvm-asr.md#model-bundles
+      - lma-asr-microvm-stack/template.yaml
+      - lma-asr-microvm-stack/source/catalog.json
+    configuration: [EnableMicrovmAsr, asr_engine]
+    tags: [asr]
+    related:
+      - capability:transcribe-streaming
+      - limitation:microvm-asr-feature-gaps
+      - limitation:microvm-regions-only
+
+  - id: speaker-attribution
+    title: Speaker names, including several people on one room microphone
+    description: >-
+      Each transcript line carries its speaker: from the meeting platform's active
+      speaker where the capture method can read it, and from voice separation
+      within a channel otherwise. When several people share one room microphone the
+      voices are told apart, named from what they say (with the quote that named
+      them), or named by hand in the Speakers panel.
+    evidence:
+      - docs/transcription-and-translation.md#speaker-attribution
+      - docs/virtual-participant.md#several-people-behind-one-attendee
+      - docs/virtual-participant.md#how-speaker-names-are-assigned
+      - lma-ai-stack/source/lambda_functions/speaker_name_resolver
+    tags: [asr, speakers]
+
+  - id: voice-enrollment
+    title: Voice enrollment, so enrolled users are named from their first word (Beta)
+    description: >-
+      Optional and off by default. LMA users can enroll their own voice once, with
+      first-party consent recorded in an append-only log, and are then labelled by
+      name in later meetings on the on-demand speech engine. Enrollments expire after
+      a set retention period and consent can be withdrawn.
+    evidence:
+      - docs/voice-enrollment.md
+      - lma-ai-stack/source/lambda_functions/voice_enrollment_manager
+    status: preview
+    configuration: [EnableVoiceEnrollment, VoiceEnrollmentRetentionDays]
+    tags: [speakers, biometric]
+    related: [capability:microvm-asr, question:biometric-voice-data]
+
+  - id: live-translation
+    title: Live translation of the transcript in the browser
+    description: >-
+      Each user can translate the live or finished transcript into any of 75 or more
+      languages with Amazon Translate, chosen in the web app without affecting other
+      users. Translation runs in the browser, line by line, and is not stored.
+    evidence:
+      - docs/transcription-and-translation.md#live-translation
+    tags: [translation, ui]
+
+  # ---------------------------------------------------------------------------
+  # Meeting assistant
+  # ---------------------------------------------------------------------------
+  - id: meeting-assistant
+    title: Meeting assistant agent on Amazon Bedrock and the Strands Agents SDK
+    description: >-
+      An agent with tools, not only a chat over the transcript, answers questions in
+      the meeting page's chat panel during and after a meeting: what was said, the
+      agenda, the shared screen, past meetings, documents and the web. Quick-action
+      chat buttons such as "summarize so far" and "list actions" are configurable.
+      It is deployed in one of three modes: without a document knowledge base, with
+      one LMA creates, or with an existing Amazon Bedrock Knowledge Base.
+    evidence:
+      - docs/meeting-assistant.md
+      - docs/meeting-assistant.md#service-modes
+      - lma-meetingassist-setup-stack/src/strands_meeting_assist_function.py
+    modes: [STRANDS_BEDROCK, STRANDS_BEDROCK_WITH_KB (Create), STRANDS_BEDROCK_WITH_KB (Use Existing)]
+    configuration: [MeetingAssistService, meeting_assist]
+    tags: [assistant, mcp-tool:ask_meeting_assistant]
+    related:
+      - capability:assistant-built-in-tools
+      - capability:in-meeting-requests
+      - capability:document-knowledge-base
+      - capability:external-mcp-servers-for-the-assistant
+      - capability:assistant-skills
+
+  - id: assistant-built-in-tools
+    title: The meeting assistant's built-in tools
+    description: >-
+      The assistant reads the current meeting's transcript and chat, its agenda,
+      context and checklist, the key frames of its shared screen and its chat
+      attachments; searches past meetings the user may see and lists recent ones;
+      searches the document knowledge base and the web (Tavily); and shows or drives
+      the Virtual Participant's browser for research during a meeting.
+    evidence:
+      - docs/meeting-assistant.md#built-in-tools
+      - lma-meetingassist-setup-stack/src/tool_selection.py
+    tags: [assistant]
+    related: [capability:meeting-assistant, capability:web-search]
+
+  - id: in-meeting-requests
+    title: Requests made in the meeting (chat, voice and wake phrase), with controls on what they may use
+    description: >-
+      Anyone in a meeting can ask the assistant through the meeting chat, the voice
+      assistant or a wake phrase. Because none of these can verify who asked, an
+      administrator chooses what such requests may use (the current meeting only by
+      default, selected tool groups, or everything the owner could use) and who may
+      ask (anyone, the owner's own microphone only, or nobody).
+    evidence:
+      - docs/meeting-assistant.md#in-meeting-requests
+      - docs/meeting-assistant.md#who-may-ask
+    configuration: [meeting_assist.inMeetingRequestTools, meeting_assist.inMeetingRequesters]
+    tags: [assistant, governance]
+    related: [capability:meeting-assistant, limitation:in-meeting-requester-identity]
+
+  - id: wake-phrase
+    title: Wake phrase in the transcript
+    description: >-
+      Saying the wake phrase (by default "OK Assistant") in a meeting sends what
+      follows to the meeting assistant, and the answer is added to the transcript.
+    evidence:
+      - docs/meeting-assistant.md#wake-phrase
+    tags: [assistant]
+
+  - id: document-knowledge-base
+    title: Document search from an Amazon Bedrock Knowledge Base
+    description: >-
+      With a knowledge base, the assistant answers from the organisation's documents.
+      LMA can create one, filled from an S3 bucket of documents and from web pages it
+      crawls, or use an existing knowledge base the customer manages.
+    evidence:
+      - docs/meeting-assistant.md#knowledge-base-configuration
+      - docs/prerequisites-and-deployment.md#knowledge-base-options
+      - lma-bedrockkb-stack/template.yaml
+    configuration: [MeetingAssistService, BedrockKnowledgeBaseId, BedrockKnowledgeBaseS3BucketName]
+    tags: [assistant, knowledge-base]
+    related: [question:knowledge-sources]
+
+  - id: transcript-knowledge-base
+    title: Search across past meetings (transcript knowledge base and the Meetings Query Tool)
+    description: >-
+      By default every meeting's transcript and summary are indexed in a Bedrock
+      Knowledge Base, so the Meetings Query Tool page and the assistant's meeting
+      history tool answer questions across every meeting the user can see, with
+      citations. Users see results only from their own and shared meetings, unless
+      they are administrators.
+    evidence:
+      - docs/meetings-query-tool.md
+      - docs/meetings-query-tool.md#user-based-access-control
+    configuration: [TranscriptKnowledgeBase]
+    tags: [assistant, knowledge-base, search, mcp-tool:search_lma_meetings]
+    related: [capability:ubac-and-sharing]
+
+  - id: web-search
+    title: Web search for the assistant (Tavily)
+    description: >-
+      With a Tavily API key, held in AWS Secrets Manager, the assistant can search the
+      web. Each configuration profile can turn web search off, and requests made in
+      the meeting use it only when allowed.
+    evidence:
+      - docs/meeting-assistant.md#tavily-web-search
+      - docs/meeting-assistant.md#web-search-and-mcp-servers
+    configuration: [TavilyApiKey]
+    tags: [assistant, third-party]
+
+  - id: external-mcp-servers-for-the-assistant
+    title: External MCP servers as tools for the assistant
+    description: >-
+      An administrator installs MCP servers from the public registry or as custom
+      endpoints (streamable HTTP or packages), with OAuth 2.1, OAuth client
+      credentials, bearer token or custom header authentication, and their tools
+      become the assistant's tools. Each configuration profile chooses which
+      installed servers the assistant may use, separately for the owner's requests
+      and for requests made in the meeting. The server library can be exported and
+      imported.
+    evidence:
+      - docs/mcp-servers.md
+      - docs/mcp-servers.md#authentication-methods
+      - docs/meeting-assistant.md#choosing-mcp-servers-one-by-one
+      - lma-ai-stack/source/lambda_functions/mcp_server_manager/index.py
+    tags: [assistant, mcp, integration]
+    related: [extension:external-mcp-server, limitation:five-external-mcp-servers]
+
+  - id: assistant-skills
+    title: Skills for the meeting assistant
+    description: >-
+      Administrators write skills, guidance the assistant loads only when a request
+      needs it, or import them as SKILL.md files, Agent Skills folders or Amazon Quick
+      skill files, and choose per configuration profile which skills are offered.
+    evidence:
+      - docs/meeting-assistant-skills.md
+      - lma-ai-stack/source/lambda_functions/skills_manager
+    tags: [assistant]
+    related: [extension:assistant-skill, limitation:skill-limits]
+
+  - id: assistant-instructions
+    title: Editable assistant instructions, with a fixed safeguard part
+    description: >-
+      The assistant's persona, tone and tool-choice guidance are an editable setting
+      in the configuration profile. A fixed part appended to every request, which no
+      profile can change, treats everything tools return as quoted data rather than
+      instructions and rules out identifying people from their faces.
+    evidence:
+      - docs/meeting-assistant.md#assistant-instructions
+    configuration: [meeting_assist.systemPrompt]
+    tags: [assistant, configuration]
+    related: [limitation:assistant-fixed-instructions]
+
+  - id: bedrock-guardrails
+    title: Amazon Bedrock Guardrails on the assistant
+    description: >-
+      An Amazon Bedrock guardrail created in the deployment's account and Region can be
+      attached to every path the assistant uses to call Bedrock.
+    evidence:
+      - docs/meeting-assistant.md#bedrock-guardrails
+    configuration: [BedrockGuardrailId, BedrockGuardrailVersion]
+    tags: [assistant, governance]
+
+  - id: model-choice
+    title: Choice of Amazon Bedrock models, prompt caching and inference geography
+    description: >-
+      The models for the assistant, summaries, the knowledge base and the other model
+      calls are chosen on the Configuration page among the Anthropic Claude 4 and 5
+      generations and Amazon Nova models. Prompt caching and reasoning effort are
+      settings. A model inference geography setting keeps every model call within the
+      deployment's geography or Region.
+    evidence:
+      - docs/meeting-assistant.md#model-selection
+      - docs/configuration-guide.md#choosing-amazon-bedrock-models
+      - docs/infrastructure-and-security.md#amazon-bedrock
+    configuration: [language_models]
+    tags: [models, residency]
+    related: [prerequisite:bedrock-model-access, question:data-residency]
+
+  - id: voice-assistant
+    title: Voice assistant in the meeting (Amazon Nova Sonic or ElevenLabs), with a translator mode
+    description: >-
+      A Virtual Participant can speak: an Amazon Nova Sonic 2 or ElevenLabs voice
+      assistant answers when addressed by its wake phrase or listens throughout,
+      looks things up with the meeting assistant, and stops talking when asked. A
+      group mode and a translator mode, which interprets aloud between two
+      languages, are available, and with Nova Sonic the mode can be changed from the
+      chat during a meeting.
+    evidence:
+      - docs/voice-assistant.md
+      - docs/voice-assistant.md#provider-comparison
+      - docs/nova-sonic-setup.md
+      - docs/elevenlabs-setup.md
+      - lma-virtual-participant-stack/backend/src/voice-assistant.ts
+    configuration: [nova_sonic_config, ElevenLabsApiKey, AmazonNovaSonicRegion]
+    tags: [assistant, voice]
+    related: [limitation:nova-sonic-concurrent-streams, capability:avatar]
+
+  - id: avatar
+    title: Animated avatar as the Virtual Participant's camera (Simli)
+    description: >-
+      With a Simli API key, the Virtual Participant shows an animated, lip-synced
+      avatar as its camera while the voice assistant speaks.
+    evidence:
+      - docs/simli-avatar-setup.md
+      - lma-virtual-participant-stack/backend/src/simli-avatar.ts
+    configuration: [SimliApiKey]
+    tags: [voice, third-party]
+
+  # ---------------------------------------------------------------------------
+  # Meeting preparation, guidance and the record
+  # ---------------------------------------------------------------------------
+  - id: meeting-preparation
+    title: Agenda, context, checklist, labels and audience on each meeting
+    description: >-
+      Each meeting can carry an agenda, a context briefing (goals, background, what a
+      good outcome is), a checklist of questions or topics to cover, labels as
+      key-value pairs, and an audience. They are given when a Virtual Participant is
+      started or scheduled, on the form or over MCP, changed on the meeting page, and
+      read by the assistant, live guidance and the summary. An agenda can also be
+      derived from the transcript.
+    evidence:
+      - docs/meeting-context-and-checklist.md
+      - docs/meeting-agenda.md
+      - lma-ai-stack/source/lambda_functions/meeting_preparation_resolver
+    tags:
+      - mcp-tool:get_meeting_agenda
+      - mcp-tool:update_meeting_agenda
+      - mcp-tool:get_meeting_context
+      - mcp-tool:set_meeting_context
+      - mcp-tool:get_meeting_checklist
+      - mcp-tool:set_meeting_checklist
+      - mcp-tool:update_checklist_item
+      - mcp-tool:update_meeting_metadata
+    related: [capability:live-guidance, capability:summary-profiles]
+
+  - id: live-guidance
+    title: Live guidance while a meeting is in progress
+    description: >-
+      While a meeting runs, the assistant periodically records the checklist's
+      progress with the transcript times of its evidence, and offers guidance such as
+      an unasked question, a missed agenda item or a time check, without being asked.
+      A digest of the meeting so far can be requested. It is off by default, turned
+      on per meeting or for every new meeting, and each run is a metered model call.
+    evidence:
+      - docs/live-guidance.md
+      - docs/live-guidance.md#turning-it-on
+      - lma-ai-stack/source/lambda_functions/live_guidance_analyzer
+    tags:
+      - mcp-tool:push_meeting_guidance
+      - mcp-tool:request_meeting_digest
+      - mcp-tool:list_meeting_guidance
+    related: [capability:meeting-notifications, limitation:live-guidance-is-advice]
+
+  - id: meeting-notifications
+    title: Meeting notifications on the meeting page
+    description: >-
+      Items such as guidance, digests and notes from backend functions or MCP clients
+      appear live in a meeting's Notifications panel for the people who can see the
+      meeting, who can dismiss or mute them; a notification can carry buttons. They
+      are delivered in LMA only.
+    evidence:
+      - docs/meeting-notifications.md
+      - docs/meeting-notifications.md#publishing-a-notification-from-a-backend-function
+    tags: [mcp-tool:list_meeting_notifications]
+    related: [extension:publish-notifications, limitation:notifications-in-lma-only]
+
+  - id: meeting-whiteboards
+    title: Meeting whiteboards the assistant can keep up to date
+    description: >-
+      A meeting page can hold named whiteboards, Markdown or Mermaid diagrams made
+      from templates such as decisions and open questions or a timeline, that the
+      people who can see the meeting edit. Optionally (off by default) the assistant
+      rewrites its own panels from the transcript and shared screen as the meeting
+      goes; a panel a person changes is theirs and the assistant leaves it alone.
+      Every change is a version that can be restored.
+    evidence:
+      - docs/meeting-whiteboards.md
+      - lma-ai-stack/source/lambda_functions/meeting_whiteboards
+    tags:
+      - mcp-tool:list_meeting_whiteboards
+      - mcp-tool:get_meeting_whiteboard
+      - mcp-tool:create_meeting_whiteboard
+      - mcp-tool:update_meeting_whiteboard
+    related: [limitation:whiteboards-not-from-in-meeting-requests]
+
+  - id: summaries
+    title: Meeting summaries, generated, regenerated and edited
+    description: >-
+      At the meeting's end LMA writes a Markdown summary with Amazon Bedrock (or with a
+      customer Lambda function instead), in sections from prompt templates: a summary,
+      decisions, action items, agenda coverage, chapters, a screen-share summary and
+      more. Summaries can also be asked for during the meeting, regenerated with
+      another profile, and edited by hand. The prompt templates are stored in the
+      configuration and editable.
+    evidence:
+      - docs/transcript-summarization.md
+      - docs/transcript-summarization.md#regenerating-and-editing-a-summary
+      - lma-ai-stack/source/lambda_functions/bedrock_summary_lambda
+    configuration: [EndOfCallTranscriptSummary, summary_prompt_templates]
+    tags: [summary, mcp-tool:get_meeting_summary, mcp-tool:regenerate_meeting_summary]
+    related: [capability:summary-profiles, extension:summary-prompt-templates, extension:end-of-call-summary-lambda]
+
+  - id: summary-profiles
+    title: Summary profiles per meeting, with structured action items
+    description: >-
+      A summary profile is a named set of summary sections. Each meeting can name the
+      profile it is summarized with, and a deployment sets a default for new
+      meetings. LMA ships a discovery-session profile (decisions, action items with
+      owners and due dates, open questions, risks, requirements heard with quotes,
+      checklist coverage) and a healthcare profile, and a profile can list action
+      items as structured data.
+    evidence:
+      - docs/transcript-summarization.md#summary-profiles
+      - docs/transcript-summarization.md#the-shipped-profiles
+      - lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/schemas/summary_profiles.json
+    configuration: [summary_profiles]
+    tags: [summary, mcp-tool:list_summary_profiles]
+    related: [extension:summary-profile]
+
+  - id: video-keyframes-and-slides
+    title: Meeting video, key frames of the shared screen and searchable slide text
+    description: >-
+      A Virtual Participant can record the meeting video, and the Desktop Capture App
+      can stream screen video. LMA keeps key frames of the shared screen, reads their
+      text with a vision model, links each to the moment it was shown, and uses them
+      in a screen-share summary, chapters and the assistant's answers ("summarize that
+      slide"). Key frames can be exported.
+    evidence:
+      - docs/meeting-video.md
+      - docs/meeting-video.md#which-meetings-have-key-frames
+      - lma-virtual-participant-stack/backend/src/keyframe-detector.ts
+      - lma-ai-stack/source/lambda_functions/keyframe_text_extractor
+    configuration: [EnableVideoRecording]
+    tags: [video]
+    related: [limitation:no-video-from-browser-capture]
+
+  - id: downloads
+    title: Downloads of every meeting file, and one archive of all of them
+    description: >-
+      A meeting's Download menu offers the transcript and the summary as Markdown,
+      Word, PDF, a self-contained web page and plain text (the transcript also as
+      Excel), the recordings, the key frames and the meeting export, and an
+      Everything archive built on the server with all of them. Word, PDF and web page
+      summaries include thumbnails of the shared screen and the consent record.
+    evidence:
+      - docs/web-ui-guide.md#transcript-downloads
+      - docs/web-ui-guide.md#everything-as-one-archive
+    tags: [export, ui, mcp-tool:get_meeting_transcript, mcp-tool:get_meeting_record]
+
+  - id: meeting-export
+    title: Meeting export, one structured JSON record of a meeting
+    description: >-
+      The meeting export (schema version 1, published as a JSON Schema) holds a
+      meeting's details, agenda and context, participants, transcript and chat,
+      links, key frames, consent record, checklist, summary, action items, guidance
+      and whiteboards, with `include` to choose parts. It is offered in the Download
+      menu, in the Everything archive and over MCP, to the people who can read the
+      meeting.
+    evidence:
+      - docs/meeting-export.md
+      - docs/schemas/meeting-export-v1.schema.json
+      - lma-ai-stack/source/lambda_functions/meeting_archive/export.py
+    tags: [export, integration, mcp-tool:get_meeting_export]
+    related: [extension:consume-meeting-export]
+
+  - id: meeting-events
+    title: Meeting lifecycle events on an EventBridge bus of the stack's own
+    description: >-
+      The stack publishes Meeting Started, Meeting Ended, Summary Ready and Virtual
+      Participant Status Changed events to its own Amazon EventBridge bus. Events
+      carry identifiers and states only, never meeting content, so a rule can start a
+      workflow that then reads the meeting through the export or MCP. On by default;
+      nothing happens until someone adds a rule.
+    evidence:
+      - docs/meeting-events.md
+      - docs/meeting-events.md#the-events
+      - lma-ai-stack/deployment/lma-ai-meeting-events.yaml
+    configuration: [EnableMeetingEvents]
+    tags: [events, integration]
+    related: [extension:meeting-event-rules]
+
+  - id: meeting-cost-estimate
+    title: Itemised cost estimate on each meeting
+    description: >-
+      Each meeting shows an estimate of what it cost: speech recognition, every
+      Amazon Bedrock call by purpose, the voice assistant, the Virtual Participant's
+      compute and sentiment analysis, priced from a price table an administrator can
+      change. Fixed infrastructure and some per-request charges are not included.
+    evidence:
+      - docs/meeting-cost-estimate.md
+      - docs/meeting-cost-estimate.md#what-is-metered-and-how
+      - lma-ai-stack/source/lambda_functions/call_cost_resolver
+    configuration: [call_pricing]
+    tags: [cost, mcp-tool:get_meeting_cost]
+    related: [limitation:cost-estimate-excludes-fixed-costs]
+
+  - id: web-ui
+    title: Web app for meetings, sources and administration
+    description: >-
+      A React web app, served through Amazon CloudFront and signed in with Amazon
+      Cognito, lists meetings and shows each one live: transcript with speakers and
+      playback, sentiment, summary, assistant, screen share, consent, whiteboards and
+      notifications. Administrators manage users, configuration, MCP servers, skills
+      and troubleshooting there.
+    evidence:
+      - docs/web-ui-guide.md
+      - lma-ai-stack/source/ui
+    tags: [ui]
+
+  # ---------------------------------------------------------------------------
+  # Consent, privacy, access and configuration
+  # ---------------------------------------------------------------------------
+  - id: meeting-consent
+    title: Meeting consent (Off, Notify or Opt-in) with a consent record on each meeting
+    description: >-
+      A deployment chooses Off, Notify (any objection stops capture) or Opt-in
+      (nothing is captured until every participant agrees, or the owner attests that
+      everyone did). The Virtual Participant posts the notice in the chat, reads typed
+      and spoken replies, and keeps screenshots as evidence; Stream Audio and the
+      Desktop Capture App show a consent step the user attests. Every meeting keeps a
+      record of the notice, replies and evidence.
+    evidence:
+      - docs/meeting-consent.md
+      - docs/meeting-consent.md#the-three-modes
+      - docs/meeting-consent.md#flows-by-capture-method
+      - lma-ai-stack/source/lambda_functions/meeting_consent_resolver
+    configuration: [meeting_consent]
+    tags: [consent, governance, mcp-tool:get_meeting_consent]
+    related:
+      - limitation:consent-identities-are-display-names
+      - limitation:capture-methods-without-consent-step
+      - question:consent-policy
+
+  - id: retention-and-transcript-deletion
+    title: Retention periods, and deleting the transcript once it is summarized
+    description: >-
+      Stack parameters set the longest meeting records, transcripts, recordings and
+      logs are kept, and a setting can delete each meeting's transcript permanently
+      once it is summarized, immediately or 15, 30 or 60 minutes later. Audio
+      recording, chat in the transcript and personal-information redaction are
+      settings too.
+    evidence:
+      - docs/privacy-and-data-handling.md#what-lma-stores-and-for-how-long
+      - docs/transcript-deletion.md
+      - docs/configuration-guide.md#retention-settings-the-stack-limits
+    configuration:
+      - MeetingRecordExpirationInDays
+      - TranscriptionExpirationInDays
+      - AudioRecordingExpirationInDays
+      - retention
+    tags: [privacy, retention]
+    related: [question:retention-policy]
+
+  - id: configuration-presets
+    title: Configuration presets for consent, retention, privacy and the assistant
+    description: >-
+      Six shipped presets set the consent, retention, privacy, assistant and summary
+      settings together: Standard, Internal meetings with notice, two regulated
+      presets that do not retain the transcript, Team-hosted (external meetings) and
+      Customer account. One is chosen at deploy time or applied later, and each is
+      available as a read-only Managed profile.
+    evidence:
+      - docs/privacy-and-data-handling.md#what-each-preset-sets
+      - docs/configuration-guide.md#configuration-presets
+      - lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets
+    configuration: [ConfigurationPreset]
+    tags:
+      - governance
+      - preset:standard
+      - preset:internal-meetings-notify
+      - preset:regulated-consent-required
+      - preset:regulated-notify
+      - preset:team-hosted-external
+      - preset:customer-account
+    related: [capability:hosting-models, extension:configuration-preset]
+
+  - id: hosting-models
+    title: Hosting models, team-hosted for external meetings or in the customer's account
+    description: >-
+      Two hosting presets cover a team that runs LMA in its own account for meetings
+      with other organizations, where guests must never reach the team's other
+      meetings or knowledge, and LMA deployed in the account of the organization whose
+      meetings it records. The guide covers isolating the account, what the meeting
+      platforms' administrators may need to allow, and moving meetings between the
+      two with `lma meetings delete --label`.
+    evidence:
+      - docs/hosting-models.md
+      - docs/hosting-models.md#the-two-models
+      - docs/lma-cli.md#lma-meetings-delete--delete-meetings-by-label
+    tags: [governance, preset:team-hosted-external, preset:customer-account]
+    related: [question:hosting-model, capability:configuration-presets]
+
+  - id: configuration-profiles
+    title: Configuration page with named profiles, validation and revision history
+    description: >-
+      Runtime settings are edited without redeploying on one Configuration page, as a
+      form, JSON or YAML, in named profiles: the read-only default, the Managed
+      presets, and Custom profiles that are full copies. Every save is checked
+      against the section's schema and recorded as a revision that can be compared
+      and restored, and saving is an administrator operation.
+    evidence:
+      - docs/configuration-guide.md
+      - docs/configuration-guide.md#configuration-profiles
+      - docs/configuration-store.md#revisions-and-audit
+      - lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/store.py
+    tags: [configuration]
+    related: [extension:configuration-settings]
+
+  - id: ubac-and-sharing
+    title: User-based access control, sharing and deletion of meetings
+    description: >-
+      Each non-admin user sees only their own meetings and the meetings shared with
+      them; Admins see every meeting. Owners share meetings read-only by email address
+      and delete their own meetings; access rules are the same on the web app, the
+      search tools and the MCP server.
+    evidence:
+      - docs/user-based-access-control.md
+      - docs/user-based-access-control.md#meeting-sharing
+      - lma-ai-stack/source/lambda_functions/mcp_analytics/tools/access.py
+    tags: [access, mcp-tool:share_meeting, mcp-tool:delete_meeting, mcp-tool:end_meeting]
+    related: [question:transcript-visibility]
+
+  - id: user-management-and-sign-in
+    title: Amazon Cognito sign-in, admin-managed users and an allowed email domain
+    description: >-
+      Users sign in to a Cognito user pool the stack creates. An Admin creates and
+      deletes users with the Admin or User role in the web app, and self sign-up can
+      be limited to one or more email domains.
+    evidence:
+      - docs/user-management.md
+      - docs/user-based-access-control.md#authorized-account-email-domain
+      - lma-cognito-stack/deployment/lma-cognito-stack.yaml
+    configuration: [AdminEmail, AllowedSignUpEmailDomain]
+    tags: [identity]
+    related: [question:identity-provider, limitation:cognito-only-sign-in]
+
+  - id: encryption-and-residency
+    title: Customer-managed encryption, secrets in Secrets Manager, and where content is processed
+    description: >-
+      Meeting data stays in the deployment's account and Region, encrypted at rest
+      with the stack's customer-managed AWS KMS key; third-party credentials are held
+      in AWS Secrets Manager. The documentation states where each kind of content is
+      processed (the Region, Amazon Transcribe, Amazon Bedrock inference geography and
+      any optional third-party integrations).
+    evidence:
+      - docs/infrastructure-and-security.md#encryption
+      - docs/infrastructure-and-security.md#integration-credentials
+      - docs/infrastructure-and-security.md#where-meeting-content-is-processed
+    tags: [security, residency]
+    related: [question:data-residency]
+
+  # ---------------------------------------------------------------------------
+  # Programmatic access and operations
+  # ---------------------------------------------------------------------------
+  - id: mcp-server-api-key
+    title: Hosted MCP server, API key endpoint (every tool, scoped keys)
+    description: >-
+      LMA is an MCP server, so AI assistants and agents can search and read meetings,
+      prepare and schedule them, follow them live and close them. On the API key
+      endpoint each user generates keys with a read-only or read-and-write scope, a
+      client is offered only the tools its key may call, and every result is limited
+      to the meetings that user may see. It serves every hosted tool over MCP
+      JSON-RPC.
+    evidence:
+      - docs/mcp-api-key-auth.md
+      - docs/mcp-api-key-auth.md#key-scopes
+      - docs/mcp-tools-reference.md
+      - lma-ai-stack/source/lambda_functions/mcp_analytics/index.py
+      - lma-ai-stack/source/lambda_functions/mcp_analytics/tool_definitions.py
+    configuration: [EnableMCP]
+    tags:
+      - mcp
+      - integration
+      - mcp-tool:search_lma_meetings
+      - mcp-tool:get_meeting_transcript
+      - mcp-tool:get_meeting_summary
+      - mcp-tool:list_meetings
+      - mcp-tool:get_meeting_record
+      - mcp-tool:get_meeting_export
+      - mcp-tool:ask_meeting_assistant
+    related: [capability:mcp-server-oauth-gateway, extension:mcp-client-integration]
+
+  - id: mcp-server-oauth-gateway
+    title: Hosted MCP server, OAuth endpoint through Amazon Bedrock AgentCore Gateway (original tools)
+    description: >-
+      For clients that sign in with three-legged OAuth, such as Amazon Quick Suite, an
+      Amazon Bedrock AgentCore Gateway serves the seven original tools: search,
+      transcript, summary, list meetings, schedule, start now and Virtual Participant
+      status. Results are scoped to the signed-in user as on the API key endpoint.
+    evidence:
+      - docs/amazon-quick-mcp-setup.md
+      - docs/amazon-quick-mcp-setup.md#authentication-three-legged-oauth-3lo
+      - lma-ai-stack/source/lambda_functions/mcp_analytics/index.py
+    configuration: [EnableMCP, MCPServerCallbackURLs]
+    tags:
+      - mcp
+      - integration
+      - mcp-tool:search_lma_meetings
+      - mcp-tool:get_meeting_transcript
+      - mcp-tool:get_meeting_summary
+      - mcp-tool:list_meetings
+      - mcp-tool:schedule_meeting
+      - mcp-tool:start_meeting_now
+      - mcp-tool:get_virtual_participant_status
+    related: [capability:mcp-server-api-key, limitation:oauth-gateway-original-tools-only]
+
+  - id: lma-cli
+    title: LMA command-line interface
+    description: >-
+      The `lma` CLI deploys, updates, publishes and deletes stacks, shows status,
+      outputs and logs, checks prerequisites, creates and manages Virtual
+      Participants, manages the assistant's skills, exports and imports the MCP
+      server library, and deletes meetings by label. A plugin adds a load simulator.
+    evidence:
+      - docs/lma-cli.md
+      - lib/lma_cli_pkg/lma_cli/commands
+    tags: [cli, operations]
+
+  - id: lma-sdk
+    title: LMA Python SDK
+    description: >-
+      The `lma-sdk` Python package gives programmatic access to stack, publish,
+      AppSync, Virtual Participant and meetings-by-label operations, and is what the
+      CLI uses.
+    evidence:
+      - docs/lma-sdk.md
+      - lib/lma_sdk/lma_sdk/client.py
+    tags: [sdk, integration]
+
+  - id: monitoring-and-alarms
+    title: Operational alarms, a CloudWatch dashboard and meeting metrics
+    description: >-
+      Each deployment creates an SNS alerts topic, CloudWatch alarms with runbook
+      descriptions, a dashboard and meeting-lifecycle metrics.
+    evidence:
+      - docs/monitoring.md
+    configuration: [EnableOperationalAlarms]
+    tags: [operations]
+
+  - id: troubleshooting-agent
+    title: Read-only AI troubleshooting agent for administrators
+    description: >-
+      An administrator page and a Diagnose button run a read-only agent over the
+      deployment's logs and records that explains why a meeting or Virtual
+      Participant failed and what to do, within spend limits.
+    evidence:
+      - docs/troubleshooting-agent.md
+      - lma-meetingassist-setup-stack/src/troubleshooting_agent_function.py
+    tags: [operations]

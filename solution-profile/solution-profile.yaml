@@ -1,0 +1,88 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Solution profile manifest (Solution Profile contract v1, vendored under
+# solution-profile/schema/v1/). See docs/solution-profile.md.
+#
+# `version` is written by `make version` in the contract's version form: a PEP 440
+# development suffix becomes a hyphenated one (0.4.1.dev1 -> 0.4.1-dev1), and a
+# final release is copied unchanged. `reviewed_for_version` is set by the person who
+# reviews the curated files for a release (.claude/skills/prepare-changelog.md).
+# `source.tag` and `source.commit` are stamped into the BUILT copy only, by
+# scripts/solution_profile/build.py; do not add them here.
+schema_version: 1
+id: live-meeting-assistant
+name: Live Meeting Assistant (LMA)
+version: 0.4.1-dev1
+reviewed_for_version: 0.4.1-dev1
+source:
+  repository: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant
+summary: >-
+  A solution, deployed into the customer's own AWS account, that captures online
+  meetings and turns them into a live transcript, live assistance and a lasting
+  record. A Virtual Participant joins Zoom, Microsoft Teams, Google Meet, Webex or
+  Amazon Chime meetings as a guest, or users capture a meeting without a bot from a
+  browser tab, a Chrome extension or a desktop app for macOS and Windows, or upload
+  a recording. Speech is transcribed by Amazon Transcribe or by an on-demand speech
+  engine on AWS Lambda MicroVMs, with speakers named. A meeting assistant built on
+  Amazon Bedrock and the Strands Agents SDK answers questions during the meeting,
+  and the meeting leaves summaries, action items, agenda coverage, key frames of the
+  shared screen and a consent record. It is also an MCP server and publishes
+  meeting events, so other systems and AI assistants can prepare, follow and use
+  meetings.
+problem_domains: [meeting-transcription, meeting-intelligence, conversational-ai]
+signals:
+  keywords:
+    - meeting transcription
+    - meeting notes
+    - meeting summary
+    - meeting assistant
+    - notetaker
+    - meeting bot
+    - Zoom
+    - Microsoft Teams
+    - Google Meet
+    - Webex
+    - Amazon Chime
+    - live captions
+    - live translation
+    - speaker identification
+    - action items
+    - meeting recording
+    - recording consent
+    - Amazon Transcribe
+    - Amazon Bedrock
+    - MCP server
+  phrases:
+    - someone has to take notes in every meeting
+    - we lose the decisions and action items from our calls
+    - we want an AI assistant that listens to our meetings
+    - we need a transcript and summary of every customer call
+    - participants have to be told the meeting is recorded and agree to it
+    - our agents should be able to read what was said in meetings
+  anti_signals:
+    - contact-center call analytics or agent assist on telephony
+    - a meeting or video-conferencing platform of its own
+    - a hosted SaaS notetaker the customer does not operate
+    - on-premises or non-AWS deployment
+    - offline transcription of large audio archives only
+licence: MIT-0
+support:
+  model: community-sample
+  statement: >-
+    An AWS sample published as open source under MIT-0. The customer deploys, owns
+    and operates it in their own AWS account, including upgrades, security review,
+    compliance with the recording laws and policies that apply to their meetings,
+    and the AWS and third-party charges it incurs. Questions and fixes go through the
+    public GitHub repository; there is no service-level agreement.
+docs_url: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/
+files:
+  capabilities: capabilities.yaml
+  extension_points: extension-points.yaml
+  limitations: limitations.yaml
+  discovery_questions: discovery-questions.yaml
+  sizing: sizing.yaml
+  deployment: deployment.yaml
+  delivery: delivery.yaml
+  changes: changes.yaml
+skills: [skills/lma-solution-fit]

@@ -1,0 +1,112 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Attach the solution profile to a GitHub Release.
+#
+# GitHub Releases are created by hand once aws-release.sh has published a release's
+# templates (docs/solution-profile.md, "Publishing"), so this runs when a release is
+# PUBLISHED, and on demand for one tag to backfill or re-run. It checks out the
+# release tag, applies the profile contract's release rules, builds the
+# deterministic tarball, validates the unpacked copy, and uploads the tarball, its
+# .sha256 and its .build.json to that release.
+#
+# Deliberate properties:
+#   * Triggered only by `release: published` and `workflow_dispatch`. No pull
+#     request event of any kind, so no contributed code runs with this token; what
+#     is checked out is a release tag of this repository.
+#   * The workflow grants nothing; the one job has `contents: write`, the minimum
+#     `gh release upload` needs.
+#   * The only input is the tag. It is checked against ^v[0-9]+\.[0-9]+\.[0-9]+$
+#     before anything uses it, and reaches every `run:` through `env:`, never by
+#     `${{ }}` interpolation into a shell. Nothing reads the release title or body.
+#   * Actions are pinned to full commit SHAs (the same pins as code-checks.yml,
+#     kept current by Dependabot); the checkout keeps no credentials.
+#   * Only PyYAML and jsonschema are installed, at the versions the vendored
+#     validator declares.
+name: Solution profile release asset
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach the solution profile for, e.g. v0.4.1"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: solution-profile-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  attach-solution-profile:
+    name: Build and attach the solution profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check the tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${RELEASE_TAG:-$INPUT_TAG}"
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            # A pre-release tag fails here on purpose: its VERSION is a development
+            # or release-candidate build, which the release rules reject.
+            echo "::error::'$TAG' is not a release tag of the form vX.Y.Z"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Install the validator's dependencies
+        run: python -m pip install --disable-pip-version-check "pyyaml==6.0.3" "jsonschema==4.25.1"
+
+      - name: Check the tag matches VERSION
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag $TAG does not match VERSION $VERSION at that tag"
+            exit 1
+          fi
+
+      - name: Apply the profile contract's release rules
+        env:
+          SOLUTION_PROFILE_RELEASE: "1"
+        run: python scripts/solution_profile/check.py
+
+      - name: Build the asset and validate the unpacked copy
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          python scripts/solution_profile/build.py \
+            --out-dir dist --tag "$TAG" --validate --release
+
+      - name: Attach the asset to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release upload "$TAG" \
+            dist/solution-profile-*.tar.gz \
+            dist/solution-profile-*.tar.gz.sha256 \
+            dist/solution-profile-*.build.json \
+            --clobber --repo "$GITHUB_REPOSITORY"

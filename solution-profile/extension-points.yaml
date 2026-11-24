@@ -1,0 +1,424 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Extension points of the Live Meeting Assistant (Solution Profile contract v1,
+# solution-profile/schema/v1/README.md). Items are ordered by the gap taxonomy:
+# configuration, hook, extension, core-enhancement, fork, other.
+extension_points:
+  # ---------------------------------------------------------------- configuration
+  - id: configuration-settings
+    title: Change runtime settings on the Configuration page, in a Custom profile
+    category: configuration
+    description: >-
+      Most behaviour is a runtime setting rather than a stack parameter: models,
+      transcription language and redaction, the speech engine per meeting source,
+      consent, retention within the stack's limits, the assistant's tools and
+      instructions, live guidance, whiteboards, summaries and the Virtual
+      Participant's behaviour. An Admin copies a profile to a Custom profile, changes
+      it as a form, JSON or YAML, and activates it; every save is validated and
+      recorded as a revision.
+    evidence:
+      - docs/configuration-guide.md
+      - docs/configuration-guide.md#what-you-can-change-without-redeploying
+      - docs/configuration-store.md#section-schemas-and-validation
+    when_to_use: Fit the deployment's behaviour to the customer's policies and meetings without code.
+    constraints:
+      - Saving configuration is an Admin operation.
+      - One profile is active for the whole deployment; there is no per-user or per-team profile.
+      - A changed setting applies within about five minutes to work started after it.
+    effort: S
+    upgrade_risk: low
+    related: [capability:configuration-profiles]
+
+  - id: configuration-preset
+    title: Start from a shipped configuration preset
+    category: configuration
+    description: >-
+      Six presets set consent, retention, privacy, assistant and summary settings
+      together for a common posture: Standard, Internal meetings with notice, two
+      regulated presets that do not retain the transcript, Team-hosted (external
+      meetings) and Customer account. Choose one at deploy time with
+      ConfigurationPreset, or apply it later as unsaved changes an Admin reviews; a
+      deployment-specific starting configuration can also be supplied with
+      CustomConfigPath.
+    evidence:
+      - docs/privacy-and-data-handling.md#what-each-preset-sets
+      - docs/configuration-guide.md#configuration-presets
+      - docs/cloudformation-parameters.md#customconfigpath
+    when_to_use: Begin a delivery from the preset nearest the customer's consent and retention policy.
+    constraints:
+      - Every preset sets the same list of settings; applying one replaces whatever another preset set.
+      - Stack parameters such as retention days, log level, video recording and the transcript knowledge base are not set by any preset.
+    effort: S
+    upgrade_risk: low
+    related: [capability:configuration-presets, delivery:choose-preset-and-deploy]
+
+  - id: summary-prompt-templates
+    title: Edit the summary prompt templates
+    category: configuration
+    description: >-
+      The default summary's sections are prompt templates in the configuration: each
+      a numbered title and a prompt with placeholders for the transcript, agenda,
+      context, checklist, key frames and chat. Sections can be added, reworded or
+      turned off with NONE.
+    evidence:
+      - docs/transcript-summarization.md#customizing-prompts
+      - docs/transcript-summarization.md#prompt-template-storage
+    when_to_use: Change what the end-of-meeting summary contains for every meeting.
+    effort: S
+    upgrade_risk: low
+    related: [capability:summaries]
+
+  - id: summary-profile
+    title: Add a summary profile for a kind of meeting
+    category: configuration
+    description: >-
+      A summary profile is a named set of sections, chosen per meeting, with an
+      option to list structured action items. A new profile (for example for
+      interviews or stand-ups) is added in the Summary Profiles section and can be
+      made the default for new meetings.
+    evidence:
+      - docs/transcript-summarization.md#summary-profiles
+      - docs/transcript-summarization.md#editing-profiles
+    when_to_use: Different meeting types need different summaries in one deployment.
+    effort: S
+    upgrade_risk: low
+    related: [capability:summary-profiles]
+
+  - id: chat-buttons-and-assistant-instructions
+    title: Chat buttons and the assistant's instructions
+    category: configuration
+    description: >-
+      The meeting assistant's quick-action buttons and the editable part of its
+      instructions (persona, tone, how it chooses tools) are settings, as are the
+      wake phrase, the tools in-meeting requests may use and who may ask.
+    evidence:
+      - docs/meeting-assistant.md#chat-shortcut-button-configuration
+      - docs/meeting-assistant.md#assistant-instructions
+      - docs/meeting-assistant.md#in-meeting-requests
+    when_to_use: Shape the assistant for the customer's meetings and audience.
+    constraints:
+      - The fixed part of the instructions, which treats tool results as data, cannot be changed by configuration.
+    effort: S
+    upgrade_risk: low
+    related: [capability:assistant-instructions, capability:in-meeting-requests]
+
+  - id: assistant-skill
+    title: Write or import a skill for the meeting assistant
+    category: configuration
+    description: >-
+      A skill is guidance an administrator writes, with optional reference files,
+      that the assistant loads only when a request needs it: for example a
+      company's meeting conventions, a methodology or a glossary. Skills are written
+      on the Skills page or imported as SKILL.md, an Agent Skills folder or an Amazon
+      Quick skill file, and offered per configuration profile.
+    evidence:
+      - docs/meeting-assistant-skills.md
+      - docs/meeting-assistant-skills.md#limits
+    when_to_use: Give the assistant domain procedures or reference material without a knowledge base.
+    constraints:
+      - Up to 40 skills per deployment and 64 KB of instructions and reference files per skill.
+      - A skill cannot change the fixed part of the assistant's instructions.
+    effort: S
+    upgrade_risk: low
+    related: [capability:assistant-skills, limitation:skill-limits]
+
+  - id: knowledge-base-content
+    title: Point the assistant at the customer's documents
+    category: configuration
+    description: >-
+      Deploy with a document knowledge base that LMA creates, filled from an S3
+      bucket and crawled web pages, or with an existing Amazon Bedrock Knowledge Base
+      the customer already manages, so the assistant answers from their content.
+    evidence:
+      - docs/prerequisites-and-deployment.md#knowledge-base-options
+      - docs/meeting-assistant.md#knowledge-base-configuration
+    when_to_use: Meetings need answers from the organisation's own documents.
+    constraints:
+      - The knowledge base mode is a stack parameter, so changing it is a stack update.
+      - Knowledge-base queries are not in the per-meeting cost estimate.
+    effort: S
+    upgrade_risk: low
+    related: [capability:document-knowledge-base]
+
+  - id: external-mcp-server
+    title: Give the assistant an external MCP server's tools
+    category: configuration
+    description: >-
+      An Admin installs an MCP server (from the public registry, a remote endpoint or a
+      package) with its credentials, and the assistant can then call its tools, for
+      example to read a CRM record or open a ticket during a meeting. Each profile
+      chooses which servers the owner's requests and in-meeting requests may use.
+    evidence:
+      - docs/mcp-servers.md
+      - docs/salesforce-mcp-setup.md
+      - docs/meeting-assistant.md#choosing-mcp-servers-one-by-one
+    when_to_use: The assistant must reach a system of record during or after a meeting.
+    constraints:
+      - At most five MCP servers per deployment.
+      - Installing, updating and removing servers is limited to the Admin group.
+      - A package server needs a layer build when it is installed or changed.
+    effort: S
+    upgrade_risk: low
+    related: [capability:external-mcp-servers-for-the-assistant, limitation:five-external-mcp-servers]
+
+  # ---------------------------------------------------------------- hook
+  - id: transcript-segment-hook
+    title: Per-segment transcript Lambda hook
+    category: hook
+    description: >-
+      A customer Lambda function named by TranscriptLambdaHookFunctionArn is called
+      synchronously for each transcript segment (final segments only, by default)
+      and returns the segment, changed or not, before it is stored. It can redact,
+      correct or enrich text, or forward segments to another system.
+    evidence:
+      - docs/lambda-hook-functions.md#transcript-processing-hook
+      - docs/lambda-hook-functions.md#important-considerations
+      - docs/cloudformation-parameters.md#transcriptlambdahookfunctionarn
+    when_to_use: Custom processing of every line as it is transcribed.
+    constraints:
+      - Called synchronously; a failure or timeout drops the segment.
+      - Set at deploy time; changing it is a stack update.
+    effort: M
+    upgrade_risk: medium
+    related: [capability:transcribe-streaming]
+
+  - id: end-of-call-summary-lambda
+    title: End-of-call summary hook (LAMBDA summaries) and the post-summary hook
+    category: hook
+    description: >-
+      With EndOfCallTranscriptSummary set to LAMBDA, a customer function named by
+      EndOfCallLambdaHookFunctionArn writes the summary instead of the built-in
+      Bedrock prompts, receiving the meeting id and returning the summary (one or more
+      sections). The FetchTranscript utility function reads the transcript for it.
+      Start-of-call and post-summary hooks are invoked at those points too.
+    evidence:
+      - docs/lambda-hook-functions.md#end-of-call-summary-hook
+      - docs/transcript-summarization.md#lambda-option
+      - docs/lambda-hook-functions.md#fetchtranscript-utility-lambda
+      - docs/cloudformation-parameters.md#postcallsummarylambdahookfunctionarn
+    when_to_use: A summary needs logic or a model the prompt templates cannot express, or a downstream system must be updated when a summary is written.
+    constraints:
+      - Regeneration calls the function again, with an extra field the function must accept.
+      - Set at deploy time; changing it is a stack update.
+    effort: M
+    upgrade_risk: medium
+    related: [capability:summaries]
+
+  - id: publish-notifications
+    title: Publish notifications to a meeting from a backend function
+    category: hook
+    description: >-
+      A customer function can publish a notification to a meeting's Notifications
+      panel, with deduplication and a rate limit, as LMA's own guidance does; an MCP
+      client can push guidance with push_meeting_guidance.
+    evidence:
+      - docs/meeting-notifications.md#publishing-a-notification-from-a-backend-function
+    when_to_use: An external rule engine or agent has something to tell the people following a meeting.
+    constraints:
+      - Delivered in LMA only, never to email or the meeting chat.
+    effort: M
+    upgrade_risk: medium
+    related: [capability:meeting-notifications]
+
+  # ---------------------------------------------------------------- extension
+  - id: meeting-event-rules
+    title: Act on meeting lifecycle events with EventBridge rules
+    category: extension
+    description: >-
+      Rules on the stack's meeting-events bus can start a workflow when a meeting
+      starts or ends, a summary is ready or a Virtual Participant needs a person, for
+      example to file the summary in a CRM or alert an operator. Events carry
+      identifiers only; the workflow reads the meeting through the export or MCP.
+    evidence:
+      - docs/meeting-events.md
+      - docs/meeting-events.md#example-email-on-summary-ready-for-one-label
+    when_to_use: Downstream systems must react to meetings without polling.
+    constraints:
+      - Delivery is at least once; consumers deduplicate as the guide describes.
+      - Events hold no meeting content.
+    effort: S
+    upgrade_risk: low
+    related: [capability:meeting-events]
+
+  - id: consume-meeting-export
+    title: Read meetings through the meeting export
+    category: extension
+    description: >-
+      A consumer reads one structured JSON record per meeting (schema version 1)
+      from the hosted MCP server's get_meeting_export tool or from the Everything
+      archive, and maps it into a CRM, a data platform or a document.
+    evidence:
+      - docs/meeting-export.md
+      - docs/schemas/meeting-export-v1.schema.json
+    when_to_use: Meeting content must reach another system in a stable shape.
+    constraints:
+      - The export is read with the reader's own access; an Admin key reads every meeting.
+    effort: M
+    upgrade_risk: low
+    related: [capability:meeting-export]
+
+  - id: mcp-client-integration
+    title: Connect an AI assistant or agent to LMA's MCP server
+    category: extension
+    description: >-
+      An MCP client (Amazon Quick Suite or Quick Desktop, Claude Desktop or a custom
+      agent) connects with an API key or OAuth and can then schedule meetings with
+      their preparation, follow them, and read the record afterwards. A skills pack
+      for Amazon Quick Desktop shows recipes.
+    evidence:
+      - docs/mcp-api-key-auth.md
+      - docs/mcp-tools-reference.md
+      - docs/amazon-quick-mcp-setup.md
+      - amazon-quick-desktop-skills-pack
+    when_to_use: Meetings are part of a wider agent workflow.
+    constraints:
+      - The OAuth endpoint serves the seven original tools only.
+      - A key's scope cannot be changed; generate a new key.
+    effort: S
+    upgrade_risk: low
+    related: [capability:mcp-server-api-key, capability:mcp-server-oauth-gateway]
+
+  - id: custom-capture-client
+    title: Build a capture client on the WebSocket streaming API
+    category: extension
+    description: >-
+      A custom client (a softphone, a room system, a recorder) streams PCM audio to
+      the transcriber's WebSocket endpoint with the user's tokens and becomes a
+      meeting source like the shipped ones, optionally running the consent API.
+    evidence:
+      - docs/websocket-streaming-api.md
+      - docs/meeting-consent.md#clients-without-a-consent-step
+      - utilities/websocket-client
+    when_to_use: Audio comes from somewhere none of the shipped capture methods reach.
+    constraints:
+      - A client without the consent step is refused by presets that require one.
+    effort: M
+    upgrade_risk: medium
+    related: [capability:websocket-streaming-api]
+
+  - id: embed-components
+    title: Embed LMA views in another web application
+    category: extension
+    description: >-
+      Stream Audio, Upload Audio, a meeting's transcript and assistant, and a Virtual
+      Participant's live view can be embedded in a portal with an iframe and the
+      postMessage API, signed in with Cognito, identity federation or passed tokens.
+    evidence:
+      - docs/embeddable-components.md
+      - docs/embeddable-components.md#authentication-options
+    when_to_use: Users should work with meetings inside an existing application.
+    effort: M
+    upgrade_risk: medium
+    related: [capability:embeddable-components]
+
+  # ---------------------------------------------------------------- core-enhancement
+  - id: core-enhancement
+    title: Contribute a change to LMA upstream
+    category: core-enhancement
+    description: >-
+      A need no setting, hook or integration covers, for example a new meeting
+      platform for the Virtual Participant, a new capture client, a new summary input
+      or a change to access rules, is built as a change to LMA itself and contributed
+      to the public repository. It ships when the maintainers release it and is then
+      carried by every upgrade.
+    evidence:
+      - CONTRIBUTING.md
+      - docs/developer-guide.md#customization-entry-points
+    when_to_use: The change is useful beyond one customer and the timeline allows a review and release.
+    constraints:
+      - The release date is the maintainers' decision, not the delivery's.
+      - Changes follow the repository's tests and review.
+    effort: L
+    upgrade_risk: low
+
+  # ---------------------------------------------------------------- fork
+  - id: private-fork
+    title: Maintain a private fork
+    category: fork
+    description: >-
+      Changing LMA's code privately (its Lambda functions, the Virtual Participant,
+      the UI or the templates) meets any need, but every release then has to be
+      merged by hand. The build-from-source path (`lma deploy --from-code` or
+      publish.sh) deploys a modified tree.
+    evidence:
+      - docs/developer-guide.md#building-and-publishing
+      - docs/lma-cli.md#lma-deploy--deployupdate-stack
+    when_to_use: Only when the change cannot wait for or does not belong upstream.
+    constraints:
+      - Releases are frequent; each upgrade needs a merge and a regression run.
+      - The customer owns every divergence permanently.
+    effort: L
+    upgrade_risk: high
+
+  # ---------------------------------------------------------------- other
+  - id: meeting-platform-policy
+    title: Meeting platforms' guest, bot and SDK policies
+    category: other
+    other_kind: integration
+    description: >-
+      Whether a Virtual Participant can join depends on settings of the meeting's own
+      platform and organisation: guests from outside, anonymous guests and guests
+      who have not signed in, lobbies and waiting rooms, chat for guests, and for the
+      Zoom Meeting SDK an approval from Zoom. These are agreed with the platform's administrators,
+      often in the other organisation.
+    evidence:
+      - docs/hosting-models.md#what-the-meeting-platforms-administrators-may-need-to-allow
+      - docs/zoom-meeting-sdk.md#approval--usage-policy
+      - docs/teams-acs-sdk.md#supported-meeting-types-and-tenant-requirements
+    when_to_use: Before relying on the Virtual Participant for a customer's meetings.
+    effort: S
+    upgrade_risk: low
+    related: [question:meeting-platforms, question:bot-policy]
+
+  - id: aws-quotas-and-models
+    title: AWS quotas and Bedrock model access in the deployment Region
+    category: other
+    other_kind: aws-service
+    description: >-
+      Amazon Transcribe's concurrent streams, the account-wide Nova Sonic stream
+      quota, Lambda MicroVM availability and Bedrock model access in the Region
+      bound how many meetings run at once and which features are available.
+    evidence:
+      - docs/troubleshooting.md#service-quotas
+      - docs/voice-assistant.md#nova-sonic-concurrency-quota
+      - docs/prerequisites-and-deployment.md#amazon-bedrock-model-access
+    when_to_use: Sizing a deployment for many concurrent meetings.
+    effort: S
+    upgrade_risk: low
+    related: [limitation:transcribe-concurrent-streams, limitation:nova-sonic-concurrent-streams]
+
+  - id: recording-policy-and-legal-review
+    title: Recording, consent and retention policy review
+    category: other
+    other_kind: process
+    description: >-
+      LMA records what was posted and replied; whether that is consent where the
+      meeting takes place, and how long meeting data may be kept, is for the
+      customer's legal and privacy teams to decide. The privacy guide's checklist for
+      a regulated deployment is the starting point.
+    evidence:
+      - docs/privacy-and-data-handling.md#checklist-for-a-regulated-deployment
+      - docs/meeting-consent.md#limitations
+    when_to_use: Every deployment that records people outside the deploying team.
+    effort: M
+    upgrade_risk: low
+    related: [question:consent-policy, question:retention-policy]
+
+  - id: identity-federation
+    title: Sign-in with the customer's identity provider
+    category: other
+    other_kind: infrastructure
+    description: >-
+      LMA signs users in to its own Cognito user pool. Using a corporate identity
+      provider means configuring federation on that user pool outside LMA's
+      templates and keeping it across stack updates.
+    evidence:
+      - docs/user-management.md
+      - docs/embeddable-components.md#option-2-cognito-identity-federation
+    when_to_use: Users must sign in with existing corporate accounts.
+    constraints:
+      - Not configured by LMA's templates; it is the customer's infrastructure work.
+    effort: M
+    upgrade_risk: medium
+    related: [limitation:cognito-only-sign-in, question:identity-provider]

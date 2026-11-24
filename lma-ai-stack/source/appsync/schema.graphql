@@ -2034,6 +2034,21 @@ type MeetingConsentEvent @aws_cognito_user_pools
 	RecordedAt: AWSDateTime
 	# The signed-in user who entered it, or "LMA" for a backend role.
 	RecordedBy: String
+	# The transcript speaker who gave the reply, when it was linked to one
+	# as it was recorded. Null otherwise. See docs/meeting-consent.md.
+	SpeakerLink: MeetingConsentSpeakerLink
+}
+
+type MeetingConsentSpeakerLink @aws_cognito_user_pools
+@aws_iam {
+	# "same_segment": the reply is that speaker's own line of the transcript.
+	Basis: String
+	# The line: its segment id, channel and speaker as the transcript stores them.
+	SegmentId: String
+	Channel: String
+	Speaker: String
+	LinkedAt: AWSDateTime
+	LinkedBy: String
 }
 
 type MeetingConsentAttestation @aws_cognito_user_pools
@@ -2205,6 +2220,15 @@ input RecordMeetingConsentEventInput {
 	Source: String
 	Text: String
 	OccurredAt: AWSDateTime
+	# Backend roles, for a reply said aloud: the transcript line it was read
+	# from, as the client wrote it. Not stored when it does not hold.
+	SpeakerLink: MeetingConsentSpeakerLinkInput
+}
+
+input MeetingConsentSpeakerLinkInput {
+	SegmentId: String!
+	Channel: String!
+	Speaker: String!
 }
 
 input AttestMeetingConsentInput {

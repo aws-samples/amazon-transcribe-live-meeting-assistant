@@ -470,17 +470,25 @@ images. Every value is LMA's own, as the record stores it:
 | `captureAllowed` | Whether the meeting may be captured now |
 | `noticePostedAt` | When the notice was first posted |
 | `notices` | Each posting of the notice kept on the record: `channel` (`chat`, `voice`, `banner` or `invite`) and `postedAt` |
-| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or `attestation`), `at` and `speakerId` |
+| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt` |
 | `attestation` | The owner's attestation (`attestedBy`, `method`, `at`), or null |
 | `hasEvidence` | Whether evidence images exist; the images are not returned |
 | `startedAt`, `updatedAt` | When consent was started, and when the record last changed |
 
 The names are those the record stores, so no value is translated. `at` is when
 the reply or attestation happened, or when it was recorded if the record holds
-only that. `speakerId` is null for every event: a consent event records the
-participant's display name, not the transcript speaker it was heard from, and
-LMA does not match a name to a speaker, because two people can show the same
-name. The record holds display names only, so an event has no email address.
+only that. A reply said aloud to a Virtual Participant while the meeting was
+being transcribed is linked, when it is recorded, to the transcript speaker who
+said it: `speakerLinkBasis` is then `same_segment` (the reply is that speaker's
+own line of the transcript) and `speakerLinkedAt` says when it was linked.
+`speakerId` is that speaker's id in
+[`get_meeting_export`](#get_meeting_export)'s `participants`, read from the
+meeting's transcript, and is null when the event was never linked or the
+transcript no longer holds the linked line under that speaker (including after
+the transcript was deleted). Every other event -- a chat reply, an entry on the
+meeting page, an attestation -- has all three null: LMA does not match a name
+to a speaker, because two people can show the same name. An event has no email
+address.
 
 A meeting whose consent was never started answers with `mode` `off`, `status`
 `not_required`, no notices or events, and `captureAllowed` as the meeting's
@@ -504,8 +512,10 @@ The meeting export's `consent` part is the same record in the same shape; see
   "noticePostedAt": "2026-12-01T15:00:30Z",
   "notices": [{"channel": "chat", "postedAt": "2026-12-01T15:00:30Z"}],
   "events": [
-    {"participantName": "Dana", "decision": "consent", "source": "chat", "at": "2026-12-01T15:01:02Z", "speakerId": null},
-    {"participantName": "Bo", "decision": "consent", "source": "voice", "at": "2026-12-01T15:01:40Z", "speakerId": null}
+    {"participantName": "Dana", "decision": "consent", "source": "chat", "at": "2026-12-01T15:01:02Z",
+     "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null},
+    {"participantName": "Bo", "decision": "consent", "source": "voice", "at": "2026-12-01T15:01:40Z",
+     "speakerId": "remote-spk_1", "speakerLinkBasis": "same_segment", "speakerLinkedAt": "2026-12-01T15:01:41Z"}
   ],
   "attestation": null,
   "hasEvidence": true,

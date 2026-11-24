@@ -116,7 +116,7 @@ const CallAnalyticsTopNavigation = () => {
                   ? [{ id: 'none', text: 'None during this visit', disabled: true }]
                   : notificationCount.meetings.map((meeting) => ({
                       id: `meeting:${meeting.callId}`,
-                      text: `${meeting.callId} (${meeting.count})`,
+                      text: `${meeting.label} (${meeting.count})`,
                       href: meetingHref(meeting.callId),
                     }))),
                 { id: 'notification-settings', text: 'Notification settings' },

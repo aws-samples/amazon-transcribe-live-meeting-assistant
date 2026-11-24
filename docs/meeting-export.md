@@ -93,7 +93,7 @@ The meeting page always offers its download as a link of this kind.
   ],
   "consent": {"meetingId": "...", "mode": "opt_in", "rule": "each_participant", "status": "granted", "captureAllowed": true,
               "noticePostedAt": "...", "notices": [{"channel": "chat", "postedAt": "..."}],
-              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null}],
+              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null}],
               "attestation": null, "hasEvidence": true, "startedAt": "...", "updatedAt": "..."},
   "agenda": {"text": "...", "source": "mcp"},
   "context": "...",
@@ -146,18 +146,28 @@ when speakers were separated. LMA does not merge voices into one person, even
 when the meeting page shows them under one name.
 
 - `speakerId` is opaque and unique within the export, for example
-  `remote-spk_0`, `local-1` or `chat-1`. Transcript entries and links refer to
-  it.
+  `remote-spk_0`, `local-1` or `chat-1`. Transcript entries, links and consent
+  events refer to it. A speaker has the same id whichever parts are exported,
+  and the same as `get_meeting_consent` gives, for the same transcript.
 - `label` is how LMA shows the speaker.
 - `name` is a person's name, or null when no name was given or confirmed. LMA
   never guesses one.
 - `consent` is `granted` or `objected`, from the speaker's latest reply among
-  the consent events recorded against that speaker, and `unknown` when there
-  is none. A consent event records the participant's display name, not the
-  transcript speaker it came from, and LMA does not match a name to a speaker,
-  because two people can show the same name and a voice can be named after the
-  meeting. So today every participant's `consent` is `unknown`; the meeting's
-  consent itself is in [`consent`](#consent).
+  the consent events linked to that speaker, and `unknown` when there is none.
+  A reply is linked to a speaker only when it was recorded: a reply said aloud
+  to a Virtual Participant while the meeting was being transcribed is that
+  speaker's own line of the transcript (see
+  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply)).
+  A chat reply, a reply heard while consent was awaited, an entry made on the
+  meeting page and an attestation are not linked to any speaker, and LMA does
+  not match a name to a speaker, because two people can show the same name and
+  a voice can be named after the meeting. A speaker's `consent` is also
+  `unknown` when the same participant (by the name the consent record holds)
+  replied otherwise afterwards in a reply not linked to that speaker, such as a
+  chat objection after a spoken consent, because nothing says which speaker
+  that later reply came from. A linked reply counts for the voice it was linked
+  to only: voices merged with it on the meeting page do not share it. The
+  meeting's consent itself is in [`consent`](#consent).
 
 `nameSource` says where a name came from:
 
@@ -204,8 +214,17 @@ tool, which is built by the same code:
 - `notices` lists each posting of the notice with its `channel` and `postedAt`;
 - `events` has one entry per consent event, with `participantName`, `decision`
   (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or
-  `attestation`), `at` and `speakerId`, which is null for every event because
-  a consent event records a display name, not a transcript speaker;
+  `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt`.
+  `speakerLinkBasis` says how the event was linked to the speaker who gave it,
+  and `speakerLinkedAt` when; both are null for an event that was never linked.
+  The one basis is `same_segment`: the reply is that speaker's own line of the
+  transcript. `speakerId` is the linked speaker's id in
+  [`participants`](#participants), and is null when the event was never
+  linked, or when the transcript no longer holds the linked line under that
+  speaker: the line expired or was deleted, or somebody named that one line as
+  another person's on the meeting page. After the transcript was deleted the
+  link is still given, with a null `speakerId`. LMA always writes
+  `speakerLinkBasis` and `speakerLinkedAt`, null when there is no link;
 - `hasEvidence` says whether evidence images exist.
 
 The evidence images themselves are only in the Everything archive, for the

@@ -1,0 +1,69 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Sizing inputs (Solution Profile contract v1, sizingFile). The profile holds no
+# formulas: estimates come from the estimators listed at the end. A deployment's
+# cost is a small fixed base (about $10 a month for the transcriber service and
+# VPC networking, as the README states, plus the alarms and dashboard) and a
+# per-meeting part that the meeting cost estimate itemises after each meeting.
+inputs:
+  - id: meetings-per-month
+    title: Meetings captured per month
+    unit: meetings/month
+    question: question:meeting-volume-and-length
+    used_for: [cost, storage]
+  - id: meeting-hours-per-month
+    title: Meeting hours captured per month
+    unit: hours/month
+    question: question:meeting-volume-and-length
+    used_for: [cost, storage]
+  - id: peak-concurrent-meetings
+    title: Meetings in progress at the same time at the busiest hour
+    unit: meetings
+    question: question:meeting-volume-and-length
+    used_for: [quotas, throughput]
+  - id: longest-meeting
+    title: Length of the longest meeting
+    unit: hours
+    question: question:meeting-volume-and-length
+    used_for: [quotas, configuration]
+  - id: capture-mix
+    title: Share of meetings captured by a Virtual Participant rather than from a user's computer
+    unit: percent
+    question: question:bot-policy
+    used_for: [cost, configuration]
+  - id: speech-engine
+    title: Speech engine per meeting source (Amazon Transcribe or the on-demand engine)
+    question: question:languages
+    used_for: [cost, configuration]
+  - id: voice-assistant-meetings
+    title: Meetings with a voice assistant or translator at the same time
+    unit: meetings
+    question: question:voice-assistant-use
+    used_for: [quotas, cost]
+  - id: assistant-features
+    title: Model-driven features turned on per meeting (live guidance, whiteboards, chat attachment summaries)
+    question: question:assistant-behaviour
+    used_for: [cost, configuration]
+  - id: retention-days
+    title: Days transcripts, records and recordings are kept, and whether video is recorded
+    unit: days
+    question: question:retention-policy
+    used_for: [storage, cost, configuration]
+estimators:
+  - id: meeting-cost-estimate
+    title: The itemised cost estimate on each meeting, from a pilot's real meetings
+    evidence: [docs/meeting-cost-estimate.md]
+  - id: readme-cost
+    title: The base and per-meeting cost outline in the README
+    evidence: [README.md#cost]
+  - id: feature-cost-measurements
+    title: Measured per-meeting-hour costs of live guidance, whiteboards, voice separation and the on-demand engine
+    evidence:
+      - docs/live-guidance.md#cost
+      - docs/meeting-whiteboards.md#cost
+      - docs/virtual-participant.md#cost-of-voice-separation
+      - docs/microvm-asr.md#cost-and-sizing
+  - id: service-pricing
+    title: Service pricing links for a cost assessment
+    evidence: [docs/troubleshooting.md#cost-assessment]

@@ -15,6 +15,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   downloadSummaryAsHtml,
   downloadTranscriptAsHtml,
+  htmlDownloadMessage,
   summaryDownloadHtml,
   transcriptDownloadHtml,
 } from './download-func';
@@ -305,5 +306,35 @@ describe('the transcript web page', () => {
     });
     await downloadTranscriptAsHtml(TRANSCRIPT, MEETING, null, { loadRenderer });
     expect(names).toEqual([`Transcript-${CALL_ID}.html`]);
+  });
+});
+
+describe('a web page download that fails', () => {
+  const failedWith = async (options) => {
+    const alerts = [];
+    vi.spyOn(window, 'alert').mockImplementation((message) => alerts.push(message));
+    await downloadSummaryAsHtml(MEETING, null, { loadThumbnails: async () => ({}), ...options });
+    return alerts;
+  };
+
+  it('mentions the connection only when the renderer could not be loaded', async () => {
+    const alerts = await failedWith({
+      loadRenderer: async () => {
+        throw new TypeError('Failed to fetch dynamically imported module');
+      },
+    });
+    expect(alerts).toEqual([htmlDownloadMessage({ rendererUnavailable: true })]);
+    expect(alerts[0]).toMatch(/internet connection/);
+  });
+
+  it('says the page could not be prepared when rendering fails', async () => {
+    const alerts = await failedWith({
+      loadRenderer: async () => ({
+        renderSummaryHtml: () => {
+          throw new Error('render failed');
+        },
+      }),
+    });
+    expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
   });
 });

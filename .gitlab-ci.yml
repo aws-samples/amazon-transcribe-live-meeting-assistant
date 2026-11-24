@@ -150,6 +150,9 @@ code_checks:
     # The product demo recorder (scripts/ux_recorder*.py), its stack-session
     # helper and the demo skill's storyboard file. No AWS, Chrome or network.
     - if ci_run DEMO_RECORDER; then make test-ux-recorder; fi
+    # The solution profile: the vendored contract validator, the cross-checks
+    # against the code, and the tests of the check and the release build.
+    - if ci_run SOLUTION_PROFILE; then make solution-profile-check test-solution-profile; fi
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
     # node --test on dist) followed by the Fastify 5 websocket smoke test, which
     # boots the server and round-trips a frame — runtime coverage the unit tests

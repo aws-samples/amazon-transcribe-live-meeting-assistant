@@ -30,13 +30,18 @@ SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
 CANONICAL_CHANNEL = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
 
 
-def read_final_rows(call_id: str) -> List[Dict[str, Any]]:
-    """Every final segment of the meeting, on every channel, across all pages."""
+def read_final_rows(call_id: str, finals_only: bool = True) -> List[Dict[str, Any]]:
+    """Every final segment of the meeting, on every channel, across all pages.
+
+    With ``finals_only`` false, every row is read, and the caller picks the
+    final ones as the meeting archive does (``lma_speakers.participants
+    .final_segments``, which keeps a row stored without ``IsPartial``), so
+    both number the same speakers alike.
+    """
     table = calls_table()
-    kwargs: Dict[str, Any] = {
-        "KeyConditionExpression": Key("PK").eq(f"trs#{call_id}"),
-        "FilterExpression": Attr("IsPartial").eq(False),
-    }
+    kwargs: Dict[str, Any] = {"KeyConditionExpression": Key("PK").eq(f"trs#{call_id}")}
+    if finals_only:
+        kwargs["FilterExpression"] = Attr("IsPartial").eq(False)
     rows: List[Dict[str, Any]] = []
     for _ in range(MAX_PAGES):
         response = table.query(**kwargs)

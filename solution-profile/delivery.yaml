@@ -1,0 +1,88 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# How a delivery usually starts (Solution Profile contract v1, deliveryFile).
+# Durations are typical values for planning, not commitments.
+day_one:
+  - id: enable-models
+    title: Enable Amazon Bedrock model access in the chosen Region
+    evidence: [docs/prerequisites-and-deployment.md#amazon-bedrock-model-access]
+  - id: choose-preset-and-deploy
+    title: Deploy the stack with the configuration preset nearest the customer's consent and retention policy
+    evidence:
+      - docs/prerequisites-and-deployment.md#deploy-the-cloudformation-stack
+      - docs/privacy-and-data-handling.md#what-each-preset-sets
+  - id: first-streamed-meeting
+    title: Sign in and capture a first meeting with Stream Audio
+    evidence: [docs/quick-start-guide.md#option-1-stream-audio-from-your-browser]
+  - id: first-vp-meeting
+    title: Send a Virtual Participant to a test meeting on the customer's main platform
+    evidence: [docs/quick-start-guide.md#option-2-virtual-participant]
+  - id: review-summary-and-cost
+    title: Read the summary, ask the assistant a question and check the meeting's cost estimate
+    evidence:
+      - docs/quick-start-guide.md#generating-summaries
+      - docs/meeting-cost-estimate.md#where-to-read-it
+
+walking_skeleton:
+  description: >-
+    One real meeting on the customer's main platform, captured in their own account
+    under their consent setting, with a transcript, a summary and a cost estimate.
+  steps: [enable-models, choose-preset-and-deploy, first-vp-meeting, review-summary-and-cost]
+
+typical_work:
+  - id: platform-join-trials
+    title: Trial Virtual Participant joins on each platform and with each partner organisation's settings
+    category: other
+    other_kind: integration
+    effort: S
+    depends_on: [first-vp-meeting]
+    prerequisites: [A test meeting on each platform organised by each kind of organiser]
+    refs: [extension:meeting-platform-policy, question:meeting-platforms]
+    evidence: [docs/hosting-models.md#what-the-meeting-platforms-administrators-may-need-to-allow]
+  - id: consent-and-retention-setup
+    title: Agree and configure the consent mode, retention and transcript deletion
+    category: configuration
+    effort: S
+    depends_on: [choose-preset-and-deploy]
+    prerequisites: [The customer's recording and retention policy]
+    refs: [capability:meeting-consent, capability:retention-and-transcript-deletion, extension:recording-policy-and-legal-review]
+    evidence: [docs/privacy-and-data-handling.md#checklist-for-a-regulated-deployment]
+  - id: summary-profiles-setup
+    title: Write summary profiles and prompt changes for the customer's kinds of meeting
+    category: configuration
+    effort: S
+    depends_on: [review-summary-and-cost]
+    refs: [extension:summary-profile, extension:summary-prompt-templates]
+    evidence: [docs/transcript-summarization.md#summary-profiles]
+  - id: assistant-knowledge-setup
+    title: Connect the assistant to the customer's documents, skills and MCP servers
+    category: configuration
+    effort: M
+    depends_on: [choose-preset-and-deploy]
+    prerequisites: [The document sources and the systems the assistant may reach]
+    refs: [extension:knowledge-base-content, extension:assistant-skill, extension:external-mcp-server]
+    evidence: [docs/meeting-assistant.md#knowledge-base-configuration]
+  - id: downstream-integration
+    title: Send summaries and records to a downstream system on meeting events
+    category: extension
+    effort: M
+    depends_on: [review-summary-and-cost]
+    prerequisites: [Access to the target system's API]
+    refs: [extension:meeting-event-rules, extension:consume-meeting-export]
+    evidence: [docs/meeting-events.md]
+  - id: identity-federation-setup
+    title: Federate sign-in with the customer's identity provider
+    category: other
+    other_kind: infrastructure
+    effort: M
+    depends_on: [choose-preset-and-deploy]
+    refs: [extension:identity-federation]
+    evidence: [docs/embeddable-components.md#option-2-cognito-identity-federation]
+  - id: quota-requests
+    title: Request Amazon Transcribe quota increases for the expected peak
+    category: other
+    other_kind: aws-service
+    effort: S
+    refs: [extension:aws-quotas-and-models, prerequisite:transcribe-quota]
+    evidence: [docs/troubleshooting.md#service-quotas]

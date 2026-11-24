@@ -83,6 +83,13 @@ export const formatElapsed = (seconds) => {
 /** Labels as the editor shows them: one key=value per line. */
 export const labelsToText = (labels) => (labels || []).map(({ Key, Value }) => `${Key}=${Value}`).join('\n');
 
+/** Why `key` is not a label key, or null when it is one. */
+export const labelKeyProblem = (key) =>
+  LABEL_KEY.test(key)
+    ? null
+    : `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
+      'starting with a letter or digit, up to 63 characters';
+
 /**
  * The labels typed as key=value lines, checked as the server checks them.
  * Returns `{ labels, error }`; `error` is null when they can be saved.
@@ -102,9 +109,7 @@ export const parseLabelsText = (text) => {
     const key = at >= 0 ? line.slice(0, at) : line;
     const value = at >= 0 ? line.slice(at + 1) : '';
     if (!LABEL_KEY.test(key)) {
-      error =
-        `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
-        'starting with a letter or digit, up to 63 characters';
+      error = labelKeyProblem(key);
     } else if (seen.has(key)) {
       error = `The label key ${key} is given more than once`;
     } else if (value.length > MAX_LABEL_VALUE_CHARS) {
@@ -128,6 +133,16 @@ export const parseLabelFilter = (text) => {
   const at = text.indexOf('=');
   if (at < 0) return { key: text, value: null };
   return { key: text.slice(0, at), value: text.slice(at + 1) };
+};
+
+/**
+ * Why a meeting list label filter can match no meeting, or null. A key that is
+ * not a label key (say "Project" or "project ") is told the same way the label
+ * editor tells it, since the filter is matched exactly.
+ */
+export const labelFilterProblem = (text) => {
+  const wanted = parseLabelFilter(text);
+  return wanted ? labelKeyProblem(wanted.key) : null;
 };
 
 /**

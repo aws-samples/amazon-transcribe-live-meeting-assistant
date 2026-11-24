@@ -89,6 +89,7 @@ title: "LMA Documentation"
 - [Embeddable Components](embeddable-components.md) — iframe embedding, postMessage API, authentication options
 - [Lambda Hook Functions](lambda-hook-functions.md) — Custom transcript processing, FetchTranscript utility, summarization hooks
 - [Meeting Lifecycle Events](meeting-events.md) — The stack's EventBridge event bus: Meeting Started, Meeting Ended, Summary Ready and Virtual Participant Status Changed, what each event carries (identifiers and states only), reopened meetings, deduplication, an example rule, and polling instead
+- [Solution Profile](solution-profile.md) — The machine-readable description of what LMA does, where it can be extended, where it stops and what to ask to judge fit, published with each GitHub Release: its files, the checks that keep it in step with the code, the deterministic release asset, and the review each release needs
 
 ### Administration
 

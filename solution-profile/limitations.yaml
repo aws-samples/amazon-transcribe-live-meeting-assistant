@@ -1,0 +1,447 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Where the Live Meeting Assistant stops (Solution Profile contract v1,
+# solution-profile/schema/v1/README.md). Each item names the docs that show it, how
+# to detect it with a discovery question, and what mitigates it.
+limitations:
+  # ---------------------------------------------------------------- Virtual Participant
+  - id: vp-is-a-visible-guest
+    title: The Virtual Participant is a visible guest from outside the organisation
+    description: >-
+      The Virtual Participant joins as a participant that everyone in the meeting
+      sees, under its display name, from outside the meeting's organisation. Meetings
+      that do not admit guests, keep them in a lobby nobody answers, or forbid bots or
+      notetakers by policy cannot be captured this way.
+    evidence:
+      - docs/hosting-models.md#what-the-meeting-platforms-administrators-may-need-to-allow
+      - docs/meeting-sources.md#at-a-glance-comparison
+    impact: high
+    detect_with: [question:meeting-platforms, question:bot-policy]
+    mitigations:
+      - capability:browser-extension
+      - capability:desktop-capture-app
+      - capability:stream-audio
+      - extension:meeting-platform-policy
+
+  - id: vp-microvm-eight-hour-ceiling
+    title: A Virtual Participant on Lambda MicroVMs is limited to 8 hours per meeting
+    description: >-
+      The default MicroVM launch type has an 8-hour hard ceiling per MicroVM, set by
+      the service, and is available only in Regions with Lambda MicroVMs. The
+      on-demand speech engine has the same ceiling.
+    evidence:
+      - docs/virtual-participant.md#microvm-launch-type-default
+      - docs/microvm-asr.md#known-limitations
+    impact: medium
+    detect_with: [question:meeting-volume-and-length]
+    mitigations: [capability:vp-join-again]
+
+  - id: vp-manual-action-needs-a-person
+    title: CAPTCHAs, sign-ins and passcode prompts need a person within minutes
+    description: >-
+      When a platform shows a CAPTCHA, a two-factor prompt, an SSO redirect or a
+      dialog the Virtual Participant cannot classify, it asks for manual action in
+      the live view and fails the meeting if nobody responds, after about three
+      minutes by default. Unattended joins therefore depend on how often the
+      platform challenges guests.
+    evidence:
+      - docs/virtual-participant.md#manual-action-required-captcha-2fa-sso
+      - docs/troubleshooting.md#vp-stuck-at-manual_action_required
+    impact: medium
+    detect_with: [question:unattended-meetings]
+    mitigations: [capability:meeting-events]
+
+  - id: zoom-sdk-needs-zoom-approval
+    title: The Zoom Meeting SDK join needs the customer's own Zoom app and Zoom's approval
+    description: >-
+      Joining through the Zoom Meeting SDK needs a Zoom SDK app owned by the deploying
+      organisation, and joining meetings hosted by other accounts needs Zoom to
+      approve that app for the use case. Without it, Zoom is joined through the web
+      client.
+    evidence:
+      - docs/zoom-meeting-sdk.md#approval--usage-policy
+    impact: low
+    detect_with: [question:meeting-platforms]
+    mitigations: [capability:vp-zoom]
+
+  - id: teams-browser-join-reads-fewer-signals
+    title: On the Teams browser join, chat senders and the meeting chat are not always available
+    description: >-
+      On the Teams web client the Virtual Participant reads chat senders only on the
+      anonymous light-meetings client, so elsewhere typed consent and chat questions
+      cannot be attributed and per-participant consent is given aloud. Teams has been
+      seen to turn the chat off for the guest shortly after admission, which removes
+      chat commands and typed replies for that meeting.
+    evidence:
+      - docs/meeting-consent.md#what-each-platform-supports
+      - docs/meeting-consent.md#when-teams-turns-the-chat-off
+    impact: medium
+    detect_with: [question:meeting-platforms, question:consent-policy]
+    mitigations: [capability:vp-microsoft-teams]
+
+  - id: teams-acs-tenant-and-meeting-types
+    title: The Teams ACS join works only for some tenants and meeting types
+    description: >-
+      Azure Communication Services interop joins only meetings organised from a
+      Microsoft 365 work or school account whose tenant admits ACS users; it never
+      joins personal Teams meetings, webinars, town halls, end-to-end-encrypted
+      meetings, breakout rooms or GCC tenants. The Virtual Participant then falls back
+      to the browser join.
+    evidence:
+      - docs/teams-acs-sdk.md#supported-meeting-types-and-tenant-requirements
+      - docs/teams-acs-sdk.md#falling-back-to-the-browser-join
+    impact: low
+    detect_with: [question:meeting-platforms]
+    mitigations: [capability:vp-microsoft-teams]
+
+  - id: google-meet-guest-acceptance
+    title: Google Meet admits the Virtual Participant only where guests without a Google account are allowed
+    description: >-
+      The Virtual Participant joins Meet as a guest without an account. Meetings
+      organised from personal accounts, or whose Workspace refuses outside guests,
+      may refuse it, and Meet's reasons for refusing are not documented. Speaker
+      names from Meet's tiles and chat senders for consent are not yet confirmed in a
+      live meeting.
+    evidence:
+      - docs/virtual-participant.md#google-meet
+    impact: medium
+    detect_with: [question:meeting-platforms, question:bot-policy]
+    mitigations: [capability:browser-extension]
+
+  - id: webex-no-participant-list
+    title: Webex gives the Virtual Participant no participant list
+    description: >-
+      On Webex the Virtual Participant cannot read who is present, so the
+      each-participant opt-in rule cannot be granted and, under the presets that
+      require it, Webex meetings are not transcribed. Key frames are judged without a
+      screen-share signal.
+    evidence:
+      - docs/meeting-consent.md#what-each-platform-supports
+      - docs/hosting-models.md#what-the-meeting-platforms-administrators-may-need-to-allow
+    impact: medium
+    detect_with: [question:meeting-platforms, question:consent-policy]
+    mitigations: [capability:meeting-consent]
+
+  # ---------------------------------------------------------------- capture without a bot
+  - id: no-bot-capture-needs-the-user-present
+    title: Capture without a bot needs the LMA user in the meeting, on Chrome or a supported desktop
+    description: >-
+      Stream Audio, the Chrome extension and the Desktop Capture App capture what the
+      user's own browser or computer hears, so the user must attend. Stream Audio and
+      the extension need Chrome (Chromium); the desktop app needs macOS 13+ or
+      Windows 10/11 and is built on the user's computer. Stream Audio and the desktop
+      app cannot read the meeting's speaker names.
+    evidence:
+      - docs/meeting-sources.md#at-a-glance-comparison
+      - docs/desktop-capture-app.md#supported-platforms
+    impact: medium
+    detect_with: [question:unattended-meetings, question:meeting-platforms]
+    mitigations: [capability:virtual-participant, capability:speaker-attribution]
+
+  - id: no-video-from-browser-capture
+    title: Key frames come only from the Virtual Participant and the Desktop Capture App
+    description: >-
+      Stream Audio, the Chrome extension and uploads carry no video, so those meetings
+      have no key frames, slide text or screen-share summary.
+    evidence:
+      - docs/meeting-video.md#which-meetings-have-key-frames
+    impact: low
+    detect_with: [question:screen-content]
+    mitigations: [capability:virtual-participant, capability:desktop-capture-app]
+
+  - id: upload-audio-limits
+    title: Uploaded recordings use Amazon Transcribe batch, up to 5 GB, without a consent flow
+    description: >-
+      An uploaded file of at most 5 GB is transcribed by Amazon Transcribe batch, not
+      by the on-demand engine, in the configured language. Uploads run no consent
+      flow, because the recording already exists.
+    evidence:
+      - docs/upload-audio.md#limits--best-practices
+      - docs/meeting-consent.md#flows-by-capture-method
+    impact: low
+    detect_with: [question:recorded-meetings]
+    mitigations: [none]
+
+  # ---------------------------------------------------------------- speech
+  - id: transcribe-concurrent-streams
+    title: Amazon Transcribe's concurrent stream quota bounds concurrent meetings
+    description: >-
+      Amazon Transcribe allows 25 concurrent streams per account and Region by
+      default, and each live meeting on it holds at least one, so the quota bounds
+      how many meetings run at once until an increase is granted.
+    evidence:
+      - docs/troubleshooting.md#service-quotas
+      - docs/user-based-access-control.md#service-limits
+    impact: medium
+    detect_with: [question:meeting-volume-and-length]
+    mitigations: [extension:aws-quotas-and-models, capability:microvm-asr]
+
+  - id: microvm-asr-feature-gaps
+    title: The on-demand speech engine lacks some Amazon Transcribe features
+    description: >-
+      A meeting on the on-demand engine has no content redaction, custom vocabulary,
+      custom language model or language identification, and takes only the languages
+      its model bundle supports (20 European languages with the default bundle).
+      Overlapping speech resolves to one speaker, and speaker identities restart on
+      a reconnect. Meetings whose settings need the missing features stay on Amazon
+      Transcribe.
+    evidence:
+      - docs/microvm-asr.md#feature-trade-offs-versus-amazon-transcribe
+      - docs/microvm-asr.md#known-limitations
+    impact: medium
+    detect_with: [question:languages]
+    mitigations: [capability:transcribe-streaming]
+
+  - id: microvm-regions-only
+    title: Published in four Regions; Lambda MicroVM features need a Region that has them
+    description: >-
+      Release templates are published for us-east-1, us-west-2, ap-northeast-1 and
+      eu-west-1. The default Virtual Participant launch type, the on-demand speech
+      engine and voice enrollment need AWS Lambda MicroVMs, available in five Regions
+      (those four and us-east-2) and not in AWS GovCloud (US). The release script
+      records that CloudFormation rejects the Virtual Participant template in a
+      Region without MicroVMs whatever the launch type, while the parameter reference
+      still describes the EC2 and Fargate launch types for such Regions, so treat any
+      other Region as unverified.
+    evidence:
+      - aws-release.sh
+      - docs/cloudformation-parameters.md#vplaunchtype
+      - docs/cloudformation-parameters.md#the-asr-microvm-speech-engine
+    impact: high
+    detect_with: [question:data-residency]
+    mitigations: [deployment:build-from-source]
+
+  # ---------------------------------------------------------------- assistant
+  - id: nova-sonic-concurrent-streams
+    title: Amazon Nova Sonic allows 20 concurrent streams per account and Region, not raisable
+    description: >-
+      Every Virtual Participant voice assistant in an account and Region shares
+      Bedrock's quota of 20 concurrent Nova Sonic streams, which cannot be raised. An
+      always-listening assistant holds one stream for the whole meeting and a
+      translator two or three while people speak, so about twenty listening
+      assistants or six to ten translators can run at once; beyond that the voice
+      assistant degrades rather than failing.
+    evidence:
+      - docs/voice-assistant.md#nova-sonic-concurrency-quota
+    impact: medium
+    detect_with: [question:voice-assistant-use, question:meeting-volume-and-length]
+    mitigations: [capability:voice-assistant]
+
+  - id: five-external-mcp-servers
+    title: At most five external MCP servers per deployment, installed by Admins
+    description: >-
+      The assistant can use at most five installed MCP servers in one deployment, and
+      installing, updating or removing them is limited to the Admin group. Servers
+      apply to the whole deployment; each profile only turns them on or off.
+    evidence:
+      - docs/mcp-servers.md#admin-ui
+      - docs/troubleshooting.md#mcp-server-installation-fails
+      - lma-ai-stack/source/lambda_functions/mcp_server_manager/index.py
+    impact: medium
+    detect_with: [question:integration-targets]
+    mitigations: [extension:core-enhancement]
+
+  - id: assistant-fixed-instructions
+    title: Part of the assistant's instructions is fixed
+    description: >-
+      The assistant's persona and tool guidance can be edited, but a fixed part is
+      appended to every request: tool results are quoted data, never instructions,
+      and people are not identified from their faces. No profile or skill can remove
+      it, and the voice assistant's own prompt is configured separately.
+    evidence:
+      - docs/meeting-assistant.md#assistant-instructions
+      - docs/voice-assistant.md#custom-system-prompts
+    impact: low
+    detect_with: [question:assistant-behaviour]
+    mitigations: [extension:chat-buttons-and-assistant-instructions, extension:private-fork]
+
+  - id: in-meeting-requester-identity
+    title: Requests made in the meeting cannot be tied to a verified person
+    description: >-
+      A question typed in the meeting chat is known only by the sender's display
+      name, and a spoken one only by its voice, so the assistant cannot answer one
+      participant differently from another. By default such requests use the current
+      meeting only; widening them exposes what those tools return to everyone who can
+      join.
+    evidence:
+      - docs/meeting-assistant.md#in-meeting-requests
+      - docs/meeting-assistant.md#who-may-ask
+    impact: medium
+    detect_with: [question:transcript-visibility, question:hosting-model]
+    mitigations: [capability:in-meeting-requests]
+
+  - id: skill-limits
+    title: Size limits on assistant skills
+    description: >-
+      A deployment holds at most 40 skills, each with at most 48 KB of instructions,
+      20 reference files and 64 KB in all; large reference libraries belong in a
+      knowledge base.
+    evidence:
+      - docs/meeting-assistant-skills.md#limits
+    impact: low
+    detect_with: [question:knowledge-sources]
+    mitigations: [capability:document-knowledge-base]
+
+  - id: live-guidance-is-advice
+    title: Live guidance and whiteboard updates are model output and can be wrong
+    description: >-
+      Live guidance may mark an item covered that was only touched on or suggest a
+      question already answered, and the assistant's whiteboard updates can miss a
+      decision. Both run only while people speak, and a meeting that turns them on
+      late is read from its most recent part.
+    evidence:
+      - docs/live-guidance.md#limitations
+      - docs/meeting-whiteboards.md#limitations
+    impact: low
+    detect_with: [question:assistant-behaviour]
+    mitigations: [capability:live-guidance, capability:meeting-whiteboards]
+
+  - id: whiteboards-not-from-in-meeting-requests
+    title: Whiteboards cannot be made from the meeting chat or by voice
+    description: >-
+      Whiteboards are made on the meeting page, by the assistant's updates or over
+      MCP, not by a request made in the meeting, and diagrams are Mermaid text rather
+      than a drawing canvas.
+    evidence:
+      - docs/meeting-whiteboards.md#limitations
+    impact: low
+    detect_with: [question:assistant-behaviour]
+    mitigations: [capability:mcp-server-api-key]
+
+  - id: notifications-in-lma-only
+    title: Notifications and guidance are delivered in the LMA web app only
+    description: >-
+      Notifications reach the people following a meeting in LMA, not email, chat apps
+      or the meeting chat. Other channels need an event rule or an MCP client.
+    evidence:
+      - docs/meeting-notifications.md#limitations
+    impact: low
+    detect_with: [question:integration-targets]
+    mitigations: [extension:meeting-event-rules, extension:mcp-client-integration]
+
+  # ---------------------------------------------------------------- consent, privacy, access
+  - id: consent-identities-are-display-names
+    title: Consent replies are matched to display names, not verified identities
+    description: >-
+      Replies are matched to participants by the name the platform shows, which a
+      guest types and anyone can change, and spoken replies are attributed by the
+      speaking indicator. The record is evidence of what was posted and replied, not
+      a legal determination of consent.
+    evidence:
+      - docs/meeting-consent.md#limitations
+    impact: medium
+    detect_with: [question:consent-policy]
+    mitigations: [extension:recording-policy-and-legal-review]
+
+  - id: capture-methods-without-consent-step
+    title: The Chrome extension has no consent step, and streamed consent is the user's word
+    description: >-
+      The Chrome extension does not run the consent flow yet, so its meetings are
+      accepted or refused as the deployment's setting for clients without a consent
+      step says. Stream Audio and the Desktop Capture App cannot see participants, so
+      an opt-in meeting from them is granted on the LMA user's attestation alone, and
+      under the consent-required preset they cannot start a meeting.
+    evidence:
+      - docs/meeting-consent.md#flows-by-capture-method
+      - docs/meeting-consent.md#clients-without-a-consent-step
+      - docs/privacy-and-data-handling.md#what-each-preset-sets
+    impact: medium
+    detect_with: [question:consent-policy]
+    mitigations: [capability:virtual-participant]
+
+  - id: transcript-deletion-deployment-wide
+    title: Deleting the transcript after the summary is a deployment-wide setting
+    description: >-
+      Deleting transcripts once they are summarized applies to every meeting in the
+      deployment; there is no per-meeting choice. Some copies, such as the indexed
+      summary and Bedrock invocation logs if the account enables them, follow their
+      own lifetimes.
+    evidence:
+      - docs/transcript-deletion.md#limitations
+      - docs/privacy-and-data-handling.md#copies-that-follow-their-own-lifetime
+    impact: medium
+    detect_with: [question:retention-policy]
+    mitigations: [capability:retention-and-transcript-deletion]
+
+  - id: cognito-only-sign-in
+    title: Users sign in to LMA's own Cognito user pool
+    description: >-
+      The web app and the clients sign in to the Cognito user pool the stack
+      creates, with Admin and User roles only. Federation with a corporate identity
+      provider is configured on that user pool by the customer, and there are no
+      finer-grained roles or per-team visibility beyond owners, sharing and Admins.
+    evidence:
+      - docs/user-management.md#roles
+      - docs/user-based-access-control.md
+    impact: medium
+    detect_with: [question:identity-provider, question:transcript-visibility]
+    mitigations: [extension:identity-federation]
+
+  - id: deployments-share-account-quotas
+    title: Deployments in one account share its quotas and its administrators' reach
+    description: >-
+      Several LMA stacks can run in one account and Region, but they share the
+      account's Transcribe, Nova Sonic and MicroVM quotas, and anyone with broad IAM
+      permissions in the account can read every meeting whatever LMA's access rules
+      say. The hosting guide recommends a dedicated account for a team-hosted
+      deployment.
+    evidence:
+      - docs/hosting-models.md#isolating-a-team-hosted-account
+      - docs/voice-assistant.md#nova-sonic-concurrency-quota
+      - docs/cleanup.md#manual-cleanup
+    impact: medium
+    detect_with: [question:hosting-model]
+    mitigations: [capability:hosting-models]
+
+  - id: single-active-configuration
+    title: One active configuration for the whole deployment
+    description: >-
+      One configuration profile is active at a time and applies to every meeting, so
+      teams with different consent, retention or assistant policies need separate
+      deployments. Per-meeting choices exist only where the settings offer them, such
+      as a stricter consent mode, a summary profile or live guidance.
+    evidence:
+      - docs/configuration-guide.md#configuration-profiles
+    impact: medium
+    detect_with: [question:hosting-model, question:consent-policy]
+    mitigations: [capability:summary-profiles]
+
+  - id: permissions-boundary-not-supported-yet
+    title: Deploying under an IAM permissions boundary is not supported yet
+    description: >-
+      The stack accepts a permissions boundary parameter, but LMA does not yet attach
+      it to every role it creates, so setting it stops a deployment. Organisations
+      that require boundaries on every role need that work completed first.
+    evidence:
+      - docs/cloudformation-service-role.md#permissions-boundary-not-yet-supported-end-to-end
+    impact: medium
+    detect_with: [question:deployment-governance]
+    mitigations: [extension:core-enhancement]
+
+  # ---------------------------------------------------------------- integration and cost
+  - id: oauth-gateway-original-tools-only
+    title: The OAuth MCP endpoint serves only the seven original tools
+    description: >-
+      Clients that connect through the OAuth gateway (for example Amazon Quick Suite)
+      get search, transcript, summary, list, schedule, start-now and status; the
+      meeting preparation, guidance, whiteboard, export and management tools need the
+      API key endpoint.
+    evidence:
+      - docs/mcp-api-key-auth.md#key-scopes
+    impact: low
+    detect_with: [question:integration-targets]
+    mitigations: [capability:mcp-server-api-key]
+
+  - id: cost-estimate-excludes-fixed-costs
+    title: The per-meeting cost estimate leaves out fixed and some per-request costs
+    description: >-
+      The estimate covers usage attributable to one meeting. It leaves out the
+      always-on transcriber service, NAT gateways and other base infrastructure,
+      per-request charges of AppSync, DynamoDB and the like, knowledge-base queries,
+      guardrails, translation and third-party services.
+    evidence:
+      - docs/meeting-cost-estimate.md#what-is-not-included
+    impact: low
+    detect_with: [question:meeting-volume-and-length]
+    mitigations: [capability:meeting-cost-estimate]
