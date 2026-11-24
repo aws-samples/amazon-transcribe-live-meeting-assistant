@@ -15,8 +15,11 @@
  * Meeting Recording › Record screen video from streaming clients is on, as the
  * meeting's audio START read it. On a deployment that does not record video a
  * START_VIDEO is accepted and discarded, whatever the setting, as it always has
- * been, so a client that reconnects after any close it did not start keeps one
- * connection; on one that does, it is refused with the setting off. The client type names only what the key frames are
+ * been. On one that does, with the setting off, a client that declares it
+ * handles a refusal (START_VIDEO's handlesRefusal) is refused; any other client
+ * has its stream accepted and discarded, so a client that reconnects after
+ * every close it did not start keeps one quiet connection. No video is kept in
+ * either case. The client type names only what the key frames are
  * recorded as (keyframeSourceFor).
  *
  * Kept free of AWS clients so it can be tested directly.
@@ -54,20 +57,30 @@ export interface VideoSwitches {
 export const videoAllowed = (switches: VideoSwitches): boolean =>
     switches.stackRecordsVideo && switches.recordScreenVideo;
 
-/** What becomes of a START_VIDEO; see the module comment. */
-export type VideoAdmission = 'record' | 'discard' | 'refuse';
+/**
+ * What becomes of a START_VIDEO; see the module comment. `discard`: the
+ * deployment records no video. `withhold`: the setting is off and the client
+ * did not declare that it handles a refusal, so its stream is accepted and
+ * discarded as well.
+ */
+export type VideoAdmission = 'record' | 'discard' | 'withhold' | 'refuse';
 
 /**
  * How a START_VIDEO is answered: accepted and discarded (no VIDEO_STARTED) on a
- * deployment that does not record video, whatever the setting; refused
- * (VIDEO_NOT_ENABLED_CLOSE) on one that does, with the setting off; and
- * recorded otherwise. The same for every client.
+ * deployment that does not record video, whatever the setting; with the setting
+ * off, refused (VIDEO_NOT_ENABLED_CLOSE) when the client declares it handles a
+ * refusal and accepted and discarded when it does not; and recorded otherwise.
+ * What the client declares changes only how it is told, never whether video is
+ * kept, and its client type plays no part.
  */
-export const videoAdmission = (switches: VideoSwitches): VideoAdmission => {
+export const videoAdmission = (switches: VideoSwitches, handlesRefusal: boolean): VideoAdmission => {
     if (!switches.stackRecordsVideo) {
         return 'discard';
     }
-    return switches.recordScreenVideo ? 'record' : 'refuse';
+    if (switches.recordScreenVideo) {
+        return 'record';
+    }
+    return handlesRefusal ? 'refuse' : 'withhold';
 };
 
 /**

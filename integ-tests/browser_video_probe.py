@@ -187,6 +187,8 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
                     await video_ws.send(json.dumps({
                         "callEvent": "START_VIDEO", "callId": leg.call_id,
                         "videoTimeOffsetMs": int(leg.video_offset_seconds * 1000),
+                        # As every LMA client sends it: told, not discarded, on a refusal.
+                        "handlesRefusal": True,
                     }))
                     leg.video_started = True
                     # The initialization segment goes straight behind START_VIDEO,

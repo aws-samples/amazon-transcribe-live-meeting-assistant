@@ -31,7 +31,10 @@ off on the active profile (in a temporary Custom copy when that profile is
 read-only, as ``test_meeting_consent.py`` does), streams the slideshow again,
 checks that the transcriber refuses the video with a ``1008`` close while the
 meeting's audio is transcribed, and puts the setting back. One setting controls
-screen video from every streaming client, the desktop app included.
+screen video from every streaming client, the desktop app included. A second
+leg streams as an earlier desktop build would, without ``handlesRefusal`` on
+``START_VIDEO``: its video is accepted and discarded rather than refused, so the
+connection stays open and no key frame is kept.
 """
 
 from __future__ import annotations
@@ -217,6 +220,11 @@ def setting_off_run(client, run) -> dict:
                            call_label="desktop-video-off")
         result["video_allowed"] = allowed
         print(f"desktop video probe meeting, setting off: {result['call_id']}")
+        # As an earlier desktop build: no handlesRefusal on START_VIDEO.
+        legacy = run_probe(client.stack_name, region=client.region, keyframe_wait_seconds=30,
+                           call_label="desktop-video-off-legacy", handles_refusal=False)
+        print(f"desktop video probe meeting, setting off, earlier build: {legacy['call_id']}")
+        result["legacy"] = legacy
         return result
     finally:
         recording.restore()
@@ -239,3 +247,18 @@ def test_with_the_setting_off_desktop_video_is_refused_and_the_audio_carries_on(
     assert run["meeting_created"], f"no meeting row for {run['call_id']}"
     assert run["segment_count"] > 0, f"no transcript segments for {run['call_id']}"
     assert run["keyframes"] == [], f"key frames were kept with the setting off: {_frame_summary(run)}"
+
+
+def test_with_the_setting_off_an_earlier_desktop_build_is_discarded_not_refused(setting_off_run: dict) -> None:
+    legacy = setting_off_run["legacy"]
+    # Not closed by the server: the stream was accepted, so a build that
+    # reconnects after every close keeps one connection.
+    assert legacy["video_close"] != 1008, (
+        f"the video of a client without handlesRefusal was refused ({legacy['video_close']} "
+        f"{legacy['video_close_reason']!r}); it should be accepted and discarded"
+    )
+    assert legacy["video_state"] == "OPEN", f"video socket ended {legacy['video_state']} before END_VIDEO"
+    assert legacy["fragments_sent"] == legacy["fragments"] > 0
+    assert legacy["audio_state"] == "OPEN", f"audio socket ended {legacy['audio_state']}"
+    assert legacy["segment_count"] > 0, f"no transcript segments for {legacy['call_id']}"
+    assert legacy["keyframes"] == [], f"key frames were kept with the setting off: {_frame_summary(legacy)}"

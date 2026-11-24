@@ -4260,7 +4260,8 @@ Resources:
                     ["${AWS::StackName}", "MeetingsStarted", {"label": "Meetings started"}],
                     ["${AWS::StackName}", "MeetingsEnded", {"label": "Meetings ended"}],
                     ["${AWS::StackName}", "StreamingSessionsStarted", {"label": "Live audio sessions opened"}],
-                    ["${AWS::StackName}", "StreamingStartsNotChecked", {"label": "Audio session starts refused, meeting record unreadable"}]
+                    ["${AWS::StackName}", "StreamingStartsNotChecked", {"label": "Audio session starts refused, meeting record unreadable"}],
+                    ["${AWS::StackName}", "ScreenVideoStreamsWithheld", {"label": "Screen video discarded from earlier desktop builds, setting off"}]
                   ]
                 }
               },

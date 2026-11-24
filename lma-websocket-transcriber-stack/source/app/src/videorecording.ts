@@ -374,12 +374,27 @@ export const startVideoSession = (
     server: FastifyInstance,
     audioPositionSeconds?: number,
     sessionOffsetSeconds = 0,
-    keyframeSource: StreamedKeyframeSource = 'DESKTOP_CAPTURE'
+    keyframeSource: StreamedKeyframeSource = 'DESKTOP_CAPTURE',
+    withheld = false
 ): VideoSession => {
     const callId = callMetaData.callId;
     const sessionNumber = callMetaData.sessionNumber;
     const key = videoSessionKey(callId, sessionNumber);
     let session = videoSessions.get(key);
+
+    // Withheld (video-admission.ts videoAdmission): the setting is off and the
+    // client is not told, so its stream is accepted and nothing of it is kept.
+    if (withheld) {
+        server.log.warn(
+            `[START_VIDEO]: [${callId}] - Screen video from streaming clients is off and the client does not declare handlesRefusal; accepting and discarding its video stream.`
+        );
+        if (!session) {
+            session = newSession(callId, callMetaData, keyframeSource);
+            videoSessions.set(key, session);
+        }
+        session.discarding = true;
+        return session;
+    }
 
     if (!ENABLE_VIDEO_RECORDING) {
         server.log.warn(

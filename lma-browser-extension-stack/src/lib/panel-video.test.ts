@@ -60,7 +60,7 @@ describe('the panel\'s screen video', () => {
     await flush();
     const ws = h.sockets[0];
     ws.onopen?.();
-    expect(json(ws)[0]).toEqual({ callEvent: 'START_VIDEO', callId: 'Weekly - 2026', videoTimeOffsetMs: 750 });
+    expect(json(ws)[0]).toEqual({ callEvent: 'START_VIDEO', callId: 'Weekly - 2026', videoTimeOffsetMs: 750, handlesRefusal: true });
     expect(ws.sent.filter((m) => typeof m !== 'string')).toHaveLength(1);
 
     h.video.stop();

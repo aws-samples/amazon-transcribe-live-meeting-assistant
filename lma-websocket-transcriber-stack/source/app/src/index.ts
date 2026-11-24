@@ -64,6 +64,7 @@ import {
     noteStreamingSessionStarted,
     noteStreamingSessionEnded,
     noteStreamingStartNotChecked,
+    noteScreenVideoWithheld,
 } from './metrics/session';
 import { RECORD_SCREEN_VIDEO_DEFAULT, getSessionSettings } from './calleventdata/session-settings';
 import { startTranscriptionEngine } from './calleventdata/engine-start';
@@ -1007,18 +1008,25 @@ const onTextMessage = async (
             return;
         }
         // Every streaming client's video follows Meeting Recording › Record
-        // screen video from streaming clients, as the meeting's START read it:
-        // refused with it off, on a deployment that records video. On one that
-        // does not, the stream is accepted and discarded (startVideoSession),
-        // whatever the setting. The client type
+        // screen video from streaming clients, as the meeting's START read it.
+        // With it off, a client that declares it handles a refusal is refused;
+        // any other client's stream is withheld: accepted and discarded, so an
+        // earlier desktop build that reconnects after every close keeps one
+        // connection. On a deployment that does not record video the stream is
+        // discarded whatever the setting (startVideoSession). The client type
         // plays no part (video-admission.ts videoAdmission).
-        if (
-            videoAdmission({
+        const admission = videoAdmission(
+            {
                 stackRecordsVideo: videoRecordingEnabled(),
                 recordScreenVideo:
                     audioSession.sessionSettings?.recording.recordScreenVideo ?? RECORD_SCREEN_VIDEO_DEFAULT,
-            }) === 'refuse'
-        ) {
+            },
+            callMetaData.handlesRefusal === true
+        );
+        if (admission === 'withhold') {
+            noteScreenVideoWithheld();
+        }
+        if (admission === 'refuse') {
             server.log.warn(
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video from streaming clients is off on this deployment; refusing video stream.`
             );
@@ -1038,7 +1046,8 @@ const onTextMessage = async (
             server,
             recordedAudioSeconds(audioSession),
             audioSession.callMetadata.sessionOffsetSeconds ?? 0,
-            keyframeSourceFor(audioSession.captureSource)
+            keyframeSourceFor(audioSession.captureSource),
+            admission === 'withhold'
         );
         videoSocketMap.set(ws, session);
         // The chunks that arrived while this START_VIDEO was handled, in order,

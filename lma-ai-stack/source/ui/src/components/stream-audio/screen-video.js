@@ -376,6 +376,9 @@ export const createVideoUplink = ({
         callEvent: 'START_VIDEO',
         callId,
         videoTimeOffsetMs: offsetMs,
+        // This client stops its video on a refusal, so it is told when
+        // screen video is off (docs/websocket-streaming-api.md, "6.1.6 Screen Video").
+        handlesRefusal: true,
         ...(resume ? { videoResume: true } : {}),
       });
       // A resumed stream carries on from what the last connection sent; a new

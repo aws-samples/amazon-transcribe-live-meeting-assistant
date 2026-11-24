@@ -195,6 +195,11 @@ export type CallMetaData = {
     // continue the same fMP4 stream, so the server appends to the same file
     // instead of rotating to a new segment.
     videoResume?: boolean,
+    // START_VIDEO only: true from a client that stops its video for good on a
+    // final refusal (a 1008 close), and is therefore told when screen video is
+    // off. A client that does not send it has its stream accepted and
+    // discarded instead (video-admission.ts videoAdmission).
+    handlesRefusal?: boolean,
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };

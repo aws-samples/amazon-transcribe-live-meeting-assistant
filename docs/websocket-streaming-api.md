@@ -639,6 +639,7 @@ while its audio is streaming. Its first frame is:
 | `callId` | `string` | **Yes** | The `callId` of the meeting whose audio this connection's user is streaming on this server |
 | `videoTimeOffsetMs` | `number` | No | How many milliseconds after the audio started the video's first frame was captured (0 to 3,600,000; default 0). Lines the video and its key frames up with the transcript |
 | `videoResume` | `boolean` | No | `true` on a reconnect that continues the same encoder's byte stream (see below) |
+| `handlesRefusal` | `boolean` | No | `true` from a client that stops its video, without reconnecting, on a final refusal (below). Such a client is refused when screen video is off; one that does not send it has its stream accepted and discarded instead. Every LMA client sends it |
 
 Every binary frame after it is a chunk of one fragmented MP4 stream: H.264
 video only, no audio, the initialization segment first. Send chunks as the
@@ -662,7 +663,12 @@ received.
 | `no active call for callId` | No audio session of this `callId` is live on this server. Send `START_VIDEO` only once the audio is streaming |
 | `not authorized for callId` | The meeting's audio is being streamed by another user |
 | `meeting consent does not allow capture` | The meeting's [consent](#615-meeting-consent-frames) does not allow capture yet, or no longer does. In opt-in, wait for the `CONSENT_STATE` with `status: "granted"` on the audio connection before sending `START_VIDEO` |
-| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off, on a deployment that records video |
+| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off, on a deployment that records video, and the `START_VIDEO` sent `handlesRefusal: true`. The wording is kept as it was, because clients match on it |
+
+With the setting off, a `START_VIDEO` without `handlesRefusal: true` is not
+refused: it is accepted and discarded, gets no `VIDEO_STARTED`, and nothing of
+it is kept (no video, key frames or upload). The transcriber counts each one as
+the `ScreenVideoStreamsWithheld` metric ([Monitoring](monitoring.md)).
 
 A refused video stream does not affect the audio: stop the video, tell the
 user, and carry on streaming audio. A client should not reconnect a refused

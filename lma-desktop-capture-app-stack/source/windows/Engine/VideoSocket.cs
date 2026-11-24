@@ -249,6 +249,9 @@ public sealed class VideoSocket
             ["callId"] = _config.CallId,
             ["callEvent"] = "START_VIDEO",
             ["videoTimeOffsetMs"] = VideoTimeOffsetMs,
+            // This build stops its video on a final refusal, so the transcriber
+            // tells it when screen video is off rather than discarding the stream.
+            ["handlesRefusal"] = true,
         };
         // Same encoder session continuing over a new socket: the server appends
         // to the current segment instead of rotating files.

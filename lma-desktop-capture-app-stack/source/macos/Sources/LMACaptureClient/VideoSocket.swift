@@ -166,6 +166,9 @@ final class VideoSocket: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDe
             "callId": config.callId,
             "callEvent": "START_VIDEO",
             "videoTimeOffsetMs": videoTimeOffsetMs,
+            // This build stops its video on a final refusal, so the transcriber
+            // tells it when screen video is off rather than discarding the stream.
+            "handlesRefusal": true,
         ]
         if startedOnce {
             // Same encoder session continuing over a new socket: the server
