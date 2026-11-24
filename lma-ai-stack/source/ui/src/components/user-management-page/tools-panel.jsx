@@ -26,6 +26,13 @@ const content = (
         admin-only pages or APIs.
       </li>
     </ul>
+    <h3>Last sign-in</h3>
+    <p>
+      The last time the user signed in with their password (in the web UI, the browser extension or an MCP client).
+      Staying signed in, which renews the session without a password, does not update it. <em>Not recorded</em> means
+      the user has not signed in since LMA began recording sign-in times; <em>Unavailable</em> means the times could not
+      be read. To export the list for an access review, run <code>lma users list --format csv</code>.
+    </p>
     <h3>Guard rails</h3>
     <ul>
       <li>You cannot delete your own account.</li>

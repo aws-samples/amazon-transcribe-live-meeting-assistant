@@ -435,6 +435,14 @@ Parameters:
     Type: String
     Description: Cognito Identity Pool used by the UI
 
+  UserSignInTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      The Cognito stack's table of each user's last sign-in time (keyed by Cognito
+      sub), read by the user management resolver. Empty when the Cognito stack
+      has none, in which case the last sign-in is reported as unavailable.
+
   AllowedSignUpEmailDomain:
     Type: String
     Default: ""
@@ -653,6 +661,7 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasUserSignInTable: !Not [!Equals [!Ref UserSignInTableName, ""]]
   # The main stack created the meeting event bus (EnableMeetingEvents).
   ShouldPublishMeetingEvents: !Not [!Equals [!Ref MeetingEventBusArn, ""]]
   HasTroubleshootingAgent: !Not [!Equals [!Ref TroubleshootingAgentFunctionArn, ""]]
@@ -11126,6 +11135,7 @@ Resources:
           ADMIN_GROUP: "Admin"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          USER_SIGN_IN_TABLE: !Ref UserSignInTableName
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -11191,6 +11201,16 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "usr#*"
+              # Each listed user's last sign-in time, and a deleted user's
+              # entry, in the Cognito stack's sign-in table.
+              - !If
+                - HasUserSignInTable
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:BatchGetItem"
+                    - "dynamodb:DeleteItem"
+                  Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserSignInTableName}"
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - kms:Decrypt
