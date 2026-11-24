@@ -626,7 +626,8 @@ class TestReadOnlyHintAnnotations(unittest.TestCase):
                     f"{tool['name']} must NOT declare readOnlyHint=True",
                 )
 
-    # The tools that replace a stored value and clear it when sent an empty one.
+    # The tools that replace one of a meeting's preparation settings as a whole and
+    # clear it when sent an empty one (tool_definitions.py's docstring).
     REPLACING_TOOLS = {
         "update_meeting_agenda",
         "update_scheduled_meeting",

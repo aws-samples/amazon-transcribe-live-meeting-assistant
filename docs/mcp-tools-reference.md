@@ -50,10 +50,12 @@ client connects, and the API key scopes, are in
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered
   for, the read-only tools only. `destructiveHint` is true for the tools whose
-  change cannot be taken back or takes something away from people, including
-  every tool that replaces a stored value and clears it when sent an empty one
-  (`update_meeting_agenda`, `update_scheduled_meeting`, `set_meeting_context`,
-  `set_meeting_checklist` and `update_meeting_metadata`).
+  change cannot be taken back or takes something away from people. That
+  includes the tools that replace one of a meeting's preparation settings as a
+  whole and clear it when sent an empty one (`update_meeting_agenda`,
+  `set_meeting_context`, `set_meeting_checklist`, `update_meeting_metadata` and
+  `update_scheduled_meeting`); a tool that changes one part, such as
+  `update_checklist_item`, is not destructive.
 
 ## Every tool
 
@@ -425,7 +427,8 @@ Beside `startDate`, `endDate`, `status`, `participant` and `limit`, it takes
 `labels` (every pair must match), `audience`, `updatedSince` and `endedSince`
 (ISO 8601). Each meeting has `labels`, `audience`, `status`, `startTime`,
 `endTime` (null until it has ended), `owner`, `summaryProfile` (the summary
-profile the meeting is summarised with, null for the default), `summaryReady`,
+profile the meeting is summarised with, null when the meeting names none, which
+means the shipped `default`), `summaryReady`,
 and `virtualParticipantId` when a Virtual Participant captured it, beside the
 earlier fields. The filters are applied before `limit`.
 
