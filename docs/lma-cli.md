@@ -292,7 +292,12 @@ and the command exits with status 1. Options: `--stack-name`, `--region`,
 `LMA_STACK_NAME` and `AWS_DEFAULT_REGION` in the environment, as for
 [`lma meetings delete`](#lma-meetings-delete--delete-meetings-by-label).
 
-`lma vp rejoin` and `lma meetings reopen` call mutations that accept IAM callers only when they sign with an **assumed role** (an SSO or role profile, or a role on an instance or in CI); with an IAM user's access keys the server refuses them. A role is accepted as a backend role, which may rejoin any Virtual Participant and reopen any meeting, as it may end any Virtual Participant; the meeting records the role's ARN as who reopened it.
+`lma vp rejoin` and `lma meetings reopen` call mutations that accept IAM
+callers only when they sign with an **assumed role** (an SSO or role profile,
+or a role on an instance or in CI); with an IAM user's access keys the server
+refuses them. A role is accepted as a backend role, which may rejoin any
+Virtual Participant and reopen any meeting, as it may end any Virtual
+Participant; the meeting records the role's ARN as who reopened it.
 
 ### `lma meetings delete` — Delete Meetings by Label
 

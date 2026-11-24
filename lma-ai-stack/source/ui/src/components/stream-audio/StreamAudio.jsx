@@ -436,11 +436,15 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return callMetaDataCopy;
   };
 
+  // The meeting the consent notice and START name: the continued meeting while
+  // continuing (its Meeting Topic field is disabled then), else the topic.
+  const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || meetingTopic;
+
   // The notice the consent step shows, as START records it.
   const noticeText = consentRequired(consentSettings)
     ? renderNotice(consentSettings.noticeTemplate, {
         lmaUser: callMetaData.agentId,
-        meeting: meetingTopic,
+        meeting: consentMeetingName,
         consentPhrase: consentSettings.consentPhrase,
         objectionPhrase: consentSettings.objectionPhrase,
       })
@@ -501,7 +505,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         ...toStreamingFrame(recordingCallMetaData),
         consent: consentPayload(consentRequired(consentSettings) ? consentSettings : { mode: 'off' }, consentStep, {
           lmaUser: recordingCallMetaData.agentId,
-          meetingName: meetingTopic,
+          meetingName: consentMeetingName,
           noticeText,
         }),
       };

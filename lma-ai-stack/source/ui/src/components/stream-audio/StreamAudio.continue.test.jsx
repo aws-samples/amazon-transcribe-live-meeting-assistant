@@ -113,6 +113,7 @@ describe('StreamAudio: continue an existing meeting', () => {
     const reopen = api.graphql.mock.calls.find(([{ query }]) => query.includes('reopenMeeting'));
     expect(reopen[0].variables).toEqual({ input: { CallId: CALL_ID } });
     expect(startFrame(target)).toMatchObject({ callId: CALL_ID, sessionNumber: 2, clientType: 'STREAM_AUDIO' });
+    expect(startFrame(target).consent.meetingName).toBe(CALL_ID);
     expect(screen.getByTestId('continue-session').textContent).toBe(
       `Continuing meeting ${CALL_ID} as session 2, from 5:17 on its transcript.`,
     );
@@ -195,6 +196,7 @@ describe('StreamAudio: continue an existing meeting', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start Streaming' }));
     await waitFor(() => expect(startFrame(second)).toBeTruthy());
     expect(startFrame(second)).not.toHaveProperty('sessionNumber');
+    expect(startFrame(second).consent.meetingName).toBe('Stream Audio');
     expect(startFrame(second).callId).not.toBe(CALL_ID);
   });
 });

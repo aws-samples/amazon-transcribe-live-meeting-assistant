@@ -9,7 +9,8 @@ processor turns into a meeting record. It refuses to reopen it while it is
 live, then marks it ended on the record (an END would run the end-of-meeting
 work, which a synthetic meeting has nothing for), and reopens it for session
 2, which is then held: while that session has not started, a second reopen by
-the same caller is answered with the same session rather than a new one. Nothing streams, so no session starts and the meeting stays ended.
+the same caller is answered with the same session rather than a new one.
+Nothing streams, so no session starts and the meeting stays ended.
 Self-cleaning.
 
 ``reopenMeeting`` accepts an IAM caller that signs with an assumed role (an
