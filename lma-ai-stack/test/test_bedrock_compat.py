@@ -15,10 +15,10 @@ asserted here rather than only at the call sites:
   return no text at all. Reading block zero either stores the model's working as
   the answer or raises, depending on the block's keys.
 
-The module is duplicated verbatim into six deployment packages across two
-CloudFormation stacks, because each is zipped on its own and there is no layer
-they share. ``test_every_package_ships_the_same_compat_module`` is what keeps the
-copies honest; the rest of the file tests the canonical one.
+The module is duplicated verbatim into every deployment package that uses it,
+across two CloudFormation stacks, because each is zipped on its own and there is
+no layer they share. ``test_every_package_ships_the_same_compat_module`` is what
+keeps the copies honest; the rest of the file tests the canonical one.
 """
 
 from __future__ import annotations

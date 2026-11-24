@@ -54,6 +54,31 @@ def test_vendored_contract_files_match_their_pinned_digests():
         assert actual == digest, f"solution-profile/schema/{name} differs from its pinned digest"
 
 
+def _pins(text, pattern):
+    found = re.findall(pattern, text, flags=re.MULTILINE)
+    return {name.lower(): version for name, version in found}
+
+
+def test_the_check_and_the_release_build_install_the_validators_versions():
+    """make setup-python and the release workflow install what the validator declares.
+
+    So a passing ``make solution-profile-check`` predicts the release build.
+    """
+    validator = (PROFILE / "schema" / "v1" / "validate_profile.py").read_text(encoding="utf-8")
+    declared = _pins(
+        re.search(r"^# dependencies = \[(.*)\]$", validator, flags=re.MULTILINE).group(1),
+        r'"(pyyaml|jsonschema)==([0-9.]+)"',
+    )
+    assert set(declared) == {"pyyaml", "jsonschema"}, declared
+    workflow = (REPO / ".github" / "workflows" / "solution-profile-release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert _pins(workflow, r'"(pyyaml|jsonschema)==([0-9.]+)"') == declared
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    setup = makefile.split("\nsetup-python:", 1)[1].split("\n\n", 1)[0]
+    assert _pins(setup, r"^\t\t(pyyaml|jsonschema)==([0-9.]+) \\$") == declared
+
+
 def test_contract_directory_holds_only_the_vendored_files():
     schema = PROFILE / "schema"
     files = sorted(

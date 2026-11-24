@@ -209,6 +209,11 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 # jsonschema: meeting_archive/test_export.py validates the meeting export against
 # docs/schemas/meeting-export-v1.schema.json; listed here so that test does not
 # depend on the SDK's dev extras bringing it in.
+# pyyaml and jsonschema are pinned to the versions the vendored solution profile
+# validator declares (solution-profile/schema/v1/validate_profile.py), which the
+# release workflow installs, so a passing `make solution-profile-check` predicts
+# the release build; test_solution_profile.py holds the three to the same pins.
+# Both satisfy cfn-lint (pyyaml>=6.0.3) and aws-sam-translator (jsonschema>=4.23,<5).
 	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
 		aws-sam-translator \
@@ -216,10 +221,10 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 		black \
 		cfn-lint \
 		flake8 \
-		jsonschema \
+		jsonschema==4.25.1 \
 		mypy \
 		pylint \
-		pyyaml \
+		pyyaml==6.0.3 \
 		ruff==$(RUFF_VERSION) \
 		virtualenv \
 		yamllint \

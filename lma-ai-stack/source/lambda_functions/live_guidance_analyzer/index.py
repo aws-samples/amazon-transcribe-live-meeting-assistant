@@ -58,6 +58,7 @@ from botocore.exceptions import ClientError
 # pylint: disable=import-error
 from lma_config import LANGUAGE_MODELS, MEETING_ASSIST, read_setting, resolve_model_id
 from lma_live_pass import LivePass
+from lma_live_pass import segments as live_pass
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage
 from lma_notifications import (
     GUIDANCE,
@@ -563,7 +564,7 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
     )
     # A state row from before ShownSegmentIds was recorded is read by its marker alone.
     shown = _json_field(state, "ShownSegmentIds", []) if "ShownSegmentIds" in state else None
-    fresh = pure.new_segments(segments, state.get("LastSegmentEndTime"), shown)
+    fresh = live_pass.new_segments(segments, state.get("LastSegmentEndTime"), shown)
     if len(fresh) < settings.min_new_segments:
         release(call_id, lease, ran=False, now=now)
         return {"ran": False, "reason": f"{len(fresh)} new segments"}
@@ -622,8 +623,8 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
         lease,
         ran=True,
         now=now,
-        LastSegmentEndTime=pure.next_marker(fresh, last_marker),
-        ShownSegmentIds=json.dumps(pure.shown_after_run(segments, last_marker, shown, fresh)),
+        LastSegmentEndTime=live_pass.next_marker(fresh, last_marker),
+        ShownSegmentIds=json.dumps(live_pass.shown_after_run(segments, last_marker, shown, fresh)),
         RollingSummary=analysis.summary or str(state.get("RollingSummary") or ""),
         Published=json.dumps(published, ensure_ascii=False),
         PublishTimes=json.dumps(recent),

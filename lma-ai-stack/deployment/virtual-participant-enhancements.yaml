@@ -111,7 +111,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: VirtualParticipantManagerPolicy
           PolicyDocument:
@@ -125,11 +125,11 @@ Resources:
                   - dynamodb:DeleteItem
                   - dynamodb:Query
                   - dynamodb:Scan
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
-                Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/*"
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/*"
               # The MCP server library import and the skill writes are for
               # administrators, not for the stack's own roles.
               # So are rejoinVirtualParticipant and reopenMeeting over IAM (the CLI and SDK).
@@ -155,18 +155,18 @@ Resources:
               - Effect: Allow
                 Action:
                   - ecs:DescribeClusters
-                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
+                Resource: !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
               - Effect: Allow
                 Action:
                   - kinesis:PutRecord
                   - kinesis:PutRecords
                   - kinesis:DescribeStream
-                Resource: !Sub "arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+                Resource: !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:DeleteItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -174,7 +174,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   ##########################################################################
   # Enhanced AppSync Data Sources and Resolvers

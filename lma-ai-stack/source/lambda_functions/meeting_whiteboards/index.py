@@ -64,6 +64,7 @@ from botocore.exceptions import ClientError
 # pylint: disable=import-error
 from lma_config import LANGUAGE_MODELS, MEETING_ASSIST, read_setting, resolve_model_id
 from lma_live_pass import LivePass
+from lma_live_pass import segments as live_pass
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage
 from lma_notifications import NotificationError, appsync_graphql, transcript_expires_after
 from lma_whiteboards import rules
@@ -1226,7 +1227,7 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
     last_marker = state.get("LastSegmentEndTime")
     # A state row from before ShownSegmentIds was recorded is read by its marker alone.
     shown = _json_list(state.get("ShownSegmentIds")) if "ShownSegmentIds" in state else None
-    fresh = updater.new_segments(segments, last_marker, shown)
+    fresh = live_pass.new_segments(segments, last_marker, shown)
     needed = 1 if trigger in EAGER_TRIGGERS else settings.min_new_segments
     if len(fresh) < needed:
         LIVE.release(call_id, lease, ran=False, now=now)
@@ -1255,8 +1256,10 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
     answer = call_model(call_id, model_for(settings), system, messages)
     plan = updater.parse_answer(answer, targets)
     marker = {
-        "LastSegmentEndTime": updater.next_marker(fresh, last_marker),
-        "ShownSegmentIds": json.dumps(updater.shown_after_run(segments, last_marker, shown, fresh)),
+        "LastSegmentEndTime": live_pass.next_marker(fresh, last_marker),
+        "ShownSegmentIds": json.dumps(
+            live_pass.shown_after_run(segments, last_marker, shown, fresh)
+        ),
         "LastScreenTime": screen_marker,
     }
     if plan is None:
