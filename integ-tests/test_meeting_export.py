@@ -593,6 +593,11 @@ query Read($CallId: ID!) { getMeetingConsent(CallId: $CallId) { Consent {
 RENAME = """
 mutation Rename($input: UpdateSpeakerIdentitiesInput!) { updateSpeakerIdentities(input: $input) { CallId } }
 """
+READ_NOTICE = """
+query Read($CallId: ID!) { getMeetingConsent(CallId: $CallId) {
+  Consent { NoticeText } Settings { VideoNoticeText }
+} }
+"""
 VOICE = "Integ Voice (spk_0)"
 OTHER_VOICE = "Integ Other (spk_1)"
 
@@ -735,3 +740,25 @@ def test_a_meeting_the_user_cannot_see_is_refused(env) -> None:
     meeting.start()
     error, answer = env.call("get_meeting_export", {"meetingId": meeting.call_id})
     assert error and "not found, or you do not have access" in answer, answer
+
+
+def test_a_virtual_participant_recording_video_gets_the_video_sentence_in_its_notice(env, client) -> None:
+    """The notice a VP recording video starts consent with ends with Meeting Consent › videoNoticeText.
+
+    As the backend role a Virtual Participant signs as: ``IncludesVideo`` on
+    ``startMeetingConsent``, which the VP sends when its Record meeting video
+    toggle is on. The notice is the one the VP posts and the record keeps.
+    """
+    arn = client.session.client("sts").get_caller_identity().get("Arn", "")
+    if ":assumed-role/" not in arn:
+        pytest.skip("needs an assumed role, which AppSync treats as the backend a Virtual Participant signs as")
+    meeting = env.meeting("video notice")
+    meeting.start()
+    graphql = client.appsync.graphql
+    graphql(START_CONSENT, {"input": {"CallId": meeting.call_id, "Mode": "notify", "LmaUser": "Integ",
+                                      "IncludesVideo": True}})
+    state = graphql(READ_NOTICE, {"CallId": meeting.call_id})["getMeetingConsent"]
+    sentence = (state.get("Settings") or {}).get("VideoNoticeText") or ""
+    notice = (state.get("Consent") or {}).get("NoticeText") or ""
+    assert sentence, f"the deployment's consent settings have no VideoNoticeText: {state.get('Settings')}"
+    assert notice.endswith(f" {sentence}"), notice

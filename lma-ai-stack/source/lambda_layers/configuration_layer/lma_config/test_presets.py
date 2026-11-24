@@ -40,12 +40,18 @@ ASSISTANT_DEFAULTS = {
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
 
+#: The sentence every preset gives the consent notice when video is recorded.
+VIDEO_NOTICE_TEXT = (
+    "Video of the meeting, including shared screens and any visible camera feeds, is also recorded."
+)
+
 #: Every setting each preset sets, as the Configuration Guide's table of
 #: configuration presets lists them, in the order the presets are listed. A
 #: change to a preset has to change this, and that table, too.
 PRESET_VALUES = {
     "standard": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "off",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": True,
@@ -62,6 +68,7 @@ PRESET_VALUES = {
     },
     "internal-meetings-notify": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "notify",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": True,
@@ -78,6 +85,7 @@ PRESET_VALUES = {
     },
     "regulated-consent-required": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "opt_in",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": False,
@@ -94,6 +102,7 @@ PRESET_VALUES = {
     },
     "regulated-notify": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "notify",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": False,
@@ -110,6 +119,7 @@ PRESET_VALUES = {
     },
     "team-hosted-external": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "opt_in",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": False,
@@ -135,6 +145,7 @@ PRESET_VALUES = {
     },
     "customer-account": {
         "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
             "mode": "opt_in",
             "consentRule": "each_participant",
             "allowPerMeetingOverride": True,

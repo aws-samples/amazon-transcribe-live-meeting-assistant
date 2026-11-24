@@ -6,6 +6,7 @@
     "meeting_consent": {
       "mode": "merge",
       "values": {
+        "videoNoticeText": "Video of the meeting, including shared screens and any visible camera feeds, is also recorded.",
         "mode": "notify",
         "consentRule": "each_participant",
         "allowPerMeetingOverride": false,

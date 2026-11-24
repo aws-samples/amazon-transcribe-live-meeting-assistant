@@ -151,10 +151,12 @@ default and in every preset) and the deployment records video
   after **Stop video**.
 - **While capturing**, **Screen video is ON** shows that the video is being
   recorded. **Stop video** ends the video and keeps the audio.
-- **Consent.** With a consent step, the notice ends with "The shared screen is
-  also recorded as video.", recorded with the notice; in Opt-in the video starts
-  only once the meeting's consent is granted, and an objection ends it with the
-  meeting.
+- **Consent.** With a consent step, the notice ends with the deployment's
+  video sentence (Meeting Consent › **Video sentence**), recorded with the
+  notice. Once the notice has been copied, posted in the chat or confirmed as
+  given, the video switch is fixed for the meeting, since the notice says
+  whether the screen is recorded. In Opt-in the video starts only once the
+  meeting's consent is granted, and an objection ends it with the meeting.
 - **When the video stops on its own** — the transcriber refuses it, the tab
   stops being shared, or its connection cannot be restored — the panel says
   why and the audio carries on.

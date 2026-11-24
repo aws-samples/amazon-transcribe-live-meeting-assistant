@@ -109,7 +109,7 @@ class FakeApi implements ConsentApi {
                     meeting: input.MeetingName ?? '',
                     consentPhrase: 'I consent',
                     objectionPhrase: 'I object',
-                }),
+                }) + (input.IncludesVideo ? ` ${DEFAULT_CONSENT_SETTINGS.videoNoticeText}` : ''),
             Participants: [],
             Events: [],
             Evidence: [],
@@ -226,6 +226,8 @@ async function harness(options: {
     /** Called as the flow sends the meeting's START event. */
     onCreateMeeting?: () => void;
     chatTurnedOff?: () => boolean;
+    /** This VP records the meeting's video. */
+    videoRecorded?: boolean;
 } = {}): Promise<Harness> {
     const deployment = effectiveConsentSettings(options.deployment ?? { mode: 'notify' });
     const api = options.api ?? new FakeApi({ mode: deployment.mode, rule: deployment.rule });
@@ -278,6 +280,7 @@ async function harness(options: {
             uploads.push(key);
         },
         callId: () => 'Weekly sync-2026-11-02',
+        videoRecorded: () => options.videoRecorded === true,
         lmaUser: 'Ana Silva',
         meetingName: 'Weekly sync',
         ownIdentities: ['LMA (Ana Silva)', 'LMA'],
@@ -2012,4 +2015,28 @@ test('the screenshots taken when the record is granted are noted for the event t
 test('describeWaiting names people and counts unidentified seats', () => {
     assert.equal(describeWaiting(['Bo Chen']), 'Bo Chen');
     assert.equal(describeWaiting(['Bo Chen', 'Cy Diaz', `${UNIDENTIFIED_PARTICIPANT} 1`, `${UNIDENTIFIED_PARTICIPANT} 2`]), 'Bo Chen, Cy Diaz and 2 unidentified participants');
+});
+
+test('a VP recording video asks for the video sentence, and posts and records the notice with it', async () => {
+    const h = await harness({ deployment: { mode: 'notify' }, videoRecorded: true });
+    assert.equal(h.api.starts[0]?.IncludesVideo, true);
+    const sentence = DEFAULT_CONSENT_SETTINGS.videoNoticeText;
+    assert.ok(h.chat.some((m) => m.includes(sentence)), h.chat.join('\n'));
+    assert.ok(h.api.noticeTexts[0]?.includes(sentence), 'the notice recorded says the video is recorded');
+    h.flow.stop();
+});
+
+test('a VP recording no video posts and records the notice without the video sentence', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    assert.equal('IncludesVideo' in (h.api.starts[0] ?? {}), false);
+    const sentence = DEFAULT_CONSENT_SETTINGS.videoNoticeText;
+    assert.ok(!h.chat.some((m) => m.includes(sentence)), h.chat.join('\n'));
+    assert.ok(!(h.api.noticeTexts[0] ?? '').includes(sentence));
+    h.flow.stop();
+});
+
+test("the notice rendered without the API ends with the deployment's video sentence when video is recorded", () => {
+    const settings = effectiveConsentSettings({ mode: 'notify', videoNoticeText: 'Video too.' });
+    assert.equal(settings.videoNoticeText, 'Video too.');
+    assert.equal(effectiveConsentSettings({ videoNoticeText: '  ' }).videoNoticeText, DEFAULT_CONSENT_SETTINGS.videoNoticeText);
 });

@@ -59,13 +59,16 @@ function ConsentPanel({ settings, noticeText, step, onStepChange, onPostInChat, 
           <SpaceBetween size="xs">
             <Box variant="p"><span data-testid="consent-notice" style={{ whiteSpace: 'pre-wrap' }}>{noticeText}</span></Box>
             <SpaceBetween direction="horizontal" size="xs">
-              <CopyToClipboard
-                variant="button"
-                textToCopy={noticeText}
-                copyButtonText="Copy"
-                copySuccessText="Notice copied"
-                copyErrorText="The notice could not be copied"
-              />
+              {/* Copying fixes the notice, as posting it does (lib/consent.ts, noticeShared). */}
+              <span data-testid="consent-notice-copy" onClickCapture={() => { if (!step.noticeCopied) update({ noticeCopied: true }); }}>
+                <CopyToClipboard
+                  variant="button"
+                  textToCopy={noticeText}
+                  copyButtonText="Copy"
+                  copySuccessText="Notice copied"
+                  copyErrorText="The notice could not be copied"
+                />
+              </span>
               <Button onClick={post} loading={posting} disabled={capturing && step.chatPost === 'confirmed'}>Post in meeting chat</Button>
             </SpaceBetween>
             {step.chatPost === 'sent' && (

@@ -216,3 +216,18 @@ test('evidence is stored under the folder the resolver accepts, named as it name
     );
     assert.equal(evidenceKey('lma-consent-evidence/', '///', at, 'ab12', 'jpg'), undefined);
 });
+
+test('the settings answer carries the video sentence, the shipped one when none is saved', () => {
+    assert.equal(
+        settingsFrame(effectiveSettings({}))['videoNoticeText'],
+        'Video of the meeting, including shared screens and any visible camera feeds, is also recorded.'
+    );
+    assert.equal(
+        settingsFrame(effectiveSettings({ mode: 'notify', videoNoticeText: 'Video too.' }))['videoNoticeText'],
+        'Video too.'
+    );
+    assert.equal(
+        settingsFrame(effectiveSettings({ videoNoticeText: '  ' }))['videoNoticeText'],
+        DEFAULT_SETTINGS['videoNoticeText']
+    );
+});

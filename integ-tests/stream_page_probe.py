@@ -77,6 +77,11 @@ class PageRun:
     call_id: str | None = None
     video_on_shown: bool = False
     surface_text: str = ""
+    # The consent notice as the page showed it with video on, when the
+    # deployment shows a consent step, and whether the video switch was then
+    # fixed by the confirmation.
+    notice_text: str = ""
+    video_switch_locked: bool | None = None
     warnings: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     console: list = field(default_factory=list)
@@ -121,6 +126,14 @@ def run_stream_page(url: str, username: str, password: str, *, seconds: float, t
         switch.wait_for(timeout=30000)
         switch.check()
         page.get_by_label("Meeting Topic").fill(topic)
+        notice = page.get_by_test_id("consent-notice")
+        if notice.count():
+            # A Notify deployment: confirm the notice was given out loud, so the
+            # transcriber records it on the meeting's consent record.
+            run.notice_text = notice.first.inner_text()
+            page.get_by_role("checkbox", name=re.compile("I have told everyone in the meeting")).check()
+            page.get_by_role("radio", name=re.compile("Out loud")).check()
+            run.video_switch_locked = switch.is_disabled()
         page.get_by_role("button", name="Start Streaming").click()
         try:
             page.get_by_text("Screen video is ON").wait_for(timeout=45000)

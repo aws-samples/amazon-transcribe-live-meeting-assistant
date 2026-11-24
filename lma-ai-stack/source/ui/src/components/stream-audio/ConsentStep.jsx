@@ -30,6 +30,7 @@ import { CONSENT_METHODS, CONSENT_MODE_OPT_IN } from './consent';
 const ConsentStep = ({
   settings,
   noticeText,
+  onNoticeCopied = () => {},
   step,
   onStepChange,
   evidence,
@@ -78,13 +79,16 @@ const ConsentStep = ({
                 {noticeText}
               </span>
             </Box>
-            <CopyToClipboard
-              variant="button"
-              textToCopy={noticeText}
-              copyButtonText="Copy notice"
-              copySuccessText="Notice copied"
-              copyErrorText="The notice could not be copied"
-            />
+            {/* Told when Copy is pressed, so the page can keep the notice as copied. */}
+            <span data-testid="consent-notice-copy" onClickCapture={onNoticeCopied}>
+              <CopyToClipboard
+                variant="button"
+                textToCopy={noticeText}
+                copyButtonText="Copy notice"
+                copySuccessText="Notice copied"
+                copyErrorText="The notice could not be copied"
+              />
+            </span>
           </SpaceBetween>
         </FormField>
 
@@ -203,6 +207,7 @@ ConsentStep.propTypes = {
     reason: PropTypes.string,
   }).isRequired,
   noticeText: PropTypes.string.isRequired,
+  onNoticeCopied: PropTypes.func,
   step: PropTypes.shape({
     confirmed: PropTypes.bool,
     method: PropTypes.string,

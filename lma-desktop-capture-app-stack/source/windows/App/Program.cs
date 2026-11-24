@@ -236,8 +236,10 @@ public static class Program
         var consentSettings = ConsentSettingsFetcher.FetchAsync(config, tokenStore).GetAwaiter().GetResult();
         if (consentSettings is { Required: true })
         {
-            var notice = Consent.RenderNotice(consentSettings.NoticeTemplate, config.AgentId, config.CallId,
-                consentSettings.ConsentPhrase, consentSettings.ObjectionPhrase);
+            var notice = Consent.NoticeWithVideo(
+                Consent.RenderNotice(consentSettings.NoticeTemplate, config.AgentId, config.CallId,
+                    consentSettings.ConsentPhrase, consentSettings.ObjectionPhrase),
+                consentSettings, config.VideoEnabled);
             Console.WriteLine($"  consent  : {Consent.Wire(consentSettings.Mode)} — share this notice in the meeting:");
             Console.WriteLine($"             {notice}");
             var step = new Consent.Step();

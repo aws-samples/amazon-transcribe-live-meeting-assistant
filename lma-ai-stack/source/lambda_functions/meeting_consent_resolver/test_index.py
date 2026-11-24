@@ -256,6 +256,45 @@ def test_starting_uses_the_deployment_default_and_renders_the_notice(dynamo, mon
     assert result["Owner"] == OWNER and result["SharedWith"] == [SHARED]
 
 
+def test_a_meeting_recording_video_has_the_video_sentence_in_its_notice(
+    dynamo, monkeypatch
+) -> None:
+    settings(monkeypatch, mode="notify", videoNoticeText="Video is recorded too.")
+    record = call(
+        "startMeetingConsent", BACKEND, LmaUser="Ana", MeetingName="Sync", IncludesVideo=True
+    )["Consent"]
+    assert record["NoticeText"].startswith("Ana is using Live Meeting Assistant")
+    assert record["NoticeText"].endswith(" Video is recorded too.")
+
+
+def test_a_meeting_without_video_has_no_video_sentence(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify")
+    record = call("startMeetingConsent", BACKEND, LmaUser="Ana", IncludesVideo=False)["Consent"]
+    assert "also recorded" not in record["NoticeText"]
+
+
+def test_the_shipped_video_sentence_is_used_when_none_is_saved(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="opt_in", consentRule="owner_attests")
+    record = call("startMeetingConsent", BACKEND, LmaUser="Ana", IncludesVideo=True)["Consent"]
+    assert record["NoticeText"].endswith(
+        "Video of the meeting, including shared screens and any visible camera feeds, "
+        "is also recorded."
+    )
+
+
+def test_a_blank_video_sentence_is_the_shipped_one(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", videoNoticeText="   ")
+    record = call("startMeetingConsent", BACKEND, LmaUser="Ana", IncludesVideo=True)["Consent"]
+    assert record["NoticeText"].endswith(index.consent.DEFAULT_SETTINGS["videoNoticeText"])
+
+
+def test_a_long_notice_keeps_the_whole_video_sentence(dynamo, monkeypatch) -> None:
+    settings(monkeypatch, mode="notify", notifyNoticeText="x" * 2000, videoNoticeText="Video too.")
+    record = call("startMeetingConsent", BACKEND, IncludesVideo=True)["Consent"]
+    assert record["NoticeText"].endswith(" Video too.")
+    assert len(record["NoticeText"]) <= index.consent.MAX_NOTICE_LENGTH
+
+
 def test_a_shared_user_cannot_start_or_change_it(dynamo) -> None:
     with pytest.raises(index.ForbiddenError):
         call("startMeetingConsent", user(SHARED), Mode="off")

@@ -262,10 +262,13 @@ public sealed class PanelView : Border
     }
 
     /// <summary>The notice for the meeting about to start, as the panel shows it.</summary>
+    // With screen video on, the notice ends with the deployment's video sentence.
     private string ConsentNoticeText =>
         _consentSettings is { Required: true } s
-            ? Consent.RenderNotice(s.NoticeTemplate, EffectiveMicLabel(), _meetingName.Text,
-                s.ConsentPhrase, s.ObjectionPhrase)
+            ? Consent.NoticeWithVideo(
+                Consent.RenderNotice(s.NoticeTemplate, EffectiveMicLabel(), _meetingName.Text,
+                    s.ConsentPhrase, s.ObjectionPhrase),
+                s, AppSettings.VideoEnabled)
             : "";
 
     /// <summary>
@@ -720,6 +723,10 @@ public sealed class PanelView : Border
             // Show/hide the source picker in place (settings live in their own
             // window now, so there's no panel rebuild to piggyback on).
             SyncVideoSourceHost();
+            // The consent notice ends with the video sentence while video is on:
+            // rebuild the panel so the notice shown and copied is the one START
+            // records.
+            Refresh();
         };
         // A ComboBox inside a ScrollViewer takes the wheel and changes its
         // SELECTION, which here persists a different device to the registry.

@@ -50,6 +50,8 @@ export interface ConsentSettings {
     readonly consentRule: ConsentRule;
     readonly notifyNoticeText: string;
     readonly optInNoticeText: string;
+    /** Added to a client's notice whenever the meeting's video is recorded. */
+    readonly videoNoticeText: string;
     readonly consentPhrases: readonly string[];
     readonly objectionPhrases: readonly string[];
     readonly allowPerMeetingOverride: boolean;
@@ -69,6 +71,8 @@ export const DEFAULT_SETTINGS: Readonly<Record<string, string | boolean>> = {
     optInNoticeText:
         '{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live ' +
         'Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed.',
+    videoNoticeText:
+        'Video of the meeting, including shared screens and any visible camera feeds, is also recorded.',
     consentPhrases: 'I consent, I agree, I accept',
     objectionPhrases:
         'I object, I do not consent, I don\'t consent, I do not agree, I don\'t agree, ' +
@@ -111,6 +115,7 @@ export const effectiveSettings = (values: Record<string, unknown> | undefined): 
         consentRule: rule,
         notifyNoticeText: String(merged['notifyNoticeText']),
         optInNoticeText: String(merged['optInNoticeText']),
+        videoNoticeText: String(merged['videoNoticeText']).trim() || String(DEFAULT_SETTINGS['videoNoticeText']),
         consentPhrases: splitPhrases(merged['consentPhrases']),
         objectionPhrases: splitPhrases(merged['objectionPhrases']),
         allowPerMeetingOverride: merged['allowPerMeetingOverride'] === true,
@@ -182,6 +187,9 @@ export const settingsFrame = (settings: ConsentSettings): Record<string, unknown
                     : '',
         consentPhrase: settings.consentPhrases[0] ?? '',
         objectionPhrase: settings.objectionPhrases[0] ?? '',
+        // The sentence a client adds to the notice it shows and records when
+        // it also records the meeting's video.
+        videoNoticeText: settings.videoNoticeText,
         clientsWithoutConsent: settings.clientsWithoutConsent,
     };
 };

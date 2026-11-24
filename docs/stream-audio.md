@@ -140,9 +140,11 @@ records video (`EnableVideoRecording=true`).
 - **While streaming**, **Screen video is ON** shows that the video is being
   recorded. **Stop video** ends the video and keeps the audio streaming; the
   video cannot be started again in the same meeting.
-- **Consent.** When the meeting has a consent step, the notice gains the
-  sentence "The shared screen is also recorded as video.", which is recorded on
-  the meeting's consent record with the notice. In Opt-in, the video starts only
+- **Consent.** When the meeting has a consent step, the notice ends with the
+  deployment's video sentence (Meeting Consent › **Video sentence**), which is
+  recorded on the meeting's consent record with the notice. Once you copy the
+  notice or confirm that it was given, the video switch is fixed for the
+  meeting, since the notice says whether the screen is recorded. In Opt-in, the video starts only
   once the meeting's consent is granted; an objection ends the meeting and its
   video, and keeps what was recorded until then.
 - **When the video stops on its own** — the transcriber refuses it, you stop

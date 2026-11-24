@@ -97,6 +97,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live "
         "Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed."
     ),
+    # Added to the notice a client shows, posts or speaks whenever the meeting's
+    # video is recorded, and recorded with it.
+    "videoNoticeText": (
+        "Video of the meeting, including shared screens and any visible camera feeds, "
+        "is also recorded."
+    ),
     "consentPhrases": "I consent, I agree, I accept",
     "objectionPhrases": (
         "I object, I do not consent, I don't consent, I do not agree, I don't agree, "

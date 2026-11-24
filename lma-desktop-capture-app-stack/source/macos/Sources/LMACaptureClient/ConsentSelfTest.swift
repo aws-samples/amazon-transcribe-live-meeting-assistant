@@ -50,6 +50,27 @@ enum ConsentSelfTest {
                   Consent.describe(s), "Evidence screenshot stored; the check was inconclusive.")
         }
 
+        // The video sentence: the deployment's, or the shipped one.
+        check("settings: shipped video sentence when none is sent", optIn.videoNoticeText, Consent.defaultVideoNoticeText)
+        check("settings: video allowed when the answer does not say", "\(optIn.videoAllowed)", "true")
+        if case .settings(let custom)? = Consent.parseFrame(
+            "{\"event\":\"CONSENT_SETTINGS\",\"available\":true,\"mode\":\"notify\",\"videoNoticeText\":\"Video too.\",\"videoAllowed\":false}") {
+            check("settings: video sentence read", custom.videoNoticeText, "Video too.")
+            check("settings: video not allowed read", "\(custom.videoAllowed)", "false")
+            check("notice: no video sentence when the transcriber takes no video",
+                  Consent.noticeWithVideo("Recorded.", settings: custom, videoEnabled: true), "Recorded.")
+            var allowed = custom; allowed.videoAllowed = true
+            check("notice: video sentence while screen video is on",
+                  Consent.noticeWithVideo("Recorded.", settings: allowed, videoEnabled: true), "Recorded. Video too.")
+            check("notice: no video sentence while screen video is off",
+                  Consent.noticeWithVideo("Recorded.", settings: allowed, videoEnabled: false), "Recorded.")
+        } else {
+            check("CONSENT_SETTINGS with a video sentence parses", "nil", "settings")
+        }
+        check("shipped video sentence",
+              Consent.defaultVideoNoticeText,
+              "Video of the meeting, including shared screens and any visible camera feeds, is also recorded.")
+
         // The notice, filled as the server fills it.
         check("notice placeholders filled",
               Consent.renderNotice(optIn.noticeTemplate, lmaUser: "Ana", meeting: "Sync",

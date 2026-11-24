@@ -10,13 +10,16 @@ import {
   CLOSE_CONSENT,
   CLOSE_NO_ACTIVE_CALL,
   CLOSE_NOT_ENABLED,
+  DEFAULT_VIDEO_NOTICE_TEXT,
   RECORDER_OPTIONS,
   TIMESLICE_MS,
   createKeyframeMonitor,
   createVideoUplink,
   describeSurface,
+  noticeWithVideo,
   pickVideoMimeType,
   startScreenVideo,
+  videoNoticeText,
   videoStopMessage,
 } from './screen-video';
 
@@ -468,5 +471,24 @@ describe('startScreenVideo', () => {
     expect(() =>
       startScreenVideo({ stream: f.stream, callId: 'c', offsetMs: 0, openSocket: vi.fn(), Recorder: f.FakeRecorder }),
     ).toThrow(/cannot record/);
+  });
+});
+
+describe('the video sentence of the consent notice', () => {
+  it("is the deployment's videoNoticeText, or the shipped one when the answer has none", () => {
+    expect(videoNoticeText({ videoNoticeText: 'Video too.' })).toBe('Video too.');
+    expect(videoNoticeText({})).toBe(DEFAULT_VIDEO_NOTICE_TEXT);
+    expect(videoNoticeText({ videoNoticeText: '   ' })).toBe(DEFAULT_VIDEO_NOTICE_TEXT);
+    expect(videoNoticeText(null)).toBe(DEFAULT_VIDEO_NOTICE_TEXT);
+    expect(DEFAULT_VIDEO_NOTICE_TEXT).toBe(
+      'Video of the meeting, including shared screens and any visible camera feeds, is also recorded.',
+    );
+  });
+
+  it('follows the notice only while video is on, and never stands alone', () => {
+    const settings = { videoNoticeText: 'Video too.' };
+    expect(noticeWithVideo('Recorded.', settings, true)).toBe('Recorded. Video too.');
+    expect(noticeWithVideo('Recorded.', settings, false)).toBe('Recorded.');
+    expect(noticeWithVideo('', settings, true)).toBe('');
   });
 });

@@ -2145,6 +2145,8 @@ type MeetingConsentSettings @aws_cognito_user_pools
 	Rule: String
 	NotifyNoticeText: String
 	OptInNoticeText: String
+	# Added to the notice when the meeting's video is recorded.
+	VideoNoticeText: String
 	ConsentPhrases: [String]
 	ObjectionPhrases: [String]
 	AllowPerMeetingOverride: Boolean
@@ -2192,6 +2194,9 @@ input StartMeetingConsentInput {
 	# filled the same way. Refused when the deployment does not allow a
 	# per-meeting choice.
 	NoticeText: String
+	# true when the meeting's video is recorded: the notice then ends with the
+	# deployment's Meeting Consent video sentence (videoNoticeText).
+	IncludesVideo: Boolean
 }
 
 input RecordMeetingConsentNoticeInput {

@@ -11,6 +11,7 @@ import {
   describeConsentState,
   emptyStep,
   noticePosted,
+  noticeShared,
   fetchConsentSettings,
   parseServerFrame,
   renderNotice,
@@ -18,6 +19,7 @@ import {
   transcriberUrl,
   withoutConsent,
 } from './consent';
+import { DEFAULT_VIDEO_NOTICE_TEXT, noticeWithVideo } from './screen-video';
 
 const OPT_IN: ConsentSettings = {
   event: 'CONSENT_SETTINGS',
@@ -59,6 +61,14 @@ describe('the consent step', () => {
     expect(noticePosted({ ...emptyStep(), chatPost: 'sent' })).toBe(true);
     expect(noticePosted({ ...emptyStep(), chatPost: 'confirmed' })).toBe(true);
     expect(noticePosted({ ...emptyStep(), chatPost: 'failed' })).toBe(false);
+  });
+
+  test('fixes what the notice says once it is copied, posted or confirmed as given', () => {
+    expect(noticeShared(emptyStep())).toBe(false);
+    expect(noticeShared({ ...emptyStep(), chatPost: 'failed' })).toBe(false);
+    expect(noticeShared({ ...emptyStep(), noticeCopied: true })).toBe(true);
+    expect(noticeShared({ ...emptyStep(), chatPost: 'sent' })).toBe(true);
+    expect(noticeShared({ ...emptyStep(), confirmed: true })).toBe(true);
   });
 
   test('holds the start while the settings are still being read', () => {
@@ -147,5 +157,15 @@ describe('fetchConsentSettings', () => {
     jest.advanceTimersByTime(60);
     await expect(answer).resolves.toBeNull();
     jest.useRealTimers();
+  });
+});
+
+describe('the video sentence', () => {
+  test("ends the notice while screen video is on: the deployment's, or the shipped one", () => {
+    const settings: ConsentSettings = { event: 'CONSENT_SETTINGS', available: true, mode: 'notify', videoNoticeText: 'Video too.' };
+    expect(noticeWithVideo('Recorded.', settings, true)).toBe('Recorded. Video too.');
+    expect(noticeWithVideo('Recorded.', settings, false)).toBe('Recorded.');
+    expect(noticeWithVideo('Recorded.', { ...settings, videoNoticeText: undefined }, true))
+      .toBe(`Recorded. ${DEFAULT_VIDEO_NOTICE_TEXT}`);
   });
 });

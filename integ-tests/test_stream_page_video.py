@@ -8,15 +8,19 @@ record screen video**, and streams a canvas slideshow tab for about 60 seconds (
 through the page's own capture (getDisplayMedia and MediaRecorder; see
 stream_page_probe.py). Then checks the meeting: its capture source, a video
 recording, and key frames under ``Source`` ``STREAM_AUDIO``, about one per
-slide. ``test_browser_video.py`` covers what the transcriber does with such a
-stream at the protocol; this file covers the page producing it.
+slide. The run is in Meeting Consent mode Notify, with a video sentence of its
+own (``videoNoticeText``): the page's notice must end with it while video is on,
+the video switch must be fixed once the notice is confirmed, and the meeting's
+consent record must keep the notice with it. ``test_browser_video.py`` covers
+what the transcriber does with such a stream at the protocol; this file covers
+the page producing it.
 
 Opt-in. It runs only with ``LMA_TEST_STREAM_PAGE_VIDEO=1``, because it needs
 Playwright with Chromium (``requirements-video.txt``, then ``python -m
 playwright install chromium``) and a display (run under ``xvfb-run`` on a
 machine without one), turns on Meeting Recording › Record screen
-video from Stream Audio/Video and the browser extension for the run (and puts
-it back), and needs a stack with ``EnableVideoRecording=true``:
+video from Stream Audio/Video and the browser extension and sets Meeting
+Consent for the run (and puts both back), and needs a stack with ``EnableVideoRecording=true``:
 
     AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user xvfb-run -a \\
       make integ-tests STACK=lma-integtest1 LMA_TEST_STREAM_PAGE_VIDEO=1
@@ -38,6 +42,10 @@ import cognito_test_user
 
 ENABLED = os.environ.get("LMA_TEST_STREAM_PAGE_VIDEO", "") not in ("", "0", "false")
 STREAM_SECONDS = 60
+
+# Meeting Consent › videoNoticeText for the run: the sentence the page adds to
+# its notice while screen video is on.
+VIDEO_SENTENCE = "The integration test records this screen as video."
 
 pytestmark = [
     pytest.mark.optional_feature,
@@ -75,7 +83,10 @@ def page_run(client):
     consent.saved = dict(record.body.get("meeting_consent") or {}) if consent.had_section else None
     try:
         recording.apply(recordBrowserVideo=True)
-        consent.apply(mode="off")
+        # Notify, with a video sentence of the test's own, so the run also checks
+        # that the page ends its notice with the deployment's sentence while
+        # video is on, and that the consent record keeps it.
+        consent.apply(mode="notify", videoNoticeText=VIDEO_SENTENCE)
         time.sleep(35)  # Meeting Consent is read on a cached tier
         username, password = credentials
         topic = f"stream-page-video-probe {datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
@@ -121,3 +132,17 @@ def test_the_page_video_keeps_key_frames_under_its_source(page_run) -> None:
     # at least SLIDE_SECONDS; only the last one, cut short by Stop, may be missed.
     assert len(frames) >= page_run["slides"] - 1, [f.get("Timestamp") for f in frames]
     assert "Some slides may be missed" not in page_run["run"].warnings
+
+
+def test_the_page_notice_ends_with_the_deployments_video_sentence(page_run) -> None:
+    run = page_run["run"]
+    assert run.notice_text, "the page showed no consent notice in Notify mode"
+    assert run.notice_text.endswith(f" {VIDEO_SENTENCE}"), run.notice_text
+    assert run.video_switch_locked is True, "the video switch could still change once the notice was confirmed"
+
+
+def test_the_consent_record_keeps_the_notice_with_the_video_sentence(page_run) -> None:
+    consent = page_run["meeting"].get("Consent") or {}
+    notices = consent.get("Notices") or []
+    assert consent.get("Mode") == "notify", consent
+    assert notices and (notices[0].get("Text") or "").endswith(f" {VIDEO_SENTENCE}"), notices

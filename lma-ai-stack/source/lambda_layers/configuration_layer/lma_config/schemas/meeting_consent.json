@@ -57,8 +57,18 @@
       "maxLength": 2000,
       "dependsOn": { "field": "mode", "value": "opt_in" }
     },
-    "consentPhrases": {
+    "videoNoticeText": {
       "order": 4,
+      "type": "string",
+      "title": "Video sentence",
+      "description": "Added to the end of the notice or consent request whenever the meeting's video is recorded: by a Virtual Participant recording video, or by the Desktop Capture App, the Stream Audio/Video page or the browser extension recording screen video. It is shown, posted or spoken with the notice, and recorded with it on the meeting's consent record. No placeholders.",
+      "format": "textarea",
+      "rows": 2,
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "consentPhrases": {
+      "order": 5,
       "type": "string",
       "title": "Consent phrases",
       "description": "Comma-separated. A reply containing one of these, as whole words and ignoring case and punctuation, is read as consent, unless it also contains an objection phrase.",
@@ -66,7 +76,7 @@
       "maxLength": 1000
     },
     "objectionPhrases": {
-      "order": 5,
+      "order": 6,
       "type": "string",
       "title": "Objection phrases",
       "description": "Comma-separated. A reply containing one of these is read as an objection. Objections are looked for first, so \"I do not consent\" is an objection although it contains \"consent\".",
@@ -74,19 +84,19 @@
       "maxLength": 1000
     },
     "allowPerMeetingOverride": {
-      "order": 6,
+      "order": 7,
       "type": "boolean",
       "title": "Allow a different choice per meeting",
       "description": "On: whoever starts a meeting may choose another mode or rule for it. Off: a meeting may only use this mode and rule or a stricter one."
     },
     "keepEvidenceScreenshots": {
-      "order": 7,
+      "order": 8,
       "type": "boolean",
       "title": "Keep evidence screenshots",
       "description": "On: screenshots kept as consent evidence stay with the meeting until it is deleted. Off: each screenshot is deleted as soon as it has been checked, and only the check's result is kept."
     },
     "verifierModelId": {
-      "order": 8,
+      "order": 9,
       "type": "string",
       "title": "Evidence check model",
       "description": "The Amazon Bedrock vision model that checks a consent evidence screenshot: whether the notice is visible, which replies are visible and from whom, and whether anybody objected. Its answer is supporting evidence only; it never changes a meeting's consent status. Image-capable models only.",
@@ -107,7 +117,7 @@
       ]
     },
     "clientsWithoutConsent": {
-      "order": 9,
+      "order": 10,
       "type": "string",
       "title": "Streaming clients without a consent step",
       "description": "What the WebSocket transcriber does, when the mode is Notify or Opt-in, with a meeting from a streaming client that shows no consent step: the Stream Audio embed, and browser extension and Desktop Capture App builds from before the consent step. Accept with a warning: the meeting is recorded and transcribed as before, with no consent record, and a warning is logged. Refuse: the meeting is not recorded or transcribed, and the client is told why. Choose Refuse once every client in use has been updated.",
@@ -118,13 +128,13 @@
       }
     },
     "leaveOnObjection": {
-      "order": 10,
+      "order": 11,
       "type": "boolean",
       "title": "Virtual Participant leaves after an objection",
       "description": "On: when a participant objects, in the meeting chat or aloud, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
     },
     "readSpokenReplies": {
-      "order": 11,
+      "order": 12,
       "type": "boolean",
       "title": "Read spoken replies",
       "description": "On: the Virtual Participant also reads consent replies and objections said aloud and addressed to LMA (\"LMA, I consent\", \"LMA, I object\"). While consent is awaited it sends the meeting audio to the meeting's transcription engine to hear them; nothing it hears is recorded or kept except the replies. Off: it reads replies in the meeting chat only, and sends no meeting audio anywhere until consent is given."

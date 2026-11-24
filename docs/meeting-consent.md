@@ -157,6 +157,7 @@ the `ConfigurationPreset` stack parameter; see
 | Consent rule (opt-in) | Each participant consents, or the meeting owner attests | Each participant consents |
 | Notice text (notify) | The notice a notify meeting posts | "{LMA_USER} is using Live Meeting Assistant to record and transcribe this meeting ({meeting}). If you do not agree, say so, and recording and transcription will stop." |
 | Consent request text (opt-in) | The request an opt-in meeting posts | "{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. Nothing is recorded or transcribed until everyone has agreed." |
+| Video sentence | Added to the end of the notice or consent request whenever the meeting's video is recorded, by any client (see [When video is recorded](#when-video-is-recorded)); shown, posted or spoken with the notice and recorded with it | "Video of the meeting, including shared screens and any visible camera feeds, is also recorded." |
 | Consent phrases | Comma-separated phrases read as consent | I consent, I agree, I accept |
 | Objection phrases | Comma-separated phrases read as an objection | I object, I do not consent, I don't consent, I do not agree, I don't agree, do not record, don't record, stop recording |
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
@@ -189,6 +190,28 @@ whether a meeting may be captured. If they cannot be read, starting a meeting's
 consent fails rather than falling back to off, and so does reading a meeting
 that has no consent record; a meeting with a record is read without the
 settings, since its record decides its own gate.
+
+### When video is recorded
+
+Whenever a meeting's video is recorded, the notice (or the consent request in
+Opt-in) ends with the **Video sentence** setting, so the participants are told,
+and the notice the meeting's consent record keeps says so. The same setting is
+used by every client:
+
+- **Virtual Participant**, when its **Record meeting video** toggle is on: the
+  notice it posts and records ends with the sentence (it asks the consent API
+  for it with `IncludesVideo` on `startMeetingConsent`).
+- **Desktop Capture App** (macOS and Windows), when **Also record screen
+  video** is on and the transcriber takes screen video.
+- **Stream Audio/Video page** and **browser extension**, while their **Also
+  record screen video** switch is on.
+
+The streaming clients read the sentence from the transcriber's
+`CONSENT_SETTINGS` answer (`videoNoticeText`), and use the shipped sentence
+with a transcriber that does not send it. On the Stream Audio/Video page and in
+the extension, the video switch is fixed once the notice has been copied,
+posted from the panel or confirmed as given, so the notice the meeting was
+given and the one the record keeps say the same thing about video.
 
 ## On the meeting page
 
@@ -988,9 +1011,9 @@ recorded as posted, so the meeting's status stays `pending`, which in notify
 still allows capture.
 
 With **Also record screen video** on (see
-[Screen Video](stream-audio.md#screen-video)), the notice ends with the fixed
-sentence "The shared screen is also recorded as video.", so the notice the
-consent record keeps says the screen was recorded. In opt-in the video starts
+[Screen Video](stream-audio.md#screen-video)), the notice ends with the
+deployment's **Video sentence** (see [When video is recorded](#when-video-is-recorded)),
+so the notice the consent record keeps says the screen was recorded. In opt-in the video starts
 only once the transcriber has granted the meeting's consent; an objection ends
 the video with the meeting, and what was recorded until then is kept.
 
@@ -1411,7 +1434,7 @@ query {
     CaptureAllowed
     Consent { ...ConsentRecord }
     Settings {
-      Mode Rule NotifyNoticeText OptInNoticeText ConsentPhrases ObjectionPhrases
+      Mode Rule NotifyNoticeText OptInNoticeText VideoNoticeText ConsentPhrases ObjectionPhrases
       AllowPerMeetingOverride KeepEvidenceScreenshots VerifierModelId
     }
   }
