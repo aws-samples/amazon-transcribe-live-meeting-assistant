@@ -154,7 +154,39 @@ capabilities:
     evidence:
       - docs/virtual-participant.md#join-again
       - lma-ai-stack/source/lambda_functions/virtual_participant_manager/join_again.py
-    related: [capability:virtual-participant]
+    related: [capability:virtual-participant, capability:continue-meeting]
+
+  - id: continue-meeting
+    title: Continue an existing meeting as a further capture session
+    description: >-
+      A meeting that has ended, or whose capture stopped too early, can be continued
+      under the same meeting ID instead of starting a new one, so its transcript,
+      meeting page and consent record stay together. Stream Audio, the Chrome
+      extension and the Desktop Capture App take the meeting's ID or page link and
+      continue it; a Virtual Participant does the same with Join again; the CLI and
+      the SDK reopen a meeting for a streaming client, and API clients call the
+      reopen mutation. Each continuation is a new session that follows the earlier
+      ones on one transcript timeline, the summary is generated again over the whole
+      transcript, and the meeting events carry the session number.
+    evidence:
+      - docs/stream-audio.md#continue-an-existing-meeting
+      - docs/browser-extension.md#continue-an-existing-meeting
+      - docs/desktop-capture-app.md#continue-an-existing-meeting
+      - docs/virtual-participant.md#rejoin
+      - docs/websocket-streaming-api.md#continuing-an-existing-meeting
+      - docs/lma-cli.md#lma-meetings--meeting-operations
+      - docs/lma-sdk.md#clientmeetings--meeting-operations
+      - docs/meeting-events.md#reopened-meetings
+      - docs/web-ui-guide.md#a-meeting-continued-in-more-than-one-session
+      - lma-ai-stack/source/lambda_functions/meeting_reopen_resolver/index.py
+    tags: [capture, sessions]
+    related:
+      - capability:vp-join-again
+      - capability:stream-audio
+      - capability:browser-extension
+      - capability:desktop-capture-app
+      - limitation:continue-meeting-who-and-when
+      - limitation:continued-meeting-sessions
 
   - id: vp-meeting-chat
     title: Meeting chat in the transcript, chat commands, and chat attachments
@@ -752,9 +784,14 @@ capabilities:
       everyone did). The Virtual Participant posts the notice in the chat, reads typed
       and spoken replies, and keeps screenshots as evidence; Stream Audio and the
       Desktop Capture App show a consent step the user attests. Every meeting keeps a
-      record of the notice, replies and evidence.
+      record of the notice, replies and evidence. A reply said aloud to a Virtual
+      Participant while the meeting is transcribed also records the transcript line
+      it was read from, when that line's speaker is the participant who replied;
+      typed replies, replies heard while consent is awaited and attestations carry
+      no such link.
     evidence:
       - docs/meeting-consent.md
+      - docs/meeting-consent.md#which-speaker-gave-a-reply
       - docs/meeting-consent.md#the-three-modes
       - docs/meeting-consent.md#flows-by-capture-method
       - lma-ai-stack/source/lambda_functions/meeting_consent_resolver

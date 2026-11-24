@@ -163,6 +163,42 @@ limitations:
     detect_with: [question:recorded-meetings]
     mitigations: [none]
 
+  # ---------------------------------------------------------------- continuing a meeting
+  - id: continue-meeting-who-and-when
+    title: Only the owner or an Admin can continue a meeting, and not while it is captured
+    description: >-
+      A meeting is continued only by its owner or an Admin; a user it is shared with
+      cannot. It cannot be continued while it is still being captured, after its
+      transcript has been deleted, or within 15 minutes of a reopen by someone else
+      (or a Virtual Participant rejoin) whose capture has not started yet; retrying
+      one's own unstarted reopen is answered with the same session. Clients downloaded before a deployment offered
+      continuation do not show the option until they are downloaded again.
+    evidence:
+      - docs/desktop-capture-app.md#continue-an-existing-meeting
+      - docs/stream-audio.md#continue-an-existing-meeting
+      - docs/websocket-streaming-api.md#continuing-an-existing-meeting
+    impact: low
+    detect_with: [question:unattended-meetings, question:retention-policy]
+    mitigations: [capability:ubac-and-sharing]
+
+  - id: continued-meeting-sessions
+    title: A continued meeting keeps separate recordings, renumbers voices and regenerates its summary
+    description: >-
+      Each session's audio and video are separate files that start at 0:00, and the
+      meeting page plays one session at a time. Voice labels are numbered afresh in
+      each session, so names given to voices should be checked after continuing. The
+      summary is generated again over the whole transcript and replaces the earlier
+      one, including a summary edited by hand, and the meeting keeps the expiry it
+      was created with. Because any ended meeting can be continued, there is no
+      event that says a meeting is over for good.
+    evidence:
+      - docs/desktop-capture-app.md#continue-an-existing-meeting
+      - docs/meeting-events.md#reopened-meetings
+      - docs/web-ui-guide.md#a-meeting-continued-in-more-than-one-session
+    impact: low
+    detect_with: [question:integration-targets, question:retention-policy]
+    mitigations: [capability:meeting-events, capability:summaries]
+
   # ---------------------------------------------------------------- speech
   - id: transcribe-concurrent-streams
     title: Amazon Transcribe's concurrent stream quota bounds concurrent meetings
