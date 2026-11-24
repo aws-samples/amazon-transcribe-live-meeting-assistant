@@ -234,7 +234,9 @@ class TestOwnerFilter(unittest.TestCase):
         assignment = next(
             node
             for node in ast.walk(function)
-            if isinstance(node, ast.Assign) and node.targets[0].id == "keys_to_include"
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "keys_to_include"
         )
         written = ast.literal_eval(assignment.value)
         self.assertIn(search_meetings.OWNER_METADATA_KEY, written)

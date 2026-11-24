@@ -27,6 +27,7 @@ import BlockStream from 'block-stream2';
 
 import {
     AsrChannelSession,
+    acquirePayload,
     coalesceBacklog,
     finishWaitMs,
     pushAsrAudio,
@@ -823,4 +824,11 @@ test('microvmRowLanguageCode turns a base language into a locale', () => {
     for (const none of [undefined, null, '', ' ', 'not a code']) {
         assert.equal(microvmRowLanguageCode(none, 'en-US'), undefined);
     }
+});
+
+test('a continued meeting\'s later session asks for an ASR MicroVM of its own; a first session names none', () => {
+    assert.deepEqual(acquirePayload('m'), { action: 'acquire', callId: 'm' });
+    assert.deepEqual(acquirePayload('m', 1), { action: 'acquire', callId: 'm' });
+    assert.deepEqual(acquirePayload('m', 3), { action: 'acquire', callId: 'm', session: '3' });
+    assert.deepEqual(acquirePayload('m', 2.5), { action: 'acquire', callId: 'm' });
 });

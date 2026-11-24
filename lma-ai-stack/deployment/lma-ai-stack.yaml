@@ -6978,6 +6978,28 @@ Resources:
       # so it answers in the form that filter matches.
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # reopenMeeting: allows one more capture session on an existing meeting,
+  # for its owner or an Admin. See lma_sessions in the configuration layer.
+  ReopenMeetingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingReopenLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: reopenMeeting
+      RequestMappingTemplateS3Location: ../source/appsync/reopenMeeting.request.vtl
+      # A refusal is answered as {"errorType", "message"} and raised here as an
+      # error of that type, so a client can tell the refusals apart.
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        #if( $ctx.result.errorType )
+          $util.error($ctx.result.message, $ctx.result.errorType)
+        #end
+        $util.toJson($ctx.result)
+
   # The meeting's summary profile, on the same resolver and access rule as its
   # preparation, and the profiles a meeting may name. See
   # docs/transcript-summarization.md#summary-profiles.
@@ -9849,7 +9871,8 @@ Resources:
       CodeUri: ../source/lambda_functions/virtual_participant_manager
       Description: Enhanced Virtual Participant Manager with ECS termination and Kinesis events
       # lma_meeting_preparation, for the meeting preparation a Join again
-      # carries. Pure Python, so it does not pin an architecture.
+      # carries, and lma_sessions, the session rules rejoin shares with the
+      # meeting reopen resolver. Pure Python, so it does not pin an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
       MemorySize: 512

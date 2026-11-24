@@ -351,6 +351,8 @@ OTHER_FIELDS = [
     # Lambda resolver: the source Virtual Participant's owner or an Admin; the
     # new one belongs to the caller (join_again.py).
     ("Mutation", "joinAgainVirtualParticipant"),
+    # Lambda resolver (meeting_reopen_resolver): the meeting's owner or an Admin.
+    ("Mutation", "reopenMeeting"),
     ("Mutation", "deleteVirtualParticipants"),
     ("Mutation", "shareVirtualParticipant"),
     ("Mutation", "unshareVirtualParticipant"),
@@ -664,9 +666,14 @@ def _lambda_backed(resolver: Resolver) -> bool:
 
 
 def test_lambda_backed_detection_sees_data_sources_in_nested_templates() -> None:
-    """Guards the selector below: getAsrConfig's data source is declared in a
-    nested template, and the meeting preparation fields' validation runs in a
-    pipeline function there; both must count as Lambda-backed."""
+    """Guards the selector below, which must find a Lambda data source wherever it is declared.
+
+    getAsrConfig's data source is declared in a nested template. The resolver of
+    a meeting preparation field such as updateCallLabels is in the AI stack's own
+    template, but its data source (the meeting preparation Lambda's) is in the
+    nested one. listInstalledMCPServers is the control: its resolver and its data
+    source are both in the AI stack's own template. All three are Lambda-backed.
+    """
     assert _lambda_backed(_resolver("Query", "getAsrConfig"))
     assert _lambda_backed(_resolver("Mutation", "updateCallLabels"))
     assert _lambda_backed(_resolver("Query", "listInstalledMCPServers"))

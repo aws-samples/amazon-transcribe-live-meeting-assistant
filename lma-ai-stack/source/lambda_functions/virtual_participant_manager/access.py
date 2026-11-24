@@ -8,20 +8,15 @@ Shared by the end, delete and rejoin operations of this Lambda (index.py and
 rejoin.py).
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
+
+# Who may reopen a meeting is shared with the meeting reopen resolver
+# (lma_sessions, in the configuration layer).
+from lma_sessions import caller_groups, caller_owns_meeting  # noqa: F401 - re-exported
 
 
 class NotAuthorizedError(Exception):
     """The caller may not change this Virtual Participant."""
-
-
-def caller_groups(identity: Optional[Dict[str, Any]]) -> List[str]:
-    """The caller's Cognito groups, from either place AppSync puts them."""
-    caller: Dict[str, Any] = identity or {}
-    groups = caller.get("groups") or (caller.get("claims") or {}).get("cognito:groups") or []
-    if isinstance(groups, str):
-        groups = [group.strip() for group in groups.split(",") if group.strip()]
-    return list(groups)
 
 
 def caller_may_change(identity: Optional[Dict[str, Any]], vp: Optional[Dict[str, Any]]) -> bool:
@@ -40,18 +35,3 @@ def caller_may_change(identity: Optional[Dict[str, Any]], vp: Optional[Dict[str,
         return True
     username = caller.get("username")
     return bool(username) and vp is not None and vp.get("Owner") == username
-
-
-def caller_owns_meeting(
-    identity: Optional[Dict[str, Any]], meeting: Optional[Dict[str, Any]]
-) -> bool:
-    """Whether the caller is an Admin or the meeting's Owner.
-
-    The rule for reopening a meeting. Narrower than reading one: a user the
-    meeting is shared with may read it but not reopen it.
-    """
-    caller: Dict[str, Any] = identity or {}
-    if "Admin" in caller_groups(caller):
-        return True
-    username = caller.get("username")
-    return bool(username) and meeting is not None and meeting.get("Owner") == username
