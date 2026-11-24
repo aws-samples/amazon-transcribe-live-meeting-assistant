@@ -508,7 +508,7 @@ Console label: *WebSocket Transcriber Task Count*
 - **Allowed values:** 1 to 20
 - **Kind:** Resource. Sets the task count of the transcriber's ECS service.
 
-Number of Fargate tasks running the WebSocket transcriber service (used by the Stream Audio/Video page and the desktop capture apps). Leave at 1 unless EnableVideoRecording is false: with video recording enabled, the desktop video stream arrives as a separate connection that must reach the task holding the meeting's audio session, which only a single task guarantees.
+Number of Fargate tasks running the WebSocket transcriber service (used by the Stream Audio/Video page, the browser extension and the desktop capture apps). Leave at 1 unless EnableVideoRecording is false: with video recording enabled, the desktop video stream arrives as a separate connection that must reach the task holding the meeting's audio session, which only a single task guarantees.
 
 ### `TranscriberAutoScalingEnabled`
 
