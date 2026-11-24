@@ -162,7 +162,7 @@ ones it was started or scheduled with, which it puts on the meeting it creates.
 
 A meeting can be ended and then continued by its owner or an Admin: by
 rejoining it with a Virtual Participant (see [Rejoin](virtual-participant.md#rejoin)),
-or by continuing it from Stream Audio, the browser extension, the Desktop
+or by continuing it from Stream Audio/Video, the browser extension, the Desktop
 Capture App, or a streaming client through the CLI or the SDK (see
 [Continue an existing meeting](desktop-capture-app.md#continue-an-existing-meeting)).
 Each continuation starts a further capture session on the same meeting. Each
