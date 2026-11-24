@@ -160,14 +160,17 @@ ones it was started or scheduled with, which it puts on the meeting it creates.
 
 ## Reopened meetings
 
-A meeting can be ended and then continued: its owner or an Admin rejoins it
-with a Virtual Participant (see [Virtual Participant](virtual-participant.md)),
-which starts a second capture session on the same meeting. Each session
-publishes its own pair of events, with the same `meetingId`:
+A meeting can be ended and then continued by its owner or an Admin: by
+rejoining it with a Virtual Participant (see [Rejoin](virtual-participant.md#rejoin)),
+or by continuing it from Stream Audio, the browser extension, the Desktop
+Capture App, or a streaming client through the CLI or the SDK (see
+[Continue an existing meeting](desktop-capture-app.md#continue-an-existing-meeting)).
+Each continuation starts a further capture session on the same meeting. Each
+session publishes its own pair of events, with the same `meetingId`:
 
-- `Meeting Started` with `sessionNumber` `2` when the second session starts,
-  timed by when it started;
-- `Meeting Ended` with `sessionNumber` `2` when it ends.
+- `Meeting Started` with the new session's `sessionNumber` (`2` for the second
+  session, and so on) when it starts, timed by when it started;
+- `Meeting Ended` with the same `sessionNumber` when it ends.
 
 So a consumer that wants "the meeting is over" should act on `Meeting Ended`
 and be ready for a later `Meeting Started` for the same meeting; one that wants

@@ -632,9 +632,17 @@ Limitations:
   after continuing.
 - **Retention.** A continued meeting keeps the expiry it was created with, which
   is also when it leaves the meeting list.
-- **Other streaming clients.** The Stream Audio page and the browser extension
-  cannot continue a meeting yet. API clients can: see
-  [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
+- **Other clients.** A meeting can also be continued from the Stream Audio page
+  ([Continue an existing meeting](stream-audio.md#continue-an-existing-meeting)),
+  the browser extension
+  ([Continue an existing meeting](browser-extension.md#continue-an-existing-meeting)),
+  the CLI (`lma meetings reopen`; see
+  [Meeting Operations](lma-cli.md#lma-meetings--meeting-operations)) and the
+  SDK (`client.meetings.reopen`; see
+  [Meeting Operations](lma-sdk.md#clientmeetings--meeting-operations)) for any
+  streaming client
+  ([Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)),
+  and with a Virtual Participant ([Rejoin](virtual-participant.md#rejoin)).
 
 ## Updating to a new version
 
