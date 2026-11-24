@@ -184,3 +184,16 @@ test('a stream started after a withheld one records, once the setting is back on
     await video.awaitPendingMuxes(quietServer, 5_000);
     assert.equal(videoEvents(events).length, 1, 'the video started after the setting came back on is uploaded');
 });
+
+test('only the meeting\'s stored session counts as stored; a withheld one does not', async (t) => {
+    stubAws(t);
+    const callId = 'video-session-stored-check';
+    const withheld = video.startVideoSession(meta(callId), quietServer, 0, 0, 'DESKTOP_CAPTURE', true);
+    assert.equal(video.isStoredVideoSession(withheld), false);
+    const recording = video.startVideoSession(meta(callId), quietServer, 0);
+    assert.equal(video.isStoredVideoSession(recording), true);
+    assert.equal(video.isStoredVideoSession(withheld), false);
+    await video.endVideoSession(callId, quietServer);
+    video.notifyAudioRecordingDone(callId, undefined, quietServer);
+    await video.awaitPendingMuxes(quietServer, 5_000);
+});

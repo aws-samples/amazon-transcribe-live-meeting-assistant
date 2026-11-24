@@ -295,6 +295,14 @@ export const getVideoSession = (callId: string, sessionNumber?: number): VideoSe
     videoSessions.get(videoSessionKey(callId, sessionNumber));
 
 /**
+ * Whether this is the meeting's stored video session. A withheld connection's
+ * session is not (startVideoSession): ending or dropping it must not touch the
+ * session the meeting does have, which another connection may be recording.
+ */
+export const isStoredVideoSession = (session: VideoSession): boolean =>
+    getVideoSession(session.callId, session.sessionNumber) === session;
+
+/**
  * Create a video segment write stream with an 'error' listener attached.
  *
  * Without a listener, an fs WriteStream that errors (ENOSPC when the shared

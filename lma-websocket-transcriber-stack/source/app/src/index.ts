@@ -84,6 +84,7 @@ import {
     awaitPendingMuxes,
     getVideoSession,
     videoRecordingEnabled,
+    isStoredVideoSession,
 } from './videorecording';
 import {
     PendingVideoChunks,
@@ -1075,6 +1076,10 @@ const onTextMessage = async (
             return;
         }
         videoSocketMap.delete(ws);
+        // A withheld connection's session is its own; the meeting's is not its to end.
+        if (!isStoredVideoSession(session)) {
+            return;
+        }
         await endVideoSession(session.callId, server, session.sessionNumber);
     } else if (callMetaData.callEvent === 'END') {
         const socketData = sessions.sessionOf(ws);
@@ -1325,7 +1330,10 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
             `[ON WSCLOSE]: [${videoSession.callId}] - Video socket closed without END_VIDEO.`
         );
         videoSocketMap.delete(ws);
-        videoSocketDropped(videoSession.callId, server, videoSession.sessionNumber);
+        // As for END_VIDEO: a withheld connection leaves the meeting's session alone.
+        if (isStoredVideoSession(videoSession)) {
+            videoSocketDropped(videoSession.callId, server, videoSession.sessionNumber);
+        }
         return;
     }
     await sessions.onConnectionClosed(ws);

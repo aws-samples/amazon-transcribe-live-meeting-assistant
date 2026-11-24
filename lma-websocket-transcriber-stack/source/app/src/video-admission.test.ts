@@ -17,6 +17,8 @@ import {
     videoStartedFrame,
 } from './video-admission';
 
+const INDEX = readFileSync(path.resolve(__dirname, '../src/index.ts'), 'utf8');
+
 test('an accepted video stream is acknowledged with its callId', () => {
     assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
 });
@@ -121,7 +123,6 @@ test('a binary frame goes to the video session, is held behind START_VIDEO, or i
 // index.ts registers the server's handlers when it is imported, so its wiring
 // of the held chunks is checked in its source: each step of the path is where
 // the comments in index.ts say it is.
-const INDEX = readFileSync(path.resolve(__dirname, '../src/index.ts'), 'utf8');
 
 const body = (start: RegExp, end: RegExp): string => {
     const from = INDEX.search(start);
@@ -160,4 +161,13 @@ test('index.ts forgets the held chunks on every refusal, on close and on a conne
     assert.ok(refusals > 0 && drops >= refusals, `${refusals} refusals of START_VIDEO but ${drops} drops`);
     assert.ok(body(/const onWsClose = async/, /\nconst [a-zA-Z]+ = /).includes('pendingVideoChunks.drop(ws)'), 'close keeps them');
     assert.ok(body(/function onWsErrorEvent/, /\n {4}}\n/).includes('pendingVideoChunks.drop(ws)'), 'an error keeps them');
+});
+
+test('index.ts ends or drops a video session only when it is the meeting\'s stored one', () => {
+    const endVideo = body(/callEvent === 'END_VIDEO'/, /\} else if \(callMetaData\.callEvent === 'END'\)/);
+    assert.ok(endVideo.indexOf('isStoredVideoSession(session)') >= 0, 'END_VIDEO ends whatever session is stored');
+    assert.ok(endVideo.indexOf('isStoredVideoSession(session)') < endVideo.indexOf('endVideoSession('));
+    const close = body(/const onWsClose = async/, /\nconst [a-zA-Z]+ = /);
+    assert.ok(close.indexOf('isStoredVideoSession(videoSession)') >= 0, 'a close drops whatever session is stored');
+    assert.ok(close.indexOf('isStoredVideoSession(videoSession)') < close.indexOf('videoSocketDropped('));
 });
