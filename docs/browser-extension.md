@@ -109,11 +109,14 @@ again after each capture, so the step always follows the settings in force.
   chat, or in the invitation's terms), and in Opt-in an optional note. In
   Opt-in, Start is refused until both are given, and nothing is recorded or
   transcribed until the transcriber has recorded your confirmation on the
-  meeting. Start is also held while the panel waits for your answer about the
+  meeting. Start is also held while the panel is still reading the settings, and
+  while it waits for your answer about the
   chat post.
 - **Participant objected**, while capturing, with an optional name. The
   extension tells the transcriber, which ends the meeting, records the
-  objection, and keeps what was captured before it; capture stops at once.
+  objection, and keeps what was captured before it; capture stops at once. If the
+  connection to LMA had been lost, the panel says the objection could not be
+  sent: record it in the Consent section of the meeting's page in LMA.
 
 The extension sends its step with every START (as mode Off when it could not
 read the settings), so the setting **Streaming clients without a consent step**

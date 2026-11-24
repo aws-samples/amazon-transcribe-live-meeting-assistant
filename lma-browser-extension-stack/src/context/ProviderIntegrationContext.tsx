@@ -11,7 +11,7 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
-import { captureStopped, parseServerFrame, withoutConsent } from '../lib/consent';
+import { OBJECTION_NOT_SENT, captureStopped, parseServerFrame, withoutConsent } from '../lib/consent';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -221,6 +221,8 @@ function IntegrationProvider({ children }: any) {
     return {};
   }, [settings]);
 
+  // True when the tab's reader was asked to post, not that the notice appeared:
+  // the user's answer in the panel decides whether it counts as posted.
   const postInMeetingChat = useCallback(async (text: string) => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab || !tab.id) return false;
@@ -300,10 +302,14 @@ function IntegrationProvider({ children }: any) {
         ...(participantName ? { participantName } : {}),
         source: 'voice',
       }));
+      // The transcriber ends the meeting on the objection and closes the
+      // connection, so no END is sent; capture stops here at once.
+      skipEndRef.current = true;
+    } else {
+      // The extension does not reconnect, so the objection cannot reach the
+      // transcriber: capture stops, and the user is told to record it.
+      setStartError(OBJECTION_NOT_SENT);
     }
-    // The transcriber ends the meeting on the objection and closes the
-    // connection, so no END is sent; capture stops here at once.
-    skipEndRef.current = true;
     stopTranscription();
   }, [readyState, sendMessage, stopTranscription]);
 

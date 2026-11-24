@@ -65,6 +65,11 @@ export type ConsentStep = {
 
 export const emptyStep = (): ConsentStep => ({ confirmed: false, statement: '', chatPost: 'none' });
 
+export const SETTINGS_LOADING = 'Reading the meeting consent settings; try again in a moment.';
+export const OBJECTION_NOT_SENT =
+  'The objection could not be sent to LMA because the connection was lost, so capture stopped. '
+  + "Record the objection in the Consent section of the meeting's page in LMA.";
+
 
 /** The notice with its placeholders filled as the server fills them. */
 export const renderNotice = (
@@ -91,7 +96,10 @@ export const consentRequired = (settings: ConsentSettings | null | undefined): b
  * confirmation and how it was given; a notice posted in the chat from here
  * must have been seen to appear before "In the meeting chat" counts.
  */
-export const startBlockedReason = (settings: ConsentSettings | null | undefined, step: ConsentStep): string => {
+export const startBlockedReason = (settings: ConsentSettings | null | undefined, step: ConsentStep, loading = false): string => {
+  // Not knowing the settings yet is not the same as there being none: the
+  // notice the meeting may need has not been shown.
+  if (loading) return SETTINGS_LOADING;
   if (!consentRequired(settings)) return '';
   if (settings?.supported === false) return settings.reason || 'This deployment does not allow capture from the browser extension.';
   if (step.chatPost === 'sent') return 'Say whether the notice appeared in the meeting chat.';

@@ -53,6 +53,11 @@ describe('the consent step', () => {
       .toBe('Use a Virtual Participant.');
   });
 
+  test('holds the start while the settings are still being read', () => {
+    expect(startBlockedReason(null, emptyStep(), true)).toMatch(/Reading the meeting consent settings/);
+    expect(startBlockedReason(null, emptyStep(), false)).toBe('');
+  });
+
   test('lets a notify meeting start unconfirmed', () => {
     expect(startBlockedReason(NOTIFY, emptyStep())).toBe('');
     expect(startBlockedReason(null, emptyStep())).toBe('');

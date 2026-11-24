@@ -59,6 +59,7 @@ function Capture() {
   // the user's step for the next meeting, which starts afresh every time.
   const [consentSettings, setConsentSettings] = React.useState<ConsentSettings | null>(null);
   const [consentStep, setConsentStep] = React.useState<ConsentStep>(emptyStep());
+  const [consentLoading, setConsentLoading] = React.useState(false);
   // The current tokens are read through a ref, so a token refresh (which Start
   // can make) neither resets the step nor asks for the settings again.
   const userRef = React.useRef(user);
@@ -67,8 +68,12 @@ function Capture() {
   useEffect(() => {
     if (isTranscribing || !settings.wssEndpoint || !signedIn) return undefined;
     let cancelled = false;
+    setConsentLoading(true);
     fetchConsentSettings(transcriberUrl(settings.wssEndpoint, userRef.current)).then((answer) => {
-      if (!cancelled) setConsentSettings(answer);
+      if (!cancelled) {
+        setConsentSettings(answer);
+        setConsentLoading(false);
+      }
     });
     setConsentStep(emptyStep());
     return () => { cancelled = true; };
@@ -161,13 +166,13 @@ function Capture() {
     if (validateForm() === false) {
       return;
     }
-    const blocked = startBlockedReason(consentSettings, consentStep);
+    const blocked = startBlockedReason(consentSettings, consentStep, consentLoading);
     setStartError(blocked);
     if (blocked) {
       return;
     }
     setShowDisclaimer(true);
-  }, [settings, validateForm, showDisclaimer, consentSettings, consentStep, setStartError]);
+  }, [settings, validateForm, showDisclaimer, consentSettings, consentStep, consentLoading, setStartError]);
 
   const disclaimerConfirmed = useCallback(() => {
     startTranscription(user, agentName, topic, continuing ? continueInput : undefined,
