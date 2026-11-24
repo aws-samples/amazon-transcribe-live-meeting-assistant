@@ -15,6 +15,7 @@ said. The table is a fake that evaluates the conditions the function writes.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -655,6 +656,37 @@ def test_a_run_makes_the_default_whiteboard_and_fills_it(table, running) -> None
     assert release["LastSegmentEndTime"] == pytest.approx(19.9)
     request = running["calls"][0]
     assert "We decided item 19." in request["messages"][0]["content"][-1]["text"]
+
+
+def test_a_segment_finalized_late_is_read_by_the_next_run_once(table, running) -> None:
+    _segments(table, 20)
+    running["answers"].append({"whiteboards": [], "notes": ""})
+    index.run(CALL)
+    marker = running["lease"].state["LastSegmentEndTime"]
+    assert json.loads(running["lease"].state["ShownSegmentIds"])
+    # Finalized after the first run read the transcript, though it ended before its marker.
+    table.put_plain(
+        {
+            "PK": f"trs#{CALL}",
+            "SK": "s00000015.5",
+            "SegmentId": "finalized-late",
+            "Channel": "AGENT",
+            "IsPartial": False,
+            "StartTime": marker - 5,
+            "EndTime": marker - 1,
+            "Transcript": "A long point that was finalized late.",
+        }
+    )
+    _segments(table, 20, start=100.0)
+    running["answers"].append({"whiteboards": [], "notes": ""})
+    index.run(CALL)
+    second = running["calls"][1]["messages"][0]["content"][-1]["text"]
+    assert "A long point that was finalized late." in second
+    _segments(table, 20, start=200.0)
+    running["answers"].append({"whiteboards": [], "notes": ""})
+    index.run(CALL)
+    third = running["calls"][2]["messages"][0]["content"][-1]["text"]
+    assert "A long point that was finalized late." not in third
 
 
 def test_a_panel_a_user_takes_during_a_run_keeps_their_content(table, running) -> None:

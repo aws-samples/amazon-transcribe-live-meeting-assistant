@@ -142,6 +142,11 @@ version.
 A run that fails is logged and skipped; the next run, an interval later, reads
 the meeting again.
 
+"What was said since the last run" also includes a segment that ended up to two
+minutes before the last run's latest segment but was finalized after that run,
+such as a long utterance on another channel; the meeting's whiteboard state
+keeps the segments each run read near its end, so no segment is read twice.
+
 ## User edits win
 
 A panel a person writes or changes becomes theirs (`Source: user`), and **the

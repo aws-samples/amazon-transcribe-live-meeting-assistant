@@ -1201,6 +1201,15 @@ def run(call_id: str, trigger: str = "auto") -> Dict[str, Any]:
         return {"ran": False, "reason": "the run failed"}
 
 
+def _json_list(value: Any) -> List[str]:
+    """A JSON list of strings stored on the state row; [] when it is not one."""
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
 def _update(  # pylint: disable=too-many-arguments,too-many-locals
     call_id: str,
     meeting: Mapping[str, Any],
@@ -1214,7 +1223,10 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
     segments = updater.final_segments(
         rows, meeting.get("SpeakerIdentities"), meeting.get("CustomerPhoneNumber")
     )
-    fresh = updater.new_segments(segments, state.get("LastSegmentEndTime"))
+    last_marker = state.get("LastSegmentEndTime")
+    # A state row from before ShownSegmentIds was recorded is read by its marker alone.
+    shown = _json_list(state.get("ShownSegmentIds")) if "ShownSegmentIds" in state else None
+    fresh = updater.new_segments(segments, last_marker, shown)
     needed = 1 if trigger in EAGER_TRIGGERS else settings.min_new_segments
     if len(fresh) < needed:
         LIVE.release(call_id, lease, ran=False, now=now)
@@ -1242,7 +1254,11 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
     )
     answer = call_model(call_id, model_for(settings), system, messages)
     plan = updater.parse_answer(answer, targets)
-    marker = {"LastSegmentEndTime": max(s.end for s in fresh), "LastScreenTime": screen_marker}
+    marker = {
+        "LastSegmentEndTime": updater.next_marker(fresh, last_marker),
+        "ShownSegmentIds": json.dumps(updater.shown_after_run(segments, last_marker, shown, fresh)),
+        "LastScreenTime": screen_marker,
+    }
     if plan is None:
         LOGGER.warning("Whiteboards answer for %s was malformed; dropped", call_id)
         LIVE.release(call_id, lease, ran=True, now=now, DefaultMade=1, **marker)

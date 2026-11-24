@@ -616,17 +616,14 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
             continue
         published[key]["withdrawn"] = True
 
-    # max() keeps the marker from moving back when only late segments were new.
-    marker = max([s.end for s in fresh] + [pure._seconds(state.get("LastSegmentEndTime"))])
+    last_marker = state.get("LastSegmentEndTime")
     release(
         call_id,
         lease,
         ran=True,
         now=now,
-        LastSegmentEndTime=marker,
-        ShownSegmentIds=json.dumps(
-            pure.shown_near(segments, [*(shown or []), *(s.segment_id for s in fresh)], marker)
-        ),
+        LastSegmentEndTime=pure.next_marker(fresh, last_marker),
+        ShownSegmentIds=json.dumps(pure.shown_after_run(segments, last_marker, shown, fresh)),
         RollingSummary=analysis.summary or str(state.get("RollingSummary") or ""),
         Published=json.dumps(published, ensure_ascii=False),
         PublishTimes=json.dumps(recent),
