@@ -81,7 +81,8 @@ def _point_in_time_recovery(dynamodb, table: str) -> dict:
 def test_content_tables_point_in_time_recovery_matches_the_parameter(deployment: dict) -> None:
     days = deployment["days"]
     present = [t for t in CONTENT_TABLES if t in deployment["tables"]]
-    assert "EventSourcingTable" in present, "the AI stack has no meetings table"
+    for always in ("EventSourcingTable", "VirtualParticipantTable", "TroubleshootingJobsTable"):
+        assert always in present, f"the AI stack has no {always}"
     for logical_id in present:
         pitr = _point_in_time_recovery(deployment["dynamodb"], deployment["tables"][logical_id])
         if days == 0:
