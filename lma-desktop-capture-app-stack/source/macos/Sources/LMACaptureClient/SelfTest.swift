@@ -287,9 +287,10 @@ enum SelfTest {
         check("consent close → consent message",
               VideoSocket.refusalMessage(closeCode: 1008, reason: "meeting consent does not allow capture") ?? "nil",
               "Screen video stopped: the meeting's consent does not allow capture now.")
-        check("other 1008 → names the reason",
-              VideoSocket.refusalMessage(closeCode: 1008, reason: "no active call for callId") ?? "nil",
-              "The transcriber did not accept the screen video (no active call for callId); audio continues.")
+        check("1008 before the audio session is live → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: "no active call for callId") ?? "nil", "nil")
+        check("other 1008 → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: "not authorized for callId") ?? "nil", "nil")
         check("1006 drop → reconnect, no message",
               VideoSocket.refusalMessage(closeCode: 1006, reason: "") ?? "nil", "nil")
         check("1000 close → reconnect, no message",

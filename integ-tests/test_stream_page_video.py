@@ -18,9 +18,9 @@ the page producing it.
 Opt-in. It runs only with ``LMA_TEST_STREAM_PAGE_VIDEO=1``, because it needs
 Playwright with Chromium (``requirements-video.txt``, then ``python -m
 playwright install chromium``) and a display (run under ``xvfb-run`` on a
-machine without one), turns on Meeting Recording › Record screen
-video from streaming clients and sets Meeting Consent for the run (and puts
-both back), and needs a stack with ``EnableVideoRecording=true``:
+machine without one), turns on Meeting Recording › Record screen video from
+streaming clients and sets Meeting Consent for the run (and puts both back),
+and needs a stack with ``EnableVideoRecording=true``:
 
     AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user xvfb-run -a \\
       make integ-tests STACK=lma-integtest1 LMA_TEST_STREAM_PAGE_VIDEO=1

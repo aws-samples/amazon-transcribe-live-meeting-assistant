@@ -26,11 +26,13 @@ namespace LMA;
 ///
 /// The transcriber answers an accepted START_VIDEO with a VIDEO_STARTED text
 /// frame, which this client reads and ignores. It closes the connection with
-/// code 1008 when it will not take the video: screen video is off for the
-/// deployment (Meeting Recording › Record screen video from streaming clients,
-/// or the EnableVideoRecording stack parameter), or the meeting's consent stops
-/// capture. A 1008 close is final for this meeting: the socket does not
-/// reconnect, and OnRefused tells the caller why (audio continues).
+/// code 1008 when it will not take the video. Two of its reasons are final for
+/// this meeting: screen video is off for the deployment (Meeting Recording ›
+/// Record screen video from streaming clients, or the EnableVideoRecording
+/// stack parameter), and the meeting's consent stops capture. For those the
+/// socket does not reconnect, and OnRefused tells the caller why (audio
+/// continues). Any other close, a 1008 such as "no active call for callId"
+/// while the audio START is still being handled included, reconnects.
 ///
 /// Ported from macOS VideoSocket.swift.
 /// </summary>
@@ -89,22 +91,27 @@ public sealed class VideoSocket
     public const string NotEnabledReason = "screen video is not enabled for this client";
 
     /// <summary>
-    /// What to tell the user when the transcriber closes the video connection,
-    /// or null for a close that is not a refusal (the socket reconnects).
+    /// The close reason the transcriber gives when the meeting's consent does
+    /// not allow capture (CONSENT_CLOSE in the transcriber's index.ts).
+    /// </summary>
+    public const string ConsentReason = "meeting consent does not allow capture";
+
+    /// <summary>
+    /// What to tell the user when the transcriber closes the video connection
+    /// for good, or null for any other close (the socket reconnects).
     /// </summary>
     public static string? RefusalMessage(int? closeCode, string? reason)
     {
         if (closeCode != 1008) return null;
-        reason ??= "";
-        if (reason == NotEnabledReason)
-            return "Screen video is turned off for this LMA deployment, so this meeting records audio only.";
-        if (reason.Contains("consent", StringComparison.OrdinalIgnoreCase))
-            return "Screen video stopped: the meeting's consent does not allow capture now.";
-        var why = reason.Length == 0 ? "" : $" ({reason})";
-        return $"The transcriber did not accept the screen video{why}; audio continues.";
+        return reason switch
+        {
+            NotEnabledReason => "Screen video is turned off for this LMA deployment, so this meeting records audio only.",
+            ConsentReason => "Screen video stopped: the meeting's consent does not allow capture now.",
+            _ => null,
+        };
     }
 
-    /// <summary>A 1008 close: stop for good and say why. True when the close was one.</summary>
+    /// <summary>A final refusal: stop for good and say why. True when the close was one.</summary>
     private bool HandleServerClose(int? code, string? reason)
     {
         var message = RefusalMessage(code, reason);

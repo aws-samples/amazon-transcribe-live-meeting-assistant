@@ -8,9 +8,10 @@ client would (``clientType`` ``STREAM_AUDIO`` and ``BROWSER_EXTENSION``), over
 the same second connection the Desktop Capture App uses, and checks what the
 stack stored and refused (see browser_video_probe.py):
 
-1. With Meeting Recording › Record screen video from streaming clients on, the settings answer allows video, and each client's
-   meeting gets one key frame per slide under its own ``Source``, a video
-   recording and its capture source.
+1. With Meeting Recording › Record screen video from streaming clients on, the
+   settings answer allows video, and each client's meeting gets one key frame
+   per slide under its own ``Source``, a video recording and its capture
+   source.
 2. A meeting continued for a second session records each session's video, and
    places the second session's key frames after the first's.
 3. With an opt-in consent mode, a meeting refused for its consent admits no

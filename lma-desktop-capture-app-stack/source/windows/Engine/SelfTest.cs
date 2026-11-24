@@ -255,9 +255,10 @@ public static class SelfTest
         Check("consent close → consent message",
             VideoSocket.RefusalMessage(1008, "meeting consent does not allow capture") ?? "null",
             "Screen video stopped: the meeting's consent does not allow capture now.");
-        Check("other 1008 → names the reason",
-            VideoSocket.RefusalMessage(1008, "no active call for callId") ?? "null",
-            "The transcriber did not accept the screen video (no active call for callId); audio continues.");
+        Check("1008 before the audio session is live → reconnect, no message",
+            VideoSocket.RefusalMessage(1008, "no active call for callId") ?? "null", "null");
+        Check("other 1008 → reconnect, no message",
+            VideoSocket.RefusalMessage(1008, "not authorized for callId") ?? "null", "null");
         Check("1006 drop → reconnect, no message", VideoSocket.RefusalMessage(1006, "") ?? "null", "null");
         Check("no close status → reconnect, no message", VideoSocket.RefusalMessage(null, null) ?? "null", "null");
 

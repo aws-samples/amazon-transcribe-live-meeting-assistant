@@ -218,14 +218,15 @@ AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     make integ-tests STACK=lma-integtest1 LMA_TEST_BROWSER_VIDEO=1
 ```
 
-It turns **Meeting Recording › Record screen video from streaming clients** on and Meeting Consent off, and later to opt-in and
-notify, on the active profile (in a temporary Custom copy of it when the
-active profile is read-only, as `test_meeting_consent.py` does), and puts both
-sections back afterwards. It needs a stack with `EnableVideoRecording=true`; on
-one without it the first fixture fails, saying so. The two continued-meeting
-tests call `reopenMeeting` through the SDK, which accepts an assumed role, and
-skip with an IAM user's keys. The meetings (`browser-video-probe-<leg>-<UTC
-time>`) are not deleted; they expire with the deployment's retention.
+It turns **Meeting Recording › Record screen video from streaming clients** on
+and Meeting Consent off, and later to opt-in and notify, on the active profile
+(in a temporary Custom copy of it when the active profile is read-only, as
+`test_meeting_consent.py` does), and puts both sections back afterwards. It
+needs a stack with `EnableVideoRecording=true`; on one without it the first
+fixture fails, saying so. The two continued-meeting tests call `reopenMeeting`
+through the SDK, which accepts an assumed role, and skip with an IAM user's
+keys. The meetings (`browser-video-probe-<leg>-<UTC time>`) are not deleted;
+they expire with the deployment's retention.
 
 The browser clients' own capture is covered separately: `test_stream_page_video.py`
 (opt-in, `LMA_TEST_STREAM_PAGE_VIDEO=1`) signs in to the web UI in Chromium under a
