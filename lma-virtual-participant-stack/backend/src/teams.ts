@@ -1434,7 +1434,8 @@ export default class Teams {
         // (chat-addressing.ts). The row's author is used here, as for the
         // capture: only to tell another VP's messages and name. One for another
         // VP, or the bare "LMA" with several here, is meeting chat only.
-        const route = chatAddressing.route(rawMessage, row.author ?? null);
+        // A Teams meeting chat has no private messages.
+        const route = chatAddressing.route(rawMessage, row.author ?? null, 'everyone');
         if (!route.act) {
             meetingChat.offer({
                 platform: 'teams',

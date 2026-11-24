@@ -1063,7 +1063,7 @@ The VP posts a customizable introduction message in the meeting chat when it joi
 
 ## In-meeting Chat Commands
 
-Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, Chime and Google Meet. Every command is addressed to `LMA` by name.
+Anyone in the meeting can control the VP by typing one of these commands in the meeting chat, sent to everyone (see [Only messages sent to everyone](#only-messages-sent-to-everyone)). Commands work across Zoom, Microsoft Teams, Webex, Chime and Google Meet. Every command is addressed to `LMA` by name.
 
 | Command (typed in chat) | What it does |
 | --- | --- |
@@ -1091,6 +1091,48 @@ Notes:
 - The help reply is posted as one to four single-line chat messages, listing each command in one canonical form: the general commands, then the voice-assistant modes and the mute commands when a voice assistant is running. How to address this VP by name is added only while the VP knows of another LMA VP in the meeting, since in a meeting with one VP that line is only more chat. It is answered whether or not transcription is paused. Apart from the help reply, the VP posts its introduction and the "started" status when it joins, the answer to each command, consent notices, and its goodbye; it does not post what the voice assistant says.
 - On the Zoom browser join the VP reads the chat from Zoom's chat panel, which Zoom closes by itself, for one when someone starts sharing their screen. The VP reopens the panel within a few seconds whenever Zoom's toolbar shows it closed, and then reads the messages sent while it was closed; a command typed while the panel was closed is therefore acted on a few seconds late rather than missed. It reads the messages already in the panel when it starts listening as sent before it joined and does not act on them, which matters on a meeting whose chat continues in a Team Chat group chat (*Meeting Group Chat*), where the panel can hold messages from earlier occurrences of the meeting.
 - On the Teams browser join the VP reads and posts the chat through Teams' chat pane, which shares the side rail with the People and View panes. On the anonymous light-meetings client the toolbar has no chat button, and the toolbar's **More** menu has no chat item (its items are settings and toggles such as **Show chat bubbles**), so a chat pane that closes cannot be reopened from the toolbar. Live VPs once saw opening the People pane take the chat's place for the rest of the meeting; in live meetings on 2026-11-15 the chat stayed on screen while the People pane was open and after it closed, over about 14 openings. So the VP opens the People pane only briefly, at most once a minute, to read the participant list for meeting consent and for a participant-list evidence screenshot, and every time it closes it checks that the chat is still there: if it is not, the VP tries once to bring it back, and if that fails it does not open the People pane again in that meeting (see [Meeting consent › Who is present](meeting-consent.md#who-is-present)). It never opens the **More** menu, and clicks a toolbar chat button only on a client that has one. If the chat pane is closed from the meeting anyway, the VP logs that once and does not reopen it: until someone opens it again, chat messages are not read, and posts are reported as not posted, so the consent flow keeps posting its notice and does not record it as posted. Messages sent while the pane was closed are read once it is open again, so a command typed meanwhile is acted on late rather than missed. Posts, the consent screenshots and the VP's periodic check of the chat pane take turns, so a screenshot never shows a half-typed message. A message counts as posted only when the compose box held it before it was submitted: an empty compose box is not submitted, and the message is reported as not posted. The anonymous light-meetings client is the exception: its compose box reads back empty even after a pasted message has landed in it (observed in a live meeting, where the messages were posted), so there a pasted message is not typed again, and one whose compose box reads empty is submitted. On that client the VP therefore cannot confirm that a message was posted: it reports a batch as posted unless Teams shows a message as failed to send or shows the chat as turned off. Once Teams shows *"Chat is turned off for this meeting"* in place of the compose box, which it did 20 to 27 seconds after the VP was admitted in live meetings on 2026-11-14 (in six live runs on 2026-11-15 the chat stayed open throughout), the VP posts nothing more, chat commands cannot be relied on, and the VP is removed from the meeting's participant list or ended from LMA instead (see [Meeting consent › When Teams turns the chat off](meeting-consent.md#when-teams-turns-the-chat-off)). The VP types keystrokes and presses Enter only in the compose box when it has the focus. It does not press Teams' **Retry** on a message that failed to send, since the caller posts again; a post that Teams shows as failed, or that stays in the compose box, is reported as not posted (the consent flow then posts its notice again; see [Meeting consent](meeting-consent.md#notify)). A **Retry** button seen right after a post counts only if it is still there five seconds later: on the anonymous light-meetings client one showed after every post in a live meeting, while every message reached the chat, and was gone again before the next post. On the anonymous light-meetings client the VP also leaves the meeting's view as Teams sets it, rather than opening the View panel to choose speaker view, because that panel takes the chat's place too.
+
+### Only messages sent to everyone
+
+The VP acts only on chat messages sent to everyone in the meeting. A message
+sent privately to the VP, or to anyone else, is not read for a chat command, a
+question for the meeting assistant or a consent reply: `LMA leave` sent
+privately does not remove the VP, `LMA pause` does not pause it, `LMA ask ...`
+is not answered, and *"LMA, I consent"* or *"I object"* is neither recorded nor
+counted. The VP posts nothing in reply, so the meeting does not learn that a
+private message was sent. Send commands, questions and consent replies to
+everyone.
+
+Where the VP cannot read who a message was sent to, it treats it as private,
+as the transcript does (see [Meeting Chat in the Transcript](#meeting-chat-in-the-transcript)):
+
+- **Zoom (browser join).** The recipient is read from the message's label,
+  *"<sender> to Everyone: ..."*. A message to *Everyone* or, on a meeting whose
+  chat continues in a Team Chat group chat, to *Meeting Group Chat* is acted
+  on; one to *You*, to a participant, or marked *(Direct Message)* or
+  *(Privately)* is not. The VP reads English labels only: where Zoom shows its
+  chat in another language the recipient cannot be read, and no chat command,
+  question or consent reply is acted on in that meeting. Such a label shows no
+  sender either, so a typed consent there was already not recorded (a consent
+  reply needs a sender; see
+  [Meeting consent › Replies in the chat](meeting-consent.md#replies-in-the-chat));
+  objections said aloud, the meeting page's Consent section and leaving the VP
+  from LMA still work.
+- **Zoom (Meeting SDK join).** A message the SDK addresses to everyone
+  (receiver 0, *Everyone*) is acted on; one to a participant, or one whose
+  payload names no receiver, is not.
+- **Webex.** A message the chat panel marks as private (*Privately*, *Private
+  message*) is not acted on. The panel does not reliably mark private
+  messages, so an unmarked one is acted on as before; the marks have not been
+  confirmed in a live meeting.
+- **Microsoft Teams, Google Meet and Amazon Chime.** Their meeting chats have
+  no private messages, so every message is read.
+
+With the stack's `LogLevel` at `DEBUG`, each such message is logged as
+`[chat-addressing] not acted on, not sent to everyone (direct)` (or
+`(recipient-unknown)`), and on Zoom its `[meeting-chat]` line (see below) has
+`outcome=direct` or `outcome=recipient-unknown`, a command included. Neither
+line holds the message text or the sender's name.
 
 ### More than one LMA in a meeting
 
@@ -1157,7 +1199,9 @@ What is not added:
   message sent to anyone but everyone (on a meeting whose chat continues in a
   Team Chat group chat, a message to *Meeting Group Chat* is sent to everyone), and a message whose recipient the VP
   could not read (a chat label in a language other than English, or a Meeting
-  SDK message that names no receiver). Only a message the VP read as sent to
+  SDK message that names no receiver). The VP does not act on these messages
+  either (see [Only messages sent to everyone](#only-messages-sent-to-everyone)).
+  Only a message the VP read as sent to
   everyone is added. Teams and Google Meet meeting chats have no private
   messages;
 - what the chat panel already held when the VP first read it (the Teams
@@ -1176,7 +1220,8 @@ What is not added:
 - the chat of Webex and Amazon Chime meetings. The Webex chat the VP reads
   does not reliably show which messages are private, so Webex is left out
   until it can be told apart. The VP still reads Webex chat for the chat
-  commands, and writes the debug line below for it with
+  commands (except a message marked private; see
+  [Only messages sent to everyone](#only-messages-sent-to-everyone)), and writes the debug line below for it with
   `outcome=not-covered`, so a live meeting shows whether a private message
   can be recognised (`recipient=direct`).
 

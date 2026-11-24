@@ -473,8 +473,9 @@ export default class ZoomSdk {
                 const audience = zoomSdkChatAudience(chat.receiverId, chat.receiverName);
                 // Which LMA VP the message is for, when there are several
                 // (chat-addressing.ts). One for another VP, or the bare "LMA"
-                // with several here, is meeting chat only.
-                const route = chatAddressing.route(rawBody, sender);
+                // with several here, is meeting chat only. A private message,
+                // or one whose payload names no receiver, is not acted on at all.
+                const route = chatAddressing.route(rawBody, sender, audience);
                 if (!route.act) {
                     meetingChat.offer({
                         platform: 'zoom-sdk',
