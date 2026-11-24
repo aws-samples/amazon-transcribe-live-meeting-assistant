@@ -427,25 +427,25 @@ The presets, by id:
 | Meeting Assistant › In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
 | Meeting Assistant › In-meeting requests: meeting context and checklist | None | None | None | None | None | None | None |
 | Meeting Assistant › In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone | Anyone |
-| Meeting Assistant › Assistant instructions | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text, followed by the [sensitive personal information rule](privacy-and-data-handling.md#minimised-content) |
+| Meeting Assistant › Leave out sensitive personal information | Off | Off | Off | Off | Off | Off | On |
 | Meeting Processing › Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` | `minimised-content` |
 
 The last seven rows are set by every preset, at their shipped defaults in the first
 four, so applying any preset puts them back after another preset changed them,
 and resets **In-meeting requests** to Current meeting only on a deployment that
-had chosen Unrestricted or Selected tools. **Assistant instructions** are the
-shipped text in every preset but Minimised content, so applying any other preset
-also replaces instructions you wrote yourself with the shipped text; export the
-profile first if you want to keep them.
+had chosen Unrestricted or Selected tools. No preset sets **Assistant
+instructions**, so applying one keeps the instructions an Admin wrote.
 
 The Minimised content preset (`minimised-content`) uses the consent settings of
 the Regulated – consent required preset, with the same consequences for Stream
 Audio/Video, the Desktop Capture App and the Webex join, and deletes the
 transcript as soon as the summary is written, so the summary is the record of
 what was said that is kept. New meetings are summarized with the shipped `minimised-content`
-summary profile, and the assistant instructions carry the same rule: the model is
-told to leave out health information and the other categories of sensitive
-personal information. That is an instruction, not a filter, and
+summary profile, and **Meeting Assistant › Leave out sensitive personal
+information** is on, which appends the same rule after the assistant's
+instructions, whatever they say: the model is told to leave out health
+information and the other categories of sensitive personal information. That is
+an instruction, not a filter, and
 [Minimised content](privacy-and-data-handling.md#minimised-content) lists what it
 does not cover.
 

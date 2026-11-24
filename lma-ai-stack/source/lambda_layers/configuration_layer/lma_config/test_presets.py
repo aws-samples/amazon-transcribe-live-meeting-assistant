@@ -25,28 +25,16 @@ from lma_config.presets import apply_preset, preset_by_id, preset_offered
 HERE = Path(__file__).resolve().parent
 DEFAULTS = HERE.parents[2] / "lambda_functions" / "configuration_seeder" / "defaults"
 
-#: The meeting assistant's instructions as the release ships them, which every
-#: preset but Minimised content sets.
-SHIPPED_ASSISTANT_INSTRUCTIONS = shipped_setting_defaults()["meeting_assist"]["systemPrompt"]
-
-#: The categories of sensitive personal information the Minimised content
-#: preset's summary profile and assistant instructions tell the model to leave out.
+#: The categories of sensitive personal information the minimised-content
+#: summary profile tells the model to leave out. The meeting assistant's rule
+#: (lma-meetingassist-setup-stack/test/test_sensitive_information_rule.py) names
+#: the same ones.
 SENSITIVE_CATEGORIES = (
     "health and medical information (conditions, symptoms, diagnoses, treatments, medication, "
     "disabilities, pregnancy and mental health), racial or ethnic origin, religious or "
     "philosophical beliefs, political opinions, trade union membership, sex life and sexual "
     "orientation, gender identity, genetic and biometric data, and criminal convictions or "
     "allegations"
-)
-
-#: What the Minimised content preset adds after the shipped assistant instructions.
-ASSISTANT_SENSITIVE_INFORMATION_RULE = (
-    "\n\nSensitive personal information:\n"
-    "- Never include sensitive personal information about anyone in an answer, even where the "
-    "transcript, the meeting chat, the shared screen, a document or another tool result contains "
-    "it: " + SENSITIVE_CATEGORIES + ". Do not quote, paraphrase or hint at it.\n"
-    "- If a request asks for it, say that you leave out sensitive personal information, and "
-    "answer the rest of the request."
 )
 
 #: What the minimised-content summary profile adds after each default section it uses.
@@ -68,7 +56,7 @@ ASSISTANT_DEFAULTS = {
         "mcpServersEnabled": True,
         "guidance": {"defaultEnabled": False},
         "whiteboards": {"defaultEnabled": False},
-        "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
+        "omitSensitivePersonalInformation": False,
     },
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
@@ -173,7 +161,7 @@ PRESET_VALUES = {
             "mcpServersEnabled": False,
             "guidance": {"defaultEnabled": True},
             "whiteboards": {"defaultEnabled": False},
-            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
+            "omitSensitivePersonalInformation": False,
         },
         "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
     },
@@ -200,7 +188,7 @@ PRESET_VALUES = {
             "mcpServersEnabled": True,
             "guidance": {"defaultEnabled": False},
             "whiteboards": {"defaultEnabled": False},
-            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
+            "omitSensitivePersonalInformation": False,
         },
         "meeting_processing": {"defaultSummaryProfile": "default"},
     },
@@ -221,7 +209,7 @@ PRESET_VALUES = {
         "language_models": {"inferenceGeography": "geography"},
         "meeting_assist": {
             **ASSISTANT_DEFAULTS["meeting_assist"],
-            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS + ASSISTANT_SENSITIVE_INFORMATION_RULE,
+            "omitSensitivePersonalInformation": True,
         },
         "meeting_processing": {"defaultSummaryProfile": "minimised-content"},
     },
@@ -352,17 +340,20 @@ def test_each_presets_default_summary_profile_ships_with_the_release():
         assert values["meeting_processing"]["defaultSummaryProfile"] in shipped, preset_id
 
 
-def test_the_minimised_content_assistant_instructions_add_the_rule_to_the_shipped_text():
-    """Nothing of the shipped instructions is lost; the rule follows them."""
-    prompt = preset_by_id("minimised-content")["Sections"]["meeting_assist"]["values"][
-        "systemPrompt"
-    ]
-    assert prompt == SHIPPED_ASSISTANT_INSTRUCTIONS + ASSISTANT_SENSITIVE_INFORMATION_RULE
-    assert SENSITIVE_CATEGORIES in prompt
+def test_only_minimised_content_turns_the_assistants_sensitive_information_rule_on():
+    """The rule is a switch, so no preset touches the Assistant instructions an Admin wrote."""
     for preset_id in PRESET_VALUES:
-        if preset_id != "minimised-content":
-            values = preset_by_id(preset_id)["Sections"]["meeting_assist"]["values"]
-            assert SENSITIVE_CATEGORIES not in values["systemPrompt"], preset_id
+        values = preset_by_id(preset_id)["Sections"]["meeting_assist"]["values"]
+        assert "systemPrompt" not in values, preset_id
+        expected = preset_id == "minimised-content"
+        assert values["omitSensitivePersonalInformation"] is expected, preset_id
+
+
+def test_applying_a_preset_keeps_the_assistant_instructions_an_admin_wrote():
+    own = {"meeting_assist": {"systemPrompt": "You are Pat."}}
+    for preset in library.shipped_presets():
+        applied = apply_preset(own, preset)
+        assert applied["meeting_assist"]["systemPrompt"] == "You are Pat.", preset["Id"]
 
 
 def test_the_minimised_content_summary_profile_carries_the_rule_in_every_section():

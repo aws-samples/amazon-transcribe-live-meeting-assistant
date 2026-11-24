@@ -3273,7 +3273,9 @@ def handler(event, context):
                         vp_browser=vp_browser_offered, skills=skills_offered
                     )
                     if tools
-                    else get_meeting_assistant_prompt() + FIXED_INSTRUCTIONS
+                    else get_meeting_assistant_prompt()
+                    + FIXED_INSTRUCTIONS
+                    + configured_sensitive_information_rule()
                 )
                 + (MEETING_CHAT_NOTE if request_scope.from_meeting_chat else '')
                 + (CURRENT_MEETING_SCOPE_NOTE if current_meeting_only else '')
@@ -3690,13 +3692,44 @@ def configured_system_prompt() -> str:
     return DEFAULT_SYSTEM_PROMPT
 
 
+#: Appended to the fixed part, right after FIXED_INSTRUCTIONS, while **Meeting
+#: Assistant › Leave out sensitive personal information**
+#: (meeting_assist.omitSensitivePersonalInformation) is on, as the Minimised
+#: content preset sets it. It follows whatever the profile's instructions say,
+#: so an Admin's own Assistant instructions keep the rule. The categories are the
+#: ones the minimised-content summary profile's sections name
+#: (test_sensitive_information_rule.py holds the two to the same list).
+SENSITIVE_INFORMATION_RULE = (
+    "\n- Never include sensitive personal information about anyone in an answer, even where the "
+    "transcript, the meeting chat, the shared screen, a document or another tool result contains "
+    "it: health and medical information (conditions, symptoms, diagnoses, treatments, medication, "
+    "disabilities, pregnancy and mental health), racial or ethnic origin, religious or "
+    "philosophical beliefs, political opinions, trade union membership, sex life and sexual "
+    "orientation, gender identity, genetic and biometric data, and criminal convictions or "
+    "allegations. Do not quote, paraphrase or hint at it."
+    "\n- If a request asks for such information, say that you leave out sensitive personal "
+    "information, and answer the rest of the request."
+)
+
+
+def configured_sensitive_information_rule() -> str:
+    """SENSITIVE_INFORMATION_RULE while the setting is on, else nothing.
+
+    Read per answer, like the model. Only a value read as true turns it on, so a
+    setting that cannot be read adds nothing, as before the setting existed.
+    """
+    value = read_setting('meeting_assist', 'omitSensitivePersonalInformation', default=False)
+    return SENSITIVE_INFORMATION_RULE if value is True else ''
+
+
 def get_meeting_assistant_prompt_with_tools(vp_browser: bool = True, skills=()) -> str:
     """The system prompt for the agent with tools, before the notes for one request.
 
     The profile's editable instructions (configured_system_prompt); then, when
     the request may use skills, their names and descriptions
     (meeting_skills.catalog_prompt); then the fixed part no profile can change
-    (FIXED_INSTRUCTIONS), ending, with skills, with the rule that what a skill
+    (FIXED_INSTRUCTIONS, followed while it is on by
+    configured_sensitive_information_rule), ending, with skills, with the rule that what a skill
     says is followed only within that part (meeting_skills.SKILL_RULES); then,
     when the Virtual Participant browser controls are offered, how to use them
     (VP_BROWSER_INSTRUCTIONS). The skills' list comes before the fixed part, so
@@ -3707,6 +3740,7 @@ def get_meeting_assistant_prompt_with_tools(vp_browser: bool = True, skills=()) 
         configured_system_prompt()
         + meeting_skills.catalog_prompt(skills)
         + FIXED_INSTRUCTIONS
+        + configured_sensitive_information_rule()
         + (meeting_skills.SKILL_RULES if skills else '')
         + (VP_BROWSER_INSTRUCTIONS if vp_browser else '')
     )
@@ -3729,6 +3763,7 @@ Meeting Context:
 User Request: {user_input}
 
 Please provide a helpful response based on the meeting context. Keep it concise and professional."""
+        prompt += configured_sensitive_information_rule()
 
         # Prepare the message for Bedrock
         message = {

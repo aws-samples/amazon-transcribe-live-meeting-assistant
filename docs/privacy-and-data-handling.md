@@ -574,7 +574,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
 | In-meeting requests: meeting context and checklist | None | None | None | None | None | None | None |
 | In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone | Anyone |
-| Assistant instructions | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text, followed by the [sensitive personal information rule](#minimised-content) |
+| Meeting assistant: leave out sensitive personal information | Off | Off | Off | Off | Off | Off | On |
 | Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` | `minimised-content` |
 
 No preset sets **Read spoken replies** or **Capture chat attachments**, which
@@ -664,15 +664,17 @@ other content is still kept; see
   it while it exists (in en-US, en-AU, en-GB and es-US).
 - **No recordings from the settings.** **Record meeting audio** and **Record
   screen video from streaming clients** are off. A Virtual Participant's meeting
-  video has no setting a preset can change: set the `EnableVideoRecording` stack
-  parameter to `false` so that no client, the Virtual Participant included,
-  records video and no key frames are kept.
+  video is chosen with its **Record meeting video** toggle when it is started.
+  The `EnableVideoRecording` stack parameter is the deployment-wide ceiling: set
+  it to `false` so that no client, the Virtual Participant included, records
+  video and no key frames are kept.
 - **Same geography.** Amazon Bedrock models run within this deployment's
   geography.
-- **Summary and assistant instructions.** New meetings are summarized with the
-  shipped `minimised-content` summary profile, and the preset's **Meeting
-  Assistant › Assistant instructions** are the shipped text with a rule added
-  after it. Both tell the model to leave out sensitive personal information about
+- **Summary and assistant rule.** New meetings are summarized with the
+  shipped `minimised-content` summary profile, and **Meeting Assistant › Leave
+  out sensitive personal information** is on, which appends a rule to the
+  assistant's system prompt after its fixed part, so whatever **Assistant
+  instructions** say, the rule follows them. Both tell the model to leave out sensitive personal information about
   anyone: health and medical information (conditions, symptoms, diagnoses,
   treatments, medication, disabilities, pregnancy and mental health), racial or
   ethnic origin, religious or philosophical beliefs, political opinions, trade
@@ -701,7 +703,7 @@ health condition and its treatment as the reason for an action item: with the
 shipped default prompts, 4 of 6 summary sections named a medical need, and with
 the `minimised-content` sections 0 of 10 did; asked about it, the meeting
 assistant named the condition in 5 of 5 answers with the shipped instructions and
-in 0 of 5 with the preset's. That is a small sample of one conversation, not a
+in 0 of 5 with the same rule added after them. That is a small sample of one conversation, not a
 measured rate, and a different model or meeting can behave differently.
 
 The rule applies only where its prompts are used:
@@ -709,12 +711,13 @@ The rule applies only where its prompts are used:
 - a meeting whose owner chooses another summary profile when it starts or on the
   meeting page, or whose summary is regenerated with another profile, is
   summarized without it;
-- an Admin who edits the summary profile or the assistant instructions in a
-  Custom profile copied from this one can remove it;
+- an Admin who edits the summary profile, or turns **Leave out sensitive
+  personal information** off, in a Custom profile copied from this one removes
+  it; editing **Assistant instructions** does not;
 - a Virtual Participant's voice assistant (Amazon Nova Sonic, or an ElevenLabs
   agent) has its own instructions, which the preset does not change; a question
-  it passes to the meeting assistant is answered under the preset's assistant
-  instructions, but what the voice assistant says in its own words is not.
+  it passes to the meeting assistant is answered with the rule, but what the
+  voice assistant says in its own words is not covered.
 
 ### What can still hold sensitive personal information
 

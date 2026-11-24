@@ -10,8 +10,8 @@ Default run (about five minutes, three model calls, self-cleaning):
 
 ``test_the_minimised_content_preset_is_a_managed_profile_with_its_values``
     The seeder wrote ``minimised-content`` as a Managed profile holding every
-    value its preset sets, the assistant instructions with the sensitive
-    personal information rule among them. Read-only.
+    value its preset sets, Meeting Assistant › Leave out sensitive personal
+    information on among them. Read-only.
 ``test_every_profile_holds_the_minimised_content_summary_profile``
     The default profile and the Managed profile both hold the shipped
     ``minimised-content`` summary profile, whose every section carries the rule,
@@ -52,9 +52,9 @@ SUMMARY_TIMEOUT_S = 15 * 60
 TRANSCRIPTS_PREFIX = "lma-transcripts/"
 OWNER = "integ-test@lma.aws"
 
-#: The rule's first words in each summary section, and in the assistant instructions.
+#: The rule's first words in each section of the summary profile.
 SUMMARY_RULE = "Leave out sensitive personal information about anyone"
-ASSISTANT_RULE = "Never include sensitive personal information about anyone"
+
 
 #: A short project meeting. One participant names a health condition and its
 #: treatment, and it is the reason for an action item, so a summary written
@@ -110,7 +110,7 @@ def test_the_minimised_content_preset_is_a_managed_profile_with_its_values(stack
     assert record.body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
     assert record.body["recording"]["recordAudio"] is False
     assert record.body["recording"]["recordScreenVideo"] is False
-    assert ASSISTANT_RULE in record.body["meeting_assist"]["systemPrompt"]
+    assert record.body["meeting_assist"]["omitSensitivePersonalInformation"] is True
     assert record.body["meeting_processing"]["defaultSummaryProfile"] == PRESET_ID
 
 

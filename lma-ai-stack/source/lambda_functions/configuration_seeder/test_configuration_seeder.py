@@ -1813,7 +1813,7 @@ def test_each_preset_is_written_as_a_managed_profile(seeder) -> None:
 
 
 def test_the_minimised_content_profile_holds_the_summary_profile_it_selects(seeder) -> None:
-    """The Managed profile names a summary profile it also holds, and the assistant rule."""
+    """The Managed profile names a summary profile it also holds, and turns the assistant rule on."""
     store, dynamo = build_store()
     seeder.seed(store, domain="default")
     seeder.write_managed_profiles(store, store.read_profile("default").body, {})
@@ -1823,8 +1823,10 @@ def test_the_minimised_content_profile_holds_the_summary_profile_it_selects(seed
     assert list(sections) == ["1#SUMMARY", "2#ACTIONS", "3#AGENDA COVERAGE"]
     for prompt in sections.values():
         assert "Leave out sensitive personal information about anyone" in prompt
-    instructions = body["meeting_assist"]["systemPrompt"]
-    assert "Never include sensitive personal information about anyone" in instructions
+    assert body["meeting_assist"]["omitSensitivePersonalInformation"] is True
+    # The Assistant instructions are the baseline's: the preset does not set them.
+    default = dynamo.body("Config#default")
+    assert body["meeting_assist"]["systemPrompt"] == default["meeting_assist"]["systemPrompt"]
     assert body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
     assert _managed(dynamo)["minimised-content"]["Description"] == (
         "Minimised content – summary only"
