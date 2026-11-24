@@ -44,6 +44,9 @@ concurrency:
 jobs:
   attach-solution-profile:
     name: Build and attach the solution profile
+    # A release marked as a pre-release gets no profile asset: its tag is not of
+    # the form vX.Y.Z, so the run would only fail at the tag check.
+    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

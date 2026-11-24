@@ -738,8 +738,10 @@ Each archive being built is one asynchronous invocation of the
 1 GB of memory. The function has no reserved concurrency, so builds share the
 account's unreserved Lambda concurrency with LMA's other functions: many
 archives prepared at once use as many concurrent executions, and a build that
-Lambda throttles is retried from its asynchronous queue. The archive is a temporary copy: it is deleted a day after it was
-written, and when the meeting is deleted. See
+Lambda throttles is retried from its asynchronous queue.
+
+The archive is a temporary copy: it is deleted a day after it was written, and
+when the meeting is deleted. See
 [Privacy and Data Handling](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime).
 
 The PDF files are built in the browser, and their text can be selected and

@@ -149,11 +149,11 @@ and where meetings are joined by a Virtual Participant, should use **Off**.
 A request that is not answered gets a fixed reply, without a model call: a
 question typed in the chat with `LMA ask` is answered in the chat with a line
 saying that questions in the chat are not answered here (an `@LMA` aside is left
-alone), and a wake phrase gets a similar fixed line, worded for a spoken request, in the transcript. The meeting
-assistant applies the setting to every request it is sent, read within about
-five minutes of a change; a Virtual Participant reads it when it starts, to
-decide whether to start its voice assistant and whether to send questions from
-the chat on at all.
+alone), and a wake phrase gets a similar fixed line, worded for a spoken
+request, in the transcript. The meeting assistant applies the setting to every
+request it is sent, read within about five minutes of a change; a Virtual
+Participant reads it when it starts, to decide whether to start its voice
+assistant and whether to send questions from the chat on at all.
 
 ### Web search and MCP servers
 

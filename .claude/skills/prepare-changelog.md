@@ -103,8 +103,9 @@ with the release's version in hand:
    (with `affects` naming the items it touches), and `evidence: [CHANGELOG.md]`.
    Keep at least the last ten releases.
 3. **Set `reviewed_for_version`** in `solution-profile/solution-profile.yaml` to the
-   release's version, in the contract's form (`0.4.1`, or `0.4.1-rc1` for a
-   pre-release).
+   release's version, in the contract's form (`0.4.1`). A release published as a
+   pre-release gets no profile asset (`solution-profile-release.yml` skips it),
+   so this step is for final releases only.
 4. **Run `make solution-profile-check`** after `make version V=<x.y.z>`. With a final
    `VERSION` it applies the release rules, so it fails until steps 2 and 3 are done.
 5. **Keep it public-safe.** The profile is published with the release: describe
