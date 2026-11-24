@@ -33,6 +33,19 @@ export const createUser = /* GraphQL */ `
   }
 `;
 
+export const setUserRole = /* GraphQL */ `
+  mutation SetUserRole($input: SetUserRoleInput!) {
+    setUserRole(input: $input) {
+      username
+      email
+      role
+      status
+      enabled
+      createdAt
+    }
+  }
+`;
+
 export const deleteUser = /* GraphQL */ `
   mutation DeleteUser($input: DeleteUserInput!) {
     deleteUser(input: $input) {

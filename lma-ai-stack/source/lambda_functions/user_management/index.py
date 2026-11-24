@@ -3,10 +3,12 @@
 
 """AppSync Lambda resolver for user management operations.
 
-Handles the admin-only `listUsers`, `createUser`, and `deleteUser` fields.
-Cognito is the single source of truth. Users have one of two roles:
-  - Admin: member of the "Admin" Cognito group
-  - User:  authenticated but not in "Admin"
+Handles the admin-only `listUsers`, `createUser`, `setUserRole` and
+`deleteUser` fields. Cognito is the single source of truth. Users have one of
+three roles (appsync/role-matrix.json, effectiveRole):
+  - Admin:       member of the "Admin" Cognito group
+  - Participant: member of the "Participant" Cognito group and not of "Admin"
+  - User:        in neither group
 
 Authorization is enforced at three layers:
   1. AppSync schema `@aws_auth(cognito_groups: ["Admin"])` (primary)
@@ -16,8 +18,9 @@ Authorization is enforced at three layers:
   3. The UI hides the page for non-admins
 
 Guard rails:
-  - A caller cannot delete their own account
-  - Cannot delete the last remaining Admin (lock-out protection)
+  - A caller cannot delete their own account or change their own role
+  - Cannot delete the last remaining Admin, or move them to another role
+    (lock-out protection)
   - Email must be well-formed and (optionally) in the allowed-domain list
 """
 
@@ -35,9 +38,13 @@ cognito = boto3.client("cognito-idp")
 
 USER_POOL_ID = os.environ["USER_POOL_ID"]
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+PARTICIPANT_GROUP = os.environ.get("PARTICIPANT_GROUP", "Participant")
 ALLOWED_SIGNUP_EMAIL_DOMAINS = os.environ.get("ALLOWED_SIGNUP_EMAIL_DOMAINS", "")
 
-VALID_ROLES = ("Admin", "User")
+ADMIN_ROLE = "Admin"
+USER_ROLE = "User"
+PARTICIPANT_ROLE = "Participant"
+VALID_ROLES = (ADMIN_ROLE, USER_ROLE, PARTICIPANT_ROLE)
 # The table that holds each user's meeting notification preferences
 # (PK "usr#<username>", SK "notification-prefs"), deleted with the user.
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
@@ -69,19 +76,23 @@ def _get_caller_identity(event):
         "username": username,
         "groups": groups,
         "is_admin": ADMIN_GROUP in groups,
+        "role": effective_role(groups),
     }
 
 
-def _require_admin(caller):
-    """Defense-in-depth: enforce admin role in the Lambda even if the AppSync
-    @aws_auth directive is already in place."""
-    if not caller["is_admin"]:
+def _require_role(caller, roles):
+    """Defense-in-depth: enforce the operation's roles in the Lambda as well as
+    in the AppSync directive on its field."""
+    if caller["role"] not in roles:
         logger.warning(
-            "Non-admin caller '%s' attempted admin-only operation (groups=%s)",
+            "Caller '%s' (role=%s) attempted an operation for %s",
             caller["username"],
-            caller["groups"],
+            caller["role"],
+            ", ".join(roles),
         )
-        raise ForbiddenError("Only Admin users can perform this operation")
+        if roles == (ADMIN_ROLE,):
+            raise ForbiddenError("Only Admin users can perform this operation")
+        raise ForbiddenError("Your role cannot perform this operation")
 
 
 def _validate_email(email):
@@ -103,15 +114,54 @@ def _validate_role(role):
         raise ValidationError(f"Invalid role '{role}'. Must be one of: {', '.join(VALID_ROLES)}")
 
 
+def effective_role(groups):
+    """A user's role from their group names: Admin, then Participant, then User.
+
+    The rule of appsync/role-matrix.json (effectiveRole); test_index.py holds
+    this copy to its vectors. Group names compare exactly.
+    """
+    if ADMIN_GROUP in groups:
+        return ADMIN_ROLE
+    if PARTICIPANT_GROUP in groups:
+        return PARTICIPANT_ROLE
+    return USER_ROLE
+
+
+def _group_names(username):
+    """The user's Cognito group names. Raises ClientError when Cognito cannot say."""
+    resp = cognito.admin_list_groups_for_user(Username=username, UserPoolId=USER_POOL_ID)
+    return [g.get("GroupName") for g in resp.get("Groups", [])]
+
+
 def _get_role_for_user(username):
-    """Look up a user's role by inspecting their Cognito group membership."""
+    """A user's role for display, read from their Cognito group membership.
+
+    A failed lookup reads as User so one throttled call degrades a listing
+    rather than failing it. Decisions that depend on the role use
+    _current_groups, which raises instead.
+    """
     try:
-        resp = cognito.admin_list_groups_for_user(Username=username, UserPoolId=USER_POOL_ID)
+        groups = _group_names(username)
     except ClientError as exc:
         logger.warning("Could not list groups for %s: %s", username, exc)
-        return "User"
-    groups = [g.get("GroupName") for g in resp.get("Groups", [])]
-    return "Admin" if ADMIN_GROUP in groups else "User"
+        return USER_ROLE
+    return effective_role(groups)
+
+
+def _current_groups(username):
+    """A user's group names, for a decision that depends on them.
+
+    Raises when they cannot be read: guessing would let the last-Admin guard
+    pass for an Admin whose lookup was throttled.
+    """
+    try:
+        return _group_names(username)
+    except cognito.exceptions.UserNotFoundException as exc:
+        raise ValidationError(f"User {username} not found") from exc
+
+
+# The group each role is held through. A User is in neither role group.
+ROLE_GROUPS = {ADMIN_ROLE: ADMIN_GROUP, PARTICIPANT_ROLE: PARTICIPANT_GROUP}
 
 
 def _attr(user, name, default=None):
@@ -167,7 +217,7 @@ def list_users(_event, _args):
 
 
 def create_user(_event, args):
-    """Create a new user in Cognito and (if Admin) add them to the Admin group."""
+    """Create a new user in Cognito and add them to their role's group, if it has one."""
     payload = args.get("input") or {}
     email = (payload.get("email") or "").strip()
     role = (payload.get("role") or "").strip()
@@ -190,16 +240,18 @@ def create_user(_event, args):
     except cognito.exceptions.UsernameExistsException as exc:
         raise ValidationError(f"User with email {email} already exists") from exc
 
-    if role == "Admin":
+    group = ROLE_GROUPS.get(role)
+    if group:
         try:
             cognito.admin_add_user_to_group(
                 UserPoolId=USER_POOL_ID,
                 Username=email,
-                GroupName=ADMIN_GROUP,
+                GroupName=group,
             )
         except ClientError:
-            # Roll back the user creation if we couldn't set the group
-            logger.exception("Failed to add %s to %s; rolling back", email, ADMIN_GROUP)
+            # Roll back the user creation if we couldn't set the group: a user
+            # created for a Participant must not be left signing in as a User.
+            logger.exception("Failed to add %s to %s; rolling back", email, group)
             try:
                 cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=email)
             except ClientError:
@@ -207,6 +259,49 @@ def create_user(_event, args):
             raise
 
     resp = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
+    return _format_cognito_user(resp)
+
+
+def set_user_role(event, args):
+    """Move a user to another role by changing their role group membership.
+
+    The new role's group is joined before the old one is left. Because Admin
+    outranks Participant, a failure between the two steps leaves the user in
+    either their old role or their new one, never a third; the error is
+    reported, and repeating the change completes it.
+    """
+    caller = _get_caller_identity(event)
+    payload = args.get("input") or {}
+    username = (payload.get("username") or "").strip()
+    role = (payload.get("role") or "").strip()
+
+    if not username:
+        raise ValidationError("username is required")
+    _validate_role(role)
+    if username == caller["username"]:
+        raise ValidationError("You cannot change your own role. Ask another Admin.")
+
+    groups = set(_current_groups(username))
+    current = effective_role(groups)
+    if current == ADMIN_ROLE and role != ADMIN_ROLE and _count_admins() <= 1:
+        raise ValidationError(
+            "Cannot change the role of the last remaining Admin user. "
+            "Make another user an Admin first."
+        )
+
+    wanted = ROLE_GROUPS.get(role)
+    logger.info("Changing the role of %s from %s to %s", username, current, role)
+    if wanted and wanted not in groups:
+        cognito.admin_add_user_to_group(
+            UserPoolId=USER_POOL_ID, Username=username, GroupName=wanted
+        )
+    for group in ROLE_GROUPS.values():
+        if group != wanted and group in groups:
+            cognito.admin_remove_user_from_group(
+                UserPoolId=USER_POOL_ID, Username=username, GroupName=group
+            )
+
+    resp = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
     return _format_cognito_user(resp)
 
 
@@ -223,8 +318,8 @@ def delete_user(event, args):
         raise ValidationError("You cannot delete your own account")
 
     # Prevent deleting the last Admin (lock-out protection)
-    target_role = _get_role_for_user(username)
-    if target_role == "Admin" and _count_admins() <= 1:
+    target_role = effective_role(_current_groups(username))
+    if target_role == ADMIN_ROLE and _count_admins() <= 1:
         raise ValidationError(
             "Cannot delete the last remaining Admin user. Create another Admin first."
         )
@@ -258,10 +353,16 @@ def _delete_notification_preferences(username):
 # ---------------------------------------------------------------------------
 
 
+# Each operation and the roles that may call it, as its field's directive in
+# schema.graphql and the user-management capability of appsync/role-matrix.json
+# name them. An operation for a narrower purpose and a wider role list (such as a
+# meeting owner adding Participants for their own meeting) is a new entry with
+# its own checks, never a widening of these.
 OPERATIONS = {
-    "listUsers": list_users,
-    "createUser": create_user,
-    "deleteUser": delete_user,
+    "listUsers": (list_users, (ADMIN_ROLE,)),
+    "createUser": (create_user, (ADMIN_ROLE,)),
+    "setUserRole": (set_user_role, (ADMIN_ROLE,)),
+    "deleteUser": (delete_user, (ADMIN_ROLE,)),
 }
 
 
@@ -270,14 +371,14 @@ def handler(event, _context):
     logger.info("User management event: %s", {k: event.get(k) for k in ("info",)})
 
     field = (event.get("info") or {}).get("fieldName", "")
-    op = OPERATIONS.get(field)
-    if op is None:
+    entry = OPERATIONS.get(field)
+    if entry is None:
         raise ValueError(f"Unknown operation: {field}")
+    op, roles = entry
 
     caller = _get_caller_identity(event)
-    # All current operations are Admin-only
     try:
-        _require_admin(caller)
+        _require_role(caller, roles)
     except ForbiddenError as exc:
         # Return as an AppSync error so the client sees a 401-style message
         raise Exception(f"Unauthorized: {exc}") from exc

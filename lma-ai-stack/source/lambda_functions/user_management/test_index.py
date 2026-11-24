@@ -13,13 +13,14 @@ administrable:
   the caller is in several groups and as a bare string when it is in one, and
   the block itself may be absent.
 * Two guard rails keep a deployment from losing every administrator: a caller
-  cannot delete its own account, and the last remaining Admin cannot be deleted.
+  cannot delete its own account or change its own role, and the last remaining
+  Admin can be neither deleted nor moved to another role.
   If either regresses, the user pool can end up with no Admin at all and the
   user-management page becomes unusable for everyone, with no in-product way
   back.
 * Validation of the email address, of the optional allowed-domain list, and of
-  the two-value role vocabulary all runs before Cognito is touched, so a
-  rejected request leaves nothing behind. When the Admin group cannot be set on
+  the three-value role vocabulary all runs before Cognito is touched, so a
+  rejected request leaves nothing behind. When a role's group cannot be set on
   a user that was just created, the creation is rolled back rather than leaving
   a user with the wrong role.
 * The mapping from Cognito's response shape to the GraphQL ``User`` type,
@@ -35,6 +36,7 @@ real ``ClientError`` subclasses because the module catches
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -72,7 +74,9 @@ with mock.patch("boto3.client"):
     index = _load_index()
 
 ADMIN_GROUP = "Admin"
+PARTICIPANT_GROUP = "Participant"
 CALLER = "admin@example.com"
+ROLE_MATRIX = Path(__file__).resolve().parents[2] / "appsync" / "role-matrix.json"
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +127,7 @@ class FakeCognito:
     def __init__(self) -> None:
         self.user_pages: list[dict] = [{"Users": []}]
         self.admins: list[str] = []
+        self.participants: list[str] = []
         self.admin_group_pages: list[dict] | None = None
         self.get_user_result: dict = {}
         self.calls: list[tuple[str, dict]] = []
@@ -130,6 +135,7 @@ class FakeCognito:
         self.list_users_error: ClientError | None = None
         self.create_error: ClientError | None = None
         self.add_to_group_error: ClientError | None = None
+        self.remove_from_group_error: ClientError | None = None
         self.delete_error: ClientError | None = None
         self.exceptions = SimpleNamespace(
             UsernameExistsException=UsernameExistsException,
@@ -156,10 +162,13 @@ class FakeCognito:
         self.record("admin_list_groups_for_user", kwargs)
         if self.group_lookup_error is not None:
             raise self.group_lookup_error
+        # Every user is in some other group too; the role must come from the name.
+        groups = [{"GroupName": "SomeOtherGroup"}]
         if kwargs["Username"] in self.admins:
-            return {"Groups": [{"GroupName": ADMIN_GROUP}]}
-        # A non-admin is still in groups; the role must come from the name.
-        return {"Groups": [{"GroupName": "SomeOtherGroup"}]}
+            groups.append({"GroupName": ADMIN_GROUP})
+        if kwargs["Username"] in self.participants:
+            groups.append({"GroupName": PARTICIPANT_GROUP})
+        return {"Groups": groups}
 
     def admin_create_user(self, **kwargs):
         self.record("admin_create_user", kwargs)
@@ -171,7 +180,16 @@ class FakeCognito:
         self.record("admin_add_user_to_group", kwargs)
         if self.add_to_group_error is not None:
             raise self.add_to_group_error
-        self.admins.append(kwargs["Username"])
+        members = self.admins if kwargs["GroupName"] == ADMIN_GROUP else self.participants
+        members.append(kwargs["Username"])
+        return {}
+
+    def admin_remove_user_from_group(self, **kwargs):
+        self.record("admin_remove_user_from_group", kwargs)
+        if self.remove_from_group_error is not None:
+            raise self.remove_from_group_error
+        members = self.admins if kwargs["GroupName"] == ADMIN_GROUP else self.participants
+        members.remove(kwargs["Username"])
         return {}
 
     def admin_delete_user(self, **kwargs):
@@ -236,6 +254,10 @@ def create_input(email: str, role: str) -> dict:
 
 def delete_input(username: str) -> dict:
     return {"input": {"username": username}}
+
+
+def role_input(username: str, role: str) -> dict:
+    return {"input": {"username": username, "role": role}}
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +345,7 @@ def test_each_operation_requires_admin_membership(cognito: FakeCognito) -> None:
         ("listUsers", {}),
         ("createUser", create_input("new@example.com", "User")),
         ("deleteUser", delete_input("victim@example.com")),
+        ("setUserRole", role_input("victim@example.com", "Admin")),
     ):
         event = {
             "info": {"fieldName": field},
@@ -553,10 +576,11 @@ def test_any_domain_is_accepted_when_no_allow_list_is_configured(
 
 
 @pytest.mark.parametrize(
-    "role", ["", "   ", "admin", "ADMIN", "user", "SuperAdmin", "Owner", "Admin,User"]
+    "role",
+    ["", "   ", "admin", "ADMIN", "user", "participant", "SuperAdmin", "Owner", "Admin,User"],
 )
-def test_rejects_a_role_outside_the_two_known_roles(cognito: FakeCognito, role: str) -> None:
-    """Only Admin and User exist; anything else would create a user with no role."""
+def test_rejects_a_role_outside_the_three_known_roles(cognito: FakeCognito, role: str) -> None:
+    """Only Admin, User and Participant exist; anything else would create a user with no role."""
     with pytest.raises(Exception, match="Invalid role"):
         index.handler(admin_event("createUser", create_input("new@example.com", role)), None)
 
@@ -578,6 +602,39 @@ def test_creating_an_admin_adds_the_admin_group(cognito: FakeCognito) -> None:
         }
     ]
     assert result["role"] == "Admin"
+
+
+def test_creating_a_participant_adds_the_participant_group(cognito: FakeCognito) -> None:
+    cognito.get_user_result = cognito_user("guest@example.com", email="guest@example.com")
+
+    result = index.handler(
+        admin_event("createUser", create_input("guest@example.com", "Participant")), None
+    )
+
+    assert cognito.kwargs_for("admin_add_user_to_group") == [
+        {
+            "UserPoolId": index.USER_POOL_ID,
+            "Username": "guest@example.com",
+            "GroupName": PARTICIPANT_GROUP,
+        }
+    ]
+    assert result["role"] == "Participant"
+
+
+def test_a_new_participant_is_removed_again_when_its_group_cannot_be_set(
+    cognito: FakeCognito,
+) -> None:
+    """Left in place, the account would sign in as a User."""
+    cognito.add_to_group_error = _CognitoError()
+
+    with pytest.raises(ClientError):
+        index.handler(
+            admin_event("createUser", create_input("guest@example.com", "Participant")), None
+        )
+
+    assert cognito.kwargs_for("admin_delete_user") == [
+        {"UserPoolId": index.USER_POOL_ID, "Username": "guest@example.com"}
+    ]
 
 
 def test_creating_a_plain_user_joins_no_group(cognito: FakeCognito) -> None:
@@ -881,3 +938,219 @@ def test_a_preferences_row_that_cannot_be_deleted_does_not_fail_the_deletion(
     result = index.handler(admin_event("deleteUser", delete_input("plain@example.com")), None)
 
     assert result == {"username": "plain@example.com", "success": True}
+
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+
+
+def _vectors() -> list[dict]:
+    return json.loads(ROLE_MATRIX.read_text())["effectiveRole"]["vectors"]
+
+
+@pytest.mark.parametrize("vector", _vectors(), ids=lambda v: ",".join(v["groups"]) or "none")
+def test_the_role_rule_matches_the_role_matrix(vector: dict) -> None:
+    assert index.effective_role(vector["groups"]) == vector["role"]
+
+
+def test_every_operation_names_the_roles_of_its_field_in_the_role_matrix() -> None:
+    capabilities = json.loads(ROLE_MATRIX.read_text())["capabilities"]
+    roles = {
+        operation.split(".", 1)[1]: tuple(capability["roles"])
+        for capability in capabilities
+        for operation in capability["appsync"]
+    }
+
+    assert {field: entry[1] for field, entry in index.OPERATIONS.items()} == {
+        field: roles[field] for field in index.OPERATIONS
+    }
+
+
+def test_a_participant_caller_is_refused_every_operation(cognito: FakeCognito) -> None:
+    for field in index.OPERATIONS:
+        event = {
+            "info": {"fieldName": field},
+            "identity": {
+                "claims": {
+                    "cognito:username": "guest@example.com",
+                    "cognito:groups": ["Participant"],
+                }
+            },
+            "arguments": {},
+        }
+        with pytest.raises(Exception, match="Unauthorized"):
+            index.handler(event, None)
+
+    assert cognito.names_called() == []
+
+
+def test_a_participant_is_listed_with_the_participant_role(cognito: FakeCognito) -> None:
+    cognito.admins = ["boss@example.com"]
+    cognito.participants = ["guest@example.com"]
+    cognito.user_pages = [
+        {
+            "Users": [
+                cognito_user("boss@example.com"),
+                cognito_user("guest@example.com"),
+                cognito_user("plain@example.com"),
+            ]
+        }
+    ]
+
+    listed = index.handler(admin_event("listUsers"), None)["users"]
+
+    assert {user["username"]: user["role"] for user in listed} == {
+        "boss@example.com": "Admin",
+        "guest@example.com": "Participant",
+        "plain@example.com": "User",
+    }
+
+
+def _role_after(cognito: FakeCognito, username: str) -> str:
+    groups = cognito.admin_list_groups_for_user(Username=username)["Groups"]
+    return index.effective_role([g["GroupName"] for g in groups])
+
+
+@pytest.mark.parametrize(
+    "start,target",
+    [
+        ("User", "Participant"),
+        ("User", "Admin"),
+        ("Participant", "User"),
+        ("Participant", "Admin"),
+        ("Admin", "User"),
+        ("Admin", "Participant"),
+        ("User", "User"),
+    ],
+)
+def test_a_role_change_leaves_the_user_in_exactly_the_new_role(
+    cognito: FakeCognito, start: str, target: str
+) -> None:
+    cognito.admins = [CALLER, "other-admin@example.com"]
+    target_user = "someone@example.com"
+    if start == "Admin":
+        cognito.admins.append(target_user)
+    if start == "Participant":
+        cognito.participants.append(target_user)
+    cognito.get_user_result = cognito_user(target_user)
+
+    result = index.handler(admin_event("setUserRole", role_input(target_user, target)), None)
+
+    assert _role_after(cognito, target_user) == target
+    assert result["role"] == target
+    assert (target_user in cognito.admins) == (target == "Admin")
+    assert (target_user in cognito.participants) == (target == "Participant")
+
+
+def test_a_role_change_joins_the_new_group_before_leaving_the_old_one(
+    cognito: FakeCognito,
+) -> None:
+    """A failure between the two steps then leaves the user in the old or the new role."""
+    cognito.admins = [CALLER, "other@example.com", "demoted@example.com"]
+    cognito.get_user_result = cognito_user("demoted@example.com")
+
+    index.handler(
+        admin_event("setUserRole", role_input("demoted@example.com", "Participant")), None
+    )
+
+    changes = [
+        name
+        for name in cognito.names_called()
+        if name in ("admin_add_user_to_group", "admin_remove_user_from_group")
+    ]
+    assert changes == ["admin_add_user_to_group", "admin_remove_user_from_group"]
+
+
+def test_a_failure_leaving_the_old_group_keeps_the_old_role_and_is_reported(
+    cognito: FakeCognito,
+) -> None:
+    cognito.admins = [CALLER, "other@example.com", "demoted@example.com"]
+    cognito.remove_from_group_error = _CognitoError()
+
+    with pytest.raises(ClientError):
+        index.handler(
+            admin_event("setUserRole", role_input("demoted@example.com", "Participant")), None
+        )
+
+    assert _role_after(cognito, "demoted@example.com") == "Admin"
+
+
+def test_the_last_admin_cannot_be_moved_to_another_role(cognito: FakeCognito) -> None:
+    cognito.admins = ["only-admin@example.com"]
+
+    with pytest.raises(Exception, match="last remaining Admin"):
+        index.handler(
+            admin_event("setUserRole", role_input("only-admin@example.com", "User")), None
+        )
+
+    assert "admin_remove_user_from_group" not in cognito.names_called()
+    assert "admin_add_user_to_group" not in cognito.names_called()
+
+
+def test_setting_the_role_the_last_admin_already_has_is_allowed(cognito: FakeCognito) -> None:
+    """Setting the role a user already has is not a change of role."""
+    cognito.admins = ["only-admin@example.com"]
+    cognito.get_user_result = cognito_user("only-admin@example.com")
+
+    result = index.handler(
+        admin_event("setUserRole", role_input("only-admin@example.com", "Admin")), None
+    )
+
+    assert result["role"] == "Admin"
+
+
+def test_a_caller_cannot_change_its_own_role(cognito: FakeCognito) -> None:
+    cognito.admins = [CALLER, "other@example.com"]
+
+    with pytest.raises(Exception, match="your own role"):
+        index.handler(admin_event("setUserRole", role_input(CALLER, "User")), None)
+
+    assert cognito.names_called() == []
+
+
+@pytest.mark.parametrize("role", ["", "admin", "Owner", "Participant,Admin"])
+def test_a_role_change_to_an_unknown_role_is_refused(cognito: FakeCognito, role: str) -> None:
+    with pytest.raises(Exception, match="Invalid role"):
+        index.handler(admin_event("setUserRole", role_input("someone@example.com", role)), None)
+
+    assert cognito.names_called() == []
+
+
+def test_a_role_change_requires_a_username(cognito: FakeCognito) -> None:
+    with pytest.raises(Exception, match="username is required"):
+        index.handler(admin_event("setUserRole", role_input("  ", "User")), None)
+
+
+def test_a_role_change_is_refused_when_the_current_role_cannot_be_read(
+    cognito: FakeCognito,
+) -> None:
+    """Guessing User for an unreadable Admin would let the last-Admin guard pass."""
+    cognito.admins = ["only-admin@example.com"]
+    cognito.group_lookup_error = _CognitoError("TooManyRequestsException")
+
+    with pytest.raises(ClientError):
+        index.handler(
+            admin_event("setUserRole", role_input("only-admin@example.com", "User")), None
+        )
+
+    assert "admin_remove_user_from_group" not in cognito.names_called()
+
+
+def test_a_deletion_is_refused_when_the_role_cannot_be_read(cognito: FakeCognito) -> None:
+    cognito.admins = ["only-admin@example.com"]
+    cognito.group_lookup_error = _CognitoError("TooManyRequestsException")
+
+    with pytest.raises(ClientError):
+        index.handler(admin_event("deleteUser", delete_input("only-admin@example.com")), None)
+
+    assert "admin_delete_user" not in cognito.names_called()
+
+
+def test_a_role_change_for_an_unknown_user_reports_a_readable_message(
+    cognito: FakeCognito,
+) -> None:
+    cognito.group_lookup_error = UserNotFoundException("UserNotFoundException")
+
+    with pytest.raises(Exception, match="ghost@example.com not found"):
+        index.handler(admin_event("setUserRole", role_input("ghost@example.com", "User")), None)

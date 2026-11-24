@@ -875,12 +875,13 @@ each edited one section of the configuration. They are now sections of the
 
 **Route**: `/#/configuration/user-management`
 
-Create and delete LMA users (Admin and non-Admin), directly from the Web UI without needing the AWS console.
+Create and delete LMA users and choose their roles (Admin, User or Participant), directly from the Web UI without needing the AWS console.
 
 - View all users in the Cognito user pool, with role, status, and creation date
-- Create a new user and choose their role (Admin or User) — Cognito emails them a temporary password
+- Create a new user and choose their role (Admin, User or Participant) — Cognito emails them a temporary password
+- Change one user's role
 - Select and delete one or more users
-- Guard rails prevent self-delete and deletion of the last remaining Admin
+- Guard rails prevent changing or deleting your own account, and changing or deleting the last remaining Admin
 
 See [User Management](user-management.md) for full documentation.
 

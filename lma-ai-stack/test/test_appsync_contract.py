@@ -185,6 +185,7 @@ ADMIN_ONLY_FIELDS = [
     ("Mutation", "initOAuthFlow"),
     ("Mutation", "handleOAuthCallback"),
     ("Mutation", "createUser"),
+    ("Mutation", "setUserRole"),
     ("Mutation", "deleteUser"),
     ("Query", "getLLMPromptTemplate"),
     ("Query", "getNovaSonicConfig"),
@@ -213,8 +214,9 @@ ADMIN_ONLY_FIELDS = [
     ("Query", "getTroubleshootingJob"),
 ]
 
-# Reads every signed-in user performs in the course of using the product, so the
-# group argument is deliberately absent and adding one would remove a feature:
+# Reads every Admin and User performs in the course of using the product, so the
+# group argument names both roles and narrowing it would remove a feature (which
+# roles every field admits is held to role-matrix.json by test_role_matrix.py):
 #
 # * getChatButtonConfig -- the Meeting Assist chat panel renders its quick-action
 #   buttons from this record for whoever is viewing the meeting.
@@ -445,15 +447,16 @@ def test_administrative_operation_is_restricted_to_the_admin_group(
 
 
 @pytest.mark.parametrize("type_name,field_name", UNRESTRICTED_READS, ids=lambda part: str(part))
-def test_read_used_by_every_signed_in_user_is_available_to_every_group(
+def test_read_used_by_every_admin_and_user_is_available_to_both(
     type_name: str, field_name: str, field_nodes: dict[tuple[str, str], object]
 ) -> None:
-    """Narrowing one of these to a group would remove a feature for most users."""
+    """Narrowing one of these to the Admin group would remove a feature for most users."""
     field = field_nodes.get((type_name, field_name))
     assert field is not None, f"{SCHEMA.name} no longer declares {type_name}.{field_name}"
-    assert _cognito_groups(field) == (), (
-        f"{type_name}.{field_name} is read by every signed-in user, so its "
-        f"@aws_cognito_user_pools directive must not name a group"
+    groups = _cognito_groups(field) or ()
+    assert {"Admin", "User"} <= set(groups), (
+        f"{type_name}.{field_name} is read by every Admin and User, so its "
+        f'@aws_cognito_user_pools directive must name both "Admin" and "User"; it names {list(groups)}'
     )
 
 
@@ -926,10 +929,17 @@ def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
         )
 
 
+# Files in appsync/ that are not resolver code and are never deployed.
+NOT_DEPLOYED = {
+    # Who may call each field; read by the tests that hold the schema to it.
+    "role-matrix.json",
+}
+
+
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
     referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", _ALL_TEMPLATES_TEXT))
-    on_disk = {path.name for path in APPSYNC_DIR.iterdir() if path.is_file()}
+    on_disk = {path.name for path in APPSYNC_DIR.iterdir() if path.is_file()} - NOT_DEPLOYED
     assert not (on_disk - referenced), (
         f"files in {APPSYNC_DIR.name}/ that no template resource references: "
         f"{sorted(on_disk - referenced)}"

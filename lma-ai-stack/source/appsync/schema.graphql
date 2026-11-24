@@ -408,93 +408,102 @@ interface DynamoDbBase {
 	ExpiresAfter: AWSTimestamp
 }
 
+# Roles. Every field of Query, Mutation and Subscription names who may call it:
+# @aws_cognito_user_pools(cognito_groups: [...]) lists the signed-in roles
+# (Admin, User, Participant), and @aws_iam admits backend roles signing with
+# SigV4. A user in no Cognito group is a User: the user pool's pre token
+# generation trigger puts exactly one of the three role names in every token's
+# cognito:groups claim. Each of the three types is @aws_iam itself, so a field
+# that names no role is refused to every signed-in caller. The roles of each
+# field are kept in appsync/role-matrix.json, and test_role_matrix.py holds this
+# schema to it. See docs/user-based-access-control.md.
 type Mutation @aws_iam {
-	createCall(input: CreateCallInput!): CreateCallOutput
-	updateCallStatus(input: UpdateCallStatusInput!): Call
-	updateCallAggregation(input: UpdateCallAggregationInput!): Call
-	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call
-	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call
+	createCall(input: CreateCallInput!): CreateCallOutput @aws_iam
+	updateCallStatus(input: UpdateCallStatusInput!): Call @aws_iam
+	updateCallAggregation(input: UpdateCallAggregationInput!): Call @aws_iam
+	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call @aws_iam
+	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call @aws_iam
 	# Sets the capture context fields of Call after the meeting started: written
 	# when the engine that transcribes it is not the one its START named, as
 	# when the MicroVM could not start and Amazon Transcribe took over.
-	updateCaptureContext(input: UpdateCaptureContextInput!): Call
+	updateCaptureContext(input: UpdateCaptureContextInput!): Call @aws_iam
 	# Sets Call.TranscriptionPause: written by the call event processor for an
 	# UPDATE_TRANSCRIPTION_PAUSE event from a Virtual Participant.
-	updateTranscriptionPause(input: UpdateTranscriptionPauseInput!): Call
+	updateTranscriptionPause(input: UpdateTranscriptionPauseInput!): Call @aws_iam
 	# Written by the call event processor for the START event of a session a
 	# rejoin allowed (Call.SessionNumber): the meeting is live again, under the
 	# same CallId. Refused for any other session number, so a redelivered START
 	# changes nothing. IAM only, like the other pipeline writes.
-	startCallSession(input: StartCallSessionInput!): Call
+	startCallSession(input: StartCallSessionInput!): Call @aws_iam
 	# Appends one language to Call.DetectedLanguages when the meeting does not
 	# list it yet; written by the call event processor for the first segment it
 	# sees in that language. A language already listed fails the write's
 	# condition, which the processor treats as done.
-	addCallDetectedLanguage(input: AddCallDetectedLanguageInput!): Call
-	updateAgent(input: UpdateAgentInput!): Call
-	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
-	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
-	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
-	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
-	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools @aws_iam
+	addCallDetectedLanguage(input: AddCallDetectedLanguageInput!): Call @aws_iam
+	updateAgent(input: UpdateAgentInput!): Call @aws_iam
+	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The meeting's preparation; see docs/meeting-context-and-checklist.md.
-	updateCallMeetingContext(input: UpdateCallMeetingContextInput!): Call @aws_cognito_user_pools @aws_iam
-	updateCallChecklist(input: UpdateCallChecklistInput!): Call @aws_cognito_user_pools @aws_iam
-	updateCallChecklistItem(input: UpdateCallChecklistItemInput!): Call @aws_cognito_user_pools @aws_iam
-	updateCallLabels(input: UpdateCallLabelsInput!): Call @aws_cognito_user_pools @aws_iam
-	updateCallAudience(input: UpdateCallAudienceInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallMeetingContext(input: UpdateCallMeetingContextInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallChecklist(input: UpdateCallChecklistInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallChecklistItem(input: UpdateCallChecklistItemInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallLabels(input: UpdateCallLabelsInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateCallAudience(input: UpdateCallAudienceInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Sets or clears the meeting's summary profile, on the updateCallAgenda access
 	# rule. A name the configuration does not hold is refused.
-	updateCallSummaryProfile(input: UpdateCallSummaryProfileInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallSummaryProfile(input: UpdateCallSummaryProfileInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Turns live guidance on or off for the meeting, on the updateCallAgenda
 	# access rule. See docs/live-guidance.md.
-	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A short digest of the meeting so far, published to its notifications as a
 	# guidance item of type meeting_digest and returned. On the updateCallAgenda
 	# access rule; one model call, billed to the meeting.
-	requestMeetingDigest(CallId: ID!): MeetingDigestResult @aws_cognito_user_pools @aws_iam
+	requestMeetingDigest(CallId: ID!): MeetingDigestResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The meeting consent record (Call.Consent). One Lambda resolver applies the
 	# access rule of each; see the Meeting consent section below and
 	# docs/meeting-consent.md.
-	startMeetingConsent(input: StartMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	recordMeetingConsentNotice(input: RecordMeetingConsentNoticeInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	setMeetingConsentParticipants(input: SetMeetingConsentParticipantsInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	recordMeetingConsentEvent(input: RecordMeetingConsentEventInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	attestMeetingConsent(input: AttestMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools @aws_iam
-	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
+	startMeetingConsent(input: StartMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	recordMeetingConsentNotice(input: RecordMeetingConsentNoticeInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	setMeetingConsentParticipants(input: SetMeetingConsentParticipantsInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	recordMeetingConsentEvent(input: RecordMeetingConsentEventInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	attestMeetingConsent(input: AttestMeetingConsentInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	addMeetingConsentEvidence(input: AddMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	verifyMeetingConsentEvidence(input: VerifyMeetingConsentEvidenceInput!): MeetingConsentUpdate @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A meeting's whiteboards, answered by the meeting whiteboards resolver on
 	# the updateCallAgenda access rule (an Admin, the meeting's owner, a user it
 	# is shared with, or a backend role). Each answer is published to
 	# onMeetingWhiteboard. A change names the version it was made from
 	# (BaseVersion) and is refused if the whiteboard has moved on. See
 	# docs/meeting-whiteboards.md.
-	createMeetingWhiteboard(input: CreateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
-	updateMeetingWhiteboard(input: UpdateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
-	deleteMeetingWhiteboard(input: DeleteMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
+	createMeetingWhiteboard(input: CreateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateMeetingWhiteboard(input: UpdateMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	deleteMeetingWhiteboard(input: DeleteMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Turns the assistant's updates of the meeting's whiteboards on or off.
-	updateCallWhiteboards(input: UpdateCallWhiteboardsInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallWhiteboards(input: UpdateCallWhiteboardsInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Updates the meeting's whiteboards from the transcript now, rather than at
 	# the next run. One model call, billed to the meeting, within the meeting's
 	# runs at most.
-	requestWhiteboardUpdate(CallId: ID!): WhiteboardUpdateResult @aws_cognito_user_pools @aws_iam
+	requestWhiteboardUpdate(CallId: ID!): WhiteboardUpdateResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Starts building a ZIP archive of the meeting's files and returns at once;
 	# the archive is read with getMeetingArchive. Answered to the callers getCall
 	# answers. See docs/web-ui-guide.md.
-	prepareMeetingArchive(CallId: ID!, Contents: MeetingArchiveContents): MeetingArchive @aws_cognito_user_pools @aws_iam
+	prepareMeetingArchive(CallId: ID!, Contents: MeetingArchiveContents): MeetingArchive @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Starts a diagnosis by the troubleshooting agent and returns at once; the
 	# answer is read with getTroubleshootingJob. For the Admin group, and
 	# re-checked in the resolver Lambda. See docs/troubleshooting-agent.md.
 	startTroubleshooting(input: StartTroubleshootingInput!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
-	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
-	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
-	addCallSummaryText(input: AddCallSummaryTextInput!): Call
-	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	addCallSummaryText(input: AddCallSummaryTextInput!): Call @aws_iam
+	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment @aws_iam
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
 	# like addTranscriptSegment. See docs/meeting-video.md.
-	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
+	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe @aws_iam
 	# Stores a notification on a meeting for the people who can see it, and
 	# publishes it to onMeetingNotification. IAM only: a backend publishes it,
 	# through lma_notifications.publish_meeting_notification. The resolver reads
@@ -502,43 +511,43 @@ type Mutation @aws_iam {
 	# message; the publisher does not name recipients, and the stored row holds
 	# none. A second publish with the same Category and DedupKey updates the
 	# notification it made. See docs/meeting-notifications.md.
-	publishMeetingNotification(input: PublishMeetingNotificationInput!): MeetingNotification
+	publishMeetingNotification(input: PublishMeetingNotificationInput!): MeetingNotification @aws_iam
 	# The signed-in user's own view of one meeting's notifications: the ones
 	# they dismissed and the categories they muted there. Changes only their own
 	# view; anyone getCall answers for the meeting may keep one.
-	updateMyMeetingNotificationState(input: UpdateMyMeetingNotificationStateInput!): MeetingNotificationState @aws_cognito_user_pools
+	updateMyMeetingNotificationState(input: UpdateMyMeetingNotificationStateInput!): MeetingNotificationState @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# The signed-in user's categories muted on every meeting.
-	updateMyNotificationPreferences(input: UpdateMyNotificationPreferencesInput!): NotificationPreferences @aws_cognito_user_pools
+	updateMyNotificationPreferences(input: UpdateMyNotificationPreferencesInput!): NotificationPreferences @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# Written by the call event processor for an ADD_CHAT_ATTACHMENT event; IAM
 	# only, like addTranscriptSegment. See docs/virtual-participant.md.
-	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment
-	deleteCall(input: DeleteCallInput!): DeleteCallOutput
-	shareCall(input: ShareCallInput!): ShareCallOutput
-	unshareCall(input: UnshareCallInput!): UnshareCallOutput
-	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput
-	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
-    shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
-	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
-	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools
-	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
-	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	addChatAttachment(input: AddChatAttachmentInput!): ChatAttachment @aws_iam
+	deleteCall(input: DeleteCallInput!): DeleteCallOutput @aws_iam
+	shareCall(input: ShareCallInput!): ShareCallOutput @aws_iam
+	unshareCall(input: UnshareCallInput!): UnshareCallOutput @aws_iam
+	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput @aws_iam
+	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput @aws_iam
+    shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Change the launch settings of a Virtual Participant that is scheduled and
 	# has not started, while the meeting is at least 5 minutes away. Its owner,
 	# Admins and backend roles may; the launch schedule follows the change.
-	updateScheduledVirtualParticipant(input: UpdateScheduledVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
-	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	updateScheduledVirtualParticipant(input: UpdateScheduledVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Relaunch a Virtual Participant that has left its meeting into the same
 	# online meeting, appending to the same LMA meeting (the CallId on its row),
 	# which is reopened if it has ended. For the meeting's owner and Admins, and
 	# with IAM for a backend role (the lma CLI and SDK). See
 	# docs/virtual-participant.md#rejoin.
-	rejoinVirtualParticipant(input: RejoinVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	rejoinVirtualParticipant(input: RejoinVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Join again as a new meeting: create and launch a new Virtual Participant,
 	# owned by the caller, from an existing one's meeting details as the form
 	# gives them. When the platform and meeting ID are the source's and no
 	# password is given, the source's stored meeting password is used. For the
 	# source's owner and Admins. See docs/virtual-participant.md#join-again.
-	joinAgainVirtualParticipant(input: JoinAgainVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
+	joinAgainVirtualParticipant(input: JoinAgainVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# Allow one more capture session on an existing meeting, for a streaming
 	# client that is to continue it under the same CallId. For the meeting's
 	# owner and Admins; refused for a meeting that is still being captured or
@@ -548,11 +557,11 @@ type Mutation @aws_iam {
 	# session's START event arrives. See
 	# docs/desktop-capture-app.md#continue-an-existing-meeting. With IAM, for a
 	# backend role (the lma CLI and SDK), as rejoinVirtualParticipant.
-	reopenMeeting(input: ReopenMeetingInput!): ReopenMeetingOutput @aws_cognito_user_pools @aws_iam
-	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
-	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
-	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
-	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
+	reopenMeeting(input: ReopenMeetingInput!): ReopenMeetingOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	# The four configuration records below are account-wide: one stored item drives
 	# every meeting in the deployment. Writing them is an administrator operation,
@@ -578,8 +587,8 @@ type Mutation @aws_iam {
 	createConfigurationProfile(input: CreateConfigurationProfileInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	activateConfigurationProfile(input: ConfigurationProfileNameInput!): ConfigurationProfileOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
-	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
+	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -593,15 +602,18 @@ type Mutation @aws_iam {
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# scope is "read" (the default) or "read-write"; see type MCPApiKey.
-	generateMCPApiKey(scope: String): GenerateMCPApiKeyOutput @aws_cognito_user_pools
-	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
+	generateMCPApiKey(scope: String): GenerateMCPApiKeyOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Moves a user to another role. Refused for the caller's own account and for
+	# the last Admin. Takes effect at the user's next sign-in or token refresh.
+	setUserRole(input: SetUserRoleInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools
-	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
-	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools
-	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
-	createVncEdgeToken(vpId: ID!): VncEdgeToken @aws_cognito_user_pools
+	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	createVncEdgeToken(vpId: ID!): VncEdgeToken @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -620,19 +632,18 @@ input OverallSentimentInput {
 	CALLER: Float
 }
 
-type Query @aws_cognito_user_pools
-@aws_iam {
-	getCall(CallId: ID!): Call
+type Query @aws_iam {
+	getCall(CallId: ID!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The summary profiles a meeting can name, default first, for the forms that
 	# choose one. Names, labels and descriptions only; no prompts.
-	listSummaryProfiles: [SummaryProfileOption] @aws_cognito_user_pools @aws_iam
+	listSummaryProfiles: [SummaryProfileOption] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# What the enrollment portal shows its visitor about their own enrollment,
 	# including the terms text whose hash is stored with a consent.
-	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
+	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# A meeting's segments a page at a time: pass each page's nextToken back
 	# until it is null. A page can hold no segments and still carry a nextToken.
-	getTranscriptSegments(callId: ID!, isPartial: Boolean, nextToken: String): TranscriptSegmentList
-	getTranscriptSegmentsWithSentiment(callId: ID!, nextToken: String): TranscriptSegmentsWithSentimentList
+	getTranscriptSegments(callId: ID!, isPartial: Boolean, nextToken: String): TranscriptSegmentList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	getTranscriptSegmentsWithSentiment(callId: ID!, nextToken: String): TranscriptSegmentsWithSentimentList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The meeting's key frames in time order, a page at a time, with short-lived
 	# signed links to their images. Answered to the callers getCall answers: the
 	# meeting's owner, the people it is shared with, admins and backend roles.
@@ -641,52 +652,52 @@ type Query @aws_cognito_user_pools
 	# it limit, nextToken and afterFrameId are not used. frameIds returns up to
 	# 100 frames, in the order named, each once, leaving out any that do not
 	# exist, likewise without the paging arguments.
-	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID, frameIds: [ID]): VideoKeyframeList
+	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID, frameIds: [ID]): VideoKeyframeList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A meeting's chat attachments in time order, with signed links to their
 	# content, valid for an hour. Answered to the callers getCall answers.
 	# attachmentId returns just that attachment, with fresh links.
-	getChatAttachments(callId: ID!, attachmentId: ID, nextToken: String): ChatAttachmentList
+	getChatAttachments(callId: ID!, attachmentId: ID, nextToken: String): ChatAttachmentList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The meeting's consent record with hour-long signed links to its evidence
 	# images, whether it may be recorded and transcribed now, and the
 	# deployment's consent settings. Answered to the callers getCall answers.
-	getMeetingConsent(CallId: ID!): MeetingConsentState
+	getMeetingConsent(CallId: ID!): MeetingConsentState @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# An archive prepareMeetingArchive started, for the caller who started it
 	# (or an Admin): its status and, once READY, a link valid for an hour.
-	getMeetingArchive(CallId: ID!, ArchiveId: ID!): MeetingArchive
+	getMeetingArchive(CallId: ID!, ArchiveId: ID!): MeetingArchive @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A meeting's notifications in the order they were first published (newest
 	# first with NewestFirst), a page at a time. Category keeps one category;
 	# Since keeps those created or updated at or after it. Answered to the
 	# callers getCall answers, decided from the meeting as it is now.
-	listMeetingNotifications(CallId: ID!, Category: String, Since: AWSDateTime, Limit: Int, NextToken: String, NewestFirst: Boolean): MeetingNotificationPage
+	listMeetingNotifications(CallId: ID!, Category: String, Since: AWSDateTime, Limit: Int, NextToken: String, NewestFirst: Boolean): MeetingNotificationPage @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The signed-in user's view of one meeting's notifications.
-	getMyMeetingNotificationState(CallId: ID!): MeetingNotificationState @aws_cognito_user_pools
+	getMyMeetingNotificationState(CallId: ID!): MeetingNotificationState @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# The signed-in user's categories muted on every meeting.
-	getMyNotificationPreferences: NotificationPreferences @aws_cognito_user_pools
+	getMyNotificationPreferences: NotificationPreferences @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# A meeting's whiteboards, in the order they were made, with the panels of
 	# each; one whiteboard, or one earlier version of it (Version); and the
 	# versions of one, newest first. Answered to the callers getCall answers.
-	listMeetingWhiteboards(CallId: ID!): MeetingWhiteboardList @aws_cognito_user_pools @aws_iam
-	getMeetingWhiteboard(CallId: ID!, WhiteboardId: ID!, Version: Int): MeetingWhiteboard @aws_cognito_user_pools @aws_iam
-	listMeetingWhiteboardVersions(CallId: ID!, WhiteboardId: ID!, Limit: Int, NextToken: String): MeetingWhiteboardVersionPage @aws_cognito_user_pools @aws_iam
+	listMeetingWhiteboards(CallId: ID!): MeetingWhiteboardList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	getMeetingWhiteboard(CallId: ID!, WhiteboardId: ID!, Version: Int): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	listMeetingWhiteboardVersions(CallId: ID!, WhiteboardId: ID!, Limit: Int, NextToken: String): MeetingWhiteboardVersionPage @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The deployment's consent mode and rule, and whether a meeting may choose a
 	# less strict one, for the Create Virtual Participant form to show which
-	# choices apply. Read by every signed-in user, before any meeting exists.
-	getMeetingConsentDefaults: MeetingConsentDefaults @aws_cognito_user_pools
-	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
-	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
-    queryKnowledgeBase(input: String!, sessionId: String): String
-	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
-	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
-	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	# choices apply. Read by every Admin and User, before any meeting exists.
+	getMeetingConsentDefaults: MeetingConsentDefaults @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+    queryKnowledgeBase(input: String!, sessionId: String): String @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Read by the Meeting Assist chat panel for whoever is viewing the meeting, to
-	# render the quick-action buttons, so every signed-in user reads it.
-	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
+	# render the quick-action buttons, so every Admin and User reads it.
+	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	# Read by the Stream Audio/Video and Upload Audio forms for whoever is starting a
 	# meeting -- the capture sample rate and the speaker-count field depend on which
-	# engine is selected -- so every signed-in user reads it. The Virtual Participant
+	# engine is selected -- so every Admin and User reads it. The Virtual Participant
 	# task role reads it with SigV4, which is what @aws_iam is here for.
-	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools @aws_iam
+	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Cognito user pools only, unlike its siblings above: the resolver behind
 	# this field decides from the caller's group membership, which a request
 	# signed with IAM credentials does not carry, so the declaration here
@@ -695,7 +706,7 @@ type Query @aws_cognito_user_pools
 	# The itemised cost estimate of one meeting, computed when read. Answered to
 	# the callers getCall answers -- an Admin, the owner, anyone the meeting is
 	# shared with, or a backend role with IAM -- and checked in the resolver.
-	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
+	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# One diagnosis started with startTroubleshooting, for the Admin who started it.
 	getTroubleshootingJob(JobId: ID!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The price table behind those estimates, for the Admin who edits it.
@@ -710,17 +721,17 @@ type Query @aws_cognito_user_pools
 	# Every profile and the baseline, without their bodies.
 	listConfigurationProfiles: ConfigurationProfileList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
-	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
+	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	exportMCPServerLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
-	listSkills: [Skill] @aws_cognito_user_pools @aws_iam
-	getSkill(skillId: ID!): Skill @aws_cognito_user_pools @aws_iam
-	exportSkill(skillId: ID!, format: String): AWSJSON @aws_cognito_user_pools @aws_iam
+	listSkills: [Skill] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	getSkill(skillId: ID!): Skill @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	exportSkill(skillId: ID!, format: String): AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	exportSkillLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
-	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
+	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
-	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools
+	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
@@ -1156,43 +1167,43 @@ input SentimentScoreInput {
 	Mixed: Float!
 }
 
-type Subscription {
+type Subscription @aws_iam {
 	onCreateCall: CreateCallOutput
-		@aws_subscribe(mutations: ["createCall"])
+		@aws_subscribe(mutations: ["createCall"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus", "updateCallAggregation", "updateRecordingUrl", "updateVideoRecordingUrl", "updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "updateCallWhiteboards", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"])
+		@aws_subscribe(mutations: ["updateCallStatus", "updateCallAggregation", "updateRecordingUrl", "updateVideoRecordingUrl", "updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "updateCallWhiteboards", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
-		@aws_subscribe(mutations: ["addTranscriptSegment"])
+		@aws_subscribe(mutations: ["addTranscriptSegment"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
-		@aws_subscribe(mutations: ["addVideoKeyframe"])
+		@aws_subscribe(mutations: ["addVideoKeyframe"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# Filtered on Owner and SharedWith by subscription.js, as the meeting's own
 	# messages are. Without CallId, every meeting the subscriber may see.
 	onMeetingNotification(CallId: ID): MeetingNotification
-		@aws_subscribe(mutations: ["publishMeetingNotification"])
+		@aws_subscribe(mutations: ["publishMeetingNotification"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# Every change to a meeting's whiteboards, filtered on Owner and SharedWith
 	# by subscription.js. A deleted whiteboard arrives with Deleted true.
 	onMeetingWhiteboard(CallId: ID): MeetingWhiteboard
-		@aws_subscribe(mutations: ["createMeetingWhiteboard", "updateMeetingWhiteboard", "deleteMeetingWhiteboard"])
+		@aws_subscribe(mutations: ["createMeetingWhiteboard", "updateMeetingWhiteboard", "deleteMeetingWhiteboard"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# Every change to a meeting's consent record. A subscriber that needs the
 	# evidence links reads getMeetingConsent again on each message.
 	onUpdateMeetingConsent(CallId: ID): MeetingConsentUpdate
-		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence", "verifyMeetingConsentEvidence"])
+		@aws_subscribe(mutations: ["startMeetingConsent", "recordMeetingConsentNotice", "setMeetingConsentParticipants", "recordMeetingConsentEvent", "attestMeetingConsent", "addMeetingConsentEvidence", "verifyMeetingConsentEvidence"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
-		@aws_subscribe(mutations: ["sendChatMessage"])
+		@aws_subscribe(mutations: ["sendChatMessage"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
-		@aws_subscribe(mutations: ["addChatToken"])
+		@aws_subscribe(mutations: ["addChatToken"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onShareMeetings: ShareMeetingsOutput
-		@aws_subscribe(mutations: ["shareMeetings"])
+		@aws_subscribe(mutations: ["shareMeetings"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onDeleteCall: DeleteCallOutput
-		@aws_subscribe(mutations: ["deleteCall"])
+		@aws_subscribe(mutations: ["deleteCall"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onUnshareCall: UnshareCallOutput
-		@aws_subscribe(mutations: ["unshareCall"])
+		@aws_subscribe(mutations: ["unshareCall"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onCreateVirtualParticipant: VirtualParticipant
-		@aws_subscribe(mutations: ["createVirtualParticipant", "joinAgainVirtualParticipant"])
+		@aws_subscribe(mutations: ["createVirtualParticipant", "joinAgainVirtualParticipant"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onUpdateVirtualParticipant: VirtualParticipant
-		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant", "rejoinVirtualParticipant"])
+		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant", "rejoinVirtualParticipant"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl
-		@aws_subscribe(mutations: ["toggleVNCPreview"])
+		@aws_subscribe(mutations: ["toggleVNCPreview"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -2434,7 +2445,7 @@ type ThinkingStepData @aws_cognito_user_pools @aws_iam {
 # has always answered: one record's "N#Label" buttons, plus its Version -- the
 # only key that is not a button, and the one the Edit Chat Buttons dialog sends
 # back as ExpectedVersion when it saves. Nothing recording who saved the record
-# is in it, because every signed-in user reads this field.
+# is in it, because every Admin and User reads this field.
 type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
 }
@@ -3153,6 +3164,7 @@ type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
 type User @aws_cognito_user_pools {
 	username: String!
 	email: String
+	# "Admin", "User" or "Participant".
 	role: String!
 	status: String
 	enabled: Boolean
@@ -3170,6 +3182,12 @@ input CreateUserInput {
 
 input DeleteUserInput {
 	username: String!
+}
+
+# role is "Admin", "User" or "Participant".
+input SetUserRoleInput {
+	username: String!
+	role: String!
 }
 
 type DeleteUserOutput @aws_cognito_user_pools {

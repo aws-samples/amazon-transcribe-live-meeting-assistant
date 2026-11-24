@@ -49,6 +49,8 @@ ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
 LOAD_SIM_DIR := utilities/load-simulator
 MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
+# The Cognito stack's Lambda triggers (lma-cognito-stack/source/<trigger>/).
+COGNITO_SOURCE_DIR := lma-cognito-stack/source
 STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requirements.txt
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
@@ -65,6 +67,7 @@ RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev
 PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
+	$(CURDIR)/$(COGNITO_SOURCE_DIR) \
 	$(CURDIR)/scripts/pr_review \
 	$(CURDIR)/scripts/ci \
 	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
@@ -444,7 +447,7 @@ test-cli: ## Run LMA CLI unit tests
 test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
-	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions $(MEETINGASSIST_TEST_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions $(MEETINGASSIST_TEST_DIR) $(COGNITO_SOURCE_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
 		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \

@@ -23,15 +23,23 @@ import {
   TextFilter,
 } from '@cloudscape-design/components';
 
-import { listUsers, createUser, deleteUser } from '../../graphql/queries/userManagementQueries';
+import { listUsers, createUser, deleteUser, setUserRole } from '../../graphql/queries/userManagementQueries';
 
 const client = generateClient();
 const logger = new ConsoleLogger('UserManagementPage');
 
-const ROLE_OPTIONS = [
-  { label: 'User', value: 'User' },
-  { label: 'Admin', value: 'Admin' },
+// The three roles (docs/user-based-access-control.md#roles).
+export const ROLE_OPTIONS = [
+  {
+    label: 'User',
+    value: 'User',
+    description: 'Their own meetings and those shared with them, and every meeting source',
+  },
+  { label: 'Admin', value: 'Admin', description: 'Every meeting, the configuration and user management' },
+  { label: 'Participant', value: 'Participant', description: 'Signs in to a home page only' },
 ];
+
+const ROLE_BADGE_COLORS = { Admin: 'red', User: 'blue', Participant: 'grey' };
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
@@ -42,7 +50,7 @@ const formatError = (err) => {
   return String(err);
 };
 
-const RoleBadge = ({ role = 'User' }) => <Badge color={role === 'Admin' ? 'red' : 'blue'}>{role}</Badge>;
+const RoleBadge = ({ role = 'User' }) => <Badge color={ROLE_BADGE_COLORS[role] || 'blue'}>{role}</Badge>;
 RoleBadge.propTypes = { role: PropTypes.string };
 
 const COLUMN_DEFINITIONS = [
@@ -91,6 +99,11 @@ const UserManagementPage = () => {
   const [newRole, setNewRole] = useState(ROLE_OPTIONS[0]);
   const [createBusy, setCreateBusy] = useState(false);
   const [createErr, setCreateErr] = useState(null);
+
+  const [roleOpen, setRoleOpen] = useState(false);
+  const [roleChoice, setRoleChoice] = useState(ROLE_OPTIONS[0]);
+  const [roleBusy, setRoleBusy] = useState(false);
+  const [roleErr, setRoleErr] = useState(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -158,6 +171,39 @@ const UserManagementPage = () => {
     }
   };
 
+  const roleTarget = selected.length === 1 ? selected[0] : null;
+
+  const handleOpenRole = () => {
+    if (!roleTarget) return;
+    setRoleChoice(ROLE_OPTIONS.find((option) => option.value === roleTarget.role) || ROLE_OPTIONS[0]);
+    setRoleErr(null);
+    setRoleOpen(true);
+  };
+
+  const handleChangeRole = async () => {
+    if (!roleTarget) return;
+    setRoleBusy(true);
+    setRoleErr(null);
+    try {
+      await client.graphql({
+        query: setUserRole,
+        variables: { input: { username: roleTarget.username, role: roleChoice.value } },
+      });
+      setSuccess(
+        `${roleTarget.email || roleTarget.username} is now ${roleChoice.value === 'Admin' ? 'an' : 'a'} ` +
+          `${roleChoice.value}. The change applies at their next sign-in or within an hour.`,
+      );
+      setRoleOpen(false);
+      setSelected([]);
+      await fetchUsers();
+    } catch (err) {
+      logger.error('setUserRole failed', err);
+      setRoleErr(formatError(err));
+    } finally {
+      setRoleBusy(false);
+    }
+  };
+
   const handleOpenDelete = () => {
     setDeleteErr(null);
     setDeleteOpen(true);
@@ -211,12 +257,15 @@ const UserManagementPage = () => {
         header={
           <Header
             variant="h1"
-            description="Create and delete LMA users (Admin only). New users get a temporary password by email."
+            description="Create and delete users and choose their roles (Admin only). New users get an invitation."
             counter={`(${users.length})`}
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button iconName="refresh" onClick={fetchUsers} loading={loading}>
                   Refresh
+                </Button>
+                <Button disabled={!roleTarget} onClick={handleOpenRole}>
+                  Change role
                 </Button>
                 <Button disabled={selected.length === 0} onClick={handleOpenDelete}>
                   Delete
@@ -294,6 +343,45 @@ const UserManagementPage = () => {
               selectedOption={newRole}
               options={ROLE_OPTIONS}
               onChange={({ detail }) => setNewRole(detail.selectedOption)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Change Role Modal */}
+      <Modal
+        visible={roleOpen}
+        onDismiss={() => setRoleOpen(false)}
+        header="Change role"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setRoleOpen(false)} disabled={roleBusy}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleChangeRole}
+                loading={roleBusy}
+                disabled={!roleTarget || roleChoice.value === roleTarget.role}
+              >
+                Change role
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {roleErr && <Alert type="error">{roleErr}</Alert>}
+          <Box variant="p">
+            Choose the role of <strong>{roleTarget?.email || roleTarget?.username}</strong>. The change applies at their
+            next sign-in or token refresh, within an hour.
+          </Box>
+          <FormField label="Role">
+            <Select
+              selectedOption={roleChoice}
+              options={ROLE_OPTIONS}
+              onChange={({ detail }) => setRoleChoice(detail.selectedOption)}
             />
           </FormField>
         </SpaceBetween>

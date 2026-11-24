@@ -9,11 +9,11 @@ import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
-import useUserGroups from '../../hooks/use-user-groups';
 import useNotificationCount from '../../hooks/use-notification-count';
 import useNotificationPreferences from '../../hooks/use-notification-preferences';
 import { meetingCallIdOf, meetingHref } from '../meeting-notifications/meeting-route';
 import NotificationPreferencesModal from '../meeting-notifications/NotificationPreferencesModal';
+import { PARTICIPANT, effectiveRole } from '../common/roles';
 
 const logger = new ConsoleLogger('TopNavigation');
 
@@ -54,13 +54,17 @@ const SignOutModal = ({ visible, setVisible }) => {
 };
 
 const CallAnalyticsTopNavigation = () => {
-  const { user, authState } = useAppContext();
-  const { isAdmin } = useUserGroups();
+  const { user, authState, currentSession } = useAppContext();
+  // The role from the session the app already holds, so it is known on the
+  // first render. A Participant has no meetings, so no meeting notifications to
+  // count or preferences to read; the notifications menu is not offered.
+  const role = effectiveRole(currentSession?.tokens?.idToken?.payload?.['cognito:groups'] || []);
+  const isParticipant = role === PARTICIPANT;
   const [email, setEmail] = useState('');
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
   const [isPreferencesVisible, setIsPreferencesVisible] = useState(false);
   const location = useLocation();
-  const signedIn = authState === 'authenticated' && Boolean(user?.username);
+  const signedIn = authState === 'authenticated' && Boolean(user?.username) && !isParticipant;
   const { mutedEverywhere, unmuteEverywhere } = useNotificationPreferences({ enabled: signedIn });
   // Meeting notifications that arrived during this visit, for meetings this
   // user owns or that are shared with them (docs/meeting-notifications.md).
@@ -92,7 +96,7 @@ const CallAnalyticsTopNavigation = () => {
 
   const fallbackId = user?.signInDetails?.loginId || user?.username || 'user';
   const displayEmail = email || fallbackId;
-  const roleLabel = isAdmin ? 'admin' : 'user';
+  const roleLabel = role.toLowerCase();
   const userId = `${displayEmail} (${roleLabel})`;
   return (
     <>
@@ -101,30 +105,34 @@ const CallAnalyticsTopNavigation = () => {
           identity={{ href: '#', title: 'Live Meeting Assistant' }}
           i18nStrings={{ overflowMenuTriggerText: 'More' }}
           utilities={[
-            {
-              type: 'menu-dropdown',
-              iconName: 'notification',
-              ariaLabel:
-                notificationCount.total > 0
-                  ? `Meeting notifications, ${notificationCount.total} during this visit`
-                  : 'Meeting notifications',
-              title: 'Meeting notifications during this visit',
-              badge: notificationCount.total > 0,
-              text: notificationCount.total > 0 ? String(notificationCount.total) : undefined,
-              items: [
-                ...(notificationCount.meetings.length === 0
-                  ? [{ id: 'none', text: 'None during this visit', disabled: true }]
-                  : notificationCount.meetings.map((meeting) => ({
-                      id: `meeting:${meeting.callId}`,
-                      text: `${meeting.label} (${meeting.count})`,
-                      href: meetingHref(meeting.callId),
-                    }))),
-                { id: 'notification-settings', text: 'Notification settings' },
-              ],
-              onItemClick: ({ detail }) => {
-                if (detail.id === 'notification-settings') setIsPreferencesVisible(true);
-              },
-            },
+            ...(isParticipant
+              ? []
+              : [
+                  {
+                    type: 'menu-dropdown',
+                    iconName: 'notification',
+                    ariaLabel:
+                      notificationCount.total > 0
+                        ? `Meeting notifications, ${notificationCount.total} during this visit`
+                        : 'Meeting notifications',
+                    title: 'Meeting notifications during this visit',
+                    badge: notificationCount.total > 0,
+                    text: notificationCount.total > 0 ? String(notificationCount.total) : undefined,
+                    items: [
+                      ...(notificationCount.meetings.length === 0
+                        ? [{ id: 'none', text: 'None during this visit', disabled: true }]
+                        : notificationCount.meetings.map((meeting) => ({
+                            id: `meeting:${meeting.callId}`,
+                            text: `${meeting.label} (${meeting.count})`,
+                            href: meetingHref(meeting.callId),
+                          }))),
+                      { id: 'notification-settings', text: 'Notification settings' },
+                    ],
+                    onItemClick: ({ detail }) => {
+                      if (detail.id === 'notification-settings') setIsPreferencesVisible(true);
+                    },
+                  },
+                ]),
             {
               type: 'menu-dropdown',
               text: userId,

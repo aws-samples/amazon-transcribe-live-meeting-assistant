@@ -435,6 +435,14 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("README.md", "vp_template"),
         ("lma-ai-stack/source/lambda_functions/vnc_edge_token/index.py", "vp_template"),
         ("lma-ai-stack/source/appsync/schema.graphql", "vp_template"),
+        # The role matrix and the suites that hold their copies of the role rule to it.
+        ("lma-ai-stack/source/appsync/role-matrix.json", "ui"),
+        ("lma-ai-stack/source/appsync/role-matrix.json", "transcriber"),
+        ("lma-ai-stack/source/appsync/role-matrix.json", "lambdas"),
+        ("lma-ai-stack/source/appsync/role-matrix.json", "integ_plumbing"),
+        ("lma-ai-stack/source/appsync/schema.graphql", "integ_plumbing"),
+        # The Cognito pre token generation trigger is tested with the Lambdas.
+        ("lma-cognito-stack/source/pre_token_generation/index.py", "lambdas"),
         # ...and read the AI stack through the AI stack tests' template helper.
         ("lma-ai-stack/test/ai_stack_templates.py", "vp_template"),
         # The ASR Lambdas read the runtime catalogue; the bundle check reads lma-main.
