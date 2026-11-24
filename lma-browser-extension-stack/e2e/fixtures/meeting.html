@@ -7,7 +7,8 @@
   markup for capture to start: Platform Detected reads "n/a" and the name and
   topic are typed in by hand, as they are on any page the extension has no
   reader for. ?audio=<file> plays a WAV served beside this page on a loop, as
-  the other participants' audio (the captured tab's audio).
+  the other participants' audio (the captured tab's audio). Only a plain file
+  name ending in .wav is accepted, and it is loaded from this page's directory.
 -->
 <html lang="en">
   <head>
@@ -19,10 +20,10 @@
     <p id="participants">Participants: E2E Remote Speaker</p>
     <audio id="meeting-audio" loop autoplay></audio>
     <script>
-      const src = new URLSearchParams(window.location.search).get('audio');
-      if (src) {
+      const name = new URLSearchParams(window.location.search).get('audio') || '';
+      if (/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\.wav$/.test(name)) {
         const audio = document.getElementById('meeting-audio');
-        audio.src = src;
+        audio.src = new URL(encodeURIComponent(name), window.location.href).href;
         audio.play().catch((error) => console.log('meeting audio did not start', String(error)));
       }
     </script>
