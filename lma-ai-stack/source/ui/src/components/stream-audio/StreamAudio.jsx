@@ -239,8 +239,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const continueSessionRef = useRef(null);
 
   // Screen video (screen-video.js): offered only when the transcriber's
-  // settings answer allows it for this page, and off at the start of every
-  // meeting. `videoState.status` is off, waiting (for an opt-in meeting's
+  // settings answer allows it for this page; it goes back to off once a
+  // meeting has streamed (stopRecording). `videoState.status` is off, waiting (for an opt-in meeting's
   // consent), on, stopped (by the user) or failed (stopped on its own).
   const [videoEnabled, setVideoEnabled] = useState(false);
   // Whether the consent notice has been copied for this meeting (see videoSwitchLocked).

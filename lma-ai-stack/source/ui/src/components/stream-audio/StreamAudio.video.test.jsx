@@ -9,7 +9,8 @@
  * the screen capture and MediaRecorder faked.
  *
  * - The switch is shown only when the settings answer allows video for this
- *   page, and is off at the start of every meeting.
+ *   page; it goes back to off once a meeting has streamed, and is kept after a
+ *   cancelled share picker.
  * - With it on, the share is asked for at 5 frames a second, the surface is
  *   named, a whole screen is warned about, and the video goes over its own
  *   connection (START_VIDEO with the meeting's callId, chunks, END_VIDEO).
