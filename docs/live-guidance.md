@@ -149,6 +149,12 @@ meeting with live guidance on can start a run. A run happens:
 A run that fails is logged and skipped. It is not retried; the next run, an
 interval later, reads the meeting again.
 
+A run reads the segments said since the last run. It also reads a segment that
+ended up to two minutes before the last run's latest segment but was finalized
+after that run, such as a long utterance on another channel; the meeting's
+guidance state keeps the segments each run saw near its end, so no segment is
+read twice.
+
 ## The digest
 
 The **Digest so far** button beside the switch, and the MCP tool

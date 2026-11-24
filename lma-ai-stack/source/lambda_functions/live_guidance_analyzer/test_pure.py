@@ -132,6 +132,39 @@ def test_only_segments_after_the_marker_are_new():
     assert len(pure.new_segments(SEGMENTS, None)) == 24
 
 
+def _segment(segment_id, end):
+    return pure.Segment(segment_id=segment_id, start=end - 3, end=end, speaker="Lee", text="x")
+
+
+def test_a_segment_finalized_after_the_last_run_but_ending_before_its_marker_is_new():
+    """A long utterance on another channel can end before the marker and arrive after it."""
+    shown = ["a", "b"]
+    segments = [_segment("a", 100), _segment("late", 95), _segment("b", 110), _segment("c", 130)]
+    fresh = pure.new_segments(segments, 110, shown)
+    assert [s.segment_id for s in fresh] == ["late", "c"]
+
+
+def test_a_segment_before_the_overlap_is_not_shown_again():
+    segments = [_segment("old", 110 - pure.OVERLAP_SECONDS - 1), _segment("c", 130)]
+    assert [s.segment_id for s in pure.new_segments(segments, 110, [])] == ["c"]
+
+
+def test_a_state_row_without_shown_ids_is_read_by_its_marker_alone():
+    segments = [_segment("late", 95), _segment("c", 130)]
+    assert [s.segment_id for s in pure.new_segments(segments, 110, None)] == ["c"]
+
+
+def test_the_shown_ids_kept_are_those_near_the_marker():
+    old = 110 - pure.OVERLAP_SECONDS - 1
+    segments = [
+        _segment("old", old),
+        _segment("a", 100),
+        _segment("b", 110),
+        _segment("unseen", 120),
+    ]
+    assert pure.shown_near(segments, ["old", "a", "b"], 110) == ["a", "b"]
+
+
 def test_a_long_transcript_keeps_its_most_recent_part(monkeypatch):
     monkeypatch.setattr(pure, "MAX_TRANSCRIPT_CHARS", 300)
     text, names = pure.transcript_block(SEGMENTS)

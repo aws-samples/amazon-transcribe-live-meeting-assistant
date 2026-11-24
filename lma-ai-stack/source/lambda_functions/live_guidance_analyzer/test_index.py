@@ -373,6 +373,35 @@ def test_a_run_reads_only_what_was_said_since_the_last_one(world):
     assert "Price and term agreed" in transcript  # the summary so far
 
 
+def test_a_segment_finalized_late_is_shown_to_the_next_run_once(world):
+    state = world()
+    automatic()
+    marker = state["dynamo"].state["LastSegmentEndTime"]
+    assert json.loads(state["dynamo"].state["ShownSegmentIds"])
+    # Finalized after the first run read the transcript, though it ended before its marker.
+    state["dynamo"].segments.append(
+        {
+            "SegmentId": "finalized-late",
+            "Speaker": "Dana",
+            "Channel": "LOCAL",
+            "Transcript": "A long point that was finalized late.",
+            "StartTime": marker - 30,
+            "EndTime": marker - 1,
+            "IsPartial": False,
+        }
+    )
+    later(state)
+    automatic()
+    second = state["bedrock"].calls[1]["messages"][0]["content"][-1]["text"]
+    assert "A long point that was finalized late." in second
+    assert "Thanks for joining" not in second
+    assert state["dynamo"].state["LastSegmentEndTime"] > marker
+    later(state)
+    automatic()
+    third = state["bedrock"].calls[2]["messages"][0]["content"][-1]["text"]
+    assert "A long point that was finalized late." not in third
+
+
 def test_a_failed_run_is_logged_and_skipped_not_retried(world):
     state = world(answers=[RuntimeError("throttled")])
     result = automatic()
