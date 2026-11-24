@@ -527,6 +527,7 @@ Parameters:
       - regulated-notify
       - team-hosted-external
       - customer-account
+      - minimised-content
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built
@@ -542,9 +543,15 @@ Parameters:
       objects), team-hosted-external (for a deployment in a team's own account
       that records meetings with external organizations: each participant must
       consent first, no audio is recorded, requests made in the meeting are off,
-      and web search and the installed MCP servers are not used) or
+      and web search and the installed MCP servers are not used),
       customer-account (a starting point for a deployment in the account of the
-      organization whose meetings it records; see docs/hosting-models.md). Each
+      organization whose meetings it records; see docs/hosting-models.md) or
+      minimised-content (the summary is the only meeting content kept: consent
+      as in regulated-consent-required, the transcript is deleted as soon as the
+      summary is written, no audio or screen video is recorded, and the summary
+      and the meeting assistant are told to leave out health information and
+      other sensitive personal information; set EnableVideoRecording to false
+      for no meeting video; see docs/privacy-and-data-handling.md). Each
       preset is also offered on the Configuration page as a
       read-only Managed profile. none is accepted as standard, for stacks deployed
       with it. CustomConfigPath is applied over this when provided.

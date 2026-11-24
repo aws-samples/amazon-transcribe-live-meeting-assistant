@@ -215,6 +215,7 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
         "regulated-notify",
         "team-hosted-external",
         "customer-account",
+        "minimised-content",
     ]
 
 

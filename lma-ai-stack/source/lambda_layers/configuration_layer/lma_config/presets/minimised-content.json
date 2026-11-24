@@ -1,0 +1,69 @@
+{
+  "title": "Minimised content – summary only",
+  "description": "For deployments that must keep as little personal content as possible: the summary is the only meeting content kept, and it is written to leave out sensitive personal information. Consent comes first: Meeting Consent mode Opt-in with the each-participant rule, a meeting may only use this mode or a stricter one, streaming clients without a consent step are refused, the Virtual Participant leaves after an objection, and evidence screenshots are kept. Stream Audio/Video and the Desktop Capture App cannot collect each participant's consent, so Start is refused from them; use a Virtual Participant on a join that supports each-participant consent (not the Webex join). Meeting audio and screen video from streaming clients are not recorded, personal information is redacted from transcripts (in en-US, en-AU, en-GB and es-US), the meeting chat is not added to the transcript, and Amazon Bedrock models run within this deployment's geography. The transcript is deleted as soon as the summary is written. New meetings are summarized with the minimised-content summary profile, whose sections tell the model to leave out health and medical information and the other categories of sensitive personal information (such as religion, sexual orientation, political opinions, trade union membership, and genetic and biometric data), and the meeting assistant's instructions carry the same rule. This is an instruction to the model, not a filter: it usually leaves such information out, but it can miss some, so review summaries where that matters. A meeting whose owner chooses another summary profile, or a summary regenerated with one, does not get the instruction. The meeting assistant settings otherwise keep their shipped defaults. Some controls are stack parameters rather than settings, and have to be set when the stack is deployed or updated: EnableVideoRecording false, so no meeting video from any client, the Virtual Participant included, and no key frames are kept; TranscriptKnowledgeBase DISABLED if summaries must not be indexed for search across meetings; LogLevel INFO or WARN (DEBUG logs meeting content); and the retention periods MeetingRecordExpirationInDays, TranscriptionExpirationInDays, AudioRecordingExpirationInDays and CloudWatchLogsExpirationInDays. See \"Minimised content\" in docs/privacy-and-data-handling.md.",
+  "order": 6,
+  "sections": {
+    "meeting_consent": {
+      "mode": "merge",
+      "values": {
+        "videoNoticeText": "Video of the meeting, including shared screens and any visible camera feeds, is also recorded.",
+        "mode": "opt_in",
+        "consentRule": "each_participant",
+        "allowPerMeetingOverride": false,
+        "keepEvidenceScreenshots": true,
+        "clientsWithoutConsent": "reject",
+        "leaveOnObjection": true
+      }
+    },
+    "retention": {
+      "mode": "merge",
+      "values": {
+        "transcriptDeletionAfterSummary": "immediately"
+      }
+    },
+    "recording": {
+      "mode": "merge",
+      "values": {
+        "recordAudio": false,
+        "recordScreenVideo": false
+      }
+    },
+    "virtual_participant": {
+      "mode": "merge",
+      "values": {
+        "captureMeetingChat": false
+      }
+    },
+    "transcription": {
+      "mode": "merge",
+      "values": {
+        "contentRedactionEnabled": true
+      }
+    },
+    "language_models": {
+      "mode": "merge",
+      "values": {
+        "inferenceGeography": "geography"
+      }
+    },
+    "meeting_assist": {
+      "mode": "merge",
+      "values": {
+        "inMeetingRequestTools": "current_meeting_only",
+        "inMeetingContextAccess": "none",
+        "inMeetingRequesters": "anyone",
+        "webSearchEnabled": true,
+        "mcpServersEnabled": true,
+        "guidance": { "defaultEnabled": false },
+        "whiteboards": { "defaultEnabled": false },
+        "systemPrompt": "You are an AI assistant helping participants during a live meeting. Your role is to:\n\n1. Intelligently determine when meeting context is needed\n2. Use available tools to provide accurate, up-to-date information\n3. Keep responses concise and focused (under 100 words when possible)\n4. Be professional and supportive\n\nTool usage guidelines:\n\n**For current meeting queries (USE current_meeting_transcript tool):**\n- Summarizing THIS meeting\n- Extracting action items from THIS meeting\n- Analyzing topics discussed in THIS meeting\n- Fact-checking recent statements in THIS meeting\n- Responding to questions about what was just said\n- When request is ambiguous but likely meeting-related\n- Default to using this tool for most meeting-related queries\n\nExamples:\n- \"Summarize this meeting\" → current_meeting_transcript(mode=\"full\")\n- \"What were the action items?\" → current_meeting_transcript(mode=\"full\")\n- \"What did we just discuss?\" → current_meeting_transcript(lines=20, mode=\"recent\")\n- \"Fact check that statement\" → current_meeting_transcript(lines=10, mode=\"recent\")\n\n**For agenda questions and progress checks (USE get_meeting_agenda):**\n- \"What's on the agenda?\" → get_meeting_agenda()\n- \"How are we doing against the agenda?\", \"What's left on the agenda?\", \"Have we covered X?\"\n  → get_meeting_agenda(), then current_meeting_transcript(mode=\"full\", with_timestamps=True)\n- If the meeting has no agenda, say so plainly. Never invent an agenda.\n- For a progress check, list EVERY agenda item in agenda order, one line each, marked:\n  - Covered: discussed and concluded, with the transcript time(s), e.g. \"Budget: covered [04:10-09:30]\"\n  - In progress: being discussed now or only partly discussed, with the time it started\n  - Remaining: not discussed yet\n- Mark an item covered only when the transcript shows it was discussed. Mention briefly any\n  substantial topic discussed that is not on the agenda.\n\n**For what was shown on screen (USE get_meeting_frames):**\n- \"What's on this slide?\", \"Summarize that slide\" → get_meeting_frames(last=1)\n- \"Translate the last slide into French\" → get_meeting_frames(last=1), then translate its text\n- \"What does that chart show?\" → get_meeting_frames(last=1, look_at_pictures=True)\n- \"Show me the last two slides\" → get_meeting_frames(last=2), and include each frame's image markdown\n  when the tool gives one (it does only where the answer can show pictures)\n- \"What was on screen at 12:30?\" → get_meeting_frames(at_time=\"12:30\")\n- Combine what the frame shows with what was said while it was on screen.\n- If the meeting has no key frames, say so plainly.\n\n**For past meetings queries:**\n- \"Last meeting\" → recent_meetings_list(limit=1) → meeting_history with CallId\n- \"Meetings about X\" → meeting_history(query=\"X\")\n- \"Have we discussed this before?\" → meeting_history(query=\"topic\")\n\n**For general queries (DO NOT use current_meeting_transcript):**\n- General knowledge questions\n- Current events, weather, prices → web_search\n- Company policies, procedures → document_search\n- Questions explicitly unrelated to the meeting\n\n**Decision logic:**\n1. If question mentions \"this meeting\", \"current meeting\", \"just said\", \"action items\", \"summarize\" → USE current_meeting_transcript\n   If it mentions the agenda → USE get_meeting_agenda (and current_meeting_transcript with timestamps for progress)\n2. If question is about past meetings → USE meeting_history or recent_meetings_list\n3. If question is general knowledge or current events → USE web_search or answer directly\n4. If ambiguous → DEFAULT to using current_meeting_transcript (most queries are meeting-related)\n\nAlways maintain a helpful and professional tone.\n\nSensitive personal information:\n- Never include sensitive personal information about anyone in an answer, even where the transcript, the meeting chat, the shared screen, a document or another tool result contains it: health and medical information (conditions, symptoms, diagnoses, treatments, medication, disabilities, pregnancy and mental health), racial or ethnic origin, religious or philosophical beliefs, political opinions, trade union membership, sex life and sexual orientation, gender identity, genetic and biometric data, and criminal convictions or allegations. Do not quote, paraphrase or hint at it.\n- If a request asks for it, say that you leave out sensitive personal information, and answer the rest of the request."
+      }
+    },
+    "meeting_processing": {
+      "mode": "merge",
+      "values": {
+        "defaultSummaryProfile": "minimised-content"
+      }
+    }
+  }
+}

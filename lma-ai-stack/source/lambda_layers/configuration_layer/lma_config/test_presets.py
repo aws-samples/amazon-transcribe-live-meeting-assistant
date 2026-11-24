@@ -25,6 +25,38 @@ from lma_config.presets import apply_preset, preset_by_id, preset_offered
 HERE = Path(__file__).resolve().parent
 DEFAULTS = HERE.parents[2] / "lambda_functions" / "configuration_seeder" / "defaults"
 
+#: The meeting assistant's instructions as the release ships them, which every
+#: preset but Minimised content sets.
+SHIPPED_ASSISTANT_INSTRUCTIONS = shipped_setting_defaults()["meeting_assist"]["systemPrompt"]
+
+#: The categories of sensitive personal information the Minimised content
+#: preset's summary profile and assistant instructions tell the model to leave out.
+SENSITIVE_CATEGORIES = (
+    "health and medical information (conditions, symptoms, diagnoses, treatments, medication, "
+    "disabilities, pregnancy and mental health), racial or ethnic origin, religious or "
+    "philosophical beliefs, political opinions, trade union membership, sex life and sexual "
+    "orientation, gender identity, genetic and biometric data, and criminal convictions or "
+    "allegations"
+)
+
+#: What the Minimised content preset adds after the shipped assistant instructions.
+ASSISTANT_SENSITIVE_INFORMATION_RULE = (
+    "\n\nSensitive personal information:\n"
+    "- Never include sensitive personal information about anyone in an answer, even where the "
+    "transcript, the meeting chat, the shared screen, a document or another tool result contains "
+    "it: " + SENSITIVE_CATEGORIES + ". Do not quote, paraphrase or hint at it.\n"
+    "- If a request asks for it, say that you leave out sensitive personal information, and "
+    "answer the rest of the request."
+)
+
+#: What the minimised-content summary profile adds after each default section it uses.
+SUMMARY_SENSITIVE_INFORMATION_RULE = (
+    "<br><br>Leave out sensitive personal information about anyone, even where it was said in "
+    "the meeting, typed in the chat or shown on the shared screen: " + SENSITIVE_CATEGORIES + ". "
+    "Do not quote, paraphrase or hint at it. Where it bears on a decision or an action item, "
+    "write only that a personal matter was raised, never what it was or whom it concerns."
+)
+
 #: The meeting assistant and summary settings at their shipped defaults, which
 #: the four presets other than the two hosting presets set.
 ASSISTANT_DEFAULTS = {
@@ -36,6 +68,7 @@ ASSISTANT_DEFAULTS = {
         "mcpServersEnabled": True,
         "guidance": {"defaultEnabled": False},
         "whiteboards": {"defaultEnabled": False},
+        "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
     },
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
@@ -140,6 +173,7 @@ PRESET_VALUES = {
             "mcpServersEnabled": False,
             "guidance": {"defaultEnabled": True},
             "whiteboards": {"defaultEnabled": False},
+            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
         },
         "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
     },
@@ -166,8 +200,30 @@ PRESET_VALUES = {
             "mcpServersEnabled": True,
             "guidance": {"defaultEnabled": False},
             "whiteboards": {"defaultEnabled": False},
+            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS,
         },
         "meeting_processing": {"defaultSummaryProfile": "default"},
+    },
+    "minimised-content": {
+        "meeting_consent": {
+            "videoNoticeText": VIDEO_NOTICE_TEXT,
+            "mode": "opt_in",
+            "consentRule": "each_participant",
+            "allowPerMeetingOverride": False,
+            "keepEvidenceScreenshots": True,
+            "clientsWithoutConsent": "reject",
+            "leaveOnObjection": True,
+        },
+        "retention": {"transcriptDeletionAfterSummary": "immediately"},
+        "recording": {"recordAudio": False, "recordScreenVideo": False},
+        "virtual_participant": {"captureMeetingChat": False},
+        "transcription": {"contentRedactionEnabled": True},
+        "language_models": {"inferenceGeography": "geography"},
+        "meeting_assist": {
+            **ASSISTANT_DEFAULTS["meeting_assist"],
+            "systemPrompt": SHIPPED_ASSISTANT_INSTRUCTIONS + ASSISTANT_SENSITIVE_INFORMATION_RULE,
+        },
+        "meeting_processing": {"defaultSummaryProfile": "minimised-content"},
     },
 }
 
@@ -283,6 +339,73 @@ def test_every_preset_sets_the_meeting_assistant_and_summary_settings():
     for preset_id, values in PRESET_VALUES.items():
         assert set(values["meeting_assist"]) == set(ASSISTANT_DEFAULTS["meeting_assist"]), preset_id
         assert set(values["meeting_processing"]) == {"defaultSummaryProfile"}, preset_id
+
+
+def _shipped_summary_profiles():
+    return json.loads((DEFAULTS / "SummaryProfiles.json").read_text(encoding="utf-8"))
+
+
+def test_each_presets_default_summary_profile_ships_with_the_release():
+    """A name that is not a shipped profile would summarize new meetings with the default."""
+    shipped = set(_shipped_summary_profiles()) | {"default"}
+    for preset_id, values in PRESET_VALUES.items():
+        assert values["meeting_processing"]["defaultSummaryProfile"] in shipped, preset_id
+
+
+def test_the_minimised_content_assistant_instructions_add_the_rule_to_the_shipped_text():
+    """Nothing of the shipped instructions is lost; the rule follows them."""
+    prompt = preset_by_id("minimised-content")["Sections"]["meeting_assist"]["values"][
+        "systemPrompt"
+    ]
+    assert prompt == SHIPPED_ASSISTANT_INSTRUCTIONS + ASSISTANT_SENSITIVE_INFORMATION_RULE
+    assert SENSITIVE_CATEGORIES in prompt
+    for preset_id in PRESET_VALUES:
+        if preset_id != "minimised-content":
+            values = preset_by_id(preset_id)["Sections"]["meeting_assist"]["values"]
+            assert SENSITIVE_CATEGORIES not in values["systemPrompt"], preset_id
+
+
+def test_the_minimised_content_summary_profile_carries_the_rule_in_every_section():
+    profile = _shipped_summary_profiles()["minimised-content"]
+    default = json.loads((DEFAULTS / "LLMPromptSummaryTemplate.json").read_text(encoding="utf-8"))
+    assert profile["structuredActionItems"] is False
+    assert list(profile["prompts"]) == ["SUMMARY", "ACTIONS", "AGENDA COVERAGE"]
+    for name, prompt in profile["prompts"].items():
+        # The default section's prompt, unchanged, with the rule after it.
+        assert prompt == default[name] + SUMMARY_SENSITIVE_INFORMATION_RULE, name
+        assert SENSITIVE_CATEGORIES in prompt, name
+    assert "not guaranteed" in profile["description"]
+
+
+def test_the_minimised_content_preset_selects_its_summary_profile_and_deletes_the_transcript():
+    sections = preset_by_id("minimised-content")["Sections"]
+    assert sections["meeting_processing"]["values"]["defaultSummaryProfile"] == "minimised-content"
+    assert sections["retention"]["values"]["transcriptDeletionAfterSummary"] == "immediately"
+    assert sections["recording"]["values"] == {"recordAudio": False, "recordScreenVideo": False}
+    consent = sections["meeting_consent"]["values"]
+    assert (consent["mode"], consent["consentRule"], consent["allowPerMeetingOverride"]) == (
+        "opt_in",
+        "each_participant",
+        False,
+    )
+    assert consent["clientsWithoutConsent"] == "reject"
+
+
+def test_the_minimised_content_preset_names_the_controls_set_at_deploy_time():
+    description = preset_by_id("minimised-content")["Description"]
+    for control in (
+        "EnableVideoRecording",
+        "TranscriptKnowledgeBase",
+        "LogLevel",
+        "MeetingRecordExpirationInDays",
+        "TranscriptionExpirationInDays",
+        "AudioRecordingExpirationInDays",
+        "CloudWatchLogsExpirationInDays",
+        "docs/privacy-and-data-handling.md",
+    ):
+        assert control in description, control
+    # The omission is the model following an instruction, and the description says so.
+    assert "not a filter" in description
 
 
 @pytest.mark.parametrize(

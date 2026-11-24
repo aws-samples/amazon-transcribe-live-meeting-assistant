@@ -103,7 +103,15 @@ def test_an_object_setting_is_read_only_from_an_object():
 
 @pytest.mark.parametrize("preset", presets.shipped_presets(), ids=lambda p: p["Id"])
 def test_every_managed_preset_carries_the_shipped_instructions(preset):
-    # A Managed profile is its preset applied over the baseline.
+    # A Managed profile is its preset applied over the baseline. Minimised
+    # content adds a rule after the shipped text (test_presets holds its words);
+    # every other preset carries the shipped text exactly.
     managed = presets.apply_preset({"meeting_assist": _shipped()}, preset)
-    assert managed["meeting_assist"]["systemPrompt"] == _shipped()["systemPrompt"]
+    instructions = managed["meeting_assist"]["systemPrompt"]
+    if preset["Id"] == "minimised-content":
+        assert instructions.startswith(
+            _shipped()["systemPrompt"] + "\n\nSensitive personal information:\n"
+        )
+    else:
+        assert instructions == _shipped()["systemPrompt"]
     assert managed["meeting_assist"]["toolSelection"] == {"mcpServers": {}, "skills": {}}

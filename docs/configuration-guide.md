@@ -383,7 +383,7 @@ installed** and has no effect.
 ### Configuration presets
 
 A **preset** is a complete organizational default for consent, retention,
-privacy and what the meeting assistant may reach. All six set the same settings,
+privacy and what the meeting assistant may reach. All seven set the same settings,
 listed below, and change only those, so applying one sets every one of them
 whichever preset was applied before, and every other setting stays as it is.
 They are the choices of the `ConfigurationPreset` stack parameter, and each is
@@ -403,33 +403,51 @@ The presets, by id:
 - `customer-account`: **Customer account**, a starting point for a deployment
   in the account of the organization whose meetings it records. See
   [Hosting Models](hosting-models.md).
+- `minimised-content`: **Minimised content – summary only**, for a deployment
+  that must keep as little personal content as possible. See
+  [Minimised content](privacy-and-data-handling.md#minimised-content).
 
-| Setting | `standard` | `internal-meetings-notify` | `regulated-consent-required` | `regulated-notify` | `team-hosted-external` | `customer-account` |
-|---|---|---|---|---|---|---|
-| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in |
-| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
-| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | On |
-| Meeting Consent › Keep evidence screenshots | On | On | On | On | On | On |
-| Meeting Consent › Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
-| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting |
-| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
-| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off |
-| Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off |
-| Meeting Recording › Record screen video from streaming clients | On | On | Off | Off | Off | On |
-| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off | On | On |
-| Amazon Transcribe › Redact personal information | Off | Off | On | On | Off | Off |
-| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment | Global | Global |
-| Meeting Assistant › Web search | On | On | On | On | Off | Off |
-| Meeting Assistant › MCP servers | On | On | On | On | Off | On |
-| Meeting Assistant › In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
-| Meeting Assistant › In-meeting requests: meeting context and checklist | None | None | None | None | None | None |
-| Meeting Assistant › In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone |
-| Meeting Processing › Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` |
+| Setting | `standard` | `internal-meetings-notify` | `regulated-consent-required` | `regulated-notify` | `team-hosted-external` | `customer-account` | `minimised-content` |
+|---|---|---|---|---|---|---|---|
+| Meeting Consent › Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in | Opt-in |
+| Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
+| Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | On | Off (a meeting may only use this mode or a stricter one) |
+| Meeting Consent › Keep evidence screenshots | On | On | On | On | On | On | On |
+| Meeting Consent › Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
+| Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting |
+| Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off | On |
+| Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off | Immediately |
+| Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off | Off |
+| Meeting Recording › Record screen video from streaming clients | On | On | Off | Off | Off | On | Off |
+| Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off | On | On | Off |
+| Amazon Transcribe › Redact personal information | Off | Off | On | On | Off | Off | On |
+| Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment | Global | Global | Same geography as this deployment |
+| Meeting Assistant › Web search | On | On | On | On | Off | Off | On |
+| Meeting Assistant › MCP servers | On | On | On | On | Off | On | On |
+| Meeting Assistant › In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
+| Meeting Assistant › In-meeting requests: meeting context and checklist | None | None | None | None | None | None | None |
+| Meeting Assistant › In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone | Anyone |
+| Meeting Assistant › Assistant instructions | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text | Shipped text, followed by the [sensitive personal information rule](privacy-and-data-handling.md#minimised-content) |
+| Meeting Processing › Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` | `minimised-content` |
 
-The last six rows are set by every preset, at their shipped defaults in the first
-four, so applying any preset puts them back after a hosting preset changed them,
+The last seven rows are set by every preset, at their shipped defaults in the first
+four, so applying any preset puts them back after another preset changed them,
 and resets **In-meeting requests** to Current meeting only on a deployment that
-had chosen Unrestricted or Selected tools.
+had chosen Unrestricted or Selected tools. **Assistant instructions** are the
+shipped text in every preset but Minimised content, so applying any other preset
+also replaces instructions you wrote yourself with the shipped text; export the
+profile first if you want to keep them.
+
+The Minimised content preset (`minimised-content`) uses the consent settings of
+the Regulated – consent required preset, with the same consequences for Stream
+Audio/Video, the Desktop Capture App and the Webex join, and deletes the
+transcript as soon as the summary is written, so the summary is the meeting
+content kept. New meetings are summarized with the shipped `minimised-content`
+summary profile, and the assistant instructions carry the same rule: the model is
+told to leave out health information and the other categories of sensitive
+personal information. That is an instruction, not a filter, and
+[Minimised content](privacy-and-data-handling.md#minimised-content) lists what it
+does not cover.
 
 Under the Regulated – consent required preset (`regulated-consent-required`)
 nothing is recorded or kept until each participant
