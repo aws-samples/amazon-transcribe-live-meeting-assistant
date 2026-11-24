@@ -7,13 +7,14 @@ One probe run (mcp_meeting_tools_probe.py) creates a synthetic meeting owned by
 the Cognito test user, generates a read key and then a read-write key, and
 exercises the tools against that meeting only: a write tool refused to the read
 key, search_lma_meetings bounded by startDate and endDate (which reads every
-meeting the user can search, not only that one), get_meeting_transcript read page by page with its nextToken, guidance
-pushed and listed, the meeting's agenda, context, checklist, labels and audience
-set and read, the meeting found by its labels, its consent record, sharing
-added and removed, a recording link from get_meeting_record, delete_meeting
-with and without confirm, schedule_meeting called again for a meeting it
-already scheduled and with meeting preparation, update_scheduled_meeting, and
-end_virtual_participant called twice.
+meeting the user can search, not only that one), get_meeting_transcript read
+page by page with its nextToken, guidance pushed and listed, the meeting's
+agenda, context, checklist, labels and audience set and read (and a label
+value with a line break refused), the meeting found by its labels, its consent
+record, sharing added and removed, a recording link from get_meeting_record,
+delete_meeting with and without confirm, schedule_meeting called again for a
+meeting it already scheduled and with meeting preparation,
+update_scheduled_meeting, and end_virtual_participant called twice.
 Each test asserts one property of what it observed.
 
 Runs whenever a Cognito test user is configured, like test_mcp_api_key_logging,

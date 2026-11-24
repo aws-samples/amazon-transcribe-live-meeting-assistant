@@ -30,7 +30,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from lma_sdk._core.aws_errors import aws_call_error, error_code, is_access_denied
+from lma_sdk._core.aws_errors import AWS_ERRORS, aws_call_error, error_code, is_access_denied
 from lma_sdk.exceptions import (
     LMAConfigurationError,
     LMATimeoutError,
@@ -475,7 +475,7 @@ class VirtualParticipantOperations:
                 "Attributes": resp.get("UserAttributes") or [],
                 "Enabled": resp.get("Enabled", True),
             }
-        except Exception as err:  # noqa: BLE001
+        except AWS_ERRORS as err:
             if error_code(err) != "UserNotFoundException":
                 raise _lookup_error("cognito-idp:AdminGetUser", pool_id, err) from err
 
@@ -490,7 +490,7 @@ class VirtualParticipantOperations:
                 resp = cognito.list_users(
                     UserPoolId=pool_id, Filter=f'email = "{ident}"', Limit=2
                 )
-            except Exception as err:  # noqa: BLE001
+            except AWS_ERRORS as err:
                 raise _lookup_error("cognito-idp:ListUsers", pool_id, err) from err
             users = resp.get("Users") or []
             if len(users) > 1:
@@ -555,7 +555,7 @@ class VirtualParticipantOperations:
         sm = self._client.session.client("secretsmanager")
         try:
             described = sm.describe_secret(SecretId=secret_name)
-        except Exception as err:  # noqa: BLE001
+        except AWS_ERRORS as err:
             code = error_code(err)
             if code in ("ResourceNotFoundException", "InvalidRequestException"):
                 return False

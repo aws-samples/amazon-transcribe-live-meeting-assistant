@@ -9,7 +9,7 @@ Semantic search across meeting transcripts using Bedrock Knowledge Base
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import boto3
@@ -35,8 +35,12 @@ def _date_bound(value: str, argument: str, end_of_day: bool) -> int:
     """
     text = value.strip() if isinstance(value, str) else ""
     try:
-        if len(text) == 10:
-            day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        try:
+            # Every date-only form ISO 8601 has (2026-11-30, 20261130, 2026-W48-1).
+            day = datetime.combine(date.fromisoformat(text), time(), tzinfo=timezone.utc)
+        except ValueError:
+            day = None
+        if day is not None:
             bound = day + timedelta(days=1) - timedelta(seconds=1) if end_of_day else day
         else:
             bound = datetime.fromisoformat(text.replace("Z", "+00:00"))

@@ -303,6 +303,15 @@ class TestDateBounds(unittest.TestCase):
             [{"lessThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793577599}}],
         )
 
+    def test_every_iso_8601_date_only_form_is_a_whole_day(self):
+        """The basic and week forms are dates alone too, not midnight."""
+        for value in ("20261101", "2026-W44-7"):
+            self.assertEqual(
+                self._conditions(end_date=value),
+                [{"lessThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793577599}}],
+                value,
+            )
+
     def test_a_date_and_time_with_an_offset_is_that_instant(self):
         self.assertEqual(
             self._conditions(start_date="2026-11-01T09:00:00+01:00"),
