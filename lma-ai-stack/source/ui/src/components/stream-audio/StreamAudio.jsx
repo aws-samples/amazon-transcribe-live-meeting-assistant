@@ -23,10 +23,11 @@ import {
   Checkbox,
   ProgressBar,
   Alert,
+  Toggle,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
 import { generateClient } from 'aws-amplify/api';
-import { fetchUserAttributes } from 'aws-amplify/auth';
+import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
@@ -34,11 +35,21 @@ import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
 import { uploadErrorMessage, uploadLanguageLabel } from './upload-language';
-import useTranscriberSocket from '../../hooks/use-transcriber-socket';
-import { toStreamingFrame } from '../common/streaming-frame';
+import useTranscriberSocket, { transcriberUrl } from '../../hooks/use-transcriber-socket';
+import { STREAM_AUDIO_CLIENT_TYPE, toStreamingFrame } from '../common/streaming-frame';
+import {
+  SCREEN_VIDEO_NOTICE,
+  VIDEO_CONSTRAINTS,
+  WHOLE_SCREEN_WARNING,
+  describeSurface,
+  pickVideoMimeType,
+  startScreenVideo,
+  videoStopMessage,
+} from './screen-video';
 import ConsentStep from './ConsentStep';
 import {
   captureEvidenceScreenshot,
+  CONSENT_MODE_OPT_IN,
   captureStopped,
   consentPayload,
   consentRequired,
@@ -224,6 +235,21 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [reopening, setReopening] = useState(false);
   const continueSessionRef = useRef(null);
 
+  // Screen video (screen-video.js): offered only when the transcriber's
+  // settings answer allows it for this page, and off at the start of every
+  // meeting. `videoState.status` is off, waiting (for an opt-in meeting's
+  // consent), on, stopped (by the user) or failed (stopped on its own).
+  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [videoState, setVideoState] = useState({ status: 'off', surface: null, message: '', slowGap: null });
+  const screenVideoRef = useRef(null);
+  // The meeting whose video waits for its consent to be granted.
+  const pendingVideoRef = useRef(null);
+  const audioStartedAtRef = useRef(0);
+  // When this meeting's consent was granted (performance.now()), or 0.
+  const grantedAtRef = useRef(0);
+  const previewRef = useRef(null);
+  const videoMimeType = pickVideoMimeType();
+
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
@@ -263,7 +289,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     onOpen: (event) => {
       // Read the consent settings on every connection, so a reconnect after
       // the transcriber refused or ended a meeting shows the settings in force.
-      event.target.send(JSON.stringify({ callEvent: 'CONSENT_SETTINGS' }));
+      // Naming this client gets the answer's videoAllowed for it.
+      event.target.send(JSON.stringify({ callEvent: 'CONSENT_SETTINGS', clientType: STREAM_AUDIO_CLIENT_TYPE }));
     },
     onMessage: (event) => {
       const frame = parseServerFrame(event.data);
@@ -278,6 +305,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         return;
       }
       setConsentFrame(frame);
+      if (frame.status === 'granted' && frame.captureAllowed !== false && !grantedAtRef.current) {
+        grantedAtRef.current = performance.now();
+      }
       // A START refused for the meeting it names: said with the form, also
       // when there is no consent step to show it.
       if (captureStopped(frame) && MEETING_REFUSALS.has(frame.code) && frame.message) {
@@ -345,6 +375,92 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const channelMerger = useRef();
   const agreeToRecord = useRef();
 
+  // --- Screen video ---------------------------------------------------------
+  const videoAllowed = consentSettings?.videoAllowed === true;
+  const videoOn = videoAllowed && videoEnabled;
+
+  // The video's own connection, authenticated like the audio one.
+  const openVideoSocket = async () => {
+    let tokens;
+    try {
+      tokens = (await fetchAuthSession()).tokens;
+    } catch (error) {
+      console.log(`DEBUG - StreamAudio: no fresh session for the video connection: ${error}`);
+    }
+    tokens = tokens || currentSession?.tokens;
+    return new window.WebSocket(
+      transcriberUrl(settings.WSEndpoint, tokens?.accessToken?.toString() ?? '', tokens?.idToken?.toString() ?? ''),
+    );
+  };
+
+  // Starts the meeting's screen video. `sinceMs` is where the transcript's
+  // clock started (performance.now()): when the audio started, or when an
+  // opt-in meeting's consent was granted, before which its audio is discarded.
+  const beginScreenVideo = (callId, sinceMs) => {
+    pendingVideoRef.current = null;
+    if (!displayStream.current || screenVideoRef.current) return;
+    try {
+      screenVideoRef.current = startScreenVideo({
+        stream: displayStream.current,
+        callId,
+        offsetMs: performance.now() - sinceMs,
+        openSocket: openVideoSocket,
+        log: (message) => console.log(`DEBUG - StreamAudio video: ${message}`),
+        onEvent: (event) => {
+          if (event.type === 'slow-keyframes') {
+            setVideoState((prev) => ({ ...prev, slowGap: event.gapSeconds }));
+            return;
+          }
+          if (event.type === 'stopped') {
+            screenVideoRef.current = null;
+            setVideoState((prev) =>
+              prev.status === 'off'
+                ? prev
+                : {
+                    ...prev,
+                    status: event.reason === 'stopped' ? 'stopped' : 'failed',
+                    message: event.reason === 'stopped' ? '' : videoStopMessage(event.reason),
+                  },
+            );
+          }
+        },
+      });
+      setVideoState((prev) => ({ ...prev, status: 'on' }));
+    } catch (error) {
+      setVideoState((prev) => ({ ...prev, status: 'failed', message: error?.message || String(error) }));
+    }
+  };
+
+  const stopScreenVideo = () => {
+    pendingVideoRef.current = null;
+    screenVideoRef.current?.stop();
+  };
+
+  const handleStopVideo = () => {
+    if (!screenVideoRef.current) {
+      // Still waiting for consent: nothing was recorded.
+      pendingVideoRef.current = null;
+      setVideoState((prev) => ({ ...prev, status: 'stopped' }));
+      return;
+    }
+    stopScreenVideo();
+  };
+
+  // An opt-in meeting's video starts when its consent is granted.
+  useEffect(() => {
+    const pending = pendingVideoRef.current;
+    if (pending && consentFrame?.status === 'granted' && consentFrame.captureAllowed !== false) {
+      beginScreenVideo(pending.callId, grantedAtRef.current || performance.now());
+    }
+  }, [consentFrame]);
+
+  // The preview shows what the video records.
+  useEffect(() => {
+    if (previewRef.current) {
+      previewRef.current.srcObject = videoState.status === 'off' ? null : displayStream.current || null;
+    }
+  }, [videoState.status]);
+
   const convertToMono = (audioSource) => {
     const splitter = audioContext.current.createChannelSplitter(2);
     const merger = audioContext.current.createChannelMerger(1);
@@ -363,6 +479,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
   const stopRecording = async () => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
+    // The video ends with the meeting (the transcriber takes END_VIDEO and the
+    // audio's END in either order), and its switch goes back to off for the next one.
+    stopScreenVideo();
+    screenVideoRef.current = null;
+    setVideoEnabled(false);
+    setVideoState({ status: 'off', surface: null, message: '', slowGap: null });
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
         message: 'UPDATE_RECORDING_STATE',
@@ -440,14 +562,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // continuing (its Meeting Topic field is disabled then), else the topic.
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || meetingTopic;
 
-  // The notice the consent step shows, as START records it.
+  // The notice the consent step shows, as START records it: with screen video
+  // on, it says so in a fixed sentence, which the consent record then keeps
+  // with the notice.
   const noticeText = consentRequired(consentSettings)
-    ? renderNotice(consentSettings.noticeTemplate, {
+    ? `${renderNotice(consentSettings.noticeTemplate, {
         lmaUser: callMetaData.agentId,
         meeting: consentMeetingName,
         consentPhrase: consentSettings.consentPhrase,
         objectionPhrase: consentSettings.objectionPhrase,
-      })
+      })}${videoOn ? ` ${SCREEN_VIDEO_NOTICE}` : ''}`
     : '';
 
   const startRecording = async () => {
@@ -461,10 +585,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       audioContext.current =
         asrEngineDefault === 'microvm' ? new window.AudioContext({ sampleRate: 16000 }) : new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        // Recorded as video: 5 frames a second, the long edge at most 1920.
+        video: videoOn ? VIDEO_CONSTRAINTS : true,
         audio: true,
         selfBrowserSurface: 'exclude',
       });
+      if (videoOn) {
+        const [videoTrack] = displayStream.current.getVideoTracks();
+        const surface = videoTrack?.getSettings?.().displaySurface;
+        setVideoState({ status: 'waiting', surface: surface || null, message: '', slowGap: null });
+      }
 
       micStream.current = await window.navigator.mediaDevices.getUserMedia({
         video: false,
@@ -512,6 +642,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // eslint-disable-next-line prettier/prettier
       console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(startFrame)}`);
       setConsentFrame(null);
+      grantedAtRef.current = 0;
       setEvidenceFrame(null);
       skipEndRef.current = false;
       setConnectionLost(false);
@@ -523,7 +654,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
             callEvent: 'CONSENT_EVIDENCE',
             image: consentEvidence.dataUrl,
             capturedAt: consentEvidence.capturedAt,
-            note: 'Captured on the Stream Audio page before streaming started',
+            note: 'Captured on the Stream Audio/Video page before streaming started',
           }),
         );
       }
@@ -562,6 +693,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         transcriber.sendAudio(event.data);
       };
       channelMerger.current.connect(audioProcessor.current);
+      audioStartedAtRef.current = performance.now();
+      if (videoOn) {
+        // Video starts once the meeting's consent allows capture: at once,
+        // except in opt-in, where it waits for the consent to be granted.
+        if (consentSettings?.mode === CONSENT_MODE_OPT_IN && !grantedAtRef.current) {
+          pendingVideoRef.current = { callId: recordingCallMetaData.callId };
+        } else {
+          beginScreenVideo(recordingCallMetaData.callId, grantedAtRef.current || audioStartedAtRef.current);
+        }
+      }
     } catch (error) {
       alert(`An error occurred while recording: ${error}`);
       await stopRecording();
@@ -621,7 +762,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
             callEvent: 'CONSENT_EVIDENCE',
             image: dataUrl,
             capturedAt,
-            note: 'Captured from the streamed tab on the Stream Audio page',
+            note: 'Captured from the streamed tab on the Stream Audio/Video page',
           }),
         );
       }
@@ -992,6 +1133,88 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                           continueSession.sessionNumber
                         }, from ${formatClock(continueSession.offsetSeconds)} on its transcript.`}
                       </Box>
+                    )}
+                  </SpaceBetween>
+                </Box>
+              )}
+
+              {mode === MODE_STREAM && videoAllowed && (
+                <Box margin={{ top: 'l' }}>
+                  <FormField
+                    label="Screen video"
+                    description={
+                      'Also record the tab, window or screen you share as video, with the meeting. Its slides ' +
+                      'appear on the meeting page. Off at the start of every meeting.'
+                    }
+                    constraintText={
+                      videoMimeType ? undefined : 'This browser cannot record screen video in the format LMA needs.'
+                    }
+                    stretch
+                  >
+                    <Toggle
+                      checked={videoEnabled}
+                      onChange={({ detail }) => setVideoEnabled(detail.checked)}
+                      disabled={recording || !videoMimeType}
+                    >
+                      Also record screen video
+                    </Toggle>
+                  </FormField>
+                </Box>
+              )}
+
+              {mode === MODE_STREAM && recording && videoState.status !== 'off' && (
+                <Box margin={{ top: 'l' }} data-testid="screen-video-status">
+                  <SpaceBetween size="s">
+                    {videoState.status === 'on' && (
+                      <Alert
+                        type="info"
+                        header="Screen video is ON"
+                        action={<Button onClick={handleStopVideo}>Stop video</Button>}
+                      >
+                        {`Recording ${describeSurface(videoState.surface).label.toLowerCase()} as video. ` +
+                          'Stop video keeps the audio streaming.'}
+                      </Alert>
+                    )}
+                    {videoState.status === 'waiting' && (
+                      <Alert
+                        type="info"
+                        header="Screen video"
+                        action={<Button onClick={handleStopVideo}>Stop video</Button>}
+                      >
+                        {`${describeSurface(videoState.surface).label} is shared. Its video starts once the ` +
+                          "meeting's consent allows capture."}
+                      </Alert>
+                    )}
+                    {videoState.status === 'stopped' && (
+                      <Box color="text-body-secondary">Screen video stopped. Audio is still being streamed.</Box>
+                    )}
+                    {videoState.status === 'failed' && (
+                      <Alert type="warning" header="Screen video stopped">
+                        {videoState.message}
+                      </Alert>
+                    )}
+                    {describeSurface(videoState.surface).wholeScreen &&
+                      ['on', 'waiting'].includes(videoState.status) && (
+                        <Alert type="warning" header="Your whole screen is shared">
+                          {WHOLE_SCREEN_WARNING}
+                        </Alert>
+                      )}
+                    {videoState.slowGap !== null && (
+                      <Alert type="warning" header="Some slides may be missed">
+                        {`This browser's video encoder puts key frames up to ${videoState.slowGap} seconds apart, ` +
+                          'and LMA takes slides from key frames at least every 2 seconds. The video is still recorded.'}
+                      </Alert>
+                    )}
+                    {['on', 'waiting'].includes(videoState.status) && (
+                      <video
+                        ref={previewRef}
+                        data-testid="screen-video-preview"
+                        aria-label="Preview of the screen video"
+                        muted
+                        autoPlay
+                        playsInline
+                        style={{ maxWidth: '320px', border: '1px solid #ccc' }}
+                      />
                     )}
                   </SpaceBetween>
                 </Box>

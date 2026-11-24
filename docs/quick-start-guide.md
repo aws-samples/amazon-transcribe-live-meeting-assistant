@@ -11,7 +11,7 @@ If you have not deployed LMA yet, start with [Prerequisites and Deployment](prer
 ## Table of Contents
 
 - [Streaming Options Overview](#streaming-options-overview)
-- [Option 1: Stream Audio from Your Browser](#option-1-stream-audio-from-your-browser)
+- [Option 1: Stream Audio/Video from Your Browser](#option-1-stream-audio-from-your-browser)
 - [Option 2: Virtual Participant](#option-2-virtual-participant)
 - [Viewing Your First Meeting](#viewing-your-first-meeting)
 - [Using the Meeting Assistant](#using-the-meeting-assistant)
@@ -22,14 +22,14 @@ If you have not deployed LMA yet, start with [Prerequisites and Deployment](prer
 
 LMA provides two ways to capture meeting audio:
 
-1. **Stream Audio** -- Share a browser tab's audio directly from Chrome. Works with any audio source including meeting applications, YouTube, and other media.
+1. **Stream Audio/Video** -- Share a browser tab's audio directly from Chrome. Works with any audio source including meeting applications, YouTube, and other media.
 2. **Virtual Participant** -- Send an AI-powered bot that joins the meeting on your behalf. Supports Zoom, Microsoft Teams, Amazon Chime, WebEx and Google Meet.
 
 Choose whichever option fits your workflow. Both produce real-time transcripts and support the full set of LMA features.
 
 ## Option 1: Stream Audio from Your Browser
 
-The Stream Audio option captures audio from a Chrome browser tab and sends it to LMA for real-time transcription.
+The Stream Audio/Video option captures audio from a Chrome browser tab and sends it to LMA for real-time transcription.
 
 ### Step 1: Open Your Audio Source
 
@@ -37,9 +37,9 @@ Open the meeting or audio source you want to transcribe in a Chrome browser tab.
 
 ### Step 2: Go to the Stream Audio Tab
 
-In the LMA web application, navigate to the **Stream Audio** tab.
+In the LMA web application, navigate to the **Stream Audio/Video** tab.
 
-![Stream Audio tab in the LMA UI](../images/readme-stream-audio.png)
+![Stream Audio/Video tab in the LMA UI](../images/readme-stream-audio.png)
 
 ### Step 3: Enter Meeting Details
 
@@ -61,7 +61,7 @@ After streaming starts, an **Open in progress meeting** link appears. Click it t
 
 ### Step 6: Manage Your Microphone
 
-While streaming, you can mute and unmute your microphone using the microphone control in the Stream Audio panel. Mute when you are not speaking to reduce background noise in the transcript.
+While streaming, you can mute and unmute your microphone using the microphone control in the Stream Audio/Video panel. Mute when you are not speaking to reduce background noise in the transcript.
 
 ![Mute/unmute microphone control](../images/readme-stream-audio-mute-mic.png)
 

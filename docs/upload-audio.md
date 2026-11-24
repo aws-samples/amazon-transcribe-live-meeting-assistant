@@ -181,7 +181,7 @@ Upload Meeting Finalizer Lambda
 Bedrock summary + meeting detail page rendered
 ```
 
-The entire server-side pipeline is shared with live Stream Audio meetings — the
+The entire server-side pipeline is shared with live Stream Audio/Video meetings — the
 only thing that differs is that the transcript comes from Transcribe's batch
 API instead of the streaming API.
 
@@ -230,7 +230,7 @@ actual number of distinct voices.
 
 ## See Also
 
-- [Stream Audio](stream-audio.md) — live streaming variant of this feature
+- [Stream Audio/Video](stream-audio.md) — live streaming variant of this feature
 - [Web UI Guide](web-ui-guide.md) — general UI walkthrough
 - [Transcription & Translation](transcription-and-translation.md) — language
   options, custom vocabulary, PII redaction settings

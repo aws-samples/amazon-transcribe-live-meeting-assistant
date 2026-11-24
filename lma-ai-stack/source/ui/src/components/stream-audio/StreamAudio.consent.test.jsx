@@ -116,7 +116,10 @@ describe('StreamAudio consent step', () => {
   it('asks for the settings on open and shows no step while consent is off', () => {
     render(<StreamAudio mode="stream" />);
     const target = openSocket();
-    expect(JSON.parse(target.send.mock.calls[0][0])).toEqual({ callEvent: 'CONSENT_SETTINGS' });
+    expect(JSON.parse(target.send.mock.calls[0][0])).toEqual({
+      callEvent: 'CONSENT_SETTINGS',
+      clientType: 'STREAM_AUDIO',
+    });
     serverSays({ ...OPT_IN, mode: 'off', noticeTemplate: '' });
     expect(screen.queryByText('Meeting consent')).toBeNull();
   });
@@ -146,7 +149,7 @@ describe('StreamAudio consent step', () => {
       noticeText: 'ana would like to record Stream Audio. Reply "I consent" to agree.',
       lmaUser: 'ana',
       meetingName: 'Stream Audio',
-      client: 'Stream Audio',
+      client: 'Stream Audio/Video',
     });
 
     // The transcriber could not record the consent: the page stops, sending no END.

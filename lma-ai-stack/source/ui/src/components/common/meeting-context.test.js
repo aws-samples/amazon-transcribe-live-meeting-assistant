@@ -28,7 +28,7 @@ import {
 describe('the capture context a meeting recorded', () => {
   it.each([
     ['VIRTUAL_PARTICIPANT', SOURCE_VIRTUAL_PARTICIPANT, 'Virtual Participant'],
-    ['STREAM_AUDIO', SOURCE_STREAM_AUDIO, 'Stream Audio'],
+    ['STREAM_AUDIO', SOURCE_STREAM_AUDIO, 'Stream Audio/Video'],
     ['BROWSER_EXTENSION', SOURCE_BROWSER_EXTENSION, 'Browser extension'],
     ['DESKTOP_APP', SOURCE_DESKTOP_APP, 'Desktop Capture App'],
     ['UPLOAD', SOURCE_UPLOAD, 'Uploaded recording'],

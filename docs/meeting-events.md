@@ -67,7 +67,7 @@ Every event has `source` `lma` and one of four `detail-type`s:
 
 | `detail-type` | When it is published |
 |---|---|
-| `Meeting Started` | The meeting record is created and transcription begins, whatever started it: Stream Audio, the browser extension, the desktop app, a Virtual Participant, an uploaded recording or a streaming client. Also when a reopened meeting starts a later session; see [Reopened meetings](#reopened-meetings). |
+| `Meeting Started` | The meeting record is created and transcription begins, whatever started it: Stream Audio/Video, the browser extension, the desktop app, a Virtual Participant, an uploaded recording or a streaming client. Also when a reopened meeting starts a later session; see [Reopened meetings](#reopened-meetings). |
 | `Meeting Ended` | A session's end closes the meeting and the meeting reaches `ENDED`. This includes a meeting ended by the End button, by its Virtual Participant leaving, by the stale meeting reaper, and an uploaded recording finishing. |
 | `Summary Ready` | A summary is stored: the end-of-meeting summary, or a regenerated one. Not published when a summary run produced nothing usable, when the meeting had nothing to summarise, or when somebody edits the summary text by hand. |
 | `Virtual Participant Status Changed` | A Virtual Participant's status changes, including to `MANUAL_ACTION_REQUIRED`, when it needs a person to solve a CAPTCHA, sign in, or complete a verification step. One event per change; a write that leaves the status as it was publishes nothing. |

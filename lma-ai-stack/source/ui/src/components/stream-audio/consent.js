@@ -85,7 +85,7 @@ export const consentPayload = (settings, step, { lmaUser, meetingName, noticeTex
   lmaUser,
   meetingName,
   ...(step.statement?.trim() ? { statement: step.statement.trim() } : {}),
-  client: 'Stream Audio',
+  client: 'Stream Audio/Video',
 });
 
 /** A JSON frame from the transcriber, or null for anything else (binary, unparseable). */

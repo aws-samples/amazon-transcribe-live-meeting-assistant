@@ -33,10 +33,10 @@ evidence check and the meeting page's Consent section are in place. The
 meeting chat, reads the replies typed there or said aloud, and withholds or
 stops recording and transcription accordingly (see
 [Virtual Participant](#virtual-participant)).
-**Stream Audio** and the **Desktop Capture App** run it too: they show the
+**Stream Audio/Video** and the **Desktop Capture App** run it too: they show the
 notice, ask the user to confirm, and the WebSocket transcriber records that on
 the meeting and withholds or stops recording and transcription accordingly (see
-[Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
+[Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
 The browser extension does not run it yet; how the
 transcriber treats a client that shows no consent step is a setting. See
 [Flows by capture method](#flows-by-capture-method).
@@ -127,9 +127,9 @@ retention and privacy ones: **Internal meetings – notify participants** sets
 Notify, and **Regulated – consent required, transcript not retained** sets
 Opt-in with the each-participant rule, a stricter choice only per meeting,
 clients without a consent step refused and the Virtual Participant leaving
-after an objection. Under Regulated, Stream Audio and the Desktop Capture App
+after an objection. Under Regulated, Stream Audio/Video and the Desktop Capture App
 cannot collect each participant's consent, so Start is refused from them (see
-[Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)),
+[Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)),
 and a Virtual Participant on the
 Webex join never meets the each-participant rule and cannot move to
 owner-attests, so its meeting is not transcribed (see
@@ -143,7 +143,7 @@ it as it is.
 Regulated except the mode, which is Notify: capture runs from the start and
 stops when a participant objects, and a meeting may use Notify or the stricter
 Opt-in, not Off. Notify and objections work on every Virtual Participant join,
-and Stream Audio and the Desktop Capture App run their notify step and capture
+and Stream Audio/Video and the Desktop Capture App run their notify step and capture
 from Start, while clients without a consent step are still refused (see
 [Clients without a consent step](#clients-without-a-consent-step)). **Standard** puts
 back the shipped defaults. Apply one from
@@ -173,7 +173,7 @@ The shipped texts say nothing about how to reply, because each capture method
 reads replies in its own way: a Virtual Participant posts one line after the
 notice that gives the reply in the form it reads (see
 [How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)),
-and Stream Audio and the Desktop Capture App show the notice to the LMA user,
+and Stream Audio/Video and the Desktop Capture App show the notice to the LMA user,
 who confirms how everyone agreed. A customised text is posted as written,
 placeholders filled in, and the Virtual Participant's line still follows it, so
 a text customised before this line existed and that carries its own reply
@@ -284,9 +284,9 @@ replies are read.
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
-| **Stream Audio** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
-| **Desktop Capture App** (macOS and Windows) | As for Stream Audio, with a copy button | As for Stream Audio; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
-| **Browser extension** | As for Stream Audio | As for Stream Audio | Not available yet; treated as a client without a consent step. |
+| **Stream Audio/Video** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
+| **Desktop Capture App** (macOS and Windows) | As for Stream Audio/Video, with a copy button | As for Stream Audio/Video; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
+| **Browser extension** | As for Stream Audio/Video | As for Stream Audio/Video | Not available yet; treated as a client without a consent step. |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
 
 Until a capture method runs the flow, its meetings have no consent record. A
@@ -583,7 +583,7 @@ objection can only stop capture, never start it.
   one to tell people how to reply is not a reply (*'Reply "I consent" to agree,
   or "I object" to decline.'*, *'Type or say "LMA, I consent" or "LMA, I
   object".'*), and the shipped notices and reply lines, posted by another LMA in
-  the same meeting or pasted from Stream Audio, are not read as replies. A custom notice text should keep
+  the same meeting or pasted from Stream Audio/Video, are not read as replies. A custom notice text should keep
   `{objection_phrase}` in quotation marks for the same reason. A phrase outside the quotation marks still
   counts (*'LMA, "stop recording" please'* does not, *'Bo said "stop
   recording", and I agree: stop recording'* does), and the phrase typed on its
@@ -948,7 +948,7 @@ that objection's screenshots.
 
 ## Stream Audio and the Desktop Capture App
 
-Stream Audio sends a meeting's audio to the WebSocket transcriber, which
+Stream Audio/Video sends a meeting's audio to the WebSocket transcriber, which
 creates the meeting. Neither the page nor the user's browser can see the
 meeting's participants or its chat, so the consent step is the LMA user's own:
 they share the notice, and confirm that it was shared or, in opt-in, that
@@ -986,6 +986,13 @@ page did not ask about, rather than treating it as a client without a consent
 step; the page then reads the settings again and shows the step. In **notify**, streaming may start without them; the notice is then not
 recorded as posted, so the meeting's status stays `pending`, which in notify
 still allows capture.
+
+With **Also record screen video** on (see
+[Screen Video](stream-audio.md#screen-video)), the notice ends with the fixed
+sentence "The shared screen is also recorded as video.", so the notice the
+consent record keeps says the screen was recorded. In opt-in the video starts
+only once the transcriber has granted the meeting's consent; an objection ends
+the video with the meeting, and what was recorded until then is kept.
 
 ### What the transcriber records, and when
 
@@ -1047,7 +1054,7 @@ exists and only a backend role may add evidence.
 
 An opt-in deployment whose rule is **Each participant consents** and that does
 not **allow a different choice per meeting** cannot be satisfied from Stream
-Audio or the Desktop Capture App, which have no participant list: the page or
+Audio/Video or the Desktop Capture App, which have no participant list: the page or
 the app says so and Start is refused.
 Use a Virtual Participant for such meetings, or allow a per-meeting choice.
 
@@ -1062,7 +1069,7 @@ without a step is then captured, since nothing says that a step is needed.
 
 The macOS and Windows apps show the same step in their panel (see
 [Meeting consent in the Desktop Capture App](desktop-capture-app.md#meeting-consent-notify-and-opt-in-deployments)),
-and the transcriber records and gates it exactly as for Stream Audio. The
+and the transcriber records and gates it exactly as for Stream Audio/Video. The
 differences:
 
 - **Reading the settings.** The app connects to the transcriber only when a
@@ -1070,7 +1077,7 @@ differences:
   its own when the user signs in, when the panel opens, and at Start if it has
   no answer yet. A transcriber that does not answer within six seconds is
   treated as one that predates the consent frames: no step is shown. The app
-  still sends its step with `START`, as mode Off, as Stream Audio does, so in an
+  still sends its step with `START`, as mode Off, as Stream Audio/Video does, so in an
   opt-in deployment the transcriber refuses the meeting and the app reads the
   settings again rather than being treated as a client without a consent step.
 - **Evidence** is one frame of the screen or window selected as the
@@ -1091,7 +1098,7 @@ differences:
 
 ### Clients without a consent step
 
-Clients that show no consent step — the browser extension, the Stream Audio
+Clients that show no consent step — the browser extension, the Stream Audio/Video
 embed (`#/embed?component=stream-audio`), Desktop Capture App builds from
 before the consent step, and scripts written against the streaming API — send
 `START` without a
@@ -1108,10 +1115,10 @@ the setting **Streaming clients without a consent step**:
 - **Refuse:** the meeting is not created, recorded or transcribed; the client is
   sent a `CONSENT_STATE` frame with the code `CONSENT_REQUIRED` and the
   connection is closed. A client without the consent step does not read that
-  frame either, so the browser extension and the Stream Audio embed show only
+  frame either, so the browser extension and the Stream Audio/Video embed show only
   that the connection closed, and each reconnect is refused again. Choose this
   only once every client in use shows the consent step, and not while the
-  browser extension or the Stream Audio embed is in use.
+  browser extension or the Stream Audio/Video embed is in use.
 
 ## What is stored
 
@@ -1198,7 +1205,7 @@ to none of them.
 | Said aloud while consent is awaited | It is heard on the Virtual Participant's separate listening session, which writes nothing to the transcript |
 | An objection with no speaker named (*Unidentified participant*) | There is no speaker to link it to |
 | Entered on the meeting page (`ui`), or an attestation | Neither is a line of the transcript; an attestation is about the whole meeting |
-| From Stream Audio or the Desktop Capture App | Their objection is the LMA user's report, not speech, and their opt-in is the owner's attestation |
+| From Stream Audio/Video or the Desktop Capture App | Their objection is the LMA user's report, not speech, and their opt-in is the owner's attestation |
 
 **When a link counts.** The export and `get_meeting_consent` give a linked
 reply's speaker only while the transcript still holds the linked line, final,
@@ -1526,7 +1533,7 @@ also holds the reply classifier described above.
 - **What LMA records is evidence, not a determination.** The record shows what
   was posted and what was replied, when; whether that amounts to consent where
   the meeting took place is for your organisation to decide.
-- **A streamed meeting's consent is the user's word.** Stream Audio and the
+- **A streamed meeting's consent is the user's word.** Stream Audio/Video and the
   Desktop Capture App cannot see the participants or the meeting chat, so an
   opt-in meeting from either is granted on the LMA user's attestation alone. An evidence screenshot is the
   only part of the record that shows what the participants saw or replied.
@@ -1549,5 +1556,5 @@ also holds the reply classifier described above.
 - [Privacy and Data Handling Controls](privacy-and-data-handling.md) — the
   consent options together with retention and deletion
 - [Virtual Participant](virtual-participant.md)
-- [Stream Audio](stream-audio.md)
+- [Stream Audio/Video](stream-audio.md)
 - [User-Based Access Control](user-based-access-control.md) — who can read a meeting

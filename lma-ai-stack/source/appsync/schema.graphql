@@ -166,7 +166,7 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# again if the engine changes, see updateCaptureContext). Absent on a meeting
 	# started before these fields existed. See
 	# docs/websocket-streaming-api.md#capture-context.
-	# CaptureSource: VIRTUAL_PARTICIPANT, STREAM_AUDIO (the Stream Audio page and
+	# CaptureSource: VIRTUAL_PARTICIPANT, STREAM_AUDIO (the Stream Audio/Video page and
 	# its embeddable component), BROWSER_EXTENSION, DESKTOP_APP, UPLOAD, or API
 	# (any other client of the streaming API, or one that did not say).
 	CaptureSource: String
@@ -677,7 +677,7 @@ type Query @aws_cognito_user_pools
 	# render the quick-action buttons, so every signed-in user reads it.
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
 	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
-	# Read by the Stream Audio and Upload Audio forms for whoever is starting a
+	# Read by the Stream Audio/Video and Upload Audio forms for whoever is starting a
 	# meeting -- the capture sample rate and the speaker-count field depend on which
 	# engine is selected -- so every signed-in user reads it. The Virtual Participant
 	# task role reads it with SigV4, which is what @aws_iam is here for.
@@ -1270,7 +1270,7 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	Width: Int
 	Height: Int
 	# What took the frame: VIRTUAL_PARTICIPANT; DESKTOP_CAPTURE for the
-	# Desktop Capture App's video; STREAM_AUDIO for the Stream Audio
+	# Desktop Capture App's video; STREAM_AUDIO for the Stream Audio/Video
 	# page's; BROWSER_EXTENSION for the browser extension's.
 	Source: String
 	# Whether the meeting platform showed a screen share when the frame was

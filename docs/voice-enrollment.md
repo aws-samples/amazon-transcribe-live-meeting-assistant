@@ -250,7 +250,7 @@ reconstruct the speech.
 
 Matching happens only in meetings the ASR MicroVM engine transcribes. Amazon
 Transcribe is the default engine for every meeting source, so an admin moves the
-sources that should be matched (Stream Audio, the Chrome extension and the Desktop
+sources that should be matched (Stream Audio/Video, the Chrome extension and the Desktop
 Capture app together, and Virtual Participants separately) onto the ASR MicroVM
 engine in the **Transcription Engine** section of the
 [Configuration page](configuration-guide.md). A meeting on Amazon Transcribe is

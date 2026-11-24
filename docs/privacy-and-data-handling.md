@@ -122,7 +122,7 @@ Notify, owner-attests and objections work on every join. The full table, with ho
 the participant list is screenshotted on each platform, is in
 [What each platform supports](meeting-consent.md#what-each-platform-supports).
 
-**Stream Audio and the Desktop Capture App.** Neither can see the meeting's
+**Stream Audio/Video and the Desktop Capture App.** Neither can see the meeting's
 participants or chat, so the consent step is the LMA user's own. They show the
 notice with a copy button for the user to share in the meeting, and ask the user
 to confirm that it was shared or, in opt-in, that everyone agreed (the
@@ -133,9 +133,9 @@ is captured until the record allows it, and audio sent before then is discarded.
 collect each participant's consent, an opt-in deployment whose rule is **Each
 participant consents** and that does not allow a different choice per meeting
 refuses Start from both. See
-[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
 
-**Clients without a consent step.** The browser extension, the Stream Audio embed,
+**Clients without a consent step.** The browser extension, the Stream Audio/Video embed,
 Desktop Capture App builds from before the consent step, and scripts written
 against the streaming API send no consent step. In Notify or Opt-in the setting
 **Streaming clients without a consent step** decides what happens to their
@@ -153,7 +153,7 @@ only be uploaded with the consent its participants gave when it was made.
 
 In every mode an objection, typed in the chat, said aloud to LMA, recorded by a
 signed-in user with **Record an objection** on the meeting page, or reported with
-**Participant objected** in Stream Audio or the Desktop Capture App, stops
+**Participant objected** in Stream Audio/Video or the Desktop Capture App, stops
 recording and transcription at once. What was captured before the objection is
 kept: an objection stops capture, it does not delete what was captured while
 capture was allowed. Delete the meeting if that content must go too.
@@ -176,7 +176,7 @@ with the result of their vision-model check. See
 
 Evidence images are screenshots of the meeting chat and participant list taken by
 the Virtual Participant when consent is granted and on every objection, or one
-frame captured by the user in Stream Audio or the Desktop Capture App. An Amazon
+frame captured by the user in Stream Audio/Video or the Desktop Capture App. An Amazon
 Bedrock vision model can check each image (the **Evidence check model**, Amazon
 Nova Lite by default); its verdict is supporting evidence and never changes the
 meeting's consent status. With **Keep evidence screenshots** off, an image is
@@ -205,13 +205,13 @@ statement of what any law requires.
   preset sets it.
 - **Opt-in with the owner attesting** suits meetings whose consent is gathered
   outside LMA (in the invitation's terms, or out loud at the start), meetings
-  streamed from Stream Audio or the Desktop Capture App, and Virtual Participant
+  streamed from Stream Audio/Video or the Desktop Capture App, and Virtual Participant
   joins that cannot list the participants. The record then rests on the owner's
   attestation, plus any evidence image.
 
 Whatever the mode, set **Streaming clients without a consent step** to **Refuse**
 in a deployment where every meeting must go through the consent step, and check
-first that no one relies on the browser extension or the Stream Audio embed.
+first that no one relies on the browser extension or the Stream Audio/Video embed.
 
 ## What LMA stores, and for how long
 
@@ -547,7 +547,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
 | Record meeting audio | On | On | Off | Off | Off | Off |
-| Record screen video from Stream Audio and the browser extension | Off | Off | Off | Off | Off | Off |
+| Record screen video from Stream Audio/Video and the browser extension | Off | Off | Off | Off | Off | Off |
 | Add the meeting chat to the transcript | On | On | Off | Off | On | On |
 | Redact personal information | Off | Off | On | On | Off | Off |
 | Model inference geography | Global | Global | Same geography | Same geography | Global | Global |
@@ -560,7 +560,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 
 No preset sets **Read spoken replies** or **Capture chat attachments**, which
 is off by default. Under the consent-required preset, Stream
-Audio and the Desktop Capture App cannot be used to start a meeting, the Webex
+Audio/Video and the Desktop Capture App cannot be used to start a meeting, the Webex
 join cannot be granted, and the Teams browser join is granted only by consent
 said aloud. Under the notify preset, every capture method that shows a consent
 step works, and clients without one are refused.
@@ -597,7 +597,7 @@ they expire.
 2. Decide **Read spoken replies**: off if no meeting audio may reach the
    transcription engine before consent.
 3. Under the consent-required preset, use Virtual Participants on joins that
-   support the each-participant rule, and tell users that Stream Audio, the
+   support the each-participant rule, and tell users that Stream Audio/Video, the
    Desktop Capture App and the Webex join will not capture meetings.
 4. Set `EnableVideoRecording` to `false`, unless meeting video is wanted and its
    retention is acceptable.

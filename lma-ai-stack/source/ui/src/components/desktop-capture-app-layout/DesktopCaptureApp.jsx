@@ -625,8 +625,8 @@ const DesktopCaptureApp = () => {
             the operating system&apos;s audio &mdash; not a browser tab &mdash; it can transcribe meetings you join from
             a <strong>native Zoom, Teams, Webex, Slack, or phone-bridge app</strong>, which the{' '}
             <Link href={`#${BROWSER_EXTENSION_PATH}`}>Chrome Extension</Link> and{' '}
-            <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio</Link> options cannot. It adds no bot or extra attendee to
-            the meeting.
+            <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio/Video</Link> options cannot. It adds no bot or extra
+            attendee to the meeting.
           </Box>
           <Alert type="info" header="Sign in with your LMA account">
             The download is preconfigured for this LMA deployment. On first launch it asks for the same username and
@@ -668,7 +668,7 @@ const DesktopCaptureApp = () => {
             <Alert type="info" header="Desktop only today">
               You appear to be on an unrecognized system. The Desktop Capture App is available for{' '}
               <strong>macOS and Windows</strong>. On this device, use the{' '}
-              <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio</Link> page or the{' '}
+              <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio/Video</Link> page or the{' '}
               <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link>.
             </Alert>
           )}

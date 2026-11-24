@@ -1,13 +1,13 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""Screen video from the Stream Audio page and the browser extension, at the protocol.
+"""Screen video from the Stream Audio/Video page and the browser extension, at the protocol.
 
 The two browser clients send their video the way the Desktop Capture App does:
 a second WebSocket with ``START_VIDEO``, fragmented-MP4 chunks and
 ``END_VIDEO`` (docs/websocket-streaming-api.md, "Screen Video"). What differs is
 on the server: their video is accepted only when Meeting Recording › Record
-screen video from Stream Audio and the browser extension is on, and their
+screen video from Stream Audio/Video and the browser extension is on, and their
 key frames are recorded with the client's own ``Source``. This probe streams
 the narrated slideshow ``desktop_video_probe.py`` builds, as one of those
 clients (the START's ``clientType``), and reports what each connection saw:

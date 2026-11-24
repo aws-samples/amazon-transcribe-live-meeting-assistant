@@ -450,7 +450,7 @@ Console label: *Deploy the ASR MicroVM speech engine*
 - **Allowed values:** `true`, `false`
 - **Kind:** Resource. Decides whether the ASR MicroVM engine's nested stack exists, in a Region with AWS Lambda MicroVMs.
 
-Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda MicroVMs in this account), an alternative to Amazon Transcribe for Stream Audio, Chrome extension, Desktop Capture and Virtual Participant meetings; it also provides the speaker embeddings voice enrollment needs. Amazon Transcribe is the default engine for every meeting source: an admin moves a source onto the ASR MicroVM engine in the Transcription Engine section of the Configuration page. Deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no effect and every meeting uses Amazon Transcribe. Set false to leave the engine undeployed. See docs/microvm-asr.md.
+Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda MicroVMs in this account), an alternative to Amazon Transcribe for Stream Audio/Video, Chrome extension, Desktop Capture and Virtual Participant meetings; it also provides the speaker embeddings voice enrollment needs. Amazon Transcribe is the default engine for every meeting source: an admin moves a source onto the ASR MicroVM engine in the Transcription Engine section of the Configuration page. Deployed only in Regions with AWS Lambda MicroVMs (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 -- not GovCloud); elsewhere this setting has no effect and every meeting uses Amazon Transcribe. Set false to leave the engine undeployed. See docs/microvm-asr.md.
 
 ## Voice enrollment (Beta; biometric; off by default)
 
@@ -508,7 +508,7 @@ Console label: *WebSocket Transcriber Task Count*
 - **Allowed values:** 1 to 20
 - **Kind:** Resource. Sets the task count of the transcriber's ECS service.
 
-Number of Fargate tasks running the WebSocket transcriber service (used by the Stream Audio page and the desktop capture apps). Leave at 1 unless EnableVideoRecording is false: with video recording enabled, the desktop video stream arrives as a separate connection that must reach the task holding the meeting's audio session, which only a single task guarantees.
+Number of Fargate tasks running the WebSocket transcriber service (used by the Stream Audio/Video page and the desktop capture apps). Leave at 1 unless EnableVideoRecording is false: with video recording enabled, the desktop video stream arrives as a separate connection that must reach the task holding the meeting's audio session, which only a single task guarantees.
 
 ### `TranscriberAutoScalingEnabled`
 
@@ -957,7 +957,7 @@ other models and has no access to the shipped ones.
 ### Scaling the WebSocket transcriber
 
 The five `Transcriber*` parameters size the Fargate service that terminates the
-browser and desktop-app WebSocket connections (the Stream Audio tab, the Desktop
+browser and desktop-app WebSocket connections (the Stream Audio/Video tab, the Desktop
 Capture App and the browser extension). They do not affect the Virtual
 Participant.
 
@@ -997,7 +997,7 @@ split across the two.
 
 `EnableMicrovmAsr` is the only deploy-time question for this engine, and it
 defaults to `true`, which deploys the engine. Amazon Transcribe is the default
-transcription engine for Stream Audio, Chrome extension, Desktop Capture and
+transcription engine for Stream Audio/Video, Chrome extension, Desktop Capture and
 Virtual Participant meetings; an admin moves a meeting source onto the ASR
 MicroVM engine in the Transcription Engine section of the Configuration page, and
 Amazon Transcribe remains the fallback for a meeting whose MicroVM cannot start. The nested stack is

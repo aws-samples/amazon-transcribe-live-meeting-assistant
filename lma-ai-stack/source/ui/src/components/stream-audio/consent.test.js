@@ -83,7 +83,7 @@ describe('consentPayload', () => {
       lmaUser: 'Ana',
       meetingName: 'Sync',
       statement: 'everyone typed I agree',
-      client: 'Stream Audio',
+      client: 'Stream Audio/Video',
     });
   });
 });

@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  *
  * Optional video recording lane for the websocket transcriber: the screen video
- * of the Desktop Capture App, the Stream Audio page and the browser
+ * of the Desktop Capture App, the Stream Audio/Video page and the browser
  * extension (which clients may send it: video-admission.ts).
  *
  * Wire protocol (fully backward compatible — servers that predate this module

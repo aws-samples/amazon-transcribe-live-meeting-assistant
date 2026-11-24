@@ -15,8 +15,8 @@
       "order": 0,
       "availableWhen": { "setting": "AsrEngineAvailable", "value": "true" },
       "type": "boolean",
-      "title": "Stream Audio, Chrome extension and Desktop Capture",
-      "description": "Speaker identification per channel is chosen per meeting, on the Stream Audio form or in the desktop app's settings. While the Amazon Transcribe section uses content redaction, a custom vocabulary or language model, language identification, or a language the deployed speech model does not support, these meetings stay on Amazon Transcribe whichever engine is selected.",
+      "title": "Stream Audio/Video, Chrome extension and Desktop Capture",
+      "description": "Speaker identification per channel is chosen per meeting, on the Stream Audio/Video form or in the desktop app's settings. While the Amazon Transcribe section uses content redaction, a custom vocabulary or language model, language identification, or a language the deployed speech model does not support, these meetings stay on Amazon Transcribe whichever engine is selected.",
       "widget": "radio",
       "booleanLabels": {
         "false": "Amazon Transcribe",

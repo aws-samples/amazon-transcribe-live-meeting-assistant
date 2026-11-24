@@ -131,7 +131,7 @@ A meeting's profile is its `SummaryProfile`. It can be set:
   `default` as shipped, so such a meeting has no profile and is summarized with
   the Transcript Summary prompts. Set to another profile's name, it is written on
   each meeting when the meeting starts, whatever captured it (a Virtual
-  Participant started or scheduled with the Default profile, Stream Audio, the
+  Participant started or scheduled with the Default profile, Stream Audio/Video, the
   Desktop Capture App, the browser extension or an uploaded recording), so the
   meeting page shows it and the owner can change it before the summary. A
   meeting whose Virtual Participant names a profile keeps that one. Choosing

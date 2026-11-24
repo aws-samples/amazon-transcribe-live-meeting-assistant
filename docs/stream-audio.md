@@ -1,8 +1,8 @@
 ---
-title: "Stream Audio"
+title: "Stream Audio/Video"
 ---
 
-# Stream Audio
+# Stream Audio/Video
 
 ## Table of Contents
 
@@ -11,6 +11,7 @@ title: "Stream Audio"
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
 - [Continue an existing meeting](#continue-an-existing-meeting)
 - [Meeting Consent](#meeting-consent)
+- [Screen Video](#screen-video)
 - [Speaker Identification](#speaker-identification)
 - [If the Connection Drops](#if-the-connection-drops)
 - [Browser Compatibility](#browser-compatibility)
@@ -20,15 +21,15 @@ title: "Stream Audio"
 
 ## Overview
 
-> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
+> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio/Video, and Virtual Participant.
 
-The Stream Audio tab in the LMA web UI lets you capture stereo audio from your Chrome browser -- combining your microphone with any incoming audio source (meeting app, softphone, YouTube, etc.).
+The Stream Audio/Video tab in the LMA web UI lets you capture stereo audio from your Chrome browser -- combining your microphone with any incoming audio source (meeting app, softphone, YouTube, etc.).
 
-![Stream Audio UI](../images/readme-stream-audio.png)
+![Stream Audio/Video UI](../images/readme-stream-audio.png)
 
 ## Use Cases
 
-Use Stream Audio with any browser-based audio application when you want to stay in your browser. It works with any audio source playing in Chrome, including:
+Use Stream Audio/Video with any browser-based audio application when you want to stay in your browser. It works with any audio source playing in Chrome, including:
 
 - Browser-based meeting applications (Amazon Chime, Google Meet, etc.)
 - Softphone or VoIP applications running in a browser tab
@@ -39,7 +40,7 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 
 1. **Open any audio source** in a Chrome browser tab (meeting app, softphone, or for demo purposes, a YouTube video).
 
-2. In the LMA UI, navigate to **Stream Audio**.
+2. In the LMA UI, navigate to **Stream Audio/Video**.
 
 3. Enter a **Meeting Topic** -- this is appended to the timestamp to create a unique meeting ID.
 
@@ -52,7 +53,7 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 
 7. Click **Start Streaming**.
 
-![Stream Audio UI](../images/readme-stream-audio.png)
+![Stream Audio/Video UI](../images/readme-stream-audio.png)
 
 8. Select the Chrome tab with your audio source, then click **Allow** to share the tab audio.
 
@@ -70,7 +71,7 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 
 12. Click **Stop Streaming** to end the session.
 
-13. A link to the recorded meeting appears at the bottom of the Stream Audio page.
+13. A link to the recorded meeting appears at the bottom of the Stream Audio/Video page.
 
 ![Open Recorded Meeting](../images/readme-stream-audio-open-recorded.png)
 
@@ -115,7 +116,47 @@ record; and, while streaming, **Participant objected**, which stops the stream
 and records the objection. In Opt-in, Start is refused until you confirm, and
 nothing is recorded or transcribed until the transcriber has recorded your
 confirmation on the meeting. See
-[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+
+## Screen Video
+
+The page can also record the tab, window or screen you share as video, stored
+with the meeting: the meeting page plays it, and its key frames become the
+meeting's shared-screen slides (see [Meeting Video and Key Frames](meeting-video.md)).
+It is offered only where an administrator has turned on **Meeting Recording ›
+Record screen video from Stream Audio/Video and the browser extension** on the
+Configuration page (off by default and in every preset) and the deployment
+records video (`EnableVideoRecording=true`).
+
+- **Turn it on for one meeting.** Switch on **Also record screen video** before
+  **Start Streaming**. It is off at the start of every meeting. The browser
+  needs MediaRecorder with MP4 (H.264) recording, as recent Chrome and Edge
+  have; where it is missing the switch is disabled and says so.
+- **What you share.** After you pick what to share, the page names it (a browser
+  tab, a window, or your whole screen) and shows a small preview of what is
+  recorded. Sharing the whole screen records everything on it, including
+  notifications and other windows, and the page warns you: share only the
+  meeting's tab or window where you can.
+- **While streaming**, **Screen video is ON** shows that the video is being
+  recorded. **Stop video** ends the video and keeps the audio streaming; the
+  video cannot be started again in the same meeting.
+- **Consent.** When the meeting has a consent step, the notice gains the
+  sentence "The shared screen is also recorded as video.", which is recorded on
+  the meeting's consent record with the notice. In Opt-in, the video starts only
+  once the meeting's consent is granted; an objection ends the meeting and its
+  video, and keeps what was recorded until then.
+- **When the video stops on its own** — the transcriber refuses it, you stop
+  sharing, or its connection cannot be restored within about two minutes — the
+  page says why and the audio carries on.
+- **Key frame spacing.** LMA takes slides from H.264 key frames, which it needs
+  at least every two seconds. The page asks the browser's encoder for one every
+  1.8 seconds and reads the spacing it actually gets from the video; if the
+  encoder spaces them further apart, the page warns that some slides may be
+  missed, and records the video anyway.
+
+The video is sent as the Desktop Capture App sends its own, over a second
+WebSocket connection; see [Screen Video](websocket-streaming-api.md#616-screen-video).
+Key frames from this page are stored with `Source` `STREAM_AUDIO`.
 
 ## Speaker Identification
 
@@ -153,7 +194,7 @@ Notes:
   and, with speaker identification on, use the voices to correct the meeting
   page's speaker names (see
   [How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named)).
-  Stream Audio has no meeting page to read, so its labels are unchanged.
+  Stream Audio/Video has no meeting page to read, so its labels are unchanged.
 - There is no additional Amazon Transcribe charge for speaker identification.
 
 ## If the Connection Drops
@@ -181,11 +222,11 @@ one holding the meeting, on deployments that run more than one.
 
 ## Browser Compatibility
 
-Chrome browser is required. Stream Audio relies on Chrome's tab audio capture API to capture audio from other browser tabs. Other browsers do not support this capability.
+Chrome browser is required. Stream Audio/Video relies on Chrome's tab audio capture API to capture audio from other browser tabs. Other browsers do not support this capability.
 
 ## Technical Details
 
-Stream Audio combines your microphone input and the selected tab's audio into a stereo (two-channel) audio stream. Your microphone is assigned to one channel while the tab audio is assigned to the other, enabling speaker attribution during transcription. The combined stream is sent via WebSocket to the Fargate-based transcription server for real-time processing.
+Stream Audio/Video combines your microphone input and the selected tab's audio into a stereo (two-channel) audio stream. Your microphone is assigned to one channel while the tab audio is assigned to the other, enabling speaker attribution during transcription. The combined stream is sent via WebSocket to the Fargate-based transcription server for real-time processing.
 
 Because attribution is per channel, several people sharing one microphone appear
 as a single speaker unless you tick the **Speaker identification** boxes above.

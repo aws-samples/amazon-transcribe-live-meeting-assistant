@@ -74,7 +74,7 @@ const ComponentSelector = ({ params, sendToParent }) => {
           <p>Available components:</p>
           <ul>
             <li>
-              <strong>stream-audio</strong> - Stream Audio meeting component (live streaming only)
+              <strong>stream-audio</strong> - Stream Audio/Video meeting component (live streaming only)
             </li>
             <li>
               <strong>upload-audio</strong> - Upload a pre-recorded audio / video file

@@ -271,7 +271,7 @@ describe('the editor', () => {
     const transcribeOnly = section('Transcription Engine');
     expect(within(transcribeOnly).getByText('Virtual Participant voice separation')).toBeTruthy();
     expect(within(transcribeOnly).queryByText('Virtual Participants')).toBeNull();
-    expect(within(transcribeOnly).queryByText('Stream Audio, Chrome extension and Desktop Capture')).toBeNull();
+    expect(within(transcribeOnly).queryByText('Stream Audio/Video, Chrome extension and Desktop Capture')).toBeNull();
     expect(within(transcribeOnly).getByText('Every meeting is transcribed by Amazon Transcribe')).toBeTruthy();
     expect(within(transcribeOnly).queryByText('Amazon Transcribe is the default engine')).toBeNull();
     unmount();
@@ -280,7 +280,7 @@ describe('the editor', () => {
     openSection(await screen.findByText('Transcription Engine'));
     const withEngine = section('Transcription Engine');
     expect(within(withEngine).getByText('Virtual Participants')).toBeTruthy();
-    expect(within(withEngine).getByText('Stream Audio, Chrome extension and Desktop Capture')).toBeTruthy();
+    expect(within(withEngine).getByText('Stream Audio/Video, Chrome extension and Desktop Capture')).toBeTruthy();
     expect(within(withEngine).getByText('Virtual Participant voice separation')).toBeTruthy();
     expect(within(withEngine).getByText('Amazon Transcribe is the default engine')).toBeTruthy();
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();

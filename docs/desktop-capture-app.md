@@ -10,7 +10,7 @@ application (macOS and Windows) that streams your **microphone**, your computer'
 LMA. Because it captures the operating system's audio, not a browser tab, it can
 transcribe meetings you join from a **native desktop app** (Zoom, Microsoft Teams,
 Cisco Webex, Slack huddles, phone bridges, …), which the
-[Chrome Extension](browser-extension.md) and [Stream Audio](stream-audio.md)
+[Chrome Extension](browser-extension.md) and [Stream Audio/Video](stream-audio.md)
 options cannot. It adds **no bot** or extra attendee to the meeting.
 
 > **Status:** macOS and Windows are available today. The app is distributed as
@@ -77,8 +77,8 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 
 ### Choosing the transcription engine
 
-Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
-in the **Transcription Engine** section of **Configuration ▸ Configuration**, the same setting that covers Stream Audio and the
+Which engine a desktop meeting uses is the deployment's **Stream Audio/Video, Chrome extension and Desktop Capture** setting
+in the **Transcription Engine** section of **Configuration ▸ Configuration**, the same setting that covers Stream Audio/Video and the
 Chrome extension; it ships on Amazon Transcribe, and an admin can move it onto the
 [ASR MicroVM engine](microvm-asr.md) wherever that engine is deployed. When the deployment runs that engine, `--asr-engine microvm` or
 `--asr-engine transcribe` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`)
@@ -140,7 +140,7 @@ stream, record, or transcribe calls if otherwise prohibited.
 
 The app shows this disclaimer **before your first recording** and requires you
 to agree (the same consent gate as the browser extension and the web UI's
-Stream Audio tab). After that:
+Stream Audio/Video tab). After that:
 
 - A one-line reminder — *"Ensure all participants have consented to
   recording"* — stays visible next to the **Start** button; hovering it shows
@@ -632,7 +632,7 @@ Limitations:
   after continuing.
 - **Retention.** A continued meeting keeps the expiry it was created with, which
   is also when it leaves the meeting list.
-- **Other clients.** A meeting can also be continued from the Stream Audio page
+- **Other clients.** A meeting can also be continued from the Stream Audio/Video page
   ([Continue an existing meeting](stream-audio.md#continue-an-existing-meeting)),
   the browser extension
   ([Continue an existing meeting](browser-extension.md#continue-an-existing-meeting)),

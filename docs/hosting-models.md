@@ -58,7 +58,7 @@ the full table.
 | | Meeting Consent › Virtual Participant leaves after an objection | On | An objection ends the Virtual Participant's part in the meeting. |
 | | Meeting Consent › Keep evidence screenshots | On | The consent record keeps the evidence of each reply. |
 | Recordings | Meeting Recording › Record meeting audio | Off | Only the transcript is kept. Meeting video is a stack parameter; see [Settings no preset can set](#settings-no-preset-can-set). |
-| | Meeting Recording › Record screen video from Stream Audio and the browser extension | Off | Those two clients record no screen video. |
+| | Meeting Recording › Record screen video from Stream Audio/Video and the browser extension | Off | Those two clients record no screen video. |
 | | Retention › Delete the transcript after the summary | Off | The transcript is kept for the retention period, 90 days by default. |
 | | Virtual Participant › Add the meeting chat to the transcript | On | The chat is part of the meeting's record and is deleted with it. |
 | In-meeting requests | Meeting Assistant › In-meeting requests: who may ask | Off | No request made in the meeting is answered, and a Virtual Participant does not start its voice assistant. See [Who may ask](#who-may-ask). |
@@ -71,7 +71,7 @@ the full table.
 | Other | Amazon Transcribe › Redact personal information; Amazon Bedrock Models › Model inference geography | Off; Global | The shipped defaults. Change them in a copy of the profile if your policy needs them. |
 
 The consent settings are those of the Regulated – consent required preset, so
-they have the same consequences: Stream Audio and the Desktop Capture App cannot
+they have the same consequences: Stream Audio/Video and the Desktop Capture App cannot
 collect each participant's consent, so **Start** is refused from them; a Virtual
 Participant on the Webex join cannot tell who is present, so a Webex meeting is
 never granted; and on the Teams browser join the chat senders and the
@@ -90,7 +90,7 @@ without signing in types themselves, and on the Teams browser join off the
 light-meetings client it sees no sender at all. It knows a speaker only by a
 diarization label. So **In-meeting requests: who may ask** has no value that lets
 only the owner ask through a Virtual Participant: **Owner only** answers only a
-wake phrase spoken into the owner's own microphone from Stream Audio, the Desktop
+wake phrase spoken into the owner's own microphone from Stream Audio/Video, the Desktop
 Capture App or the browser extension, and nothing in a meeting a Virtual
 Participant captures. The Team-hosted preset therefore uses **Off**. The owner
 still asks the meeting assistant from the meeting page, which is signed in as
@@ -132,7 +132,7 @@ is one to **decide with the customer**.
 | Meeting Consent › Allow a different choice per meeting | On | Whether the owner of a meeting may choose another mode or rule for it, such as owner attestation for an internal meeting. |
 | Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the browser extension and older clients may capture without asking. |
 | Meeting Recording › Record meeting audio | Off | Whether recordings are wanted. Meeting video is the `EnableVideoRecording` stack parameter. |
-| Meeting Recording › Record screen video from Stream Audio and the browser extension | Off | Whether users may record the screen or tab they share from those two clients, where `EnableVideoRecording` is `true`. |
+| Meeting Recording › Record screen video from Stream Audio/Video and the browser extension | Off | Whether users may record the screen or tab they share from those two clients, where `EnableVideoRecording` is `true`. |
 | Retention | Transcript kept for the retention period | The periods their policy requires: the retention stack parameters, and **Retention › Delete the transcript after the summary**. |
 | Knowledge base | Allowed | The document knowledge base holds the customer's own documents; it is chosen with the `MeetingAssistService` stack parameter and its data sources. |
 | Meeting Assistant › Web search | Off | Whether meeting content may be sent to a web search provider. |
@@ -140,14 +140,14 @@ is one to **decide with the customer**.
 | Meeting Assistant › In-meeting requests: who may ask | Anyone | Whether participants may ask the assistant in the meeting, answered from the current meeting only. |
 | Meeting Processing › Default summary profile for new meetings | `default` | The `discovery-session` profile is available for each meeting; make it the default if most meetings are discovery sessions. |
 
-Stream Audio and the Desktop Capture App have no participant list, so they
+Stream Audio/Video and the Desktop Capture App have no participant list, so they
 cannot collect each participant's consent. Because this preset allows a
 different choice per meeting, their meetings run under the rule **The meeting
 owner attests** instead: the LMA user confirms that everyone in the meeting
 agreed before **Start**. If the customer turns **Allow a different choice per
 meeting** off, **Start** is refused from both, and their meetings need a Virtual
 Participant. See
-[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
 
 ## Settings no preset can set
 
@@ -155,7 +155,7 @@ These are stack parameters, or are not part of LMA, so they are set when the
 stack is deployed or updated, or in the account. For a team-hosted deployment:
 
 1. **Meeting video off.** Set `EnableVideoRecording` to `false`, so no
-   Virtual Participant, Desktop Capture App, Stream Audio page or browser
+   Virtual Participant, Desktop Capture App, Stream Audio/Video page or browser
    extension records video and no key frames
    are taken. Key frames exist only where video is recorded; where it is, their
    items are kept as long as the transcript and their images follow

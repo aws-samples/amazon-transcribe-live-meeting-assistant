@@ -10,7 +10,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > **An alternative transcription engine, deployed by default and selected per
 > meeting source.** `EnableMicrovmAsr` defaults to `true`, which deploys the engine,
 > but Amazon Transcribe is the default transcription engine for every meeting source.
-> Where the engine is deployed, an admin moves Stream Audio, Chrome extension and
+> Where the engine is deployed, an admin moves Stream Audio/Video, Chrome extension and
 > Desktop Capture meetings, Virtual Participants, or both onto it in the
 > Transcription Engine section of the Configuration page. Amazon Transcribe is also
 > the fallback: it is used for every meeting where the engine is not deployed
@@ -63,7 +63,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 ## Why this exists
 
-By default a [Stream Audio](stream-audio.md), [Chrome extension](browser-extension.md) or
+By default a [Stream Audio/Video](stream-audio.md), [Chrome extension](browser-extension.md) or
 [Desktop Capture App](desktop-capture-app.md) meeting labels the transcript by **audio
 channel**: everything from your microphone
 is one speaker, everything from the shared tab is another. That is correct when one
@@ -117,7 +117,7 @@ language the deployed model bundle does not support (see
 `el-GR`), a meeting that would otherwise use this engine is transcribed by Amazon
 Transcribe instead, so the option is applied rather than silently dropped. Redaction
 counts when its switch is on, whatever the language. The rule is applied each time a meeting starts, by the
-WebSocket transcriber for Stream Audio, Chrome extension and Desktop Capture meetings
+WebSocket transcriber for Stream Audio/Video, Chrome extension and Desktop Capture meetings
 and by the Virtual Participant for its own, and each logs the reason at info level
 (`[ASR] ... Amazon Transcribe options use content redaction, ...`). It also wins over
 an explicit request for this engine (`--asr-engine microvm` from a Desktop Capture
@@ -554,7 +554,7 @@ each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
+| Stream Audio/Video, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
 | Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
 Both settings ship on Amazon Transcribe. Choosing **ASR MicroVM speech engine** for a
@@ -584,7 +584,7 @@ section, in a Custom profile, to keep using it.
 On a deployment without the engine (`EnableMicrovmAsr=false`, or a Region without
 AWS Lambda MicroVMs) the settings are not shown and have no effect: the transcriber
 and the Virtual Participant find no ASR launcher configured and use Amazon
-Transcribe, logging that at info level. Diarization stays a per-meeting choice — the Stream Audio form still asks
+Transcribe, logging that at info level. Diarization stays a per-meeting choice — the Stream Audio/Video form still asks
 which channels to identify speakers on, because only the person in the meeting knows
 whether several people share their microphone. The Desktop Capture apps can force an
 engine for one run with `--asr-engine`, which wins over the deployment setting.
@@ -601,7 +601,7 @@ took 21 seconds on the integration stack on 2026-11-11, and the launcher allows 
 four minutes before it gives up. There is no warm pool, so every meeting pays that
 launch. The audio the meeting sends meanwhile is kept and transcribed:
 
-- **Stream Audio, the Chrome extension and Desktop Capture.** The transcriber holds the
+- **Stream Audio/Video, the Chrome extension and Desktop Capture.** The transcriber holds the
   audio twice while the MicroVM launches: in each channel's engine session, which sends it
   as its first audio when it connects, and in the meeting's audio stream, which Amazon
   Transcribe reads if the launch fails. Rows are timed from the start of the meeting's
@@ -681,14 +681,14 @@ on the page rather than in the DynamoDB console.
 
 | Setting | Default | Effect |
 |---|---|---|
-| Stream Audio, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
+| Stream Audio/Video, Chrome extension and Desktop Capture: engine | ASR MicroVM engine | Which engine those meetings use |
 | Virtual Participants: engine | ASR MicroVM engine | Which engine Virtual Participants use |
 | Virtual Participant voice separation | on | A VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. Honoured on **both** engines: the on-demand engine separates voices itself, and on Amazon Transcribe the VP recovers the turns from Transcribe's own per-item speaker labels. With it on, the VP also uses each voice to correct the roster name once the voice has been heard long enough alongside one attendee (see [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well)); on a measured two-person Zoom meeting that cut wrongly named rows from 10 to 6 of 415, which is one meeting on one platform. A person the engine splits into two voices is still shown as **one person**: a name is shown as several people only when it reads as a room or its voices are given different names (see [One person or several people](transcription-and-translation.md#one-person-or-several-people)). Clear it to name VP rows from the roster alone; what it costs on this engine is under [Cost and sizing](#cost-and-sizing). Measured on four voices mixed onto one channel, the on-demand engine gave 3 labels at 79% purity against Amazon Transcribe's 2 at 57%, so prefer this engine for conference rooms, and for the voice correction, which acts only on a voice that is at least 70% one attendee. The voice assistant's own speech is never diarized on either engine, because it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
 bundle's measured operating point (or the engine's built-in defaults), baked into the
-image. Stream Audio still asks **Speakers per channel** when diarization is ticked:
+image. Stream Audio/Video still asks **Speakers per channel** when diarization is ticked:
 only the person in the meeting knows how many people share their microphone, and that
 per-meeting cap is the one number a user can usefully supply.
 
@@ -851,7 +851,7 @@ segment until it closes, so their partials stay unlabelled whatever the client a
 engine image from before this field ignores it, and its partials are unlabelled too.
 The Virtual Participant asks for it on its participant session whenever it asks for
 voice separation (see
-[Live rows](virtual-participant.md#live-rows)). The WebSocket transcriber (Stream Audio
+[Live rows](virtual-participant.md#live-rows)). The WebSocket transcriber (Stream Audio/Video
 and the browser extension) does not ask for it yet.
 
 What it costs has **not been measured**. Without it the diarizer steps once each time an
@@ -860,7 +860,7 @@ second while someone is speaking, and each step also re-reads the diarizer's cac
 context (up to about 42 s of speech features), so the diarizer's share of the CPU can be
 several times higher than without it. Watch the `engine load` line, and any
 `engine behind, dropped` lines, on the first meetings that use it.
-A channel that asks for no labels, such as Stream Audio's microphone or the Virtual
+A channel that asks for no labels, such as Stream Audio/Video's microphone or the Virtual
 Participant's assistant, gets none: the engine skips voice embedding for it, and its rows
 still close at 20 s.
 
@@ -941,7 +941,7 @@ real meeting audio rather than synthetic speech where you can; a synthetic pair 
 useful smoke test of the tool, not a measurement to ship.
 
 **Making a sample.** Play a recording of someone else through your laptop speakers
-while you talk into the microphone and capture it with **Stream Audio** — its two
+while you talk into the microphone and capture it with **Stream Audio/Video** — its two
 channels are exactly system audio and microphone, so the two voices land on separate
 channels. Alternate for ~20 s each, four or five times. Or merge two single-speaker
 files from a public corpus:
@@ -1164,7 +1164,7 @@ alike. See
 engine-independent, so it reads the same whether these labels came from here or from
 Amazon Transcribe.
 
-**A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
+**A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio/Video's
 two channels. Meeting audio is on `REMOTE`, and the assistant's own voice is on
 `LOCAL` under the VP's name, never diarized. Wake phrases are detected on meeting rows
 only, so the assistant cannot wake itself.
@@ -1178,7 +1178,7 @@ attendee's name. The rules, their thresholds and what they did on a measured mee
 are in [Naming rows from the voice as well](virtual-participant.md#naming-rows-from-the-voice-as-well);
 the extension's version is described in
 [How meeting speakers are named](browser-extension.md#how-meeting-speakers-are-named).
-A channel with no page to read, such as Stream Audio's, keeps the format above.
+A channel with no page to read, such as Stream Audio/Video's, keeps the format above.
 
 ## Known limitations
 
@@ -1199,13 +1199,13 @@ A channel with no page to read, such as Stream Audio's, keeps the format above.
 - **Speaker identities are per session and per channel.** A reconnect mid-meeting
   starts new identities.
 - **8-hour hard ceiling** per MicroVM (service limit).
-- Applies to Stream Audio, the Chrome extension, the Desktop Capture Apps and the
+- Applies to Stream Audio/Video, the Chrome extension, the Desktop Capture Apps and the
   Virtual Participant. The
   Upload Audio path still uses Amazon Transcribe batch.
 
 ## Troubleshooting
 
-**The "Speakers per channel" field is missing from Stream Audio.** It is shown only
+**The "Speakers per channel" field is missing from Stream Audio/Video.** It is shown only
 when speaker identification is ticked for at least one channel and the
 streaming-meetings engine in the **Transcription Engine** section of **Configuration ▸ Configuration** is the on-demand engine. A
 deployment without the engine (`EnableMicrovmAsr=false`, or a Region without AWS
@@ -1272,12 +1272,12 @@ knob — the fix is a re-measurement with `scripts/calibrate.py`.
 **Two people share one label.** The reverse failure: their voices score above the
 threshold against each other. On the measured data the hardest real pair (two
 similar-sounding women) scored 0.307 and a synthetic same-gender pair 0.402, both under
-0.5 — but a closer pair is possible. Stream Audio's **Speakers per channel** cannot
+0.5 — but a closer pair is possible. Stream Audio/Video's **Speakers per channel** cannot
 separate them (a cap only bounds splitting); the answer is again a measurement on a
 recording of those voices.
 
 **Too many speakers on genuinely multi-speaker audio.** Set **Speakers per channel** in
-Stream Audio to the number of people actually sharing that microphone or tab. It is the
+Stream Audio/Video to the number of people actually sharing that microphone or tab. It is the
 one per-meeting number a user can supply that the engine cannot infer.
 
 **`scripts/calibrate.py` reports "unusable".** The same-speaker and different-speaker
@@ -1324,7 +1324,7 @@ Every checksum in `catalog.json` was verified by downloading the artifact and ha
 
 ## See Also
 
-- [Stream Audio](stream-audio.md)
+- [Stream Audio/Video](stream-audio.md)
 - [Desktop Capture App](desktop-capture-app.md)
 - [Transcription & Translation](transcription-and-translation.md)
 - [WebSocket Streaming API](websocket-streaming-api.md)

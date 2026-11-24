@@ -11,7 +11,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 - **[Chrome Extension](browser-extension.md)** — browser extension that runs
   inside the tab where your meeting is loaded.
-- **[Stream Audio (from Mic+Browser)](stream-audio.md)** — built-in page in the
+- **[Stream Audio/Video (from Mic+Browser)](stream-audio.md)** — built-in page in the
   LMA web app that streams audio from your microphone and any Chrome tab
   (meetings, softphones, YouTube, audio/video playback).
 - **[Desktop Capture App](desktop-capture-app.md)** — native macOS and
@@ -23,7 +23,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 ## At-a-glance comparison
 
-| Capability                                              | Chrome Extension       | Stream Audio (from Mic+Browser) | Desktop Capture App | Virtual Participant |
+| Capability                                              | Chrome Extension       | Stream Audio/Video (from Mic+Browser) | Desktop Capture App | Virtual Participant |
 | ------------------------------------------------------- | ---------------------- | ------------------------------- | -------------------------- | ------------------- |
 | One-time install required                               | Yes (Chromium only)    | No                              | Yes (build on your computer) | No                |
 | Runs inside meeting tab                                 | ✅                     | ❌ (separate LMA tab)           | ❌ (menu-bar / tray app)   | ❌ (joins as a bot) |
@@ -55,7 +55,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 - You want to capture audio from something other than a conventional meeting —
   a softphone, a YouTube video, a recorded audio/video file playing in a tab,
   etc.
-- You're fine with no speaker attribution (Stream Audio has no access to
+- You're fine with no speaker attribution (Stream Audio/Video has no access to
   meeting-app metadata; it only distinguishes your microphone channel from the
   tab-audio channel).
 
@@ -63,10 +63,10 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 - You join meetings from a **native desktop app** on macOS or Windows (Zoom,
   Teams, Webex, Slack, a phone bridge, …) rather than a Chrome tab — which rules
-  out both the Chrome Extension and Stream Audio, and you don't want a visible bot.
+  out both the Chrome Extension and Stream Audio/Video, and you don't want a visible bot.
 - You're attending the meeting yourself and want an unobtrusive menu-bar / tray
   app (start/stop, pause, mute mic/system, live meters) with no extra attendee.
-- You're fine with no per-speaker names (like Stream Audio, it only distinguishes
+- You're fine with no per-speaker names (like Stream Audio/Video, it only distinguishes
   your microphone from the system/meeting-audio channel) and don't need the
   in-meeting Voice Assistant.
 - macOS and Windows are available today; mobile is on the roadmap. See
@@ -86,6 +86,6 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 ## See also
 
 - [Chrome Extension](browser-extension.md) — install and usage guide
-- [Stream Audio](stream-audio.md) — browser-based capture
+- [Stream Audio/Video](stream-audio.md) — browser-based capture
 - [Desktop Capture App](desktop-capture-app.md) — native macOS / Windows app
 - [Virtual Participant](virtual-participant.md) — server-side bot

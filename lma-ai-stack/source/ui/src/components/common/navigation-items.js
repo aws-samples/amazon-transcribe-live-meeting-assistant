@@ -48,7 +48,7 @@ export const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'Stream Audio (Mic+Browser)',
+          text: 'Stream Audio/Video (Mic+Browser)',
           href: `#${STREAM_AUDIO_PATH}`,
           external: true,
         },

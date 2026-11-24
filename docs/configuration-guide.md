@@ -41,8 +41,8 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Transcription Engine | Virtual Participant voice separation, which works on either engine and is on by default (clear it to name Virtual Participant rows from the meeting roster alone), and, where the ASR MicroVM speech engine is deployed (`EnableMicrovmAsr=true`, the default, in a Region with AWS Lambda MicroVMs), which engine transcribes streaming meetings and which transcribes Virtual Participants: Amazon Transcribe by default, or the ASR MicroVM engine. Without that engine only the voice separation switch is shown, and every meeting uses Amazon Transcribe. While the Amazon Transcribe section uses content redaction, a custom vocabulary or language model, language identification, or a language the deployed speech model does not support (see [Languages](microvm-asr.md#languages)), meetings stay on Amazon Transcribe whichever engine is selected, and the section says so | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with, by region, shown as a table with the source of every shipped price; change one to use your own rate, and export or import the whole table (see [Changing prices](meeting-cost-estimate.md#changing-prices)). Also opened from **Configuration ▸ Meeting Cost Prices** in the navigation | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
-| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel. Uploaded recordings use the language, or language identification with the language options | To streaming meetings that start after the save, to the next Virtual Participant to start, and to uploads started after the save |
-| Meeting Recording | Whether those meetings' audio is recorded when the client does not say, and whether the Stream Audio page and the browser extension may record screen video (see [Meeting Video](meeting-video.md)) | To streaming meetings that start after the save, and to the next Virtual Participant to start |
+| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio/Video page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel. Uploaded recordings use the language, or language identification with the language options | To streaming meetings that start after the save, to the next Virtual Participant to start, and to uploads started after the save |
+| Meeting Recording | Whether those meetings' audio is recorded when the client does not say, and whether the Stream Audio/Video page and the browser extension may record screen video (see [Meeting Video](meeting-video.md)) | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)), and whether such a request may read the meeting context and checklist ([Requests made in the meeting](meeting-context-and-checklist.md#requests-made-in-the-meeting)); the editable part of the assistant's instructions ([Assistant Instructions](meeting-assistant.md#assistant-instructions)); and, per installed MCP server and per skill, whether the assistant uses it and whether requests made in the meeting may ([Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one), [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile)) | To transcript segments processed, and answers started, about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The name the Virtual Participant joins meetings under (see [More than one LMA in a meeting](virtual-participant.md#more-than-one-lma-in-a-meeting)), its voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
@@ -414,7 +414,7 @@ The presets, by id:
 | Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off |
 | Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off |
-| Meeting Recording › Record screen video from Stream Audio and the browser extension | Off | Off | Off | Off | Off | Off |
+| Meeting Recording › Record screen video from Stream Audio/Video and the browser extension | Off | Off | Off | Off | Off | Off |
 | Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off | On | On |
 | Amazon Transcribe › Redact personal information | Off | Off | On | On | Off | Off |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment | Global | Global |
@@ -437,7 +437,7 @@ the meeting audio is processed by the meeting's transcription engine, and only
 the reply events are kept on the consent record. Turn **Meeting Consent › Read
 spoken replies** off to have it read the chat only and send no meeting audio
 anywhere before consent; the presets leave that setting as it is (see
-[Spoken replies](meeting-consent.md#spoken-replies)). Stream Audio and the Desktop Capture App cannot collect
+[Spoken replies](meeting-consent.md#spoken-replies)). Stream Audio/Video and the Desktop Capture App cannot collect
 each participant's consent, so Start is refused from them; use a Virtual
 Participant on a join that supports each-participant consent. A Virtual
 Participant on the Webex join cannot tell who is present, so it never meets the
@@ -455,19 +455,19 @@ may use Notify or the stricter Opt-in, not Off. A Virtual Participant posts the
 notice in the meeting chat and reads objections there, and those said aloud and
 addressed to LMA (read from the meeting's own transcription, unless **Read
 spoken replies** is off), on every join, and it leaves the meeting after an
-objection, so nothing is recorded or kept after it. Stream Audio and the Desktop Capture App
+objection, so nothing is recorded or kept after it. Stream Audio/Video and the Desktop Capture App
 show the notice for the LMA user to share in the meeting and capture from
 Start; an objection takes effect when the user records it with **Participant
 objected**. Clients that show no consent step (the browser extension, the
-Stream Audio embed and Desktop Capture App builds from before the consent step)
+Stream Audio/Video embed and Desktop Capture App builds from before the consent step)
 are refused, as under Regulated. See
-[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
 
 The two hosting presets, Team-hosted (external meetings) and Customer account,
 are described with every setting they change, and the reason for each, in
 [Hosting Models](hosting-models.md). Team-hosted uses the same consent settings
 as the Regulated – consent required preset, with the same consequences for Stream
-Audio, the Desktop Capture App and the Webex join, keeps the transcript, and
+Audio/Video, the Desktop Capture App and the Webex join, keeps the transcript, and
 turns requests made in the meeting, web search and the installed MCP servers off.
 
 Every preset leaves **Meeting Assistant › Whiteboards › On for new meetings** off, so

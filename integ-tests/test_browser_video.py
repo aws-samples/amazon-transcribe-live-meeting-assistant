@@ -1,14 +1,14 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""Screen video from the Stream Audio page and the browser extension, on a live stack.
+"""Screen video from the Stream Audio/Video page and the browser extension, on a live stack.
 
 Streams the narrated slideshow of ``desktop_video_probe.py`` as each browser
 client would (``clientType`` ``STREAM_AUDIO`` and ``BROWSER_EXTENSION``), over
 the same second connection the Desktop Capture App uses, and checks what the
 stack stored and refused (see browser_video_probe.py):
 
-1. With Meeting Recording › Record screen video from Stream Audio and the
+1. With Meeting Recording › Record screen video from Stream Audio/Video and the
    browser extension on, the settings answer allows video, and each client's
    meeting gets one key frame per slide under its own ``Source``, a video
    recording and its capture source.
@@ -160,7 +160,7 @@ def config(stack, user):
         answers = _wait_for_video_allowed(stack, user, True)
         if set(answers.values()) != {True}:
             pytest.fail(
-                f"Record screen video from Stream Audio and the browser extension is on, but the "
+                f"Record screen video from Stream Audio/Video and the browser extension is on, but the "
                 f"transcriber reports videoAllowed {answers}: the stack does not record video "
                 "(EnableVideoRecording=false)"
             )

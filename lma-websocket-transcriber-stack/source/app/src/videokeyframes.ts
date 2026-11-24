@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  *
  * Key frames of a streaming client's video (the Desktop Capture App, the Stream
- * Audio page or the browser extension): the slides and documents that
+ * Audio/Video page or the browser extension): the slides and documents that
  * were on screen, kept when they change and stored on the meeting, as the
  * Virtual Participant does for its own display (docs/meeting-video.md).
  *

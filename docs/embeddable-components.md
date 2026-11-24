@@ -76,7 +76,7 @@ backend emits the corresponding events.
 
 ### 1. Basic Embed (Stream Audio)
 
-The simplest way to get started is to embed the Stream Audio component:
+The simplest way to get started is to embed the Stream Audio/Video component:
 
 ```html
 <iframe
@@ -88,7 +88,7 @@ The simplest way to get started is to embed the Stream Audio component:
 ></iframe>
 ```
 
-> **Important**: The `allow="microphone; display-capture"` attribute is required for the Stream Audio component to access the user's microphone and screen audio.
+> **Important**: The `allow="microphone; display-capture"` attribute is required for the Stream Audio/Video component to access the user's microphone and screen audio.
 
 ### 1b. Upload Audio (Pre-recorded)
 
@@ -842,7 +842,7 @@ postMessage event to the parent, just as if it had loaded normally.
 4. **Use HTTPS** for both your application and the LMA iframe
 
 5. **Limit iframe permissions** — only grant the permissions each component needs:
-   - Stream Audio: `allow="microphone; display-capture"`
+   - Stream Audio/Video: `allow="microphone; display-capture"`
    - Transcript/Summary/Chat: no special permissions needed
    - VNC: no special permissions needed
 
@@ -862,12 +862,12 @@ postMessage event to the parent, just as if it had loaded normally.
 
 Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 
-**Stream Audio (pre-populated):**
+**Stream Audio/Video (pre-populated):**
 ```
 /#/embed?component=stream-audio&meetingTopic=My+Meeting&participants=Team&owner=me@co.com
 ```
 
-**Auto-start Stream Audio:**
+**Auto-start Stream Audio/Video:**
 ```
 /#/embed?component=stream-audio&meetingTopic=Auto+Meeting&autoStart=true
 ```
@@ -941,7 +941,7 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 
 - [LMA GitHub Repository](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant)
 - [LMA Main README](../README.md)
-- [LMA Stream Audio Documentation](../lma-ai-stack/WebUIStreamingClient.md)
+- [LMA Stream Audio/Video Documentation](../lma-ai-stack/WebUIStreamingClient.md)
 - [LMA Virtual Participant Documentation](../lma-virtual-participant-stack/README.md)
 - [MDN: Window.postMessage()](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - [MDN: iframe allow attribute](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#allow)

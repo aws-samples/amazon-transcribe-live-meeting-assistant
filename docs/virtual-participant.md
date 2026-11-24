@@ -56,13 +56,13 @@ title: "Virtual Participant"
 
 ## Overview
 
-> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
+> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio/Video, and Virtual Participant.
 
 The Virtual Participant (VP) is a headless Chrome browser that joins meetings as a separate participant, driven by Playwright. It runs on ECS (EC2 or Fargate) or, where available, in an AWS Lambda MicroVM — see [Launch Types](#launch-types). It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
 ## When to use Virtual Participant
 
-- **Attendees on native desktop or mobile apps**: Participants are free to use native meeting apps (Zoom, Teams, etc.) instead of being limited to the browser — the Chrome Extension and Stream Audio require joining from the web client.
+- **Attendees on native desktop or mobile apps**: Participants are free to use native meeting apps (Zoom, Teams, etc.) instead of being limited to the browser — the Chrome Extension and Stream Audio/Video require joining from the web client.
 - **Independent attendance**: The VP can join before you arrive, stay after you leave, or attend meetings you do not join at all — including scheduling it in advance.
 - **Voice Assistant**: The VP is the only capture option that supports the Voice Assistant (wake phrase, push-to-talk, always-on modes).
 - **Open VP live view**: Use the Meeting Assistant's "Open VP live view" feature to see the bot's browser view of the meeting in real time.
@@ -658,7 +658,7 @@ The server launches the new Virtual Participant (or, when it is scheduled, the s
 
 A rejoin is refused for a Virtual Participant that was never admitted to its meeting, because no LMA meeting was created to reopen, and when the meeting's transcript has already been deleted by the Retention settings (see [Transcript deletion](transcript-deletion.md)); a deployment that deletes transcripts **Immediately** after the summary therefore cannot reopen a meeting once its summary is written. The server holds the rule on who may: the caller must be the Virtual Participant's owner or an Admin, and also the meeting's owner or an Admin. Being one of the people a meeting is shared with is not enough. The same operation is available to API clients as the `rejoinVirtualParticipant` mutation, and from the `lma` CLI and the SDK as `lma vp rejoin --id <vpId>` and `client.vp.rejoin(vp_id)` (see [LMA CLI](lma-cli.md#lma-vp--virtual-participant-operations)).
 
-The streaming clients continue an existing meeting through the same sessions, with the `reopenMeeting` mutation: the Desktop Capture App, the Stream Audio page and the browser extension each have **Continue an existing meeting…** (see [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)), and `lma meetings reopen` and `client.meetings.reopen` call it for any other client.
+The streaming clients continue an existing meeting through the same sessions, with the `reopenMeeting` mutation: the Desktop Capture App, the Stream Audio/Video page and the browser extension each have **Continue an existing meeting…** (see [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)), and `lma meetings reopen` and `client.meetings.reopen` call it for any other client.
 
 #### What a rejoin does
 
@@ -1017,7 +1017,7 @@ a VP on that engine falls back to Amazon Transcribe when a MicroVM cannot be
 acquired. On Amazon Transcribe, with a voice assistant
 configured, the VP sends Amazon Transcribe one stream with two channels, with channel
 identification on: the meeting's participants on the first channel and the assistant's
-voice on the second, the same layout as Stream Audio's tab and microphone. Participant
+voice on the second, the same layout as Stream Audio/Video's tab and microphone. Participant
 rows are on the `REMOTE` channel, named from the meeting roster, and only they are
 checked for wake phrases and stop requests; the assistant's rows are on the `LOCAL`
 channel under the VP's own name. A participant who talks over the assistant therefore
@@ -1048,7 +1048,7 @@ choices:
   [While the MicroVM starts](microvm-asr.md#while-the-microvm-starts).
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `LOCAL`
-  channel under the VP's own name, never diarized, exactly as Stream Audio separates the
+  channel under the VP's own name, never diarized, exactly as Stream Audio/Video separates the
   microphone from the tab. Meeting rows are named after the attendee the platform showed
   during them (see [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)).
 - **Pausing keeps the engine session.** The chat pause command stops feeding meeting audio
@@ -1419,7 +1419,7 @@ For the recommended EC2 + VSCode Remote-SSH + VNC workflow — including how to 
 ## See Also
 
 - [Virtual Participant Local Development](virtual-participant-local-dev.md) -- EC2 + VSCode + VNC workflow for running the VP locally
-- [Stream Audio](stream-audio.md) -- Browser-based audio capture alternative
+- [Stream Audio/Video](stream-audio.md) -- Browser-based audio capture alternative
 - [Voice Assistant](voice-assistant.md) -- Add a voice assistant to the Virtual Participant
 - [Simli Avatar Setup](simli-avatar-setup.md) -- Configure a visual avatar for the VP
 - [MicroVM ASR](microvm-asr.md) -- The on-demand transcription engine and its Virtual Participant switches

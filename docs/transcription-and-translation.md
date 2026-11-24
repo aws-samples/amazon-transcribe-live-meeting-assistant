@@ -53,7 +53,7 @@ Channel separation gives one speaker name per channel, which is not enough when
 several people share a channel -- a multi-participant call captured from a browser
 tab or desktop app, or a conference-room microphone shared by several people.
 
-For WebSocket streaming sessions (the [Stream Audio](stream-audio.md) tab and the
+For WebSocket streaming sessions (the [Stream Audio/Video](stream-audio.md) tab and the
 [Desktop Capture App](desktop-capture-app.md)), Amazon Transcribe **speaker
 partitioning (diarization)** can be enabled **per channel** to tell those voices
 apart. Each distinct voice is appended to the channel's speaker name as `(spk_0)`,
@@ -283,7 +283,7 @@ self-introductions are applied, and why everything weaker is a suggestion.
 Which voices count as unnamed depends on the label they carry. A voice under the
 default label (`Other Participant`, the desktop app's `Other participants`, or
 `Me`) is always a candidate. A label you typed yourself — the participant name on
-the Stream Audio form, or your address on the microphone channel — is treated as
+the Stream Audio/Video form, or your address on the microphone channel — is treated as
 a person's name while one voice is heard on that channel, and as a channel label
 once speaker separation has split it into two or more voices, at which point those
 voices are named like any other. On a meeting the Virtual Participant captured,
@@ -376,7 +376,7 @@ names the language of each final row it writes (see
 language with the transcript:
 
 - Each transcript segment stores the language it was identified in as
-  `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio,
+  `LanguageCode` (for example `es-US`). The WebSocket transcriber (Stream Audio/Video,
   the browser extension and the desktop apps) and the Virtual Participant both
   pass it on, on the meeting channel and on the voice assistant's channel; it is
   part of the `ADD_TRANSCRIPT_SEGMENT` event, the `TranscriptSegment` type of
@@ -507,7 +507,7 @@ Both types flow through the LMA pipeline. You can configure Lambda hook function
 
 ## Configuration Parameters
 
-For meetings streamed from the Stream Audio page, the browser extension and the
+For meetings streamed from the Stream Audio/Video page, the browser extension and the
 desktop app, the language, redaction, custom vocabulary, custom language model and
 speaker-identification default are set in the **Amazon Transcribe** section of the
 [Configuration page](configuration-guide.md), and whether audio is recorded in its

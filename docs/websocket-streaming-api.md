@@ -225,7 +225,7 @@ Client                                          Server
 
 1. **Connect** — Open a WebSocket connection to `wss://<CLOUDFRONT_DOMAIN>/api/v1/ws` with authentication tokens.
 2. **Send START** — Immediately send a JSON text message with `callEvent: "START"` and session metadata. This **must** be the first text message. The server will not process audio until a START message is received.
-3. **Stream Audio** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
+3. **Stream Audio/Video** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
 4. **Speaker Changes** *(optional)* — Send `SPEAKER_CHANGE` text messages when the active speaker changes in a multi-participant meeting.
 5. **Send END** — When the session is complete, send a JSON text message with `callEvent: "END"` to signal the server to finalize the transcription, upload recordings, and clean up.
 6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server holds the meeting for 60 seconds for the client to reconnect, and then triggers end-of-call processing (see [Reconnection](#reconnection)).
@@ -272,7 +272,7 @@ Sent once at the beginning of a session to initialize the transcription.
 | `activeSpeaker` | `string` | No | Value of `remoteSpeakerName` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
 | `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
 | `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
-| `clientType` | `string` | No | `API` | Which client is capturing the meeting: `STREAM_AUDIO` (the Stream Audio page and its embeddable components), `BROWSER_EXTENSION` or `DESKTOP_APP`. Stored on the meeting as its capture source; any other value, or none, is stored as `API`. See [Capture Context](#capture-context). |
+| `clientType` | `string` | No | `API` | Which client is capturing the meeting: `STREAM_AUDIO` (the Stream Audio/Video page and its embeddable components), `BROWSER_EXTENSION` or `DESKTOP_APP`. Stored on the meeting as its capture source; any other value, or none, is stored as `API`. See [Capture Context](#capture-context). |
 | `sessionNumber` | `number` | No | — | Only to continue an existing meeting: the capture session the `reopenMeeting` mutation answered for this `callId` (an integer from 2). Send it on every START for the session, reconnects included. See [Continuing an existing meeting](#continuing-an-existing-meeting). |
 
 #### Who may start a meeting, or add to one
@@ -305,7 +305,7 @@ meeting that already exists, even one that has ended (shown as **Done**), so
 that it continues under the same `callId` on one transcript timeline. This is
 what **Continue an existing meeting…** does in the Desktop Capture App (see
 [Desktop Capture App](desktop-capture-app.md#continue-an-existing-meeting)), on
-the [Stream Audio](stream-audio.md#continue-an-existing-meeting) page and in the
+the [Stream Audio/Video](stream-audio.md#continue-an-existing-meeting) page and in the
 [browser extension](browser-extension.md#continue-an-existing-meeting), and the
 same mechanism a Virtual Participant [rejoin](virtual-participant.md#rejoin)
 uses. From a script, `lma meetings reopen --id <callId>` or
@@ -373,7 +373,7 @@ and the meeting stays **Done**, since the session has already started once.
 > the meeting's `SystemPhoneNumber` attribute (default `"System"`) and does not
 > otherwise use; it has no newer name, and a new client need not send it.
 > The in-repository clients that are built and deployed with the stack (the
-> Stream Audio page, the embeddable components, the browser extension, the
+> Stream Audio/Video page, the embeddable components, the browser extension, the
 > sample CLI client) send the documented names. The Desktop Capture Apps for
 > macOS and Windows still send `agentId`, `fromNumber` and `toNumber`, which
 > keeps them working against deployments of earlier versions.
@@ -464,7 +464,7 @@ Opt-in, a client shows its user a consent step before streaming and sends what
 the user confirmed with `START`. The server records it on the meeting once the
 meeting exists, and transcribes and records audio only while the meeting's
 consent allows it. See
-[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app)
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app)
 for the behaviour; this section is the protocol.
 
 **Ask for the settings** (any time on an open connection, usually once on
@@ -516,7 +516,7 @@ The server answers:
     "lmaUser": "ana@example.com",
     "meetingName": "Weekly sync",
     "statement": "Everyone agreed at the start of the call.",
-    "client": "Stream Audio"
+    "client": "Stream Audio/Video"
   }
 }
 ```
@@ -601,13 +601,13 @@ A client can record the screen, window or browser tab its user shares, beside
 the meeting's audio. The video is stored with the meeting as its video
 recording, muxed with the audio when the meeting ends, and its key frames
 become the meeting's shared-screen slides
-([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App sends it this way,
-and so may the Stream Audio page and the browser extension.
+([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App and the Stream Audio/Video page
+send it this way, and so may the browser extension.
 
 **Whether a client may send video.** The deployment must record video (the
-`EnableVideoRecording` stack parameter). The Stream Audio page and the
+`EnableVideoRecording` stack parameter). The Stream Audio/Video page and the
 browser extension (`clientType` `STREAM_AUDIO` and `BROWSER_EXTENSION`) also
-need **Meeting Recording › Record screen video from Stream Audio and the
+need **Meeting Recording › Record screen video from Stream Audio/Video and the
 browser extension** to be on, as it was when the meeting's `START` was handled;
 it is off by default and in every configuration preset. Other clients follow
 the stack parameter alone. To find out before offering video, send
@@ -1009,7 +1009,7 @@ A client that reconnects should therefore:
   as ended, rather than send START for it again, which would start a second
   session (below).
 
-LMA's own clients do this. The Stream Audio page and its embeddable variants
+LMA's own clients do this. The Stream Audio/Video page and its embeddable variants
 reconnect after 1, 2 and 4 seconds and then every 5 seconds, fetch tokens for
 each connection, send the START again, and then send up to the last 3 seconds of
 audio captured while disconnected (older audio is dropped). If no connection
