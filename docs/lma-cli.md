@@ -335,7 +335,7 @@ consent record and evidence, notifications, meeting archives and Virtual
 Participant records. See
 [Deleting a meeting](privacy-and-data-handling.md#deleting-a-meeting) for the
 full list and for the copies it does not reach, such as the DynamoDB tables'
-35-day point-in-time recovery.
+point-in-time recovery (`MeetingDataPointInTimeRecoveryDays`, 35 days by default).
 
 A meeting that is still in progress (`STARTED` or `TRANSCRIBING`) is never
 deleted: it is listed as skipped, and the command can be run again after it
