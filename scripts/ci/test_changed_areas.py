@@ -31,9 +31,7 @@ GITLAB_CI = REPO_ROOT / ".gitlab-ci.yml"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location(
-        "changed_areas", HERE / "changed_areas.py"
-    )
+    spec = importlib.util.spec_from_file_location("changed_areas", HERE / "changed_areas.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules["changed_areas"] = module
@@ -71,9 +69,7 @@ def ran(paths: list[str]) -> set[str]:
         ["docs-site/src/assets/logo-dark.svg", "docs-site/public/videos/demo.mp4"],
     ],
 )
-def test_a_documentation_change_runs_only_the_suites_that_read_documentation(
-    paths,
-) -> None:
+def test_a_documentation_change_runs_only_the_suites_that_read_documentation(paths) -> None:
     assert ca.docs_only(paths)
     steps = ran(paths)
     assert steps <= DOC_READERS | {"vp_template", PROFILE}, steps
@@ -128,14 +124,7 @@ def test_a_full_run_by_request_runs_every_check() -> None:
 def test_a_ui_change_does_not_run_the_other_stacks() -> None:
     steps = ran(["lma-ai-stack/source/ui/src/components/call-panel/CallPanel.jsx"])
     assert "ui" in steps and "ai_stack" in steps
-    assert not steps & {
-        "vp",
-        "transcriber",
-        "browser_extension",
-        "asr",
-        "typescript",
-        "cfn_lint",
-    }
+    assert not steps & {"vp", "transcriber", "browser_extension", "asr", "typescript", "cfn_lint"}
 
 
 def test_a_vp_backend_change_runs_the_vp_suites_and_not_the_ui() -> None:
@@ -145,9 +134,7 @@ def test_a_vp_backend_change_runs_the_vp_suites_and_not_the_ui() -> None:
 
 
 def test_a_layer_change_runs_every_lambda_suite_and_the_static_tests() -> None:
-    steps = ran(
-        ["lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/codec.py"]
-    )
+    steps = ran(["lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/codec.py"])
     assert {"lambdas", "python_lint", "ai_stack"} <= steps
     assert not steps & {"ui", "vp", "transcriber", "browser_extension"}
 
@@ -170,9 +157,7 @@ def test_a_template_change_runs_cfn_lint_and_the_template_readers() -> None:
         "lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml",
     ],
 )
-def test_an_ai_stack_template_change_runs_the_resource_budget_and_cfn_lint(
-    path: str,
-) -> None:
+def test_an_ai_stack_template_change_runs_the_resource_budget_and_cfn_lint(path: str) -> None:
     """The AI stack static tests include test_resource_budget.py, which counts each
     AI stack template's resources after the SAM transform, and the VP template
     tests read both templates through the AI stack tests' helper."""
@@ -208,22 +193,13 @@ def test_the_cognito_template_runs_the_extension_smoke_test() -> None:
 @pytest.mark.parametrize(
     ("path", "job"),
     [
-        (
-            "lma-desktop-capture-app-stack/source/windows/Engine/SelfTest.cs",
-            "desktop_windows",
-        ),
-        (
-            "lma-desktop-capture-app-stack/source/windows/build-windows.ps1",
-            "desktop_windows",
-        ),
+        ("lma-desktop-capture-app-stack/source/windows/Engine/SelfTest.cs", "desktop_windows"),
+        ("lma-desktop-capture-app-stack/source/windows/build-windows.ps1", "desktop_windows"),
         (
             "lma-desktop-capture-app-stack/source/windows/LMACaptureClient.Windows.csproj",
             "desktop_windows",
         ),
-        (
-            "lma-desktop-capture-app-stack/source/windows/lma-config.json",
-            "desktop_windows",
-        ),
+        ("lma-desktop-capture-app-stack/source/windows/lma-config.json", "desktop_windows"),
         (
             "lma-desktop-capture-app-stack/source/macos/Sources/LMACaptureClient/SRP.swift",
             "desktop_macos",
@@ -233,9 +209,7 @@ def test_the_cognito_template_runs_the_extension_smoke_test() -> None:
         ("lma-desktop-capture-app-stack/source/macos/Info.plist", "desktop_macos"),
     ],
 )
-def test_a_desktop_client_change_runs_only_that_clients_job(
-    path: str, job: str
-) -> None:
+def test_a_desktop_client_change_runs_only_that_clients_job(path: str, job: str) -> None:
     assert ran([path]) == {job}
 
 
@@ -284,13 +258,8 @@ def test_the_docs_site_build_is_not_documentation(path: str) -> None:
     assert selection.full and "docs_site" in selection.reason
 
 
-def test_a_load_simulator_change_runs_its_tests_and_the_static_scan_of_utilities() -> (
-    None
-):
-    assert ran(["utilities/load-simulator/lma_load/cli.py"]) == {
-        "load_simulator",
-        "ai_stack",
-    }
+def test_a_load_simulator_change_runs_its_tests_and_the_static_scan_of_utilities() -> None:
+    assert ran(["utilities/load-simulator/lma_load/cli.py"]) == {"load_simulator", "ai_stack"}
 
 
 def test_a_rename_out_of_an_area_counts_against_both_areas() -> None:
@@ -305,9 +274,7 @@ def test_docs_only_is_decided_by_the_primary_area() -> None:
     assert not ca.docs_only(["docs/x.md", "lma-ai-stack/source/ui/src/App.jsx"])
     assert not ca.docs_only(["CLAUDE.md"]), "instruction files are not documentation"
     assert not ca.docs_only(
-        [
-            "lma-llm-template-setup-stack/source/lambda_functions/TroubleshootingAgentSystemPrompt.md"
-        ]
+        ["lma-llm-template-setup-stack/source/lambda_functions/TroubleshootingAgentSystemPrompt.md"]
     ), "a prompt shipped by a stack is code, whatever its extension"
 
 
@@ -362,16 +329,10 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
     ("path", "reader"),
     [
         # The transcriber compares its detector with the VP's copy.
-        (
-            "lma-virtual-participant-stack/backend/src/keyframe-detector.ts",
-            "transcriber",
-        ),
+        ("lma-virtual-participant-stack/backend/src/keyframe-detector.ts", "transcriber"),
         # The skills manager's tests import the Amazon Quick skills pack's skills.
         ("amazon-quick-desktop-skills-pack/skills/lma-live-coach.md", "lambdas"),
-        (
-            "lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts",
-            "transcriber",
-        ),
+        ("lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts", "transcriber"),
         # The call event processor holds its chat attachment types to the VP's.
         ("lma-virtual-participant-stack/backend/src/chat-attachments.ts", "lambdas"),
         # configuration-store.ts: both TypeScript copies and the Python half are held
@@ -380,30 +341,15 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
             "lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts",
             "ai_stack",
         ),
-        (
-            "lma-virtual-participant-stack/backend/src/config/configuration-store.ts",
-            "ai_stack",
-        ),
-        (
-            "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/store.py",
-            "ai_stack",
-        ),
+        ("lma-virtual-participant-stack/backend/src/config/configuration-store.ts", "ai_stack"),
+        ("lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/store.py", "ai_stack"),
         # key_in_folder copies (test_key_in_folder_copies_agree.py) and bedrock_compat
         # copies (test_bedrock_compat.py), including the meeting-assist one.
-        (
-            "lma-ai-stack/source/lambda_functions/video_keyframes_resolver/index.py",
-            "ai_stack",
-        ),
-        (
-            "lma-ai-stack/source/lambda_functions/consent_evidence_verifier/index.py",
-            "ai_stack",
-        ),
+        ("lma-ai-stack/source/lambda_functions/video_keyframes_resolver/index.py", "ai_stack"),
+        ("lma-ai-stack/source/lambda_functions/consent_evidence_verifier/index.py", "ai_stack"),
         ("lma-meetingassist-setup-stack/src/bedrock_compat.py", "ai_stack"),
         # The layer's speaker-mode rules and their UI copy.
-        (
-            "lma-ai-stack/source/ui/src/components/common/speaker-mode-rules.json",
-            "lambdas",
-        ),
+        ("lma-ai-stack/source/ui/src/components/common/speaker-mode-rules.json", "lambdas"),
         ("lma-ai-stack/source/ui/src/graphql/queries/onUpdateCall.js", "lambdas"),
         # The summary Lambda's tests check that no shipped summary prompt uses the
         # meeting context and checklist placeholders, in both copies.
@@ -412,10 +358,7 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
             "lambdas",
         ),
         # The VP's inference catalogue copy, compared with the layer's.
-        (
-            "lma-virtual-participant-stack/backend/src/bedrock-inference-catalog.json",
-            "ai_stack",
-        ),
+        ("lma-virtual-participant-stack/backend/src/bedrock-inference-catalog.json", "ai_stack"),
         # The VP unit tests read these.
         ("docs/virtual-participant.md", "vp"),
         # The meeting archive's tests validate the export against its schema.
@@ -521,21 +464,15 @@ def test_glob_semantics(pattern: str, path: str, expected: bool) -> None:
 
 def test_github_outputs_and_shell_assignments_name_every_step() -> None:
     selection = ca.select(["CHANGELOG.md"])
-    outputs = dict(
-        line.split("=", 1) for line in ca.github_outputs(selection).splitlines()
-    )
+    outputs = dict(line.split("=", 1) for line in ca.github_outputs(selection).splitlines())
     assert outputs["ui"] == "false" and outputs["pr_review"] == "true"
     assert (
-        outputs["full"] == "false"
-        and outputs["areas"] == "ai_stack_inputs,docs,solution_profile"
+        outputs["full"] == "false" and outputs["areas"] == "ai_stack_inputs,docs,solution_profile"
     )
     assert ca.STEPS.keys() <= outputs.keys()
     shell = ca.shell_assignments(selection)
     assert "CI_RUN_UI=false" in shell and "CI_RUN_PR_REVIEW=true" in shell
-    assert all(
-        re.fullmatch(r"CI_RUN_[A-Z_]+=(true|false)", line)
-        for line in shell.splitlines()
-    )
+    assert all(re.fullmatch(r"CI_RUN_[A-Z_]+=(true|false)", line) for line in shell.splitlines())
 
 
 def test_the_summary_says_what_ran_and_why() -> None:
@@ -636,9 +573,7 @@ def github_steps(github_jobs) -> list[dict]:
         "protection waiting for a check that never reports"
     )
     assert "if" not in job, "the required check must report on every run"
-    assert "needs" not in job, (
-        "the required check must not wait for, or depend on, another job"
-    )
+    assert "needs" not in job, "the required check must not wait for, or depend on, another job"
     return job["steps"]
 
 
@@ -659,9 +594,7 @@ UNGATED = {
 }
 
 
-def test_every_github_step_is_gated_on_a_real_key_and_runs_when_unset(
-    github_steps,
-) -> None:
+def test_every_github_step_is_gated_on_a_real_key_and_runs_when_unset(github_steps) -> None:
     used: set[str] = set()
     for step in github_steps:
         name = step["name"]
@@ -690,9 +623,7 @@ def _assert_selective_only_for_pull_requests(steps: list[dict]) -> None:
     assert "scripts/ci/changed_areas.py" in body
     assert "pull_request" in body and "--base HEAD^1" in body and "--all" in body
     checkout = next(s for s in steps if s["name"] == "Check out the repository")
-    assert checkout["with"]["fetch-depth"] >= 2, (
-        "HEAD^1 of the merge commit must be fetched"
-    )
+    assert checkout["with"]["fetch-depth"] >= 2, "HEAD^1 of the merge commit must be fetched"
 
 
 def test_the_github_selection_is_selective_only_for_pull_requests(github_steps) -> None:
@@ -705,9 +636,7 @@ def test_the_select_job_runs_the_same_selection(github_jobs) -> None:
     _assert_selective_only_for_pull_requests(select["steps"])
 
 
-def test_every_github_only_step_is_a_whole_job_that_runs_when_unset(
-    github_jobs,
-) -> None:
+def test_every_github_only_step_is_a_whole_job_that_runs_when_unset(github_jobs) -> None:
     """Gated as ``!cancelled() && needs.select.outputs.<key> != 'false'``.
 
     ``!cancelled()`` matters: without it a failed ``select`` job would skip the job
@@ -720,8 +649,7 @@ def test_every_github_only_step_is_a_whole_job_that_runs_when_unset(
         assert job["needs"] == "select", job_id
         condition = str(job["if"]).strip()
         match = re.fullmatch(
-            r"\$\{\{ !cancelled\(\) && needs\.select\.outputs\.(\w+) != 'false' \}\}",
-            condition,
+            r"\$\{\{ !cancelled\(\) && needs\.select\.outputs\.(\w+) != 'false' \}\}", condition
         )
         assert match and match.group(1) == key, f"{job_id}: {condition!r}"
         assert outputs[key] == f"${{{{ steps.areas.outputs.{key} }}}}", outputs
@@ -731,9 +659,7 @@ def test_every_github_only_step_is_a_whole_job_that_runs_when_unset(
     assert github_jobs.keys() == {"code-checks", "select", *GATED_JOBS}
 
 
-def test_the_desktop_jobs_run_the_self_test_and_keep_the_build_for_a_week(
-    github_jobs,
-) -> None:
+def test_the_desktop_jobs_run_the_self_test_and_keep_the_build_for_a_week(github_jobs) -> None:
     for job_id, runner in (
         ("desktop-windows", "windows-latest"),
         ("desktop-macos", "macos-latest"),
@@ -755,9 +681,7 @@ def test_every_gitlab_step_is_gated_on_a_real_key() -> None:
     assert "CI_MERGE_REQUEST_DIFF_BASE_SHA" in script and "--all" in script
     used = set(re.findall(r"ci_run ([A-Z_]+)", script))
     # GitLab has no Windows or macOS runners, so the GitHub-only steps are absent.
-    assert {
-        key.upper() for key in ca.STEPS.keys() - ca.GITHUB_ONLY_STEPS.keys()
-    } == used, used
+    assert {key.upper() for key in ca.STEPS.keys() - ca.GITHUB_ONLY_STEPS.keys()} == used, used
     # Every make target and npm command is inside a ci_run block, apart from the
     # always-run CI tooling tests.
     for line in job["script"]:
@@ -798,9 +722,7 @@ def test_both_platforms_run_the_extension_smoke_test_with_the_extension_build(
         "scripts/solution_profile/check.py",
     ],
 )
-def test_a_profile_change_runs_the_profile_step_and_is_not_documentation(
-    path: str,
-) -> None:
+def test_a_profile_change_runs_the_profile_step_and_is_not_documentation(path: str) -> None:
     assert PROFILE in ran([path])
     assert not ca.docs_only([path])
 
@@ -830,9 +752,7 @@ def test_a_file_the_profile_reads_runs_the_profile_step(path: str) -> None:
 
 def test_a_file_the_profile_does_not_read_does_not_run_it() -> None:
     assert PROFILE not in ran(["lma-virtual-participant-stack/backend/src/logger.ts"])
-    assert PROFILE not in ran(
-        ["lma-websocket-transcriber-stack/source/app/src/index.ts"]
-    )
+    assert PROFILE not in ran(["lma-websocket-transcriber-stack/source/app/src/index.ts"])
 
 
 def test_every_cross_check_source_runs_the_profile_step() -> None:
