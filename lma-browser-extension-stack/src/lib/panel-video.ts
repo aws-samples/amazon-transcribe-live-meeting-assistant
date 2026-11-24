@@ -85,6 +85,11 @@ export const createPanelVideo = ({
 
   /** START has been sent for `meeting`; `waitForGrant` in opt-in. */
   const begin = (meeting: string, wantVideo: boolean, waitForGrant: boolean) => {
+    // A previous capture still waiting for its last chunk is ended now, so its
+    // timer cannot end this one's video.
+    if (endTimer !== null) finishEnd();
+    uplink = null;
+    monitor = null;
     callId = meeting;
     wanted = wantVideo;
     state = VIDEO_OFF;
@@ -146,6 +151,8 @@ export const createPanelVideo = ({
   /** The user's Stop video: the recorder stops, and its last chunk ends the stream. */
   const stop = () => {
     if (state.status === 'waiting' && !uplink) {
+      // The recorder may already have been asked to start.
+      sendToRecorder({ action: 'StopVideo' });
       wanted = false;
       set({ status: 'stopped', message: '' });
       return;

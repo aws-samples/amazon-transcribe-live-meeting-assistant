@@ -28,6 +28,7 @@ import {
   consentRequired,
   describeConsentState,
   emptyStep,
+  noticePosted,
   fetchConsentSettings,
   renderNotice,
   startBlockedReason,
@@ -371,8 +372,16 @@ function Capture() {
                   stretch={true}
                   label="Screen video:"
                   description="Also record this meeting tab as video, with the meeting. Its slides appear on the meeting page. Only the meeting tab itself is recorded. Off at the start of every meeting."
+                  constraintText={noticePosted(consentStep) ? 'Fixed once the notice is posted in the chat, which says whether the screen is recorded.' : undefined}
                 >
-                  <Toggle checked={videoEnabled} onChange={({ detail }) => setVideoEnabled(detail.checked)}>Also record screen video</Toggle>
+                  <Toggle
+                    checked={videoEnabled}
+                    onChange={({ detail }) => setVideoEnabled(detail.checked)}
+                    // The notice already posted says whether the screen is recorded.
+                    disabled={noticePosted(consentStep)}
+                  >
+                    Also record screen video
+                  </Toggle>
                 </FormField>
               )}
               {consentPanel}

@@ -65,6 +65,12 @@ export type ConsentStep = {
 
 export const emptyStep = (): ConsentStep => ({ confirmed: false, statement: '', chatPost: 'none' });
 
+/**
+ * Whether the notice has been posted in the chat from the panel (or is being
+ * confirmed): what it said, screen video included, is then fixed for the meeting.
+ */
+export const noticePosted = (step: ConsentStep): boolean => step.chatPost === 'sent' || step.chatPost === 'confirmed';
+
 export const SETTINGS_LOADING = 'Reading the meeting consent settings; try again in a moment.';
 export const OBJECTION_NOT_SENT =
   'The objection could not be sent to LMA because the connection was lost, so capture stopped. '

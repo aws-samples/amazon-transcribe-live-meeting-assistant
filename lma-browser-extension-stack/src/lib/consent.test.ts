@@ -10,6 +10,7 @@ import {
   consentRequired,
   describeConsentState,
   emptyStep,
+  noticePosted,
   fetchConsentSettings,
   parseServerFrame,
   renderNotice,
@@ -51,6 +52,13 @@ describe('the consent step', () => {
     expect(startBlockedReason(OPT_IN, { ...emptyStep(), confirmed: true, method: 'verbal' })).toBe('');
     expect(startBlockedReason({ ...OPT_IN, supported: false, reason: 'Use a Virtual Participant.' }, emptyStep()))
       .toBe('Use a Virtual Participant.');
+  });
+
+  test('fixes what the notice says once it is posted in the chat', () => {
+    expect(noticePosted(emptyStep())).toBe(false);
+    expect(noticePosted({ ...emptyStep(), chatPost: 'sent' })).toBe(true);
+    expect(noticePosted({ ...emptyStep(), chatPost: 'confirmed' })).toBe(true);
+    expect(noticePosted({ ...emptyStep(), chatPost: 'failed' })).toBe(false);
   });
 
   test('holds the start while the settings are still being read', () => {

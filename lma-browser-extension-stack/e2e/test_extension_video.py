@@ -237,7 +237,7 @@ def test_a_share_other_than_the_meeting_tab_records_no_video(browser) -> None:
 
 
 def test_a_recorder_that_is_not_capturing_does_not_answer(browser) -> None:
-    """Every open tab has a recorder, and the video messages reach them all."""
+    """A recorder that is not capturing ignores video messages, besides the panel sending them only to the captured tab."""
     context = browser["context"]
     worker = eb.service_worker(context)
     worker.evaluate(COLLECT)
