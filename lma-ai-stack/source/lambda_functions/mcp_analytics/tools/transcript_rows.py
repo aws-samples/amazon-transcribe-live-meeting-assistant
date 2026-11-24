@@ -11,7 +11,7 @@ meeting page and the summaries name them, with the configuration layer's
 ``speaker_namer`` over the meeting's speaker identity map.
 """
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from boto3.dynamodb.conditions import Attr, Key
 
@@ -30,18 +30,27 @@ SPEECH_CHANNELS = ("REMOTE", "LOCAL", "CALLER", "AGENT")
 CANONICAL_CHANNEL = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
 
 
-def read_final_rows(call_id: str, finals_only: bool = True) -> List[Dict[str, Any]]:
+def read_final_rows(
+    call_id: str, finals_only: bool = True, fields: Optional[Sequence[str]] = None
+) -> List[Dict[str, Any]]:
     """Every final segment of the meeting, on every channel, across all pages.
 
     With ``finals_only`` false, every row is read, and the caller picks the
     final ones as the meeting archive does (``lma_speakers.participants
     .final_segments``, which keeps a row stored without ``IsPartial``), so
     both number the same speakers alike.
+
+    With ``fields``, each row holds those attributes only, so a long meeting's
+    read does not carry the text of every line to a caller that needs none of it.
     """
     table = calls_table()
     kwargs: Dict[str, Any] = {"KeyConditionExpression": Key("PK").eq(f"trs#{call_id}")}
     if finals_only:
         kwargs["FilterExpression"] = Attr("IsPartial").eq(False)
+    if fields:
+        names = {f"#f{n}": field for n, field in enumerate(fields)}
+        kwargs["ProjectionExpression"] = ", ".join(names)
+        kwargs["ExpressionAttributeNames"] = names
     rows: List[Dict[str, Any]] = []
     for _ in range(MAX_PAGES):
         response = table.query(**kwargs)

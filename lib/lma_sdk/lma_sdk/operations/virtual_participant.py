@@ -30,6 +30,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
+from lma_sdk._core.aws_errors import AWS_ERRORS, aws_call_error, error_code, is_access_denied
 from lma_sdk.exceptions import (
     LMAConfigurationError,
     LMATimeoutError,
@@ -474,8 +475,8 @@ class VirtualParticipantOperations:
                 "Attributes": resp.get("UserAttributes") or [],
                 "Enabled": resp.get("Enabled", True),
             }
-        except Exception as err:  # noqa: BLE001
-            if _error_code(err) != "UserNotFoundException":
+        except AWS_ERRORS as err:
+            if error_code(err) != "UserNotFoundException":
                 raise _lookup_error("cognito-idp:AdminGetUser", pool_id, err) from err
 
         if record is None:
@@ -489,7 +490,7 @@ class VirtualParticipantOperations:
                 resp = cognito.list_users(
                     UserPoolId=pool_id, Filter=f'email = "{ident}"', Limit=2
                 )
-            except Exception as err:  # noqa: BLE001
+            except AWS_ERRORS as err:
                 raise _lookup_error("cognito-idp:ListUsers", pool_id, err) from err
             users = resp.get("Users") or []
             if len(users) > 1:
@@ -554,15 +555,19 @@ class VirtualParticipantOperations:
         sm = self._client.session.client("secretsmanager")
         try:
             described = sm.describe_secret(SecretId=secret_name)
-        except Exception as err:  # noqa: BLE001
-            code = _error_code(err)
+        except AWS_ERRORS as err:
+            code = error_code(err)
             if code in ("ResourceNotFoundException", "InvalidRequestException"):
                 return False
-            if required:
+            if required and is_access_denied(err):
                 raise LMAConfigurationError(
-                    f"Could not check for stored Zoom credentials ({code or 'error'}); "
+                    f"Could not check for stored Zoom credentials ({code}); "
                     f"the caller needs secretsmanager:DescribeSecret on "
                     f"<stack>/zoom-credentials/*."
+                ) from err
+            if required:
+                raise LMAConfigurationError(
+                    f"Could not check for stored Zoom credentials: {err}"
                 ) from err
             logger.warning(
                 "Could not check for stored Zoom credentials (%s); "
@@ -815,17 +820,9 @@ class VirtualParticipantOperations:
 
 # ── Helpers ───────────────────────────────────────────────────
 
-def _error_code(err: Exception) -> str:
-    """The AWS error code of a botocore ClientError, else ''."""
-    response = getattr(err, "response", None) or {}
-    return str((response.get("Error") or {}).get("Code") or "")
-
-
 def _lookup_error(action: str, pool_id: str, err: Exception) -> LMAConfigurationError:
-    return LMAConfigurationError(
-        f"Could not look up the LMA user in user pool {pool_id}; the "
-        f"caller needs {action} on it: {err}"
-    )
+    """A failed user lookup; a denied call also names the action needed."""
+    return aws_call_error(action, f"look up the LMA user in user pool {pool_id}", err)
 
 
 def _extract_user_pool_id(raw_outputs: dict[str, str]) -> str | None:

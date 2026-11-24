@@ -687,7 +687,11 @@ def test_a_spoken_consent_is_given_as_its_speaker_s_through_the_live_pipeline(en
     meeting.start()
     _spoken_line(meeting, "vp-REMOTE-r1-g0-s1", 1.0, VOICE, "LMA, I consent.")
     _spoken_line(meeting, "vp-REMOTE-r1-g0-s2", 4.0, OTHER_VOICE, "Good morning, everyone.")
-    lines = _wait(lambda: (lambda found: found if len(found) >= 2 else None)(_stored_lines(meeting)), 120, 3)
+    def both_lines_stored():
+        found = _stored_lines(meeting)
+        return found if len(found) >= 2 else None
+
+    lines = _wait(both_lines_stored, 120, 3)
     assert lines and len(lines) == 2, f"the synthetic lines were not stored: {lines}"
     channel, stored = lines["vp-REMOTE-r1-g0-s1"]
     assert (channel, stored) == ("REMOTE", VOICE), lines

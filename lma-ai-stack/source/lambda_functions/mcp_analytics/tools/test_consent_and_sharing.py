@@ -4,8 +4,10 @@
 """get_meeting_consent and share_meeting."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
+from lma_speakers.participants import SPEAKER_FIELDS  # configuration layer
 
 from tools import consent, meeting_actions
 from tools._meeting_fakes import ADMIN, OTHER, OWNER, SHARED, caller, meeting_row
@@ -214,6 +216,24 @@ def test_a_linked_reply_gives_the_speaker_id_the_export_gives(calls_table, appsy
     assert (ana["speakerId"], ana["speakerLinkBasis"]) == (None, "same_segment")
     assert "SpeakerLink {" in appsync.calls[0][0]
     assert "trs#m1" in transcript_reads(calls_table)
+
+
+def test_a_linked_reply_reads_only_the_fields_speaker_ids_need(calls_table, appsync):
+    """A long meeting's lines are read without their text; the ids are the same."""
+    calls_table.put(meeting_row())
+    calls_table.put(line("r1", "Ana Silva (spk_0)", 1.0))
+    calls_table.put(line("r9", "Bo Chen (spk_1)", 9.0))
+    appsync.answers["getMeetingConsent"] = {"getMeetingConsent": LINKED_RECORD}
+    answer = consent.execute(caller(), "m1")
+    (read,) = [
+        q
+        for q in calls_table.queries
+        if transcript_reads(SimpleNamespace(queries=[q])) == ["trs#m1"]
+    ]
+    projected = sorted(read["ExpressionAttributeNames"].values())
+    assert projected == sorted(SPEAKER_FIELDS)
+    assert "Transcript" not in projected
+    assert answer["events"][0]["speakerId"] == "remote-spk_1"
 
 
 def test_after_the_transcript_is_deleted_a_link_names_no_speaker(calls_table, appsync):

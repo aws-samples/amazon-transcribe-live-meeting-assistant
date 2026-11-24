@@ -53,6 +53,21 @@ VOICE_ID = re.compile(r"^spk_\d+$")
 #: (lma_consent.SPEAKER_LINK_PLATFORM_IDENTITY).
 PLATFORM_IDENTITY = "platform_identity"
 
+#: Every segment field that final_segments and Speakers read, so a reader that
+#: only needs speaker ids (get_meeting_consent) can read just these from the
+#: transcript; test_lma_speakers holds the two to this list.
+SPEAKER_FIELDS = (
+    "PK",
+    "SegmentId",
+    "StartTime",
+    "EndTime",
+    "IsPartial",
+    "Channel",
+    "Speaker",
+    # A platform_identity link is confirmed by the id its speaker's rows carry.
+    "PlatformParticipantId",
+)
+
 
 def segment_kind(row: Mapping[str, Any]) -> str:
     """``speech``, ``chat`` or ``assistant``: what a segment's channel holds."""

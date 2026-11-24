@@ -226,9 +226,10 @@ tool, which is built by the same code:
   linked, or when the transcript no longer confirms the link under that
   speaker: the lines expired or were deleted, or somebody named one of them as
   another person's on the meeting page. See
-  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply). After the transcript was deleted the
-  link is still given, with a null `speakerId`. LMA always writes
-  `speakerLinkBasis` and `speakerLinkedAt`, null when there is no link;
+  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply).
+  After the transcript was deleted the link is still given, with a null
+  `speakerId`. Every event has `speakerLinkBasis` and `speakerLinkedAt` (the
+  schema requires both), null when there is no link;
 - `hasEvidence` says whether evidence images exist.
 
 The evidence images themselves are only in the Everything archive, for the

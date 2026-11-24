@@ -171,7 +171,9 @@
               "decision",
               "source",
               "at",
-              "speakerId"
+              "speakerId",
+              "speakerLinkBasis",
+              "speakerLinkedAt"
             ],
             "properties": {
               "participantName": {
@@ -209,11 +211,11 @@
               },
               "speakerLinkBasis": {
                 "enum": ["same_segment", "platform_identity", null],
-                "description": "How the event was linked to the transcript speaker who gave it, when it was recorded: same_segment, the reply is that speaker's own line of the transcript; platform_identity, a chat reply whose sender the meeting platform gave the same participant id as that speaker's lines (the id itself is not exported). Null for an event that was never linked. LMA always writes it."
+                "description": "How the event was linked to the transcript speaker who gave it, when it was recorded: same_segment, the reply is that speaker's own line of the transcript; platform_identity, a chat reply whose sender the meeting platform gave the same participant id as that speaker's lines (the id itself is not exported). Null for an event that was never linked."
               },
               "speakerLinkedAt": {
                 "type": ["string", "null"],
-                "description": "When the event was linked to its speaker; null for an event that was never linked. LMA always writes it."
+                "description": "When the event was linked to its speaker; null for an event that was never linked."
               }
             }
           }

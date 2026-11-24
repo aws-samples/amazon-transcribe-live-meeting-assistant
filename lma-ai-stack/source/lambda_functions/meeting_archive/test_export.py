@@ -584,6 +584,17 @@ def test_a_spoken_consent_is_given_as_its_speaker_s(fakes) -> None:
     assert set(consent_of(plain).values()) == {"unknown"}
 
 
+@pytest.mark.parametrize("key", ["speakerLinkBasis", "speakerLinkedAt"])
+def test_the_schema_requires_both_speaker_link_keys_on_every_event(fakes, key) -> None:
+    """Null when there is no link, but always present: a reader need not test for them."""
+    document = linked_export(fakes, [spoken("Bo Chen", "consent", segment_id=None)])
+    (event,) = document["consent"]["events"]
+    assert event[key] is None
+    del event[key]
+    errors = [error.message for error in VALIDATOR.iter_errors(document)]
+    assert any(f"'{key}' is a required property" in message for message in errors), errors
+
+
 def test_a_renamed_speaker_keeps_its_consent_and_its_id(fakes) -> None:
     identities = {
         "identities": {
