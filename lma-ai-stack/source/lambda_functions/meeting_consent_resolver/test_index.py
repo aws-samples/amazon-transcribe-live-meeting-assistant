@@ -431,6 +431,82 @@ def test_a_reply_whose_link_does_not_hold_is_recorded_without_it(
     assert result["Consent"]["Status"] == "objected"
 
 
+BY_ID = {
+    "Basis": "platform_identity",
+    "PlatformParticipantId": "8:acs:0000-bo",
+    "Channel": "REMOTE",
+    "Speaker": "Bo Chen (spk_0)",
+}
+
+
+def test_a_chat_reply_is_stored_with_its_sender_s_platform_link(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo (guest)",
+        Decision="objection",
+        Source="chat",
+        SpeakerLink=BY_ID,
+    )
+    (event,) = result["Consent"]["Events"]
+    assert event["SpeakerLink"] == {**BY_ID, "LinkedAt": event["RecordedAt"], "LinkedBy": "LMA"}
+
+
+@pytest.mark.parametrize(
+    "identity, source, link",
+    [
+        # Only the capture client links a reply.
+        (user(OWNER), "chat", BY_ID),
+        # A reply said aloud is not linked by a chat sender's id.
+        (BACKEND, "voice", BY_ID),
+        ({**BACKEND}, "chat", {**BY_ID, "PlatformParticipantId": ""}),
+        ({**BACKEND}, "chat", {**BY_ID, "Basis": "display_name"}),
+    ],
+)
+def test_a_chat_reply_whose_platform_link_does_not_hold_is_recorded_without_it(
+    dynamo, identity, source, link
+) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    result = call(
+        "recordMeetingConsentEvent",
+        identity,
+        ParticipantName="Bo Chen",
+        Decision="objection",
+        Source=source,
+        SpeakerLink=link,
+    )
+    (event,) = result["Consent"]["Events"]
+    assert "SpeakerLink" not in event
+    assert result["Consent"]["Status"] == "objected"
+
+
+def test_no_platform_id_is_stored_once_the_transcript_is_deleted(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    dynamo.items[CALL_ID]["TranscriptDeletedAt"] = SER.serialize("2026-11-04T00:00:00Z")
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo Chen",
+        Decision="objection",
+        Source="chat",
+        SpeakerLink=BY_ID,
+    )
+    (event,) = result["Consent"]["Events"]
+    assert "SpeakerLink" not in event
+    assert "8:acs:0000-bo" not in json.dumps(dynamo.consent())
+    # A spoken reply's link holds no platform id, and is stored as before.
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo Chen",
+        Decision="objection",
+        Source="voice",
+        SpeakerLink=LINE,
+    )
+    assert result["Consent"]["Events"][-1]["SpeakerLink"]["Basis"] == "same_segment"
+
+
 def test_a_shared_user_cannot_change_who_is_present(dynamo) -> None:
     call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
     with pytest.raises(index.ForbiddenError):

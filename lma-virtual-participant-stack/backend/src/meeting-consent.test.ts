@@ -37,6 +37,7 @@ import {
     speakerLinkFor,
     UNKNOWN_SENDER,
 } from './meeting-consent.js';
+import { notePlatformSpeaker, resetPlatformSpeakers } from './platform-speakers.js';
 import { normalizeParticipantName, renderNotice } from './consent-matcher.js';
 import { noteParticipantSeen, UNIDENTIFIED_PARTICIPANT } from './consent-roster.js';
 import { ConsentListener, HeardResult, ListenerEngines } from './consent-listener.js';
@@ -1652,7 +1653,9 @@ test('a reply is not linked to a line named after somebody else, or to no line',
     unnamed.flow.stop();
 });
 
-test('a chat reply is never linked to a transcript speaker', async () => {
+test('a chat reply without a sender id is not linked to a transcript speaker', async () => {
+    resetPlatformSpeakers();
+    notePlatformSpeaker('8:acs:bo', 'REMOTE', 'Bo Chen');
     const h = await harness({ deployment: { mode: 'notify' } });
     await h.flow.handleChat('Bo Chen', 'stop recording');
     await h.settle();
@@ -1660,6 +1663,49 @@ test('a chat reply is never linked to a transcript speaker', async () => {
     assert.equal(event.Source, 'chat');
     assert.equal(event.SpeakerLink, undefined);
     h.flow.stop();
+    resetPlatformSpeakers();
+});
+
+test('a chat reply is linked by its sender id to the speaker last written with it', async () => {
+    resetPlatformSpeakers();
+    notePlatformSpeaker('16778240', 'REMOTE', 'Bo Chen');
+    notePlatformSpeaker('16778240', 'REMOTE', 'Bo Chen (spk_2)');
+    const h = await harness({ deployment: { mode: 'notify' } });
+    // The chat name differs from the speaker's: names are not compared.
+    await h.flow.handleChat('Bo (guest)', 'stop recording', 16778240);
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.Source, 'chat');
+    assert.deepEqual(event.SpeakerLink, {
+        Basis: 'platform_identity',
+        PlatformParticipantId: '16778240',
+        Channel: 'REMOTE',
+        Speaker: 'Bo Chen (spk_2)',
+    });
+    h.flow.stop();
+    resetPlatformSpeakers();
+});
+
+test('a chat reply whose sender id no row has carried is not linked', async () => {
+    resetPlatformSpeakers();
+    notePlatformSpeaker('8:acs:ana', 'REMOTE', 'Ana Silva');
+    const h = await harness({ deployment: { mode: 'notify' } });
+    await h.flow.handleChat('Bo Chen', 'stop recording', '8:acs:bo');
+    await h.settle();
+    assert.equal(h.api.events[h.api.events.length - 1].SpeakerLink, undefined);
+    h.flow.stop();
+    resetPlatformSpeakers();
+});
+
+test('a spoken reply is never linked by platform id', async () => {
+    resetPlatformSpeakers();
+    notePlatformSpeaker('8:acs:bo', 'REMOTE', 'Bo Chen');
+    const h = await harness({ deployment: { mode: 'notify' } });
+    h.flow.handleSpeech('Bo Chen', 'LMA, I object');
+    await h.settle();
+    assert.equal(h.api.events[h.api.events.length - 1].SpeakerLink, undefined);
+    h.flow.stop();
+    resetPlatformSpeakers();
 });
 
 test('speakerLinkFor keeps the line as stored and refuses anything else', () => {

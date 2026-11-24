@@ -116,6 +116,10 @@ Deleted, for the meeting:
   deleted, not only the current one;
 - those files' entries in the transcript knowledge base, when the deployment
   has one;
+- the platform participant id on each consent reply linked to its speaker by
+  that id (a chat reply on Teams through Azure Communication Services or the
+  Zoom Meeting SDK); the link keeps its basis and when it was made, and no
+  longer names a speaker;
 - the quote in each piece of [checklist](meeting-context-and-checklist.md)
   evidence, which is transcript content. Its segment id and time are kept, and
   a quote sent after the deletion is not stored;
@@ -142,7 +146,8 @@ Kept:
   **Days to keep transcript segments** in full;
 - the consent record, which is the evidence that participants were told,
   including the transcript line each spoken reply was linked to (its segment
-  id and stored speaker, not its words; see
+  id and stored speaker, not its words, and the stored speaker each chat reply
+  was linked to, without its platform participant id; see
   [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply));
 - the meeting's notifications of other categories, and each user's dismissals
   and mutes.

@@ -207,11 +207,11 @@
                   "string",
                   "null"
                 ],
-                "description": "The speakerId of the participant the event is linked to, while the transcript still holds the linked line under that speaker; null otherwise. A name is never matched to a speaker."
+                "description": "The speakerId of the participant the event is linked to, while the transcript still confirms the link (the linked line, or lines carrying the sender's platform participant id, under that speaker); null otherwise. A name is never matched to a speaker."
               },
               "speakerLinkBasis": {
-                "enum": ["same_segment", null],
-                "description": "How the event was linked to the transcript speaker who gave it, when it was recorded: same_segment, the reply is that speaker's own line of the transcript. Null for an event that was never linked."
+                "enum": ["same_segment", "platform_identity", null],
+                "description": "How the event was linked to the transcript speaker who gave it, when it was recorded: same_segment, the reply is that speaker's own line of the transcript; platform_identity, a chat reply whose sender the meeting platform gave the same participant id as that speaker's lines (the id itself is not exported). Null for an event that was never linked."
               },
               "speakerLinkedAt": {
                 "type": ["string", "null"],

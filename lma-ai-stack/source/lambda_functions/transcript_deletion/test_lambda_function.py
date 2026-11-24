@@ -88,6 +88,18 @@ class FakeTable:
             item["Checklist"] = values[":checklist"]
             item["ChecklistVersion"] = values[":next"]
             return
+        if UpdateExpression == "SET #c.#e = :events, #c.#v = :next":
+            consent = item.get("Consent")
+            condition = kwargs["ConditionExpression"]
+            if "attribute_not_exists(#c.#v)" in condition:
+                holds = isinstance(consent, dict) and "Version" not in consent
+            else:
+                holds = isinstance(consent, dict) and consent.get("Version") == values[":version"]
+            if not holds:
+                raise _conflict("ConditionalCheckFailedException")
+            consent["Events"] = values[":events"]
+            consent["Version"] = values[":next"]
+            return
         if UpdateExpression.startswith("SET TranscriptDeletionScheduledFor"):
             item["TranscriptDeletionScheduledFor"] = values[":at"]
             return
@@ -315,6 +327,105 @@ def test_a_checklist_the_meeting_was_created_with_is_still_stripped(aws):
     lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
     assert _meeting(aws)["Checklist"][0]["Evidence"][0]["Quote"] is None
     assert _meeting(aws)["ChecklistVersion"] == 1
+
+
+def _consent_with_links():
+    chat_link = {
+        "Basis": "platform_identity",
+        "PlatformParticipantId": "8:acs:0000-bo",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_0)",
+        "LinkedAt": "2026-11-03T14:06:10Z",
+        "LinkedBy": "LMA",
+    }
+    spoken_link = {
+        "Basis": "same_segment",
+        "SegmentId": "s1",
+        "Channel": "REMOTE",
+        "Speaker": "Ana Silva",
+        "LinkedAt": "2026-11-03T14:07:10Z",
+        "LinkedBy": "LMA",
+    }
+    return {
+        "Mode": "notify",
+        "Status": "granted",
+        "Version": 7,
+        "Events": [
+            {
+                "ParticipantName": "Bo",
+                "Decision": "consent",
+                "Source": "chat",
+                "SpeakerLink": chat_link,
+            },
+            {
+                "ParticipantName": "Ana",
+                "Decision": "consent",
+                "Source": "voice",
+                "SpeakerLink": spoken_link,
+            },
+            {"ParticipantName": "Cy", "Decision": "consent", "Source": "chat"},
+        ],
+    }
+
+
+def test_deleting_the_transcript_removes_each_consent_platform_id_and_keeps_the_link_s_basis(aws):
+    _meeting(aws).update(Consent=_consent_with_links())
+    lf.handler({"CallId": CALL_ID, "Trigger": "scheduled"}, CONTEXT)
+    consent = _meeting(aws)["Consent"]
+    assert "8:acs:0000-bo" not in json.dumps(consent)
+    assert consent["Events"][0]["SpeakerLink"] == {
+        "Basis": "platform_identity",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_0)",
+        "LinkedAt": "2026-11-03T14:06:10Z",
+        "LinkedBy": "LMA",
+    }
+    # A spoken reply's link and an unlinked reply are kept as they were.
+    assert consent["Events"][1:] == _consent_with_links()["Events"][1:]
+    # The version moves on, so a consent write that read the old record is read again.
+    assert consent["Version"] == 8
+    assert consent["Status"] == "granted"
+
+
+def test_a_consent_record_without_platform_ids_is_left_alone(aws):
+    record = _consent_with_links()
+    record["Events"] = record["Events"][1:]
+    _meeting(aws).update(Consent=record)
+    assert lf.strip_consent_platform_ids(CALL_ID) == 0
+    assert _meeting(aws)["Consent"]["Version"] == 7
+
+
+def test_a_consent_record_that_changes_meanwhile_is_read_again(aws, monkeypatch):
+    _meeting(aws).update(Consent=_consent_with_links())
+    original = aws.table.update_item
+    raced = []
+
+    def update_item(**kwargs):
+        if kwargs["UpdateExpression"].startswith("SET #c.#e") and not raced:
+            raced.append(True)
+            _meeting(aws)["Consent"]["Version"] = 8
+        return original(**kwargs)
+
+    monkeypatch.setattr(aws.table, "update_item", update_item)
+    assert lf.strip_consent_platform_ids(CALL_ID) == 1
+    assert _meeting(aws)["Consent"]["Version"] == 9
+    assert "PlatformParticipantId" not in _meeting(aws)["Consent"]["Events"][0]["SpeakerLink"]
+
+
+def test_a_consent_record_that_never_stops_changing_fails_the_run_so_it_is_retried(
+    aws, monkeypatch
+):
+    _meeting(aws).update(Consent=_consent_with_links())
+    original = aws.table.update_item
+
+    def update_item(**kwargs):
+        if kwargs["UpdateExpression"].startswith("SET #c.#e"):
+            _meeting(aws)["Consent"]["Version"] += 1
+        return original(**kwargs)
+
+    monkeypatch.setattr(aws.table, "update_item", update_item)
+    with pytest.raises(lf.ConsentPlatformIdsNotRemoved):
+        lf.strip_consent_platform_ids(CALL_ID)
 
 
 def test_a_checklist_that_changes_meanwhile_is_read_again(aws, monkeypatch):

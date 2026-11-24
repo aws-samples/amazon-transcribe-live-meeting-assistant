@@ -80,14 +80,22 @@ export interface RecordEventInput {
     /** `chat` when omitted. */
     Source?: ReplySource;
     /**
-     * A reply said aloud: the transcript line it was read from, as written to
-     * the meeting. The resolver stores it as the reply's link to that line's
-     * speaker when the line's speaker is the reply's participant. Not read
-     * back: the VP selects no link in its answers, so it works with an API
-     * that has none.
+     * The transcript speaker who gave the reply, as the VP wrote them:
+     * - a reply said aloud (basis `same_segment`, the default): the
+     *   transcript line it was read from. The resolver stores it when the
+     *   line's speaker is the reply's participant.
+     * - a chat reply (basis `platform_identity`): the speaker most recently
+     *   written with the chat sender's platform participant id
+     *   (platform-speakers.ts), and that id.
+     * Not read back: the VP selects no link in its answers, so it works with an
+     * API that has none.
      */
-    SpeakerLink?: { SegmentId: string; Channel: string; Speaker: string };
+    SpeakerLink?: SpeakerLinkInput;
 }
+
+export type SpeakerLinkInput =
+    | { Basis?: 'same_segment'; SegmentId: string; Channel: string; Speaker: string }
+    | { Basis: 'platform_identity'; PlatformParticipantId: string; Channel: string; Speaker: string };
 
 export interface AddEvidenceInput {
     S3Key: string;
@@ -212,9 +220,10 @@ export function createConsentApi(callId: string, send: GraphqlSender): ConsentAp
             try {
                 return await mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', event);
             } catch (error) {
-                // An API from before speaker links refuses the field. The
+                // An API from before speaker links refuses the field, and one
+                // from before chat links refuses the chat link's fields. The
                 // reply matters more than its link, so it is sent again without.
-                if (!event.SpeakerLink || !(error instanceof ConsentApiError) || !/SpeakerLink/.test(error.message)) {
+                if (!event.SpeakerLink || !(error instanceof ConsentApiError) || !/SpeakerLink|PlatformParticipantId|Basis/.test(error.message)) {
                     throw error;
                 }
                 log.warn('[consent] the consent API does not take a speaker link; the reply is recorded without it');

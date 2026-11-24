@@ -527,6 +527,11 @@ export class TranscriptionService {
         // Transcribe rows are named from the same roster timeline as the
         // engine's, by each word's span on the meeting timeline.
         kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
+        // A row of speech carries the platform's id for the participant it is
+        // named after, where the join gives one (platform-speakers.ts).
+        kinesisStreamManager.setPlatformIdLookup((start, end, speaker) =>
+            this.rosterTimeline.platformIdFor(start, end, speaker, rosterLagSeconds()),
+        );
         // And their voice labels' evidence from what the platform actually
         // showed, exactly as the engine's rows count it.
         kinesisStreamManager.setRosterCoverage((start, end) => this.rosterCoverageFor(start, end));
@@ -1784,7 +1789,13 @@ export class TranscriptionService {
         }
     }
 
-    async speakerChange(speaker: string): Promise<void> {
+    /**
+     * The platform shows `speaker` as the active speaker. `platformId` is the
+     * platform's own id for them, from the same report, on the joins whose
+     * platform gives one (Teams through Azure Communication Services, the Zoom
+     * Meeting SDK); it is carried on the rows named after them.
+     */
+    async speakerChange(speaker: string, platformId?: string | null): Promise<void> {
         // Update global current speaker
         currentSpeaker = speaker;
         if (speaker && speaker !== 'none' && !isOwnIdentity(speaker, this.ownIdentities())) {
@@ -1793,7 +1804,7 @@ export class TranscriptionService {
 
         const timestamp = Date.now();
         details.speakers.push({ name: speaker, timestamp });
-        this.rosterTimeline.record(this.rosterClockSeconds(), speaker);
+        this.rosterTimeline.record(this.rosterClockSeconds(), speaker, platformId);
         // Who is present, for the meeting consent flow's participant list.
         noteParticipantSeen(speaker);
         // Somebody other than the VP is speaking: the meeting is live (meeting-liveness.ts).

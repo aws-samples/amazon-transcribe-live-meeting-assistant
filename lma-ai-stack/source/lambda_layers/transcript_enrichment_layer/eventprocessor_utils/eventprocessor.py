@@ -199,6 +199,25 @@ def segment_language_code(message: Dict) -> Optional[str]:
     return None
 
 
+#: The longest platform participant id stored on a segment
+#: (lma_consent.MAX_PLATFORM_ID_LENGTH).
+MAX_PLATFORM_PARTICIPANT_ID_LENGTH = 256
+
+
+def segment_platform_participant_id(message: Dict) -> Optional[str]:
+    """The ``PlatformParticipantId`` a Virtual Participant sent on a segment, or None.
+
+    The meeting platform's id for the participant the row is named after, on
+    the joins whose platform gives one; it links a chat consent reply to the
+    row's speaker (docs/meeting-consent.md). Anything that is not a non-empty
+    string of at most 256 characters is treated as no id.
+    """
+    value = message.get("PlatformParticipantId")
+    if isinstance(value, str) and 0 < len(value.strip()) <= MAX_PLATFORM_PARTICIPANT_ID_LENGTH:
+        return value.strip()
+    return None
+
+
 # Transform Transcript segment fields
 def normalize_transcript_segments(message: Dict) -> List[Dict]:
     """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
@@ -320,6 +339,13 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     if language_code:
         for segment in segments:
             segment["LanguageCode"] = language_code
+
+    # The platform's id for the row's participant, on a segment of speech a
+    # Virtual Participant wrote. Left out otherwise, as the language is.
+    platform_id = None if transcriptEvent else segment_platform_participant_id(message)
+    if platform_id:
+        for segment in segments:
+            segment["PlatformParticipantId"] = platform_id
 
     return segments
 

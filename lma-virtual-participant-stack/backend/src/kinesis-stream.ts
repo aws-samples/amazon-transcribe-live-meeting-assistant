@@ -8,6 +8,7 @@ import { meetingPlatformName, preparationStartFields, type VpPreparation } from 
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
+import { notePlatformSpeaker, platformId } from './platform-speakers.js';
 import type { AsrEngineName } from './asr-microvm-client.js';
 import type { ChatAttachmentEvent } from './chat-attachments.js';
 
@@ -185,6 +186,12 @@ class KinesisStreamManager {
   // first report belongs to nobody -- and with no source set there is none.
   private rosterCoverage:
     | ((absoluteStart: number, absoluteEnd: number) => Iterable<[string, number]>)
+    | null = null;
+  // The platform's own id for the participant a row of speech is named after,
+  // from the same roster timeline (RosterTimeline.platformIdFor). Only the
+  // joins whose platform gives one with the active speaker set it.
+  private platformIdLookup:
+    | ((absoluteStart: number, absoluteEnd: number, speaker: string) => string | undefined)
     | null = null;
   // Whether to recover speaker turns from Transcribe's per-item labels. Off
   // unless the deployment's VP voice-separation switch is on.
@@ -502,6 +509,7 @@ class KinesisStreamManager {
         Speaker: (segment as any).Speaker,
         ...language,
       };
+      Object.assign(record, this.platformIdField(record.Channel, record.StartTime, record.EndTime, record.Speaker));
       records.push(this.onMeetingTimeline(record));
     }
     return {
@@ -519,7 +527,9 @@ class KinesisStreamManager {
   async sendPreparedTranscriptSegments(prepared: PreparedTranscriptSegments): Promise<number> {
     for (const record of prepared.records) {
       if (process.env.DEBUG) {
-        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, record);
+        // The platform participant id is not logged (platform-speakers.ts).
+        const { PlatformParticipantId: _id, ...logged } = record;
+        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, logged);
       }
       try {
         const now = new Date().toISOString();
@@ -531,6 +541,7 @@ class KinesisStreamManager {
           IdToken: process.env.USER_ID_TOKEN || '',
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
         });
+        KinesisStreamManager.notePlatformRow(record);
         log.info(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
       } catch (error) {
         log.error(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
@@ -562,11 +573,41 @@ class KinesisStreamManager {
       TranscriptEvent: null,
       Speaker: segment.speaker,
       ...languageField(segment.languageCode),
+      ...this.platformIdField(segment.channel || REMOTE_CHANNEL, segment.startTime, segment.endTime, segment.speaker),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
     };
     await this.sendRecord(this.onMeetingTimeline(record));
+    KinesisStreamManager.notePlatformRow(record);
+  }
+
+  /**
+   * The row's `PlatformParticipantId` field: the platform's id for the
+   * participant shown for most of the row, when that participant is the one
+   * the row is named after (platformIdLookup). Only on the participants'
+   * speech channel; empty for a chat row, an assistant row and a join that
+   * gives no id. The ids are personal identifiers: stored on the segment
+   * alone, never logged.
+   */
+  private platformIdField(
+    channel: string,
+    start: unknown,
+    end: unknown,
+    speaker: unknown,
+  ): { PlatformParticipantId?: string } {
+    if (!this.platformIdLookup || channel !== REMOTE_CHANNEL || typeof speaker !== 'string' || !speaker.trim()) {
+      return {};
+    }
+    if (typeof start !== 'number' || typeof end !== 'number') return {};
+    const id = platformId(this.platformIdLookup(start, end, speaker));
+    return id ? { PlatformParticipantId: id } : {};
+  }
+
+  /** A final row of speech that carries a platform id, written: for linking a chat reply (platform-speakers.ts). */
+  private static notePlatformRow(record: any): void {
+    if (record.IsPartial !== false || !record.PlatformParticipantId) return;
+    notePlatformSpeaker(record.PlatformParticipantId, String(record.Channel), String(record.Speaker ?? ''));
   }
 
   /**
@@ -606,6 +647,18 @@ class KinesisStreamManager {
    */
   setRosterLookup(lookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null): void {
     this.rosterLookup = lookup;
+  }
+
+  /**
+   * Where a row of speech's `PlatformParticipantId` comes from: the platform's
+   * id for the participant shown for most of the row's span of the meeting
+   * timeline, when that participant is the one the row is named after
+   * (RosterTimeline.platformIdFor).
+   */
+  setPlatformIdLookup(
+    lookup: ((absoluteStart: number, absoluteEnd: number, speaker: string) => string | undefined) | null,
+  ): void {
+    this.platformIdLookup = lookup;
   }
 
   /**

@@ -480,15 +480,19 @@ the reply or attestation happened, or when it was recorded if the record holds
 only that. A reply said aloud to a Virtual Participant while the meeting was
 being transcribed is linked, when it is recorded, to the transcript speaker who
 said it: `speakerLinkBasis` is then `same_segment` (the reply is that speaker's
-own line of the transcript) and `speakerLinkedAt` says when it was linked.
+own line of the transcript) and `speakerLinkedAt` says when it was linked. On
+Teams through Azure Communication Services and the Zoom Meeting SDK, a chat
+reply is linked the same way to the speaker whose lines carry the sender's
+platform participant id, with `speakerLinkBasis` `platform_identity`; the id
+itself is never returned.
 `speakerId` is that speaker's id in
 [`get_meeting_export`](#get_meeting_export)'s `participants`, read from the
 meeting's transcript, and is null when the event was never linked or the
 transcript no longer holds the linked line under that speaker (including after
-the transcript was deleted). Every other event -- a chat reply, an entry on the
-meeting page, an attestation -- has all three null: LMA does not match a name
-to a speaker, because two people can show the same name. An event has no email
-address.
+the transcript was deleted). Every other event -- a chat reply on any other
+join, an entry on the meeting page, an attestation -- has all three null: LMA
+does not match a name to a speaker, because two people can show the same name.
+An event has no email address.
 
 A meeting whose consent was never started answers with `mode` `off`, `status`
 `not_required`, no notices or events, and `captureAllowed` as the meeting's

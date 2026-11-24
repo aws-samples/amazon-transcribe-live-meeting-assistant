@@ -26,7 +26,11 @@ from .rules import normalize_name
 def speaker_link(event: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
     """The event's stored ``SpeakerLink``, when it has one in a readable shape."""
     link = event.get("SpeakerLink")
-    if isinstance(link, Mapping) and link.get("Basis") and link.get("SegmentId"):
+    if not isinstance(link, Mapping) or not link.get("Basis"):
+        return None
+    # A platform_identity link whose id was removed with the transcript keeps
+    # its basis and time, and names nobody.
+    if link.get("SegmentId") or link.get("Basis") == "platform_identity":
         return link
     return None
 
@@ -47,8 +51,10 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
 
     ``speakerLinkBasis`` and ``speakerLinkedAt`` say how and when the event was
     linked to the transcript speaker who gave it (``same_segment``: the reply
-    is that speaker's own line of the transcript), and are null for an event
-    that was never linked. ``speakerId`` is that speaker's participant id, from
+    is that speaker's own line of the transcript; ``platform_identity``: a
+    chat reply whose sender the platform gave the same participant id as that
+    speaker's rows), and are null for an event that was never linked. The
+    platform's id itself is never given. ``speakerId`` is that speaker's participant id, from
     ``speakers`` (an ``lma_speakers.participants.Speakers`` over the meeting's
     final segments), when the transcript still confirms the link; null
     otherwise, and always null without ``speakers``. A name is never matched

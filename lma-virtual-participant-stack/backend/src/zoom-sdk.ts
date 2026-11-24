@@ -45,6 +45,8 @@ function buildSignature(clientId: string, clientSecret: string, meetingNumber: s
 /** One chat message as the in-page listener queues it (zoom-sdk-server.ts). */
 export interface ZoomSdkChat {
     senderName: string;
+    /** The sender's participant id, the active speaker's `userId`, when the payload gives one. */
+    senderId?: string | null;
     text: string;
     id?: string | number | null;
     time?: string | number | null;
@@ -421,13 +423,14 @@ export default class ZoomSdk {
         let pollsSinceLonelyCheck = 0;
         const monitorTimer = setInterval(async () => {
             if (this.ended || page.isClosed()) return;
-            let snap: { speaker: string; chats: ZoomSdkChat[]; count: number; domCount: number; status: number; selfLeave: number | null } | null;
+            let snap: { speaker: string; speakerId: string; chats: ZoomSdkChat[]; count: number; domCount: number; status: number; selfLeave: number | null } | null;
             try {
                 snap = await page.evaluate(() => {
                     const w = window as any;
                     const chats = w.__lmaChatQueue.splice(0, w.__lmaChatQueue.length);
                     return {
                         speaker: w.__lmaActiveSpeaker || '',
+                        speakerId: w.__lmaActiveSpeakerId || '',
                         chats,
                         count: w.__lmaParticipantCount,
                         domCount: typeof w.__lmaParticipantCountDom === 'function' ? w.__lmaParticipantCountDom() : -1,
@@ -450,10 +453,12 @@ export default class ZoomSdk {
                 return;
             }
 
-            if (snap.speaker && snap.speaker !== lastSpeaker) {
-                lastSpeaker = snap.speaker;
+            // Told apart by name and id: two participants may share a name.
+            const speakerKey = `${snap.speaker}\u0000${snap.speakerId}`;
+            if (snap.speaker && speakerKey !== lastSpeaker) {
+                lastSpeaker = speakerKey;
                 if (snap.speaker !== details.scribeIdentity && snap.speaker !== details.scribeName) {
-                    await transcriptionService.speakerChange(snap.speaker).catch(() => {});
+                    await transcriptionService.speakerChange(snap.speaker, snap.speakerId || null).catch(() => {});
                 }
             }
 
@@ -485,7 +490,7 @@ export default class ZoomSdk {
                 // Read with its address reduced to "LMA".
                 const body = route.text;
                 // A consent reply, or "LMA start" while consent is withheld.
-                if (await meetingConsent.handleChat(sender, body)) continue;
+                if (await meetingConsent.handleChat(sender, body, chat.senderId ?? null)) continue;
                 if (matchesEndCommand(body)) {
                     log.info(`[zoom-sdk] asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                     await this.sendMessages(page, exitMessagesFor(sender));

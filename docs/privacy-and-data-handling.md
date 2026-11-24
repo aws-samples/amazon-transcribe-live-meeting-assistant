@@ -170,9 +170,24 @@ record**, an attribute of the meeting's row, so it is shared, kept and deleted
 with the meeting. It holds the mode and rule, the status and whether capture was
 allowed, the notice text and each time it was posted, the participants listed as
 present, every reply and attestation with the participant's display name, where
-it was read and when, the status history with reasons, and the evidence images
-with the result of their vision-model check. See
+it was read and when, the transcript speaker a reply was linked to when it was
+recorded, the status history with reasons, and the evidence images with the
+result of their vision-model check. See
 [What is stored](meeting-consent.md#what-is-stored).
+
+On Teams through Azure Communication Services and the Zoom Meeting SDK, the
+Virtual Participant also stores the meeting platform's participant id, a
+personal identifier, on each transcript segment of speech it names after that
+participant (`PlatformParticipantId`), and on a chat consent reply linked to its
+speaker by that id. It is kept with the transcript segments (**Days to keep
+transcript segments**), removed from the consent record when the transcript is
+deleted after the summary, and deleted with the meeting. It is not written to
+the logs at the default log level and is not sent to a Transcript Lambda hook
+(debug-level logging of whole incoming records, for troubleshooting, includes
+it with the rest of the segment). It is not returned by the GraphQL API, and is
+not in the meeting export or any MCP tool's answer, which give LMA's own speaker
+id instead. See
+[Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply).
 
 Evidence images are screenshots of the meeting chat and participant list taken by
 the Virtual Participant when consent is granted and on every objection, or one

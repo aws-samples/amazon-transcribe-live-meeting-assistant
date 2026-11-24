@@ -15,6 +15,11 @@ input AddTranscriptSegmentInput {
 	SentimentWeighted: Float
 	# See TranscriptSegment.LanguageCode.
 	LanguageCode: String
+	# The meeting platform's id for the participant the row is named after,
+	# written by a Virtual Participant on the joins whose platform gives one
+	# (docs/meeting-consent.md#which-speaker-gave-a-reply). Stored on the
+	# segment only; not a field of TranscriptSegment, so never read back.
+	PlatformParticipantId: String
 	Owner: String
 	SharedWith: String
 }
@@ -2043,8 +2048,11 @@ type MeetingConsentEvent @aws_cognito_user_pools
 type MeetingConsentSpeakerLink @aws_cognito_user_pools
 @aws_iam {
 	# "same_segment": the reply is that speaker's own line of the transcript.
+	# "platform_identity": a chat reply whose sender the meeting platform gave
+	# the same participant id as that speaker's lines (the id is not given).
 	Basis: String
-	# The line: its segment id, channel and speaker as the transcript stores them.
+	# The line, for same_segment: its segment id. Channel and Speaker are the
+	# speaker as the transcript stores them, for either basis.
 	SegmentId: String
 	Channel: String
 	Speaker: String
@@ -2226,13 +2234,20 @@ input RecordMeetingConsentEventInput {
 	Source: String
 	Text: String
 	OccurredAt: AWSDateTime
-	# Backend roles, for a reply said aloud: the transcript line it was read
-	# from, as the client wrote it. Not stored when it does not hold.
+	# Backend roles: for a reply said aloud, the transcript line it was read
+	# from; for a chat reply, the speaker its sender's platform id was last
+	# written with. Not stored when it does not hold.
 	SpeakerLink: MeetingConsentSpeakerLinkInput
 }
 
 input MeetingConsentSpeakerLinkInput {
-	SegmentId: String!
+	# "same_segment" when omitted: SegmentId is the line the reply was read
+	# from. "platform_identity", for a chat reply: PlatformParticipantId is
+	# the sender's id on the meeting platform, and Channel and Speaker the
+	# speaker last written with it.
+	Basis: String
+	SegmentId: String
+	PlatformParticipantId: String
 	Channel: String!
 	Speaker: String!
 }

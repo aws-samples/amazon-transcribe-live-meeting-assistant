@@ -86,6 +86,7 @@ from lma_config import (  # configuration layer
     ConfigurationStore,
     deletion_delay_minutes,
 )
+from lma_consent import without_platform_ids  # configuration layer
 from lma_meeting_preparation.rules import strip_quotes  # configuration layer
 from lma_notifications import TRANSCRIPT_BOUND_CATEGORIES  # configuration layer
 
@@ -321,6 +322,77 @@ def strip_checklist_quotes(call_id: str) -> int:
     # transcript recorded as deleted must not keep its quotes.
     raise ChecklistQuotesNotRemoved(
         f"the checklist of {call_id} kept changing while removing its quotes"
+    )
+
+
+class ConsentPlatformIdsNotRemoved(RuntimeError):
+    """The consent record kept changing while its platform participant ids were removed."""
+
+
+def strip_consent_platform_ids(call_id: str) -> int:
+    """Remove the platform participant id from every consent reply's speaker link; the number removed.
+
+    A chat reply linked to its transcript speaker by the platform's
+    participant id (docs/meeting-consent.md) holds that id, which the
+    transcript's segments also carried; it goes with them. The link keeps its
+    basis and time, and names no speaker. The write is conditional on the
+    record's version as read (the consent resolver's guard), and bumps it, so a
+    consent write racing this one is read again rather than restoring an id;
+    and once TranscriptDeletedAt is set, which record_deletion does first, the
+    resolver stores no new one.
+    """
+    for _attempt in range(QUOTE_STRIP_ATTEMPTS):
+        item = (
+            _table()
+            .get_item(
+                Key=meeting_key(call_id),
+                ProjectionExpression="#c",
+                ExpressionAttributeNames={"#c": "Consent"},
+                ConsistentRead=True,
+            )
+            .get("Item")
+        )
+        record = (item or {}).get("Consent")
+        if not isinstance(record, dict):
+            return 0
+        stripped, changed = without_platform_ids(record)
+        if not changed:
+            return 0
+        removed = sum(
+            1
+            for event in record.get("Events") or []
+            if isinstance(event, dict)
+            and isinstance(event.get("SpeakerLink"), dict)
+            and "PlatformParticipantId" in event["SpeakerLink"]
+        )
+        version = int(record.get("Version") or 0)
+        names = {"#c": "Consent", "#e": "Events", "#v": "Version"}
+        values: Dict[str, Any] = {":events": stripped["Events"], ":next": version + 1}
+        if version:
+            condition = "#c.#v = :version"
+            values[":version"] = version
+        else:
+            condition = "attribute_not_exists(#c.#v)"
+        try:
+            _table().update_item(
+                Key=meeting_key(call_id),
+                UpdateExpression="SET #c.#e = :events, #c.#v = :next",
+                ConditionExpression=f"attribute_exists(PK) AND {condition}",
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if _error_code(error) != "ConditionalCheckFailedException":
+                raise
+            LOGGER.info(
+                "the consent record of %s changed while removing its platform ids; reading it again",
+                call_id,
+            )
+            continue
+        return removed
+    # Raised, so the invocation fails and is retried, as for the checklist.
+    raise ConsentPlatformIdsNotRemoved(
+        f"the consent record of {call_id} kept changing while removing its platform ids"
     )
 
 
@@ -564,6 +636,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     # outlast this sweep, as for the checklist quotes below.
     whiteboards = delete_whiteboards(call_id)
     checklist_items = strip_checklist_quotes(call_id)
+    consent_ids = strip_consent_platform_ids(call_id)
     LOGGER.info(
         json.dumps(
             {
@@ -574,6 +647,7 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
                 "filesDeleted": len(keys),
                 "attachmentFilesDeleted": attachments,
                 "checklistItemsWithQuotesRemoved": checklist_items,
+                "consentPlatformIdsRemoved": consent_ids,
                 "notificationRowsDeleted": notifications,
                 "whiteboardRowsDeleted": whiteboards,
             }
