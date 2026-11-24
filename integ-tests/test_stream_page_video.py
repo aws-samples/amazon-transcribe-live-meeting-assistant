@@ -116,6 +116,8 @@ def test_the_page_video_is_recorded_with_the_meeting(page_run) -> None:
 def test_the_page_video_keeps_key_frames_under_its_source(page_run) -> None:
     frames = page_run["frames"]
     assert {f.get("Source") for f in frames} == {"STREAM_AUDIO"}, frames
-    # One per slide, allowing the last slide, which may be cut short, to be missed.
+    # One per slide. The slideshow's clock starts once the page's capture has
+    # begun (stream_page_probe.SLIDESHOW_HTML), so the first slide is held for
+    # at least SLIDE_SECONDS; only the last one, cut short by Stop, may be missed.
     assert len(frames) >= page_run["slides"] - 1, [f.get("Timestamp") for f in frames]
     assert "Some slides may be missed" not in page_run["run"].warnings
