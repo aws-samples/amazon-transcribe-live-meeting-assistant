@@ -168,12 +168,23 @@ def test_an_ai_stack_template_change_runs_the_resource_budget_and_cfn_lint(path:
     "path",
     [
         "lma-browser-extension-stack/src/App.tsx",
-        "lma-browser-extension-stack/e2e/test_extension_smoke.py",
         "lma-browser-extension-stack/e2e/fixtures/meeting.html",
     ],
 )
 def test_the_browser_extension_runs_alone(path: str) -> None:
     assert ran([path]) == {"browser_extension"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "lma-browser-extension-stack/e2e/test_extension_smoke.py",
+        "lma-browser-extension-stack/e2e/extension_browser.py",
+    ],
+)
+def test_the_extension_e2e_python_is_linted(path: str) -> None:
+    # PYTHON_LINT_PATHS in the Makefile includes lma-browser-extension-stack/e2e.
+    assert {"browser_extension", "python_lint"} <= ran([path])
 
 
 def test_the_extension_manifest_also_runs_the_sdk_publish_tests() -> None:
@@ -197,6 +208,16 @@ def test_the_key_frame_sampler_runs_the_integration_plumbing_tests() -> None:
     # test_ci_plumbing.py holds the Stream page probe's slides to the key frame detector.
     areas = ran(["lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts"])
     assert {"integ_plumbing", "transcriber"} <= areas
+
+
+def test_the_extension_e2e_helper_runs_the_integration_plumbing_tests() -> None:
+    # test_ci_plumbing.py imports browser_extension_probe, which imports extension_browser.
+    assert "integ_plumbing" in ran(["lma-browser-extension-stack/e2e/extension_browser.py"])
+
+
+def test_the_public_publish_module_runs_the_extension_smoke_test() -> None:
+    # extension_browser.py imports chrome_extension_version from it.
+    assert "browser_extension" in ran(["lib/lma_sdk/lma_sdk/operations/publish.py"])
 
 
 def test_the_cognito_template_runs_the_extension_smoke_test() -> None:

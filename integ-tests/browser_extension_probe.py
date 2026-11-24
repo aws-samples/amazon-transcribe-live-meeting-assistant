@@ -131,7 +131,9 @@ def create_test_user(stack: Stack) -> dict[str, str]:
 
 
 def delete_test_user(stack: Stack, email: str) -> None:
-    subprocess.run(  # noqa: S603 - fixed argv
+    """``ux_test_session.py teardown``; raises if it exits non-zero, so a user left
+    behind is reported as a teardown error instead of passing silently."""
+    out = subprocess.run(  # noqa: S603 - fixed argv
         [
             sys.executable,
             str(UX_TEST_SESSION),
@@ -147,6 +149,11 @@ def delete_test_user(stack: Stack, email: str) -> None:
         check=False,
         timeout=120,
     )
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"ux_test_session.py teardown for {email} exited {out.returncode}: "
+            f"{(out.stderr or out.stdout).strip()[-500:]}"
+        )
 
 
 # ── the extension ──────────────────────────────────────────────────────────
@@ -295,11 +302,21 @@ class Result:
 
 
 def stream_from_extension(
-    stack: Stack, user: dict[str, str], workdir: Path, headless: bool = True
+    stack: Stack,
+    user: dict[str, str],
+    workdir: Path,
+    headless: bool = True,
+    result: Result | None = None,
 ) -> Result:
+    """Stream from the extension and fill ``result``.
+
+    Pass ``result`` to keep what was recorded when this raises: ``call_id`` is set
+    as soon as the panel sends its START frame, so the caller can still delete the
+    meeting after a later step fails.
+    """
     from playwright.sync_api import expect, sync_playwright
 
-    result = Result()
+    result = Result() if result is None else result
     served = download_served_extension(stack, workdir / "served")
     staged, result.served_version = stage_for_chrome(served, workdir / "extension")
     config = json.loads((staged / "lma_config.json").read_text())
@@ -335,8 +352,13 @@ def stream_from_extension(
                 panel.on("pageerror", lambda error: result.page_errors.append(str(error)))
                 frames: list[Any] = []
 
+                def on_frame(payload: Any) -> None:
+                    frames.append(payload)
+                    if not result.call_id:
+                        record_start(result, payload)
+
                 def on_socket(ws: Any) -> None:
-                    ws.on("framesent", lambda payload: frames.append(payload))
+                    ws.on("framesent", on_frame)
 
                 panel.on("websocket", on_socket)
                 panel.goto(eb.panel_url(result.extension_id))
@@ -373,17 +395,7 @@ def stream_from_extension(
                     expect(start).to_be_visible(timeout=15_000)
                     meeting.wait_for_timeout(2000)
 
-                for payload in frames:
-                    if isinstance(payload, str):
-                        try:
-                            message = json.loads(payload)
-                        except ValueError:
-                            continue
-                        if message.get("callEvent") == "START" and not result.start_frame:
-                            result.start_frame = message
-                    else:
-                        result.audio_frames += 1
-                result.call_id = result.start_frame.get("callId", "")
+                result.audio_frames = sum(1 for payload in frames if not isinstance(payload, str))
             finally:
                 context.close()
     finally:
@@ -392,6 +404,19 @@ def stream_from_extension(
     if result.call_id:
         result.meeting, result.segments = wait_for_transcript(stack, result.call_id)
     return result
+
+
+def record_start(result: Result, payload: Any) -> None:
+    """Keep the first START frame, and its ``callId``, from a frame the panel sent."""
+    if not isinstance(payload, str) or result.start_frame:
+        return
+    try:
+        message = json.loads(payload)
+    except ValueError:
+        return
+    if isinstance(message, dict) and message.get("callEvent") == "START":
+        result.start_frame = message
+        result.call_id = str(message.get("callId", ""))
 
 
 def wait_for_transcript(

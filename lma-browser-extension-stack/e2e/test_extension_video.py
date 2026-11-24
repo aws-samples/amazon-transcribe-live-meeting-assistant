@@ -109,7 +109,12 @@ def browser(tmp_path_factory):
             extra_args=("--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"),
         )
         # Nothing here needs the network.
-        context.route("**/*", lambda route: route.abort() if route.request.url.startswith(("http", "ws")) else route.continue_())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.abort() if route.request.url.startswith(("http", "ws")) else route.continue_()
+            ),
+        )
         try:
             yield {"context": context, "extension_id": extension_id, "playwright": playwright}
         finally:
@@ -129,7 +134,9 @@ def _record(browser, surface: str, seconds: float, shared: str = "meeting") -> d
     context = browser["context"]
     worker = eb.service_worker(context)
     worker.evaluate(COLLECT)
-    recorder_url = f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html"
+    recorder_url = (
+        f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html"
+    )
     page = context.new_page()
     page.add_init_script(FAKE_CAPTURE)
     try:
@@ -155,11 +162,11 @@ def _boxes(data: bytes, start: int = 0, end: int | None = None):
     end = len(data) if end is None else end
     at = start
     while at + 8 <= end:
-        size = int.from_bytes(data[at:at + 4], "big")
-        kind = data[at + 4:at + 8].decode("latin-1")
+        size = int.from_bytes(data[at : at + 4], "big")
+        kind = data[at + 4 : at + 8].decode("latin-1")
         header = 8
         if size == 1:
-            size = int.from_bytes(data[at + 8:at + 16], "big")
+            size = int.from_bytes(data[at + 8 : at + 16], "big")
             header = 16
         if size < header or at + size > end:
             return
@@ -177,9 +184,9 @@ def keyframe_times(data: bytes) -> list[float]:
     moov = next((s, e) for k, s, e in top if k == "moov")
     trak = _child(data, *moov, "trak")
     mdhd = _child(data, *_child(data, *trak, "mdia"), "mdhd")
-    timescale = int.from_bytes(data[mdhd[0] + (20 if data[mdhd[0]] == 1 else 12):][:4], "big")
+    timescale = int.from_bytes(data[mdhd[0] + (20 if data[mdhd[0]] == 1 else 12) :][:4], "big")
     trex = _child(data, *_child(data, *moov, "mvex"), "trex")
-    default_flags = int.from_bytes(data[trex[0] + 20:trex[0] + 24], "big")
+    default_flags = int.from_bytes(data[trex[0] + 20 : trex[0] + 24], "big")
     times = []
     for kind, s, e in top:
         if kind != "moof":
@@ -187,34 +194,37 @@ def keyframe_times(data: bytes) -> list[float]:
         traf = _child(data, s, e, "traf")
         tfhd = _child(data, *traf, "tfhd")
         tfdt = _child(data, *traf, "tfdt")
-        tf = int.from_bytes(data[tfhd[0] + 1:tfhd[0] + 4], "big")
+        tf = int.from_bytes(data[tfhd[0] + 1 : tfhd[0] + 4], "big")
         p = tfhd[0] + 8 + (8 if tf & 1 else 0) + (4 if tf & 2 else 0)
         duration = 0
         if tf & 8:
-            duration = int.from_bytes(data[p:p + 4], "big")
+            duration = int.from_bytes(data[p : p + 4], "big")
             p += 4
         p += 4 if tf & 0x10 else 0
-        flags = int.from_bytes(data[p:p + 4], "big") if tf & 0x20 else default_flags
-        t = (int.from_bytes(data[tfdt[0] + 4:tfdt[0] + 12], "big") if data[tfdt[0]] == 1
-             else int.from_bytes(data[tfdt[0] + 4:tfdt[0] + 8], "big"))
+        flags = int.from_bytes(data[p : p + 4], "big") if tf & 0x20 else default_flags
+        t = (
+            int.from_bytes(data[tfdt[0] + 4 : tfdt[0] + 12], "big")
+            if data[tfdt[0]] == 1
+            else int.from_bytes(data[tfdt[0] + 4 : tfdt[0] + 8], "big")
+        )
         for k, ts, te in _boxes(data, *traf):
             if k != "trun":
                 continue
-            rf = int.from_bytes(data[ts + 1:ts + 4], "big")
-            count = int.from_bytes(data[ts + 4:ts + 8], "big")
+            rf = int.from_bytes(data[ts + 1 : ts + 4], "big")
+            count = int.from_bytes(data[ts + 4 : ts + 8], "big")
             q = ts + 8 + (4 if rf & 1 else 0)
             first = None
             if rf & 4:
-                first = int.from_bytes(data[q:q + 4], "big")
+                first = int.from_bytes(data[q : q + 4], "big")
                 q += 4
             for i in range(count):
                 d, f = duration, (first if i == 0 and first is not None else flags)
                 if rf & 0x100:
-                    d = int.from_bytes(data[q:q + 4], "big")
+                    d = int.from_bytes(data[q : q + 4], "big")
                     q += 4
                 q += 4 if rf & 0x200 else 0
                 if rf & 0x400:
-                    f = int.from_bytes(data[q:q + 4], "big")
+                    f = int.from_bytes(data[q : q + 4], "big")
                     q += 4
                 q += 4 if rf & 0x800 else 0
                 if not f & 0x10000:
@@ -232,15 +242,25 @@ def test_the_share_is_asked_for_with_the_video_constraints(meeting_tab) -> None:
     options = meeting_tab["options"]
     assert options["preferCurrentTab"] is True
     assert options["surfaceSwitching"] == "exclude"
-    assert options["video"] == {"frameRate": {"ideal": 5, "max": 5}, "width": {"max": 1920}, "height": {"max": 1920}}
+    assert options["video"] == {
+        "frameRate": {"ideal": 5, "max": 5},
+        "width": {"max": 1920},
+        "height": {"max": 1920},
+    }
 
 
 def test_the_meeting_tab_is_recorded_as_fragmented_mp4(meeting_tab) -> None:
     actions = [m["action"] for m in meeting_tab["messages"]]
     assert actions[0] == "VideoStarted", actions
     assert actions[-1] == "VideoStopped", actions
-    assert meeting_tab["messages"][0]["mimeType"].startswith("video/mp4"), meeting_tab["messages"][0]
-    chunks = [base64.b64decode(m["data"].split(",", 1)[1]) for m in meeting_tab["messages"] if m["action"] == "VideoChunk"]
+    assert meeting_tab["messages"][0]["mimeType"].startswith("video/mp4"), meeting_tab["messages"][
+        0
+    ]
+    chunks = [
+        base64.b64decode(m["data"].split(",", 1)[1])
+        for m in meeting_tab["messages"]
+        if m["action"] == "VideoChunk"
+    ]
     assert len(chunks) >= 3, actions
     kinds = [k for k, _, _ in _boxes(b"".join(chunks))]
     assert kinds[:2] == ["ftyp", "moov"] and "moof" in kinds, kinds[:6]
@@ -248,7 +268,9 @@ def test_the_meeting_tab_is_recorded_as_fragmented_mp4(meeting_tab) -> None:
 
 def test_key_frames_are_at_most_two_seconds_apart(meeting_tab) -> None:
     data = b"".join(
-        base64.b64decode(m["data"].split(",", 1)[1]) for m in meeting_tab["messages"] if m["action"] == "VideoChunk"
+        base64.b64decode(m["data"].split(",", 1)[1])
+        for m in meeting_tab["messages"]
+        if m["action"] == "VideoChunk"
     )
     times = keyframe_times(data)
     assert len(times) >= 5, times
@@ -283,7 +305,9 @@ def test_a_recorder_that_is_not_capturing_does_not_answer(browser) -> None:
     worker.evaluate(COLLECT)
     page = context.new_page()
     try:
-        page.goto(f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html")
+        page.goto(
+            f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html"
+        )
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StartVideo' })")
         time.sleep(1.5)
         assert worker.evaluate("self.__video") == []

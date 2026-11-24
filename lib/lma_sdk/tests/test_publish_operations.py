@@ -656,6 +656,12 @@ class TestChromeExtensionVersion:
         with pytest.raises(LMAPublishError):
             chrome_extension_version(version)
 
+    def test_is_exported_from_the_public_publish_module(self):
+        from lma_sdk.operations import publish as public_publish
+
+        assert public_publish.chrome_extension_version is chrome_extension_version
+        assert "chrome_extension_version" in public_publish.__all__
+
 
 class TestBrowserExtensionPackage:
     """Runs the browser extension publish path over the real stack directory."""

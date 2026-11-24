@@ -1485,6 +1485,33 @@ def test_the_browser_video_probe_expects_a_key_frame_for_each_slide_it_showed() 
     assert expected_timestamps(media, leg, 100.0) == [100.0 + LEAD_SECONDS, 108.0 + LEAD_SECONDS]
 
 
+def test_the_browser_extension_probe_records_the_meeting_at_the_start_frame() -> None:
+    """The id is kept from the first START frame, so a later failure can still clean up."""
+    import browser_extension_probe as probe
+
+    result = probe.Result()
+    probe.record_start(result, bytes([0, 1]))
+    probe.record_start(result, "not json")
+    probe.record_start(result, json.dumps({"callEvent": "SPEAKER_CHANGE", "callId": "x"}))
+    assert result.call_id == ""
+    probe.record_start(result, json.dumps({"callEvent": "START", "callId": "m-1"}))
+    probe.record_start(result, json.dumps({"callEvent": "START", "callId": "m-2"}))
+    assert result.call_id == "m-1"
+    assert result.start_frame["callId"] == "m-1"
+
+
+def test_the_browser_extension_probe_reports_a_failed_user_teardown() -> None:
+    import browser_extension_probe as probe
+
+    stack = probe.Stack(name="s", region="us-east-1", outputs={}, table="t")
+    failed = mock.Mock(returncode=1, stderr="user not found", stdout="")
+    with mock.patch.object(probe.subprocess, "run", return_value=failed):
+        with pytest.raises(RuntimeError, match="exited 1: user not found"):
+            probe.delete_test_user(stack, "t@example.com")
+    with mock.patch.object(probe.subprocess, "run", return_value=mock.Mock(returncode=0)):
+        probe.delete_test_user(stack, "t@example.com")
+
+
 def test_every_marker_used_in_the_suite_is_registered() -> None:
     """An unregistered marker is silently ignored, so the exemption would lapse."""
     registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()

@@ -93,10 +93,15 @@ def run(stack, user):
 
     scratch = Path.home() / ".lma-scratch"
     scratch.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="extension-e2e-", dir=scratch) as workdir:
-        result = probe.stream_from_extension(stack, user, Path(workdir), headless=not HEADED)
-    print(f"browser extension meeting: {result.call_id!r}")
+    # Created here, so a meeting the panel started is deleted even if streaming fails
+    # after its START frame (stream_from_extension records the id at that frame).
+    result = probe.Result()
     try:
+        with tempfile.TemporaryDirectory(prefix="extension-e2e-", dir=scratch) as workdir:
+            probe.stream_from_extension(
+                stack, user, Path(workdir), headless=not HEADED, result=result
+            )
+        print(f"browser extension meeting: {result.call_id!r}")
         yield result
     finally:
         if result.call_id and not KEEP_MEETING:

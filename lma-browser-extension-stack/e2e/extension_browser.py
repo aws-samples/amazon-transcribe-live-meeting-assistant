@@ -31,7 +31,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from lma_sdk._core.publish import chrome_extension_version
+from lma_sdk.operations.publish import chrome_extension_version
 
 E2E_DIR = Path(__file__).resolve().parent
 EXTENSION_DIR = E2E_DIR.parent
