@@ -8,12 +8,13 @@
 /* eslint-disable no-bitwise */
 
 /**
- * Screen video from the Stream Audio/Video page: the shared tab, window or
- * screen, recorded with the browser's MediaRecorder as fragmented MP4 and sent
- * to the WebSocket transcriber on a second connection, the way the Desktop
- * Capture App sends its video (docs/websocket-streaming-api.md, "6.1.6 Screen
- * Video"): START_VIDEO with the callId and the video's offset from the audio,
- * the chunks as binary frames, then END_VIDEO.
+ * Screen video from the Stream Audio/Video page and the browser extension: the
+ * shared tab, window or screen, recorded with the browser's MediaRecorder as
+ * fragmented MP4 and sent to the WebSocket transcriber on a second connection,
+ * the way the Desktop Capture App sends its video
+ * (docs/websocket-streaming-api.md, "6.1.6 Screen Video"): START_VIDEO with the
+ * callId and the video's offset from the audio, the chunks as binary frames,
+ * then END_VIDEO.
  *
  * The transcriber samples only the stream's H.264 key frames, and needs one at
  * least every two seconds. MediaRecorder is asked for one every 1.8 seconds
@@ -23,8 +24,14 @@
  * hardware encoders may not honour the option.
  *
  * Framework-free, with the browser objects injectable, so it is tested without
- * a browser; StreamAudio.jsx wires it to the page.
+ * a browser. StreamAudio.jsx wires it to the page; the extension keeps an
+ * identical copy (lma-browser-extension-stack/src/lib/screen-video.js, held to
+ * this one by a test) and uses its connection and key frame monitor for the
+ * chunks its in-tab recorder hands over.
  */
+
+/** A browser constructor by name, or undefined outside a browser. */
+const browserGlobal = (name) => (typeof window === 'undefined' ? undefined : window[name]);
 
 /** Tried in order: H.264 High 4.0 first, then whatever H.264 profile the browser picks. */
 export const VIDEO_MIME_TYPES = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1'];
@@ -40,7 +47,7 @@ export const KEYFRAME_GAP_WARNING_SECONDS = 2.5;
 export const SCREEN_VIDEO_NOTICE = 'The shared screen is also recorded as video.';
 
 /** The first supported MP4 type, or null when this browser cannot record one. */
-export const pickVideoMimeType = (Recorder = globalThis.MediaRecorder) => {
+export const pickVideoMimeType = (Recorder = browserGlobal('MediaRecorder')) => {
   if (!Recorder || typeof Recorder.isTypeSupported !== 'function') return null;
   return VIDEO_MIME_TYPES.find((type) => Recorder.isTypeSupported(type)) || null;
 };
@@ -262,8 +269,9 @@ const reconnectDelay = (attempt) => Math.min(1000 * 2 ** attempt, 5000);
  * The connection opens with the first chunk, by when the meeting's audio START
  * has normally been handled. A START_VIDEO refused because the audio session
  * is not there yet is tried again from the start of the stream, so every chunk
- * is kept until the connection has stayed open for `confirmMs`, after which
- * that refusal cannot come. Any other drop of a stream the transcriber took
+ * is kept until the transcriber says it has a session for the stream
+ * (VIDEO_STARTED), or, from one that does not say, until the connection has
+ * stayed open for `confirmMs`. Any other drop of a stream the transcriber took
  * reconnects with `videoResume` and sends what was recorded meanwhile (at most
  * `maxBufferBytes`), for up to `resumeWindowMs`, which is inside the
  * transcriber's two-minute hold; a stream that never reached it starts again
@@ -302,10 +310,17 @@ export const createVideoUplink = ({
   let queued = [];
   let queuedBytes = 0;
   let connecting = false;
-  // Whether the transcriber holds a video session for this stream: a
-  // START_VIDEO went out on a connection that it did not refuse for want of
-  // the audio session. A later connection then resumes that session.
+  // Whether the transcriber holds a video session for this stream: it said so
+  // (VIDEO_STARTED), or, from a transcriber that does not say, the connection
+  // stayed open for `confirmMs`. A later connection then resumes that session.
   let admitted = false;
+
+  const admit = () => {
+    admitted = true;
+    confirmed = true;
+    retained = [];
+    retainedBytes = 0;
+  };
 
   const finish = (reason) => {
     if (finished) return;
@@ -350,7 +365,6 @@ export const createVideoUplink = ({
         videoTimeOffsetMs: offsetMs,
         ...(resume ? { videoResume: true } : {}),
       });
-      admitted = true;
       // A resumed stream carries on from what the last connection sent; a new
       // one starts again from its first chunk, which holds the init segment.
       const backlog = resume ? queued : retained;
@@ -360,11 +374,7 @@ export const createVideoUplink = ({
       if (!confirmed) {
         confirmTimer = setTimer(() => {
           confirmTimer = null;
-          if (socket === ws && open) {
-            confirmed = true;
-            retained = [];
-            retainedBytes = 0;
-          }
+          if (socket === ws && open) admit();
         }, confirmMs);
       }
       if (stopping) {
@@ -405,6 +415,20 @@ export const createVideoUplink = ({
       // Dropped: reconnect, resuming the session it was admitted to.
       // eslint-disable-next-line no-use-before-define
       scheduleReconnect();
+    };
+    ws.onmessage = (event) => {
+      if (typeof event?.data !== 'string') return;
+      try {
+        if (JSON.parse(event.data)?.event === 'VIDEO_STARTED' && socket === ws) {
+          if (confirmTimer !== null) {
+            clearTimer(confirmTimer);
+            confirmTimer = null;
+          }
+          admit();
+        }
+      } catch {
+        // not a frame of ours
+      }
     };
     ws.onerror = () => log('video connection error');
   };
@@ -484,8 +508,8 @@ export const startScreenVideo = ({
   openSocket,
   onEvent = () => {},
   log = () => {},
-  Recorder = globalThis.MediaRecorder,
-  MediaStreamClass = globalThis.MediaStream,
+  Recorder = browserGlobal('MediaRecorder'),
+  MediaStreamClass = browserGlobal('MediaStream'),
   uplinkOptions = {},
 }) => {
   const mimeType = pickVideoMimeType(Recorder);

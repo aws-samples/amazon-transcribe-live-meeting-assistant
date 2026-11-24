@@ -338,6 +338,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         # The skills manager's tests import the Amazon Quick skills pack's skills.
         ("amazon-quick-desktop-skills-pack/skills/lma-live-coach.md", "lambdas"),
         ("lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts", "transcriber"),
+        # The extension holds its copy of the page's screen video module to the original.
+        ("lma-ai-stack/source/ui/src/components/stream-audio/screen-video.js", "browser_extension"),
         # The call event processor holds its chat attachment types to the VP's.
         ("lma-virtual-participant-stack/backend/src/chat-attachments.ts", "lambdas"),
         # configuration-store.ts: both TypeScript copies and the Python half are held

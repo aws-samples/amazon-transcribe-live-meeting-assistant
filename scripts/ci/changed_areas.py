@@ -331,6 +331,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The transcriber's tests compare its key-frame detector with the VP's copy and
     # read the consent defaults and schema it mirrors.
     (f"{VP}/backend/src/keyframe-detector.ts", "transcriber"),
+    # The extension's tests hold its copy of the page's screen video module to the
+    # original (panel-video.test.ts).
+    (f"{UI}/src/components/stream-audio/screen-video.js", "browser_extension"),
     # The call event processor's tests hold its list of chat attachment types to
     # the VP's.
     (f"{VP}/backend/src/chat-attachments.ts", "lambdas"),

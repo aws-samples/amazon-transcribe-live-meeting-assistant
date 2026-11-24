@@ -50,6 +50,21 @@ describe('ConsentPanel', () => {
     expect(screen.getByText('Posted in the meeting chat.')).toBeTruthy();
   });
 
+  test('in notify, a post the user saw appear confirms the notice; in opt-in it does not confirm agreement', async () => {
+    const notify = jest.fn();
+    const { unmount } = render(<Harness onStep={notify} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Post in meeting chat' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it appeared' }));
+    expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ chatPost: 'confirmed', method: 'chat', confirmed: true }));
+    unmount();
+
+    const optIn = jest.fn();
+    render(<Harness settings={{ ...NOTIFY, mode: 'opt_in' }} onStep={optIn} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Post in meeting chat' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, it appeared' }));
+    expect(optIn).toHaveBeenLastCalledWith(expect.objectContaining({ chatPost: 'confirmed', confirmed: false }));
+  });
+
   test('says so when the notice could not be posted', async () => {
     render(<Harness onPostInChat={async () => false} />);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Post in meeting chat' })); });

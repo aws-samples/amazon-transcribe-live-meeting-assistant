@@ -279,6 +279,12 @@ def test_extension_video_keeps_one_key_frame_per_slide_under_its_source(extensio
     _assert_one_frame_per_slide(extension["frames"], extension["expected"], "BROWSER_EXTENSION")
 
 
+def test_an_accepted_video_stream_is_acknowledged(stream_page, extension) -> None:
+    """VIDEO_STARTED on the video connection: from then on a drop resumes the stream."""
+    for leg in (stream_page["leg"], extension["leg"]):
+        assert {"event": "VIDEO_STARTED", "callId": leg.call_id} in leg.video_frames, leg.video_frames
+
+
 def test_extension_video_is_recorded_with_the_meeting(extension) -> None:
     meeting = extension["meeting"]
     assert meeting.get("CaptureSource") == "BROWSER_EXTENSION", meeting.get("CaptureSource")
@@ -440,5 +446,6 @@ def test_with_the_setting_off_the_settings_answer_withholds_browser_video(settin
 def test_with_the_setting_off_browser_video_is_refused_and_the_audio_carries_on(setting_off) -> None:
     for client_type, leg in setting_off["legs"].items():
         assert leg.video_close_code == 1008 and leg.video_close_reason == NOT_ENABLED, leg.summary()
+        assert not any(f.get("event") == "VIDEO_STARTED" for f in leg.video_frames), leg.video_frames
         assert leg.audio_state == "OPEN" and leg.end_sent, f"{client_type}: {leg.summary()}"
         assert setting_off["frames"][client_type] == [], _summary(setting_off["frames"][client_type])

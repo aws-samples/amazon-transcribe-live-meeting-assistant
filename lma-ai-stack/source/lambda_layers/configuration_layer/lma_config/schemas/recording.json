@@ -21,7 +21,7 @@
       "order": 1,
       "type": "boolean",
       "title": "Record screen video from Stream Audio/Video and the browser extension",
-      "description": "On: the Stream Audio/Video page offers its users a switch, Also record screen video, off at the start of every meeting, that also records the tab, window or screen they share; the WebSocket transcriber accepts screen video from the page and the browser extension, stores it with the meeting, and keeps its key frames as the meeting's shared-screen slides. Off: the page offers no video, the transcriber refuses video from those two clients, and their meetings record audio only. The Desktop Capture App is not affected. Video is recorded only on a deployment with the EnableVideoRecording stack parameter set to true."
+      "description": "On: the Stream Audio/Video page and the browser extension offer their users a switch, Also record screen video, off at the start of every meeting, that also records the tab, window or screen they share (the extension records only a browser tab (the meeting tab is offered first)); the WebSocket transcriber stores the video with the meeting and keeps its key frames as the meeting's shared-screen slides. Off: those two clients offer no video, the transcriber refuses video from those two clients, and their meetings record audio only. The Desktop Capture App is not affected. Video is recorded only on a deployment with the EnableVideoRecording stack parameter set to true."
     }
   },
   "additionalProperties": false

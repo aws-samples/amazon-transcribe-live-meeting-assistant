@@ -140,14 +140,15 @@ limitations:
     mitigations: [capability:virtual-participant, capability:speaker-attribution]
 
   - id: no-video-from-browser-capture
-    title: The Chrome extension and uploads carry no video, and Stream Audio/Video only where turned on
+    title: Uploads carry no video, and the browser clients record it only where turned on
     description: >-
-      The Chrome extension and uploads carry no video, so those meetings have no key
-      frames, slide text or screen-share summary. Stream Audio/Video records screen video
-      only where an administrator turns on Meeting Recording › Record screen video from
-      Stream Audio/Video and the browser extension (off by default and in every preset),
-      and then only for meetings whose user switches it on; its other meetings
-      have no key frames, slide text or screen-share summary.
+      Uploads carry no video, so those meetings have no key frames, slide text or
+      screen-share summary. Stream Audio/Video and the Chrome extension record screen
+      video only where an administrator turns on Meeting Recording › Record screen video
+      from Stream Audio/Video and the browser extension (off by default and in every
+      preset), and then only for meetings whose user switches it on; the extension
+      records only a browser tab (the meeting tab is offered first). Their other meetings have no key frames,
+      slide text or screen-share summary.
     evidence:
       - docs/meeting-video.md#which-meetings-have-key-frames
     impact: low
@@ -383,7 +384,7 @@ limitations:
       from before the consent step, do not run the consent flow, so their meetings
       are accepted or refused as the deployment's setting for clients without a
       consent step says. Stream Audio/Video, the Chrome extension and the Desktop
-      Capture App cannot see participants, so an opt-in meeting from them is granted
+      Capture App cannot collect each participant's own consent, so an opt-in meeting from them is granted
       on the LMA user's attestation alone, and under the consent-required preset
       they cannot start a meeting.
     evidence:

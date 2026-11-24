@@ -6,7 +6,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isBrowserVideoClient, keyframeSourceFor, videoAllowedFor } from './video-admission';
+import { isBrowserVideoClient, keyframeSourceFor, videoAllowedFor, videoStartedFrame } from './video-admission';
+
+test('an accepted video stream is acknowledged with its callId', () => {
+    assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
+});
 
 const ON = { stackRecordsVideo: true, recordBrowserVideo: true };
 const SETTING_OFF = { stackRecordsVideo: true, recordBrowserVideo: false };

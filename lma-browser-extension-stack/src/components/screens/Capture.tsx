@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect } from 'react';
 import logo from './logo.svg';
 import './Capture.css'
-import { Alert, Box, Button, Checkbox, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Icon, Input, Link, Modal, SpaceBetween } from '@cloudscape-design/components';
+import { Alert, Box, Button, Checkbox, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Icon, Input, Link, Modal, SpaceBetween, Toggle } from '@cloudscape-design/components';
 import UserMessage from '../views/UserMessage';
 import OtherMessage from '../views/OtherMessage';
 import { useNavigation } from '../../context/NavigationContext';
@@ -19,6 +19,7 @@ import { nameFromIdToken } from '../../lib/identity';
 import { prefillField } from '../../lib/capture';
 import { INVALID_MEETING_ID, meetingIdFrom } from '../../lib/continue-meeting';
 import ConsentPanel from '../views/ConsentPanel';
+import { SCREEN_VIDEO_NOTICE } from '../../lib/screen-video';
 import {
   ConsentSettings,
   ConsentStep,
@@ -27,6 +28,7 @@ import {
   consentRequired,
   describeConsentState,
   emptyStep,
+  noticePosted,
   fetchConsentSettings,
   renderNotice,
   startBlockedReason,
@@ -37,7 +39,10 @@ function Capture() {
   const { navigate } = useNavigation();
   const { user, logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, startError, setStartError, consentFrame, postInMeetingChat, reportObjection } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, startError, setStartError, consentFrame, postInMeetingChat, reportObjection, videoState, stopVideo } = useIntegration();
+  // "Also record screen video" (lib/panel-video.ts): offered when the transcriber allows video
+  // from the extension, and off at the start of every meeting.
+  const [videoEnabled, setVideoEnabled] = React.useState(false);
   // "Continue an existing meeting…" (lib/continue-meeting.ts).
   const [continuing, setContinuing] = React.useState(false);
   const [continueInput, setContinueInput] = React.useState("");
@@ -76,10 +81,15 @@ function Capture() {
       }
     });
     setConsentStep(emptyStep());
+    setVideoEnabled(false);
     return () => { cancelled = true; };
   }, [isTranscribing, settings.wssEndpoint, signedIn]);
 
-  // The notice as shown and as START records it.
+  const videoAllowed = consentSettings?.videoAllowed === true;
+  const videoOn = videoAllowed && videoEnabled;
+
+  // The notice as shown and as START records it: with screen video on, it says
+  // so in a fixed sentence, which the consent record keeps with the notice.
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || topic;
   const noticeText = consentRequired(consentSettings)
     ? renderNotice(consentSettings?.noticeTemplate, {
@@ -87,7 +97,7 @@ function Capture() {
       meeting: consentMeetingName,
       consentPhrase: consentSettings?.consentPhrase,
       objectionPhrase: consentSettings?.objectionPhrase,
-    })
+    }) + (videoOn ? ` ${SCREEN_VIDEO_NOTICE}` : '')
     : '';
 
   // componentDidMount:
@@ -176,8 +186,9 @@ function Capture() {
 
   const disclaimerConfirmed = useCallback(() => {
     startTranscription(user, agentName, topic, continuing ? continueInput : undefined,
-      consentPayload(consentSettings, consentStep, { lmaUser: agentName, meetingName: consentMeetingName, noticeText }));
-  }, [user, agentName, topic, continuing, continueInput, startTranscription, consentSettings, consentStep, consentMeetingName, noticeText])
+      consentPayload(consentSettings, consentStep, { lmaUser: agentName, meetingName: consentMeetingName, noticeText }),
+      videoOn);
+  }, [user, agentName, topic, continuing, continueInput, startTranscription, consentSettings, consentStep, consentMeetingName, noticeText, videoOn])
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -205,6 +216,29 @@ function Capture() {
       setVersion("dev/web");
     }
   }, [version, setVersion]);
+
+  // While capturing: where the screen video stands, and Stop video, which keeps the audio.
+  const videoPanel = videoState.status === 'off' ? null : (
+    <SpaceBetween size="xs">
+      {videoState.status === 'on' && (
+        <Alert type="info" header="Screen video is ON" action={<Button onClick={() => stopVideo()}>Stop video</Button>}>
+          Recording the shared tab as video. Stop video keeps the audio streaming.
+        </Alert>
+      )}
+      {videoState.status === 'waiting' && (
+        <Alert type="info" header="Screen video" action={<Button onClick={() => stopVideo()}>Stop video</Button>}>
+          The video starts once the meeting&apos;s consent allows capture.
+        </Alert>
+      )}
+      {videoState.status === 'stopped' && <Box color="text-body-secondary">Screen video stopped. Audio is still being streamed.</Box>}
+      {videoState.status === 'failed' && <Alert type="warning" header="Screen video stopped">{videoState.message}</Alert>}
+      {videoState.slowGap !== null && (
+        <Alert type="warning" header="Some slides may be missed">
+          {`This browser's video encoder puts key frames up to ${videoState.slowGap} seconds apart, and LMA takes slides from key frames at least every 2 seconds. The video is still recorded.`}
+        </Alert>
+      )}
+    </SpaceBetween>
+  );
 
   const consentPanel = consentRequired(consentSettings) && consentSettings ? (
     <ConsentPanel
@@ -288,6 +322,7 @@ function Capture() {
                   </>
               }
               <Button fullWidth={true} variant='primary' onClick={() => stopListening()}>Stop Listening</Button>
+              {videoPanel}
               {consentPanel}
             </>
             :
@@ -330,6 +365,23 @@ function Capture() {
                     placeholder='Meeting ID or https://…/#/calls/…'
                     ariaLabel='Meeting ID or link'
                   ></Input>
+                </FormField>
+              )}
+              {videoAllowed && (
+                <FormField
+                  stretch={true}
+                  label="Screen video:"
+                  description="Also record the shared tab as video, with the meeting. Its slides appear on the meeting page. Only a browser tab (the meeting tab is offered first) is recorded. Off at the start of every meeting."
+                  constraintText={noticePosted(consentStep) ? 'Fixed once the notice is posted in the chat, which says whether the screen is recorded.' : undefined}
+                >
+                  <Toggle
+                    checked={videoEnabled}
+                    onChange={({ detail }) => setVideoEnabled(detail.checked)}
+                    // The notice already posted says whether the screen is recorded.
+                    disabled={noticePosted(consentStep)}
+                  >
+                    Also record screen video
+                  </Toggle>
                 </FormField>
               )}
               {consentPanel}

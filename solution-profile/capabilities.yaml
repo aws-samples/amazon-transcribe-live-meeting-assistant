@@ -689,7 +689,8 @@ capabilities:
     title: Meeting video, key frames of the shared screen and searchable slide text
     description: >-
       A Virtual Participant can record the meeting video, and the Desktop Capture App
-      and, where an administrator turns it on, the Stream Audio/Video page can stream
+      and, where an administrator turns it on, the Stream Audio/Video page and the
+      Chrome extension can stream
       screen video. LMA keeps key frames of the shared screen, reads their
       text with a vision model, links each to the moment it was shown, and uses them
       in a screen-share summary, chapters and the assistant's answers ("summarize that
