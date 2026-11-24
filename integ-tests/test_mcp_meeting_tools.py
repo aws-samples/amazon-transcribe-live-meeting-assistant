@@ -185,6 +185,9 @@ def test_the_consent_record_is_given_in_lma_s_own_values(observed) -> None:
             "source": "ui",
             "at": replies[0]["at"] if replies else None,
             "speakerId": None,
+            # A reply made on the page is not linked to a transcript speaker.
+            "speakerLinkBasis": None,
+            "speakerLinkedAt": None,
         }
     ], consent["events"]
     assert replies[0]["at"], replies

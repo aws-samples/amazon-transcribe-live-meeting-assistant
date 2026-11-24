@@ -233,7 +233,7 @@ def run_stream_page_audio(url: str, username: str, password: str, *, seconds: fl
         page = context.new_page()
         page.on("console", lambda m: run.console.append(m.text[:300]))
         page.on("dialog", lambda d: d.accept())
-        page.on("websocket", lambda ws: ws.on("framesent", frames.append))
+        page.on("websocket", lambda ws: ws.on("framesent", lambda payload: frames.append(payload)))
         _open_stream_page(page, url, username, password)
         topic_field = page.get_by_label("Meeting Topic")
         topic_field.wait_for(timeout=30000)
