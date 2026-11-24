@@ -8,8 +8,8 @@ the Virtual Participant and the transcriber send one, which the call event
 processor turns into a meeting record. It refuses to reopen it while it is
 live, then marks it ended on the record (an END would run the end-of-meeting
 work, which a synthetic meeting has nothing for), and reopens it for session
-2, which is then held: a second reopen is refused while that session has not
-started. Nothing streams, so no session starts and the meeting stays ended.
+2, which is then held: while that session has not started, a second reopen by
+the same caller is answered with the same session rather than a new one. Nothing streams, so no session starts and the meeting stays ended.
 Self-cleaning.
 
 ``reopenMeeting`` accepts an IAM caller that signs with an assumed role (an
@@ -93,11 +93,13 @@ def test_an_ended_meeting_is_reopened_for_its_next_session(client: LMAClient) ->
         assert record["SessionNumber"] == {"N": "2"}
         assert record["Status"] == {"S": "ENDED"}, "the meeting reopens when its session starts"
 
-        # While that session has not started, and for 15 minutes, the meeting
-        # is not reopened again.
-        with pytest.raises(LMAAppSyncError) as pending:
-            client.meetings.reopen(call_id)
-        assert pending.value.error_type == "MeetingInProgress", pending.value
+        # While that session has not started, and for 15 minutes, the caller
+        # who allowed it is given the same session again (a client retrying a
+        # START that did not get through), and no further session is allowed.
+        again = client.meetings.reopen(call_id)
+        assert again.session_number == 2
+        assert again.session_offset_seconds == first.session_offset_seconds
+        assert again.reopened_at == first.reopened_at
         assert meeting()["SessionNumber"] == {"N": "2"}
 
         with pytest.raises(LMAAppSyncError) as missing:
