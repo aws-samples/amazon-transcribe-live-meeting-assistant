@@ -67,7 +67,8 @@ auth path Quick uses.
 
 The API key path exposes all 29 tools below; the OAuth path exposes the seven
 original ones for now (the first seven rows, without the meeting preparation
-arguments of `schedule_meeting` and `start_meeting_now`). Read-only tools are
+arguments of `schedule_meeting` and `start_meeting_now`; its `list_meetings`
+has no `labels` or `audience` filter either). Read-only tools are
 annotated with `readOnlyHint: true` so MCP clients (including Quick
 Desktop scheduled agents) classify them correctly; every tool also declares
 `destructiveHint` and `idempotentHint`.

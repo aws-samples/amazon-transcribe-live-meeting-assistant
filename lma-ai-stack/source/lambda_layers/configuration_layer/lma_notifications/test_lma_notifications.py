@@ -78,10 +78,26 @@ def test_publishes_the_mutation_with_the_given_fields():
         "Body": "**Body**",
         "Refs": ["checklist:item-1", "segment:seg-9"],
         "DedupKey": "ask_question:item-1",
-        "ExpiresAt": "2026-11-19T15:00:00Z",
+        "ExpiresAt": "2026-11-19T15:00:00.000Z",
         "CreatedBy": "user@example.com",
     }
     assert stored["Created"] is True
+
+
+@pytest.mark.parametrize(
+    "given, sent",
+    [
+        ("2026-12-01T10:00:00", "2026-12-01T10:00:00.000Z"),
+        ("2026-12-01T10:00:00Z", "2026-12-01T10:00:00.000Z"),
+        ("2026-12-01T11:30:00+01:00", "2026-12-01T10:30:00.000Z"),
+        ("2026-12-01T10:00:00.123456Z", "2026-12-01T10:00:00.123Z"),
+    ],
+)
+def test_an_expires_at_string_is_sent_in_utc_with_an_offset(given, sent):
+    """A string without an offset is taken as UTC, as a naive datetime is."""
+    api = FakeApi()
+    _publish(api, expires_at=given)
+    assert api.requests[0][1]["input"]["ExpiresAt"] == sent
 
 
 def test_the_published_message_selects_owner_and_shared_with():

@@ -14,9 +14,9 @@ Two front doors:
   carries a scope (execute_tool_call): a read key is answered only by the tools
   whose annotations declare readOnlyHint, a read-write key by every tool, and a
   legacy key -- one stored before keys had scopes -- by the seven original tools,
-  as they were, and the read-only meeting tools.
-* The BedrockAgentCore Gateway path serves the seven original tools, as they
-  were (GATEWAY_TOOL_NAMES). The gateway invokes this function with a tool's
+  with their original arguments, and the read-only meeting tools.
+* The BedrockAgentCore Gateway path serves the seven original tools, with their
+  original arguments (GATEWAY_TOOL_NAMES). The gateway invokes this function with a tool's
   arguments as the event and the tool's name in the Lambda context
   (``bedrockAgentCoreToolName``); an event without that name is matched to one
   of the seven by its arguments.
@@ -212,7 +212,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if tool_name not in GATEWAY_TOOL_NAMES:
                 return error_response(400, gateway_refusal(tool_name))
             # The gateway authenticates the user with OAuth; no API key, so no key
-            # scope. It serves the seven original tools as they were.
+            # scope. It serves the seven original tools with their original arguments.
             key_scope_to_apply = None
 
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
@@ -665,7 +665,8 @@ MCP_TOOLS = [
     },
 ]
 
-# Every tool, on both front doors: the seven above and the meeting tools.
+# The tools the API key endpoint serves: the seven above and the meeting tools.
+# The seven original ones are also the OAuth endpoint's (GATEWAY_TOOL_NAMES).
 TOOLS: List[Dict[str, Any]] = [*MCP_TOOLS, *MEETING_TOOLS]
 
 
@@ -678,7 +679,7 @@ def is_read_only(tool_name: str) -> bool:
 ORIGINAL_TOOL_NAMES = frozenset(tool["name"] for tool in MCP_TOOLS)
 
 # The tools the BedrockAgentCore Gateway path serves, and the scope its callers
-# are held to: the seven original tools, as they were.
+# are held to: the seven original tools, with their original arguments.
 GATEWAY_TOOL_NAMES = ORIGINAL_TOOL_NAMES
 GATEWAY_SCOPE = "gateway"
 
@@ -732,8 +733,8 @@ def _meeting(caller: CallerInfo) -> Any:
 
 
 # The arguments schedule_meeting and start_meeting_now gained with the meeting
-# preparation tools. A legacy key and the gateway keep those two tools as they
-# were, so they are refused these.
+# preparation tools. A legacy key and the gateway keep those two tools with their
+# original arguments, so they are refused these.
 PREPARATION_ARGUMENTS = (
     "labels",
     "audience",
@@ -757,7 +758,7 @@ def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Di
         raise PermissionError(
             f"{', '.join(given)} on {tool_name} change who can see the meeting and what it "
             "carries, so they need an MCP API key with the read-write scope; this key was "
-            "created before keys had scopes, and keeps the original tools as they were. "
+            "created before keys had scopes, and keeps the original tools' arguments. "
             "Generate a read-write key on the MCP Servers page (Hosted MCP Access) to use them."
         )
     return vp_preparation.vp_inputs(
