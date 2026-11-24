@@ -3,6 +3,7 @@ Unit tests for search_meetings tool — specifically the model ARN builder.
 Verifies that inference profile IDs get the correct ARN path.
 """
 
+import ast
 import os
 import sys
 import unittest
@@ -182,6 +183,63 @@ class TestExecuteResolvesArn(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 search_meetings.execute(query="q", user_id="u", is_admin=True)
             self.assertIn("Bedrock model not configured", str(ctx.exception))
+
+
+class TestOwnerFilter(unittest.TestCase):
+    """A non-Admin caller's search is limited to the documents their meetings wrote."""
+
+    ENV = {"AWS_REGION": "us-west-2", "AWS_ACCOUNT_ID": "123456789012", "MODEL_ARN": ""}
+
+    def _filter(self, is_admin, **dates):
+        with (
+            patch.dict(os.environ, self.ENV, clear=False),
+            patch.object(
+                search_meetings, "_configured_model_id", return_value="amazon.nova-lite-v1:0"
+            ),
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            mock_kb = MagicMock()
+            mock_kb.retrieve_and_generate.return_value = {"output": {"text": "ok"}, "citations": []}
+            mock_boto3.client.return_value = mock_kb
+            search_meetings.execute(query="q", user_id="user-1", is_admin=is_admin, **dates)
+            kb = mock_kb.retrieve_and_generate.call_args[1]["retrieveAndGenerateConfiguration"][
+                "knowledgeBaseConfiguration"
+            ]
+        return kb["retrievalConfiguration"]["vectorSearchConfiguration"].get("filter")
+
+    def test_non_admin_search_filters_on_the_owner_metadata_key(self):
+        """One condition is sent bare: a RetrievalFilter's andAll takes two or more."""
+        self.assertEqual(
+            self._filter(is_admin=False),
+            {"equals": {"key": "Owner", "value": "user-1"}},
+        )
+
+    def test_several_conditions_are_combined_with_and_all(self):
+        conditions = self._filter(is_admin=False, start_date="2026-11-01")["andAll"]
+        self.assertEqual(len(conditions), 2)
+        self.assertIn({"equals": {"key": "Owner", "value": "user-1"}}, conditions)
+
+    def test_admin_search_is_not_filtered_by_owner(self):
+        self.assertIsNone(self._filter(is_admin=True))
+
+    def test_owner_key_is_the_one_the_summary_step_writes(self):
+        """Metadata keys are case-sensitive: hold the filter to getKBMetadata's key list."""
+        summary = Path(__file__).resolve().parents[2] / "bedrock_summary_lambda" / "index.py"
+        tree = ast.parse(summary.read_text())
+        function = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "getKBMetadata"
+        )
+        assignment = next(
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "keys_to_include"
+        )
+        written = ast.literal_eval(assignment.value)
+        self.assertIn(search_meetings.OWNER_METADATA_KEY, written)
 
 
 class TestInputValidation(unittest.TestCase):

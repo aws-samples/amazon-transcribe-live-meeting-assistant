@@ -160,12 +160,13 @@ contract test holds the two lists to each other.
 ## Retention
 
 - **Guidance** (category `guidance`) may quote the meeting, so it follows the
-  **transcript**. Once a meeting's transcript is deleted, a guidance publish to
-  it is refused (`NotificationTranscriptDeleted`), and an update through a
-  DedupKey keeps the expiry the first publish gave it. It expires with the transcript (**Days to keep transcript
-  segments**), and the [transcript deletion](transcript-deletion.md) function
-  deletes it when the transcript is deleted after the summary. That includes
-  the guidance an MCP client pushed with `push_meeting_guidance`.
+  **transcript**, including the guidance an MCP client pushed with
+  `push_meeting_guidance`. It expires with the transcript (**Days to keep
+  transcript segments**), and the [transcript deletion](transcript-deletion.md)
+  function deletes it when the transcript is deleted after the summary. Once a
+  meeting's transcript is deleted, a guidance publish to it is refused
+  (`NotificationTranscriptDeleted`), and an update through a DedupKey keeps the
+  expiry the first publish gave it.
 - **Other categories**, and each user's dismissals and mutes on a meeting,
   follow the **meeting record** (**Days to keep meeting records**).
 - **Deleting a meeting** deletes all of its notifications, the users'
@@ -198,7 +199,8 @@ list_meeting_notifications(meeting_id, category?, since?, limit?, cursor?)
 Each item has `notificationId`, `category`, `type`, `severity`, `title`, `body`,
 `refs`, `dedupKey`, `actions`, `source`, `createdBy`, `createdAt`, `updatedAt`,
 `revision` and `expiresAt`, oldest first. `list_meeting_guidance` returns the
-`guidance` category in its own, older shape (see
+`guidance` category in its own shape (`guidanceId`, `level`, `title`, `text`,
+...; see
 [Meeting Guidance](mcp-api-key-auth.md#meeting-guidance)).
 
 The tool wraps the `listMeetingNotifications` GraphQL query, which the meeting
