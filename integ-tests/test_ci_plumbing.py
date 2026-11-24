@@ -1763,3 +1763,36 @@ def test_the_stream_page_probe_opens_the_route_the_web_ui_serves_the_page_on() -
     match = re.search(r"export const STREAM_AUDIO_PATH = '([^']+)';", constants)
     assert match, "STREAM_AUDIO_PATH is not defined in the UI's routes/constants.js"
     assert stream_page_probe.STREAM_PAGE_PATH == match.group(1)
+
+
+
+def _key_frame_default(name: str) -> int:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "lma-websocket-transcriber-stack" / "source" / "app" / "src" / "videokeyframes.ts"
+    ).read_text(encoding="utf-8")
+    match = re.search(rf"numberEnv\('{name}', ([0-9_]+)\)", source)
+    assert match, f"{name} has no default in videokeyframes.ts"
+    return int(match.group(1).replace("_", ""))
+
+
+def test_the_stream_page_slides_change_too_rarely_to_make_the_screen_busy() -> None:
+    """Slides closer than the busy gap must hold still longer than a sampled slide reliably does."""
+    import stream_page_probe  # imports playwright only when a run starts
+
+    assert stream_page_probe.SLIDE_SECONDS * 1000 > _key_frame_default("KEYFRAME_BUSY_GAP_MS")
+
+
+def test_every_two_stream_page_slides_differ_by_more_than_the_detectors_pixel_delta() -> None:
+    """Two slides whose grey levels are within the delta look like one slide to the detector."""
+    import stream_page_probe  # imports playwright only when a run starts
+
+    def grey(colour: str) -> float:  # the luma ffmpeg's format=gray keeps (BT.601)
+        r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+        return 0.299 * r + 0.587 * g + 0.114 * b
+
+    delta = _key_frame_default("KEYFRAME_PIXEL_DELTA")
+    greys = [grey(c) for c in stream_page_probe.SLIDE_COLOURS]
+    closest = min(abs(a - b) for i, a in enumerate(greys) for b in greys[i + 1:])
+    # Three times the delta, for the encoder's and the scaler's rounding.
+    assert closest > 3 * delta, greys

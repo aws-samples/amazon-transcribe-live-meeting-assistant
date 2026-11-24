@@ -37,7 +37,7 @@ import pytest
 import cognito_test_user
 
 ENABLED = os.environ.get("LMA_TEST_STREAM_PAGE_VIDEO", "") not in ("", "0", "false")
-STREAM_SECONDS = 40
+STREAM_SECONDS = 60
 
 pytestmark = [
     pytest.mark.optional_feature,
