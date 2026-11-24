@@ -546,7 +546,7 @@ Parameters:
       and web search and the installed MCP servers are not used),
       customer-account (a starting point for a deployment in the account of the
       organization whose meetings it records; see docs/hosting-models.md) or
-      minimised-content (the summary is the only meeting content kept: consent
+      minimised-content (the summary is kept, the transcript is not: consent
       as in regulated-consent-required, the transcript is deleted as soon as the
       summary is written, no audio or screen video is recorded, and the summary
       and the meeting assistant are told to leave out health information and

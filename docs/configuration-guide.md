@@ -441,8 +441,8 @@ profile first if you want to keep them.
 The Minimised content preset (`minimised-content`) uses the consent settings of
 the Regulated – consent required preset, with the same consequences for Stream
 Audio/Video, the Desktop Capture App and the Webex join, and deletes the
-transcript as soon as the summary is written, so the summary is the meeting
-content kept. New meetings are summarized with the shipped `minimised-content`
+transcript as soon as the summary is written, so the summary is the record of
+what was said that is kept. New meetings are summarized with the shipped `minimised-content`
 summary profile, and the assistant instructions carry the same rule: the model is
 told to leave out health information and the other categories of sensitive
 personal information. That is an instruction, not a filter, and
