@@ -817,9 +817,9 @@ def test_iam_roles_carry_the_permissions_boundary_conditional(resources: dict):
         for name, resource in roles.items()
         if "PermissionsBoundary" not in resource.get("Properties", {})
     }
-    assert len(without) == 29, (
+    assert len(without) == 21, (
         f"{len(without)} of {len(roles)} IAM roles do not reference "
-        f"PermissionsBoundaryArn, expected 29. If a role was added, give it the "
+        f"PermissionsBoundaryArn, expected 21. If a role was added, give it the "
         f"`!If [HasPermissionsBoundary, ...]` block; if one was fixed, lower this "
         f"number and update docs/cloudformation-service-role.md. Roles: "
         f"{sorted(without)}"
@@ -843,12 +843,12 @@ def test_partition_and_endpoint_literals_do_not_increase(raw: str):
             arn_literals += 1
         if "amazonaws.com" in line and "URLSuffix" not in line:
             endpoint_literals += 1
-    assert arn_literals <= 88, (
-        f"{arn_literals} lines hardcode 'arn:aws:' (was 88). Use "
+    assert arn_literals <= 65, (
+        f"{arn_literals} lines hardcode 'arn:aws:' (was 65). Use "
         f'!Sub "arn:${{AWS::Partition}}:..." instead.'
     )
-    assert endpoint_literals <= 84, (
-        f"{endpoint_literals} lines hardcode 'amazonaws.com' (was 84). Use "
+    assert endpoint_literals <= 63, (
+        f"{endpoint_literals} lines hardcode 'amazonaws.com' (was 63). Use "
         f'!Sub "service.${{AWS::URLSuffix}}" instead.'
     )
 
