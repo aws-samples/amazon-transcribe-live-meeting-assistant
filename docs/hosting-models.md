@@ -138,6 +138,15 @@ is one to **decide with the customer**.
 | Meeting Assistant › In-meeting requests: who may ask | Anyone | Whether participants may ask the assistant in the meeting, answered from the current meeting only. |
 | Meeting Processing › Default summary profile for new meetings | `default` | The `discovery-session` profile is available for each meeting; make it the default if most meetings are discovery sessions. |
 
+Stream Audio and the Desktop Capture App have no participant list, so they
+cannot collect each participant's consent. Because this preset allows a
+different choice per meeting, their meetings run under the rule **The meeting
+owner attests** instead: the LMA user confirms that everyone in the meeting
+agreed before **Start**. If the customer turns **Allow a different choice per
+meeting** off, **Start** is refused from both, and their meetings need a Virtual
+Participant. See
+[Stream Audio and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+
 ## Settings no preset can set
 
 These are stack parameters, or are not part of LMA, so they are set when the

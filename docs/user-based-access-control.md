@@ -178,6 +178,11 @@ matching meetings, anyone else's only the ones they own, and the deletion checks
 that again for each meeting. It is a dry run unless `--confirm` is given, and it
 skips meetings still in progress.
 
+As [the CLI reference](lma-cli.md#lma-meetings-delete--delete-meetings-by-label)
+says, the command acts with the caller's AWS credentials, which are what permit
+it; its table lists the AWS actions they need. `--user-name` chooses which
+meetings are selected, by the rules above.
+
 ## Knowledge Base Search
 
 The transcript knowledge base (`TranscriptKnowledgeBase`) holds every meeting's

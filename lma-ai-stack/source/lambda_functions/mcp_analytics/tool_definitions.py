@@ -15,8 +15,8 @@ whose change cannot be taken back or takes something away from people. That
 includes the tools that replace one of a meeting's preparation settings as a
 whole and clear it when sent an empty one: update_meeting_agenda (the agenda),
 set_meeting_context, set_meeting_checklist (the whole checklist),
-update_meeting_metadata (the labels, audience, summary profile and live
-guidance it is given) and update_scheduled_meeting (a scheduled Virtual
+update_meeting_metadata (which replaces the labels, and sets the audience,
+summary profile and live guidance it is given) and update_scheduled_meeting (a scheduled Virtual
 Participant's settings). A tool that changes one part, such
 as update_checklist_item, is not destructive. ``idempotentHint`` marks the ones
 that change nothing more when called again with the same arguments.
