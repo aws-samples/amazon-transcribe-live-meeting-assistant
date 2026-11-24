@@ -199,7 +199,9 @@ describe('createVideoUplink', () => {
     await flush();
     const ws = s.made[0];
     ws.onopen();
-    expect(s.json(ws)).toEqual([{ callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 1200, handlesRefusal: true }]);
+    expect(s.json(ws)).toEqual([
+      { callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 1200, handlesRefusal: true },
+    ]);
     expect(s.binary(ws)).toHaveLength(1);
     uplink.send(chunk(1));
     expect(s.binary(ws)).toHaveLength(2);
@@ -223,7 +225,9 @@ describe('createVideoUplink', () => {
     await flush();
     const retry = s.made[1];
     retry.onopen();
-    expect(s.json(retry)).toEqual([{ callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true }]);
+    expect(s.json(retry)).toEqual([
+      { callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true },
+    ]);
     expect(s.binary(retry).map((b) => new Uint8Array(b)[0])).toEqual([0, 1]);
   });
 
@@ -241,7 +245,9 @@ describe('createVideoUplink', () => {
     await flush();
     const again = s.made[1];
     again.onopen();
-    expect(s.json(again)).toEqual([{ callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true }]);
+    expect(s.json(again)).toEqual([
+      { callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true },
+    ]);
     expect(s.binary(again).map((b) => new Uint8Array(b)[0])).toEqual([0, 1]);
   });
 
@@ -280,7 +286,9 @@ describe('createVideoUplink', () => {
     await flush();
     const again = s.made[1];
     again.onopen();
-    expect(s.json(again)).toEqual([{ callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true }]);
+    expect(s.json(again)).toEqual([
+      { callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0, handlesRefusal: true },
+    ]);
     expect(s.binary(again).map((b) => new Uint8Array(b)[0])).toEqual([0, 1]);
   });
 
