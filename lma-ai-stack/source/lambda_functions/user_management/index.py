@@ -22,14 +22,22 @@ Guard rails:
   - Cannot delete the last remaining Admin, or move them to another role
     (lock-out protection)
   - Email must be well-formed and (optionally) in the allowed-domain list
+
+Last sign-in: `listUsers` adds each user's last interactive sign-in time, which
+the Cognito stack's PostAuthentication trigger writes to its sign-in table
+(USER_SIGN_IN_TABLE, keyed by Cognito sub). A user with no item there has not
+signed in since the trigger was deployed. When the table cannot be read the
+times are left null and `lastSignInAvailable` is false, so the page does not
+report "not recorded" for a time it could not read.
 """
 
 import logging
 import os
 import re
+import time
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -48,6 +56,13 @@ VALID_ROLES = (ADMIN_ROLE, USER_ROLE, PARTICIPANT_ROLE)
 # The table that holds each user's meeting notification preferences
 # (PK "usr#<username>", SK "notification-prefs"), deleted with the user.
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
+# The Cognito stack's table of last sign-in times (key "UserSub"); empty when the
+# Cognito stack has none.
+USER_SIGN_IN_TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
+# BatchGetItem's limit on keys per request, and how often keys it leaves
+# unprocessed (throttling) are retried.
+BATCH_GET_MAX = 100
+UNPROCESSED_RETRIES = 5
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
@@ -187,7 +202,48 @@ def _format_cognito_user(user):
         "status": user.get("UserStatus"),
         "enabled": user.get("Enabled", True),
         "createdAt": created_iso,
+        "lastSignInAt": None,
     }
+
+
+def _last_sign_ins(subs):
+    """Map each Cognito sub in ``subs`` to its recorded last sign-in time.
+
+    Returns None when the times cannot be read (no table configured, or
+    DynamoDB refused), so a caller can tell "not recorded" from "unknown".
+    """
+    if not USER_SIGN_IN_TABLE:
+        return None
+    found = {}
+    dynamodb = boto3.client("dynamodb")
+    unique = sorted({sub for sub in subs if sub})
+    try:
+        for start in range(0, len(unique), BATCH_GET_MAX):
+            chunk = unique[start : start + BATCH_GET_MAX]
+            request = {
+                USER_SIGN_IN_TABLE: {
+                    "Keys": [{"UserSub": {"S": sub}} for sub in chunk],
+                    "ProjectionExpression": "UserSub, LastSignInAt",
+                }
+            }
+            attempt = 0
+            while request:
+                response = dynamodb.batch_get_item(RequestItems=request)
+                for item in response.get("Responses", {}).get(USER_SIGN_IN_TABLE, []):
+                    at = (item.get("LastSignInAt") or {}).get("S")
+                    if at:
+                        found[item["UserSub"]["S"]] = at
+                request = response.get("UnprocessedKeys") or {}
+                if request:
+                    attempt += 1
+                    if attempt > UNPROCESSED_RETRIES:
+                        logger.warning("The sign-in table kept leaving keys unprocessed")
+                        return None
+                    time.sleep(min(0.05 * 2**attempt, 1.0))
+    except (ClientError, BotoCoreError):
+        logger.warning("Could not read the last sign-in times", exc_info=True)
+        return None
+    return found
 
 
 def _count_admins():
@@ -204,16 +260,22 @@ def _count_admins():
 
 
 def list_users(_event, _args):
-    """Return all users in the Cognito user pool with their role."""
+    """Return all users in the Cognito user pool with their role and last sign-in."""
     users = []
+    subs = []
     paginator = cognito.get_paginator("list_users")
     for page in paginator.paginate(UserPoolId=USER_POOL_ID, Limit=60):
         for user in page.get("Users", []):
             users.append(_format_cognito_user(user))
+            subs.append(_attr(user, "sub"))
+    sign_ins = _last_sign_ins(subs)
+    if sign_ins is not None:
+        for user, sub in zip(users, subs):
+            user["lastSignInAt"] = sign_ins.get(sub)
     # Sort newest first
     users.sort(key=lambda u: u.get("createdAt") or "", reverse=True)
     logger.info("Listed %d users", len(users))
-    return {"users": users}
+    return {"users": users, "lastSignInAvailable": sign_ins is not None}
 
 
 def create_user(_event, args):
@@ -324,6 +386,7 @@ def delete_user(event, args):
             "Cannot delete the last remaining Admin user. Create another Admin first."
         )
 
+    sub = _sub_of(username)
     logger.info("Deleting user %s (role=%s)", username, target_role)
     try:
         cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=username)
@@ -331,7 +394,32 @@ def delete_user(event, args):
         raise ValidationError(f"User {username} not found") from exc
 
     _delete_notification_preferences(username)
+    _delete_last_sign_in(sub)
     return {"username": username, "success": True}
+
+
+def _sub_of(username):
+    """The user's Cognito sub, read before the user is deleted; "" if it cannot be read."""
+    if not USER_SIGN_IN_TABLE:
+        return ""
+    try:
+        user = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
+    except (ClientError, BotoCoreError):
+        # A missing user is reported by the delete itself.
+        return ""
+    return _attr(user, "sub") or ""
+
+
+def _delete_last_sign_in(sub):
+    """Delete the user's last sign-in time. Best effort: the user is gone."""
+    if not USER_SIGN_IN_TABLE or not sub:
+        return
+    try:
+        boto3.client("dynamodb").delete_item(
+            TableName=USER_SIGN_IN_TABLE, Key={"UserSub": {"S": sub}}
+        )
+    except (ClientError, BotoCoreError):
+        logger.warning("Could not delete the last sign-in time of %s", sub, exc_info=True)
 
 
 def _delete_notification_preferences(username):

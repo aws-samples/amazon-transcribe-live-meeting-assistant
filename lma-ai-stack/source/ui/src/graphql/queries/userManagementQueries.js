@@ -15,7 +15,9 @@ export const listUsers = /* GraphQL */ `
         status
         enabled
         createdAt
+        lastSignInAt
       }
+      lastSignInAvailable
     }
   }
 `;

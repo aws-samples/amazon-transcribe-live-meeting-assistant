@@ -336,7 +336,7 @@ def test_the_groups_claim_is_honoured_when_it_arrives_as_a_bare_string(
         "arguments": {},
     }
 
-    assert index.handler(event, None) == {"users": []}
+    assert index.handler(event, None)["users"] == []
 
 
 def test_each_operation_requires_admin_membership(cognito: FakeCognito) -> None:
@@ -727,7 +727,7 @@ def test_list_users_maps_cognito_fields_onto_the_graphql_user_shape(cognito: Fak
         }
     ]
 
-    assert index.handler(admin_event("listUsers"), None) == {
+    assert _no_sign_in(index.handler(admin_event("listUsers"), None)) == {
         "users": [
             {
                 "username": "boss@example.com",
@@ -757,8 +757,8 @@ def test_create_user_reads_the_attributes_key_that_admin_get_user_returns(
         "UserCreateDate": datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
     }
 
-    assert index.handler(
-        admin_event("createUser", create_input("new@example.com", "User")), None
+    assert _no_sign_in(
+        index.handler(admin_event("createUser", create_input("new@example.com", "User")), None)
     ) == {
         "username": "new@example.com",
         "email": "preferred@example.com",
@@ -1166,3 +1166,17 @@ def test_the_own_account_guards_ignore_letter_case(cognito: FakeCognito) -> None
         index.handler(admin_event("deleteUser", delete_input(CALLER.upper())), None)
 
     assert cognito.names_called() == []
+def _no_sign_in(result: dict) -> dict:
+    """``result`` without its last sign-in fields, which must say nothing was read.
+
+    These tests configure no sign-in table, so every user's ``lastSignInAt`` is
+    null and a listing reports the times unavailable. The times themselves are
+    tested in test_last_sign_in.py.
+    """
+    result = dict(result)
+    if "users" in result:
+        assert result.pop("lastSignInAvailable") is False
+        result["users"] = [_no_sign_in(user) for user in result["users"]]
+        return result
+    assert result.pop("lastSignInAt") is None
+    return result

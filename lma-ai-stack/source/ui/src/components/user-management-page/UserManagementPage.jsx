@@ -53,7 +53,17 @@ const formatError = (err) => {
 const RoleBadge = ({ role = 'User' }) => <Badge color={ROLE_BADGE_COLORS[role] || 'blue'}>{role}</Badge>;
 RoleBadge.propTypes = { role: PropTypes.string };
 
-const COLUMN_DEFINITIONS = [
+// What the Last sign-in column shows for a user with no recorded sign-in, and for
+// every user when the sign-in times could not be read.
+export const NOT_RECORDED_TEXT = 'Not recorded';
+export const UNAVAILABLE_TEXT = 'Unavailable';
+
+export const lastSignInText = (item, lastSignInAvailable) => {
+  if (!lastSignInAvailable) return UNAVAILABLE_TEXT;
+  return item.lastSignInAt ? new Date(item.lastSignInAt).toLocaleString() : NOT_RECORDED_TEXT;
+};
+
+const columnDefinitions = (lastSignInAvailable) => [
   {
     id: 'email',
     header: 'Email',
@@ -84,10 +94,17 @@ const COLUMN_DEFINITIONS = [
     cell: (item) => (item.createdAt ? new Date(item.createdAt).toLocaleString() : '-'),
     sortingField: 'createdAt',
   },
+  {
+    id: 'lastSignInAt',
+    header: 'Last sign-in',
+    cell: (item) => lastSignInText(item, lastSignInAvailable),
+    sortingField: 'lastSignInAt',
+  },
 ];
 
 const UserManagementPage = () => {
   const [users, setUsers] = useState([]);
+  const [lastSignInAvailable, setLastSignInAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [selected, setSelected] = useState([]);
@@ -116,6 +133,8 @@ const UserManagementPage = () => {
       const result = await client.graphql({ query: listUsers });
       const list = result?.data?.listUsers?.users || [];
       setUsers(list);
+      // Only an explicit true shows the times; anything else shows Unavailable.
+      setLastSignInAvailable(result?.data?.listUsers?.lastSignInAvailable === true);
     } catch (err) {
       logger.error('listUsers failed', err);
       setError(formatError(err));
@@ -127,6 +146,8 @@ const UserManagementPage = () => {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  const tableColumns = useMemo(() => columnDefinitions(lastSignInAvailable), [lastSignInAvailable]);
 
   const filteredUsers = useMemo(() => {
     if (!filterText) return users;
@@ -281,7 +302,7 @@ const UserManagementPage = () => {
         }
       >
         <Table
-          columnDefinitions={COLUMN_DEFINITIONS}
+          columnDefinitions={tableColumns}
           items={filteredUsers}
           loading={loading}
           loadingText="Loading users"

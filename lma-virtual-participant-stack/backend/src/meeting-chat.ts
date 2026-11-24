@@ -171,8 +171,9 @@ export type ChatOutcome =
     | 'duplicate'
     | 'own'
     | 'command'
+    /** Sent privately: neither added to the transcript nor acted on. */
     | 'direct'
-    /** The handler did not say who the message was sent to. */
+    /** The handler did not say who the message was sent to: neither added nor acted on. */
     | 'recipient-unknown'
     | 'history'
     | 'disabled'
@@ -535,12 +536,14 @@ export class MeetingChatCapture {
         const seenAs = text || chatTranscriptWithAttachments('', undefined, attachments);
         if (this.alreadySeen(chat, seenAs)) return 'duplicate';
         if (this.isOwn(chat.sender, text)) return 'own';
-        if (isLmaChatCommand(text) || (chat.commandText && isLmaChatCommand(chat.commandText))) return 'command';
-        if (chat.audience === 'direct') return 'direct';
         // Only a message the handler shows was sent to everyone: a Zoom label
         // in another language, or an SDK payload naming no receiver, may be a
-        // private message.
+        // private message. Checked ahead of the commands, so a private command
+        // (which the handlers do not act on either; chat-addressing.ts) reads
+        // as private in the debug line, not as a command.
+        if (chat.audience === 'direct') return 'direct';
         if (chat.audience !== 'everyone') return 'recipient-unknown';
+        if (isLmaChatCommand(text) || (chat.commandText && isLmaChatCommand(chat.commandText))) return 'command';
         if (chat.history) return 'history';
         const settingOn = this.deps.settingOn();
         const redacting = this.deps.redacting();

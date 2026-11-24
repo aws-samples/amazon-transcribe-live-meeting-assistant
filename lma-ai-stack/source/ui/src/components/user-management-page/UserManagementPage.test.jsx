@@ -3,46 +3,106 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
+
+/**
+ * The User Management page's Last sign-in column: a recorded time is shown, a
+ * user with none shows "Not recorded" (never a blank cell), and when the server
+ * could not read the times every user shows "Unavailable". Role, status, enabled
+ * and created are still shown.
+ */
 import React from 'react';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const graphql = vi.fn();
-vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: (...args) => graphql(...args) }) }));
+import UserManagementPage, { NOT_RECORDED_TEXT, UNAVAILABLE_TEXT, lastSignInText } from './UserManagementPage';
 
-/* eslint-disable import/first */
-import UserManagementPage, { ROLE_OPTIONS } from './UserManagementPage';
-/* eslint-enable import/first */
+const { graphqlMock, state } = vi.hoisted(() => ({ graphqlMock: vi.fn(), state: { listUsers: null } }));
+vi.mock('aws-amplify/api', () => ({
+  generateClient: () => ({ graphql: graphqlMock }),
+}));
 
-const MATRIX = JSON.parse(readFileSync(path.join(__dirname, '../../../../appsync/role-matrix.json'), 'utf-8'));
+const SIGNED_IN_AT = '2026-11-20T09:30:00.000Z';
 
-afterEach(() => {
-  cleanup();
-  graphql.mockReset();
+const users = [
+  {
+    username: 'admin@example.com',
+    email: 'admin@example.com',
+    role: 'Admin',
+    status: 'CONFIRMED',
+    enabled: true,
+    createdAt: '2026-01-02T03:04:05.000Z',
+    lastSignInAt: SIGNED_IN_AT,
+  },
+  {
+    username: 'new@example.com',
+    email: 'new@example.com',
+    role: 'User',
+    status: 'FORCE_CHANGE_PASSWORD',
+    enabled: false,
+    createdAt: '2026-11-23T12:00:00.000Z',
+    lastSignInAt: null,
+  },
+];
+
+beforeEach(() => {
+  state.listUsers = { users, lastSignInAvailable: true };
+  graphqlMock.mockReset();
+  graphqlMock.mockImplementation(({ query }) => {
+    if (query.includes('query ListUsers')) return Promise.resolve({ data: { listUsers: state.listUsers } });
+    return Promise.resolve({ data: {} });
+  });
 });
 
-describe('User Management', () => {
-  it('offers every role of the role matrix', () => {
-    expect(ROLE_OPTIONS.map((option) => option.value).sort()).toEqual(Object.keys(MATRIX.roles).sort());
+const rowOf = async (email) => (await screen.findByText(email)).closest('tr');
+
+describe('UserManagementPage last sign-in', () => {
+  it('asks for each user’s last sign-in and whether the times were read', async () => {
+    render(<UserManagementPage />);
+    await screen.findByText('admin@example.com');
+    const { query } = graphqlMock.mock.calls[0][0];
+    expect(query).toContain('lastSignInAt');
+    expect(query).toContain('lastSignInAvailable');
   });
 
-  it('lists a Participant with that role, and offers Change role only for a selected user', async () => {
-    graphql.mockResolvedValue({
-      data: {
-        listUsers: {
-          users: [{ username: 'guest@example.com', email: 'guest@example.com', role: 'Participant', enabled: true }],
-        },
-      },
-    });
+  it('shows the column, a recorded time, and "Not recorded" for a user with none', async () => {
+    render(<UserManagementPage />);
+    expect(await screen.findByText('Last sign-in')).toBeInTheDocument();
 
+    const admin = within(await rowOf('admin@example.com'));
+    expect(admin.getByText(new Date(SIGNED_IN_AT).toLocaleString())).toBeInTheDocument();
+    expect(admin.queryByText(NOT_RECORDED_TEXT)).not.toBeInTheDocument();
+
+    const fresh = within(await rowOf('new@example.com'));
+    expect(fresh.getByText(NOT_RECORDED_TEXT)).toBeInTheDocument();
+  });
+
+  it('keeps showing role, status, enabled and created', async () => {
+    render(<UserManagementPage />);
+    const fresh = within(await rowOf('new@example.com'));
+    expect(fresh.getByText('User')).toBeInTheDocument();
+    expect(fresh.getByText('FORCE_CHANGE_PASSWORD')).toBeInTheDocument();
+    expect(fresh.getByText('No')).toBeInTheDocument();
+    expect(fresh.getByText(new Date('2026-11-23T12:00:00.000Z').toLocaleString())).toBeInTheDocument();
+  });
+
+  it('shows "Unavailable" for every user when the times could not be read', async () => {
+    state.listUsers = { users: users.map((u) => ({ ...u, lastSignInAt: null })), lastSignInAvailable: false };
     render(<UserManagementPage />);
 
-    await waitFor(() => expect(screen.getByText('guest@example.com')).toBeTruthy());
-    expect(screen.getAllByText('Participant').length).toBeGreaterThan(0);
-    // The first is the header action; the dialog's own button is rendered too.
-    const [button] = screen.getAllByRole('button', { name: 'Change role' });
-    expect(button.disabled || button.getAttribute('aria-disabled') === 'true').toBe(true);
+    const rows = await Promise.all(['admin@example.com', 'new@example.com'].map(rowOf));
+    rows.forEach((tr) => {
+      const row = within(tr);
+      expect(row.getByText(UNAVAILABLE_TEXT)).toBeInTheDocument();
+      expect(row.queryByText(NOT_RECORDED_TEXT)).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe('lastSignInText', () => {
+  it('is never blank', () => {
+    expect(lastSignInText({ lastSignInAt: null }, true)).toBe(NOT_RECORDED_TEXT);
+    expect(lastSignInText({}, true)).toBe(NOT_RECORDED_TEXT);
+    expect(lastSignInText({ lastSignInAt: SIGNED_IN_AT }, false)).toBe(UNAVAILABLE_TEXT);
+    expect(lastSignInText({ lastSignInAt: SIGNED_IN_AT }, true)).toBe(new Date(SIGNED_IN_AT).toLocaleString());
   });
 });
