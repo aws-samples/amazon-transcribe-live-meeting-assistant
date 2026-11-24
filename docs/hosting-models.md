@@ -130,7 +130,7 @@ is one to **decide with the customer**.
 |---|---|---|
 | Meeting Consent › Consent mode, rule | Opt-in, each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
 | Meeting Consent › Allow a different choice per meeting | On | Whether the owner of a meeting may choose another mode or rule for it, such as owner attestation for an internal meeting. |
-| Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the browser extension and older clients may capture without asking. |
+| Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the Stream Audio embed and older clients may capture without asking. |
 | Meeting Recording › Record meeting audio | Off | Whether recordings are wanted. Meeting video is the `EnableVideoRecording` stack parameter. |
 | Meeting Recording › Record screen video from Stream Audio/Video and the browser extension | Off | Whether users may record the screen or tab they share from those two clients, where `EnableVideoRecording` is `true`. |
 | Retention | Transcript kept for the retention period | The periods their policy requires: the retention stack parameters, and **Retention › Delete the transcript after the summary**. |

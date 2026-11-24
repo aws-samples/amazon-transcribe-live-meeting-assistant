@@ -37,7 +37,7 @@ stops recording and transcription accordingly (see
 notice, ask the user to confirm, and the WebSocket transcriber records that on
 the meeting and withholds or stops recording and transcription accordingly (see
 [Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app)).
-The browser extension does not run it yet; how the
+The browser extension runs it as well (see [Meeting consent](browser-extension.md#meeting-consent)); how the
 transcriber treats a client that shows no consent step is a setting. See
 [Flows by capture method](#flows-by-capture-method).
 
@@ -286,7 +286,7 @@ replies are read.
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
 | **Stream Audio/Video** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app). |
 | **Desktop Capture App** (macOS and Windows) | As for Stream Audio/Video, with a copy button | As for Stream Audio/Video; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
-| **Browser extension** | As for Stream Audio/Video | As for Stream Audio/Video | Not available yet; treated as a client without a consent step. |
+| **Browser extension** | As for Stream Audio/Video, with a copy button and **Post in meeting chat**, which counts as posted only once the user confirms the notice appeared | As for Stream Audio/Video | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [Meeting consent](browser-extension.md#meeting-consent). |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
 
 Until a capture method runs the flow, its meetings have no consent record. A
@@ -1098,8 +1098,9 @@ differences:
 
 ### Clients without a consent step
 
-Clients that show no consent step — the browser extension, the Stream Audio/Video
-embed (`#/embed?component=stream-audio`), Desktop Capture App builds from
+Clients that show no consent step — the Stream Audio
+embed (`#/embed?component=stream-audio`), browser extension builds and Desktop
+Capture App builds from
 before the consent step, and scripts written against the streaming API — send
 `START` without a
 `consent` field. In Notify or Opt-in the transcriber treats such a meeting by
@@ -1115,10 +1116,10 @@ the setting **Streaming clients without a consent step**:
 - **Refuse:** the meeting is not created, recorded or transcribed; the client is
   sent a `CONSENT_STATE` frame with the code `CONSENT_REQUIRED` and the
   connection is closed. A client without the consent step does not read that
-  frame either, so the browser extension and the Stream Audio/Video embed show only
+  frame either, so the Stream Audio embed and older browser extension builds show only
   that the connection closed, and each reconnect is refused again. Choose this
   only once every client in use shows the consent step, and not while the
-  browser extension or the Stream Audio/Video embed is in use.
+  Stream Audio embed or an older browser extension build is in use.
 
 ## What is stored
 

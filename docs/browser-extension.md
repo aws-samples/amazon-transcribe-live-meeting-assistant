@@ -89,6 +89,42 @@ minutes have passed. A package from before this option has no
 API says it cannot continue meetings; download the extension again from LMA. See
 [Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 
+### Meeting consent
+
+When the deployment's [meeting consent](meeting-consent.md) mode is Notify or
+Opt-in, the panel shows a **Meeting consent** step above **Start Listening**.
+The extension reads the settings from the transcriber when the panel opens and
+again after each capture, so the step always follows the settings in force.
+
+- **The notice** (the consent request in Opt-in), filled with your name and the
+  meeting topic. **Copy** puts it on the clipboard; **Post in meeting chat**
+  posts it in the meeting chat of the tab, through the same reader that reads
+  the meeting's speakers. After posting, the panel asks **Did the notice appear
+  in the meeting chat?**: it counts as posted only when you answer **Yes, it
+  appeared**, which also chooses *In the meeting chat* as how everyone was told.
+  Answer **No**, or if posting failed, copy the notice and paste it yourself,
+  or read it out.
+- **The confirmation**: in Opt-in, that everyone agreed; in Notify, that you
+  told everyone with the notice. With it, **how** (out loud, in the meeting
+  chat, or in the invitation's terms), and in Opt-in an optional note. In
+  Opt-in, Start is refused until both are given, and nothing is recorded or
+  transcribed until the transcriber has recorded your confirmation on the
+  meeting. Start is also held while the panel is still reading the settings, and
+  while it waits for your answer about the
+  chat post.
+- **Participant objected**, while capturing, with an optional name. The
+  extension tells the transcriber, which ends the meeting, records the
+  objection, and keeps what was captured before it; capture stops at once. If the
+  connection to LMA had been lost, the panel says the objection could not be
+  sent: record it in the Consent section of the meeting's page in LMA.
+
+The extension sends its step with every START (as mode Off when it could not
+read the settings), so the setting **Streaming clients without a consent step**
+no longer applies to it. A deployment that refuses such clients can now use the
+extension. The consent record names the client "Browser extension". See
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app)
+for what the transcriber records, and when.
+
 ## How meeting speakers are named
 
 Your microphone's lines carry your name. The meeting tab's lines are named from

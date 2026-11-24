@@ -18,12 +18,26 @@ import { useSettings } from '../../context/SettingsContext';
 import { nameFromIdToken } from '../../lib/identity';
 import { prefillField } from '../../lib/capture';
 import { INVALID_MEETING_ID, meetingIdFrom } from '../../lib/continue-meeting';
+import ConsentPanel from '../views/ConsentPanel';
+import {
+  ConsentSettings,
+  ConsentStep,
+  captureStopped,
+  consentPayload,
+  consentRequired,
+  describeConsentState,
+  emptyStep,
+  fetchConsentSettings,
+  renderNotice,
+  startBlockedReason,
+  transcriberUrl,
+} from '../../lib/consent';
 
 function Capture() {
   const { navigate } = useNavigation();
   const { user, logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, startError, setStartError } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, startError, setStartError, consentFrame, postInMeetingChat, reportObjection } = useIntegration();
   // "Continue an existing meeting…" (lib/continue-meeting.ts).
   const [continuing, setContinuing] = React.useState(false);
   const [continueInput, setContinueInput] = React.useState("");
@@ -39,6 +53,42 @@ function Capture() {
   // to another meeting tab; a field holding anything else is theirs, and the
   // readers report often enough that overwriting it would eat what they typed.
   const prefilled = React.useRef({ topic: "", agentName: "" });
+
+  // The consent step (lib/consent.ts): the transcriber's settings, read on a
+  // short connection when the panel opens and again after each capture, and
+  // the user's step for the next meeting, which starts afresh every time.
+  const [consentSettings, setConsentSettings] = React.useState<ConsentSettings | null>(null);
+  const [consentStep, setConsentStep] = React.useState<ConsentStep>(emptyStep());
+  const [consentLoading, setConsentLoading] = React.useState(false);
+  // The current tokens are read through a ref, so a token refresh (which Start
+  // can make) neither resets the step nor asks for the settings again.
+  const userRef = React.useRef(user);
+  userRef.current = user;
+  const signedIn = Boolean(user?.access_token);
+  useEffect(() => {
+    if (isTranscribing || !settings.wssEndpoint || !signedIn) return undefined;
+    let cancelled = false;
+    setConsentLoading(true);
+    fetchConsentSettings(transcriberUrl(settings.wssEndpoint, userRef.current)).then((answer) => {
+      if (!cancelled) {
+        setConsentSettings(answer);
+        setConsentLoading(false);
+      }
+    });
+    setConsentStep(emptyStep());
+    return () => { cancelled = true; };
+  }, [isTranscribing, settings.wssEndpoint, signedIn]);
+
+  // The notice as shown and as START records it.
+  const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || topic;
+  const noticeText = consentRequired(consentSettings)
+    ? renderNotice(consentSettings?.noticeTemplate, {
+      lmaUser: agentName,
+      meeting: consentMeetingName,
+      consentPhrase: consentSettings?.consentPhrase,
+      objectionPhrase: consentSettings?.objectionPhrase,
+    })
+    : '';
 
   // componentDidMount:
   useEffect(() => {
@@ -116,12 +166,18 @@ function Capture() {
     if (validateForm() === false) {
       return;
     }
+    const blocked = startBlockedReason(consentSettings, consentStep, consentLoading);
+    setStartError(blocked);
+    if (blocked) {
+      return;
+    }
     setShowDisclaimer(true);
-  }, [settings, validateForm, showDisclaimer]);
+  }, [settings, validateForm, showDisclaimer, consentSettings, consentStep, consentLoading, setStartError]);
 
   const disclaimerConfirmed = useCallback(() => {
-    startTranscription(user, agentName, topic, continuing ? continueInput : undefined);
-  }, [user, agentName, topic, continuing, continueInput, startTranscription])
+    startTranscription(user, agentName, topic, continuing ? continueInput : undefined,
+      consentPayload(consentSettings, consentStep, { lmaUser: agentName, meetingName: consentMeetingName, noticeText }));
+  }, [user, agentName, topic, continuing, continueInput, startTranscription, consentSettings, consentStep, consentMeetingName, noticeText])
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -149,6 +205,23 @@ function Capture() {
       setVersion("dev/web");
     }
   }, [version, setVersion]);
+
+  const consentPanel = consentRequired(consentSettings) && consentSettings ? (
+    <ConsentPanel
+      settings={consentSettings}
+      noticeText={noticeText}
+      step={consentStep}
+      onStepChange={(next) => { setConsentStep(next); setStartError(""); }}
+      onPostInChat={() => postInMeetingChat(noticeText)}
+      capturing={isTranscribing}
+      status={(isTranscribing || captureStopped(consentFrame)) && consentFrame?.message !== startError ? describeConsentState(consentFrame) : null}
+      onObjection={(name) => reportObjection(name)}
+    />
+  ) : consentSettings?.available === false ? (
+    <Alert type="warning" header="Meeting consent settings unavailable">
+      {consentSettings.message} The transcriber applies the settings in force when you start.
+    </Alert>
+  ) : null;
 
   return (
     <ContentLayout
@@ -215,6 +288,7 @@ function Capture() {
                   </>
               }
               <Button fullWidth={true} variant='primary' onClick={() => stopListening()}>Stop Listening</Button>
+              {consentPanel}
             </>
             :
             <>
@@ -258,6 +332,7 @@ function Capture() {
                   ></Input>
                 </FormField>
               )}
+              {consentPanel}
               {startError && <Alert type="error">{startError}</Alert>}
               <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>
             </>

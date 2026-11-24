@@ -301,7 +301,8 @@ extension_points:
     title: Embed LMA views in another web application
     category: extension
     description: >-
-      Stream Audio/Video, Upload Audio, a meeting's transcript and assistant, and a Virtual
+      Stream Audio (audio only; screen video is on the full page), Upload Audio, a
+      meeting's transcript and assistant, and a Virtual
       Participant's live view can be embedded in a portal with an iframe and the
       postMessage API, signed in with Cognito, identity federation or passed tokens.
     evidence:

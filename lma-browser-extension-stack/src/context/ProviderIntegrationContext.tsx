@@ -11,6 +11,7 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
+import { OBJECTION_NOT_SENT, captureStopped, parseServerFrame, withoutConsent } from '../lib/consent';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -26,6 +27,8 @@ type Call = {
   // Only to continue an existing meeting: the capture session reopenMeeting
   // allowed, with the meeting's own ID as callId.
   sessionNumber?: number,
+  // The consent step (lib/consent.ts), sent with every START.
+  consent?: Record<string, unknown>,
 }
 
 const initialIntegration = {
@@ -37,7 +40,8 @@ const initialIntegration = {
   setPaused: (pauseValue: boolean) => { },
   fetchMetadata: () => { },
   // `continueMeeting`: the meeting ID or link of an existing meeting to continue.
-  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => { },
+  // `consent`: the consent step's START field (lib/consent.ts consentPayload).
+  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>) => { },
   // Why capture did not start, or stopped: a reopenMeeting refusal, or the
   // transcriber's. Empty otherwise.
   startError: "",
@@ -46,7 +50,13 @@ const initialIntegration = {
   metadata: { userName: "", meetingTopic: "" } as MeetingMetadata,
   platform: "n/a",
   activeSpeaker: "n/a",
-  sendRecordingMessage: () => { }
+  sendRecordingMessage: () => { },
+  // The last CONSENT_STATE frame of this capture, or null.
+  consentFrame: null as Record<string, any> | null,
+  // Posts text in the meeting chat of the active tab; false when it could not be sent.
+  postInMeetingChat: async (text: string) => false as boolean,
+  // A participant objected: tells the transcriber, which ends the meeting, and stops capturing.
+  reportObjection: (participantName: string) => { },
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -65,6 +75,10 @@ function IntegrationProvider({ children }: any) {
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [startError, setStartError] = useState("");
+  const [consentFrame, setConsentFrame] = useState<Record<string, any> | null>(null);
+  // Set when the transcriber has ended the meeting (its consent, or an
+  // objection reported here): stopping then sends no END.
+  const skipEndRef = useRef(false);
   // The meeting ID or link to continue, from startTranscription until the
   // capture has started.
   const continueMeetingRef = useRef<string | undefined>(undefined);
@@ -88,6 +102,13 @@ function IntegrationProvider({ children }: any) {
       // stopped; it then closes the connection.
       const refusal = refusalMessage(event.data);
       if (refusal) setStartError(refusal);
+      const frame = parseServerFrame(event.data);
+      if (frame?.event === 'CONSENT_STATE') {
+        setConsentFrame(frame);
+        // The transcriber has ended the meeting and closes the connection:
+        // nothing more is sent for it, END included.
+        if (captureStopped(frame)) skipEndRef.current = true;
+      }
     },
     onClose: (event) => {
       console.log(event);
@@ -200,7 +221,21 @@ function IntegrationProvider({ children }: any) {
     return {};
   }, [settings]);
 
-  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => {
+  // True when the tab's reader was asked to post, not that the notice appeared:
+  // the user's answer in the panel decides whether it counts as posted.
+  const postInMeetingChat = useCallback(async (text: string) => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab || !tab.id) return false;
+    try {
+      await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: text });
+      return true;
+    } catch (error) {
+      console.log("Unable to send the chat message to this tab", error);
+      return false;
+    }
+  }, []);
+
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>) => {
     if (await checkTokenExpired(user)) {
       login();
       return;
@@ -212,6 +247,8 @@ function IntegrationProvider({ children }: any) {
     // allowed session for 15 minutes).
     continueMeetingRef.current = continueMeeting;
     startSentRef.current = false;
+    skipEndRef.current = false;
+    setConsentFrame(null);
 
     setShouldConnect(true);
     const callMetadata: Call = {
@@ -221,6 +258,9 @@ function IntegrationProvider({ children }: any) {
       callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
       activeSpeaker: 'n/a',
+      // Always sent, as mode off when the settings were not read, so an opt-in
+      // deployment refuses a START this panel did not ask about.
+      consent: consent ?? { mode: 'off', confirmed: false, client: 'Browser extension' },
     }
 
     setCurrentCall(callMetadata);
@@ -243,9 +283,9 @@ function IntegrationProvider({ children }: any) {
       if (chrome.runtime) {
         chrome.runtime.sendMessage({ action: "StopTranscription" });
       }
-      if (readyState === ReadyState.OPEN) {
+      if (readyState === ReadyState.OPEN && !skipEndRef.current) {
         currentCall.callEvent = 'END';
-        sendMessage(JSON.stringify(currentCall));
+        sendMessage(JSON.stringify(withoutConsent(currentCall)));
         getWebSocket()?.close();
       }
       setShouldConnect(false);
@@ -254,6 +294,24 @@ function IntegrationProvider({ children }: any) {
       sendStopMessage();
     }
   }, [readyState, shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
+
+  const reportObjection = useCallback((participantName: string) => {
+    if (readyState === ReadyState.OPEN) {
+      sendMessage(JSON.stringify({
+        callEvent: 'CONSENT_OBJECTION',
+        ...(participantName ? { participantName } : {}),
+        source: 'voice',
+      }));
+      // The transcriber ends the meeting on the objection and closes the
+      // connection, so no END is sent; capture stops here at once.
+      skipEndRef.current = true;
+    } else {
+      // The extension does not reconnect, so the objection cannot reach the
+      // transcriber: capture stops, and the user is told to record it.
+      setStartError(OBJECTION_NOT_SENT);
+    }
+    stopTranscription();
+  }, [readyState, sendMessage, stopTranscription]);
 
   useEffect(() => {
     if (chrome.runtime) {
@@ -297,7 +355,7 @@ function IntegrationProvider({ children }: any) {
           currentCall.callEvent = 'SPEAKER_CHANGE';
           currentCall.activeSpeaker = request.active_speaker;
           setActiveSpeaker(request.active_speaker);
-          sendMessage(JSON.stringify(currentCall));
+          sendMessage(JSON.stringify(withoutConsent(currentCall)));
         } else if (request.action === "MuteChange") {
           setMuted(request.mute);
         }
@@ -332,7 +390,8 @@ function IntegrationProvider({ children }: any) {
     <IntegrationContext.Provider value={{
       currentCall, isTranscribing, muted, setMuted, paused, setPaused,
       fetchMetadata, startTranscription, stopTranscription, metadata, platform,
-      activeSpeaker, sendRecordingMessage, startError, setStartError
+      activeSpeaker, sendRecordingMessage, startError, setStartError,
+      consentFrame, postInMeetingChat, reportObjection
     }}>
       {children}
     </IntegrationContext.Provider>

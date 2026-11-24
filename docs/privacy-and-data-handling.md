@@ -135,7 +135,7 @@ participant consents** and that does not allow a different choice per meeting
 refuses Start from both. See
 [Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
-**Clients without a consent step.** The browser extension, the Stream Audio/Video embed,
+**Clients without a consent step.** The Stream Audio embed, browser extension and
 Desktop Capture App builds from before the consent step, and scripts written
 against the streaming API send no consent step. In Notify or Opt-in the setting
 **Streaming clients without a consent step** decides what happens to their
@@ -211,7 +211,7 @@ statement of what any law requires.
 
 Whatever the mode, set **Streaming clients without a consent step** to **Refuse**
 in a deployment where every meeting must go through the consent step, and check
-first that no one relies on the browser extension or the Stream Audio/Video embed.
+first that no one relies on the Stream Audio embed or an older browser extension build.
 
 ## What LMA stores, and for how long
 
