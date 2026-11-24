@@ -487,7 +487,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "chat, voice, ui or attestation, at, speakerId, speakerLinkBasis and "
             "speakerLinkedAt). A reply said aloud while the meeting was transcribed is "
             "linked to the transcript speaker who said it (speakerLinkBasis same_segment); "
-            "on Teams through Azure Communication Services and the Zoom Meeting SDK a chat "
+            "on Teams through Azure Communication Services and the Zoom Meeting SDK, a chat "
             "reply is linked to the speaker whose lines carry the sender's platform "
             "participant id (speakerLinkBasis platform_identity; the id is not returned). "
             "speakerId is then that speaker's id in get_meeting_export's participants "

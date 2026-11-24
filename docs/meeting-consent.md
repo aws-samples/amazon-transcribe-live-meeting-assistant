@@ -1207,7 +1207,7 @@ with a chat message's sender:
 | Join | The id, for the active speaker and for a chat sender |
 |---|---|
 | Teams through Azure Communication Services | The participant's communication identifier, as Azure Communication Services flattens it |
-| Zoom Meeting SDK | The SDK's `userId` for the meeting, from its active-speaker event and its chat message |
+| Zoom Meeting SDK | The SDK's `userId` for the meeting, from its active-speaker event (documented by the SDK) and its chat message (`senderId` or `sender.userId`; the SDK does not document the chat message's fields, and they have not yet been confirmed in a live meeting) |
 
 On those joins the Virtual Participant writes the id on each row of speech it
 names after that participant (`PlatformParticipantId` on the transcript
@@ -1219,7 +1219,11 @@ display names are not compared: a chat name can differ from the name shown
 speaking, and two people can share one. A reply is not linked when no row of
 speech has carried the sender's id yet, or when the speaker it was last written
 with has also been written with another participant's id (one voice label over
-two people).
+two people). If a join's chat message turns out to carry no sender id, or one
+that differs from the speaker's, its chat replies are recorded unlinked, as on
+every other join. The Virtual Participant's log says, for each chat reply,
+whether a sender id was present and whether the reply was linked (never the
+id).
 
 **What is not linked**, and why:
 
@@ -1256,8 +1260,11 @@ with the consent record: deleted with the meeting, and kept when the transcript
 is deleted after the summary, as the rest of the record is. A `same_segment`
 link holds the line's segment id and stored speaker, not its words. The
 platform participant id is a personal identifier: it is stored on the
-transcript segments and on the chat reply's link only, is never logged, and is
-never in the export or the `get_meeting_consent` answer, which give LMA's own
+transcript segments and on the chat reply's link only. It is not written to
+the logs at the default log level and is not sent to a Transcript Lambda hook;
+debug-level logging of whole incoming records, which a deployment turns on
+only for troubleshooting, includes it with the rest of the segment. It is never
+in the export or the `get_meeting_consent` answer, which give LMA's own
 `speakerId` instead. It follows the transcript: the segments are kept for
 **Days to keep transcript segments**, and deleting the transcript after the
 summary also removes the id from every reply's link, while the link keeps its

@@ -527,7 +527,9 @@ class KinesisStreamManager {
   async sendPreparedTranscriptSegments(prepared: PreparedTranscriptSegments): Promise<number> {
     for (const record of prepared.records) {
       if (process.env.DEBUG) {
-        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, record);
+        // The platform participant id is not logged (platform-speakers.ts).
+        const { PlatformParticipantId: _id, ...logged } = record;
+        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, logged);
       }
       try {
         const now = new Date().toISOString();

@@ -120,5 +120,7 @@ def execute(caller: Caller, meeting_id: Any) -> Dict[str, Any]:
     if has_speaker_links((state or {}).get("Consent")) and not meeting.get("TranscriptDeletedAt"):
         # The ids the meeting export gives its speakers, from the same lines.
         speakers = Speakers(final_segments(read_final_rows(call_id, finals_only=False)), meeting)
+        # The meeting row was read before getMeetingConsent, so a chat reply
+        # recorded between the two reads is given without a speaker this once.
         state = with_stored_platform_ids(state, meeting.get("Consent"))
     return meeting_consent_output(call_id, state, speakers)

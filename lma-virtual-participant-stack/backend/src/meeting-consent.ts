@@ -1301,6 +1301,13 @@ export class MeetingConsentFlow {
         };
         const link =
             source === 'voice' ? speakerLinkFor(line, key) : source === 'chat' ? platformIdentityLinkFor(senderId) : undefined;
+        if (source === 'chat') {
+            // Whether the platform gave a sender id and whether it linked the
+            // reply, never the id itself: what a live check of a join reads.
+            log.info(
+                `[consent] chat reply: sender id ${senderId ? 'present' : 'absent'}, ${link ? 'linked to a transcript speaker' : 'not linked'}`,
+            );
+        }
         if (link) event.SpeakerLink = link;
         if (decision === 'objection') {
             if (this.isEchoedObjection(key, source)) {

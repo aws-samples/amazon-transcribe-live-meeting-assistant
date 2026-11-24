@@ -146,8 +146,8 @@ Kept:
   **Days to keep transcript segments** in full;
 - the consent record, which is the evidence that participants were told,
   including the transcript line each spoken reply was linked to (its segment
-  id and stored speaker, not its words) and the stored speaker each chat reply
-  was linked to (without its platform participant id); see
+  id and stored speaker, not its words, and the stored speaker each chat reply
+  was linked to, without its platform participant id; see
   [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply));
 - the meeting's notifications of other categories, and each user's dismissals
   and mutes.

@@ -1219,7 +1219,7 @@ async def get_sentiment_and_latest_end(
         channel = canonical_channel(segment.get("Channel", None))
         if is_speech_channel(channel):
             if segment.get("SentimentWeighted", None):
-                LOGGER.debug("Aggregating sentiment entry", extra=segment)
+                LOGGER.debug("Aggregating sentiment entry", extra=without_platform_id(segment))
                 sentiment_entry: SentimentEntry = {
                     "Id": segment["SegmentId"],
                     "BeginOffsetMillis": segment["StartTime"] * 1000,
@@ -1899,7 +1899,7 @@ async def execute_add_agent_assist_mutation(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    LOGGER.debug("Add Agent Assist Mutation message: %s", json.dumps(message))
+    LOGGER.debug("Add Agent Assist Mutation message: %s", json.dumps(without_platform_id(message)))
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.addTranscriptSegment.args(input=message).select(
@@ -1966,8 +1966,23 @@ async def execute_update_agent_mutation(
 ##########################################################################
 
 
+def without_platform_id(segment: Any) -> Any:
+    """A segment without its ``PlatformParticipantId``, for a log line or a hook.
+
+    The meeting platform's participant id is a personal identifier stored on
+    the segment only (docs/meeting-consent.md#which-speaker-gave-a-reply); it
+    is not written to the processor's own log lines nor sent to a Transcript
+    Lambda hook.
+    """
+    if isinstance(segment, dict) and "PlatformParticipantId" in segment:
+        return {k: v for k, v in segment.items() if k != "PlatformParticipantId"}
+    return segment
+
+
 def invoke_transcript_lambda_hook(message: Dict[str, Any]):
     if not message.get("IsPartial") or not transcript_hook_nonpartial_only():
+        platform_id = message.get("PlatformParticipantId")
+        message = without_platform_id(message)
         LOGGER.debug("Transcript Lambda Hook Arn: %s", TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN)
         LOGGER.debug("Transcript Lambda Hook Request: %s", message)
         lambda_response = LAMBDA_HOOK_CLIENT.invoke(
@@ -1986,6 +2001,9 @@ def invoke_transcript_lambda_hook(message: Dict[str, Any]):
         # A hook written for an earlier version may hand back an older channel name.
         if isinstance(message, dict) and message.get("Channel"):
             message["Channel"] = canonical_channel(message["Channel"])
+        # The id the hook was not given goes back on the segment it returned.
+        if platform_id and isinstance(message, dict):
+            message["PlatformParticipantId"] = platform_id
     return message
 
 

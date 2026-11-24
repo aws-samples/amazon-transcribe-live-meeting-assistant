@@ -493,6 +493,36 @@ def test_a_transcript_hook_returning_an_older_channel_name_is_written_as_the_cur
     assert result["Channel"] == "REMOTE"
 
 
+def test_a_transcript_hook_is_not_sent_the_platform_participant_id(monkeypatch):
+    """The id stays on the segment the hook returns, and is never in its payload."""
+    sent = []
+
+    class Payload:
+        def __init__(self, body):
+            self.body = body
+
+        def read(self):
+            return json.dumps({**json.loads(self.body), "Transcript": "redacted"}).encode()
+
+    class HookClient:
+        def invoke(self, **kwargs):
+            sent.append(kwargs["Payload"])
+            return {"Payload": Payload(kwargs["Payload"])}
+
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", HookClient(), raising=False)
+    monkeypatch.setattr(cep, "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    message = {
+        "Channel": "REMOTE",
+        "Transcript": "hi",
+        "IsPartial": False,
+        "PlatformParticipantId": "8:acs:0000-bo",
+    }
+    result = cep.invoke_transcript_lambda_hook(message)
+    assert "8:acs:0000-bo" not in sent[0]
+    assert result["Transcript"] == "redacted"
+    assert result["PlatformParticipantId"] == "8:acs:0000-bo"
+
+
 @pytest.mark.parametrize("shape", SCORES_NOTHING)
 def test_an_empty_segment_list_aggregates_to_an_empty_aggregation(shape, schema):
     """A list with nothing to score is a valid answer, and writing it is right."""

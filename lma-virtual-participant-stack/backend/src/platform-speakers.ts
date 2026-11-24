@@ -68,7 +68,7 @@ export function platformSpeakerFor(id: string | undefined): PlatformSpeaker | un
     return ids && ids.size === 1 ? { ...found } : undefined;
 }
 
-/** Forgets every id: a new meeting, or a test. */
+/** Forgets every id. A Virtual Participant serves one meeting per process, so only tests call it. */
 export function resetPlatformSpeakers(): void {
     latest.clear();
     idsBySpeaker.clear();

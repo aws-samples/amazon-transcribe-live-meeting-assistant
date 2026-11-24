@@ -181,9 +181,12 @@ personal identifier, on each transcript segment of speech it names after that
 participant (`PlatformParticipantId`), and on a chat consent reply linked to its
 speaker by that id. It is kept with the transcript segments (**Days to keep
 transcript segments**), removed from the consent record when the transcript is
-deleted after the summary, and deleted with the meeting. It is never logged, is
-not returned by the GraphQL API, and is not in the meeting export or any MCP
-tool's answer, which give LMA's own speaker id instead. See
+deleted after the summary, and deleted with the meeting. It is not written to
+the logs at the default log level and is not sent to a Transcript Lambda hook
+(debug-level logging of whole incoming records, for troubleshooting, includes
+it with the rest of the segment). It is not returned by the GraphQL API, and is
+not in the meeting export or any MCP tool's answer, which give LMA's own speaker
+id instead. See
 [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply).
 
 Evidence images are screenshots of the meeting chat and participant list taken by
