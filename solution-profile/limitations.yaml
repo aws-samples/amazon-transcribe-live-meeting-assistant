@@ -169,9 +169,9 @@ limitations:
     description: >-
       A meeting is continued only by its owner or an Admin; a user it is shared with
       cannot. It cannot be continued while it is still being captured, after its
-      transcript has been deleted, or within 15 minutes of another reopen whose
-      capture has not started yet, so a reopen that failed to start can hold the
-      meeting for up to 15 minutes. Clients downloaded before a deployment offered
+      transcript has been deleted, or within 15 minutes of a reopen by someone else
+      (or a Virtual Participant rejoin) whose capture has not started yet; retrying
+      one's own unstarted reopen is answered with the same session. Clients downloaded before a deployment offered
       continuation do not show the option until they are downloaded again.
     evidence:
       - docs/desktop-capture-app.md#continue-an-existing-meeting

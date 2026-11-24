@@ -784,8 +784,11 @@ capabilities:
       everyone did). The Virtual Participant posts the notice in the chat, reads typed
       and spoken replies, and keeps screenshots as evidence; Stream Audio and the
       Desktop Capture App show a consent step the user attests. Every meeting keeps a
-      record of the notice, replies and evidence, and a reply said aloud records the
-      transcript line it was read from.
+      record of the notice, replies and evidence. A reply said aloud to a Virtual
+      Participant while the meeting is transcribed also records the transcript line
+      it was read from, when that line's speaker is the participant who replied;
+      typed replies, replies heard while consent is awaited and attestations carry
+      no such link.
     evidence:
       - docs/meeting-consent.md
       - docs/meeting-consent.md#which-speaker-gave-a-reply
