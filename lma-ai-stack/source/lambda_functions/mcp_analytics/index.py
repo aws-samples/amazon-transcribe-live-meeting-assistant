@@ -733,8 +733,8 @@ def _meeting(caller: CallerInfo) -> Any:
 
 
 # The arguments schedule_meeting and start_meeting_now gained with the meeting
-# preparation tools. A legacy key and the gateway keep those two tools as they
-# were, so they are refused these.
+# preparation tools. A legacy key and the gateway keep those two tools with their
+# original arguments, so they are refused these.
 PREPARATION_ARGUMENTS = (
     "labels",
     "audience",
