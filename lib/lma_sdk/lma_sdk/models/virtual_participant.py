@@ -66,6 +66,12 @@ class VpRow(BaseModel):
     errorMessage: str | None = None
     endTrigger: str | None = None
     endReason: str | None = None
+    # The meeting's capture session this VP runs (absent: 1) and where it
+    # starts on the transcript timeline; set by a rejoin.
+    sessionNumber: int | None = None
+    sessionTimeOffset: float | None = None
+    rejoinedAt: str | None = None
+    rejoinedBy: str | None = None
 
     # Catch-all for any extra fields returned by the API.
     extra: dict[str, Any] = Field(default_factory=dict)

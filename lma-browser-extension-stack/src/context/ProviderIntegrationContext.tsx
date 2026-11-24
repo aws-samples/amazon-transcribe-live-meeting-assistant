@@ -10,6 +10,7 @@ import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
+import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -22,6 +23,9 @@ type Call = {
   callId: string,
   samplingRate: number,
   activeSpeaker: string,
+  // Only to continue an existing meeting: the capture session reopenMeeting
+  // allowed, with the meeting's own ID as callId.
+  sessionNumber?: number,
 }
 
 const initialIntegration = {
@@ -32,7 +36,12 @@ const initialIntegration = {
   paused: false,
   setPaused: (pauseValue: boolean) => { },
   fetchMetadata: () => { },
-  startTranscription: (user: any, userName: string, meetingTopic: string) => { },
+  // `continueMeeting`: the meeting ID or link of an existing meeting to continue.
+  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => { },
+  // Why capture did not start, or stopped: a reopenMeeting refusal, or the
+  // transcriber's. Empty otherwise.
+  startError: "",
+  setStartError: (message: string) => { },
   stopTranscription: () => { },
   metadata: { userName: "", meetingTopic: "" } as MeetingMetadata,
   platform: "n/a",
@@ -55,6 +64,15 @@ function IntegrationProvider({ children }: any) {
   const [shouldConnect, setShouldConnect] = useState(false);
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [startError, setStartError] = useState("");
+  // The meeting ID or link to continue, from startTranscription until the
+  // capture has started.
+  const continueMeetingRef = useRef<string | undefined>(undefined);
+  // Whether this capture's START has been sent: the tab's audio is held back
+  // until it has, since the transcriber drops audio that arrives before START
+  // (the tab starts sending once it reports its sampling rate, and a continued
+  // meeting is reopened between the two).
+  const startSentRef = useRef(false);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -64,6 +82,12 @@ function IntegrationProvider({ children }: any) {
     },
     onOpen: (event) => {
       console.log(event);
+    },
+    onMessage: (event) => {
+      // A START refused for the meeting it names, or capture the transcriber
+      // stopped; it then closes the connection.
+      const refusal = refusalMessage(event.data);
+      if (refusal) setStartError(refusal);
     },
     onClose: (event) => {
       console.log(event);
@@ -176,20 +200,27 @@ function IntegrationProvider({ children }: any) {
     return {};
   }, [settings]);
 
-  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string) => {
     if (await checkTokenExpired(user)) {
       login();
       return;
     }
+    setStartError("");
+    // Continuing a meeting: reopened once the tab's capture has started, just
+    // before START (the SamplingRate message below), so a capture that never
+    // starts leaves no session allowed (reopenMeeting holds the meeting for an
+    // allowed session for 15 minutes).
+    continueMeetingRef.current = continueMeeting;
+    startSentRef.current = false;
 
     setShouldConnect(true);
-    const callMetadata = {
+    const callMetadata: Call = {
       callEvent: 'START',
       clientType: 'BROWSER_EXTENSION',
       localSpeakerName: userName,
       callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
-      activeSpeaker: 'n/a'
+      activeSpeaker: 'n/a',
     }
 
     setCurrentCall(callMetadata);
@@ -238,13 +269,27 @@ function IntegrationProvider({ children }: any) {
           );
         } else if (request.action === "SamplingRate") {
           // This event should only bubble up once at the start of recording in the injected code
+          const continueMeeting = continueMeetingRef.current;
+          continueMeetingRef.current = undefined;
+          if (continueMeeting !== undefined) {
+            const result = await reopenMeeting(settings.graphqlEndpoint, user.id_token, continueMeeting);
+            if (result.error !== undefined) {
+              setStartError(result.error);
+              chrome.runtime.sendMessage({ action: "StopTranscription" });
+              setShouldConnect(false);
+              return;
+            }
+            currentCall.callId = result.session.callId;
+            currentCall.sessionNumber = result.session.sessionNumber;
+          }
           currentCall.samplingRate = request.samplingRate;
           currentCall.callEvent = 'START';
           sendMessage(JSON.stringify(currentCall));
+          startSentRef.current = true;
           setIsTranscribing(true);
           sendRecordingMessage();
         } else if (request.action === "AudioData") {
-          if (readyState === ReadyState.OPEN) {
+          if (readyState === ReadyState.OPEN && startSentRef.current) {
             const audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }
@@ -264,7 +309,8 @@ function IntegrationProvider({ children }: any) {
     // `metadata` is deliberately absent: the handler no longer reads it, and
     // including it re-registered the listener on every reader report.
   }, [currentCall, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
-    setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata
+    setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata,
+    settings, user
   ]);
 
   // Follow the user to another meeting tab. Needed because reports from tabs the
@@ -286,7 +332,7 @@ function IntegrationProvider({ children }: any) {
     <IntegrationContext.Provider value={{
       currentCall, isTranscribing, muted, setMuted, paused, setPaused,
       fetchMetadata, startTranscription, stopTranscription, metadata, platform,
-      activeSpeaker, sendRecordingMessage
+      activeSpeaker, sendRecordingMessage, startError, setStartError
     }}>
       {children}
     </IntegrationContext.Provider>

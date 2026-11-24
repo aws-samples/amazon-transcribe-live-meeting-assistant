@@ -7,7 +7,9 @@
 ``importMCPServerLibrary`` and the meeting assistant skill writes
 (``createSkill``, ``updateSkill``, ``deleteSkill``, ``importSkill`` and
 ``importSkillLibrary``) accept the Admin group and IAM-signed callers, so that an
-operator can call them with the LMA SDK and CLI. Several roles the stacks create
+operator can call them with the LMA SDK and CLI. ``rejoinVirtualParticipant`` and
+``reopenMeeting`` accept IAM-signed callers too, as a backend role that may act
+on any meeting. Several roles the stacks create
 are granted ``appsync:GraphQL`` on every mutation (or the whole API) for their
 own work. Each such policy document carries an explicit ``Deny`` on each of those
 fields, and this test holds every template to that: a new broad grant without
@@ -40,6 +42,10 @@ FIELDS = (
     "deleteSkill",
     "importSkill",
     "importSkillLibrary",
+    # Accept IAM callers for operators (the lma CLI and SDK), as a backend role
+    # that may act on any meeting.
+    "rejoinVirtualParticipant",
+    "reopenMeeting",
 )
 
 

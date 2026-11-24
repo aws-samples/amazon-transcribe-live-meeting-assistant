@@ -50,6 +50,8 @@ import {
   startBlockedReason,
 } from './consent';
 import { CONNECTION_LOST_MESSAGE } from './transcriber-stream';
+import { INVALID_MEETING_ID, MEETING_REFUSALS, meetingIdFrom, reopenMeeting } from './continue-meeting';
+import { formatClock } from '../meeting-player/playback-sync';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
@@ -212,6 +214,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Set when the transcriber refused the START itself: no meeting was created.
   const refusedRef = useRef(false);
 
+  // "Continue an existing meeting…" (continue-meeting.js): the meeting ID or
+  // link typed, and the session reopenMeeting allowed for the stream being
+  // started, which its START names. Cleared when that stream stops: each
+  // continuation reopens the meeting again.
+  const [continuing, setContinuing] = useState(false);
+  const [continueInput, setContinueInput] = useState('');
+  const [continueSession, setContinueSession] = useState(null);
+  const [reopening, setReopening] = useState(false);
+  const continueSessionRef = useRef(null);
+
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
@@ -266,6 +278,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         return;
       }
       setConsentFrame(frame);
+      // A START refused for the meeting it names: said with the form, also
+      // when there is no consent step to show it.
+      if (captureStopped(frame) && MEETING_REFUSALS.has(frame.code) && frame.message) {
+        setStartError(frame.message);
+      }
       if (captureStopped(frame) && recordingRef.current) {
         // The transcriber has ended the meeting: nothing more is sent for it, and a
         // reconnect does not send its START again.
@@ -387,6 +404,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         callId: crypto.randomUUID(),
       });
     }
+    continueSessionRef.current = null;
+    setContinueSession(null);
     setRecording(false);
   };
 
@@ -398,9 +417,15 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     const meetingPrefix = meetingTopic.replace(/[\/?#%\+&]/g, '|') || 'Stream Audio';
 
     setMeetingTopic(meetingPrefix);
+    // A continued meeting is streamed under its own ID, naming the session
+    // reopenMeeting allowed; any other stream under a new one, naming none.
+    const withoutSession = { ...callMetaData };
+    delete withoutSession.sessionNumber;
+    const session = continueSessionRef.current;
     const callMetaDataCopy = {
-      ...callMetaData,
-      callId: `${meetingPrefix} - ${getTimestampStr()}`,
+      ...withoutSession,
+      callId: session ? session.callId : `${meetingPrefix} - ${getTimestampStr()}`,
+      ...(session ? { sessionNumber: session.sessionNumber } : {}),
       agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
       fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
       // Omitted when blank rather than sent as 0, so leaving the field alone means
@@ -411,11 +436,15 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     return callMetaDataCopy;
   };
 
+  // The meeting the consent notice and START name: the continued meeting while
+  // continuing (its Meeting Topic field is disabled then), else the topic.
+  const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || meetingTopic;
+
   // The notice the consent step shows, as START records it.
   const noticeText = consentRequired(consentSettings)
     ? renderNotice(consentSettings.noticeTemplate, {
         lmaUser: callMetaData.agentId,
-        meeting: meetingTopic,
+        meeting: consentMeetingName,
         consentPhrase: consentSettings.consentPhrase,
         objectionPhrase: consentSettings.objectionPhrase,
       })
@@ -425,7 +454,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     console.log(`
       DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
     `);
-    const recordingCallMetaData = getFinalCallMetadata();
     try {
       // 16 kHz is the ASR models' native rate, so capturing there means no
       // resampling anywhere in the chain. Other rates still work (the
@@ -444,6 +472,27 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       });
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
+      // Continuing a meeting: reopened only now that the tab and microphone
+      // are shared, just before START, so a start abandoned at the browser's
+      // prompts leaves no session allowed that never starts (reopenMeeting
+      // holds the meeting for an allowed session for 15 minutes).
+      if (continuing) {
+        setReopening(true);
+        const { session, error } = await reopenMeeting(appsyncClient, continueInput);
+        setReopening(false);
+        if (error) {
+          [displayStream.current, micStream.current].forEach((stream) =>
+            stream?.getTracks().forEach((track) => track.stop()),
+          );
+          audioContext.current?.close?.();
+          setStartError(error);
+          setRecording(false);
+          return;
+        }
+        continueSessionRef.current = session;
+        setContinueSession(session);
+      }
+      const recordingCallMetaData = getFinalCallMetadata();
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
       recordingCallMetaData.callEvent = 'START';
 
@@ -456,7 +505,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         ...toStreamingFrame(recordingCallMetaData),
         consent: consentPayload(consentRequired(consentSettings) ? consentSettings : { mode: 'off' }, consentStep, {
           lmaUser: recordingCallMetaData.agentId,
-          meetingName: meetingTopic,
+          meetingName: consentMeetingName,
           noticeText,
         }),
       };
@@ -534,18 +583,22 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
 
   const handleRecording = () => {
     if (!recording) {
-      const blocked = startBlockedReason(consentSettings, consentStep);
+      const blocked =
+        startBlockedReason(consentSettings, consentStep) ||
+        (continuing && !meetingIdFrom(continueInput) ? INVALID_MEETING_ID : '');
       setStartError(blocked);
       if (blocked) return recording;
       // eslint-disable-next-line no-restricted-globals
       agreeToRecord.current = confirm(settings.recordingDisclaimer);
 
       if (agreeToRecord.current) {
-        if (settings.WSEndpoint) {
-          setRecording(!recording);
-        } else {
+        if (!settings.WSEndpoint) {
           alert('Enable Websocket Audio input to use this feature');
+          return recording;
         }
+        continueSessionRef.current = null;
+        setContinueSession(null);
+        setRecording(!recording);
       }
     } else {
       setRecording(!recording);
@@ -773,7 +826,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   mode === MODE_STREAM ? (recording ? 'secondary' : 'primary') : 'primary'
                 }
                 onClick={handleSubmit}
-                disabled={mode === MODE_UPLOAD ? uploadDisabled : false}
+                disabled={mode === MODE_UPLOAD ? uploadDisabled : reopening}
+                loading={mode === MODE_STREAM && reopening}
               >
                 {submitLabel}
               </Button>
@@ -849,7 +903,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   description="Prefix for unique meeting identifier"
                   errorText={meetingTopic.length < 1 && DEFAULT_BLANK_FIELD_MSG}
                 >
-                  <Input value={meetingTopic} onChange={handleCallIdChange} disabled={recording || uploadInProgress} />
+                  <Input
+                    value={meetingTopic}
+                    onChange={handleCallIdChange}
+                    disabled={recording || uploadInProgress || (mode === MODE_STREAM && continuing)}
+                  />
                 </FormField>
                 <FormField
                   label={mode === MODE_UPLOAD ? 'Participants' : 'Participants (stream)'}
@@ -892,6 +950,52 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   </Grid>
                 </FormField>
               </ColumnLayout>
+
+              {mode === MODE_STREAM && (
+                <Box margin={{ top: 'l' }}>
+                  <SpaceBetween size="xs">
+                    <Checkbox
+                      checked={continuing}
+                      onChange={({ detail }) => {
+                        setContinuing(detail.checked);
+                        setStartError('');
+                      }}
+                      disabled={recording || reopening}
+                      description={
+                        'Add to a meeting that already exists, even one shown as Done, on the same transcript. ' +
+                        "For the meeting's owner and Admins."
+                      }
+                    >
+                      Continue an existing meeting…
+                    </Checkbox>
+                    {continuing && (
+                      <FormField
+                        label="Meeting ID or link"
+                        description="The meeting ID, or the link to the meeting's page in LMA."
+                        stretch
+                      >
+                        <Input
+                          value={continueInput}
+                          onChange={({ detail }) => {
+                            setContinueInput(detail.value);
+                            setStartError('');
+                          }}
+                          disabled={recording || reopening}
+                          placeholder="Meeting ID or https://…/#/calls/…"
+                          ariaLabel="Meeting ID or link"
+                        />
+                      </FormField>
+                    )}
+                    {continueSession && recording && (
+                      <Box color="text-body-secondary" data-testid="continue-session">
+                        {`Continuing meeting ${continueSession.callId} as session ${
+                          continueSession.sessionNumber
+                        }, from ${formatClock(continueSession.offsetSeconds)} on its transcript.`}
+                      </Box>
+                    )}
+                  </SpaceBetween>
+                </Box>
+              )}
 
               {mode === MODE_STREAM && (
                 <Box margin={{ top: 'l' }}>
