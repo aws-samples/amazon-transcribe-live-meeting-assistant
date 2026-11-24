@@ -40,6 +40,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
 import { requiresAlbSelfRegistration } from './launch-mode.js';
+import { videoRecordingOffReason } from './video-recording-rule.js';
 import {
     CONTEXT_VIRTUAL_PARTICIPANT,
     LaunchType,
@@ -337,6 +338,11 @@ const main = async (): Promise<void> => {
                 exit: (code) => process.exit(code),
                 logError: (message) => log.error(message),
             });
+
+            // Why the meeting's video is not recorded although the launch asked
+            // for it (or that nothing stops it), as decided when the settings
+            // were applied (video-recording-rule.ts). Not awaited: best-effort.
+            void statusManager.setVideoRecordingOffReason(videoRecordingOffReason());
 
             // Get existing CallId from VP record first, with the capture session
             // a rejoined VP runs (docs/virtual-participant.md#rejoin). A row

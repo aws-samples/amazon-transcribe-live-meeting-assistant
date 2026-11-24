@@ -1,0 +1,8 @@
+## The setting, for the pipeline's write function to read from the stash (as
+## $ctx.stash.recordVpMeetingVideo): true or false; nothing is stashed when it
+## could not be read. A failed read does not refuse the request: the VP applies
+## the setting when it starts, whatever the row says.
+#if( !$ctx.error && !$util.isNull($ctx.result) )
+  $util.qr( $ctx.stash.put("recordVpMeetingVideo", $ctx.result) )
+#end
+$util.toJson({})

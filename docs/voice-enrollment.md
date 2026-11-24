@@ -151,8 +151,13 @@ re-recording* restores them. Plan a retention change accordingly: it asks every
 enrolled person to repeat the enrollment, so it is not a parameter to tune
 casually once people have enrolled.
 
-**Point-in-time recovery is on**, so the log can be restored to any moment in the
-retention window.
+**Point-in-time recovery is on** for the consent log, for 35 days, so the log can
+be restored to any moment in that window. The voice enrollment table's
+point-in-time recovery follows the `MeetingDataPointInTimeRecoveryDays` stack
+parameter (35 days by default), so a withdrawn or expired voiceprint stays
+restorable for that many days; set it to `0` for a withdrawal to leave no
+restorable copy. See
+[Point-in-time recovery of the DynamoDB tables](privacy-and-data-handling.md#point-in-time-recovery-of-the-dynamodb-tables).
 
 **Both tables survive stack deletion** (`DeletionPolicy: Retain`), and that cuts
 both ways, so it is worth being explicit. It means a stack deleted by accident,

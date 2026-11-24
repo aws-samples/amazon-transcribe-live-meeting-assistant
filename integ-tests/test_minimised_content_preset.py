@@ -110,6 +110,7 @@ def test_the_minimised_content_preset_is_a_managed_profile_with_its_values(stack
     assert record.body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
     assert record.body["recording"]["recordAudio"] is False
     assert record.body["recording"]["recordScreenVideo"] is False
+    assert record.body["recording"]["recordVpMeetingVideo"] is False
     assert record.body["meeting_assist"]["omitSensitivePersonalInformation"] is True
     assert record.body["meeting_processing"]["defaultSummaryProfile"] == PRESET_ID
 

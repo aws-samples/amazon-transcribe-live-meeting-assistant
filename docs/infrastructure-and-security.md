@@ -155,7 +155,7 @@ stack creates) rather than from an injected environment, so the launcher writes
 the resolved values into the `vpConfig` attribute of that participant's item and
 the container reads them from there and applies them to its environment before
 starting. That table is encrypted with the deployment's customer-managed key and
-has point-in-time recovery enabled, each item expires by TTL on `expiresAt`
+has point-in-time recovery as `MeetingDataPointInTimeRecoveryDays` sets it, each item expires by TTL on `expiresAt`
 roughly nine hours after the launch, and the Virtual Participant's own task role
 can read items in it.
 

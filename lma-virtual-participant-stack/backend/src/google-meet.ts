@@ -530,7 +530,8 @@ export default class GoogleMeet {
         // Which LMA VP the message is for, when there are several
         // (chat-addressing.ts). One for another VP, or the bare "LMA" with
         // several here, is meeting chat only.
-        const route = chatAddressing.route(rawMessage, sender);
+        // A Google Meet chat has no private messages.
+        const route = chatAddressing.route(rawMessage, sender, 'everyone');
         if (!route.act) {
             meetingChat.offer({
                 platform: 'google-meet',

@@ -81,7 +81,7 @@ PRESET_VALUES = {
             "leaveOnObjection": False,
         },
         "retention": {"transcriptDeletionAfterSummary": "off"},
-        "recording": {"recordAudio": True, "recordScreenVideo": True},
+        "recording": {"recordAudio": True, "recordScreenVideo": True, "recordVpMeetingVideo": True},
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
@@ -98,7 +98,7 @@ PRESET_VALUES = {
             "leaveOnObjection": False,
         },
         "retention": {"transcriptDeletionAfterSummary": "off"},
-        "recording": {"recordAudio": True, "recordScreenVideo": True},
+        "recording": {"recordAudio": True, "recordScreenVideo": True, "recordVpMeetingVideo": True},
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
@@ -115,7 +115,11 @@ PRESET_VALUES = {
             "leaveOnObjection": True,
         },
         "retention": {"transcriptDeletionAfterSummary": "after_15_minutes"},
-        "recording": {"recordAudio": False, "recordScreenVideo": False},
+        "recording": {
+            "recordAudio": False,
+            "recordScreenVideo": False,
+            "recordVpMeetingVideo": False,
+        },
         "virtual_participant": {"captureMeetingChat": False},
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
@@ -132,7 +136,11 @@ PRESET_VALUES = {
             "leaveOnObjection": True,
         },
         "retention": {"transcriptDeletionAfterSummary": "after_15_minutes"},
-        "recording": {"recordAudio": False, "recordScreenVideo": False},
+        "recording": {
+            "recordAudio": False,
+            "recordScreenVideo": False,
+            "recordVpMeetingVideo": False,
+        },
         "virtual_participant": {"captureMeetingChat": False},
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
@@ -149,7 +157,11 @@ PRESET_VALUES = {
             "leaveOnObjection": True,
         },
         "retention": {"transcriptDeletionAfterSummary": "off"},
-        "recording": {"recordAudio": False, "recordScreenVideo": False},
+        "recording": {
+            "recordAudio": False,
+            "recordScreenVideo": False,
+            "recordVpMeetingVideo": False,
+        },
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
@@ -176,7 +188,11 @@ PRESET_VALUES = {
             "leaveOnObjection": False,
         },
         "retention": {"transcriptDeletionAfterSummary": "off"},
-        "recording": {"recordAudio": False, "recordScreenVideo": True},
+        "recording": {
+            "recordAudio": False,
+            "recordScreenVideo": True,
+            "recordVpMeetingVideo": True,
+        },
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
@@ -203,7 +219,11 @@ PRESET_VALUES = {
             "leaveOnObjection": True,
         },
         "retention": {"transcriptDeletionAfterSummary": "immediately"},
-        "recording": {"recordAudio": False, "recordScreenVideo": False},
+        "recording": {
+            "recordAudio": False,
+            "recordScreenVideo": False,
+            "recordVpMeetingVideo": False,
+        },
         "virtual_participant": {"captureMeetingChat": False},
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
@@ -372,7 +392,12 @@ def test_the_minimised_content_preset_selects_its_summary_profile_and_deletes_th
     sections = preset_by_id("minimised-content")["Sections"]
     assert sections["meeting_processing"]["values"]["defaultSummaryProfile"] == "minimised-content"
     assert sections["retention"]["values"]["transcriptDeletionAfterSummary"] == "immediately"
-    assert sections["recording"]["values"] == {"recordAudio": False, "recordScreenVideo": False}
+    # No audio, and no video from any client the settings govern.
+    assert sections["recording"]["values"] == {
+        "recordAudio": False,
+        "recordScreenVideo": False,
+        "recordVpMeetingVideo": False,
+    }
     consent = sections["meeting_consent"]["values"]
     assert (consent["mode"], consent["consentRule"], consent["allowPerMeetingOverride"]) == (
         "opt_in",

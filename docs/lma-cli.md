@@ -335,7 +335,7 @@ consent record and evidence, notifications, meeting archives and Virtual
 Participant records. See
 [Deleting a meeting](privacy-and-data-handling.md#deleting-a-meeting) for the
 full list and for the copies it does not reach, such as the DynamoDB tables'
-35-day point-in-time recovery.
+point-in-time recovery (`MeetingDataPointInTimeRecoveryDays`, 35 days by default).
 
 A meeting that is still in progress (`STARTED` or `TRANSCRIBING`) is never
 deleted: it is listed as skipped, and the command can be run again after it
@@ -365,6 +365,59 @@ The command acts with your AWS credentials, which are what allow it at all;
 It is not offered as an MCP tool.
 
 > The underlying SDK methods are documented under [`client.meetings`](lma-sdk.md#clientmeetings--meetings-by-label).
+
+### `lma users list` — List Users for an Access Review
+
+Lists every user of the stack's Cognito user pool with their email, role
+(`Admin` or `User`), Cognito status, whether the account is enabled, when it was
+created, and when the user last signed in, for a periodic user access review.
+
+```bash
+# A table in the terminal
+lma users list
+
+# A CSV file to attach to the review
+lma users list --format csv --output lma-users.csv
+
+# JSON, with the stack, Region, account, user pool and time of the export
+lma --stack-name LMA-team users list --format json > lma-users.json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--format table\|json\|csv` | Output format (default `table`) |
+| `--output PATH`, `-o` | Write the `json` or `csv` output to this file instead of standard output |
+| `--stack-name`, `--region` | The stack and Region, as for [`lma meetings delete`](#lma-meetings-delete--delete-meetings-by-label) |
+
+The CSV columns are `email`, `username`, `role`, `status`, `enabled`
+(`true`/`false`), `created_at` and `last_sign_in_at`; times are ISO 8601 in UTC.
+
+The last sign-in is the user's last **interactive** sign-in, which the Cognito
+stack's PostAuthentication trigger records: a session the web UI renews with a
+refresh token does not update it. See
+[Last sign-in](user-management.md#last-sign-in) for exactly what is recorded. A
+user with no recorded sign-in (none since the feature was deployed) shows
+`Not recorded` in the table and the CSV, and `null` in JSON. If the times cannot
+be read at all (a stack not yet updated to a version that records them, or a
+missing permission), every user shows `Unavailable` (`null` in JSON, with
+`last_sign_in_available: false` and `last_sign_in_unavailable_reason`), a warning
+saying why is printed on standard error, and the users are still listed.
+
+The command acts with your AWS credentials, not as an LMA user, so it does not
+need membership of the `Admin` group, but it needs:
+
+| Action | Resource | Used for |
+|--------|----------|----------|
+| `cloudformation:DescribeStacks` | The LMA stack | Finding the user pool in the stack's outputs |
+| `cloudformation:DescribeStackResource` | The LMA stack and its Cognito stack (`COGNITOSTACK`) | Finding the sign-in table, `UserSignInTable` |
+| `cognito-idp:ListUsers`, `cognito-idp:ListUsersInGroup` | The LMA user pool | Listing the users and the members of the `Admin` group |
+| `dynamodb:BatchGetItem` | The sign-in table | Reading the last sign-in times |
+| `kms:Decrypt` | The stack's customer-managed key, through DynamoDB | Reading the encrypted table, where the key policy leaves that to IAM |
+
+The account in the output comes from `sts:GetCallerIdentity`. If the sign-in
+table cannot be read, the users are still listed, with the times `Unavailable`.
+
+> The underlying SDK method is documented under [`client.users`](lma-sdk.md#clientusers--users-for-an-access-review).
 
 ### `lma load` — Load Simulator (plugin)
 

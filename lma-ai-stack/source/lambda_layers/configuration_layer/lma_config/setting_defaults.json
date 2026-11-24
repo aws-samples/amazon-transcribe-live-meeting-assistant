@@ -74,6 +74,10 @@
     "recordScreenVideo": {
       "type": "boolean",
       "default": true
+    },
+    "recordVpMeetingVideo": {
+      "type": "boolean",
+      "default": true
     }
   },
   "meeting_assist": {

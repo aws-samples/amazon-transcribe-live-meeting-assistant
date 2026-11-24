@@ -298,6 +298,8 @@ If you would rather scope the role down, the suite itself — as opposed to the
 deploy — needs only read access to the stack and its resources (CloudFormation,
 ELBv2, ECS, Kinesis), `appsync:GraphQL` on the stack's API, read/write on the
 EventSourcing DynamoDB table (it creates rows and deletes them),
+`dynamodb:DescribeContinuousBackups` on the stack's DynamoDB tables (to compare
+their point-in-time recovery with the stack parameter),
 `states:StartSyncExecution` on the Virtual Participant scheduler, use of the
 stack's KMS key through those services, and `secretsmanager:GetSecretValue` on
 the secret above (and on the live meeting secret, if that test is on). The Cognito side needs no IAM at all: the test user

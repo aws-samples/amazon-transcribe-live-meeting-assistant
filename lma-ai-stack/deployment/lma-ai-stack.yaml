@@ -252,6 +252,57 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingDataPointInTimeRecoveryDays:
+    Type: Number
+    Default: 35
+    MinValue: 0
+    MaxValue: 35
+    # Listed so that only whole days are accepted; RecoveryPeriodInDays is an integer.
+    AllowedValues:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+      - 17
+      - 18
+      - 19
+      - 20
+      - 21
+      - 22
+      - 23
+      - 24
+      - 25
+      - 26
+      - 27
+      - 28
+      - 29
+      - 30
+      - 31
+      - 32
+      - 33
+      - 34
+      - 35
+    ConstraintDescription: A whole number of days from 0 to 35.
+    Description: >-
+      The point-in-time recovery window, in days, of the tables that hold meeting
+      content: the meetings table, the Virtual Participant table and its task registry,
+      the troubleshooting jobs table and the voice enrollment table. 0 turns point-in-time recovery off
+      on them, so a deleted item cannot be restored; 1 to 35 keeps it on with that
+      recovery period. Every other table keeps a 35-day window.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -435,6 +486,14 @@ Parameters:
   AppIdentityPoolId:
     Type: String
     Description: Cognito Identity Pool used by the UI
+
+  UserSignInTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      The Cognito stack's table of each user's last sign-in time (keyed by Cognito
+      sub), read by the user management resolver. Empty when the Cognito stack
+      has none, in which case the last sign-in is reported as unavailable.
 
   AllowedSignUpEmailDomain:
     Type: String
@@ -653,7 +712,10 @@ Metadata:
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
+  # Point-in-time recovery of the tables that hold meeting content; 0 turns it off.
+  HasMeetingDataPointInTimeRecovery: !Not [!Equals [!Ref MeetingDataPointInTimeRecoveryDays, "0"]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasUserSignInTable: !Not [!Equals [!Ref UserSignInTableName, ""]]
   # The main stack created the meeting event bus (EnableMeetingEvents).
   ShouldPublishMeetingEvents: !Not [!Equals [!Ref MeetingEventBusArn, ""]]
   HasTroubleshootingAgent: !Not [!Equals [!Ref TroubleshootingAgentFunctionArn, ""]]
@@ -1054,8 +1116,11 @@ Resources:
               - Owner
               - SharedWith
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -1095,8 +1160,11 @@ Resources:
         - AttributeName: SubjectId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -5222,8 +5290,11 @@ Resources:
         - AttributeName: JobId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       TimeToLiveSpecification:
         AttributeName: ExpiresAt
         Enabled: true
@@ -8624,8 +8695,11 @@ Resources:
         - AttributeName: id
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -9268,9 +9342,41 @@ Resources:
       PipelineConfig:
         Functions:
           - !GetAtt ValidateMeetingPreparationAppSyncFunction.FunctionId
+          - !GetAtt CheckVirtualParticipantVideoRecordingAppSyncFunction.FunctionId
           - !GetAtt CreateVirtualParticipantAppSyncFunction.FunctionId
       RequestMappingTemplate: "{}"
       ResponseMappingTemplate: "$util.toJson($ctx.result)"
+
+  # Reads Meeting Recording > Record Virtual Participant meeting video, by the
+  # meeting preparation resolver Lambda (which reads the configuration already),
+  # so createVirtualParticipant can record on the row why its video will not be
+  # recorded. A request that turns the video off does not invoke the Lambda.
+  CheckVirtualParticipantVideoRecordingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: CheckVirtualParticipantVideoRecording
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/checkVirtualParticipantVideoRecording.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/checkVirtualParticipantVideoRecording.response.vtl
+
+  # The same setting, for the Create Virtual Participant form.
+  GetVirtualParticipantVideoRecordingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Query
+      FieldName: getVirtualParticipantVideoRecording
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   CreateVirtualParticipantAppSyncFunction:
     Type: AWS::AppSync::FunctionConfiguration
@@ -9341,6 +9447,15 @@ Resources:
         ## launches; immediate launches also pass it via the Step Functions input.
         #if(!$util.isNull($ctx.args.input.enableVideoRecording))
           $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
+        #end
+
+        ## Why the video will not be recorded although the request asks for it
+        ## (or says nothing, which means on): Meeting Recording > Record Virtual
+        ## Participant meeting video is off, as the pipeline's second function
+        ## read it. The VP container reads the setting again when it starts,
+        ## which decides, and rewrites or removes this then.
+        #if($ctx.stash.recordVpMeetingVideo == false && $util.defaultIfNull($ctx.args.input.enableVideoRecording, true) != false)
+          $util.qr($input.put("videoRecordingOffReason", "configuration"))
         #end
 
         ## Live guidance for the meeting it creates (Boolean). Absent, the
@@ -9618,6 +9733,23 @@ Resources:
             $util.qr( $expSet.put("#joinMethod", ":joinMethod") )
             $util.qr( $expNames.put("#joinMethod", "joinMethod") )
             $util.qr( $expValues.put(":joinMethod", $util.dynamodb.toDynamoDB($ctx.args.input.joinMethod)) )
+        #end
+
+        ## Why the meeting's video is not recorded although the launch asked **
+        ## for it ("configuration" or "deployment"), written by the VP when it **
+        ## starts; clearVideoRecordingOffReason removes it when nothing stops **
+        ## the video. **
+        #if( $util.defaultIfNull($ctx.args.input.clearVideoRecordingOffReason, false) == true )
+            $util.qr( $expNames.put("#videoRecordingOffReason", "videoRecordingOffReason") )
+            $util.qr( $expRemove.add("#videoRecordingOffReason") )
+        #elseif( !$util.isNullOrBlank($ctx.args.input.videoRecordingOffReason) )
+            #set( $videoOffReasons = ["configuration", "deployment"] )
+            #if( !$videoOffReasons.contains($ctx.args.input.videoRecordingOffReason) )
+                $util.error("videoRecordingOffReason must be configuration or deployment", "BadRequest")
+            #end
+            $util.qr( $expSet.put("#videoRecordingOffReason", ":videoRecordingOffReason") )
+            $util.qr( $expNames.put("#videoRecordingOffReason", "videoRecordingOffReason") )
+            $util.qr( $expValues.put(":videoRecordingOffReason", $util.dynamodb.toDynamoDB($ctx.args.input.videoRecordingOffReason)) )
         #end
 
         ## Build the update expression. updatedAt is always set, so the SET **
@@ -10024,8 +10156,11 @@ Resources:
         - AttributeName: vpId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -11069,6 +11204,7 @@ Resources:
           ADMIN_GROUP: "Admin"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          USER_SIGN_IN_TABLE: !Ref UserSignInTableName
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -11134,6 +11270,16 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "usr#*"
+              # Each listed user's last sign-in time, and a deleted user's
+              # entry, in the Cognito stack's sign-in table.
+              - !If
+                - HasUserSignInTable
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:BatchGetItem"
+                    - "dynamodb:DeleteItem"
+                  Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserSignInTableName}"
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - kms:Decrypt
