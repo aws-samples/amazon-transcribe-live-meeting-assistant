@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from ai_stack_templates import flattened
 
 ROOT = Path(__file__).resolve().parents[2]
 PRESETS = ROOT / "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets"
@@ -28,9 +27,8 @@ _Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
 
 
 def _parameter(template: Path) -> dict:
-    # The AI stack with its nested templates' resources inlined; see ai_stack_templates.
-    if template == TEMPLATES[1]:
-        return flattened()["Parameters"]["ConfigurationPreset"]
+    # Read from each template itself: flattening the AI stack inlines its nested
+    # templates' resources, not their parameters, so it would change nothing here.
     document = yaml.load(template.read_text(), Loader=_Loader)  # noqa: S506 -- a SafeLoader subclass
     return document["Parameters"]["ConfigurationPreset"]
 
