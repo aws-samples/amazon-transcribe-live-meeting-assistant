@@ -189,7 +189,13 @@ def test_listusers_returns_each_users_recorded_sign_in(signed_in, listed) -> Non
 def test_lma_users_list_returns_the_same_times(client, signed_in, listed) -> None:
     users, _before = signed_in
     from_api = {u["username"]: u["lastSignInAt"] for u in listed["users"]}
-    runner = CliRunner()
+    # Standard error apart from standard output, so a warning cannot break the
+    # JSON or CSV parse: the default from Click 8.2, which no longer takes the
+    # argument; Click 8.1 (allowed by the CLI's pin) needs it.
+    try:
+        runner = CliRunner(mix_stderr=False)
+    except TypeError:
+        runner = CliRunner()
     base = ["--stack-name", client.stack_name]
     if client.region:
         base += ["--region", client.region]

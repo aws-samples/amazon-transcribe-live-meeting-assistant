@@ -70,7 +70,7 @@ The new user receives a **Welcome to Live Meeting Assistant!** email from Amazon
 2. Choose **Delete**.
 3. Review the confirmation modal and choose **Delete** to proceed.
 
-Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) time. It does **not** delete meetings that user owns or has shared.
+Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) time. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
 
 ## Last sign-in
 

@@ -120,8 +120,7 @@ const UserManagementPage = () => {
       const result = await client.graphql({ query: listUsers });
       const list = result?.data?.listUsers?.users || [];
       setUsers(list);
-      // False only when the server says the times could not be read; a server
-      // that predates the field leaves it null, which reads as unavailable too.
+      // Only an explicit true shows the times; anything else shows Unavailable.
       setLastSignInAvailable(result?.data?.listUsers?.lastSignInAvailable === true);
     } catch (err) {
       logger.error('listUsers failed', err);
