@@ -61,11 +61,11 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 69 parameters.
+The template declares 70 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
-| Resource | 50 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
+| Resource | 51 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
@@ -682,6 +682,7 @@ Optional s3://bucket/key of a configuration file, JSON or YAML, laid over Config
 | [`EnableVideoRecording`](#enablevideorecording) | `true` | Resource |
 | [`MeetingRecordExpirationInDays`](#meetingrecordexpirationindays) | `90` | Configuration page limit |
 | [`TranscriptionExpirationInDays`](#transcriptionexpirationindays) | `90` | Resource |
+| [`MeetingDataPointInTimeRecoveryDays`](#meetingdatapointintimerecoverydays) | `35` | Resource |
 | [`AudioRecordingExpirationInDays`](#audiorecordingexpirationindays) | `90` | Resource |
 | [`CloudWatchLogsExpirationInDays`](#cloudwatchlogsexpirationindays) | `90` | Resource |
 | [`VPSchedulerStateMachineLogsExpirationInDays`](#vpschedulerstatemachinelogsexpirationindays) | `7` | Resource |
@@ -716,6 +717,16 @@ Console label: *Transcription Expiration In Days*
 - **Kind:** Resource. Sets the lifecycle rules for transcript files and key-frame images on the recordings bucket, and is read by the functions that write transcript segments, to set when each expires. Also the default and upper limit of the Configuration page's **Retention › Days to keep transcript segments**.
 
 Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time. Specify partial days like 0.5 to retain transcriptions for half a day. Also sets the lifecycle rules for transcript files and key-frame images in the recordings bucket, which the Configuration page does not change. This is the default and the upper limit; an Admin can set a shorter period at run time on the Configuration page (Retention section), never a longer one.
+
+### `MeetingDataPointInTimeRecoveryDays`
+
+Console label: *Meeting Data Point-in-Time Recovery Days*
+
+- **Default:** `35`
+- **Allowed values:** `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `17`, `18`, `19`, `20`, `21`, `22`, `23`, `24`, `25`, `26`, `27`, `28`, `29`, `30`, `31`, `32`, `33`, `34`, `35`
+- **Kind:** Resource. Sets the point-in-time recovery of the tables that hold meeting content: off at 0, otherwise on with that recovery period.
+
+Point-in-time recovery window, in days, of the DynamoDB tables that hold meeting content: the meetings table (meeting records, transcripts, summaries, consent records, notifications, whiteboards and chat attachment items), the Virtual Participant table and its task registry, the troubleshooting jobs table and the voice enrollment table. 1 to 35 keeps point-in-time recovery on with that recovery period, so an item deleted from these tables can be restored for that many days. 0 turns point-in-time recovery off on them, so a deletion is final and no restorable copy is kept; it also means the tables cannot be restored after an accidental write or deletion. Every other table, including the configuration tables and the voice consent log, keeps a 35-day window. AWS Backup plans and on-demand backups are separate and not changed by this parameter.
 
 ### `AudioRecordingExpirationInDays`
 

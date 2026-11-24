@@ -139,8 +139,10 @@ export interface ZoomChatLabel {
 }
 
 export function parseZoomChatLabel(label: string): ZoomChatLabel {
+    // The sender may hold one comma, as a directory-style "Strahan, Bob"
+    // does, so the prefix is not looked for inside the message text.
     const match = label.match(
-        /^([^,:]+?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
+        /^([^,:]+(?:,[^,:]+)?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
     );
     return {
         sender: match?.[1]?.trim() || null,
@@ -2011,10 +2013,12 @@ export default class Zoom {
             // `message` is the row's aria-label, sender and recipient included.
             // Every command below is matched against the body alone.
             const { sender, recipient, body: rawBody, time } = parseZoomChatLabel(message);
+            const audience = zoomChatAudience(recipient);
             // Which LMA VP the message is for, when there are several
             // (chat-addressing.ts). One for another VP, or the bare "LMA" with
-            // several here, is meeting chat only.
-            const route = chatAddressing.route(rawBody, sender);
+            // several here, is meeting chat only. A private message, or one
+            // whose recipient the label does not show, is not acted on at all.
+            const route = chatAddressing.route(rawBody, sender, audience);
             if (!route.act) {
                 meetingChat.offer({
                     platform: 'zoom',
@@ -2023,7 +2027,7 @@ export default class Zoom {
                     sender,
                     id: messageId,
                     platformTime: time,
-                    audience: zoomChatAudience(recipient),
+                    audience,
                     links,
                     attachments,
                 });
@@ -2093,7 +2097,7 @@ export default class Zoom {
                     sender,
                     id: messageId,
                     platformTime: time,
-                    audience: zoomChatAudience(recipient),
+                    audience,
                     links,
                     attachments,
                 });
