@@ -9,6 +9,7 @@ Semantic search across meeting transcripts using Bedrock Knowledge Base
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import boto3
@@ -19,6 +20,34 @@ logger = logging.getLogger()
 
 # The metadata key that holds a meeting's owner in the transcript knowledge base.
 OWNER_METADATA_KEY = "Owner"
+
+# The metadata key that holds a meeting's creation time, as whole seconds since
+# the epoch, in the transcript knowledge base (CREATED_AT_EPOCH_KEY in
+# bedrock_summary_lambda). startDate and endDate bound a search on it.
+CREATED_AT_METADATA_KEY = "CreatedAtEpochSeconds"
+
+
+def _date_bound(value: str, argument: str, end_of_day: bool) -> int:
+    """``value``, an ISO 8601 date or date and time, as seconds since the epoch.
+
+    A date alone stands for the whole day in UTC: its first second as a start,
+    its last second as an end. A time without an offset is read as UTC.
+    """
+    text = value.strip() if isinstance(value, str) else ""
+    try:
+        if len(text) == 10:
+            day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            bound = day + timedelta(days=1) - timedelta(seconds=1) if end_of_day else day
+        else:
+            bound = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise ValueError(
+            f"{argument} must be an ISO 8601 date or date and time, "
+            "for example 2026-11-01 or 2026-11-01T09:00:00Z"
+        ) from None
+    return int(bound.timestamp())
 
 
 def _configured_model_id() -> str:
@@ -70,8 +99,9 @@ def execute(
 
     Args:
         query: Natural language search query
-        start_date: Optional ISO 8601 start date filter
-        end_date: Optional ISO 8601 end date filter
+        start_date: Optional ISO 8601 date or date and time; meetings created from then
+        end_date: Optional ISO 8601 date or date and time; meetings created until then
+            (a date alone includes the whole day, in UTC)
         max_results: Maximum number of results (default: 10)
         user_id: User ID for access control
         is_admin: Whether user is admin (can see all meetings)
@@ -115,12 +145,28 @@ def execute(
     if not is_admin and user_id:
         filters.append({"equals": {"key": OWNER_METADATA_KEY, "value": user_id}})
 
-    # Date range filters
+    # Date range filters, on when each meeting was created. A document written
+    # before the summary step wrote this key has none, so it is not found by a
+    # search given either date.
     if start_date:
-        filters.append({"greaterThanOrEquals": {"key": "meetingDate", "value": start_date}})
+        filters.append(
+            {
+                "greaterThanOrEquals": {
+                    "key": CREATED_AT_METADATA_KEY,
+                    "value": _date_bound(start_date, "startDate", end_of_day=False),
+                }
+            }
+        )
 
     if end_date:
-        filters.append({"lessThanOrEquals": {"key": "meetingDate", "value": end_date}})
+        filters.append(
+            {
+                "lessThanOrEquals": {
+                    "key": CREATED_AT_METADATA_KEY,
+                    "value": _date_bound(end_date, "endDate", end_of_day=True),
+                }
+            }
+        )
 
     # Build retrieval configuration
     retrieval_config = {"vectorSearchConfiguration": {"numberOfResults": max_results}}

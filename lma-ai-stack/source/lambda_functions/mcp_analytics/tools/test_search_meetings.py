@@ -241,6 +241,92 @@ class TestOwnerFilter(unittest.TestCase):
         written = ast.literal_eval(assignment.value)
         self.assertIn(search_meetings.OWNER_METADATA_KEY, written)
 
+    def test_date_key_is_the_one_the_summary_step_writes(self):
+        """The date bounds filter on the numeric key getKBMetadata adds, by that name."""
+        summary = Path(__file__).resolve().parents[2] / "bedrock_summary_lambda" / "index.py"
+        tree = ast.parse(summary.read_text())
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "CREATED_AT_EPOCH_KEY"
+        )
+        self.assertEqual(
+            ast.literal_eval(assignment.value), search_meetings.CREATED_AT_METADATA_KEY
+        )
+
+    def test_every_filtered_key_is_one_the_summary_step_writes(self):
+        """No condition names a key that no knowledge base document carries."""
+        conditions = self._filter(is_admin=False, start_date="2026-11-01", end_date="2026-11-30")[
+            "andAll"
+        ]
+        keys = {next(iter(condition.values()))["key"] for condition in conditions}
+        self.assertEqual(
+            keys,
+            {search_meetings.OWNER_METADATA_KEY, search_meetings.CREATED_AT_METADATA_KEY},
+        )
+
+
+class TestDateBounds(unittest.TestCase):
+    """startDate and endDate become numeric bounds on the meeting's creation time."""
+
+    ENV = {"AWS_REGION": "us-west-2", "AWS_ACCOUNT_ID": "123456789012", "MODEL_ARN": ""}
+
+    def _conditions(self, **dates):
+        with (
+            patch.dict(os.environ, self.ENV, clear=False),
+            patch.object(
+                search_meetings, "_configured_model_id", return_value="amazon.nova-lite-v1:0"
+            ),
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            mock_kb = MagicMock()
+            mock_kb.retrieve_and_generate.return_value = {"output": {"text": "ok"}, "citations": []}
+            mock_boto3.client.return_value = mock_kb
+            search_meetings.execute(query="q", is_admin=True, **dates)
+            kb = mock_kb.retrieve_and_generate.call_args[1]["retrieveAndGenerateConfiguration"][
+                "knowledgeBaseConfiguration"
+            ]
+        found = kb["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]
+        return found["andAll"] if "andAll" in found else [found]
+
+    def test_a_start_date_alone_starts_at_midnight_utc(self):
+        self.assertEqual(
+            self._conditions(start_date="2026-11-01"),
+            [{"greaterThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793491200}}],
+        )
+
+    def test_an_end_date_alone_includes_the_whole_day(self):
+        self.assertEqual(
+            self._conditions(end_date="2026-11-01"),
+            [{"lessThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793577599}}],
+        )
+
+    def test_a_date_and_time_with_an_offset_is_that_instant(self):
+        self.assertEqual(
+            self._conditions(start_date="2026-11-01T09:00:00+01:00"),
+            [{"greaterThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793520000}}],
+        )
+
+    def test_a_date_and_time_without_an_offset_is_read_as_utc(self):
+        self.assertEqual(
+            self._conditions(end_date="2026-11-01T08:00:00"),
+            [{"lessThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793520000}}],
+        )
+
+    def test_both_bounds_are_combined(self):
+        conditions = self._conditions(start_date="2026-11-01", end_date="2026-11-01")
+        self.assertEqual(len(conditions), 2)
+
+    def test_a_value_that_is_not_a_date_is_refused_with_the_argument_named(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._conditions(start_date="last week")
+        self.assertIn("startDate must be an ISO 8601 date", str(ctx.exception))
+        with self.assertRaises(ValueError) as ctx:
+            self._conditions(end_date="2026-13-01")
+        self.assertIn("endDate must be an ISO 8601 date", str(ctx.exception))
+
 
 class TestInputValidation(unittest.TestCase):
     """Basic input validation."""

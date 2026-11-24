@@ -42,6 +42,7 @@ from urllib.parse import unquote
 
 from boto3.dynamodb.types import TypeDeserializer
 
+from lma_sdk._core.aws_errors import AWS_ERRORS, aws_call_error
 from lma_sdk.exceptions import LMAAppSyncError, LMAConfigurationError, LMAValidationError
 from lma_sdk.models.meeting import MeetingSession
 from lma_sdk.models.meetings import MeetingDeleteResult, MeetingFailure, MeetingRef
@@ -135,10 +136,12 @@ def labels_of(row: Mapping[str, Any]) -> Dict[str, str]:
 
 
 def _aws_error(action: str, resource: str, err: Exception) -> LMAConfigurationError:
-    """An AWS call that failed, as one line naming the action the caller needs."""
-    return LMAConfigurationError(
-        f"Could not {resource}; the caller needs {action} on it (see the permissions table "
-        f"of `lma meetings delete` in docs/lma-cli.md): {err}"
+    """An AWS call that failed, as one line; a denied call also names the action needed."""
+    return aws_call_error(
+        action,
+        resource,
+        err,
+        see="see the permissions table of `lma meetings delete` in docs/lma-cli.md",
     )
 
 
@@ -214,7 +217,7 @@ class MeetingOperations:
                 kwargs["NextToken"] = token
             try:
                 response = cognito.admin_list_groups_for_user(**kwargs)
-            except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+            except AWS_ERRORS as err:
                 raise _aws_error(
                     "cognito-idp:AdminListGroupsForUser",
                     f"read the groups of {user.username} in user pool {pool_id}",
@@ -269,7 +272,7 @@ class MeetingOperations:
         while True:
             try:
                 response = dynamodb.query(**kwargs)
-            except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+            except AWS_ERRORS as err:
                 raise _aws_error(
                     "dynamodb:Query",
                     f"list the meetings in the {LIST_INDEX} index of {self.table_name}",
@@ -301,7 +304,7 @@ class MeetingOperations:
             while request:
                 try:
                     response = dynamodb.batch_get_item(RequestItems=request)
-                except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+                except AWS_ERRORS as err:
                     raise _aws_error(
                         "dynamodb:BatchGetItem",
                         f"read the meeting records in {self.table_name}",

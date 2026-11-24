@@ -151,6 +151,9 @@ def normalize_labels(value: Any) -> List[Dict[str, str]]:
             raise PreparationError(
                 f"The Value of label {key} is longer than {MAX_LABEL_VALUE_CHARS} characters"
             )
+        # The meeting page edits labels one per line, so a value is one line.
+        if "".join(label_value.splitlines()) != label_value:
+            raise PreparationError(f"The Value of label {key} must not contain a line break")
         labels.append({"Key": key, "Value": label_value})
     return labels
 

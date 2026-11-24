@@ -1017,8 +1017,23 @@ def test_only_the_indexed_attributes_are_written_to_the_metadata_sidecar() -> No
             "UpdatedAt": "2025-01-02T03:44:05.000Z",
             "Owner": "bob@example.com",
             "TotalConversationDurationMillis": 125400,
+            "CreatedAtEpochSeconds": 1735787045,
         }
     }
+
+
+def test_the_creation_time_is_also_written_as_a_number_for_date_bounded_search() -> None:
+    """Bedrock's range conditions compare numbers; CreatedAt is a string."""
+    metadata = json.loads(index.getKBMetadata({"CallId": "c", "CreatedAt": "2026-11-01T00:00:00Z"}))
+    assert metadata["metadataAttributes"][index.CREATED_AT_EPOCH_KEY] == 1793491200
+    unzoned = json.loads(index.getKBMetadata({"CallId": "c", "CreatedAt": "2026-11-01T00:00:00"}))
+    assert unzoned["metadataAttributes"][index.CREATED_AT_EPOCH_KEY] == 1793491200
+
+
+def test_a_creation_time_that_is_not_iso_8601_writes_no_number() -> None:
+    for created_at in ("t", "", None):
+        metadata = json.loads(index.getKBMetadata({"CallId": "c", "CreatedAt": created_at}))
+        assert index.CREATED_AT_EPOCH_KEY not in metadata["metadataAttributes"]
 
 
 def test_metadata_attributes_that_the_call_lacks_are_simply_absent() -> None:
