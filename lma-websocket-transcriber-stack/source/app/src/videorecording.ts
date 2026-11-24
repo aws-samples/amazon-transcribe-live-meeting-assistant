@@ -295,6 +295,14 @@ export const getVideoSession = (callId: string, sessionNumber?: number): VideoSe
     videoSessions.get(videoSessionKey(callId, sessionNumber));
 
 /**
+ * Whether this is the meeting's stored video session. A withheld connection's
+ * session is not (startVideoSession): ending or dropping it must not touch the
+ * session the meeting does have, which another connection may be recording.
+ */
+export const isStoredVideoSession = (session: VideoSession): boolean =>
+    getVideoSession(session.callId, session.sessionNumber) === session;
+
+/**
  * Create a video segment write stream with an 'error' listener attached.
  *
  * Without a listener, an fs WriteStream that errors (ENOSPC when the shared
@@ -384,23 +392,18 @@ export const startVideoSession = (
 
     // Withheld (video-admission.ts videoAdmission): the setting is off and the
     // client is not told, so its stream is accepted and nothing of it is kept.
-    // A session the meeting already has (video recorded before the setting was
-    // turned off and the client reconnected) is left as it is, so what it holds
-    // is still finished and uploaded; this connection gets a discarding session
-    // of its own, which is not stored.
+    // The connection gets a discarding session of its own, which is never
+    // stored: a session the meeting already has (video recorded before the
+    // setting was turned off) is left to be finished and uploaded, and a later
+    // START_VIDEO made after the setting is turned back on starts recording
+    // rather than continuing a discarded stream.
     if (withheld) {
         server.log.warn(
             `[START_VIDEO]: [${callId}] - Screen video from streaming clients is off and the client does not declare handlesRefusal; accepting and discarding its video stream.`
         );
-        if (session) {
-            const unstored = newSession(callId, callMetaData, keyframeSource);
-            unstored.discarding = true;
-            return unstored;
-        }
-        session = newSession(callId, callMetaData, keyframeSource);
-        session.discarding = true;
-        videoSessions.set(key, session);
-        return session;
+        const unstored = newSession(callId, callMetaData, keyframeSource);
+        unstored.discarding = true;
+        return unstored;
     }
 
     if (!ENABLE_VIDEO_RECORDING) {

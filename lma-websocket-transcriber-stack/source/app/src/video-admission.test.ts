@@ -11,16 +11,17 @@ import path from 'node:path';
 import {
     PendingVideoChunks,
     keyframeSourceFor,
+    routeBinaryFrame,
     videoAdmission,
     videoAllowed,
     videoStartedFrame,
 } from './video-admission';
 
+const INDEX = readFileSync(path.resolve(__dirname, '../src/index.ts'), 'utf8');
+
 test('an accepted video stream is acknowledged with its callId', () => {
     assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
 });
-
-const INDEX_SOURCE = readFileSync(path.resolve(__dirname, '../src/index.ts'), 'utf8');
 
 const ON = { stackRecordsVideo: true, recordScreenVideo: true };
 const SETTING_OFF = { stackRecordsVideo: true, recordScreenVideo: false };
@@ -53,7 +54,7 @@ test('with the stack off every START_VIDEO is discarded, whatever the setting or
 });
 
 test('index.ts reads handlesRefusal from START_VIDEO and withholds a stream into a discarding session', () => {
-    const startVideo = INDEX_SOURCE.slice(INDEX_SOURCE.indexOf('const admission = videoAdmission('));
+    const startVideo = INDEX.slice(INDEX.indexOf('const admission = videoAdmission('));
     assert.ok(startVideo.length > 0, 'START_VIDEO does not decide its admission with videoAdmission');
     assert.ok(/callMetaData\.handlesRefusal === true/.test(startVideo.slice(0, 600)), 'handlesRefusal is not read');
     assert.ok(/admission === 'withhold'/.test(startVideo), 'a withheld stream is not handled');
@@ -103,4 +104,70 @@ test('a refused START_VIDEO forgets the chunks held for it', () => {
     pending.drop('ws');
     assert.deepEqual(pending.release('ws'), []);
     assert.equal(pending.hold('ws', Uint8Array.of(2)), 'no-start');
+});
+
+test('a binary frame goes to the video session, is held behind START_VIDEO, or is audio', () => {
+    const pending = new PendingVideoChunks<string>(4);
+    const chunk = Uint8Array.of(1, 2, 3);
+    assert.equal(routeBinaryFrame('ws', chunk, true, pending), 'video');
+    assert.equal(routeBinaryFrame('ws', chunk, false, pending), 'audio');
+    pending.begin('ws');
+    assert.equal(routeBinaryFrame('ws', chunk, false, pending), 'held');
+    assert.equal(routeBinaryFrame('ws', chunk, false, pending), 'dropped');
+    // A session wins over a START_VIDEO still recorded as in progress.
+    assert.equal(routeBinaryFrame('ws', chunk, true, pending), 'video');
+    assert.deepEqual(pending.release('ws'), [chunk]);
+    assert.equal(routeBinaryFrame('ws', chunk, false, pending), 'audio');
+});
+
+// index.ts registers the server's handlers when it is imported, so its wiring
+// of the held chunks is checked in its source: each step of the path is where
+// the comments in index.ts say it is.
+
+const body = (start: RegExp, end: RegExp): string => {
+    const from = INDEX.search(start);
+    assert.ok(from >= 0, `index.ts has no ${start}`);
+    const rest = INDEX.slice(from);
+    const to = rest.slice(1).search(end);
+    return to >= 0 ? rest.slice(0, to + 1) : rest;
+};
+
+test('index.ts holds the chunks behind START_VIDEO from before its first await', () => {
+    const handler = body(/const onTextMessage = async/, /\nconst [a-zA-Z]+ = /);
+    const begin = handler.indexOf('pendingVideoChunks.begin(ws)');
+    assert.ok(begin >= 0, 'START_VIDEO does not begin holding chunks');
+    assert.ok(begin < handler.indexOf('await '), 'chunks are held only after the handler first awaits');
+});
+
+test('index.ts writes the held chunks once START_VIDEO has its session, before any later chunk', () => {
+    const start = INDEX.indexOf('const session = startVideoSession(');
+    const release = INDEX.indexOf('pendingVideoChunks.release(ws)');
+    assert.ok(start >= 0 && release > start, 'the held chunks are not released after the session starts');
+    const between = INDEX.slice(start, release);
+    assert.ok(between.includes('videoSocketMap.set(ws, session)'), 'the session is not registered before the release');
+    assert.ok(!between.includes('await '), 'a later chunk could overtake the held ones');
+});
+
+test('index.ts routes every binary frame through routeBinaryFrame', () => {
+    const handler = body(/const onBinaryMessage = async/, /\nconst [a-zA-Z]+ = /);
+    assert.ok(handler.includes('routeBinaryFrame(ws, data,'), 'onBinaryMessage does not route through routeBinaryFrame');
+    assert.ok(!handler.includes('pendingVideoChunks.hold('), 'onBinaryMessage holds chunks outside routeBinaryFrame');
+});
+
+test('index.ts forgets the held chunks on every refusal, on close and on a connection error', () => {
+    const startVideo = INDEX.slice(INDEX.indexOf('callMetaData.callEvent === \'START_VIDEO\''), INDEX.indexOf('const session = startVideoSession('));
+    const refusals = startVideo.split('ws.close(').length - 1;
+    const drops = startVideo.split('pendingVideoChunks.drop(ws)').length - 1;
+    assert.ok(refusals > 0 && drops >= refusals, `${refusals} refusals of START_VIDEO but ${drops} drops`);
+    assert.ok(body(/const onWsClose = async/, /\nconst [a-zA-Z]+ = /).includes('pendingVideoChunks.drop(ws)'), 'close keeps them');
+    assert.ok(body(/function onWsErrorEvent/, /\n {4}}\n/).includes('pendingVideoChunks.drop(ws)'), 'an error keeps them');
+});
+
+test('index.ts ends or drops a video session only when it is the meeting\'s stored one', () => {
+    const endVideo = body(/callEvent === 'END_VIDEO'/, /\} else if \(callMetaData\.callEvent === 'END'\)/);
+    assert.ok(endVideo.indexOf('isStoredVideoSession(session)') >= 0, 'END_VIDEO ends whatever session is stored');
+    assert.ok(endVideo.indexOf('isStoredVideoSession(session)') < endVideo.indexOf('endVideoSession('));
+    const close = body(/const onWsClose = async/, /\nconst [a-zA-Z]+ = /);
+    assert.ok(close.indexOf('isStoredVideoSession(videoSession)') >= 0, 'a close drops whatever session is stored');
+    assert.ok(close.indexOf('isStoredVideoSession(videoSession)') < close.indexOf('videoSocketDropped('));
 });

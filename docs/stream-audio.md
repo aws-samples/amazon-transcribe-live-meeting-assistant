@@ -131,7 +131,9 @@ every streaming client: this page, the browser extension and the Desktop
 Capture App.
 
 - **Turn it on for one meeting.** Switch on **Also record screen video** before
-  **Start Streaming**. It is off at the start of every meeting. The browser
+  **Start Streaming**. It goes back to off once a meeting has streamed; if you
+  cancel the share picker, or the start fails, it stays as you chose for the
+  next **Start Streaming**. The browser
   needs MediaRecorder with MP4 (H.264) recording, as recent Chrome and Edge
   have; where it is missing the switch is disabled and says so.
 - **What you share.** After you pick what to share, the page names it (a browser

@@ -84,10 +84,12 @@ import {
     awaitPendingMuxes,
     getVideoSession,
     videoRecordingEnabled,
+    isStoredVideoSession,
 } from './videorecording';
 import {
     PendingVideoChunks,
     VIDEO_NOT_ENABLED_CLOSE,
+    routeBinaryFrame,
     keyframeSourceFor,
     videoAdmission,
     videoAllowed,
@@ -440,6 +442,9 @@ const registerHandlers = (
                 error
             )}`
         );
+        // The close that follows drops them too; dropped here as well, so no
+        // chunk held for this connection outlives the error.
+        pendingVideoChunks.drop(ws);
         ws.close();
     }
 };
@@ -449,18 +454,19 @@ const onBinaryMessage = async (
     ws: WebSocket,
     data: Uint8Array
 ): Promise<void> => {
-    // Video sockets carry fragmented-MP4 chunks, never audio PCM.
+    // Video sockets carry fragmented-MP4 chunks, never audio PCM. Chunks
+    // behind a START_VIDEO still being handled are written once it has a
+    // session (video-admission.ts routeBinaryFrame).
     const videoSession = videoSocketMap.get(ws);
-    if (videoSession !== undefined) {
+    const route = routeBinaryFrame(ws, data, videoSession !== undefined, pendingVideoChunks);
+    if (route === 'video' && videoSession !== undefined) {
         writeVideoChunk(videoSession, data, server);
         return;
     }
-    // Behind a START_VIDEO still being handled: written once it has a session.
-    const held = pendingVideoChunks.hold(ws, data);
-    if (held === 'held') {
+    if (route === 'held') {
         return;
     }
-    if (held === 'full') {
+    if (route === 'dropped') {
         server.log.error(
             `[ON BINARY MESSAGE]: [${clientIP}] - Too much video arrived before its START_VIDEO was handled; dropping a chunk.`
         );
@@ -1070,6 +1076,10 @@ const onTextMessage = async (
             return;
         }
         videoSocketMap.delete(ws);
+        // A withheld connection's session is its own; the meeting's is not its to end.
+        if (!isStoredVideoSession(session)) {
+            return;
+        }
         await endVideoSession(session.callId, server, session.sessionNumber);
     } else if (callMetaData.callEvent === 'END') {
         const socketData = sessions.sessionOf(ws);
@@ -1320,7 +1330,10 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
             `[ON WSCLOSE]: [${videoSession.callId}] - Video socket closed without END_VIDEO.`
         );
         videoSocketMap.delete(ws);
-        videoSocketDropped(videoSession.callId, server, videoSession.sessionNumber);
+        // As for END_VIDEO: a withheld connection leaves the meeting's session alone.
+        if (isStoredVideoSession(videoSession)) {
+            videoSocketDropped(videoSession.callId, server, videoSession.sessionNumber);
+        }
         return;
     }
     await sessions.onConnectionClosed(ws);

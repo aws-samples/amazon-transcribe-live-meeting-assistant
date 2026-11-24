@@ -5,6 +5,7 @@
  */
 import React, { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { ConsoleLogger } from 'aws-amplify/utils';
 
 import {
   Form,
@@ -65,6 +66,8 @@ import { INVALID_MEETING_ID, MEETING_REFUSALS, meetingIdFrom, reopenMeeting } fr
 import { formatClock } from '../meeting-player/playback-sync';
 
 let SOURCE_SAMPLING_RATE;
+
+const logger = new ConsoleLogger('StreamAudio');
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
 
 // Mode values for the top-of-page Tiles selector (only shown when the
@@ -176,7 +179,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         }
       } catch (err) {
         // Non-fatal; we'll fall back to loginId / 'Me'.
-        console.log(`DEBUG - StreamAudio: fetchUserAttributes failed: ${err}`);
+        logger.debug(`DEBUG - StreamAudio: fetchUserAttributes failed: ${err}`);
       }
     };
     if (authState === 'authenticated') {
@@ -236,8 +239,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const continueSessionRef = useRef(null);
 
   // Screen video (screen-video.js): offered only when the transcriber's
-  // settings answer allows it for this page, and off at the start of every
-  // meeting. `videoState.status` is off, waiting (for an opt-in meeting's
+  // settings answer allows it for this page; it goes back to off once a
+  // meeting has streamed (stopRecording). `videoState.status` is off, waiting (for an opt-in meeting's
   // consent), on, stopped (by the user) or failed (stopped on its own).
   const [videoEnabled, setVideoEnabled] = useState(false);
   // Whether the consent notice has been copied for this meeting (see videoSwitchLocked).
@@ -388,7 +391,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     try {
       tokens = (await fetchAuthSession()).tokens;
     } catch (error) {
-      console.log(`DEBUG - StreamAudio: no fresh session for the video connection: ${error}`);
+      logger.debug(`DEBUG - StreamAudio: no fresh session for the video connection: ${error}`);
     }
     tokens = tokens || currentSession?.tokens;
     return new window.WebSocket(
@@ -410,7 +413,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         callId,
         offsetMs: performance.now() - sinceMs,
         openSocket: openVideoSocket,
-        log: (message) => console.log(`DEBUG - StreamAudio video: ${message}`),
+        log: (message) => logger.debug(`DEBUG - StreamAudio video: ${message}`),
         onEvent: (event) => {
           if (screenVideoRef.current !== video) return;
           if (event.type === 'slow-keyframes') {
@@ -486,12 +489,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   };
 
   const stopRecording = async () => {
-    console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
+    logger.debug(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
     // The video ends with the meeting (the transcriber takes END_VIDEO and the
-    // audio's END in either order), and its switch goes back to off for the next one.
+    // audio's END in either order). Its switch goes back to off for the next
+    // meeting only once this one has streamed: a start that failed, or a share
+    // picker the user cancelled, keeps the user's choice for the next Start.
+    const streamed = audioStartedAtRef.current > 0;
+    audioStartedAtRef.current = 0;
     stopScreenVideo();
     screenVideoRef.current = null;
-    setVideoEnabled(false);
+    if (streamed) setVideoEnabled(false);
     setVideoState({ status: 'off', surface: null, message: '', slowGap: null });
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
@@ -503,7 +510,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       setMicMuted(false);
       setRecordedMeetingId(callMetaData.callId);
     } else {
-      console.log(`
+      logger.debug(`
         DEBUG - [${new Date().toISOString()}]: Error trying to stop recording. AudioWorklet Processor node is not active.
       `);
     }
@@ -522,7 +529,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     } else if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
       // eslint-disable-next-line prettier/prettier
-      console.log(`
+      logger.debug(`
         DEBUG - [${new Date().toISOString()}]: Send Call END msg: ${JSON.stringify(callMetaData)}
       `);
       // Nothing is sent if the transcriber already ended the meeting.
@@ -597,7 +604,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   }
 
   const startRecording = async () => {
-    console.log(`
+    logger.debug(`
       DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
     `);
     try {
@@ -662,7 +669,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
         }),
       };
       // eslint-disable-next-line prettier/prettier
-      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(startFrame)}`);
+      logger.debug(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(startFrame)}`);
       setConsentFrame(null);
       grantedAtRef.current = 0;
       setEvidenceFrame(null);
@@ -691,13 +698,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       monoMicSource.connect(channelMerger.current, 0, 0);
       monoDisplaySource.connect(channelMerger.current, 0, 1);
 
-      console.log(`
+      logger.debug(`
         DEBUG - [${new Date().toISOString()}]: Registering and adding AudioWorklet processor to capture audio
       `);
       try {
         await audioContext.current.audioWorklet.addModule('./worklets/recording-processor.js');
       } catch (error) {
-        console.log(`
+        logger.debug(`
           DEBUG - [${new Date().toISOString()}]: Error registering AudioWorklet processor: ${error}
         `);
       }
@@ -705,7 +712,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor');
 
       audioProcessor.current.port.onmessageerror = (error) => {
-        console.log(`
+        logger.debug(`
           DEBUG - [${new Date().toISOString()}]: Error receiving message from worklet ${error}
         `);
       };
@@ -719,10 +726,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       if (videoOn) {
         // Video starts once the meeting's consent allows capture: at once,
         // except in opt-in, where it waits for the consent to be granted.
-        if (consentSettings?.mode === CONSENT_MODE_OPT_IN && !grantedAtRef.current) {
+        // Its offset is measured from the grant in opt-in, and from the audio
+        // start otherwise.
+        const optIn = consentSettings?.mode === CONSENT_MODE_OPT_IN;
+        if (optIn && !grantedAtRef.current) {
           pendingVideoRef.current = { callId: recordingCallMetaData.callId };
         } else {
-          beginScreenVideo(recordingCallMetaData.callId, grantedAtRef.current || audioStartedAtRef.current);
+          beginScreenVideo(recordingCallMetaData.callId, optIn ? grantedAtRef.current : audioStartedAtRef.current);
         }
       }
     } catch (error) {

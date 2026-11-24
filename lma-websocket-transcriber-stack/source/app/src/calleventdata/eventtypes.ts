@@ -287,9 +287,10 @@ export type SocketCallData = {
     ownerSub?: string
     /**
      * The client that opened this session, from its START's clientType
-     * (capture-context.ts captureSourceFor). Decides whether a START_VIDEO for
-     * the session is admitted and what its key frames are recorded as
-     * (video-admission.ts).
+     * (capture-context.ts captureSourceFor). Names what the session's key
+     * frames are recorded as (video-admission.ts keyframeSourceFor); an
+     * undefined capture source is treated as the streaming API's. It plays no
+     * part in whether a START_VIDEO is admitted.
      */
     captureSource?: StreamingCaptureSource
     /**
