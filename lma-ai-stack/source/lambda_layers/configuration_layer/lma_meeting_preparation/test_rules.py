@@ -72,7 +72,9 @@ def test_a_label_value_is_at_most_256_characters():
         rules.normalize_labels([{"Key": "k", "Value": "v" * 257}])
 
 
-@pytest.mark.parametrize("value", ["two\nlines", "two\r\nlines", "ends\n", "line\u2028separator"])
+@pytest.mark.parametrize(
+    "value", ["two\nlines", "two\r\nlines", "ends\n", "line\u2028separator", "vertical\x0btab"]
+)
 def test_a_label_value_with_a_line_break_is_refused(value):
     """The meeting page's label editor shows one label per line."""
     with pytest.raises(PreparationError, match="label k must not contain a line break"):

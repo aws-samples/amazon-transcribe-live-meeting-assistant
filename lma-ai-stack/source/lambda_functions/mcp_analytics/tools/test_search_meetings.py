@@ -303,7 +303,7 @@ class TestDateBounds(unittest.TestCase):
             [{"lessThanOrEquals": {"key": "CreatedAtEpochSeconds", "value": 1793577599}}],
         )
 
-    def test_every_iso_8601_date_only_form_is_a_whole_day(self):
+    def test_the_basic_and_week_date_forms_are_a_whole_day(self):
         """The basic and week forms are dates alone too, not midnight."""
         for value in ("20261101", "2026-W44-7"):
             self.assertEqual(
@@ -335,6 +335,19 @@ class TestDateBounds(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self._conditions(end_date="2026-13-01")
         self.assertIn("endDate must be an ISO 8601 date", str(ctx.exception))
+
+    def test_a_date_that_is_not_one_is_refused_before_any_other_check(self):
+        """Also on a stack without a knowledge base or a model, and with no AWS call."""
+        with (
+            patch.dict(os.environ, {"TRANSCRIPT_KB_ID": "", "MODEL_ARN": ""}, clear=False),
+            patch.object(search_meetings, "_configured_model_id") as model,
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                search_meetings.execute(query="q", start_date="2026-305")
+        self.assertIn("startDate must be an ISO 8601 date", str(ctx.exception))
+        model.assert_not_called()
+        mock_boto3.client.assert_not_called()
 
 
 class TestInputValidation(unittest.TestCase):

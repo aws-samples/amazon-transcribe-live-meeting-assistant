@@ -874,7 +874,9 @@ CREATED_AT_EPOCH_KEY = "CreatedAtEpochSeconds"
 def epoch_seconds(timestamp):
     """An ISO 8601 time as whole seconds since the epoch, or None if it is not one.
 
-    A time without an offset is read as UTC, as LMA writes its times in UTC.
+    A time without an offset is read as UTC, as LMA writes its times in UTC, and as
+    _date_bound in mcp_analytics/tools/search_meetings.py reads the dates it filters
+    on; keep the two in step.
     """
     if not isinstance(timestamp, str) or not timestamp.strip():
         return None

@@ -31,12 +31,15 @@ def _date_bound(value: str, argument: str, end_of_day: bool) -> int:
     """``value``, an ISO 8601 date or date and time, as seconds since the epoch.
 
     A date alone stands for the whole day in UTC: its first second as a start,
-    its last second as an end. A time without an offset is read as UTC.
+    its last second as an end. A time without an offset is read as UTC, as
+    ``epoch_seconds`` in bedrock_summary_lambda reads the CreatedAt it converts;
+    keep the two in step.
     """
     text = value.strip() if isinstance(value, str) else ""
     try:
         try:
-            # Every date-only form ISO 8601 has (2026-11-30, 20261130, 2026-W48-1).
+            # The calendar and week date forms Python reads (2026-11-30, 20261130,
+            # 2026-W48-1); ordinal and reduced-precision dates are refused below.
             day = datetime.combine(date.fromisoformat(text), time(), tzinfo=timezone.utc)
         except ValueError:
             day = None
@@ -116,32 +119,8 @@ def execute(
     if not query:
         raise ValueError("Query is required")
 
-    kb_id = os.environ.get("TRANSCRIPT_KB_ID")
-
-    if not kb_id:
-        raise ValueError("Transcript Knowledge Base not configured")
-
-    # Resolve the model ARN. Prefer the configured model (builds correct ARN type
-    # for both foundation models and inference profiles). Fall back to the
-    # legacy pre-built MODEL_ARN for backward compatibility.
-    model_id = _configured_model_id()
-    if model_id:
-        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        account_id = (
-            os.environ.get("AWS_ACCOUNT_ID") or boto3.client("sts").get_caller_identity()["Account"]
-        )
-        model_arn = _build_model_arn(model_id, region, account_id)
-    else:
-        model_arn = os.environ.get("MODEL_ARN")
-
-    if not model_arn:
-        raise ValueError(
-            "Bedrock model not configured: choose one in the Amazon Bedrock Models section of the Configuration page"
-        )
-
-    kb_client = boto3.client("bedrock-agent-runtime")
-
-    # Build metadata filters for UBAC and date range
+    # Build metadata filters for UBAC and date range. First, so a date that is
+    # not one is refused as such on any stack.
     filters = []
 
     # UBAC: Non-admin users see only their meetings. The key is the one the summary
@@ -171,6 +150,31 @@ def execute(
                 }
             }
         )
+
+    kb_id = os.environ.get("TRANSCRIPT_KB_ID")
+
+    if not kb_id:
+        raise ValueError("Transcript Knowledge Base not configured")
+
+    # Resolve the model ARN. Prefer the configured model (builds correct ARN type
+    # for both foundation models and inference profiles). Fall back to the
+    # legacy pre-built MODEL_ARN for backward compatibility.
+    model_id = _configured_model_id()
+    if model_id:
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        account_id = (
+            os.environ.get("AWS_ACCOUNT_ID") or boto3.client("sts").get_caller_identity()["Account"]
+        )
+        model_arn = _build_model_arn(model_id, region, account_id)
+    else:
+        model_arn = os.environ.get("MODEL_ARN")
+
+    if not model_arn:
+        raise ValueError(
+            "Bedrock model not configured: choose one in the Amazon Bedrock Models section of the Configuration page"
+        )
+
+    kb_client = boto3.client("bedrock-agent-runtime")
 
     # Build retrieval configuration
     retrieval_config = {"vectorSearchConfiguration": {"numberOfResults": max_results}}

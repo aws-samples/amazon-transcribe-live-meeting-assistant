@@ -91,9 +91,8 @@ def test_a_date_bounded_search_is_answered(observed) -> None:
 
 
 def test_a_search_date_that_is_no_date_is_refused_naming_the_argument(observed) -> None:
+    """Checked before the knowledge base and the model, so on every stack."""
     refused = observed["date_search_bad_date"]
-    if "Knowledge Base not configured" in refused["text"]:
-        pytest.skip("the stack has no transcript knowledge base")
     assert refused["error"], refused["text"]
     assert "startDate must be an ISO 8601 date" in refused["text"], refused["text"]
 
