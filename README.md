@@ -18,7 +18,7 @@ More demos, including meeting consent and compliance, an AI coach for a requirem
 
 **It joins the meeting for you, on any platform**
 - **Virtual Participant:** paste a meeting link and a Virtual Participant joins Zoom, Teams, Google Meet, Webex or Chime as a guest, now or at a scheduled time. It introduces itself in the chat and leaves when the meeting ends. ([Virtual Participant](./docs/virtual-participant.md))
-- **Capture without a bot:** stream from the web app's Stream Audio tab, the Chrome extension, or the native **Desktop Capture App** for macOS and Windows. ([Meeting Sources](./docs/meeting-sources.md))
+- **Capture without a bot:** stream from the web app's Stream Audio/Video tab, the Chrome extension, or the native **Desktop Capture App** for macOS and Windows. ([Meeting Sources](./docs/meeting-sources.md))
 
 **A live transcript, in the language you read best**
 - **Live transcript:** each line appears seconds after it's spoken, labelled with its speaker, with live translation into 75+ languages. Search it, filter by speaker, and play the recording from any line. ([Transcription & Translation](./docs/transcription-and-translation.md))
@@ -56,7 +56,7 @@ More demos, including meeting consent and compliance, an AI coach for a requirem
 
 A meeting is captured by:
 - the Virtual Participant, which runs on AWS Lambda MicroVMs by default;
-- the Stream Audio tab;
+- the Stream Audio/Video tab;
 - the Chrome extension;
 - the Desktop Capture App.
 

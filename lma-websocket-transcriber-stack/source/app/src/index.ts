@@ -976,7 +976,7 @@ const onTextMessage = async (
             ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
             return;
         }
-        // The Stream Audio page and the browser extension send video only
+        // The Stream Audio/Video page and the browser extension send video only
         // when the deployment records it and the Meeting Recording setting, as
         // the meeting's START read it, allows it. Other clients keep the stack
         // switch alone: with it off, their stream is accepted and discarded.
@@ -1053,7 +1053,7 @@ const onTextMessage = async (
  * started). True when the frame was one of them.
  *
  * The CONSENT_SETTINGS answer also says whether the client the frame names
- * (`clientType`, as in START) may send screen video, so the Stream Audio
+ * (`clientType`, as in START) may send screen video, so the Stream Audio/Video
  * page and the browser extension offer video only where START_VIDEO would be
  * accepted. A meeting reads the setting again when it starts.
  */

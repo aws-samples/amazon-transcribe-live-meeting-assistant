@@ -30,7 +30,7 @@ const content = (
       <a href={`${DOCS_BASE}/meeting-sources/`} target="_blank" rel="noopener noreferrer">
         <Icon name="external" /> Meeting Sources comparison
       </a>{' '}
-      for a side-by-side of the Chrome Extension, Stream Audio, and Virtual Participant.
+      for a side-by-side of the Chrome Extension, Stream Audio/Video, and Virtual Participant.
     </p>
     <h3>Documentation</h3>
     <ul>

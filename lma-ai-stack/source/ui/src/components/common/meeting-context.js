@@ -35,7 +35,7 @@ export const SOURCE_UNKNOWN = 'unknown';
 
 const SOURCE_LABELS = {
   [SOURCE_VIRTUAL_PARTICIPANT]: 'Virtual Participant',
-  [SOURCE_STREAM_AUDIO]: 'Stream Audio or the browser extension',
+  [SOURCE_STREAM_AUDIO]: 'Stream Audio/Video or the browser extension',
   [SOURCE_DESKTOP_APP]: 'Desktop Capture App',
   [SOURCE_UPLOAD]: 'Uploaded recording',
   [SOURCE_UNKNOWN]: 'Not known (an MCP client, the API, or a Meeting ID typed by hand)',
@@ -44,7 +44,7 @@ const SOURCE_LABELS = {
 // The values of the meeting record's CaptureSource, and how each reads.
 const RECORDED_SOURCES = {
   VIRTUAL_PARTICIPANT: { kind: SOURCE_VIRTUAL_PARTICIPANT, label: 'Virtual Participant' },
-  STREAM_AUDIO: { kind: SOURCE_STREAM_AUDIO, label: 'Stream Audio' },
+  STREAM_AUDIO: { kind: SOURCE_STREAM_AUDIO, label: 'Stream Audio/Video' },
   BROWSER_EXTENSION: { kind: SOURCE_BROWSER_EXTENSION, label: 'Browser extension' },
   DESKTOP_APP: { kind: SOURCE_DESKTOP_APP, label: 'Desktop Capture App' },
   UPLOAD: { kind: SOURCE_UPLOAD, label: 'Uploaded recording' },

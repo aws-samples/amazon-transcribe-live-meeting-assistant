@@ -32,7 +32,7 @@ LMA is deployed as a set of 11 nested CloudFormation stacks providing a fully se
 
 ## Processing Flow
 
-1. **User starts meeting** via the Stream Audio tab or by launching a Virtual Participant.
+1. **User starts meeting** via the Stream Audio/Video tab or by launching a Virtual Participant.
 2. A **secure WebSocket connection** is established to the Fargate-based WebSocket server.
 3. **Two-channel audio** is streamed to Amazon Transcribe.
 4. **Transcription results** are written to a Kinesis Data Stream in real time.

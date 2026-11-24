@@ -12,8 +12,8 @@
  * fragmented-MP4 chunks and END_VIDEO (videorecording.ts). The Desktop Capture
  * App, and any client of the streaming API that does not name itself, may do so
  * whenever the deployment records video (the EnableVideoRecording stack
- * parameter). The Stream Audio page and the browser extension may do so
- * only when Meeting Recording › Record screen video from Stream Audio and
+ * parameter). The Stream Audio/Video page and the browser extension may do so
+ * only when Meeting Recording › Record screen video from Stream Audio/Video and
  * the browser extension is on as well, as the meeting's audio START read it.
  *
  * Kept free of AWS clients so it can be tested directly.
@@ -40,7 +40,7 @@ export const isBrowserVideoClient = (source: StreamingCaptureSource | undefined)
 export interface VideoSwitches {
     /** The EnableVideoRecording stack parameter (ENABLE_VIDEO_RECORDING). */
     readonly stackRecordsVideo: boolean;
-    /** Meeting Recording › Record screen video from Stream Audio and the browser extension. */
+    /** Meeting Recording › Record screen video from Stream Audio/Video and the browser extension. */
     readonly recordBrowserVideo: boolean;
 }
 

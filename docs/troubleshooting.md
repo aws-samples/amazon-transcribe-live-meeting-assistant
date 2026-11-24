@@ -176,7 +176,7 @@ its shutdown never runs:
   doing so (automatic cleanup on uncaught errors was added in v0.3.0).
 - **Uploaded recording**: `upload_meeting_finalizer` sends it when the Amazon
   Transcribe batch job reaches `COMPLETED` or `FAILED`.
-- **Streamed audio** (Stream Audio tab, Desktop Capture App, browser
+- **Streamed audio** (Stream Audio/Video tab, Desktop Capture App, browser
   extension): the WebSocket server sends it when the connection closes. If the
   Fargate task hosting the connection goes away without running its close
   handler, the `StaleMeetingReaper` Lambda ends the meeting instead. It runs

@@ -161,7 +161,7 @@ capabilities:
     description: >-
       A meeting that has ended, or whose capture stopped too early, can be continued
       under the same meeting ID instead of starting a new one, so its transcript,
-      meeting page and consent record stay together. Stream Audio, the Chrome
+      meeting page and consent record stay together. Stream Audio/Video, the Chrome
       extension and the Desktop Capture App take the meeting's ID or page link and
       continue it; a Virtual Participant does the same with Join again; the CLI and
       the SDK reopen a meeting for a streaming client, and API clients call the
@@ -205,9 +205,9 @@ capabilities:
     related: [capability:virtual-participant, capability:in-meeting-requests]
 
   - id: stream-audio
-    title: Stream Audio from the web app (microphone and a Chrome tab)
+    title: Stream Audio/Video from the web app (microphone and a Chrome tab)
     description: >-
-      The web app's Stream Audio page captures the user's microphone and the audio of
+      The web app's Stream Audio/Video page captures the user's microphone and the audio of
       any Chrome tab, such as a meeting joined in the browser, and streams both
       channels for transcription without adding a bot to the meeting. It needs no
       install, but it has no meeting-platform metadata, so remote speakers are told
@@ -276,7 +276,7 @@ capabilities:
   - id: embeddable-components
     title: Embeddable transcript, assistant, stream and Virtual Participant views
     description: >-
-      LMA views (Stream Audio, Upload Audio, a meeting's transcript, summary and
+      LMA views (Stream Audio/Video, Upload Audio, a meeting's transcript, summary and
       assistant, and a Virtual Participant with its live view) can be embedded in
       another web application in an iframe, with a postMessage API and three
       authentication options.
@@ -687,7 +687,8 @@ capabilities:
     title: Meeting video, key frames of the shared screen and searchable slide text
     description: >-
       A Virtual Participant can record the meeting video, and the Desktop Capture App
-      can stream screen video. LMA keeps key frames of the shared screen, reads their
+      and, where an administrator turns it on, the Stream Audio/Video page can stream
+      screen video. LMA keeps key frames of the shared screen, reads their
       text with a vision model, links each to the moment it was shown, and uses them
       in a screen-share summary, chapters and the assistant's answers ("summarize that
       slide"). Key frames can be exported.
@@ -782,7 +783,7 @@ capabilities:
       A deployment chooses Off, Notify (any objection stops capture) or Opt-in
       (nothing is captured until every participant agrees, or the owner attests that
       everyone did). The Virtual Participant posts the notice in the chat, reads typed
-      and spoken replies, and keeps screenshots as evidence; Stream Audio and the
+      and spoken replies, and keeps screenshots as evidence; Stream Audio/Video and the
       Desktop Capture App show a consent step the user attests. Every meeting keeps a
       record of the notice, replies and evidence. A reply said aloud to a Virtual
       Participant while the meeting is transcribed also records the transcript line

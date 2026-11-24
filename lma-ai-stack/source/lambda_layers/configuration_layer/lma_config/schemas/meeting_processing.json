@@ -37,7 +37,7 @@
       "order": 3,
       "type": "string",
       "title": "Default summary profile for new meetings",
-      "description": "The summary profile a meeting is given when it starts without one: a Virtual Participant started or scheduled with the Default profile, Stream Audio, the Desktop Capture App, the browser extension and uploaded recordings. default, the shipped value, gives such a meeting no profile, so it is summarized with the Transcript Summary prompts. Another name is written on the meeting when it starts, where its owner can see it and change it on the meeting page before the summary. A name that is not in the Summary Profiles section when the summary is written is summarized with the default, and the summary records the profile it asked for.",
+      "description": "The summary profile a meeting is given when it starts without one: a Virtual Participant started or scheduled with the Default profile, Stream Audio/Video, the Desktop Capture App, the browser extension and uploaded recordings. default, the shipped value, gives such a meeting no profile, so it is summarized with the Transcript Summary prompts. Another name is written on the meeting when it starts, where its owner can see it and change it on the meeting page before the summary. A name that is not in the Summary Profiles section when the summary is written is summarized with the default, and the summary records the profile it asked for.",
       "examples": ["default", "discovery-session"],
       "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
     }

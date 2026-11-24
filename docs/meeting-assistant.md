@@ -134,7 +134,7 @@ meeting is answered at all. The meeting page's own chat is never affected.
 | Value | What is answered |
 |---|---|
 | **Anyone** (`anyone`, the default) | Every in-meeting request, as **In-meeting requests** above allows. |
-| **Owner only** (`owner_only`) | Only a request spoken with the wake phrase on the LMA user's own microphone, in a meeting streamed from Stream Audio, the Desktop Capture App or the browser extension, which capture that microphone as a channel of its own (`LOCAL`). Nothing else is answered: no question typed in the meeting chat, no request spoken in a meeting a Virtual Participant captures, and no wake phrase on the meeting audio. A Virtual Participant does not start its voice assistant. |
+| **Owner only** (`owner_only`) | Only a request spoken with the wake phrase on the LMA user's own microphone, in a meeting streamed from Stream Audio/Video, the Desktop Capture App or the browser extension, which capture that microphone as a channel of its own (`LOCAL`). Nothing else is answered: no question typed in the meeting chat, no request spoken in a meeting a Virtual Participant captures, and no wake phrase on the meeting audio. A Virtual Participant does not start its voice assistant. |
 | **Off** (`off`) | No request made in the meeting, on any capture method. A Virtual Participant does not start its voice assistant. |
 
 A Virtual Participant cannot tell the meeting's owner from a guest. It knows a

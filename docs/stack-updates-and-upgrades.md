@@ -373,7 +373,7 @@ or renamed.**
   preference applies. The meeting's `CustomerPhoneNumber` and
   `SystemPhoneNumber` attributes and GraphQL fields are unchanged.
   `CustomerPhoneNumber` holds the name given for the other participants (the
-  Stream Audio page's participant name, or "Virtual Participant"), which the
+  Stream Audio/Video page's participant name, or "Virtual Participant"), which the
   transcript shows in place of the placeholder speaker name, and it is passed to
   the start-of-call and end-of-call Lambda hooks as before. In the meeting list's
   Excel export, the column that held it is now `remoteParticipantName` (it was
@@ -383,7 +383,7 @@ or renamed.**
   `remoteSpeakerName` (the meeting audio). The older `agentId` and `fromNumber`
   are still accepted in every message, and `toNumber` is still accepted and
   stored, so existing clients need no change; if a message carries both
-  spellings, the documented one is used. The Stream Audio page, the embeddable
+  spellings, the documented one is used. The Stream Audio/Video page, the embeddable
   components, the browser extension and the sample CLI client send the new
   names. The Desktop Capture Apps still send the older ones, so they keep
   working against deployments of earlier versions. When a START names no remote

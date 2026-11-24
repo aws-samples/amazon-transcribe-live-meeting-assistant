@@ -215,7 +215,7 @@ Parameters:
     Description: >-
       Deploys the ASR MicroVM speech engine (open-source models on AWS Lambda
       MicroVMs in this account), an alternative to Amazon Transcribe for Stream
-      Audio, Chrome extension, Desktop Capture and Virtual Participant meetings;
+      Audio/Video, Chrome extension, Desktop Capture and Virtual Participant meetings;
       it also provides the speaker embeddings voice enrollment needs. Amazon
       Transcribe is the default engine for every meeting source: an admin moves
       a source onto the ASR MicroVM engine in the Transcription Engine section
@@ -783,7 +783,8 @@ Parameters:
     MaxValue: 20
     Description: >-
       Number of Fargate tasks running the WebSocket transcriber service (used by
-      the Stream Audio page and the desktop capture apps). Leave at 1 unless
+      the Stream Audio/Video page, the browser extension and the desktop capture
+      apps). Leave at 1 unless
       EnableVideoRecording is false: with video recording enabled, the desktop
       video stream arrives as a separate connection that must reach the task
       holding the meeting's audio session, which only a single task guarantees.

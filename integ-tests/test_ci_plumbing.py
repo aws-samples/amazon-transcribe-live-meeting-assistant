@@ -1422,6 +1422,22 @@ def test_the_browser_video_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_stream_page_video_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_STREAM_PAGE_VIDEO=1, Chromium and a display."""
+    import test_stream_page_video
+
+    names = [m.name for m in test_stream_page_video.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
+def test_the_stream_page_probe_finds_the_meeting_in_the_page_link() -> None:
+    from stream_page_probe import _call_id_from
+
+    assert _call_id_from("#/calls/Weekly%20sync%20-%202026-11-24") == "Weekly sync - 2026-11-24"
+    assert _call_id_from("") is None
+
+
 def test_the_browser_video_probe_expects_a_key_frame_for_each_slide_it_showed() -> None:
     """A slide counts once its first two seconds of video went out, placed after the session's offset."""
     from browser_video_probe import Leg, expected_timestamps

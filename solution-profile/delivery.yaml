@@ -13,8 +13,8 @@ day_one:
       - docs/prerequisites-and-deployment.md#deploy-the-cloudformation-stack
       - docs/privacy-and-data-handling.md#what-each-preset-sets
   - id: first-streamed-meeting
-    title: Sign in and capture a first meeting with Stream Audio
-    evidence: [docs/quick-start-guide.md#option-1-stream-audio-from-your-browser]
+    title: Sign in and capture a first meeting with Stream Audio/Video
+    evidence: [docs/quick-start-guide.md#option-1-stream-audiovideo-from-your-browser]
   - id: first-vp-meeting
     title: Send a Virtual Participant to a test meeting on the customer's main platform
     evidence: [docs/quick-start-guide.md#option-2-virtual-participant]

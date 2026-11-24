@@ -60,7 +60,7 @@ export interface RecordingSettings {
     /** The default for recording a meeting's audio; a client's own choice wins. */
     readonly recordAudio: boolean;
     /**
-     * Whether the Stream Audio page and the browser extension may send
+     * Whether the Stream Audio/Video page and the browser extension may send
      * screen video (START_VIDEO). The Desktop Capture App is not affected, and
      * the EnableVideoRecording stack parameter still decides whether any video
      * is recorded (see video-admission.ts).
@@ -70,7 +70,7 @@ export interface RecordingSettings {
 
 /**
  * The shipped default of Meeting Recording › Record screen video from Stream
- * Audio and the browser extension, used when the configuration does not
+ * Audio/Video and the browser extension, used when the configuration does not
  * hold the setting or cannot be read. No stack parameter backs it.
  * lma-ai-stack/test/test_parameter_backed_settings.py holds it to
  * setting_defaults.json.

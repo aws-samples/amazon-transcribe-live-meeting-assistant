@@ -1,6 +1,8 @@
-# Extra Python deps for the opt-in desktop video test (test_desktop_video.py),
+# Extra Python deps for the opt-in video tests (test_desktop_video.py,
+# test_browser_video.py and test_stream_page_video.py),
 # on top of requirements.txt. Kept separate so the default and scheduled runs do
 # not download an ffmpeg they never use. Install with:
 #   .venv/bin/pip install -r integ-tests/requirements.txt -r integ-tests/requirements-video.txt
 pillow>=10.1          # renders the slides (ImageFont.load_default(size=...) needs 10.1)
 imageio-ffmpeg>=0.5   # a static ffmpeg with libx264; LMA_TEST_FFMPEG or ffmpeg on PATH is used first
+playwright>=1.48     # drives the Stream Audio/Video page in Chromium (test_stream_page_video.py); then: python -m playwright install chromium

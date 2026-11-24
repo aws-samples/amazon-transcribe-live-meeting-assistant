@@ -100,7 +100,7 @@ const BrowserExtension = () => {
             <Alert type="warning" header="Chromium-based browser recommended">
               This extension is packaged for Chrome and other Chromium-based browsers (Microsoft Edge, Brave, Arc). It
               won&apos;t install on Firefox or Safari. If you&apos;re on a non-Chromium browser, use{' '}
-              <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio (from Mic+Browser)</Link> or{' '}
+              <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio/Video (from Mic+Browser)</Link> or{' '}
               <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link> instead.
             </Alert>
           )}

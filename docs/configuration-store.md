@@ -552,7 +552,7 @@ do everything they did, and their addresses (`/#/configuration/transcript-summar
 The **Edit Chat Buttons** dialog in a meeting's chat panel stays, because it is used
 in the context of a meeting; it saves the same section. The per-section GraphQL
 operations stay too, because other readers use them: every chat panel reads
-`getChatButtonConfig`, the Stream Audio and Upload Audio forms and the Virtual
+`getChatButtonConfig`, the Stream Audio/Video and Upload Audio forms and the Virtual
 Participant read `getAsrConfig`, and `getNovaSonicConfig` keeps its IAM
 authorization for backend callers. Their saves are checked against the same
 schemas.
@@ -1207,7 +1207,7 @@ Participant asks for per-voice labels — are the `asr_engine` section.
   separation switch through it, and that switch applies on Amazon Transcribe too.
   On a deployment without the on-demand engine the Configuration page shows only
   that switch in the section, since the engine choices have nothing to select. The
-  read stays open to every signed-in user and to IAM — the Stream Audio and
+  read stays open to every signed-in user and to IAM — the Stream Audio/Video and
   Upload Audio forms read it, and the Virtual Participant reads its two switches
   with SigV4 — and answers with the *effective* switches plus `Version`. The
   write stays Admin-only and is conditional on the version the page loaded.

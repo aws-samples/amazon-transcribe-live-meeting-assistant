@@ -31,7 +31,7 @@ questions:
       - when: a platform outside the five
         then: >-
           The Virtual Participant cannot join it; capture from the user's own
-          computer with the Desktop Capture App or Stream Audio, or plan a core
+          computer with the Desktop Capture App or Stream Audio/Video, or plan a core
           enhancement. See docs/meeting-sources.md.
         refs: [capability:desktop-capture-app, capability:stream-audio, extension:core-enhancement]
       - when: Microsoft Teams
@@ -69,7 +69,7 @@ questions:
     implications:
       - when: bots not allowed
         then: >-
-          Use the Chrome extension, Stream Audio or the Desktop Capture App, which
+          Use the Chrome extension, Stream Audio/Video or the Desktop Capture App, which
           capture from the attending user's computer. See docs/meeting-sources.md.
         refs: [capability:browser-extension, capability:desktop-capture-app, limitation:no-bot-capture-needs-the-user-present]
       - when: guests allowed with a lobby
@@ -215,7 +215,7 @@ questions:
       - when: every participant must agree first
         then: >-
           Use Opt-in with the each-participant rule, through the Virtual Participant;
-          Stream Audio and the desktop app rely on the user's attestation, and Webex
+          Stream Audio/Video and the desktop app rely on the user's attestation, and Webex
           cannot grant it. See docs/meeting-consent.md.
         refs: [capability:configuration-presets, limitation:webex-no-participant-list]
       - when: notice with the right to object

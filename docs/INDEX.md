@@ -17,7 +17,7 @@ title: "LMA Documentation"
 ### Getting Started
 
 - [Prerequisites & Deployment](prerequisites-and-deployment.md) — AWS account setup, Bedrock model access, CloudFormation deployment, initial login
-- [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio or Virtual Participant
+- [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio/Video or Virtual Participant
 - [Demo Videos](demo-videos.md) — Recorded walkthroughs of LMA features, and how to record and publish a new one
 - [LMA in Action](lma-in-action.md) — An illustrated one-page tour of what LMA does and what sets it apart
 
@@ -41,7 +41,7 @@ title: "LMA Documentation"
 ### Meeting Sources
 
 - [Meeting Sources Overview](meeting-sources.md) — Side-by-side comparison of the three capture options and guidance on when to use each
-- [Stream Audio](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab
+- [Stream Audio/Video](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab, with optional screen video
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Desktop Capture App](desktop-capture-app.md) — Native macOS / Windows app (menu bar / system tray) that captures system + mic audio for meetings joined from native desktop apps (no browser, no bot)
