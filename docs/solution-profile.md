@@ -7,7 +7,7 @@ title: "Solution Profile"
 
 # Solution Profile
 
-LMA publishes a **solution profile** with every release: a small, versioned,
+LMA publishes a **solution profile** with every final release: a small, versioned,
 machine-readable description of what LMA does, where it can be extended, where it
 stops, the questions that test whether it fits a need, and how a deployment usually
 starts. It is meant for AI assistants and for people who judge, early in a project,
@@ -136,9 +136,14 @@ for the tag. Publishing that release runs
 3. builds the tarball, validates the unpacked copy, and
 4. uploads the tarball, its `.sha256` and its `.build.json` to the release.
 
+A release published with GitHub's pre-release flag set runs nothing and gets no
+profile asset. A pre-release tag published without that flag fails at the first
+step.
+
 The workflow can also be run by hand from the Actions tab for one tag, to attach the
 profile to a release published before the workflow ran or to re-run it. A tag from
-before the profile existed has nothing to build and fails at the second step.
+before the profile existed has nothing to build and fails at the second step, and a
+pre-release tag fails at the first.
 
 ## Reviewing the profile for a release
 
