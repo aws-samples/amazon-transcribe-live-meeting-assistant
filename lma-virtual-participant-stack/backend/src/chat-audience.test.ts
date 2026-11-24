@@ -103,6 +103,18 @@ test('Zoom: a private consent reply, command or question is not acted on; one to
     }
 });
 
+test('Zoom: a sender whose display name holds a comma is read, and the recipient with it', () => {
+    for (const label of ['Strahan, Bob to Everyone: LMA leave', 'Strahan, Bob to Everyone, 10:42 AM, LMA leave']) {
+        const { sender, recipient, body } = parseZoomChatLabel(label);
+        assert.equal(sender, 'Strahan, Bob', label);
+        assert.equal(body, 'LMA leave', label);
+        assert.equal(new ChatAddressing(() => BOB).route(body, sender, zoomChatAudience(recipient)).act, true, label);
+    }
+    const { sender, recipient, body } = parseZoomChatLabel('Strahan, Bob to You (Direct Message): LMA leave');
+    assert.equal(sender, 'Strahan, Bob');
+    assert.equal(new ChatAddressing(() => BOB).route(body, sender, zoomChatAudience(recipient)).act, false);
+});
+
 test('Zoom: a label in another language shows no recipient, and is not acted on', () => {
     const { sender, recipient, body } = parseZoomChatLabel('Bo Chen an Alle: LMA, I consent');
     assert.equal(sender, null);
@@ -167,7 +179,9 @@ const RECIPIENT: Record<string, RegExp> = {
 };
 
 test('every handler routes chat with what it read of the recipient', () => {
-    assert.match(source('zoom.ts'), /const audience = zoomChatAudience\(recipient\);\s*(?:\/\/.*\s*)*const route = chatAddressing\.route/);
+    const zoom = source('zoom.ts');
+    const read = zoom.indexOf('const audience = zoomChatAudience(recipient);');
+    assert.ok(read >= 0 && zoom.indexOf('chatAddressing.route(rawBody, sender, audience)', read) > read);
     assert.match(source('zoom-sdk.ts'), /const audience = zoomSdkChatAudience\(chat\.receiverId, chat\.receiverName\);/);
     for (const [file, call] of Object.entries(RECIPIENT)) assert.match(source(file), call, file);
 });
@@ -178,7 +192,10 @@ test('every handler stops at a message it does not act on, before any consent re
         const at = body.search(RECIPIENT[file]);
         const gate = body.indexOf('if (!route.act)', at);
         assert.ok(gate > at, `${file}: no route.act gate`);
-        // The end of the gate's block: its return or continue.
+        // The end of the gate's block: its return or continue. The 900 and
+        // 3000 characters below are size heuristics for the gate's block and
+        // for the handler code before the route call; widen them if a handler
+        // grows past them.
         const block = body.slice(gate, gate + 900);
         const exit = block.search(/\b(return|continue);/);
         assert.ok(exit >= 0, `${file}: the gate does not stop`);
