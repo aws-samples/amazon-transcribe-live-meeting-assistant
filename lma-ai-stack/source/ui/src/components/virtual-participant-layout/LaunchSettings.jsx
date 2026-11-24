@@ -138,6 +138,7 @@ LaunchSettings.propTypes = {
     agendaSource: PropTypes.string,
     enableVideoRecording: PropTypes.bool,
     videoRecordingOffReason: PropTypes.string,
+    status: PropTypes.string,
     guidanceEnabled: PropTypes.bool,
     consentMode: PropTypes.string,
     consentRule: PropTypes.string,

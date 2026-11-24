@@ -124,14 +124,27 @@ VIDEO_RECORDING_OFF_NOTES = {
 }
 
 
-def video_recording_fields(vp: Mapping[str, Any]) -> Dict[str, Any]:
+#: The note for a scheduled Virtual Participant, which reads the setting again
+#: when it starts.
+SCHEDULED_VIDEO_RECORDING_OFF_NOTE = (
+    "Meeting video will not be recorded unless Meeting Recording > Record Virtual Participant "
+    "meeting video is turned on before the Virtual Participant starts; it is off on the "
+    "Configuration page now. Audio and the transcript are recorded."
+)
+
+
+def video_recording_fields(vp: Mapping[str, Any], *, scheduled: bool = False) -> Dict[str, Any]:
     """``videoRecording: "off"`` and a ``videoRecordingNote`` saying why, when the
     row createVirtualParticipant returned names a reason; nothing otherwise.
 
     The Virtual Participant reads the setting again when it starts, which is
-    what decides.
+    what decides, so for a ``scheduled`` one the note says the value then
+    decides.
     """
     reason = vp.get("videoRecordingOffReason")
-    if reason in VIDEO_RECORDING_OFF_NOTES:
-        return {"videoRecording": "off", "videoRecordingNote": VIDEO_RECORDING_OFF_NOTES[reason]}
-    return {}
+    if reason not in VIDEO_RECORDING_OFF_NOTES:
+        return {}
+    note = VIDEO_RECORDING_OFF_NOTES[reason]
+    if scheduled and reason == "configuration":
+        note = SCHEDULED_VIDEO_RECORDING_OFF_NOTE
+    return {"videoRecording": "off", "videoRecordingNote": note}

@@ -185,6 +185,8 @@ class TestVideoRecordingSetting(_ToolHarness):
             self.assertIn(
                 "Record Virtual Participant meeting video", self.result["videoRecordingNote"]
             )
+        # The scheduled one says the setting at its start decides.
+        self.assertIn("before the Virtual Participant starts", self.result["videoRecordingNote"])
 
     def test_a_row_without_one_says_nothing_about_video(self):
         common, _when = self.base()

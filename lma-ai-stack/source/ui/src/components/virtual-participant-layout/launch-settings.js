@@ -130,8 +130,15 @@ export const describeToggle = (value) => {
  * deployment or the Configuration page refused it (videoRecordingOffReason,
  * written when the Virtual Participant is created and again when it starts).
  */
-export const describeVideoRecording = ({ enableVideoRecording, videoRecordingOffReason }) => {
+export const describeVideoRecording = ({ enableVideoRecording, videoRecordingOffReason, status }) => {
   if (videoRecordingOffReason === 'configuration') {
+    // A scheduled one reads the setting again when it starts, which decides.
+    if (status === 'SCHEDULED') {
+      return (
+        'Off unless Record Virtual Participant meeting video is on when it starts ' +
+        '(it was off on the Configuration page when this was scheduled)'
+      );
+    }
     return 'Off: Record Virtual Participant meeting video is off on the Configuration page';
   }
   if (videoRecordingOffReason === 'deployment') {

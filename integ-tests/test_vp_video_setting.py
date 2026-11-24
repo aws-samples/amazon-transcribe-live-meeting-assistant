@@ -18,16 +18,17 @@ fails part-way leaves the deployment's setting as it found it.
     A Virtual Participant scheduled a day ahead that asks for video is stored
     with videoRecordingOffReason "configuration" by createVirtualParticipant,
     and with its own enableVideoRecording kept as asked.
-``test_the_vp_applies_the_setting_saved_when_it_starts``
+``test_the_vp_applies_the_setting_saved_when_it_starts`` *(opt-in,* ``LMA_TEST_VP_VIDEO_LAUNCH=1`` *)*
     A Virtual Participant created while the setting is on (so its row has no
     reason), then launched after the setting is turned off, against a meeting
     ID that does not exist: the reason on its row can only have been written by
     the Virtual Participant itself when it started. Takes a few minutes, for
-    the launch.
+    the launch, and is opt-in because it places a Virtual Participant task.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -141,6 +142,10 @@ def test_create_records_why_the_video_will_not_be_recorded(client: LMAClient, re
         _end(client, vp_id, "integ-test VP video setting: cancelled before launch")
 
 
+@pytest.mark.skipif(
+    os.environ.get("LMA_TEST_VP_VIDEO_LAUNCH") != "1",
+    reason="launches a Virtual Participant task; set LMA_TEST_VP_VIDEO_LAUNCH=1 to run",
+)
 def test_the_vp_applies_the_setting_saved_when_it_starts(client: LMAClient, recording) -> None:
     recording.apply(recordVpMeetingVideo=True)
     vp_id = None

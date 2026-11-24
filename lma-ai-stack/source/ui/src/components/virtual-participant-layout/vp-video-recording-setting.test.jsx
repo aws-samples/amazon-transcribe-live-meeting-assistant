@@ -96,4 +96,20 @@ describe('Launch settings', () => {
     fireEvent.click(screen.getByText('Launch settings'));
     expect(screen.getByText(text)).toBeTruthy();
   });
+
+  it('says a scheduled one follows the setting saved when it starts', () => {
+    render(
+      <LaunchSettings
+        vp={{
+          id: 'vp-1',
+          meetingPlatform: 'ZOOM',
+          status: 'SCHEDULED',
+          enableVideoRecording: true,
+          videoRecordingOffReason: 'configuration',
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText('Launch settings'));
+    expect(screen.getByText(/^Off unless Record Virtual Participant meeting video is on when it starts/)).toBeTruthy();
+  });
 });

@@ -34,6 +34,11 @@ import { isMeetingUrl, zoomMeetingLinkHint } from './launch-settings';
 import { PLATFORM_OPTIONS, agendaIsTooLong, meetingIdError } from './vp-form';
 import { summaryProfileOptions } from '../../hooks/use-summary-profiles';
 
+/** Shown under a Record meeting video switch the deployment's setting has turned off. */
+export const VIDEO_RECORDING_OFF_TEXT =
+  'Meeting video is not recorded: Record Virtual Participant meeting video is off on the Configuration page ' +
+  '(Meeting Recording). The meeting is recorded as audio and transcript only.';
+
 /**
  * The fields of the Virtual Participant form, from the meeting name to video
  * recording, shared by the Create Virtual Participant form and the form that
@@ -44,11 +49,6 @@ import { summaryProfileOptions } from '../../hooks/use-summary-profiles';
  * not join through the Zoom Meeting SDK, and `browserProfileField` after it;
  * each form supplies its own.
  */
-/** Shown under a Record meeting video switch the deployment's setting has turned off. */
-export const VIDEO_RECORDING_OFF_TEXT =
-  'Meeting video is not recorded: Record Virtual Participant meeting video is off on the Configuration page ' +
-  '(Meeting Recording). The meeting is recorded as audio and transcript only.';
-
 const VirtualParticipantFormFields = ({
   form,
   onChange,

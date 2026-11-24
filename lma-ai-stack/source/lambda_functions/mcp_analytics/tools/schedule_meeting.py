@@ -310,7 +310,7 @@ def execute(
             "meetingUrl": get_meeting_url(call_id) if call_id else None,
             "virtualParticipantUrl": get_virtual_participant_url(vp_id),
             "message": f"Meeting scheduled successfully for {scheduled_time}. Virtual participant will join automatically.",
-            **video_recording_fields(vp_data),
+            **video_recording_fields(vp_data, scheduled=True),
         }
 
     except Exception as e:
