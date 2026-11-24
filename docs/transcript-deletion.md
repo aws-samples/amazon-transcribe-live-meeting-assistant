@@ -75,13 +75,14 @@ The configuration presets set both:
 | **Regulated – consent required, transcript not retained**, **Regulated – notify with opt-out, transcript not retained** | 15 minutes after the summary | Immediately |
 | **Team-hosted (external meetings)**, **Customer account** | Off | Off |
 
-The two Regulated presets also turn **Record meeting audio** and **Record screen
-video from streaming clients** off, so under them most meetings have no
-recording at all. A recording can still be made: a Virtual Participant records
-video unless its **Record meeting video** toggle is off or the stack's
-`EnableVideoRecording` parameter is `false`, which no preset can set. Those
-presets delete any such recording as soon as the summary is stored, rather than
-after the transcript's 15 minutes, because the presets are meant to keep no
+The two Regulated presets also turn **Record meeting audio**, **Record screen
+video from streaming clients** and **Record Virtual Participant meeting video**
+off, so under them most meetings have no recording at all. A recording can
+still be stored: an uploaded meeting keeps the file that was uploaded as its
+recording, and an Admin may turn a recording setting back on while keeping
+the preset's retention. Those presets
+delete any such recording as soon as the summary is stored, rather than after
+the transcript's 15 minutes, because the presets are meant to keep no
 recording, and nothing that comes after the summary needs one. The transcript
 keeps its 15 minutes, in which it can be read or downloaded.
 

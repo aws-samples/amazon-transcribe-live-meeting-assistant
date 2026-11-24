@@ -125,6 +125,28 @@ export const describeToggle = (value) => {
   return DEPLOYMENT_DEFAULT;
 };
 
+/**
+ * Whether the meeting's video is recorded: the launch's choice, unless the
+ * deployment or the Configuration page refused it (videoRecordingOffReason,
+ * written when the Virtual Participant is created and again when it starts).
+ */
+export const describeVideoRecording = ({ enableVideoRecording, videoRecordingOffReason, status }) => {
+  if (videoRecordingOffReason === 'configuration') {
+    // A scheduled one reads the setting again when it starts, which decides.
+    if (status === 'SCHEDULED') {
+      return (
+        'Off unless Record Virtual Participant meeting video is on when it starts ' +
+        '(it was off on the Configuration page when this was scheduled)'
+      );
+    }
+    return 'Off: Record Virtual Participant meeting video is off on the Configuration page';
+  }
+  if (videoRecordingOffReason === 'deployment') {
+    return 'Off: this deployment does not record meeting video (EnableVideoRecording)';
+  }
+  return describeToggle(enableVideoRecording);
+};
+
 /** The meeting consent choice as the form labels it, or the deployment default. */
 export const describeConsent = ({ consentMode, consentRule }) => {
   if (!consentMode) return DEPLOYMENT_DEFAULT;

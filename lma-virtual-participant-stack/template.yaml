@@ -254,9 +254,11 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Default for capturing meeting video (X11 screen recording) in addition to
-      audio. This is the per-deployment default; each Virtual Participant can
-      override it with the "Record meeting video" toggle in the LMA UI.
+      Whether Virtual Participants may capture meeting video (X11 screen
+      recording) in addition to audio. With "false" no Virtual Participant
+      records video. With "true", the Configuration page's Meeting Recording >
+      Record Virtual Participant meeting video setting and each launch's
+      "Record meeting video" switch decide.
 
   # Teams meeting-end detection. Defaults match
   # DEFAULT_ATTENDEE_WATCHDOG_CONFIG in backend/src/teams.ts (which applies
@@ -2898,6 +2900,11 @@ Resources:
             # Deployment default for video recording; overridden per-VP at task
             # launch by the Step Functions / scheduler "Record meeting video" toggle.
             - Name: ENABLE_VIDEO_RECORDING
+              Value: !Ref EnableVideoRecording
+            # The same parameter as a limit no launch overrides: with it false
+            # no Virtual Participant records video, whatever its launch asked
+            # for (backend/src/video-recording-rule.ts).
+            - Name: DEPLOYMENT_VIDEO_RECORDING
               Value: !Ref EnableVideoRecording
             - Name: VIDEO_RECORDINGS_KEY_PREFIX
               Value: !Ref VideoRecordingsPrefix

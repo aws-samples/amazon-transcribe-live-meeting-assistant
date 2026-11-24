@@ -29,7 +29,7 @@ from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, norm
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
 from tools.virtual_participants import pending_scheduled_vps_of_owner, update_scheduled_vp
-from tools.vp_preparation import platform_fields
+from tools.vp_preparation import platform_fields, video_recording_fields
 
 logger = logging.getLogger()
 
@@ -213,6 +213,7 @@ def execute(
             Owner
             SharedWith
             createdAt
+            videoRecordingOffReason
         }
     }
     """
@@ -309,6 +310,7 @@ def execute(
             "meetingUrl": get_meeting_url(call_id) if call_id else None,
             "virtualParticipantUrl": get_virtual_participant_url(vp_id),
             "message": f"Meeting scheduled successfully for {scheduled_time}. Virtual participant will join automatically.",
+            **video_recording_fields(vp_data, scheduled=True),
         }
 
     except Exception as e:

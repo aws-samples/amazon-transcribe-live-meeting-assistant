@@ -617,3 +617,45 @@ def test_the_vp_check_takes_the_summary_profile(profiles):
     assert validate(["summaryProfile"], summaryProfile="default")["summaryProfile"] is None
     with pytest.raises(index.BadRequestError, match="no summary profile"):
         validate(["summaryProfile"], summaryProfile="retro")
+
+
+# ── Record Virtual Participant meeting video ────────────────────────────────
+
+
+class FakeStore:
+    def __init__(self, values=None, error=None):
+        self.values, self.error, self.sections = values or {}, error, []
+
+    def get_section(self, name):
+        self.sections.append(name)
+        if self.error:
+            raise self.error
+
+        class Resolved:  # pylint: disable=too-few-public-methods
+            values = self.values
+
+        return Resolved()
+
+
+def video_recording(monkeypatch, store, field="virtualParticipantVideoRecording", identity=None):
+    monkeypatch.setattr(index, "_CONFIG_STORE", store)
+    return index.handler({"info": {"fieldName": field}, "identity": identity or {}}, None)
+
+
+@pytest.mark.parametrize("saved, answer", [(False, False), (True, True), (None, True)])
+def test_the_vp_pipeline_reads_record_vp_meeting_video(monkeypatch, saved, answer):
+    store = FakeStore({} if saved is None else {"recordVpMeetingVideo": saved})
+    assert video_recording(monkeypatch, store) is answer
+    assert store.sections == ["recording"]
+
+
+def test_a_setting_that_cannot_be_read_answers_none_rather_than_refusing(monkeypatch):
+    assert video_recording(monkeypatch, FakeStore(error=RuntimeError("AccessDenied"))) is None
+
+
+def test_the_form_reads_the_setting_as_any_signed_in_user(monkeypatch):
+    store = FakeStore({"recordVpMeetingVideo": False})
+    field = "getVirtualParticipantVideoRecording"
+    assert video_recording(monkeypatch, store, field, user("anyone@example.com")) is False
+    with pytest.raises(index.ForbiddenError):
+        video_recording(monkeypatch, store, field, {})

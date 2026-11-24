@@ -42,7 +42,7 @@ see [Retention: settings the stack limits](#retention-settings-the-stack-limits)
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with, by region, shown as a table with the source of every shipped price; change one to use your own rate, and export or import the whole table (see [Changing prices](meeting-cost-estimate.md#changing-prices)). Also opened from **Configuration ▸ Meeting Cost Prices** in the navigation | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames, and the **Model inference geography**: whether those models, the consent evidence check model and the Virtual Participant's page-automation model may run in any commercial AWS Region, only within this deployment's geography, or only in its Region (see [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed)) | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio/Video page, the browser extension and the desktop app, and of Virtual Participants: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel. Uploaded recordings use the language, or language identification with the language options | To streaming meetings that start after the save, to the next Virtual Participant to start, and to uploads started after the save |
-| Meeting Recording | Whether those meetings' audio is recorded when the client does not say, and whether streaming clients (the Stream Audio/Video page, the browser extension and the Desktop Capture App) may record screen video; one setting controls screen video from every streaming client (see [Meeting Video](meeting-video.md)) | To streaming meetings that start after the save, and to the next Virtual Participant to start |
+| Meeting Recording | Whether those meetings' audio is recorded when the client does not say, whether streaming clients (the Stream Audio/Video page, the browser extension and the Desktop Capture App) may record screen video, and whether a Virtual Participant may record the meeting's video; one setting controls screen video from every streaming client, and another Virtual Participant video, which overrides the Create Virtual Participant form's Record meeting video toggle when it is off (see [Meeting Video](meeting-video.md)) | To streaming meetings that start after the save, and to the next Virtual Participant to start |
 | Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript, whether its answers use Amazon Bedrock [prompt caching](meeting-assistant.md#prompt-caching), its reasoning effort, and what a request made in the meeting (the meeting chat, the voice assistant, the wake phrase) is answered from ([In-meeting requests](meeting-assistant.md#in-meeting-requests)), and whether such a request may read the meeting context and checklist ([Requests made in the meeting](meeting-context-and-checklist.md#requests-made-in-the-meeting)); the editable part of the assistant's instructions ([Assistant Instructions](meeting-assistant.md#assistant-instructions)); and, per installed MCP server and per skill, whether the assistant uses it and whether requests made in the meeting may ([Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one), [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile)) | To transcript segments processed, and answers started, about five minutes after the save or later |
 | Meeting Processing | Whether a transcript Lambda hook is sent partial segments, how long a meeting may go without speech before the inactive-meeting reaper ends it, and how far back the reaper looks | Within about five minutes of the save |
 | Virtual Participant | The name the Virtual Participant joins meetings under (see [More than one LMA in a meeting](virtual-participant.md#more-than-one-lma-in-a-meeting)), its voice assistant provider, activation mode, wake phrases and activation duration, the ElevenLabs agent and Simli face, how a Teams Virtual Participant decides its meeting has ended, and whether the meeting chat is added to the transcript (see [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript)) | To the next Virtual Participant to start |
@@ -424,6 +424,7 @@ The presets, by id:
 | Retention › Delete the recordings after the summary | Off | Off | Immediately | Immediately | Off | Off |
 | Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off |
 | Meeting Recording › Record screen video from streaming clients | On | On | Off | Off | Off | On |
+| Meeting Recording › Record Virtual Participant meeting video | On | On | Off | Off | Off | On |
 | Virtual Participant › Add the meeting chat to the transcript | On | On | Off | Off | On | On |
 | Amazon Transcribe › Redact personal information | Off | Off | On | On | Off | Off |
 | Amazon Bedrock Models › Model inference geography | Global | Global | Same geography as this deployment | Same geography as this deployment | Global | Global |
@@ -499,11 +500,13 @@ posture of either Regulated preset also sets them when the stack is deployed or 
 - `AudioRecordingExpirationInDays` and `CloudWatchLogsExpirationInDays` — how
   long recordings and logs are kept.
 - `EnableVideoRecording` — meeting video from the Virtual Participant, the
-  Desktop Capture App, the Stream Audio/Video page and the browser extension. A
-  Virtual Participant's video is also chosen per meeting, and the streaming
-  clients' video (the Stream Audio/Video page, the browser extension and the
-  Desktop Capture App) also needs Meeting Recording › Record screen video from
-  streaming clients.
+  Desktop Capture App, the Stream Audio/Video page and the browser extension.
+  With it `false` no video is recorded, whatever the settings say. With it
+  `true`, a Virtual Participant's video also needs Meeting Recording › Record
+  Virtual Participant meeting video and the meeting's own Record meeting video
+  toggle, and the streaming clients' video (the Stream Audio/Video page, the
+  browser extension and the Desktop Capture App) also needs Meeting Recording ›
+  Record screen video from streaming clients.
 
 Where each service that receives meeting content runs is listed in
 [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed).

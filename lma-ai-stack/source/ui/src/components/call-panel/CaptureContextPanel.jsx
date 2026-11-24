@@ -245,7 +245,7 @@ const CaptureContextPanel = ({
   // existed: the rows keep their "Not recorded" or "Off" reason.
   const recordingsDeleted = recordings.state === 'deleted' && recordings.files !== 0;
   const consent = consentSummary(consentState);
-  const videoOff = Boolean(vp) && vp.enableVideoRecording === false;
+  const videoOff = Boolean(vp) && (vp.enableVideoRecording === false || Boolean(vp.videoRecordingOffReason));
   const engine = transcriptionEngine(item);
   const language = transcriptionLanguage(item);
   const detected = languages || meetingLanguages(item.detectedLanguages);

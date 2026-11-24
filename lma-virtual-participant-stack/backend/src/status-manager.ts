@@ -959,6 +959,34 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /**
+   * Record why the meeting's video is not recorded although the launch asked
+   * for it (`videoRecordingOffReason`: `configuration` or `deployment`; see
+   * video-recording-rule.ts), or, with null, that nothing stops it, which
+   * removes a reason createVirtualParticipant stored for a scheduled launch
+   * whose setting has been turned back on since. Written once, at startup.
+   * Writes no status. Best-effort, and selected outside SUBSCRIBED_FIELDS for
+   * the reason setJoinMethod gives.
+   */
+  async setVideoRecordingOffReason(reason: string | null): Promise<void> {
+    if (this.skipProgressWrite('the video recording outcome')) return;
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+            videoRecordingOffReason
+          }
+        }
+      `;
+      const input = reason
+        ? { id: this.participantId, videoRecordingOffReason: reason }
+        : { id: this.participantId, clearVideoRecordingOffReason: true };
+      await this.signAndSendGraphQLRequest(mutation, { input });
+    } catch {
+      /* the video recording outcome is best-effort */
+    }
+  }
+
   // Admission. Clears the join sub-step detail with it (no message is
   // supplied), so the UI stops showing "Waiting to be admitted…" next to a
   // participant that is by then in the meeting.

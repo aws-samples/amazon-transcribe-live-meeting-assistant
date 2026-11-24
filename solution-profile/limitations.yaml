@@ -148,7 +148,9 @@ limitations:
       from streaming clients is on (on by default; off in the Team-hosted, Regulated and
       Regulated notify presets), and then only for meetings whose user switches it on;
       the extension records only the meeting tab. Their other meetings have no key
-      frames, slide text or screen-share summary.
+      frames, slide text or screen-share summary. A Virtual Participant records video
+      only where Meeting Recording › Record Virtual Participant meeting video is on (on
+      by default; off in the same three presets).
     evidence:
       - docs/meeting-video.md#which-meetings-have-key-frames
     impact: low

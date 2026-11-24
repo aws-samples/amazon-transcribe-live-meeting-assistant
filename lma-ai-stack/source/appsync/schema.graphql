@@ -680,6 +680,11 @@ type Query @aws_cognito_user_pools
 	# less strict one, for the Create Virtual Participant form to show which
 	# choices apply. Read by every signed-in user, before any meeting exists.
 	getMeetingConsentDefaults: MeetingConsentDefaults @aws_cognito_user_pools
+	# Whether Meeting Recording > Record Virtual Participant meeting video is on,
+	# for the Create Virtual Participant form, which disables its Record meeting
+	# video switch when it is off. Null when the setting could not be read. Read
+	# by every signed-in user, before any meeting exists.
+	getVirtualParticipantVideoRecording: Boolean @aws_cognito_user_pools @aws_iam
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
@@ -776,6 +781,14 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# to audio. Defaults to true; persisted on the row so the VPScheduler Lambda
 	# can plumb ENABLE_VIDEO_RECORDING to scheduled launches.
 	enableVideoRecording: Boolean
+	# Why the meeting's video is not recorded although enableVideoRecording asked
+	# for it: "configuration" (Meeting Recording > Record Virtual Participant
+	# meeting video is off) or "deployment" (the EnableVideoRecording stack
+	# parameter is false). Written by createVirtualParticipant from the setting
+	# when the row is created, and by the VP container when it starts, which
+	# removes it when nothing stops the video. Absent when the video is recorded
+	# or the launch did not ask for it.
+	videoRecordingOffReason: String
 	# The agenda given when the VP was started or scheduled, and where it came
 	# from ("scheduled" from the LMA form, "mcp" from an MCP client). Read by the
 	# VP container when it starts, which puts it on the meeting record it creates;
@@ -960,6 +973,8 @@ input UpdateVirtualParticipantInput {
 	errorMessage: String
 	endTrigger: String
 	joinMethod: String
+	# "configuration" or "deployment"; see VirtualParticipant.videoRecordingOffReason.
+	videoRecordingOffReason: String
 	userAcknowledgedFailure: Boolean
 	# Clear flags. An omitted field means "leave this attribute as it is", so
 	# clearing an attribute needs a signal of its own. Setting one of these to
@@ -967,6 +982,7 @@ input UpdateVirtualParticipantInput {
 	# over a value supplied for the same attribute in the same call.
 	clearErrorMessage: Boolean
 	clearManualAction: Boolean
+	clearVideoRecordingOffReason: Boolean
 }
 
 # The launch settings of a scheduled Virtual Participant, as the Create
