@@ -60,7 +60,7 @@ export interface RecordingSettings {
     /** The default for recording a meeting's audio; a client's own choice wins. */
     readonly recordAudio: boolean;
     /**
-     * Whether the Stream Audio/Video page and the browser extension may send
+     * Whether the Stream Audio page and the browser extension may send
      * screen video (START_VIDEO). The Desktop Capture App is not affected, and
      * the EnableVideoRecording stack parameter still decides whether any video
      * is recorded (see video-admission.ts).

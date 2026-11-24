@@ -602,12 +602,12 @@ the meeting's audio. The video is stored with the meeting as its video
 recording, muxed with the audio when the meeting ends, and its key frames
 become the meeting's shared-screen slides
 ([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App sends it this way,
-and so may the Stream Audio/Video page and the browser extension.
+and so may the Stream Audio page and the browser extension.
 
 **Whether a client may send video.** The deployment must record video (the
-`EnableVideoRecording` stack parameter). The Stream Audio/Video page and the
+`EnableVideoRecording` stack parameter). The Stream Audio page and the
 browser extension (`clientType` `STREAM_AUDIO` and `BROWSER_EXTENSION`) also
-need **Meeting Recording › Record screen video from Stream Audio/Video and the
+need **Meeting Recording › Record screen video from Stream Audio and the
 browser extension** to be on, as it was when the meeting's `START` was handled;
 it is off by default and in every configuration preset. Other clients follow
 the stack parameter alone. To find out before offering video, send
@@ -679,7 +679,7 @@ consent does not allow capture`). Do not reconnect it.
 two minutes. Reconnect with a new `START_VIDEO` for the same `callId`: with
 `videoResume: true` when the encoder carried on and the chunks continue the same
 byte stream (send every chunk produced since the drop, in order and with no gap,
-which would leave the rest of the stream undecodable; do not
+since a gap leaves the rest of the stream undecodable; do not
 send the initialization segment again), or without it when the encoder started
 again, in which case the stream begins with its own initialization segment.
 See [Reconnection](#reconnection) for how a restarted stream's key frames are

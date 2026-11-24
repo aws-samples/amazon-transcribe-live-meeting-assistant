@@ -5,7 +5,7 @@
 
 A key frame is one picture of the shared screen, sent by the Virtual Participant
 (keyframe-sampler.ts) or by the WebSocket transcriber (videokeyframes.ts) for the
-screen video of the Desktop Capture App, the Stream Audio/Video page or the
+screen video of the Desktop Capture App, the Stream Audio page or the
 browser extension, with the same fields; see docs/meeting-video.md.
 
 Kept free of AWS imports, like pure.py, so the validation can be tested without

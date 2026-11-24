@@ -12,8 +12,8 @@
  * fragmented-MP4 chunks and END_VIDEO (videorecording.ts). The Desktop Capture
  * App, and any client of the streaming API that does not name itself, may do so
  * whenever the deployment records video (the EnableVideoRecording stack
- * parameter). The Stream Audio/Video page and the browser extension may do so
- * only when Meeting Recording › Record screen video from Stream Audio/Video and
+ * parameter). The Stream Audio page and the browser extension may do so
+ * only when Meeting Recording › Record screen video from Stream Audio and
  * the browser extension is on as well, as the meeting's audio START read it.
  *
  * Kept free of AWS clients so it can be tested directly.
@@ -23,7 +23,7 @@ import type { StreamingCaptureSource } from './calleventdata/capture-context';
 /**
  * How a video connection is closed when its client may not send video. The
  * client stops its video and carries on with the audio; see
- * docs/websocket-streaming-api.md, "START_VIDEO".
+ * docs/websocket-streaming-api.md, "6.1.6 Screen Video".
  */
 export const VIDEO_NOT_ENABLED_CLOSE = { code: 1008, reason: 'screen video is not enabled for this client' } as const;
 
@@ -40,7 +40,7 @@ export const isBrowserVideoClient = (source: StreamingCaptureSource | undefined)
 export interface VideoSwitches {
     /** The EnableVideoRecording stack parameter (ENABLE_VIDEO_RECORDING). */
     readonly stackRecordsVideo: boolean;
-    /** Meeting Recording › Record screen video from Stream Audio/Video and the browser extension. */
+    /** Meeting Recording › Record screen video from Stream Audio and the browser extension. */
     readonly recordBrowserVideo: boolean;
 }
 
