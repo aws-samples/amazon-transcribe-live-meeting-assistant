@@ -134,6 +134,14 @@ def labels_of(row: Mapping[str, Any]) -> Dict[str, str]:
     return out
 
 
+def _aws_error(action: str, resource: str, err: Exception) -> LMAConfigurationError:
+    """An AWS call that failed, as one line naming the action the caller needs."""
+    return LMAConfigurationError(
+        f"Could not {resource}; the caller needs {action} on it (see the permissions table "
+        f"of `lma meetings delete` in docs/lma-cli.md): {err}"
+    )
+
+
 def _plain(item: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: _DESERIALIZER.deserialize(value) for key, value in item.items()}
 
@@ -204,7 +212,14 @@ class MeetingOperations:
             kwargs: Dict[str, Any] = {"UserPoolId": pool_id, "Username": user.username}
             if token:
                 kwargs["NextToken"] = token
-            response = cognito.admin_list_groups_for_user(**kwargs)
+            try:
+                response = cognito.admin_list_groups_for_user(**kwargs)
+            except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+                raise _aws_error(
+                    "cognito-idp:AdminListGroupsForUser",
+                    f"read the groups of {user.username} in user pool {pool_id}",
+                    err,
+                ) from err
             groups += [group.get("GroupName", "") for group in response.get("Groups") or []]
             token = response.get("NextToken")
             if not token:
@@ -252,7 +267,14 @@ class MeetingOperations:
             "ExpressionAttributeValues": {":type": {"S": LIST_ITEM_TYPE}},
         }
         while True:
-            response = dynamodb.query(**kwargs)
+            try:
+                response = dynamodb.query(**kwargs)
+            except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+                raise _aws_error(
+                    "dynamodb:Query",
+                    f"list the meetings in the {LIST_INDEX} index of {self.table_name}",
+                    err,
+                ) from err
             rows += [_plain(item) for item in response.get("Items") or []]
             last = response.get("LastEvaluatedKey")
             if not last:
@@ -277,7 +299,14 @@ class MeetingOperations:
             }
             attempt = 0
             while request:
-                response = dynamodb.batch_get_item(RequestItems=request)
+                try:
+                    response = dynamodb.batch_get_item(RequestItems=request)
+                except Exception as err:  # noqa: BLE001 -- botocore's errors, as one line
+                    raise _aws_error(
+                        "dynamodb:BatchGetItem",
+                        f"read the meeting records in {self.table_name}",
+                        err,
+                    ) from err
                 for item in response.get("Responses", {}).get(self.table_name, []):
                     record = _plain(item)
                     found[str(record.get("CallId"))] = record
