@@ -367,6 +367,13 @@ def test_the_virtual_participants_video_segments_are_deleted(aws):
     assert f"lma-video-chunks/{CALL_ID}1/chunk-0.webm" in aws.s3.versions
 
 
+def test_another_meetings_segments_below_this_ones_folder_are_kept(aws):
+    deeper = f"lma-video-chunks/{CALL_ID}/b/chunk-0.webm"
+    aws.s3.put(deeper)
+    _scheduled_recordings()
+    assert deeper in aws.s3.versions
+
+
 def test_a_file_that_cannot_be_deleted_fails_the_run_and_keeps_the_links(aws):
     aws.s3.fail_deletes = True
     with pytest.raises(RuntimeError, match="could not delete"):

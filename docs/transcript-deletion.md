@@ -265,8 +265,9 @@ the page says when, the player and the recording downloads are no longer
 offered, and the **Details** tab's **Capture and processing** section says
 under **Recording retention** that the **Delete the recordings after the
 summary** setting deleted them, how many recording files were removed, and
-what is kept. Its **Audio recording** and **Video recording** rows read **None
-kept: recordings deleted after the summary**. A meeting whose recordings are not
+what is kept. Its **Audio recording** and **Video recording** rows read **Deleted
+after the summary**; a meeting that had no recording to delete keeps the
+rows' usual reason, such as **Not recorded**. A meeting whose recordings are not
 deleted after the summary is shown as keeping them as the deployment's
 recording retention says.
 
@@ -321,10 +322,22 @@ to 24 hours. A recording link the call event processor cannot pass on to the
 function fails the record, which the stream delivers again. A deletion that
 still has not completed, of either kind, is kept on a dead-letter queue, and the
 `transcript-deletion-dead-letter-queue-depth` alarm notifies the operational
-alerts topic (see [Monitoring & Alerting](monitoring.md)). Until it is run
-again, a failed recording deletion leaves the meeting's links in place, so the
-recordings are still shown on the meeting page rather than silently missing.
-The alarm's description says how to run each kind of deletion again.
+alerts topic (see [Monitoring & Alerting](monitoring.md)). A failed recording
+deletion removes no link and records nothing, so until it is run again its
+files are still stored and the meeting record still links to them. The first
+deletion of a meeting's recordings that fails therefore leaves them shown on the
+meeting page. A later one, such as a recording stored after the meeting's
+recordings were deleted whose own deletion fails, is shown only by the alarm:
+once a meeting's recordings have been deleted, the page offers none, and the
+**Details** tab says they were deleted after the summary.
+
+A `meeting-ended` or `summary-written` message on the queue may be for either
+kind of deletion, because those events act on both settings; the function's
+log line for the failure names the kind (`the transcript deletion of …` or `the
+recordings deletion of …`). Run again only the kind that failed. A `scheduled`
+run deletes whatever the setting says now, so running a transcript deletion for
+a meeting whose recordings failed would delete a transcript the settings keep.
+The alarm's description says the same.
 
 As a backstop, while deletion is on each transcript segment and meeting
 assistant answer is also written with a DynamoDB time to live of at most two

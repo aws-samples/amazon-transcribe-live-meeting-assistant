@@ -863,7 +863,11 @@ def delete_recording_files(call_id: str, meeting: Dict[str, Any]) -> int:
     for key in linked_recording_keys(meeting):
         entries.extend(_listed_versions(key, lambda k, key=key: k == key))
     folder = f"{VIDEO_CHUNKS_PREFIX}{call_id}/"
-    entries.extend(_listed_versions(folder, lambda k: k.startswith(folder)))
+    # Segments sit directly in the folder: a deeper key is another meeting's
+    # whose id continues this one's with a slash.
+    entries.extend(
+        _listed_versions(folder, lambda k: k.startswith(folder) and "/" not in k[len(folder) :])
+    )
     _delete_versions(entries, f"the recordings of {call_id}")
     return len({e["Key"] for e in entries})
 

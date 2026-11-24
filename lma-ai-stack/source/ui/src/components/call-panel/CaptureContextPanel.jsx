@@ -102,7 +102,7 @@ const separationValue = (separation, transcriptDeleted, recordedSetting) => {
 };
 
 const recordingValue = (url, { live, off, kind, deleted }) => {
-  if (deleted) return <StatusIndicator type="stopped">None kept: recordings deleted after the summary</StatusIndicator>;
+  if (deleted) return <StatusIndicator type="stopped">Deleted after the summary</StatusIndicator>;
   if (url) return <StatusIndicator type="success">Recorded</StatusIndicator>;
   if (off) return <StatusIndicator type="stopped">Off for this Virtual Participant</StatusIndicator>;
   if (live)

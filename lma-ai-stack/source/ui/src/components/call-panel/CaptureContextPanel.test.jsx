@@ -156,7 +156,7 @@ describe('CaptureContextPanel', () => {
     ).toBeTruthy();
     expect(screen.getByText(/3 recording files removed/)).toBeTruthy();
     expect(screen.getByText(/A recording stored for the meeting afterwards is deleted when it arrives/)).toBeTruthy();
-    expect(screen.getAllByText('None kept: recordings deleted after the summary')).toHaveLength(2);
+    expect(screen.getAllByText('Deleted after the summary')).toHaveLength(2);
     expect(screen.queryByText('Recorded')).toBeNull();
   });
 
@@ -166,7 +166,7 @@ describe('CaptureContextPanel', () => {
       vp: { id: 'vp-1', enableVideoRecording: false },
     });
     expect(screen.getByText('No recording to delete')).toBeTruthy();
-    expect(screen.queryByText('None kept: recordings deleted after the summary')).toBeNull();
+    expect(screen.queryByText('Deleted after the summary')).toBeNull();
     expect(screen.getByText('Not recorded')).toBeTruthy();
     expect(screen.getByText('Off for this Virtual Participant')).toBeTruthy();
   });
