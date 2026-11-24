@@ -156,11 +156,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AIStackName}-StrandsChatInterface
           PolicyDocument:
@@ -258,11 +259,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AIStackName}-MeetingInvitationParser
           PolicyDocument:
@@ -274,12 +276,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
               - Effect: Allow
                 Action:
                   - "bedrock:GetInferenceProfile"
                 Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
               # Read-only, on the shared configuration table: the model this
               # function calls is read from its Amazon Bedrock Models section.
               - Effect: Allow
@@ -313,11 +315,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AIStackName}-BedrockKnowledgeBase
           PolicyDocument:
@@ -328,18 +331,18 @@ Resources:
                   - "bedrock:Retrieve"
                   - "bedrock:RetrieveAndGenerate"
                 #TODO: Figure out how to restrict to target Transcript KB - created in a parallel nested stack
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
                 Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
               - Effect: Allow
                 Action:
                   - "bedrock:GetInferenceProfile"
                 Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
               # Read-only, on the shared configuration table: the model this
               # function calls is read from its Amazon Bedrock Models section.
               - Effect: Allow
@@ -366,7 +369,8 @@ Resources:
               - sts:AssumeRole
             Principal:
               Service:
-                - appsync.amazonaws.com
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: lambda
           PolicyDocument:
@@ -478,7 +482,8 @@ Resources:
               - sts:AssumeRole
             Principal:
               Service:
-                - appsync.amazonaws.com
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: lambda
           PolicyDocument:
@@ -603,7 +608,8 @@ Resources:
               - sts:AssumeRole
             Principal:
               Service:
-                - appsync.amazonaws.com
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: lambda
           PolicyDocument:
@@ -724,7 +730,7 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: appsync.amazonaws.com
+              Service: !Sub "appsync.${AWS::URLSuffix}"
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: InvokeLambda
@@ -1551,7 +1557,8 @@ Resources:
               - sts:AssumeRole
             Principal:
               Service:
-                - appsync.amazonaws.com
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: lambda
           PolicyDocument:
@@ -2201,7 +2208,8 @@ Resources:
               - sts:AssumeRole
             Principal:
               Service:
-                - appsync.amazonaws.com
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
         - PolicyName: lambda
           PolicyDocument:
@@ -2246,7 +2254,7 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       PermissionsBoundary: !If
@@ -2280,7 +2288,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   # Dedicated, KMS-encrypted log group, matching every other function in this
   # stack. The function logs VP ids and caller identities, so its logs must not
@@ -2330,7 +2338,7 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: appsync.amazonaws.com
+              Service: !Sub "appsync.${AWS::URLSuffix}"
       Policies:
         - PolicyName: LambdaInvokePolicy
           PolicyDocument:
@@ -2376,7 +2384,7 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       PermissionsBoundary: !If
@@ -2460,7 +2468,7 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: appsync.amazonaws.com
+              Service: !Sub "appsync.${AWS::URLSuffix}"
       Policies:
         - PolicyName: LambdaInvokePolicy
           PolicyDocument:
