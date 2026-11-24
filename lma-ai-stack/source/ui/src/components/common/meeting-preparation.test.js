@@ -11,6 +11,7 @@ import {
   exportableMeeting,
   filterMeetingsByPreparation,
   formatElapsed,
+  labelFilterProblem,
   labelsToText,
   moveItem,
   nextItemId,
@@ -95,6 +96,15 @@ describe('the meeting list filters', () => {
     expect(match('customer=  opaque x ')).toEqual([]);
     expect(ids({ label: 'Project' })).toEqual([]);
     expect(ids({ label: 'project=ACME' })).toEqual([]);
+  });
+
+  it('say why a filter whose key is not a label key matches nothing, as the label editor does', () => {
+    expect(labelFilterProblem('project=acme')).toBeNull();
+    expect(labelFilterProblem('project')).toBeNull();
+    expect(labelFilterProblem('')).toBeNull();
+    expect(labelFilterProblem('Project=acme')).toMatch(/"Project" is not a label key/);
+    expect(labelFilterProblem('project ')).toMatch(/"project " is not a label key/);
+    expect(labelFilterProblem('Project=acme')).toBe(parseLabelsText('Project=acme').error);
   });
 
   it('match an audience, or meetings with none', () => {

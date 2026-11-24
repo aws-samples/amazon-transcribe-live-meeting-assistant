@@ -10,9 +10,9 @@
  * not a category muted everywhere.
  */
 import { describe, expect, it } from 'vitest';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
-import useNotificationCount, { countsFor } from './use-notification-count';
+import useNotificationCount, { countsFor, GET_MEETING_NAME, meetingLabel } from './use-notification-count';
 import useNotificationsDrawer from './use-notifications-drawer';
 import fakeClient, { notification } from '../components/meeting-notifications/__mocks__/notification-client';
 
@@ -39,6 +39,31 @@ describe('useNotificationCount', () => {
     expect(result.current.total).toBe(1);
     rerender({ current: 'm2' });
     expect(result.current.total).toBe(0);
+  });
+
+  it('names each meeting by its name, read once, and by its CallId until then or without one', async () => {
+    const { client, state, send } = fakeClient({
+      getCall: ({ callId }) => (callId === 'm1' ? { CallId: 'm1', MeetingTopic: 'Weekly sync' } : null),
+    });
+    const { result } = renderHook(() => useNotificationCount({ username: 'owner@example.com', client }));
+    act(() => send(notification('a')));
+    act(() => send(notification('b', { CallId: 'm2' })));
+    expect(meetingLabel(result.current.meetings.find((m) => m.callId === 'm1'))).toBe('m1');
+    await waitFor(() =>
+      expect(meetingLabel(result.current.meetings.find((m) => m.callId === 'm1'))).toBe('Weekly sync'),
+    );
+    expect(meetingLabel(result.current.meetings.find((m) => m.callId === 'm2'))).toBe('m2');
+    act(() => send(notification('c')));
+    const reads = state.requests.filter((request) => request.query === GET_MEETING_NAME);
+    expect(reads.map((request) => request.variables.callId).sort()).toEqual(['m1', 'm2']);
+  });
+
+  it('keeps the CallId when the name cannot be read', async () => {
+    const { client, state, send } = fakeClient({ getCall: new Error('not authorized') });
+    const { result } = renderHook(() => useNotificationCount({ username: 'owner@example.com', client }));
+    act(() => send(notification('a')));
+    await waitFor(() => expect(state.requests.some((request) => request.query === GET_MEETING_NAME)).toBe(true));
+    expect(meetingLabel(result.current.meetings[0])).toBe('m1');
   });
 
   it('counts only meetings the user owns or is shared on, and not muted categories', () => {

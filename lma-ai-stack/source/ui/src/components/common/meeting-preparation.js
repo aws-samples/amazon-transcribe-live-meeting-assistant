@@ -92,6 +92,13 @@ export const labelsToText = (labels) => (labels || []).map(({ Key, Value }) => `
  * case included. A key the server would refuse is refused here, not changed.
  * Only lines holding nothing but spaces are skipped.
  */
+/** Why `key` is not a label key, or null when it is one. */
+export const labelKeyProblem = (key) =>
+  LABEL_KEY.test(key)
+    ? null
+    : `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
+      'starting with a letter or digit, up to 63 characters';
+
 export const parseLabelsText = (text) => {
   const labels = [];
   const seen = new Set();
@@ -102,9 +109,7 @@ export const parseLabelsText = (text) => {
     const key = at >= 0 ? line.slice(0, at) : line;
     const value = at >= 0 ? line.slice(at + 1) : '';
     if (!LABEL_KEY.test(key)) {
-      error =
-        `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
-        'starting with a letter or digit, up to 63 characters';
+      error = labelKeyProblem(key);
     } else if (seen.has(key)) {
       error = `The label key ${key} is given more than once`;
     } else if (value.length > MAX_LABEL_VALUE_CHARS) {
@@ -128,6 +133,16 @@ export const parseLabelFilter = (text) => {
   const at = text.indexOf('=');
   if (at < 0) return { key: text, value: null };
   return { key: text.slice(0, at), value: text.slice(at + 1) };
+};
+
+/**
+ * Why a meeting list label filter can match no meeting, or null. A key that is
+ * not a label key (say "Project" or "project ") is told the same way the label
+ * editor tells it, since the filter is matched exactly.
+ */
+export const labelFilterProblem = (text) => {
+  const wanted = parseLabelFilter(text);
+  return wanted ? labelKeyProblem(wanted.key) : null;
 };
 
 /**
