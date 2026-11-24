@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState } from 'react';
-import { Input, Pagination, Select, SpaceBetween, Table, TextFilter } from '@cloudscape-design/components';
+import { FormField, Input, Pagination, Select, SpaceBetween, Table, TextFilter } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import useCallsContext from '../../contexts/calls';
 
@@ -13,7 +13,7 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
 import { exportToExcel } from '../common/download-func';
-import { exportableMeeting, filterMeetingsByPreparation } from '../common/meeting-preparation';
+import { exportableMeeting, filterMeetingsByPreparation, labelFilterProblem } from '../common/meeting-preparation';
 
 import {
   CallsPreferences,
@@ -45,6 +45,7 @@ const CallList = () => {
   // The label (key=value, or key alone) and audience filters, applied before
   // the text filter.
   const [labelFilter, setLabelFilter] = useState('');
+  const labelProblem = labelFilterProblem(labelFilter);
   const [audienceFilter, setAudienceFilter] = useState(AUDIENCE_FILTER_OPTIONS[0]);
 
   const {
@@ -130,13 +131,16 @@ const CallList = () => {
             filteringPlaceholder="Find meetings"
             countText={getFilterCounterText(filteredItemsCount)}
           />
-          <Input
-            type="search"
-            value={labelFilter}
-            onChange={({ detail }) => setLabelFilter(detail.value)}
-            placeholder="Label, e.g. project=acme"
-            ariaLabel="Filter meetings by label (key=value)"
-          />
+          <FormField errorText={labelProblem}>
+            <Input
+              type="search"
+              value={labelFilter}
+              onChange={({ detail }) => setLabelFilter(detail.value)}
+              placeholder="Label, e.g. project=acme"
+              ariaLabel="Filter meetings by label (key=value)"
+              invalid={Boolean(labelProblem)}
+            />
+          </FormField>
           <Select
             selectedOption={audienceFilter}
             options={AUDIENCE_FILTER_OPTIONS}

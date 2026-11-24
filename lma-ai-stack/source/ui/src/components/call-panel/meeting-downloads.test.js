@@ -25,8 +25,14 @@ vi.mock('../common/download-func', () => ({
   transcriptDownloadMarkdown: vi.fn(() => '# Transcript'),
 }));
 
+vi.mock('../common/summary', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getTextFileFormattedMeetingDetails: vi.fn(() => 'Summary text'),
+}));
+
 /* eslint-disable import/first -- the module under test is imported after its dependency is mocked */
 import * as downloads from '../common/download-func';
+import { getTextFileFormattedMeetingDetails } from '../common/summary';
 import {
   downloadMenuItems,
   openSignedFile,
@@ -107,6 +113,21 @@ describe('runSummaryAction', () => {
     expect(downloads.summaryDownloadMarkdown).toHaveBeenCalledWith(ITEM, CONSENT, PARTICIPANTS);
     expect(downloads.downloadSummaryAsDocx).toHaveBeenCalledWith(ITEM, CONSENT, PARTICIPANTS);
     expect(downloads.downloadSummaryAsPdf).toHaveBeenCalledWith(ITEM, CONSENT, PARTICIPANTS);
+  });
+
+  it('passes the participants to the plain-text download and the clipboard copy', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    try {
+      await runSummaryAction('text', ITEM, CONSENT, PARTICIPANTS);
+      expect(getTextFileFormattedMeetingDetails).toHaveBeenCalledWith(ITEM, CONSENT, PARTICIPANTS);
+      expect(downloads.exportToTextFile).toHaveBeenCalledWith('Summary text', `Summary-${ITEM.callId}`);
+      expect(await runSummaryAction('copy', ITEM, CONSENT, PARTICIPANTS)).toBe(true);
+      expect(downloads.summaryDownloadMarkdown).toHaveBeenLastCalledWith(ITEM, CONSENT, PARTICIPANTS);
+      expect(writeText).toHaveBeenCalledWith('# Summary');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
