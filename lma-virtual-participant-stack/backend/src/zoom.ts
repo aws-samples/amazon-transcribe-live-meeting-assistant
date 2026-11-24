@@ -139,10 +139,10 @@ export interface ZoomChatLabel {
 }
 
 export function parseZoomChatLabel(label: string): ZoomChatLabel {
-    // The sender may hold a comma, as a directory-style "Strahan, Bob" does;
-    // it never holds the colon the colon form ends the prefix with.
+    // The sender may hold one comma, as a directory-style "Strahan, Bob"
+    // does, so the prefix is not looked for inside the message text.
     const match = label.match(
-        /^([^:]+?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
+        /^([^,:]+(?:,[^,:]+)?)\s+to\s+([^,:]+?)(?:\s*:\s*|,\s*(\d{1,2}:\d{2}(?:\s*[AP]M)?)\s*,\s*)/i,
     );
     return {
         sender: match?.[1]?.trim() || null,

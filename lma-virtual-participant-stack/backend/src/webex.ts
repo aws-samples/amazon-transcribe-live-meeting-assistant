@@ -1016,6 +1016,8 @@ export default class Webex {
                     sender,
                     id: messageId,
                     links,
+                    // Not webexChatAudience: an unmarked row is reported as
+                    // recipient=unknown here, on purpose (see that function).
                     audience: privateMark ? 'direct' : undefined,
                 });
             }

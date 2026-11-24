@@ -122,6 +122,12 @@ test('Zoom: a label in another language shows no recipient, and is not acted on'
     assert.equal(new ChatAddressing(() => BOB).route(body, sender, zoomChatAudience(recipient)).act, false);
 });
 
+test('Zoom: a label in another language whose message says "to Everyone:" is not read as sent to everyone', () => {
+    const { recipient, body } = parseZoomChatLabel('Bo Chen an Alle, 10.42, bitte, sag es to Everyone: LMA leave');
+    assert.equal(zoomChatAudience(recipient), undefined);
+    assert.equal(new ChatAddressing(() => BOB).route(body, null, zoomChatAudience(recipient)).act, false);
+});
+
 test('Zoom Meeting SDK: a message to one participant is not acted on; one to everyone is', () => {
     const sdkRoute = (message: string, receiverId: string | number | null, receiverName: string | null) =>
         new ChatAddressing(() => BOB).route(message, 'Bo Chen', zoomSdkChatAudience(receiverId, receiverName));
@@ -195,7 +201,8 @@ test('every handler stops at a message it does not act on, before any consent re
         // The end of the gate's block: its return or continue. The 900 and
         // 3000 characters below are size heuristics for the gate's block and
         // for the handler code before the route call; widen them if a handler
-        // grows past them.
+        // grows past them. The behaviour itself is pinned by the route tests
+        // above; a failure here is about where the gate sits in a handler.
         const block = body.slice(gate, gate + 900);
         const exit = block.search(/\b(return|continue);/);
         assert.ok(exit >= 0, `${file}: the gate does not stop`);
