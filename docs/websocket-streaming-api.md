@@ -293,7 +293,7 @@ capturing and do not reconnect for that meeting.
 | `MEETING_NOT_FOUND` | The START names a `sessionNumber`, but no meeting has this `callId`. |
 | `SESSION_NOT_ALLOWED` | The `sessionNumber` is not the session `reopenMeeting` last allowed on this meeting, or is not an integer from 2. Call `reopenMeeting` again. |
 | `TRANSCRIPT_DELETED` | The START names a `sessionNumber`, and the meeting's transcript has been deleted. |
-| `MEETING_NOT_CHECKED` | The server could not read the meeting record (it tried three times). Try again. |
+| `MEETING_NOT_CHECKED` | The server could not read the meeting record (it tried twice, waiting up to 3 seconds each time). Try again. |
 
 The server reads the meeting record through LMA's AppSync API, with the
 transcriber task's role.
