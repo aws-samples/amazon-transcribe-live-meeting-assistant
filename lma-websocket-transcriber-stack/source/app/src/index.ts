@@ -1064,6 +1064,10 @@ const onConsentFrame = async (
 ): Promise<boolean> => {
     const kind = frame['callEvent'];
     if (kind === 'CONSENT_SETTINGS') {
+        // The Meeting Recording setting is read as a meeting's START reads it
+        // (one consistent read of the configuration, on the immediate tier), so
+        // the answer matches what a START sent now would be held to. A client
+        // asks once per connection, before its START.
         const [settings, sessionSettings] = await Promise.all([
             readConsentSettings(server.log),
             getSessionSettings(server.log),

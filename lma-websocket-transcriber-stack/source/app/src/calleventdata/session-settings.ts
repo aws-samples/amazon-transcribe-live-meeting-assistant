@@ -70,7 +70,7 @@ export interface RecordingSettings {
 
 /**
  * The shipped default of Meeting Recording › Record screen video from Stream
- * Audio/Video and the browser extension, used when the configuration does not
+ * Audio and the browser extension, used when the configuration does not
  * hold the setting or cannot be read. No stack parameter backs it.
  * lma-ai-stack/test/test_parameter_backed_settings.py holds it to
  * setting_defaults.json.
