@@ -261,12 +261,14 @@ const reconnectDelay = (attempt) => Math.min(1000 * 2 ** attempt, 5000);
  *
  * The connection opens with the first chunk, by when the meeting's audio START
  * has normally been handled. A START_VIDEO refused because the audio session
- * is not there yet is tried again from the start of the stream: every chunk is
- * kept until the connection has stayed open for `confirmMs`. After that, a
- * dropped connection reconnects with `videoResume` and sends what was recorded
- * meanwhile (at most `maxBufferBytes`), for up to `resumeWindowMs`, which is
- * inside the transcriber's two-minute hold. Any other refusal ends the video
- * for the meeting; the audio is not affected.
+ * is not there yet is tried again from the start of the stream, so every chunk
+ * is kept until the connection has stayed open for `confirmMs`, after which
+ * that refusal cannot come. Any other drop of a stream the transcriber took
+ * reconnects with `videoResume` and sends what was recorded meanwhile (at most
+ * `maxBufferBytes`), for up to `resumeWindowMs`, which is inside the
+ * transcriber's two-minute hold; a stream that never reached it starts again
+ * from its first chunk. Any other refusal ends the video for the meeting; the
+ * audio is not affected.
  */
 export const createVideoUplink = ({
   openSocket,
@@ -296,10 +298,14 @@ export const createVideoUplink = ({
   // Kept until confirmed: everything since the stream began.
   let retained = [];
   let retainedBytes = 0;
-  // Recorded while no connection was open, after confirmation.
+  // Recorded while no connection was open.
   let queued = [];
   let queuedBytes = 0;
   let connecting = false;
+  // Whether the transcriber holds a video session for this stream: a
+  // START_VIDEO went out on a connection that it did not refuse for want of
+  // the audio session. A later connection then resumes that session.
+  let admitted = false;
 
   const finish = (reason) => {
     if (finished) return;
@@ -316,7 +322,7 @@ export const createVideoUplink = ({
   const connect = async () => {
     if (connecting || finished) return;
     connecting = true;
-    const resume = confirmed;
+    const resume = admitted;
     let ws;
     try {
       ws = await openSocket();
@@ -344,6 +350,9 @@ export const createVideoUplink = ({
         videoTimeOffsetMs: offsetMs,
         ...(resume ? { videoResume: true } : {}),
       });
+      admitted = true;
+      // A resumed stream carries on from what the last connection sent; a new
+      // one starts again from its first chunk, which holds the init segment.
       const backlog = resume ? queued : retained;
       backlog.forEach((chunk) => ws.send(chunk));
       queued = [];
@@ -379,6 +388,10 @@ export const createVideoUplink = ({
       if (event?.code === POLICY_CLOSE) {
         if (reason === CLOSE_NO_ACTIVE_CALL && !confirmed && startAttempts + 1 < maxStartAttempts) {
           startAttempts += 1;
+          // No session was made for it: the retry starts the stream again.
+          admitted = false;
+          queued = [];
+          queuedBytes = 0;
           log(`video refused before the audio session was found; trying again (${startAttempts})`);
           retryTimer = setTimer(() => {
             retryTimer = null;
@@ -389,12 +402,7 @@ export const createVideoUplink = ({
         finish(reason || 'refused');
         return;
       }
-      if (!confirmed) {
-        // Dropped before the stream was confirmed: start it again from the beginning.
-        // eslint-disable-next-line no-use-before-define
-        scheduleReconnect();
-        return;
-      }
+      // Dropped: reconnect, resuming the session it was admitted to.
       // eslint-disable-next-line no-use-before-define
       scheduleReconnect();
     };
@@ -435,7 +443,7 @@ export const createVideoUplink = ({
       socket.send(chunk);
       return;
     }
-    if (confirmed) {
+    if (admitted) {
       queued.push(chunk);
       queuedBytes += bytes;
       if (queuedBytes > maxBufferBytes) {

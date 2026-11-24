@@ -400,13 +400,16 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     pendingVideoRef.current = null;
     if (!displayStream.current || screenVideoRef.current) return;
     try {
-      screenVideoRef.current = startScreenVideo({
+      // Events from an earlier meeting's video, still closing, are ignored.
+      let video = null;
+      video = startScreenVideo({
         stream: displayStream.current,
         callId,
         offsetMs: performance.now() - sinceMs,
         openSocket: openVideoSocket,
         log: (message) => console.log(`DEBUG - StreamAudio video: ${message}`),
         onEvent: (event) => {
+          if (screenVideoRef.current !== video) return;
           if (event.type === 'slow-keyframes') {
             setVideoState((prev) => ({ ...prev, slowGap: event.gapSeconds }));
             return;
@@ -425,6 +428,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
           }
         },
       });
+      screenVideoRef.current = video;
       setVideoState((prev) => ({ ...prev, status: 'on' }));
     } catch (error) {
       setVideoState((prev) => ({ ...prev, status: 'failed', message: error?.message || String(error) }));

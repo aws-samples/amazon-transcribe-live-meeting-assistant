@@ -82,7 +82,7 @@ export default defineConfig({
           label: "Meeting Sources",
           items: [
             { label: "Meeting Sources Overview", slug: "meeting-sources" },
-            { label: "Stream Audio", slug: "stream-audio" },
+            { label: "Stream Audio/Video", slug: "stream-audio" },
             { label: "Browser Extension", slug: "browser-extension" },
             { label: "Desktop Capture App", slug: "desktop-capture-app" },
             { label: "Virtual Participant", slug: "virtual-participant" },
