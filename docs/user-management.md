@@ -13,6 +13,8 @@ LMA ships with a built-in **User Management** page that lets administrators crea
 - [Accessing the User Management page](#accessing-the-user-management-page)
 - [Creating a user](#creating-a-user)
 - [Deleting users](#deleting-users)
+- [Last sign-in](#last-sign-in)
+- [Exporting users for an access review](#exporting-users-for-an-access-review)
 - [Security model](#security-model)
 - [Guard rails](#guard-rails)
 - [Email domain restrictions](#email-domain-restrictions)
@@ -26,7 +28,7 @@ Users are stored in LMA's Amazon Cognito User Pool (created by the `lma-cognito-
 
 The User Management page provides:
 
-- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, and creation date.
+- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, creation date, and [last sign-in](#last-sign-in).
 - **Create user** — creates a Cognito user with the chosen role. Cognito emails the new user a temporary password; they must set a new password on first sign-in.
 - **Delete user(s)** — permanently removes one or more selected users from Cognito, with confirmation.
 
@@ -68,7 +70,50 @@ The new user receives a **Welcome to Live Meeting Assistant!** email from Amazon
 2. Choose **Delete**.
 3. Review the confirmation modal and choose **Delete** to proceed.
 
-Deletion removes the user from the Cognito user pool. It does **not** delete meetings that user owns or has shared.
+Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) time. It does **not** delete meetings that user owns or has shared.
+
+## Last sign-in
+
+The **Last sign-in** column shows when each user last signed in to LMA with their password. It is meant for periodic user access reviews: finding accounts nobody has used for a while, so they can be disabled or deleted.
+
+**How it is recorded.** Amazon Cognito's `ListUsers` API does not return a sign-in time, and reading a user's sign-in history from Cognito requires Cognito threat protection, which LMA does not require. So the `lma-cognito-stack` nested stack adds a Cognito **PostAuthentication** Lambda trigger, `CognitoPostAuthenticationFunction`. After each successful sign-in it writes the time to a small DynamoDB table, `UserSignInTable`, one item per user keyed by the user's Cognito `sub` (an identifier that never changes). The table is encrypted with the stack's customer-managed KMS key and, like the user pool, is kept when the stack is deleted with `EnableDataRetentionOnDelete=true`. No attribute is added to the user pool. The trigger never blocks a sign-in: if the write fails, the failure is logged in `/<stack-name>/lambda/CognitoPostAuthenticationFunction` and the user signs in as usual.
+
+**What counts as a sign-in.** PostAuthentication runs when a user authenticates with their password: in the web UI, in the browser extension, or through the MCP external app client. It does **not** run when a client silently renews its session with a refresh token, which the web UI does while a user stays signed in (for up to 30 days, the app client's refresh-token lifetime). So the column is the last *interactive sign-in*, not the last time the user used LMA: a user who keeps a browser session open can be active today and still show a sign-in from several weeks ago. For an access review, read an old or missing time as "has not entered their password since then".
+
+**What the column can show:**
+
+| Value | Meaning |
+|---|---|
+| A date and time | The user's last recorded sign-in, in your browser's time zone. |
+| **Not recorded** | No sign-in has been recorded for this user. Sign-in times are recorded from the first deployment of a version of LMA that includes this feature onwards, so right after an upgrade every user shows this until they next sign in. A new user who has not yet signed in for the first time also shows it. |
+| **Unavailable** | The sign-in times could not be read, so nothing is known about any user's last sign-in. The resolver's log (`/<stack-name>/lambda/UserManagement`) says why. |
+
+## Exporting users for an access review
+
+The [LMA CLI](lma-cli.md#lma-users-list--list-users-for-an-access-review) lists the same information from a terminal, for an access review export:
+
+```bash
+# A table in the terminal
+lma users list --stack-name LMA
+
+# A CSV file for the review: email, username, role, status, enabled, created_at, last_sign_in_at
+lma users list --stack-name LMA --format csv --output lma-users-2026-11.csv
+
+# JSON, with the stack, Region, account, user pool and time of the export
+lma users list --stack-name LMA --format json
+```
+
+A CSV row looks like this (times are ISO 8601 in UTC):
+
+```
+email,username,role,status,enabled,created_at,last_sign_in_at
+jdoe@example.com,jdoe@example.com,User,CONFIRMED,true,2026-03-02T14:05:11.000Z,2026-11-20T09:30:00.000Z
+new.user@example.com,new.user@example.com,User,FORCE_CHANGE_PASSWORD,true,2026-11-23T12:00:00.000Z,Not recorded
+```
+
+In the CSV and table, a user with no recorded sign-in shows `Not recorded`, and every user shows `Unavailable` when the times could not be read (with a warning on standard error saying why, for example a stack not yet updated to a version that records them). In JSON, `last_sign_in_at` is `null` in both cases, and `last_sign_in_available` (`false` when the times could not be read) tells them apart.
+
+The command runs with your AWS credentials, not as an LMA user, so it needs IAM permissions on the stack's resources rather than membership of the `Admin` group. The permissions are listed under [`lma users list`](lma-cli.md#lma-users-list--list-users-for-an-access-review).
 
 ## Security model
 
@@ -90,6 +135,8 @@ cognito-idp:AdminAddUserToGroup
 cognito-idp:AdminRemoveUserFromGroup
 cognito-idp:AdminListGroupsForUser
 ```
+
+It may also read (`dynamodb:BatchGetItem`) and delete (`dynamodb:DeleteItem`) items in the Cognito stack's `UserSignInTable`, for the [last sign-in](#last-sign-in) times it lists and the item of a user it deletes. The PostAuthentication trigger's own role may only update items in that table.
 
 ## Guard rails
 
@@ -118,6 +165,12 @@ If you set the `AllowedSignUpEmailDomain` CloudFormation parameter at deployment
 
 **"Email domain 'X' is not allowed"**
 : The `AllowedSignUpEmailDomain` CloudFormation parameter restricts new user emails to specific domains. Update the parameter on your stack and redeploy, or choose an email in an allowed domain.
+
+**Every user shows "Not recorded" in the Last sign-in column**
+: Sign-in times are recorded from the deployment of this feature onwards. Users show a time after their next sign-in with their password; a user who stays signed in (their session renewed by a refresh token) does not, until they sign in again. See [Last sign-in](#last-sign-in).
+
+**The Last sign-in column shows "Unavailable"**
+: The user management Lambda could not read `UserSignInTable`. Check `/<stack-name>/lambda/UserManagement` for the error. On a stack whose AI stack was deployed without the Cognito stack's table name (for example, a nested-stack update that did not complete), update the whole LMA stack again.
 
 **CloudWatch Logs for debugging**
 : The Lambda logs all admin actions (create/delete) and all attempts by non-admin callers. Look in CloudWatch Logs under `/<stack-name>/lambda/UserManagement`.

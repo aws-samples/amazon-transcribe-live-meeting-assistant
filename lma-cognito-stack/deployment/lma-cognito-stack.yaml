@@ -136,8 +136,13 @@ Outputs:
     Description: The Cognito User Pool Domain
     Value: !Ref LMAUserPoolDomain
   AppIdentityPoolId:
-    Description: The Id for the App Cognito Identity Pool 
+    Description: The Id for the App Cognito Identity Pool
     Value: !Ref IdentityPool
+  UserSignInTableName:
+    Description: >-
+      The DynamoDB table holding each user's last interactive sign-in time,
+      keyed by Cognito sub. Read by the User Management page and `lma users list`.
+    Value: !Ref UserSignInTable
 
 Resources:
 
@@ -180,6 +185,7 @@ Resources:
         Account Verification
       LambdaConfig:
         CustomMessage: !GetAtt CognitoCustomMessageFunction.Arn
+        PostAuthentication: !GetAtt CognitoPostAuthenticationFunction.Arn
         PreAuthentication: !If
           - ShouldAllowSignUpEmailDomain
           - !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
@@ -731,6 +737,186 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref CognitoCustomMessageFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt UserPool.Arn
+
+  ##########################################################################
+  # Cognito PostAuthentication trigger: last sign-in time
+  #
+  # Records when each user last signed in, for user access reviews (the
+  # User Management page's "Last sign-in" column and `lma users list`).
+  # Cognito ListUsers does not return a sign-in time, and reading the
+  # sign-in history from Cognito needs threat protection, which LMA does not
+  # require, so the time is kept here: one item per user, keyed by Cognito
+  # sub. No user pool attribute is added.
+  #
+  # PostAuthentication runs after an interactive sign-in (the web UI, the
+  # browser extension, the MCP external app client). It does not run when a
+  # client renews its tokens with a refresh token, so the time is the last
+  # time the user signed in with their password, not the last time they
+  # used LMA.
+  #
+  # The trigger never fails a sign-in: a write that does not succeed is
+  # logged and the event is returned as it came.
+  ##########################################################################
+
+  UserSignInTable:
+    Type: AWS::DynamoDB::Table
+    # Sign-in times belong with the user directory, so the table is kept
+    # with the user pool on stack delete.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        # The user's Cognito sub, which never changes and is never reused.
+        - AttributeName: UserSub
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserSub
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CognitoPostAuthenticationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: RecordLastSignIn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # One write per sign-in; the function reads nothing.
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt UserSignInTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  CognitoPostAuthenticationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CognitoPostAuthenticationFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CognitoPostAuthenticationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      # Cognito waits at most five seconds for a trigger; the write below
+      # gives up well inside that.
+      Timeout: 5
+      MemorySize: 128
+      Role: !GetAtt CognitoPostAuthenticationFunctionRole.Arn
+      Environment:
+        Variables:
+          USER_SIGN_IN_TABLE: !Ref UserSignInTable
+      # Unit tests: lma-ai-stack/test/test_cognito_last_sign_in_trigger.py
+      InlineCode: |
+        # Cognito PostAuthentication trigger for LMA: records the time of the
+        # user's last interactive sign-in, keyed by their Cognito sub. Never
+        # fails the sign-in: any error is logged and the event is returned.
+        import logging
+        import os
+        from datetime import datetime, timezone
+
+        import boto3
+        from botocore.config import Config
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
+        # Two attempts of at most two seconds each, inside Cognito's five.
+        dynamodb = boto3.client(
+            "dynamodb",
+            config=Config(
+                connect_timeout=1,
+                read_timeout=1,
+                retries={"mode": "standard", "total_max_attempts": 2},
+            ),
+        )
+
+
+        def now_iso():
+            """The current time as AppSync's AWSDateTime takes it (UTC, Z)."""
+            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+        def lambda_handler(event, _context):
+            attributes = (event.get("request") or {}).get("userAttributes") or {}
+            sub = attributes.get("sub") or ""
+            if not TABLE or not sub:
+                logger.warning("Last sign-in not recorded: no table or no sub in the event")
+                return event
+            signed_in_at = now_iso()
+            try:
+                dynamodb.update_item(
+                    TableName=TABLE,
+                    Key={"UserSub": {"S": sub}},
+                    UpdateExpression="SET LastSignInAt = :at",
+                    # Two sign-ins at once must not move the time backwards.
+                    ConditionExpression="attribute_not_exists(LastSignInAt) OR LastSignInAt < :at",
+                    ExpressionAttributeValues={":at": {"S": signed_in_at}},
+                )
+                logger.info("Recorded the last sign-in of sub %s at %s", sub, signed_in_at)
+            except dynamodb.exceptions.ConditionalCheckFailedException:
+                logger.info("A later sign-in is already recorded for sub %s", sub)
+            except Exception:  # pylint: disable=broad-except
+                logger.exception("Could not record the last sign-in of sub %s", sub)
+            return event
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CognitoPostAuthenticationFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cognito trigger"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - CognitoPostAuthenticationFunctionLogGroup
+
+  CognitoPostAuthenticationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CognitoPostAuthenticationFunction
       Principal: cognito-idp.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt UserPool.Arn

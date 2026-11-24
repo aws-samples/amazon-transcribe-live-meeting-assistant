@@ -3157,10 +3157,18 @@ type User @aws_cognito_user_pools {
 	status: String
 	enabled: Boolean
 	createdAt: AWSDateTime
+	# The user's last interactive sign-in, recorded by the Cognito stack's
+	# PostAuthentication trigger. Null when none has been recorded (the user
+	# has not signed in since the trigger was deployed) or the time could not
+	# be read; UserList.lastSignInAvailable tells the two apart.
+	lastSignInAt: AWSDateTime
 }
 
 type UserList @aws_cognito_user_pools {
 	users: [User]
+	# False when the sign-in times could not be read, so a null lastSignInAt
+	# does not mean "not recorded".
+	lastSignInAvailable: Boolean
 }
 
 input CreateUserInput {
