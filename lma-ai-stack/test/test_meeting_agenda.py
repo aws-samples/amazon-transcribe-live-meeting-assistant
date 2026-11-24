@@ -76,8 +76,9 @@ def test_the_agenda_mutation_is_reachable_by_signed_in_users_and_backend_roles(
     line = next(line for line in schema_sdl.splitlines() if "updateCallAgenda(" in line)
     assert "@aws_cognito_user_pools" in line
     assert "@aws_iam" in line
-    # No group argument: access is per meeting, decided in the template.
-    assert "cognito_groups" not in line
+    # Every Admin and User (role-matrix.json); access is then per meeting,
+    # decided in the template.
+    assert 'cognito_groups: ["Admin", "User"]' in line
 
 
 def test_an_agenda_write_is_published_to_the_meeting_subscription(schema_sdl: str) -> None:

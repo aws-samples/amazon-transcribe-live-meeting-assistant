@@ -1154,3 +1154,15 @@ def test_a_role_change_for_an_unknown_user_reports_a_readable_message(
 
     with pytest.raises(Exception, match="ghost@example.com not found"):
         index.handler(admin_event("setUserRole", role_input("ghost@example.com", "User")), None)
+
+
+def test_the_own_account_guards_ignore_letter_case(cognito: FakeCognito) -> None:
+    """The user pool's usernames are case-insensitive, so the guards are too."""
+    cognito.admins = [CALLER, "other@example.com"]
+
+    with pytest.raises(Exception, match="your own role"):
+        index.handler(admin_event("setUserRole", role_input(CALLER.upper(), "User")), None)
+    with pytest.raises(Exception, match="your own account"):
+        index.handler(admin_event("deleteUser", delete_input(CALLER.upper())), None)
+
+    assert cognito.names_called() == []

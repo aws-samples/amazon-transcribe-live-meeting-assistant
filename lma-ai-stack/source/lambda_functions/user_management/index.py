@@ -278,7 +278,7 @@ def set_user_role(event, args):
     if not username:
         raise ValidationError("username is required")
     _validate_role(role)
-    if username == caller["username"]:
+    if username.casefold() == (caller["username"] or "").casefold():
         raise ValidationError("You cannot change your own role. Ask another Admin.")
 
     groups = set(_current_groups(username))
@@ -314,7 +314,7 @@ def delete_user(event, args):
     if not username:
         raise ValidationError("username is required")
 
-    if username == caller["username"]:
+    if username.casefold() == (caller["username"] or "").casefold():
         raise ValidationError("You cannot delete your own account")
 
     # Prevent deleting the last Admin (lock-out protection)

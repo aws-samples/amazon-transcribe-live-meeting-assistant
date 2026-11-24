@@ -6,7 +6,7 @@
     "Participant": "Member of the Participant Cognito group. Signs in to a minimal home page; no meeting data, meeting sources or configuration."
   },
   "effectiveRole": {
-    "description": "A caller's role from their Cognito groups: Admin when the groups include Admin, otherwise Participant when they include Participant, otherwise User. The pre token generation trigger replaces the role groups in each token's cognito:groups claim with this one role, keeps any other group, and adds the role to the ID token as the lma_role claim. Implemented by lma-cognito-stack/source/pre_token_generation/index.py, lma-ai-stack/source/ui/src/components/common/roles.js, lma-websocket-transcriber-stack/source/app/src/utils/roles.ts, mcp_api_key_authorizer, mcp_analytics/tools/access.py and user_management; each one's tests check it against these vectors.",
+    "description": "A caller's role from their Cognito groups: Admin when the groups include Admin, otherwise Participant when they include Participant, otherwise User. The pre token generation trigger replaces the role groups in each token's cognito:groups claim with this one role, keeps any other group, and adds the role to the ID token as the lma_role claim. Implemented by lma-cognito-stack/source/pre_token_generation/index.py, lma-ai-stack/source/ui/src/components/common/roles.js, lma-websocket-transcriber-stack/source/app/src/utils/roles.ts, mcp_api_key_authorizer, mcp_analytics/index.py and user_management; each one's tests check it against these vectors.",
     "precedence": ["Admin", "Participant", "User"],
     "default": "User",
     "vectors": [

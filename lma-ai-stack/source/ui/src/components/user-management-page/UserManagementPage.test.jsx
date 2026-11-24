@@ -28,7 +28,7 @@ describe('User Management', () => {
     expect(ROLE_OPTIONS.map((option) => option.value).sort()).toEqual(Object.keys(MATRIX.roles).sort());
   });
 
-  it('lists a Participant with that role and offers Change role once one user is selected', async () => {
+  it('lists a Participant with that role, and offers Change role only for a selected user', async () => {
     graphql.mockResolvedValue({
       data: {
         listUsers: {

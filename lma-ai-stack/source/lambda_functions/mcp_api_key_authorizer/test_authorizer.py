@@ -384,11 +384,6 @@ class TestLogOutputOmitsKey(unittest.TestCase):
         result = index.handler(event, None)
         self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestOwnerRole(unittest.TestCase):
     """The key owner's role is read from the user pool on every request."""
 
@@ -494,3 +489,7 @@ class TestOwnerRole(unittest.TestCase):
             self.assertEqual(self.effect(self.authorize()), "Deny")
         finally:
             index.USER_POOL_ID = original
+
+
+if __name__ == "__main__":
+    unittest.main()

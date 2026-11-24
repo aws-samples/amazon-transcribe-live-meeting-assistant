@@ -243,7 +243,7 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 - **Type**: `REQUEST` (not TOKEN) — receives all headers, no IdentitySource filter
 - **TTL**: 0 (no caching — since the identity source varies between headers)
 - **Token extraction order**: `authorizationToken` (TOKEN mode compat) → `headers.x-api-key` → `headers.Authorization` (strips `Bearer ` prefix)
-- **Owner's role**: read from the user pool on every request. A key is refused while its owner is a Participant or once the owner is deleted, and `isAdmin` is `"true"` only while the owner is in the **Admin** group. See [User-Based Access Control](user-based-access-control.md#roles).
+- **Owner's role**: read from the user pool on every request, with one `AdminListGroupsForUser` call, which counts against the account's Amazon Cognito user-read request quota; a call still throttled after three retries denies that request. A key is refused while its owner is a Participant or once the owner is deleted, and `isAdmin` is `"true"` only while the owner is in the **Admin** group. See [User-Based Access Control](user-based-access-control.md#roles).
 - **On success**: returns IAM Allow policy with `context: { userId, username, isAdmin, role, scope }`
 - **On failure**: returns IAM Deny policy
 

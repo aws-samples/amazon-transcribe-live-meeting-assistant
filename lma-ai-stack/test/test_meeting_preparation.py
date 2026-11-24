@@ -121,7 +121,9 @@ def test_each_mutation_is_for_signed_in_users_and_backend_roles_and_published(sc
     lines = schema_sdl.splitlines()
     for mutation in MUTATIONS:
         line = next(line for line in lines if line.strip().startswith(f"{mutation}("))
-        assert line.strip().endswith("): Call @aws_cognito_user_pools @aws_iam"), mutation
+        assert line.strip().endswith(
+            '): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam'
+        ), mutation
     on_update = next(i for i, line in enumerate(lines) if line.strip().startswith("onUpdateCall("))
     subscribe = next(line for line in lines[on_update:] if "@aws_subscribe" in line)
     for mutation in MUTATIONS:
