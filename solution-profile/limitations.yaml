@@ -171,11 +171,13 @@ limitations:
       cannot. It cannot be continued while it is still being captured, after its
       transcript has been deleted, or within 15 minutes of a reopen by someone else
       (or a Virtual Participant rejoin) whose capture has not started yet; retrying
-      one's own unstarted reopen is answered with the same session. Clients downloaded before a deployment offered
-      continuation do not show the option until they are downloaded again.
+      one's own unstarted reopen is answered with the same session. Clients
+      downloaded before a deployment offered continuation do not show the option
+      until they are downloaded again.
     evidence:
       - docs/desktop-capture-app.md#continue-an-existing-meeting
       - docs/stream-audio.md#continue-an-existing-meeting
+      - docs/browser-extension.md#continue-an-existing-meeting
       - docs/websocket-streaming-api.md#continuing-an-existing-meeting
     impact: low
     detect_with: [question:unattended-meetings, question:retention-policy]
