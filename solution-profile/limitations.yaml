@@ -147,7 +147,7 @@ limitations:
       video only where an administrator turns on Meeting Recording › Record screen video
       from Stream Audio/Video and the browser extension (off by default and in every
       preset), and then only for meetings whose user switches it on; the extension
-      records only the meeting tab itself. Their other meetings have no key frames,
+      records only a browser tab (the meeting tab is offered first). Their other meetings have no key frames,
       slide text or screen-share summary.
     evidence:
       - docs/meeting-video.md#which-meetings-have-key-frames

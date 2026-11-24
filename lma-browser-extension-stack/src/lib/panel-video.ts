@@ -34,7 +34,8 @@ export const VIDEO_OFF: VideoState = { status: 'off', message: '', slowGap: null
 
 /** What the panel says when the shared surface is not the meeting tab. */
 export const NOT_THE_MEETING_TAB =
-  'Screen video is recorded only from the meeting tab itself, and something else was shared, so this meeting '
+  'Screen video is recorded only from a browser tab (the meeting tab is offered first), and a window or the '
+  + 'whole screen was shared, so this meeting '
   + 'records audio only.';
 const UNSUPPORTED = 'This browser cannot record screen video in the format LMA needs, so this meeting records audio only.';
 

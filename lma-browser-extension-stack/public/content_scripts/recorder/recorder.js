@@ -22,7 +22,8 @@ chrome.runtime.onMessage.addListener(async function (request, sender, sendRespon
  * recorded with MediaRecorder as fragmented MP4 and handed to the side panel
  * chunk by chunk ("VideoChunk"), which sends it to the transcriber on its own
  * connection (src/lib/screen-video.js). Recorded only when the shared surface
- * is the meeting tab itself; anything else leaves the audio running and tells
+ * is a browser tab (the meeting tab is offered first); a window or screen leaves
+ * the audio running and tells
  * the panel ("VideoUnavailable"). These values match src/lib/screen-video.js,
  * which a test holds them to.
  */

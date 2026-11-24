@@ -222,7 +222,7 @@ function Capture() {
     <SpaceBetween size="xs">
       {videoState.status === 'on' && (
         <Alert type="info" header="Screen video is ON" action={<Button onClick={() => stopVideo()}>Stop video</Button>}>
-          Recording the meeting tab as video. Stop video keeps the audio streaming.
+          Recording the shared tab as video. Stop video keeps the audio streaming.
         </Alert>
       )}
       {videoState.status === 'waiting' && (
@@ -371,7 +371,7 @@ function Capture() {
                 <FormField
                   stretch={true}
                   label="Screen video:"
-                  description="Also record this meeting tab as video, with the meeting. Its slides appear on the meeting page. Only the meeting tab itself is recorded. Off at the start of every meeting."
+                  description="Also record the shared tab as video, with the meeting. Its slides appear on the meeting page. Only a browser tab (the meeting tab is offered first) is recorded. Off at the start of every meeting."
                   constraintText={noticePosted(consentStep) ? 'Fixed once the notice is posted in the chat, which says whether the screen is recorded.' : undefined}
                 >
                   <Toggle
