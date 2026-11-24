@@ -10,7 +10,7 @@ import { useLocation } from 'react-router-dom';
 import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
-import useNotificationCount, { meetingLabel } from '../../hooks/use-notification-count';
+import useNotificationCount from '../../hooks/use-notification-count';
 import useNotificationPreferences from '../../hooks/use-notification-preferences';
 import { meetingCallIdOf, meetingHref } from '../meeting-notifications/meeting-route';
 import NotificationPreferencesModal from '../meeting-notifications/NotificationPreferencesModal';
@@ -116,7 +116,7 @@ const CallAnalyticsTopNavigation = () => {
                   ? [{ id: 'none', text: 'None during this visit', disabled: true }]
                   : notificationCount.meetings.map((meeting) => ({
                       id: `meeting:${meeting.callId}`,
-                      text: `${meetingLabel(meeting)} (${meeting.count})`,
+                      text: `${meeting.label} (${meeting.count})`,
                       href: meetingHref(meeting.callId),
                     }))),
                 { id: 'notification-settings', text: 'Notification settings' },

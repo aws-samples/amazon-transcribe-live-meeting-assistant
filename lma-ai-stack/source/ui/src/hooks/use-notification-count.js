@@ -16,11 +16,17 @@ const logger = new ConsoleLogger('useNotificationCount');
 export const MAX_MEETINGS = 20;
 
 /**
- * How the top navigation names a meeting: its title as the meeting page shows
- * it (the Meeting ID without its time stamp; see meetingTitle), read from the
- * CallId itself, so naming the meetings needs no request.
+ * How the top navigation names each meeting in `meetings`: its title as the
+ * meeting page shows it (the Meeting ID without its time stamp; see
+ * meetingTitle), read from the CallId itself, so naming them needs no request.
+ * Meetings whose titles are the same, such as two days of "Weekly sync", keep
+ * their whole Meeting ID, so every entry can be told apart.
  */
-export const meetingLabel = (meeting) => meetingTitle(meeting.callId);
+export const meetingLabels = (meetings) => {
+  const titles = meetings.map((meeting) => meetingTitle(meeting.callId));
+  const uses = titles.reduce((counts, title) => ({ ...counts, [title]: (counts[title] || 0) + 1 }), {});
+  return titles.map((title, index) => (uses[title] > 1 ? meetings[index].callId : title));
+};
 
 /**
  * Whether a notification counts for this user: on a meeting they own or that is
@@ -89,9 +95,11 @@ const useNotificationCount = ({ username, currentCallId, mutedEverywhere = [], c
     if (currentCallId) clear(currentCallId);
   }, [currentCallId, clear]);
 
-  const meetings = Object.entries(byMeeting)
+  const counted = Object.entries(byMeeting)
     .sort(([, a], [, b]) => b.last - a.last)
     .map(([callId, entry]) => ({ callId, count: entry.ids.length }));
+  const labels = meetingLabels(counted);
+  const meetings = counted.map((meeting, index) => ({ ...meeting, label: labels[index] }));
   const total = meetings.reduce((sum, meeting) => sum + meeting.count, 0);
   return { total, meetings, clear };
 };

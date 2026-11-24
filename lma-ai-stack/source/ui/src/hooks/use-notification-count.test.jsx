@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 
-import useNotificationCount, { countsFor, meetingLabel } from './use-notification-count';
+import useNotificationCount, { countsFor, meetingLabels } from './use-notification-count';
 import { meetingTitle } from '../components/common/meeting-header';
 import useNotificationsDrawer from './use-notifications-drawer';
 import fakeClient, { notification } from '../components/meeting-notifications/__mocks__/notification-client';
@@ -47,11 +47,19 @@ describe('useNotificationCount', () => {
     const { result } = renderHook(() => useNotificationCount({ username: 'owner@example.com', client }));
     act(() => send(notification('a', { CallId: 'Weekly sync-2026-11-03-14-05-09-123' })));
     act(() => send(notification('b', { CallId: 'm2' })));
-    const labels = result.current.meetings.map(meetingLabel).sort();
+    const labels = result.current.meetings.map((meeting) => meeting.label).sort();
     expect(labels).toEqual(['Weekly sync', 'm2']);
     expect(labels[0]).toBe(meetingTitle('Weekly sync-2026-11-03-14-05-09-123'));
     // Only the subscription: naming the meetings reads nothing.
     expect(state.requests).toHaveLength(1);
+  });
+
+  it('keeps the whole Meeting ID for meetings whose titles are the same', () => {
+    const first = 'Weekly sync-2026-11-03-14-05-09-123';
+    const second = 'Weekly sync-2026-11-10-14-05-09-456';
+    expect(meetingLabels([{ callId: first }, { callId: second }, { callId: 'Retro-2026-11-04-10-00-00-789' }])).toEqual(
+      [first, second, 'Retro'],
+    );
   });
 
   it('counts only meetings the user owns or is shared on, and not muted categories', () => {
