@@ -16,6 +16,7 @@ import { attachMeetingConsent, meetingConsent } from './consent-runtime.js';
 import { toolbarPanels } from './consent-evidence.js';
 import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { meetingChat } from './meeting-chat-runtime.js';
+import type { ChatAudience } from './meeting-chat.js';
 import { chatAddressing } from './chat-addressing.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
@@ -176,6 +177,19 @@ export const WEBEX_CHAT_SELECTORS: WebexChatSelectors = {
     bodies: 'span[class^="style-chat-msg"], .activity-item-message',
     rows: '.activity-item, div[class^="style-chat-msg-container"]',
 };
+
+/**
+ * Who a Webex chat message went to, for the chat commands: private when the
+ * row marks it so ("Privately", "Private message", "direct message"), and
+ * everyone otherwise. Webex shows a private message only by such a mark (the
+ * marks are not yet confirmed in a live meeting), so a row without one is read
+ * as sent to everyone; leaving every unmarked row unread would leave Webex with
+ * no chat commands. The meeting chat capture, which leaves Webex out, still
+ * reports an unmarked row as `recipient=unknown`.
+ */
+export function webexChatAudience(privateMark: boolean | undefined): ChatAudience {
+    return privateMark ? 'direct' : 'everyone';
+}
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
@@ -908,8 +922,9 @@ export default class Webex {
             }
             // Which LMA VP the message is for, when there are several
             // (chat-addressing.ts). One for another VP, or the bare "LMA" with
-            // several here, is observed for the diagnostics only.
-            const route = chatAddressing.route(message, sender);
+            // several here, is observed for the diagnostics only. One the row
+            // marks as private is not acted on at all (webexChatAudience).
+            const route = chatAddressing.route(message, sender, webexChatAudience(privateMark));
             if (!route.act) {
                 meetingChat.observe({
                     platform: 'webex',
@@ -1001,6 +1016,8 @@ export default class Webex {
                     sender,
                     id: messageId,
                     links,
+                    // Not webexChatAudience: an unmarked row is reported as
+                    // recipient=unknown here, on purpose (see that function).
                     audience: privateMark ? 'direct' : undefined,
                 });
             }

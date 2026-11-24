@@ -531,7 +531,8 @@ export default class TeamsSdk {
                     // Which LMA VP the message is for, when there are several
                     // (chat-addressing.ts). One for another VP, or the bare
                     // "LMA" with several here, is meeting chat only.
-                    const route = chatAddressing.route(rawBody, sender);
+                    // A Teams meeting chat has no private messages.
+                    const route = chatAddressing.route(rawBody, sender, 'everyone');
                     if (!route.act) {
                         meetingChat.offer({
                             platform: 'teams-sdk',

@@ -274,7 +274,8 @@ export default class Chime {
                 // reduced to "LMA". One for another VP, or the bare "LMA" with
                 // several here, is not read for the commands.
                 if (text) {
-                    const route = chatAddressing.route(text, sender === 'Amazon Chime' ? null : sender);
+                    // A Chime meeting chat has no private messages.
+                    const route = chatAddressing.route(text, sender === 'Amazon Chime' ? null : sender, 'everyone');
                     if (!route.act) return;
                     text = route.text;
                 }

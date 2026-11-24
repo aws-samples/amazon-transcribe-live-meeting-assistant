@@ -29,6 +29,13 @@
  *
  * A message from another LMA VP (by its sender name) is never acted on.
  *
+ * Nor is one that was not sent to everyone in the meeting: a private (direct)
+ * message, or one whose recipient the handler could not read (a Zoom label in
+ * another language, a Meeting SDK payload naming no receiver). It is not read
+ * for a consent reply, a command or a question, and nothing is posted in reply.
+ * Every handler passes what it read of the recipient to `route`, so a new
+ * platform gets the same rule by routing its chat.
+ *
  * The other VPs are known by name from what this VP can see: chat senders, the
  * names the platform shows as speaking (consent-roster.ts's sightings), and
  * where a handler can read the whole participant list (the Google Meet tiles,
@@ -48,6 +55,7 @@ import { onParticipantSeen } from './consent-roster.js';
 import { DEFAULT_EXIT_MESSAGE, details } from './details.js';
 import { createLogger } from './logger.js';
 import { cleanChatSpacing, isLmaVpName, sameVpName, setVpPeerNames, vpHandles } from './vp-handle.js';
+import type { ChatAudience } from './meeting-chat.js';
 
 const log = createLogger('chat-addressing');
 
@@ -67,8 +75,11 @@ export interface ChatAddress {
 export interface ChatRoute extends ChatAddress {
     /** Whether this VP reads the message for its commands, questions and consent replies. */
     act: boolean;
-    /** Why it does not, for the debug line. */
-    reason?: 'other-vp' | 'several-vps' | 'ambiguous' | 'from-vp';
+    /**
+     * Why it does not, for the debug line. `direct`: sent privately;
+     * `recipient-unknown`: the handler could not read who it was sent to.
+     */
+    reason?: 'other-vp' | 'several-vps' | 'ambiguous' | 'from-vp' | 'direct' | 'recipient-unknown';
 }
 
 function escapeRegExp(text: string): string {
@@ -278,14 +289,25 @@ export class ChatAddressing {
         return [...this.seen.values()].map((entry) => entry.name);
     }
 
-    /** Whether this VP acts on `message` from `sender`, and the text it reads it as. */
-    route(message: string, sender?: string | null): ChatRoute {
+    /**
+     * Whether this VP acts on `message` from `sender`, sent to `audience`, and
+     * the text it reads it as. `audience` is what the handler read of the
+     * recipient, undefined when it could not read one; it is required so that
+     * every handler says. Only a message sent to everyone is acted on.
+     */
+    route(message: string, sender: string | null | undefined, audience: ChatAudience | undefined): ChatRoute {
         this.notePeer(sender);
         const route = routeChatMessage(message, sender, this.selfName(), this.peers());
         // A VP that posts its exit message has left.
         if (route.reason === 'from-vp' && sender && isVpExitMessage(message, this.exitMessages())) {
             this.seen.delete(normalizeChatText(sender));
             this.logCount();
+        }
+        if (audience !== 'everyone') {
+            const reason = audience === 'direct' ? 'direct' : 'recipient-unknown';
+            // No text and no sender name: the message was not meant for everyone.
+            log.debug(`[chat-addressing] not acted on, not sent to everyone (${reason})`);
+            return { ...route, act: false, reason };
         }
         if (!route.act) log.debug(`[chat-addressing] not for this VP (${route.reason}, address=${route.kind})`);
         return route;
