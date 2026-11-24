@@ -183,6 +183,11 @@ def test_the_extension_manifest_also_runs_the_sdk_publish_tests() -> None:
     )
 
 
+def test_the_sdk_publish_mapping_runs_the_extension_smoke_test() -> None:
+    # The smoke test stages the manifest version with chrome_extension_version.
+    assert "browser_extension" in ran(["lib/lma_sdk/lma_sdk/_core/publish.py"])
+
+
 def test_the_cognito_template_runs_the_extension_smoke_test() -> None:
     # The smoke test holds the extension id to the template's sign-in callback.
     assert {"browser_extension", "cfn_lint"} <= ran(

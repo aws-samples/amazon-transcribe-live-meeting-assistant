@@ -366,6 +366,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The browser extension's Playwright smoke test checks that the extension id is
     # the one the Cognito app client names as its sign-in callback.
     ("lma-cognito-stack/deployment/lma-cognito-stack.yaml", "browser_extension"),
+    # ...and stages the manifest version with the SDK's publish mapping.
+    ("lib/lma_sdk/lma_sdk/_core/publish.py", "browser_extension"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.
     ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's

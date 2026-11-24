@@ -147,7 +147,7 @@ def test_extension_loads_with_the_id_the_sign_in_callback_names(browser) -> None
     )
 
 
-def test_manifest_is_the_staged_release_version(browser) -> None:
+def test_manifest_carries_the_staged_version(browser) -> None:
     worker = eb.service_worker(browser["context"])
     manifest = worker.evaluate("chrome.runtime.getManifest()")
     assert manifest["manifest_version"] == 3

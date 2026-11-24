@@ -115,7 +115,7 @@ def test_served_extension_has_a_version_chrome_accepts(run) -> None:
     assert probe.chrome_accepts_version(run.served_version), (
         f"the stack serves the extension with manifest version {run.served_version!r}, "
         "which Chrome refuses to load (it accepts 1-4 dot-separated integers); the rest "
-        "of this run used a copy stamped with its release part"
+        "of this run used a copy re-stamped with the SDK's publish mapping"
     )
 
 

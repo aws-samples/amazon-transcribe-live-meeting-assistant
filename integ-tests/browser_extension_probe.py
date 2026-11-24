@@ -174,7 +174,8 @@ def stage_for_chrome(served: Path, dest: Path) -> tuple[Path, str]:
     """Stage the served extension (or a local build with its configuration).
 
     Returns the staged directory and the served manifest's version. A version Chrome
-    refuses is replaced by its release part here, so the rest of the run can go on;
+    refuses is re-stamped here with the SDK's publish mapping
+    (``extension_browser.chrome_version``), so the rest of the run can go on;
     :func:`chrome_accepts_version` on the returned version is the test of it.
     """
     served_manifest = json.loads((served / "manifest.json").read_text())
