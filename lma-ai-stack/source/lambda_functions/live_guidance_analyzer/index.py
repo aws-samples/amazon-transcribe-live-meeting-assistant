@@ -561,7 +561,9 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
     segments = pure.final_segments(
         read_segments(call_id), meeting.get("SpeakerIdentities"), meeting.get("CustomerPhoneNumber")
     )
-    fresh = pure.new_segments(segments, state.get("LastSegmentEndTime"))
+    # A state row from before ShownSegmentIds was recorded is read by its marker alone.
+    shown = _json_field(state, "ShownSegmentIds", []) if "ShownSegmentIds" in state else None
+    fresh = pure.new_segments(segments, state.get("LastSegmentEndTime"), shown)
     if len(fresh) < settings.min_new_segments:
         release(call_id, lease, ran=False, now=now)
         return {"ran": False, "reason": f"{len(fresh)} new segments"}
@@ -614,12 +616,17 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
             continue
         published[key]["withdrawn"] = True
 
+    # max() keeps the marker from moving back when only late segments were new.
+    marker = max([s.end for s in fresh] + [pure._seconds(state.get("LastSegmentEndTime"))])
     release(
         call_id,
         lease,
         ran=True,
         now=now,
-        LastSegmentEndTime=max(s.end for s in fresh),
+        LastSegmentEndTime=marker,
+        ShownSegmentIds=json.dumps(
+            pure.shown_near(segments, [*(shown or []), *(s.segment_id for s in fresh)], marker)
+        ),
         RollingSummary=analysis.summary or str(state.get("RollingSummary") or ""),
         Published=json.dumps(published, ensure_ascii=False),
         PublishTimes=json.dumps(recent),
