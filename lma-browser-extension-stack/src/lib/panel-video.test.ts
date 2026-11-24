@@ -107,6 +107,23 @@ describe('the panel\'s screen video', () => {
     expect(h.last().message).toMatch(/not enabled/);
   });
 
+  test('sends the recorder\'s last chunk before ending the stream when the capture ends', async () => {
+    const h = setup();
+    h.video.begin('m', true, false);
+    h.video.onRecorderMessage({ action: 'VideoStarted' });
+    h.video.onRecorderMessage({ action: 'VideoChunk', data: chunk([1]) });
+    await flush();
+    const ws = h.sockets[0];
+    ws.onopen?.();
+    h.video.end();
+    expect(h.recorder).toEqual(['StartVideo', 'StopVideo']);
+    h.video.onRecorderMessage({ action: 'VideoChunk', data: chunk([2]) });
+    h.video.onRecorderMessage({ action: 'VideoStopped', reason: 'stopped' });
+    expect(ws.sent.filter((m) => typeof m !== 'string')).toHaveLength(2);
+    expect(json(ws)[json(ws).length - 1]).toEqual({ callEvent: 'END_VIDEO', callId: 'm' });
+    expect(h.last().status).toBe('off');
+  });
+
   test('goes back to off when the capture ends', () => {
     const h = setup();
     h.video.begin('m', true, false);

@@ -88,6 +88,8 @@ function IntegrationProvider({ children }: any) {
   // Screen video of the meeting tab (lib/panel-video.ts): asked for at
   // startTranscription, started once START is sent and consent allows capture.
   const wantVideoRef = useRef(false);
+  // The tab whose recorder captures this meeting.
+  const capturedTabRef = useRef<number | undefined>(undefined);
   const [videoState, setVideoState] = useState<VideoState>(VIDEO_OFF);
   const userRef = useRef(user);
   userRef.current = user;
@@ -95,8 +97,11 @@ function IntegrationProvider({ children }: any) {
   if (panelVideoRef.current === null) {
     panelVideoRef.current = createPanelVideo({
       openSocket: async () => new WebSocket(transcriberUrl(settings.wssEndpoint as string, userRef.current)),
+      // To the recorder in the captured tab only, as StartTranscription is
+      // sent: every open tab has a recorder.
       sendToRecorder: (message) => {
-        if (chrome.runtime) chrome.runtime.sendMessage(message);
+        const tabId = capturedTabRef.current;
+        if (tabId !== undefined && chrome.tabs) chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
       },
       onState: (state) => setVideoState(state),
       log: (message) => console.log(`LMA video: ${message}`),
@@ -295,6 +300,7 @@ function IntegrationProvider({ children }: any) {
       if (chrome.runtime) {
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (tab.id) {
+          capturedTabRef.current = tab.id;
           const response = await chrome.tabs.sendMessage(tab.id, { action: "StartTranscription", video: wantVideoRef.current });
           // We send a message here, but not actually start the stream until we receive a new message with the sample rate.
         }
@@ -387,7 +393,10 @@ function IntegrationProvider({ children }: any) {
           setActiveSpeaker(request.active_speaker);
           sendMessage(JSON.stringify(withoutConsent(currentCall)));
         } else if (["VideoStarted", "VideoChunk", "VideoStopped", "VideoUnavailable"].includes(request.action)) {
-          panelVideo.onRecorderMessage(request);
+          // Only from the recorder in the tab being captured.
+          if (sender && sender.tab && sender.tab.id === capturedTabRef.current) {
+            panelVideo.onRecorderMessage(request);
+          }
         } else if (request.action === "MuteChange") {
           setMuted(request.mute);
         }

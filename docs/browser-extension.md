@@ -101,7 +101,9 @@ again after each capture, so the step always follows the settings in force.
   posts it in the meeting chat of the tab, through the same reader that reads
   the meeting's speakers. After posting, the panel asks **Did the notice appear
   in the meeting chat?**: it counts as posted only when you answer **Yes, it
-  appeared**, which also chooses *In the meeting chat* as how everyone was told.
+  appeared**, which also chooses *In the meeting chat* as how everyone was told
+  and, in Notify, confirms that you told everyone (in Opt-in, that everyone
+  agreed is still yours to confirm).
   Answer **No**, or if posting failed, copy the notice and paste it yourself,
   or read it out.
 - **The confirmation**: in Opt-in, that everyone agreed; in Notify, that you
@@ -113,7 +115,8 @@ again after each capture, so the step always follows the settings in force.
   while it waits for your answer about the chat post.
 - **Participant objected**, while capturing, with an optional name. The
   extension tells the transcriber, which ends the meeting, records the
-  objection, and keeps what was captured before it; capture stops at once. If the
+  objection, and keeps what was captured before it; capture stops at once, and
+  the panel shows that a participant objected. If the
   connection to LMA had been lost, the panel says the objection could not be
   sent: record it in the Consent section of the meeting's page in LMA.
 

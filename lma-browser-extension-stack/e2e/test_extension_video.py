@@ -101,10 +101,11 @@ def _record(browser, surface: str, seconds: float) -> dict:
     context = browser["context"]
     worker = eb.service_worker(context)
     worker.evaluate(COLLECT)
+    recorder_url = f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html"
     page = context.new_page()
     page.add_init_script(FAKE_CAPTURE)
     try:
-        page.goto(f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html")
+        page.goto(recorder_url)
         page.evaluate(f"window.__surface = {surface!r}")
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StartTranscription', video: true })")
         page.wait_for_function("window.__gdmOptions !== null", timeout=15_000)
@@ -233,3 +234,18 @@ def test_a_share_other_than_the_meeting_tab_records_no_video(browser) -> None:
     actions = [m["action"] for m in result["messages"]]
     assert actions == ["VideoUnavailable"], actions
     assert result["messages"][0]["reason"] == "surface"
+
+
+def test_a_recorder_that_is_not_capturing_does_not_answer(browser) -> None:
+    """Every open tab has a recorder, and the video messages reach them all."""
+    context = browser["context"]
+    worker = eb.service_worker(context)
+    worker.evaluate(COLLECT)
+    page = context.new_page()
+    try:
+        page.goto(f"chrome-extension://{browser['extension_id']}/content_scripts/recorder/recorder.html")
+        worker.evaluate("chrome.runtime.sendMessage({ action: 'StartVideo' })")
+        time.sleep(1.5)
+        assert worker.evaluate("self.__video") == []
+    finally:
+        page.close()

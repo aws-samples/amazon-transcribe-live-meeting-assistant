@@ -34,6 +34,8 @@ const VIDEO_CONSTRAINTS = { frameRate: { ideal: 5, max: 5 }, width: { max: 1920 
 let videoRecorder = null;
 let videoTrack = null;
 let videoStopReason = null;
+// Whether this recorder is capturing a meeting: set once its share is granted.
+let capturing = false;
 
 const pickVideoMimeType = () => {
   if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') return null;
@@ -41,7 +43,8 @@ const pickVideoMimeType = () => {
 };
 
 const startVideo = () => {
-  if (videoRecorder) return;
+  // Only the recorder that is capturing this meeting answers.
+  if (videoRecorder || !capturing) return;
   if (!videoTrack) {
     // Told now, when the panel is ready for it: the share was not the meeting tab.
     chrome.runtime.sendMessage({ action: "VideoUnavailable", reason: "surface" });
@@ -129,6 +132,7 @@ const stopStreaming = async () => {
     audioProcessor.disconnect();
     audioProcessor = null;
     stopVideo("stopped");
+    capturing = false;
     videoTrack = null;
 
     displayStream.getTracks().forEach((track) => {
@@ -170,6 +174,7 @@ const startStreaming = async (withVideo = false) => {
       }
     });
 
+    capturing = true;
     if (withVideo) {
       const [track] = displayStream.getVideoTracks();
       const surface = track && track.getSettings ? track.getSettings().displaySurface : undefined;

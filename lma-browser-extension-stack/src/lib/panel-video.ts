@@ -46,6 +46,10 @@ type Options = {
   log?: (message: string) => void,
   now?: () => number,
   uplinkOptions?: Record<string, unknown>,
+  /** How long the end of a capture waits for the recorder's last chunk. */
+  endWaitMs?: number,
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>,
+  clearTimer?: (timer: ReturnType<typeof setTimeout>) => void,
 };
 
 /** Decodes the recorder's base64 data URL into bytes. */
@@ -57,7 +61,11 @@ export const dataUrlBytes = (dataUrl: string): Uint8Array => {
   return bytes;
 };
 
-export const createPanelVideo = ({ openSocket, sendToRecorder, onState, log = () => undefined, now = () => Date.now(), uplinkOptions = {} }: Options) => {
+export const createPanelVideo = ({
+  openSocket, sendToRecorder, onState, log = () => undefined, now = () => Date.now(), uplinkOptions = {},
+  endWaitMs = 3000, setTimer = (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimer = (t: ReturnType<typeof setTimeout>) => clearTimeout(t),
+}: Options) => {
+  let endTimer: ReturnType<typeof setTimeout> | null = null;
   let state: VideoState = VIDEO_OFF;
   let callId: string | null = null;
   let since = 0;
@@ -126,6 +134,10 @@ export const createPanelVideo = ({ openSocket, sendToRecorder, onState, log = ()
       monitor?.push(bytes);
       uplink?.send(bytes.buffer);
     } else if (request.action === 'VideoStopped') {
+      if (endTimer !== null) {
+        finishEnd();
+        return;
+      }
       if (request.reason === 'ended') fail(videoStopMessage('ended'));
       uplink?.stop();
     }
@@ -142,12 +154,29 @@ export const createPanelVideo = ({ openSocket, sendToRecorder, onState, log = ()
   };
 
   /** The capture ended: whatever is still open is ended, and the switch goes back to off. */
-  const end = () => {
+  const finishEnd = () => {
+    if (endTimer !== null) clearTimer(endTimer);
+    endTimer = null;
     wanted = false;
     uplink?.stop();
     uplink = null;
     state = VIDEO_OFF;
     onState(state);
+  };
+
+  /**
+   * The capture ended: the recorder's last chunk is sent before the stream is
+   * ended (it comes with "VideoStopped"), waiting at most `endWaitMs` for it;
+   * then the switch goes back to off.
+   */
+  const end = () => {
+    if (!uplink) {
+      finishEnd();
+      return;
+    }
+    if (endTimer !== null) return;
+    sendToRecorder({ action: 'StopVideo' });
+    endTimer = setTimer(finishEnd, endWaitMs);
   };
 
   return { begin, granted, onRecorderMessage, stop, end, state: () => state };
