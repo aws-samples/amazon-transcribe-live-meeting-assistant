@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 import boto3
 from bedrock_compat import (
@@ -863,6 +864,31 @@ def posixify_filename(filename: str) -> str:
     return posix_filename
 
 
+# The metadata key that holds the meeting's creation time as whole seconds since
+# the epoch (UTC). Bedrock's range conditions compare numbers, and CreatedAt is an
+# ISO 8601 string, so the MCP search_lma_meetings tool bounds a search by its
+# startDate and endDate on this key.
+CREATED_AT_EPOCH_KEY = "CreatedAtEpochSeconds"
+
+
+def epoch_seconds(timestamp):
+    """An ISO 8601 time as whole seconds since the epoch, or None if it is not one.
+
+    A time without an offset is read as UTC, as LMA writes its times in UTC, and as
+    _date_bound in mcp_analytics/tools/search_meetings.py reads the dates it filters
+    on; keep the two in step.
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
 def getKBMetadata(metadata):
     # Keys to include
     keys_to_include = [
@@ -874,6 +900,9 @@ def getKBMetadata(metadata):
     ]
     # Create a new dictionary with only the specified keys
     filtered_metadata = {key: metadata[key] for key in keys_to_include if key in metadata}
+    created_at = epoch_seconds(metadata.get("CreatedAt"))
+    if created_at is not None:
+        filtered_metadata[CREATED_AT_EPOCH_KEY] = created_at
     kbMetadata = {"metadataAttributes": filtered_metadata}
     return json.dumps(kbMetadata)
 

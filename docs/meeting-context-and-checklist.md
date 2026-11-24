@@ -69,7 +69,7 @@ key is everything before the first `=` and the value everything after it.
 
 | Input | Limit |
 |---|---|
-| Labels | At most 20. A key is 1 to 63 characters of lower-case letters, digits, `.`, `_` and `-`, starting with a letter or a digit (`[a-z0-9][a-z0-9._-]{0,62}`), and is used once. A value is at most 256 characters. |
+| Labels | At most 20. A key is 1 to 63 characters of lower-case letters, digits, `.`, `_` and `-`, starting with a letter or a digit (`[a-z0-9][a-z0-9._-]{0,62}`), and is used once. A value is at most 256 characters, on one line (a value with a line break is refused, as the label editor shows one label per line). |
 | Audience | `internal`, `external`, or empty to clear it. |
 | Meeting context | At most 20,000 characters. |
 | Checklist | At most 100 items. |

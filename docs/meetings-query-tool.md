@@ -25,7 +25,7 @@ The Meetings Query Tool relies on a Bedrock Knowledge Base that is automatically
 
 1. **Knowledge Base creation** -- When the **Transcript Knowledge Base** CloudFormation parameter is set to **BEDROCK_KNOWLEDGE_BASE (Create)** (the default), LMA provisions a dedicated Bedrock Knowledge Base for meeting data.
 
-2. **Data ingestion** -- When each meeting ends, LMA writes the meeting summary, full transcript, and metadata (including owner, callId, timestamps, and duration) to an S3 bucket.
+2. **Data ingestion** -- When each meeting ends, LMA writes the meeting summary, full transcript, and metadata (including owner, callId, timestamps, and duration) to an S3 bucket. The metadata also holds the meeting's creation time as a number (`CreatedAtEpochSeconds`, seconds since the epoch), which the MCP `search_lma_meetings` tool's `startDate` and `endDate` filter on.
 
 3. **Retention management** -- An S3 lifecycle policy manages data retention based on the transcript retention parameter (default: 90 days). Expired meeting data is automatically deleted.
 

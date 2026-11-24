@@ -256,8 +256,20 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Natural language search query"},
-                "startDate": {"type": "string", "description": "Optional ISO 8601 start date"},
-                "endDate": {"type": "string", "description": "Optional ISO 8601 end date"},
+                "startDate": {
+                    "type": "string",
+                    "description": (
+                        "Optional ISO 8601 date or date and time: meetings created from "
+                        "then (a date alone starts at 00:00 UTC)"
+                    ),
+                },
+                "endDate": {
+                    "type": "string",
+                    "description": (
+                        "Optional ISO 8601 date or date and time: meetings created until "
+                        "then (a date alone includes the whole day, in UTC)"
+                    ),
+                },
                 "maxResults": {"type": "number", "description": "Maximum results to return"},
             },
             "required": ["query"],

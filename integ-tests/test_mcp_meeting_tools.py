@@ -6,13 +6,15 @@
 One probe run (mcp_meeting_tools_probe.py) creates a synthetic meeting owned by
 the Cognito test user, generates a read key and then a read-write key, and
 exercises the tools against that meeting only: a write tool refused to the read
-key, get_meeting_transcript read page by page with its nextToken, guidance
-pushed and listed, the meeting's agenda, context, checklist, labels and audience
-set and read, the meeting found by its labels, its consent record, sharing
-added and removed, a recording link from get_meeting_record, delete_meeting
-with and without confirm, schedule_meeting called again for a meeting it
-already scheduled and with meeting preparation, update_scheduled_meeting, and
-end_virtual_participant called twice.
+key, search_lma_meetings bounded by startDate and endDate (which reads every
+meeting the user can search, not only that one), get_meeting_transcript read
+page by page with its nextToken, guidance pushed and listed, the meeting's
+agenda, context, checklist, labels and audience set and read (and a label
+value with a line break refused), the meeting found by its labels, its consent
+record, sharing added and removed, a recording link from get_meeting_record,
+delete_meeting with and without confirm, schedule_meeting called again for a
+meeting it already scheduled and with meeting preparation,
+update_scheduled_meeting, and end_virtual_participant called twice.
 Each test asserts one property of what it observed.
 
 Runs whenever a Cognito test user is configured, like test_mcp_api_key_logging,
@@ -76,6 +78,25 @@ def test_a_read_key_reads(observed) -> None:
     assert observed["read_key_reads"], "get_meeting_transcript was refused to a read key"
 
 
+# ── search_lma_meetings, bounded by date ────────────────────────────────────
+
+
+def test_a_date_bounded_search_is_answered(observed) -> None:
+    """startDate and endDate become numeric conditions the knowledge base accepts."""
+    search = observed["date_search"]
+    if search["error"] and "Knowledge Base not configured" in search["error"]:
+        pytest.skip("the stack has no transcript knowledge base")
+    assert search["error"] is None, search["error"]
+    assert search["answered"], "search_lma_meetings answered without an answer field"
+
+
+def test_a_search_date_that_is_no_date_is_refused_naming_the_argument(observed) -> None:
+    """Checked before the knowledge base and the model, so on every stack."""
+    refused = observed["date_search_bad_date"]
+    assert refused["error"], refused["text"]
+    assert "startDate must be an ISO 8601 date" in refused["text"], refused["text"]
+
+
 # ── get_meeting_transcript, page by page ────────────────────────────────────
 
 
@@ -132,7 +153,9 @@ def test_a_request_over_a_limit_is_refused_whole_naming_the_limit(observed) -> N
     assert observed["too_many_items"] and "at most 100 items" in observed["too_many_items"], observed[
         "too_many_items"
     ]
-    # Nothing of the refused label change was applied.
+    refused = observed["label_with_line_break"]
+    assert refused and "must not contain a line break" in refused, refused
+    # Nothing of the refused label changes was applied.
     assert observed["labels_after_refusals"] == observed["metadata"][0], observed["labels_after_refusals"]
 
 

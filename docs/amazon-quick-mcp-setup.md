@@ -360,7 +360,19 @@ Common parameters for the most-used tools.
 
 - `query` (required) — natural-language query
 - `maxResults` — default 10
-- `startDate` / `endDate` — optional ISO 8601
+- `startDate` / `endDate` — optional ISO 8601 date (`2026-11-01`) or date and
+  time (`2026-11-01T09:00:00Z`); they bound the search by when each meeting was
+  created. A date alone covers the whole day in UTC, and a time without an
+  offset is read as UTC. A value that is not a date is refused, naming the
+  argument.
+
+  The dates are matched against the creation time that the summary step writes
+  into each meeting's knowledge base metadata (`CreatedAtEpochSeconds`). Meetings
+  summarized before that key was added have no such value, so a search given
+  either date does not find them; a search without dates still does. To make an
+  older meeting findable by date, press **Regenerate** on its summary, which
+  writes its knowledge base files again; the next knowledge base sync (every 15
+  minutes) picks them up. LMA does not rewrite the older files for you.
 
 ### `get_meeting_transcript`
 

@@ -480,3 +480,43 @@ def test_an_aws_error_is_one_line_naming_the_action(client, aws, service, method
     assert action in message
     assert "not authorized" in message
     assert "\n" not in message
+
+
+def _fails(method, code, message):
+    def call(*_args, **_kwargs):
+        raise ClientError({"Error": {"Code": code, "Message": message}}, method)
+
+    return call
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["ThrottlingException", "ResourceNotFoundException", "ProvisionedThroughputExceededException"],
+)
+def test_an_aws_error_that_is_not_a_denial_names_no_permission(client, aws, code):
+    """Only a denied call points the caller at IAM."""
+    aws.dynamodb.query = _fails("Query", code, "try again")
+    with pytest.raises(meeting_ops.LMAConfigurationError) as caught:
+        client.meetings.delete_by_labels({"engagement": "acme"}, as_user="alice", confirm=False)
+    message = str(caught.value)
+    assert message.startswith("Could not list the meetings")
+    assert "try again" in message
+    assert "caller needs" not in message
+    assert "dynamodb:Query" not in message
+
+
+def test_a_denied_call_also_points_at_the_permissions_table(client, aws):
+    aws.dynamodb.query = _fails("Query", "AccessDenied", "not authorized")
+    with pytest.raises(meeting_ops.LMAConfigurationError, match="permissions table"):
+        client.meetings.delete_by_labels({"engagement": "acme"}, as_user="alice", confirm=False)
+
+
+def test_an_error_that_is_not_from_aws_is_not_reported_as_one(client, aws):
+    """A defect in the SDK surfaces as itself, not as a missing permission."""
+
+    def broken(*_args, **_kwargs):
+        raise KeyError("Items")
+
+    aws.dynamodb.query = broken
+    with pytest.raises(KeyError):
+        client.meetings.delete_by_labels({"engagement": "acme"}, as_user="alice", confirm=False)

@@ -254,6 +254,26 @@ class TestLaunchAsUser:
             )
         services["appsync"].graphql.assert_not_called()
 
+    def test_a_zoom_check_that_fails_otherwise_names_no_permission(self, client, services):
+        services["cognito"].admin_get_user.return_value = _cognito_user()
+        services["secrets"].describe_secret.side_effect = _client_error("ThrottlingException")
+
+        with pytest.raises(LMAConfigurationError) as caught:
+            client.vp.create(
+                meeting_name="m", platform="ZOOM", meeting_id="1",
+                wait=False, as_user="alice@example.com", use_zoom_credentials=True,
+            )
+        message = str(caught.value)
+        assert message.startswith("Could not check for stored Zoom credentials:")
+        assert "ThrottlingException" in message
+        assert "caller needs" not in message
+        services["appsync"].graphql.assert_not_called()
+
+    def test_a_lookup_error_that_is_not_from_aws_is_not_reported_as_one(self, client, services):
+        services["cognito"].admin_get_user.side_effect = KeyError("UserAttributes")
+        with pytest.raises(KeyError):
+            client.vp.resolve_user("alice@example.com")
+
     def test_required_zoom_credentials_missing_creates_no_row(self, client, services):
         services["cognito"].admin_get_user.return_value = _cognito_user()
         services["secrets"].describe_secret.side_effect = _client_error("ResourceNotFoundException")
@@ -322,6 +342,14 @@ class TestResolveUser:
         services["cognito"].admin_get_user.side_effect = _client_error("AccessDeniedException")
         with pytest.raises(LMAConfigurationError, match="cognito-idp:AdminGetUser"):
             client.vp.resolve_user("alice@example.com")
+
+    def test_a_lookup_that_fails_otherwise_names_no_permission(self, client, services):
+        services["cognito"].admin_get_user.side_effect = _client_error("TooManyRequestsException")
+        with pytest.raises(LMAConfigurationError) as caught:
+            client.vp.resolve_user("alice@example.com")
+        message = str(caught.value)
+        assert message.startswith(f"Could not look up the LMA user in user pool {POOL_ID}:")
+        assert "caller needs" not in message
 
     def test_empty_identifier_rejected(self, client, services):
         with pytest.raises(LMAVirtualParticipantError, match="must not be empty"):

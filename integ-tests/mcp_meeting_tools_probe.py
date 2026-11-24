@@ -13,7 +13,9 @@ It then generates MCP API keys for the test user, one at a time because a user
 holds one key:
 
 1. a key with the read scope, with which a write tool must be refused and must
-   leave nothing behind;
+   leave nothing behind, and with which search_lma_meetings is asked for the
+   last 30 days (startDate and endDate) and once with a startDate that is no
+   date;
 2. a key with the read-write scope, with which it reads get_meeting_transcript
    (format json) page by page with its nextToken while segments are added,
    pushes guidance and reads it back (with list_meeting_guidance and
@@ -276,10 +278,37 @@ class Probe:
             self.observed["read_key_context_refused"] = error and "read-write" in str(answer)
             error, answer = self.call(key, "get_meeting_transcript", {"meetingId": self.call_id, "format": "json"})
             self.observed["read_key_reads"] = not error
+            self._date_bounded_search(key)
         finally:
             self.revoke(prefix)
         self.observed["guidance_after_read_key"] = self._guidance_rows()
         self.observed["meeting_after_read_key"] = self.meeting_row() is not None
+
+    def _date_bounded_search(self, key: str) -> None:
+        """search_lma_meetings with startDate and endDate, and with a value that is no date.
+
+        The knowledge base must accept the numeric range conditions the dates
+        become; whether it finds a meeting depends on its 15-minute ingestion,
+        so only the answer's being an answer is observed. A stack deployed
+        without the transcript knowledge base answers that it has none.
+        """
+        today = datetime.now(timezone.utc).date()
+        error, answer = self.call(
+            key,
+            "search_lma_meetings",
+            {
+                "query": "What was decided?",
+                "startDate": (today - timedelta(days=30)).isoformat(),
+                "endDate": today.isoformat(),
+                "maxResults": 3,
+            },
+        )
+        self.observed["date_search"] = {
+            "error": str(answer)[:300] if error else None,
+            "answered": not error and isinstance(answer, dict) and "answer" in answer,
+        }
+        error, answer = self.call(key, "search_lma_meetings", {"query": "q", "startDate": "last week"})
+        self.observed["date_search_bad_date"] = {"error": error, "text": str(answer)[:300]}
 
     def _guidance_rows(self) -> int:
         """The meeting's stored notifications (guidance is one category of them)."""
@@ -380,6 +409,10 @@ class Probe:
             {**meeting, "items": [{"itemId": f"i{n}", "text": "t", "kind": "topic"} for n in range(101)]},
         )
         self.observed["too_many_items"] = refused if error else None
+        error, refused = self.call(
+            key, "update_meeting_metadata", {**meeting, "labels": {"probe": "two\nlines"}}
+        )
+        self.observed["label_with_line_break"] = refused if error else None
         self.observed["labels_after_refusals"] = call("update_meeting_metadata", {"audience": "internal"}).get("labels")
         self.observed["listed_by_labels"] = [entry["meetingId"] for entry in found]
         self.observed["listed_fields"] = sorted(found[0]) if found else []
