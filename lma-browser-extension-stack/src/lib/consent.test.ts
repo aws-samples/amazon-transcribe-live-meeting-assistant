@@ -15,6 +15,7 @@ import {
   renderNotice,
   startBlockedReason,
   transcriberUrl,
+  withoutConsent,
 } from './consent';
 
 const OPT_IN: ConsentSettings = {
@@ -88,6 +89,13 @@ describe('the consent step', () => {
     expect(describeConsentState({ event: 'CONSENT_STATE', status: 'granted', captureAllowed: true })?.type).toBe('success');
     expect(describeConsentState({ event: 'CONSENT_STATE', status: 'objected', captureAllowed: false })?.text).toMatch(/objected/);
     expect(describeConsentState({ event: 'CONSENT_STATE', captureAllowed: false, message: 'Refused.' })).toEqual({ type: 'error', text: 'Refused.' });
+  });
+
+  test('leaves the consent step out of the frames after START', () => {
+    const start = { callEvent: 'START', callId: 'c', consent: { mode: 'notify' } };
+    expect(withoutConsent({ ...start, callEvent: 'END' })).toEqual({ callEvent: 'END', callId: 'c' });
+    const speaker: { callEvent: string, callId: string, consent?: unknown } = { callEvent: 'SPEAKER_CHANGE', callId: 'c' };
+    expect(withoutConsent(speaker)).toEqual({ callEvent: 'SPEAKER_CHANGE', callId: 'c' });
   });
 
   test('builds the upgrade URL with the tokens in the query string', () => {

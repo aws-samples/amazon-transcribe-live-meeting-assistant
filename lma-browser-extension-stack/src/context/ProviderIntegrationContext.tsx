@@ -11,7 +11,7 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
-import { captureStopped, parseServerFrame } from '../lib/consent';
+import { captureStopped, parseServerFrame, withoutConsent } from '../lib/consent';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -59,9 +59,6 @@ const initialIntegration = {
   reportObjection: (participantName: string) => { },
 };
 const IntegrationContext = createContext(initialIntegration);
-
-// The consent step belongs to START only; END and SPEAKER_CHANGE leave it out.
-const withoutConsent = ({ consent, ...frame }: Call): Omit<Call, "consent"> => frame;
 
 function IntegrationProvider({ children }: any) {
 

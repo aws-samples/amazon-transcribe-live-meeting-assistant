@@ -22,6 +22,7 @@ import ConsentPanel from '../views/ConsentPanel';
 import {
   ConsentSettings,
   ConsentStep,
+  captureStopped,
   consentPayload,
   consentRequired,
   describeConsentState,
@@ -66,7 +67,8 @@ function Capture() {
     });
     setConsentStep(emptyStep());
     return () => { cancelled = true; };
-  }, [isTranscribing, settings.wssEndpoint, user]);
+    // The tokens, not the user object: a token refresh at Start must not reset the step.
+  }, [isTranscribing, settings.wssEndpoint, user?.access_token, user?.id_token]);
 
   // The notice as shown and as START records it.
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || topic;
@@ -203,7 +205,7 @@ function Capture() {
       onStepChange={(next) => { setConsentStep(next); setStartError(""); }}
       onPostInChat={() => postInMeetingChat(noticeText)}
       capturing={isTranscribing}
-      status={describeConsentState(consentFrame)}
+      status={isTranscribing || captureStopped(consentFrame) ? describeConsentState(consentFrame) : null}
       onObjection={(name) => reportObjection(name)}
     />
   ) : consentSettings?.available === false ? (

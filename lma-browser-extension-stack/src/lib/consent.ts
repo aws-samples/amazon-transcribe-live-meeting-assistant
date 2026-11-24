@@ -137,6 +137,9 @@ export const parseServerFrame = (data: unknown): Record<string, any> | null => {
   }
 };
 
+/** A control frame without its consent step: END and SPEAKER_CHANGE do not repeat START's. */
+export const withoutConsent = <T extends { consent?: unknown }>({ consent, ...frame }: T): Omit<T, 'consent'> => frame;
+
 /** Whether a CONSENT_STATE frame says the transcriber stopped, or will not start, capturing. */
 export const captureStopped = (frame: Record<string, any> | null): boolean =>
   frame?.event === 'CONSENT_STATE' && frame.captureAllowed === false;

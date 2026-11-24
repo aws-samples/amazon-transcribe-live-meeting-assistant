@@ -638,7 +638,7 @@ storyboards:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Which options work where'
         say: >-
-          Which options apply depends on how the meeting is captured. The Virtual Participant runs the whole flow inside the meeting: notify, opt-in with each participant's reply typed or said aloud, or the owner's confirmation, objections, and screenshots as evidence. Stream Audio and the Desktop Capture App show the notice to the LMA user to share, who confirms it was given or that everyone agreed, and can record an objection. The browser extension has no consent step yet, so its meetings are accepted with a warning or refused, as you choose. On Webex, use the owner's confirmation, because the Virtual Participant cannot see who is present.
+          Which options apply depends on how the meeting is captured. The Virtual Participant runs the whole flow inside the meeting: notify, opt-in with each participant's reply typed or said aloud, or the owner's confirmation, objections, and screenshots as evidence. Stream Audio and the Desktop Capture App show the notice to the LMA user to share, who confirms it was given or that everyone agreed, and can record an objection. The Stream Audio embed has no consent step, so its meetings are accepted with a warning or refused, as you choose. On Webex, use the owner's confirmation, because the Virtual Participant cannot see who is present.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Opt-in for one meeting'
@@ -680,7 +680,7 @@ storyboards:
       - 'Every meeting keeps an auditable consent record with evidence and a timeline'
       - 'Keep a configuration profile for each jurisdiction or context'
     not_shown:
-      - 'Opt-in with every participant consenting in a live meeting (a silent attendee who never replies keeps it waiting, as designed); spoken replies; the Desktop Capture App itself; the browser extension (no consent step yet)'
+      - 'Opt-in with every participant consenting in a live meeting (a silent attendee who never replies keeps it waiting, as designed); spoken replies; the Desktop Capture App itself; the Stream Audio embed (no consent step)'
     docs: docs/meeting-consent.md
     category: 'Overview'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}

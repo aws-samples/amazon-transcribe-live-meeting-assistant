@@ -121,6 +121,7 @@ no longer applies to it. A deployment that refuses such clients can now use the
 extension. The consent record names the client "Browser extension". See
 [Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app)
 for what the transcriber records, and when.
+
 ## How meeting speakers are named
 
 Your microphone's lines carry your name. The meeting tab's lines are named from
