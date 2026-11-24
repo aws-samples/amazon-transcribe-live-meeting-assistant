@@ -5,12 +5,14 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import {
     PendingVideoChunks,
-    isBrowserVideoClient,
     keyframeSourceFor,
-    videoAllowedFor,
+    videoAdmission,
+    videoAllowed,
     videoStartedFrame,
 } from './video-admission';
 
@@ -18,31 +20,44 @@ test('an accepted video stream is acknowledged with its callId', () => {
     assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
 });
 
-const ON = { stackRecordsVideo: true, recordBrowserVideo: true };
-const SETTING_OFF = { stackRecordsVideo: true, recordBrowserVideo: false };
-const STACK_OFF = { stackRecordsVideo: false, recordBrowserVideo: true };
+const INDEX_SOURCE = readFileSync(path.resolve(__dirname, '../src/index.ts'), 'utf8');
 
-test('the two browser clients are the ones the Meeting Recording setting governs', () => {
-    assert.equal(isBrowserVideoClient('STREAM_AUDIO'), true);
-    assert.equal(isBrowserVideoClient('BROWSER_EXTENSION'), true);
-    assert.equal(isBrowserVideoClient('DESKTOP_APP'), false);
-    assert.equal(isBrowserVideoClient('API'), false);
-    assert.equal(isBrowserVideoClient(undefined), false);
+const ON = { stackRecordsVideo: true, recordScreenVideo: true };
+const SETTING_OFF = { stackRecordsVideo: true, recordScreenVideo: false };
+const STACK_OFF = { stackRecordsVideo: false, recordScreenVideo: true };
+
+test('screen video is recorded only when the stack and the setting both allow it', () => {
+    assert.equal(videoAllowed(ON), true);
+    assert.equal(videoAllowed(SETTING_OFF), false);
+    assert.equal(videoAllowed(STACK_OFF), false);
+    assert.equal(videoAllowed({ stackRecordsVideo: false, recordScreenVideo: false }), false);
 });
 
-test('browser clients send video only when the stack and the setting both allow it', () => {
-    for (const source of ['STREAM_AUDIO', 'BROWSER_EXTENSION'] as const) {
-        assert.equal(videoAllowedFor(source, ON), true, source);
-        assert.equal(videoAllowedFor(source, SETTING_OFF), false, source);
-        assert.equal(videoAllowedFor(source, STACK_OFF), false, source);
+test('a client that handles a refusal is refused with the setting off, and recorded with it on', () => {
+    assert.equal(videoAdmission(ON, true), 'record');
+    assert.equal(videoAdmission(SETTING_OFF, true), 'refuse');
+});
+
+test('a client that does not declare it handles a refusal is withheld, not refused, with the setting off', () => {
+    // Accepted and discarded: an earlier desktop build reconnects after every
+    // close, so a refusal would bring it straight back.
+    assert.equal(videoAdmission(SETTING_OFF, false), 'withhold');
+    assert.equal(videoAdmission(ON, false), 'record');
+});
+
+test('with the stack off every START_VIDEO is discarded, whatever the setting or the client', () => {
+    for (const handlesRefusal of [true, false]) {
+        assert.equal(videoAdmission(STACK_OFF, handlesRefusal), 'discard');
+        assert.equal(videoAdmission({ stackRecordsVideo: false, recordScreenVideo: false }, handlesRefusal), 'discard');
     }
 });
 
-test('the desktop app and the streaming API keep following the stack switch alone', () => {
-    for (const source of ['DESKTOP_APP', 'API', undefined] as const) {
-        assert.equal(videoAllowedFor(source, SETTING_OFF), true, String(source));
-        assert.equal(videoAllowedFor(source, STACK_OFF), false, String(source));
-    }
+test('index.ts reads handlesRefusal from START_VIDEO and withholds a stream into a discarding session', () => {
+    const startVideo = INDEX_SOURCE.slice(INDEX_SOURCE.indexOf('const admission = videoAdmission('));
+    assert.ok(startVideo.length > 0, 'START_VIDEO does not decide its admission with videoAdmission');
+    assert.ok(/callMetaData\.handlesRefusal === true/.test(startVideo.slice(0, 600)), 'handlesRefusal is not read');
+    assert.ok(/admission === 'withhold'/.test(startVideo), 'a withheld stream is not handled');
+    assert.ok(startVideo.includes('noteScreenVideoWithheld('), 'a withheld stream is not counted');
 });
 
 test('key frames are recorded under the client that streamed the video', () => {

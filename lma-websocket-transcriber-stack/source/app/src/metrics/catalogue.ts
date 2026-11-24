@@ -53,11 +53,20 @@ export const STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = 'StreamingSessionsWithoutTr
  */
 export const STREAMING_STARTS_NOT_CHECKED = 'StreamingStartsNotChecked';
 
+/**
+ * A START_VIDEO was accepted and its video discarded because Meeting Recording ›
+ * Record screen video from streaming clients is off and the client did not
+ * declare that it handles a refusal (an earlier Desktop Capture App build). No
+ * video is kept; a sustained value means such clients are still in use.
+ */
+export const SCREEN_VIDEO_STREAMS_WITHHELD = 'ScreenVideoStreamsWithheld';
+
 export const CATALOGUE: readonly MetricDefinition[] = [
     { name: STREAMING_SESSIONS_STARTED, unit: 'Count' },
     { name: TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS, unit: 'Milliseconds' },
     { name: STREAMING_SESSIONS_WITHOUT_TRANSCRIPT, unit: 'Count' },
     { name: STREAMING_STARTS_NOT_CHECKED, unit: 'Count' },
+    { name: SCREEN_VIDEO_STREAMS_WITHHELD, unit: 'Count' },
 ];
 
 export const UNIT_BY_NAME: Readonly<Record<string, MetricUnit>> = Object.fromEntries(

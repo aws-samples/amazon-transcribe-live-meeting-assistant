@@ -25,6 +25,16 @@ scheduled one included, reports them as skipped rather than failed.
 
 The meeting is left in place: it expires with the deployment's retention, and
 can be opened on the meeting page to see its Shared screen strip.
+
+Last, it turns Meeting Recording › Record screen video from streaming clients
+off on the active profile (in a temporary Custom copy when that profile is
+read-only, as ``test_meeting_consent.py`` does), streams the slideshow again,
+checks that the transcriber refuses the video with a ``1008`` close while the
+meeting's audio is transcribed, and puts the setting back. One setting controls
+screen video from every streaming client, the desktop app included. A second
+leg streams as an earlier desktop build would, without ``handlesRefusal`` on
+``START_VIDEO``: its video is accepted and discarded rather than refused, so the
+connection stays open and no key frame is kept.
 """
 
 from __future__ import annotations
@@ -42,6 +52,9 @@ ENABLED = os.environ.get("LMA_TEST_DESKTOP_VIDEO", "") not in ("", "0", "false")
 # plus half a second for the video socket opening after the audio.
 TIMESTAMP_TOLERANCE_SECONDS = 2.5
 QUESTION = "What did the last slide say?"
+# The close reason for video the deployment does not record
+# (VIDEO_NOT_ENABLED_CLOSE in lma-websocket-transcriber-stack's video-admission.ts).
+NOT_ENABLED = "screen video is not enabled for this client"
 
 pytestmark = [
     pytest.mark.optional_feature,
@@ -162,3 +175,90 @@ def test_assistant_reads_the_last_slide(run: dict, client) -> None:
         f"asked {QUESTION!r}; the answer does not quote the last slide "
         f"({run['slides'][-1]!r}), which is never spoken: {text!r}"
     )
+
+
+# ── setting off: the desktop app's video is refused, the audio carries on ──
+
+
+def _video_allowed(stack, tokens) -> bool | None:
+    from browser_video_probe import settings_answer
+
+    answer = settings_answer(stack.outputs["LMAWebsocketEndpoint"], tokens, None) or {}
+    return answer.get("videoAllowed")
+
+
+@pytest.fixture(scope="module")
+def setting_off_run(client, run) -> dict:
+    """After ``run``: the slideshow again, with the Meeting Recording setting off."""
+    import time
+
+    from desktop_video_probe import run_probe
+    from meeting_consent_probe import (
+        ConsentSettingsOverride,
+        Stack,
+        tokens_for_test_user,
+    )
+
+    stack = Stack.find(client.stack_name, client.region)
+    _username, tokens = tokens_for_test_user(stack)
+    recording = ConsentSettingsOverride(stack, section="recording")
+    recording.save()
+    try:
+        recording.apply(recordScreenVideo=False)
+        deadline = time.monotonic() + 30
+        allowed = _video_allowed(stack, tokens)
+        while allowed is not False and time.monotonic() < deadline:
+            time.sleep(2)
+            allowed = _video_allowed(stack, tokens)
+        if allowed is not False:
+            pytest.fail(
+                f"videoAllowed is still {allowed!r} 30 s after Record screen video from streaming clients "
+                "was turned off: the setting has not reached the transcriber, or the deployed transcriber "
+                "predates the one setting for every client"
+            )
+        result = run_probe(client.stack_name, region=client.region, keyframe_wait_seconds=30,
+                           call_label="desktop-video-off")
+        result["video_allowed"] = allowed
+        print(f"desktop video probe meeting, setting off: {result['call_id']}")
+        # As an earlier desktop build: no handlesRefusal on START_VIDEO.
+        legacy = run_probe(client.stack_name, region=client.region, keyframe_wait_seconds=30,
+                           call_label="desktop-video-off-legacy", handles_refusal=False)
+        print(f"desktop video probe meeting, setting off, earlier build: {legacy['call_id']}")
+        result["legacy"] = legacy
+        return result
+    finally:
+        recording.restore()
+
+
+def test_with_the_setting_off_the_settings_answer_withholds_video(setting_off_run: dict) -> None:
+    assert setting_off_run["video_allowed"] is False, (
+        f"videoAllowed is {setting_off_run['video_allowed']!r} with Record screen video from "
+        "streaming clients off; it should be False for every client"
+    )
+
+
+def test_with_the_setting_off_desktop_video_is_refused_and_the_audio_carries_on(setting_off_run: dict) -> None:
+    run = setting_off_run
+    assert run["video_close"] == 1008 and run["video_close_reason"] == NOT_ENABLED, (
+        f"video socket ended {run['video_state']} (close {run['video_close']} {run['video_close_reason']!r}); "
+        "with the setting off the transcriber refuses the video of every streaming client"
+    )
+    assert run["audio_state"] == "OPEN", f"audio socket ended {run['audio_state']}"
+    assert run["meeting_created"], f"no meeting row for {run['call_id']}"
+    assert run["segment_count"] > 0, f"no transcript segments for {run['call_id']}"
+    assert run["keyframes"] == [], f"key frames were kept with the setting off: {_frame_summary(run)}"
+
+
+def test_with_the_setting_off_an_earlier_desktop_build_is_discarded_not_refused(setting_off_run: dict) -> None:
+    legacy = setting_off_run["legacy"]
+    # Not closed by the server: the stream was accepted, so a build that
+    # reconnects after every close keeps one connection.
+    assert legacy["video_close"] != 1008, (
+        f"the video of a client without handlesRefusal was refused ({legacy['video_close']} "
+        f"{legacy['video_close_reason']!r}); it should be accepted and discarded"
+    )
+    assert legacy["video_state"] == "OPEN", f"video socket ended {legacy['video_state']} before END_VIDEO"
+    assert legacy["fragments_sent"] == legacy["fragments"] > 0
+    assert legacy["audio_state"] == "OPEN", f"audio socket ended {legacy['audio_state']}"
+    assert legacy["segment_count"] > 0, f"no transcript segments for {legacy['call_id']}"
+    assert legacy["keyframes"] == [], f"key frames were kept with the setting off: {_frame_summary(legacy)}"

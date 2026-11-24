@@ -425,6 +425,15 @@ public sealed class CaptureController
             Log($"Screen video failed (audio unaffected): {msg}");
             StopVideo(sendEnd: false);
         };
+        // The transcriber refused the video (screen video is off for the
+        // deployment) or stopped it for the meeting's consent: stop the video
+        // lane for this meeting, without END_VIDEO, and say why. Audio continues.
+        vSock.OnRefused = msg =>
+        {
+            StopVideo(sendEnd: false);
+            Log(msg);
+            OnVideoFallback?.Invoke(msg);
+        };
         _videoSocket = vSock;
         _videoCapture = vCap;
         vSock.Connect();

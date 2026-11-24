@@ -248,6 +248,20 @@ public static class SelfTest
         Check("configured callId is kept across sessions",
             Config.SessionCallId(null, "Fixed", later), "Fixed");
 
+        Console.WriteLine("\nScreen video refused by the transcriber:");
+        Check("setting off → audio-only message",
+            VideoSocket.RefusalMessage(1008, VideoSocket.NotEnabledReason) ?? "null",
+            "Screen video is turned off for this LMA deployment, so this meeting records audio only.");
+        Check("consent close → consent message",
+            VideoSocket.RefusalMessage(1008, "meeting consent does not allow capture") ?? "null",
+            "Screen video stopped: the meeting's consent does not allow capture now.");
+        Check("1008 before the audio session is live → reconnect, no message",
+            VideoSocket.RefusalMessage(1008, "no active call for callId") ?? "null", "null");
+        Check("other 1008 → reconnect, no message",
+            VideoSocket.RefusalMessage(1008, "not authorized for callId") ?? "null", "null");
+        Check("1006 drop → reconnect, no message", VideoSocket.RefusalMessage(1006, "") ?? "null", "null");
+        Check("no close status → reconnect, no message", VideoSocket.RefusalMessage(null, null) ?? "null", "null");
+
         Console.WriteLine("\nMeeting consent step:");
         foreach (var (caseName, caseGot, caseWant) in Consent.SelfTestCases()) Check(caseName, caseGot, caseWant);
 

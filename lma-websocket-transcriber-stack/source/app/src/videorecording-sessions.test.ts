@@ -125,3 +125,45 @@ test('a later session\'s video starts while the earlier session\'s video is stil
     const sessions = videoEvents(events).map((event) => event['SessionNumber']);
     assert.deepEqual(sessions, [1, 2], 'each session writes its own video recording link');
 });
+
+test('a withheld stream is accepted into a discarding session that keeps nothing', async (t) => {
+    const events = stubAws(t);
+    const callId = 'video-session-withheld';
+    const session = video.startVideoSession(meta(callId), quietServer, 0, 0, 'DESKTOP_CAPTURE', true);
+    assert.equal(session.discarding, true);
+    video.writeVideoChunk(session, CHUNK, quietServer);
+    assert.equal(session.fileSize, 0, 'no video byte is written');
+    await video.endVideoSession(callId, quietServer);
+    video.notifyAudioRecordingDone(callId, undefined, quietServer);
+    await video.awaitPendingMuxes(quietServer, 5_000);
+    assert.deepEqual(videoEvents(events), [], 'no video recording link is written');
+});
+
+test('a stream that is not withheld is recorded, as before', async (t) => {
+    const events = stubAws(t);
+    const callId = 'video-session-not-withheld';
+    const session = video.startVideoSession(meta(callId), quietServer, 0, 0, 'DESKTOP_CAPTURE', false);
+    assert.equal(session.discarding, false);
+    video.writeVideoChunk(session, CHUNK, quietServer);
+    await video.endVideoSession(callId, quietServer);
+    video.notifyAudioRecordingDone(callId, undefined, quietServer);
+    await video.awaitPendingMuxes(quietServer, 5_000);
+    assert.equal(videoEvents(events).length, 1);
+});
+
+test('a withheld stream leaves the video the meeting already recorded to be uploaded', async (t) => {
+    const events = stubAws(t);
+    const callId = 'video-session-withheld-after-recording';
+    const recording = video.startVideoSession(meta(callId), quietServer, 0);
+    video.writeVideoChunk(recording, CHUNK, quietServer);
+    // The setting is turned off; an earlier desktop build reconnects its video.
+    const withheld = video.startVideoSession(meta(callId), quietServer, 0, 0, 'DESKTOP_CAPTURE', true);
+    assert.notEqual(withheld, recording, 'the withheld connection has a session of its own');
+    assert.equal(withheld.discarding, true);
+    assert.equal(recording.discarding, false, 'the meeting\'s recording is not discarded');
+    video.writeVideoChunk(withheld, CHUNK, quietServer);
+    await video.endVideoSession(callId, quietServer);
+    video.notifyAudioRecordingDone(callId, undefined, quietServer);
+    await video.awaitPendingMuxes(quietServer, 5_000);
+    assert.equal(videoEvents(events).length, 1, 'the video recorded before the change is still uploaded');
+});

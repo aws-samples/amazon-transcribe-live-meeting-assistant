@@ -18,9 +18,9 @@ the page producing it.
 Opt-in. It runs only with ``LMA_TEST_STREAM_PAGE_VIDEO=1``, because it needs
 Playwright with Chromium (``requirements-video.txt``, then ``python -m
 playwright install chromium``) and a display (run under ``xvfb-run`` on a
-machine without one), turns on Meeting Recording › Record screen
-video from Stream Audio/Video and the browser extension and sets Meeting
-Consent for the run (and puts both back), and needs a stack with ``EnableVideoRecording=true``:
+machine without one), turns on Meeting Recording › Record screen video from
+streaming clients and sets Meeting Consent for the run (and puts both back),
+and needs a stack with ``EnableVideoRecording=true``:
 
     AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user xvfb-run -a \\
       make integ-tests STACK=lma-integtest1 LMA_TEST_STREAM_PAGE_VIDEO=1
@@ -82,7 +82,7 @@ def page_run(client):
     consent.had_section = "meeting_consent" in record.body
     consent.saved = dict(record.body.get("meeting_consent") or {}) if consent.had_section else None
     try:
-        recording.apply(recordBrowserVideo=True)
+        recording.apply(recordScreenVideo=True)
         # Notify, with a video sentence of the test's own, so the run also checks
         # that the page ends its notice with the deployment's sentence while
         # video is on, and that the consent record keeps it.

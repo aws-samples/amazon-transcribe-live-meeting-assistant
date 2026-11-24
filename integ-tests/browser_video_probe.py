@@ -6,9 +6,9 @@
 The two browser clients send their video the way the Desktop Capture App does:
 a second WebSocket with ``START_VIDEO``, fragmented-MP4 chunks and
 ``END_VIDEO`` (docs/websocket-streaming-api.md, "Screen Video"). What differs is
-on the server: their video is accepted only when Meeting Recording › Record
-screen video from Stream Audio/Video and the browser extension is on, and their
-key frames are recorded with the client's own ``Source``. This probe streams
+on the server: their key frames are recorded with the client's own ``Source``.
+Every client's video, theirs and the desktop app's alike, is accepted only when
+Meeting Recording › Record screen video from streaming clients is on. This probe streams
 the narrated slideshow ``desktop_video_probe.py`` builds, as one of those
 clients (the START's ``clientType``), and reports what each connection saw:
 how it ended, the consent frames on the audio connection, and how many video
@@ -187,6 +187,8 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
                     await video_ws.send(json.dumps({
                         "callEvent": "START_VIDEO", "callId": leg.call_id,
                         "videoTimeOffsetMs": int(leg.video_offset_seconds * 1000),
+                        # As every LMA client sends it: told, not discarded, on a refusal.
+                        "handlesRefusal": True,
                     }))
                     leg.video_started = True
                     # The initialization segment goes straight behind START_VIDEO,

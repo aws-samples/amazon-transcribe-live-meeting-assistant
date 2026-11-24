@@ -604,14 +604,14 @@ become the meeting's shared-screen slides
 ([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App, the Stream Audio/Video page and the
 browser extension send it this way.
 
-**Whether a client may send video.** The deployment must record video (the
-`EnableVideoRecording` stack parameter). The Stream Audio/Video page and the
-browser extension (`clientType` `STREAM_AUDIO` and `BROWSER_EXTENSION`) also
-need **Meeting Recording › Record screen video from Stream Audio/Video and the
-browser extension** to be on, as it was when the meeting's `START` was handled;
-it is off by default and in every configuration preset. Other clients follow
-the stack parameter alone. To find out before offering video, send
-`clientType` with `CONSENT_SETTINGS`, and read `videoAllowed` in the answer:
+**Whether a client may send video.** One rule holds for every client,
+whatever `clientType` it sends: the deployment must record video (the
+`EnableVideoRecording` stack parameter), and **Meeting Recording › Record
+screen video from streaming clients** must be on, as it was when the meeting's
+`START` was handled. The setting is on by default and in the Standard,
+Internal meetings and Customer account presets, and off in the Team-hosted,
+Regulated and Regulated notify presets. To find out before offering video,
+send `CONSENT_SETTINGS` and read `videoAllowed` in the answer:
 
 ```json
 { "callEvent": "CONSENT_SETTINGS", "clientType": "STREAM_AUDIO" }
@@ -622,8 +622,8 @@ the stack parameter alone. To find out before offering video, send
 ```
 
 `videoAllowed` is in every `CONSENT_SETTINGS` answer, including one with
-`available: false`. It describes the client the frame names, or the streaming
-API's when it names none; it is read afresh for each answer.
+`available: false`. It is the same for every client, and is read afresh for
+each answer.
 
 **The video connection.** Open a second WebSocket to the same endpoint, with
 the same user's tokens, after the audio connection's `START` has been sent and
@@ -639,6 +639,7 @@ while its audio is streaming. Its first frame is:
 | `callId` | `string` | **Yes** | The `callId` of the meeting whose audio this connection's user is streaming on this server |
 | `videoTimeOffsetMs` | `number` | No | How many milliseconds after the audio started the video's first frame was captured (0 to 3,600,000; default 0). Lines the video and its key frames up with the transcript |
 | `videoResume` | `boolean` | No | `true` on a reconnect that continues the same encoder's byte stream (see below) |
+| `handlesRefusal` | `boolean` | No | `true` from a client that stops its video, without reconnecting, on a final refusal (below). Such a client is refused when screen video is off; one that does not send it has its stream accepted and discarded instead. Every current LMA client sends it; Desktop Capture App builds from before this release do not |
 
 Every binary frame after it is a chunk of one fragmented MP4 stream: H.264
 video only, no audio, the initialization segment first. Send chunks as the
@@ -662,13 +663,21 @@ received.
 | `no active call for callId` | No audio session of this `callId` is live on this server. Send `START_VIDEO` only once the audio is streaming |
 | `not authorized for callId` | The meeting's audio is being streamed by another user |
 | `meeting consent does not allow capture` | The meeting's [consent](#615-meeting-consent-frames) does not allow capture yet, or no longer does. In opt-in, wait for the `CONSENT_STATE` with `status: "granted"` on the audio connection before sending `START_VIDEO` |
-| `screen video is not enabled for this client` | The deployment or the Meeting Recording setting does not allow video from this client |
+| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off, on a deployment that records video, and the `START_VIDEO` sent `handlesRefusal: true`. The wording is kept as it was, because clients match on it |
+
+With the setting off, a `START_VIDEO` without `handlesRefusal: true` is not
+refused: it is accepted and discarded, gets no `VIDEO_STARTED`, and nothing of
+it is kept (no video, key frames or upload). The transcriber counts each one as
+the `ScreenVideoStreamsWithheld` metric ([Monitoring](monitoring.md)).
 
 A refused video stream does not affect the audio: stop the video, tell the
 user, and carry on streaming audio. A client should not reconnect a refused
 video stream. On a deployment that does not record video
-(`EnableVideoRecording=false`), a stream from a client other than the two
-browser clients is accepted and discarded.
+(`EnableVideoRecording=false`) a `START_VIDEO` is accepted and discarded, from
+every client and whatever the setting, and gets no `VIDEO_STARTED`; so is one that arrives after the
+meeting's video, or its mux, has ended. The settings answer's `videoAllowed` is
+`false` in both of the first two cases, so a client that reads it first sends
+no video.
 
 **Consent.** An objection ends
 the meeting and its video: the video recorded until then is kept with the
@@ -695,9 +704,9 @@ When the server has a video session for the stream, it answers the
 From then on, a connection that drops can resume the stream (`videoResume:
 true`); before it, the server may have no session for it, so start the stream
 again from its initialization segment. A client that reads no frames on its
-video connection can ignore it. A stream from a client other than the two
-browser clients on a deployment that does not record video gets no
-`VIDEO_STARTED`, since it is discarded.
+video connection can ignore it. A stream sent to a deployment that does not
+record video (`EnableVideoRecording=false`) gets no `VIDEO_STARTED`, whatever
+client sends it, since it is discarded.
 
 **Continued meetings.** A meeting continued with `sessionNumber` (see
 [Continuing an existing meeting](#continuing-an-existing-meeting)) records the

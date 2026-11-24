@@ -129,6 +129,14 @@ export const noteStreamingStartNotChecked = (emitter: MetricEmitter = METRICS): 
     emitter.count(catalogue.STREAMING_STARTS_NOT_CHECKED);
 };
 
+/**
+ * Count a START_VIDEO accepted and discarded because the setting is off and the
+ * client did not declare that it handles a refusal.
+ */
+export const noteScreenVideoWithheld = (emitter: MetricEmitter = METRICS): void => {
+    emitter.count(catalogue.SCREEN_VIDEO_STREAMS_WITHHELD);
+};
+
 /** Whether this meeting has produced a transcript segment. For tests. */
 export const sawTranscriptSegment = (meeting: CallMetaData): boolean =>
     stateByMeeting.get(meeting)?.sawTranscriptSegment ?? false;

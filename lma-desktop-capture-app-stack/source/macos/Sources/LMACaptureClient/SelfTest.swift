@@ -280,6 +280,22 @@ enum SelfTest {
               Config.sessionCallId(requested: nil, configured: "Fixed", now: later),
               "Fixed")
 
+        print("\nScreen video refused by the transcriber:")
+        check("setting off → audio-only message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: VideoSocket.notEnabledReason) ?? "nil",
+              "Screen video is turned off for this LMA deployment, so this meeting records audio only.")
+        check("consent close → consent message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: "meeting consent does not allow capture") ?? "nil",
+              "Screen video stopped: the meeting's consent does not allow capture now.")
+        check("1008 before the audio session is live → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: "no active call for callId") ?? "nil", "nil")
+        check("other 1008 → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1008, reason: "not authorized for callId") ?? "nil", "nil")
+        check("1006 drop → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1006, reason: "") ?? "nil", "nil")
+        check("1000 close → reconnect, no message",
+              VideoSocket.refusalMessage(closeCode: 1000, reason: "") ?? "nil", "nil")
+
         print("\nMeeting consent step:")
         for (name, got, want) in ConsentSelfTest.cases() { check(name, got, want) }
 

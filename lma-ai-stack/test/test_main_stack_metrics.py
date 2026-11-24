@@ -561,6 +561,7 @@ REQUIRED_CALL_SITES = {
     "noteStreamingSessionStarted": TRANSCRIBER_APP / "index.ts",
     "noteStreamingSessionEnded": TRANSCRIBER_APP / "index.ts",
     "noteStreamingStartNotChecked": TRANSCRIBER_APP / "index.ts",
+    "noteScreenVideoWithheld": TRANSCRIBER_APP / "index.ts",
     # The one function both transcription engines write a segment through, which
     # is why the first segment of a meeting is recognised there and not twice.
     "noteTranscriptSegment": TRANSCRIBER_APP / "calleventdata" / "transcribe.ts",

@@ -135,6 +135,7 @@ STREAMING_SESSIONS_STARTED = "StreamingSessionsStarted"
 TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS = "TimeToFirstTranscriptSegmentMs"
 STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = "StreamingSessionsWithoutTranscript"
 STREAMING_STARTS_NOT_CHECKED = "StreamingStartsNotChecked"
+SCREEN_VIDEO_STREAMS_WITHHELD = "ScreenVideoStreamsWithheld"
 
 # ── voice assistant capacity ────────────────────────────────────────────────
 #
@@ -271,6 +272,23 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "the same caller on the task is not refused and is not counted. A "
             "sustained value means new and continued meetings streamed through "
             "the transcriber are being turned away at START."
+        ),
+    ),
+    MetricDefinition(
+        name=SCREEN_VIDEO_STREAMS_WITHHELD,
+        unit="Count",
+        component=Component.WEBSOCKET_TRANSCRIBER,
+        # Nothing is lost: the setting says no video is kept. Graphed so an
+        # administrator can see earlier desktop builds still in use.
+        records_swallowed_failure=False,
+        meaning=(
+            "A START_VIDEO was accepted and its video discarded, because Meeting "
+            "Recording > Record screen video from streaming clients is off and "
+            "the client did not declare that it handles a refusal: an earlier "
+            "Desktop Capture App build. No video, key frame or upload is kept. "
+            "Clients that declare it are refused instead and are not counted. A "
+            "sustained value means users still run a desktop build that should "
+            "be updated."
         ),
     ),
     MetricDefinition(

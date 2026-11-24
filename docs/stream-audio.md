@@ -123,10 +123,12 @@ confirmation on the meeting. See
 The page can also record the tab, window or screen you share as video, stored
 with the meeting: the meeting page plays it, and its key frames become the
 meeting's shared-screen slides (see [Meeting Video and Key Frames](meeting-video.md)).
-It is offered only where an administrator has turned on **Meeting Recording ›
-Record screen video from Stream Audio/Video and the browser extension** on the
-Configuration page (off by default and in every preset) and the deployment
-records video (`EnableVideoRecording=true`).
+It is offered only where **Meeting Recording › Record screen video from
+streaming clients** is on in the Configuration page (on by default; off in the
+Team-hosted, Regulated and Regulated notify presets) and the deployment records
+video (`EnableVideoRecording=true`). One setting controls screen video from
+every streaming client: this page, the browser extension and the Desktop
+Capture App.
 
 - **Turn it on for one meeting.** Switch on **Also record screen video** before
   **Start Streaming**. It is off at the start of every meeting. The browser

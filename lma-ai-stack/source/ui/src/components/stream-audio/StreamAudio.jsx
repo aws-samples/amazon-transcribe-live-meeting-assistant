@@ -291,7 +291,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     onOpen: (event) => {
       // Read the consent settings on every connection, so a reconnect after
       // the transcriber refused or ended a meeting shows the settings in force.
-      // Naming this client gets the answer's videoAllowed for it.
+      // The clientType names this client to the consent answer; its videoAllowed
+      // is the same for every client.
       event.target.send(JSON.stringify({ callEvent: 'CONSENT_SETTINGS', clientType: STREAM_AUDIO_CLIENT_TYPE }));
     },
     onMessage: (event) => {
