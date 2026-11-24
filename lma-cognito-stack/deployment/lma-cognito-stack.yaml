@@ -757,8 +757,9 @@ Resources:
   # time the user signed in with their password, not the last time they
   # used LMA.
   #
-  # The trigger never fails a sign-in: a write that does not succeed is
-  # logged and the event is returned as it came.
+  # A failed write does not fail the sign-in: it is logged and the event
+  # is returned as it came. (As for any trigger, Cognito still fails a
+  # sign-in if Lambda cannot run the function within its five seconds.)
   ##########################################################################
 
   UserSignInTable:
@@ -844,8 +845,8 @@ Resources:
       # Unit tests: lma-ai-stack/test/test_cognito_last_sign_in_trigger.py
       InlineCode: |
         # Cognito PostAuthentication trigger for LMA: records the time of the
-        # user's last interactive sign-in, keyed by their Cognito sub. Never
-        # fails the sign-in: any error is logged and the event is returned.
+        # user's last interactive sign-in, keyed by their Cognito sub. A failed
+        # write does not fail the sign-in: it is logged and the event returned.
         import logging
         import os
         from datetime import datetime, timezone
