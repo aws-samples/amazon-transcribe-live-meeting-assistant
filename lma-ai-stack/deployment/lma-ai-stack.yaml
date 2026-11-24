@@ -252,6 +252,19 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingDataPointInTimeRecoveryDays:
+    Type: Number
+    Default: 35
+    MinValue: 0
+    MaxValue: 35
+    ConstraintDescription: A whole number of days from 0 to 35.
+    Description: >-
+      The point-in-time recovery window, in days, of the tables that hold meeting
+      content: the meetings table, the Virtual Participant table, the troubleshooting
+      jobs table and the voice enrollment table. 0 turns point-in-time recovery off
+      on them, so a deleted item cannot be restored; 1 to 35 keeps it on with that
+      recovery period. The configuration tables keep a 35-day window.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -652,6 +665,8 @@ Metadata:
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
+  # Point-in-time recovery of the tables that hold meeting content; 0 turns it off.
+  HasMeetingDataPointInTimeRecovery: !Not [!Equals [!Ref MeetingDataPointInTimeRecoveryDays, "0"]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   # The main stack created the meeting event bus (EnableMeetingEvents).
   ShouldPublishMeetingEvents: !Not [!Equals [!Ref MeetingEventBusArn, ""]]
@@ -1053,8 +1068,11 @@ Resources:
               - Owner
               - SharedWith
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -1094,8 +1112,11 @@ Resources:
         - AttributeName: SubjectId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
@@ -5221,8 +5242,11 @@ Resources:
         - AttributeName: JobId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       TimeToLiveSpecification:
         AttributeName: ExpiresAt
         Enabled: true
@@ -8623,8 +8647,11 @@ Resources:
         - AttributeName: id
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS

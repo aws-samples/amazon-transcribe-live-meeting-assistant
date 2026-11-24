@@ -275,7 +275,8 @@ account:
 3. Deleting does not reach the copies listed in
    [Copies that follow their own lifetime](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime):
    in particular, the DynamoDB tables' point-in-time recovery can restore a
-   deleted item for 35 days, and downloads stay where they were saved.
+   deleted item for `MeetingDataPointInTimeRecoveryDays` days (35 by default; 0
+   turns it off), and downloads stay where they were saved.
 
 ## Related
 
