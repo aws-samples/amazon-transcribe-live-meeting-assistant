@@ -40,6 +40,13 @@ class FakeTable:
         )
         if "Limit" in kwargs:
             rows = rows[: kwargs["Limit"]]
+        if "ProjectionExpression" in kwargs:
+            names = kwargs.get("ExpressionAttributeNames") or {}
+            fields = [
+                names.get(part.strip(), part.strip())
+                for part in kwargs["ProjectionExpression"].split(",")
+            ]
+            rows = [{key: item[key] for key in fields if key in item} for item in rows]
         return {"Items": rows}
 
     def scan(self, **kwargs):
