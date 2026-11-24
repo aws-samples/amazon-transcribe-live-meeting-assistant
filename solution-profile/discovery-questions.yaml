@@ -1,0 +1,411 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Discovery questions (Solution Profile contract v1, discoveryQuestionsFile).
+# Each `text` is written to be asked to a customer as it stands. `implications`
+# are read by people and assistants, not executed; each `then` names the page it
+# is drawn from.
+questions:
+  # ---------------------------------------------------------------- Meetings
+  - id: meeting-platforms
+    topic: Meetings
+    text: >-
+      Which meeting platforms are the meetings held on (for example Zoom, Microsoft
+      Teams, Google Meet, Webex or Amazon Chime), and who organises them: your own
+      organisation, or the other organisations you meet with?
+    intent: >-
+      The Virtual Participant supports five platforms, each with its own join method
+      and limits, and meetings organised by another organisation are governed by
+      that organisation's platform settings.
+    answer_type: list
+    priority: must
+    phase: pre-contract
+    tests:
+      - capability:vp-zoom
+      - capability:vp-microsoft-teams
+      - capability:vp-google-meet
+      - capability:vp-webex
+      - capability:vp-amazon-chime
+      - limitation:vp-is-a-visible-guest
+    implications:
+      - when: a platform outside the five
+        then: >-
+          The Virtual Participant cannot join it; capture from the user's own
+          computer with the Desktop Capture App or Stream Audio, or plan a core
+          enhancement. See docs/meeting-sources.md.
+        refs: [capability:desktop-capture-app, capability:stream-audio, extension:core-enhancement]
+      - when: Microsoft Teams
+        then: >-
+          Decide between the browser join and Azure Communication Services, and check
+          which signals each reads for consent and chat. See docs/teams-acs-sdk.md
+          and docs/meeting-consent.md.
+        refs: [capability:vp-microsoft-teams, limitation:teams-browser-join-reads-fewer-signals, limitation:teams-acs-tenant-and-meeting-types]
+      - when: Google Meet, or Webex with per-participant consent
+        then: >-
+          Run a test meeting early: Meet must accept browser guests, and Webex cannot
+          grant per-participant consent. See docs/virtual-participant.md.
+        refs: [limitation:google-meet-guest-acceptance, limitation:webex-no-participant-list]
+      - when: meetings are organised by other organisations
+        then: >-
+          Their administrators may need to allow guests and lobbies, and should be
+          told LMA will join. See docs/hosting-models.md.
+        refs: [extension:meeting-platform-policy, capability:hosting-models]
+    follow_ups: [bot-policy, unattended-meetings]
+
+  - id: bot-policy
+    topic: Meetings
+    text: >-
+      Do your meetings, or the meetings of organisations you meet with, allow guests
+      from outside the organisation and AI notetakers or bots to join, and do they
+      use lobbies or waiting rooms?
+    intent: >-
+      The Virtual Participant is a visible guest. A policy against bots or guests
+      means capture has to come from a participant's own computer instead.
+    answer_type: enum
+    options: [guests and bots allowed, guests allowed with a lobby, bots not allowed, it varies by meeting]
+    priority: must
+    phase: pre-contract
+    tests: [limitation:vp-is-a-visible-guest, limitation:google-meet-guest-acceptance, extension:meeting-platform-policy]
+    implications:
+      - when: bots not allowed
+        then: >-
+          Use the Chrome extension, Stream Audio or the Desktop Capture App, which
+          capture from the attending user's computer. See docs/meeting-sources.md.
+        refs: [capability:browser-extension, capability:desktop-capture-app, limitation:no-bot-capture-needs-the-user-present]
+      - when: guests allowed with a lobby
+        then: Someone in the meeting has to admit the Virtual Participant each time.
+        refs: [capability:virtual-participant]
+
+  - id: unattended-meetings
+    topic: Meetings
+    text: >-
+      Should meetings be captured when nobody from your team attends them, or is
+      someone from your team always in the meeting?
+    intent: >-
+      Only the Virtual Participant captures a meeting without the user present, and
+      an unattended join depends on nobody being needed for a CAPTCHA or sign-in.
+    answer_type: boolean
+    priority: should
+    phase: discovery
+    tests: [capability:virtual-participant, limitation:no-bot-capture-needs-the-user-present, limitation:vp-manual-action-needs-a-person]
+    implications:
+      - when: yes, unattended
+        then: >-
+          Use scheduled Virtual Participants, and alert an operator on the Virtual
+          Participant Status Changed event for manual action. See
+          docs/virtual-participant.md and docs/meeting-events.md.
+        refs: [capability:vp-scheduling-and-invitations, capability:meeting-events]
+
+  - id: meeting-volume-and-length
+    topic: Meetings
+    text: >-
+      How many meetings do you expect to capture in a typical week, how many at the
+      same time at the busiest hour, and how long is a typical and a long meeting?
+    intent: >-
+      Concurrent meetings are bounded by Amazon Transcribe and Nova Sonic quotas, a
+      meeting on Lambda MicroVMs is limited to 8 hours, and volume drives the cost.
+    answer_type: text
+    priority: must
+    phase: pre-contract
+    tests:
+      - limitation:transcribe-concurrent-streams
+      - limitation:vp-microvm-eight-hour-ceiling
+      - limitation:nova-sonic-concurrent-streams
+      - capability:meeting-cost-estimate
+    implications:
+      - when: more than about 25 meetings at once
+        then: Request an Amazon Transcribe concurrent stream increase before go-live. See docs/troubleshooting.md.
+        refs: [extension:aws-quotas-and-models]
+      - when: meetings longer than 8 hours
+        then: Plan for the Virtual Participant to rejoin with Join again, or use another launch type. See docs/virtual-participant.md.
+        refs: [capability:vp-join-again]
+    follow_ups: [voice-assistant-use]
+
+  - id: recorded-meetings
+    topic: Meetings
+    text: >-
+      Do you also have recordings of past meetings that should be transcribed and
+      summarized, and roughly how large is the largest file?
+    intent: Uploaded recordings take a separate batch path with a 5 GB limit and no consent flow.
+    answer_type: boolean
+    priority: could
+    phase: discovery
+    tests: [capability:upload-audio, limitation:upload-audio-limits]
+
+  - id: screen-content
+    topic: Meetings
+    text: >-
+      Is much of what matters in your meetings shown on screen, such as slides,
+      documents or dashboards, and should it be searchable afterwards?
+    intent: Key frames and slide text come only from Virtual Participant video or the desktop app's screen video.
+    answer_type: boolean
+    priority: should
+    phase: discovery
+    tests: [capability:video-keyframes-and-slides, limitation:no-video-from-browser-capture]
+    implications:
+      - when: "yes"
+        then: Keep video recording on and use the Virtual Participant or the Desktop Capture App. See docs/meeting-video.md.
+        refs: [capability:video-keyframes-and-slides]
+
+  # ---------------------------------------------------------------- Language and speech
+  - id: languages
+    topic: Language and speech
+    text: >-
+      Which languages are spoken in your meetings, do meetings mix languages, and
+      would participants want to read the transcript in another language?
+    intent: >-
+      Amazon Transcribe and the on-demand engine support different languages, the
+      on-demand engine has no language identification, and translation is a
+      per-user view in the browser.
+    answer_type: list
+    priority: must
+    phase: pre-contract
+    tests: [capability:transcribe-streaming, capability:microvm-asr, capability:live-translation, limitation:microvm-asr-feature-gaps]
+    implications:
+      - when: meetings mix languages, or a language outside the on-demand bundle
+        then: Keep those meeting sources on Amazon Transcribe with language identification. See docs/transcription-and-translation.md.
+        refs: [capability:transcribe-streaming]
+      - when: participants want a spoken interpreter
+        then: Consider the voice assistant's translator mode. See docs/voice-assistant.md.
+        refs: [capability:voice-assistant]
+
+  - id: shared-rooms
+    topic: Language and speech
+    text: >-
+      Do several people often join from one meeting room on one microphone, and must
+      the transcript name each of them?
+    intent: Several voices behind one attendee need voice separation and naming, and optionally voice enrollment.
+    answer_type: boolean
+    priority: should
+    phase: discovery
+    tests: [capability:speaker-attribution, capability:voice-enrollment]
+    follow_ups: [biometric-voice-data]
+
+  - id: biometric-voice-data
+    topic: Language and speech
+    text: >-
+      Would your organisation allow employees to enroll a voice sample, with their
+      explicit consent, so that they are recognised by name in later meetings?
+    intent: Voice enrollment stores a voiceprint, which is biometric data under many policies; it is off by default.
+    answer_type: boolean
+    priority: could
+    phase: discovery
+    tests: [capability:voice-enrollment]
+
+  # ---------------------------------------------------------------- Consent and privacy
+  - id: consent-policy
+    topic: Consent and privacy
+    text: >-
+      What do your policies, and the laws where your participants are, require
+      before a meeting is recorded or transcribed: no notice, a notice with the
+      chance to object, or every participant's agreement before anything is kept?
+    intent: >-
+      The answer chooses the consent mode and rule, which capture methods can be
+      used, and which configuration preset to start from.
+    answer_type: enum
+    options: [no notice required, notice with the right to object, every participant must agree first, the meeting owner may attest agreement, not yet decided]
+    priority: must
+    phase: pre-contract
+    tests:
+      - capability:meeting-consent
+      - capability:configuration-presets
+      - limitation:consent-identities-are-display-names
+      - limitation:capture-methods-without-consent-step
+    implications:
+      - when: every participant must agree first
+        then: >-
+          Use Opt-in with the each-participant rule, through the Virtual Participant;
+          Stream Audio and the desktop app rely on the user's attestation, and Webex
+          cannot grant it. See docs/meeting-consent.md.
+        refs: [capability:configuration-presets, limitation:webex-no-participant-list]
+      - when: notice with the right to object
+        then: Start from the notify presets. See docs/privacy-and-data-handling.md.
+        refs: [capability:configuration-presets]
+      - when: not yet decided
+        then: Plan a legal and privacy review before go-live; LMA records evidence, not a determination.
+        refs: [extension:recording-policy-and-legal-review]
+    follow_ups: [retention-policy]
+
+  - id: retention-policy
+    topic: Consent and privacy
+    text: >-
+      How long may transcripts, summaries, audio and video recordings be kept, and
+      may the transcript be kept at all once a summary has been written?
+    intent: >-
+      Retention days are stack parameters, transcript deletion after the summary is
+      a deployment-wide setting, and audio recording can be turned off.
+    answer_type: text
+    priority: must
+    phase: pre-contract
+    tests: [capability:retention-and-transcript-deletion, limitation:transcript-deletion-deployment-wide]
+    implications:
+      - when: the transcript must not be kept after the summary
+        then: Use a regulated preset, which deletes it 15 minutes after the summary. See docs/transcript-deletion.md.
+        refs: [capability:configuration-presets]
+      - when: no recordings may be kept
+        then: Turn audio recording off and set EnableVideoRecording to false. See docs/privacy-and-data-handling.md.
+        refs: [capability:retention-and-transcript-deletion]
+
+  - id: transcript-visibility
+    topic: Consent and privacy
+    text: >-
+      Who should be able to read a meeting's transcript and summary: only the person
+      who captured it, people they choose to share it with, a whole team, or
+      administrators as well? Should people inside the meeting be able to ask an AI
+      assistant about past meetings or documents?
+    intent: >-
+      LMA's access model is owner, explicit sharing and Admins; requests made inside
+      a meeting are answered from the current meeting only unless widened.
+    answer_type: text
+    priority: must
+    phase: discovery
+    tests: [capability:ubac-and-sharing, capability:in-meeting-requests, limitation:in-meeting-requester-identity, limitation:cognito-only-sign-in]
+    implications:
+      - when: team-wide visibility without sharing each meeting
+        then: Not offered; share meetings, use Admin accounts sparingly, or plan a core enhancement.
+        refs: [extension:core-enhancement]
+
+  - id: hosting-model
+    topic: Consent and privacy
+    text: >-
+      Will this deployment record meetings with several unrelated outside
+      organisations, or only the meetings of the one organisation whose AWS account
+      it runs in? Do different teams need different recording policies?
+    intent: The two hosting presets, account isolation and one active configuration per deployment follow from this.
+    answer_type: enum
+    options: [external meetings with several organisations, one organisation's own meetings, both]
+    priority: must
+    phase: pre-contract
+    tests: [capability:hosting-models, limitation:deployments-share-account-quotas, limitation:single-active-configuration]
+    implications:
+      - when: external meetings with several organisations
+        then: Start from the Team-hosted preset in a dedicated account. See docs/hosting-models.md.
+        refs: [capability:hosting-models, limitation:deployments-share-account-quotas]
+      - when: teams need different policies
+        then: Plan one deployment per policy.
+        refs: [limitation:single-active-configuration]
+
+  # ---------------------------------------------------------------- Assistant and knowledge
+  - id: knowledge-sources
+    topic: Assistant and knowledge
+    text: >-
+      Should the meeting assistant answer from your own documents or web pages, and
+      if so where are they kept today and roughly how many are there?
+    intent: The answer chooses the knowledge base mode, and whether skills or MCP servers suit the content better.
+    answer_type: text
+    priority: should
+    phase: discovery
+    tests: [capability:document-knowledge-base, capability:assistant-skills, extension:knowledge-base-content]
+    implications:
+      - when: documents already in an Amazon Bedrock Knowledge Base
+        then: Deploy with the existing knowledge base. See docs/prerequisites-and-deployment.md.
+        refs: [capability:document-knowledge-base]
+      - when: short procedures or glossaries
+        then: Write them as skills. See docs/meeting-assistant-skills.md.
+        refs: [extension:assistant-skill]
+
+  - id: voice-assistant-use
+    topic: Assistant and knowledge
+    text: >-
+      Should the assistant speak in meetings, for example to answer questions aloud
+      or interpret between two languages, and in how many meetings at once?
+    intent: Voice assistants share an account-wide Nova Sonic stream quota that cannot be raised.
+    answer_type: text
+    priority: could
+    phase: discovery
+    tests: [capability:voice-assistant, limitation:nova-sonic-concurrent-streams]
+
+  - id: assistant-behaviour
+    topic: Assistant and knowledge
+    text: >-
+      What should the assistant do during and after meetings, for example answer
+      questions, track a checklist, suggest questions, keep notes on a whiteboard, or
+      follow a particular methodology?
+    intent: Each is a separate, mostly off-by-default feature with its own cost and limits.
+    answer_type: list
+    priority: should
+    phase: discovery
+    tests:
+      - capability:meeting-assistant
+      - capability:live-guidance
+      - capability:meeting-whiteboards
+      - capability:meeting-preparation
+      - limitation:live-guidance-is-advice
+      - limitation:assistant-fixed-instructions
+
+  # ---------------------------------------------------------------- Integration
+  - id: integration-targets
+    topic: Integration
+    text: >-
+      Which systems should meetings feed or read from, for example a CRM, a ticketing
+      system, a data platform, an AI assistant your people already use, or email and
+      chat notifications?
+    intent: >-
+      Events, the meeting export, the hosted MCP server and external MCP servers for
+      the assistant are the integration points; notifications are in LMA only.
+    answer_type: list
+    priority: must
+    phase: discovery
+    tests:
+      - capability:meeting-events
+      - capability:meeting-export
+      - capability:mcp-server-api-key
+      - capability:external-mcp-servers-for-the-assistant
+      - limitation:five-external-mcp-servers
+      - limitation:notifications-in-lma-only
+    implications:
+      - when: a system should receive every summary
+        then: Add an EventBridge rule on Summary Ready that reads the meeting export. See docs/meeting-events.md.
+        refs: [extension:meeting-event-rules, extension:consume-meeting-export]
+      - when: an AI assistant should schedule and read meetings
+        then: Connect it to the hosted MCP server. See docs/mcp-tools-reference.md.
+        refs: [extension:mcp-client-integration]
+      - when: the assistant must reach more than five external systems
+        then: Combine them behind fewer MCP servers.
+        refs: [limitation:five-external-mcp-servers]
+
+  # ---------------------------------------------------------------- Identity and deployment
+  - id: identity-provider
+    topic: Identity and deployment
+    text: >-
+      How should people sign in to LMA: with accounts created for them in LMA, by
+      email domain self-sign-up, or with your corporate identity provider?
+    intent: LMA uses its own Cognito user pool; corporate federation is configured on it by the customer.
+    answer_type: enum
+    options: [accounts created in LMA, self-sign-up by email domain, corporate identity provider]
+    priority: should
+    phase: discovery
+    tests: [capability:user-management-and-sign-in, limitation:cognito-only-sign-in, extension:identity-federation]
+
+  - id: data-residency
+    topic: Identity and deployment
+    text: >-
+      In which AWS Region, or at least which country or geography, must meeting data
+      be stored and processed, and may AI model calls leave that geography?
+    intent: >-
+      Releases are published for four Regions, several features need Lambda
+      MicroVMs, and the inference geography setting keeps model calls in the
+      deployment's geography or Region.
+    answer_type: text
+    priority: must
+    phase: pre-contract
+    tests: [limitation:microvm-regions-only, capability:encryption-and-residency, capability:model-choice]
+    implications:
+      - when: a Region outside the four published ones
+        then: Treat it as unverified and test a deployment there before committing. See aws-release.sh.
+        refs: [deployment:build-from-source]
+      - when: model calls must stay in the geography
+        then: Set the model inference geography accordingly and confirm the chosen models are offered there.
+        refs: [capability:model-choice]
+
+  - id: deployment-governance
+    topic: Identity and deployment
+    text: >-
+      Who will deploy and operate LMA in your AWS account, and does your organisation
+      require deployments through a delegated role or IAM permissions boundaries on
+      every role?
+    intent: LMA is customer-operated; a delegated service role is supported, permissions boundaries are not yet.
+    answer_type: text
+    priority: should
+    phase: pre-contract
+    tests: [limitation:permissions-boundary-not-supported-yet, prerequisite:deploy-permissions]

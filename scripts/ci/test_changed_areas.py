@@ -45,6 +45,10 @@ ca = _load()
 #: documentation pages.
 DOC_READERS = {"ai_stack", "pr_review", "demo_recorder"}
 
+#: The solution profile's step, which also runs for a page the profile cites as
+#: evidence. Seconds.
+PROFILE = "solution_profile"
+
 
 def ran(paths: list[str]) -> set[str]:
     selection = ca.select(paths)
@@ -68,12 +72,13 @@ def ran(paths: list[str]) -> set[str]:
 def test_a_documentation_change_runs_only_the_suites_that_read_documentation(paths) -> None:
     assert ca.docs_only(paths)
     steps = ran(paths)
-    assert steps <= DOC_READERS | {"vp_template"}, steps
+    assert steps <= DOC_READERS | {"vp_template", PROFILE}, steps
     assert {"pr_review", "ai_stack"} <= steps
 
 
 def test_a_changelog_only_change_runs_nothing_heavy() -> None:
-    assert ran(["CHANGELOG.md"]) == DOC_READERS
+    # The profile's changes.yaml is checked against the CHANGELOG's latest releases.
+    assert ran(["CHANGELOG.md"]) == DOC_READERS | {PROFILE}
 
 
 @pytest.mark.parametrize(
@@ -400,7 +405,9 @@ def test_github_outputs_and_shell_assignments_name_every_step() -> None:
     selection = ca.select(["CHANGELOG.md"])
     outputs = dict(line.split("=", 1) for line in ca.github_outputs(selection).splitlines())
     assert outputs["ui"] == "false" and outputs["pr_review"] == "true"
-    assert outputs["full"] == "false" and outputs["areas"] == "ai_stack_inputs,docs"
+    assert (
+        outputs["full"] == "false" and outputs["areas"] == "ai_stack_inputs,docs,solution_profile"
+    )
     assert ca.STEPS.keys() <= outputs.keys()
     shell = ca.shell_assignments(selection)
     assert "CI_RUN_UI=false" in shell and "CI_RUN_PR_REVIEW=true" in shell
@@ -557,3 +564,112 @@ def test_every_gitlab_step_is_gated_on_a_real_key() -> None:
     for line in job["script"]:
         if "make " in line or "npm " in line:
             assert "ci_run " in line or "test-ci-tooling" in line, line
+
+
+# --- the solution profile ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "solution-profile/capabilities.yaml",
+        "solution-profile/schema/README.md",
+        "solution-profile/skills/lma-solution-fit/SKILL.md",
+        "scripts/solution_profile/check.py",
+    ],
+)
+def test_a_profile_change_runs_the_profile_step_and_is_not_documentation(path: str) -> None:
+    assert PROFILE in ran([path])
+    assert not ca.docs_only([path])
+
+
+def test_the_profile_check_is_linted() -> None:
+    assert "python_lint" in ran(["scripts/solution_profile/build.py"])
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # The cross-checks' sources (scripts/solution_profile/check.py CROSS_CHECK_SOURCES).
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/index.py",
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tool_definitions.py",
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/platform_helper.py",
+        "lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/new-one.json",
+        # Files the profile cites as evidence, and a file inside a cited directory.
+        "docs/meeting-export.md",
+        "docs/schemas/meeting-export-v1.schema.json",
+        "lma-virtual-participant-stack/backend/src/zoom.ts",
+        "lma-ai-stack/source/lambda_functions/live_guidance_analyzer/index.py",
+    ],
+)
+def test_a_file_the_profile_reads_runs_the_profile_step(path: str) -> None:
+    assert PROFILE in ran([path]), f"{path} must run {PROFILE}"
+
+
+def test_a_file_the_profile_does_not_read_does_not_run_it() -> None:
+    assert PROFILE not in ran(["lma-virtual-participant-stack/backend/src/logger.ts"])
+    assert PROFILE not in ran(["lma-websocket-transcriber-stack/source/app/src/index.ts"])
+
+
+def test_every_cross_check_source_runs_the_profile_step() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "_profile_check", REPO_ROOT / "scripts" / "solution_profile" / "check.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclasses resolve their module through it
+    spec.loader.exec_module(module)
+    for source in module.CROSS_CHECK_SOURCES:
+        is_file = source.endswith((".py", ".md", ".sh")) or source == "VERSION"
+        path = source if is_file else f"{source}/x.json"
+        assert PROFILE in ca.areas_for(path), f"{path} must run {PROFILE}"
+
+
+def _yaml_evidence(profile_dir: Path) -> set[str]:
+    found: set[str] = set()
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "evidence":
+                    found.update(v for v in value if not v.startswith("https://"))
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for path in profile_dir.glob("*.yaml"):
+        walk(yaml.safe_load(path.read_text(encoding="utf-8")))
+    return {entry.split("#", 1)[0].rstrip("/") for entry in found}
+
+
+def test_the_evidence_reader_agrees_with_a_yaml_parse_of_the_profile() -> None:
+    read = ca.read_evidence_paths(REPO_ROOT / "solution-profile")
+    assert read
+    assert set(read) == _yaml_evidence(REPO_ROOT / "solution-profile")
+
+
+def test_the_evidence_reader_reads_both_list_forms(tmp_path) -> None:
+    (tmp_path / "a.yaml").write_text(
+        "items:\n"
+        "  - id: x\n"
+        "    evidence: [docs/a.md#one, 'docs/b.md', https://example.com/c]\n"
+        "    tags: [t]\n"
+        "  - id: y\n"
+        "    evidence:\n"
+        "      - docs/d.md\n"
+        "      - lma-x/dir/\n"
+        "    related:\n"
+        "      - capability:z\n",
+        encoding="utf-8",
+    )
+    read = ca.read_evidence_paths(tmp_path)
+    assert read == {"docs/a.md", "docs/b.md", "docs/d.md", "lma-x/dir"}
+    assert ca.is_evidence("lma-x/dir/file.py", read)
+    assert not ca.is_evidence("lma-x/dirt.py", read)
+
+
+def test_an_unreadable_profile_runs_the_profile_step_for_everything(tmp_path) -> None:
+    assert ca.read_evidence_paths(tmp_path / "missing") is None
+    assert ca.is_evidence("anything/at/all.txt", None)

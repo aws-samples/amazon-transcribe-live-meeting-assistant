@@ -166,6 +166,10 @@ export default defineConfig({
               label: "Meeting Lifecycle Events",
               slug: "meeting-events",
             },
+            {
+              label: "Solution Profile",
+              slug: "solution-profile",
+            },
           ],
         },
         {
