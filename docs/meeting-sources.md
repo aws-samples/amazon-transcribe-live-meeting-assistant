@@ -49,7 +49,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
   attendee metadata.
 - You don't want a bot visible to other attendees.
 
-### Use **Stream Audio (from Mic+Browser)** when…
+### Use **Stream Audio/Video (from Mic+Browser)** when…
 
 - You don't want to install anything.
 - You want to capture audio from something other than a conventional meeting —

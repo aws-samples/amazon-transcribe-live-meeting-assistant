@@ -36,7 +36,7 @@ stops recording and transcription accordingly (see
 **Stream Audio/Video** and the **Desktop Capture App** run it too: they show the
 notice, ask the user to confirm, and the WebSocket transcriber records that on
 the meeting and withholds or stops recording and transcription accordingly (see
-[Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)).
+[Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app)).
 The browser extension does not run it yet; how the
 transcriber treats a client that shows no consent step is a setting. See
 [Flows by capture method](#flows-by-capture-method).
@@ -129,7 +129,7 @@ Opt-in with the each-participant rule, a stricter choice only per meeting,
 clients without a consent step refused and the Virtual Participant leaving
 after an objection. Under Regulated, Stream Audio/Video and the Desktop Capture App
 cannot collect each participant's consent, so Start is refused from them (see
-[Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app)),
+[Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app)),
 and a Virtual Participant on the
 Webex join never meets the each-participant rule and cannot move to
 owner-attests, so its meeting is not transcribed (see
@@ -284,7 +284,7 @@ replies are read.
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
 | **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
-| **Stream Audio/Video** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio/Video and the Desktop Capture App](#stream-audio-and-the-desktop-capture-app). |
+| **Stream Audio/Video** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app). |
 | **Desktop Capture App** (macOS and Windows) | As for Stream Audio/Video, with a copy button | As for Stream Audio/Video; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
 | **Browser extension** | As for Stream Audio/Video | As for Stream Audio/Video | Not available yet; treated as a client without a consent step. |
 | **Upload Audio** | None: the recording already exists | — | Not applicable. A recording should only be uploaded with the consent its participants gave when it was made. |
@@ -946,7 +946,7 @@ that objection's screenshots.
 - The screen recording does not resume once capture has been withheld after it
   started (see [Objections](#objections)).
 
-## Stream Audio and the Desktop Capture App
+## Stream Audio/Video and the Desktop Capture App
 
 Stream Audio/Video sends a meeting's audio to the WebSocket transcriber, which
 creates the meeting. Neither the page nor the user's browser can see the

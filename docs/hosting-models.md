@@ -147,7 +147,7 @@ owner attests** instead: the LMA user confirms that everyone in the meeting
 agreed before **Start**. If the customer turns **Allow a different choice per
 meeting** off, **Start** is refused from both, and their meetings need a Virtual
 Participant. See
-[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
 ## Settings no preset can set
 

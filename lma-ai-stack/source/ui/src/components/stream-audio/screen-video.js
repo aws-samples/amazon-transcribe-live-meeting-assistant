@@ -295,6 +295,7 @@ export const createVideoUplink = ({
   let finished = false;
   // Kept until confirmed: everything since the stream began.
   let retained = [];
+  let retainedBytes = 0;
   // Recorded while no connection was open, after confirmation.
   let queued = [];
   let queuedBytes = 0;
@@ -353,6 +354,7 @@ export const createVideoUplink = ({
           if (socket === ws && open) {
             confirmed = true;
             retained = [];
+            retainedBytes = 0;
           }
         }, confirmMs);
       }
@@ -420,7 +422,15 @@ export const createVideoUplink = ({
   const send = (chunk) => {
     if (finished || stopping) return;
     const bytes = chunk?.byteLength ?? 0;
-    if (!confirmed) retained.push(chunk);
+    if (!confirmed) {
+      retained.push(chunk);
+      retainedBytes += bytes;
+      if (retainedBytes > maxBufferBytes) {
+        log('video buffer full before the stream was confirmed; giving up on video');
+        finish('buffer');
+        return;
+      }
+    }
     if (open && socket) {
       socket.send(chunk);
       return;

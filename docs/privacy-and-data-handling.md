@@ -133,7 +133,7 @@ is captured until the record allows it, and audio sent before then is discarded.
 collect each participant's consent, an opt-in deployment whose rule is **Each
 participant consents** and that does not allow a different choice per meeting
 refuses Start from both. See
-[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
 **Clients without a consent step.** The browser extension, the Stream Audio/Video embed,
 Desktop Capture App builds from before the consent step, and scripts written

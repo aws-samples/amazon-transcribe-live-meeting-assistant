@@ -225,7 +225,7 @@ Client                                          Server
 
 1. **Connect** — Open a WebSocket connection to `wss://<CLOUDFRONT_DOMAIN>/api/v1/ws` with authentication tokens.
 2. **Send START** — Immediately send a JSON text message with `callEvent: "START"` and session metadata. This **must** be the first text message. The server will not process audio until a START message is received.
-3. **Stream Audio/Video** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
+3. **Stream audio** — Send raw PCM audio data as binary WebSocket frames. Continue sending audio for the duration of the session.
 4. **Speaker Changes** *(optional)* — Send `SPEAKER_CHANGE` text messages when the active speaker changes in a multi-participant meeting.
 5. **Send END** — When the session is complete, send a JSON text message with `callEvent: "END"` to signal the server to finalize the transcription, upload recordings, and clean up.
 6. **Close** — The server will close the WebSocket connection after processing the END event. The client may also close the connection. If the client disconnects without sending END, the server holds the meeting for 60 seconds for the client to reconnect, and then triggers end-of-call processing (see [Reconnection](#reconnection)).
@@ -464,7 +464,7 @@ Opt-in, a client shows its user a consent step before streaming and sends what
 the user confirmed with `START`. The server records it on the meeting once the
 meeting exists, and transcribes and records audio only while the meeting's
 consent allows it. See
-[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app)
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app)
 for the behaviour; this section is the protocol.
 
 **Ask for the settings** (any time on an open connection, usually once on

@@ -11,7 +11,7 @@ If you have not deployed LMA yet, start with [Prerequisites and Deployment](prer
 ## Table of Contents
 
 - [Streaming Options Overview](#streaming-options-overview)
-- [Option 1: Stream Audio/Video from Your Browser](#option-1-stream-audio-from-your-browser)
+- [Option 1: Stream Audio/Video from Your Browser](#option-1-stream-audiovideo-from-your-browser)
 - [Option 2: Virtual Participant](#option-2-virtual-participant)
 - [Viewing Your First Meeting](#viewing-your-first-meeting)
 - [Using the Meeting Assistant](#using-the-meeting-assistant)
@@ -27,7 +27,7 @@ LMA provides two ways to capture meeting audio:
 
 Choose whichever option fits your workflow. Both produce real-time transcripts and support the full set of LMA features.
 
-## Option 1: Stream Audio from Your Browser
+## Option 1: Stream Audio/Video from Your Browser
 
 The Stream Audio/Video option captures audio from a Chrome browser tab and sends it to LMA for real-time transcription.
 
@@ -35,7 +35,7 @@ The Stream Audio/Video option captures audio from a Chrome browser tab and sends
 
 Open the meeting or audio source you want to transcribe in a Chrome browser tab. This can be a web-based meeting application, a YouTube video, a podcast, or any other audio playing in the browser.
 
-### Step 2: Go to the Stream Audio Tab
+### Step 2: Go to the Stream Audio/Video Tab
 
 In the LMA web application, navigate to the **Stream Audio/Video** tab.
 

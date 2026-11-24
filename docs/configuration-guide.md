@@ -461,7 +461,7 @@ Start; an objection takes effect when the user records it with **Participant
 objected**. Clients that show no consent step (the browser extension, the
 Stream Audio/Video embed and Desktop Capture App builds from before the consent step)
 are refused, as under Regulated. See
-[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
 The two hosting presets, Team-hosted (external meetings) and Customer account,
 are described with every setting they change, and the reason for each, in
@@ -489,8 +489,11 @@ posture of either Regulated preset also sets them when the stack is deployed or 
   [Retention: settings the stack limits](#retention-settings-the-stack-limits)).
 - `AudioRecordingExpirationInDays` and `CloudWatchLogsExpirationInDays` — how
   long recordings and logs are kept.
-- `EnableVideoRecording` — meeting video from the Virtual Participant and the
-  Desktop Capture App. A Virtual Participant's video is also chosen per meeting.
+- `EnableVideoRecording` — meeting video from the Virtual Participant, the
+  Desktop Capture App, the Stream Audio/Video page and the browser extension. A
+  Virtual Participant's video is also chosen per meeting, and the two browser
+  clients' video also needs Meeting Recording › Record screen video from Stream
+  Audio/Video and the browser extension.
 
 Where each service that receives meeting content runs is listed in
 [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed).

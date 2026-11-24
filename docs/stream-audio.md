@@ -23,7 +23,7 @@ title: "Stream Audio/Video"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio/Video, and Virtual Participant.
 
-The Stream Audio/Video tab in the LMA web UI lets you capture stereo audio from your Chrome browser -- combining your microphone with any incoming audio source (meeting app, softphone, YouTube, etc.).
+The Stream Audio/Video tab in the LMA web UI lets you capture stereo audio from your Chrome browser -- combining your microphone with any incoming audio source (meeting app, softphone, YouTube, etc.) -- and, where an administrator allows it, to record the shared tab, window or screen as video ([Screen Video](#screen-video)).
 
 ![Stream Audio/Video UI](../images/readme-stream-audio.png)
 
@@ -116,7 +116,7 @@ record; and, while streaming, **Participant objected**, which stops the stream
 and records the objection. In Opt-in, Start is refused until you confirm, and
 nothing is recorded or transcribed until the transcriber has recorded your
 confirmation on the meeting. See
-[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audio-and-the-desktop-capture-app).
+[Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
 ## Screen Video
 

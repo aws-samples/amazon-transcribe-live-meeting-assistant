@@ -74,7 +74,7 @@ backend emits the corresponding events.
 
 ## Quick Start
 
-### 1. Basic Embed (Stream Audio)
+### 1. Basic Embed (Stream Audio/Video)
 
 The simplest way to get started is to embed the Stream Audio/Video component:
 
@@ -119,7 +119,7 @@ To show both options with a Tiles-style switcher at the top of the form:
 ></iframe>
 ```
 
-### 2. Pre-Populated Stream Audio
+### 2. Pre-Populated Stream Audio/Video
 
 Pre-fill the meeting form fields so users just click "Start Streaming":
 

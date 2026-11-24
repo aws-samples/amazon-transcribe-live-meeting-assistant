@@ -13,8 +13,8 @@ recorded meeting** link) and what the page showed. The tests read the stored
 meeting afterwards (test_stream_page_video.py).
 
 The slideshow changes slide every ``SLIDE_SECONDS``, a multiple of the two
-seconds between the key frames the page asks for, so each slide change falls
-near a key frame.
+seconds at which the transcriber samples key frames (the page asks its encoder
+for one every 1.8 seconds), so each slide is held for several samples.
 
 Chromium runs headed, because the picker flag picks a tab only there (headless,
 the fake picker always gives a synthetic screen); on a machine without a
