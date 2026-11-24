@@ -139,7 +139,7 @@ limitations:
     detect_with: [question:unattended-meetings, question:meeting-platforms]
     mitigations: [capability:virtual-participant, capability:speaker-attribution]
 
-  - id: no-video-from-browser-capture
+  - id: screen-video-where-turned-on
     title: Uploads carry no video, and the browser clients record it only where turned on
     description: >-
       Uploads carry no video, so those meetings have no key frames, slide text or
@@ -147,7 +147,7 @@ limitations:
       video only where an administrator turns on Meeting Recording › Record screen video
       from Stream Audio/Video and the browser extension (off by default and in every
       preset), and then only for meetings whose user switches it on; the extension
-      records only a browser tab (the meeting tab is offered first). Their other meetings have no key frames,
+      records only the meeting tab. Their other meetings have no key frames,
       slide text or screen-share summary.
     evidence:
       - docs/meeting-video.md#which-meetings-have-key-frames

@@ -139,11 +139,16 @@ default and in every preset) and the deployment records video
 
 - **Turn it on for one meeting.** Switch on **Also record screen video** before
   **Start Listening**. It is off at the start of every meeting.
-- **A browser tab only.** The extension records video only when what Chrome
-  shares is a browser tab (the meeting tab is offered first). If a window or the whole screen is
-  shared instead, the audio is captured as usual, no video is recorded, and the panel
-  says so. Chrome's option to switch the share to
-  another tab is turned off for a capture that started with video on.
+- **The meeting tab only.** The extension records video only when what Chrome
+  shares is the meeting tab, which Chrome offers first. If another tab, a window
+  or the whole screen is shared instead, the audio is captured as usual, no video
+  is recorded, and the panel says so. The extension checks which tab was shared
+  with Chrome's capture handles: before asking for the share it labels the
+  meeting tab, visibly only to itself, and records video only when the shared
+  tab carries that label. A browser that cannot make the check records audio
+  only, and the panel says so. Chrome's option to switch the share to another
+  tab is turned off for the whole of a capture that started with video on, also
+  after **Stop video**.
 - **While capturing**, **Screen video is ON** shows that the video is being
   recorded. **Stop video** ends the video and keeps the audio.
 - **Consent.** With a consent step, the notice ends with "The shared screen is

@@ -6,7 +6,10 @@
 The recorder page (``content_scripts/recorder/recorder.html``) is opened from the
 staged extension, with ``getDisplayMedia`` answered by a fake capture source: a
 canvas slideshow, changing slide every three seconds at five frames a second,
-whose video track reports the surface the test chooses. The extension's service
+whose video track reports the surface the test chooses and the capture handle of
+the tab it stands for (the label the recorder chose, for the meeting tab). The
+page stands in for the meeting tab's content script too, answering the
+recorder's request to label the tab. The extension's service
 worker stands in for the side panel: it sends the recorder the messages the
 panel sends (``StartTranscription`` with ``video``, ``StartVideo``,
 ``StopVideo``) and collects what the recorder hands back.
@@ -17,6 +20,11 @@ with the video constraints and with tab switching off; the chunks form one
 fragmented MP4 stream (initialization segment, then ``moof`` fragments) whose
 H.264 key frames are at most two seconds apart; and a surface other than the
 meeting tab records no video and says so.
+
+The last tests use no fake: a meeting tab and another tab, the extension's own
+content script in each, and Chromium's real tab capture, which a launch switch
+answers with the meeting tab or with the other tab. They show that the label
+check tells the two apart in a real browser.
 """
 
 from __future__ import annotations
@@ -34,6 +42,15 @@ FAKE_CAPTURE = """
 (() => {
   window.__gdmOptions = null;
   window.__surface = 'browser';
+  // Which tab the share stands for: 'meeting' carries the recorder's label.
+  window.__shared = 'meeting';
+  window.__label = null;
+  // The meeting tab's content script, for a recorder opened as a page of its own.
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.lma !== 'lma-set-capture-handle') return;
+    window.__label = event.data.handle;
+    window.postMessage({ lma: 'lma-capture-handle-set', handle: event.data.handle, ok: true }, '*');
+  });
   const slideshow = () => {
     const canvas = document.createElement('canvas');
     canvas.width = 1280; canvas.height = 720;
@@ -56,6 +73,8 @@ FAKE_CAPTURE = """
     const video = slideshow().captureStream(5).getVideoTracks()[0];
     const settings = video.getSettings.bind(video);
     video.getSettings = () => ({ ...settings(), displaySurface: window.__surface });
+    video.getCaptureHandle = () => (window.__surface !== 'browser' ? null
+      : { handle: window.__shared === 'meeting' ? window.__label : 'another-tabs-label' });
     const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
     return new MediaStream([video, ...mic.getAudioTracks()]);
   };
@@ -92,12 +111,21 @@ def browser(tmp_path_factory):
         # Nothing here needs the network.
         context.route("**/*", lambda route: route.abort() if route.request.url.startswith(("http", "ws")) else route.continue_())
         try:
-            yield {"context": context, "extension_id": extension_id}
+            yield {"context": context, "extension_id": extension_id, "playwright": playwright}
         finally:
             context.close()
 
 
-def _record(browser, surface: str, seconds: float) -> dict:
+def _wait_for(target, expression: str, timeout_s: float = 15.0) -> None:
+    """Poll ``expression`` from here: an extension page's CSP refuses the eval ``wait_for_function`` polls with."""
+    deadline = time.monotonic() + timeout_s
+    while not target.evaluate(expression):
+        if time.monotonic() > deadline:
+            raise AssertionError(f"timed out waiting for {expression}")
+        time.sleep(0.1)
+
+
+def _record(browser, surface: str, seconds: float, shared: str = "meeting") -> dict:
     context = browser["context"]
     worker = eb.service_worker(context)
     worker.evaluate(COLLECT)
@@ -106,18 +134,19 @@ def _record(browser, surface: str, seconds: float) -> dict:
     page.add_init_script(FAKE_CAPTURE)
     try:
         page.goto(recorder_url)
-        page.evaluate(f"window.__surface = {surface!r}")
+        page.evaluate(f"window.__surface = {surface!r}; window.__shared = {shared!r}")
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StartTranscription', video: true })")
-        page.wait_for_function("window.__gdmOptions !== null", timeout=15_000)
+        _wait_for(page, "window.__gdmOptions !== null")
         time.sleep(1.5)
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StartVideo' })")
         time.sleep(seconds)
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StopVideo' })")
         time.sleep(2.0)
         options = page.evaluate("window.__gdmOptions")
+        label = page.evaluate("window.__label")
         messages = worker.evaluate("self.__video")
         worker.evaluate("chrome.runtime.sendMessage({ action: 'StopTranscription' })")
-        return {"options": options, "messages": messages}
+        return {"options": options, "messages": messages, "label": label}
     finally:
         page.close()
 
@@ -229,11 +258,22 @@ def test_key_frames_are_at_most_two_seconds_apart(meeting_tab) -> None:
     assert max(gaps) <= 2.05, f"key frames at {times}"
 
 
-def test_a_share_other_than_the_meeting_tab_records_no_video(browser) -> None:
+def test_the_meeting_tab_is_labelled_before_the_share_is_asked_for(meeting_tab) -> None:
+    assert meeting_tab["label"], meeting_tab
+
+
+def test_a_screen_records_no_video(browser) -> None:
     result = _record(browser, "monitor", seconds=2)
     actions = [m["action"] for m in result["messages"]]
     assert actions == ["VideoUnavailable"], actions
-    assert result["messages"][0]["reason"] == "surface"
+    assert result["messages"][0]["reason"] == "not-meeting-tab"
+
+
+def test_another_tab_records_no_video(browser) -> None:
+    result = _record(browser, "browser", seconds=2, shared="another-tab")
+    actions = [m["action"] for m in result["messages"]]
+    assert actions == ["VideoUnavailable"], actions
+    assert result["messages"][0]["reason"] == "not-meeting-tab"
 
 
 def test_a_recorder_that_is_not_capturing_does_not_answer(browser) -> None:
@@ -249,3 +289,92 @@ def test_a_recorder_that_is_not_capturing_does_not_answer(browser) -> None:
         assert worker.evaluate("self.__video") == []
     finally:
         page.close()
+
+
+#: The two tabs of the real-capture tests, served by the test itself.
+MEETING_URL = "https://meeting.example.test/"
+OTHER_URL = "https://other.example.test/"
+OTHER_TITLE = "Another tab"
+
+
+#: For the share of another tab only: the recorder's share request without
+#: ``preferCurrentTab``. With it, Chromium asks whether to share this tab, which
+#: ``--auto-select-tab-capture-source-by-title`` does not answer; without it, the
+#: switch picks the other tab. The capture and its capture handle stay real.
+PLAIN_SHARE_PICKER = """
+(() => {
+  if (location.protocol !== 'chrome-extension:' || !navigator.mediaDevices) return;
+  const real = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getDisplayMedia = (options) => {
+    const { preferCurrentTab, ...rest } = options || {};
+    return real(rest);
+  };
+})();
+"""
+
+
+def _tab_page(route) -> None:
+    title = "Meeting" if route.request.url.startswith(MEETING_URL) else OTHER_TITLE
+    route.fulfill(content_type="text/html", body=f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>")
+
+
+def _record_real_share(browser, tmp_path_factory, share_switch: str, *, plain_picker: bool = False) -> list[dict]:
+    """Start a capture with video from the meeting tab's own recorder, Chromium answering the share with ``share_switch``."""
+    root = tmp_path_factory.mktemp("extension-real-share")
+    extension = eb.stage_extension(root / "extension", config=eb.OFFLINE_CONFIG)
+    context, _extension_id = eb.launch(
+        browser["playwright"],
+        extension,
+        root / "profile",
+        extra_args=("--use-fake-device-for-media-stream", share_switch),
+    )
+    try:
+        context.route("https://*.example.test/**", _tab_page)
+        # The microphone, which the recorder asks for after the share, without a
+        # prompt. --use-fake-ui-for-media-stream would also answer the share
+        # itself, which is what the switch under test chooses.
+        context.grant_permissions(["microphone"], origin=MEETING_URL.rstrip("/"))
+        if plain_picker:
+            context.add_init_script(PLAIN_SHARE_PICKER)
+        worker = eb.service_worker(context)
+        worker.evaluate(COLLECT)
+        # Opened first, so the meeting tab is in front when it asks for the share.
+        context.new_page().goto(OTHER_URL)
+        meeting = context.new_page()
+        meeting.goto(MEETING_URL)
+        meeting.bring_to_front()
+        # The recorder iframe the content script injects has loaded.
+        _wait_for(meeting, "!!document.getElementById('permissionsIFrame')")
+        time.sleep(1.0)
+        # To the meeting tab only, as the side panel sends it.
+        send = (
+            "(async (message) => { const [tab] = await chrome.tabs.query({ url: '" + MEETING_URL + "*' });"
+            " chrome.tabs.sendMessage(tab.id, message).catch(() => undefined); return tab.id; })"
+        )
+        worker.evaluate(send, {"action": "StartTranscription", "video": True})
+        time.sleep(4.0)
+        worker.evaluate(send, {"action": "StartVideo"})
+        _wait_for(worker, "self.__video.length > 0", timeout_s=10)
+        time.sleep(2.5)
+        worker.evaluate(send, {"action": "StopVideo"})
+        time.sleep(1.0)
+        messages = worker.evaluate("self.__video")
+        worker.evaluate(send, {"action": "StopTranscription"})
+        return messages
+    finally:
+        context.close()
+
+
+def test_a_real_share_of_the_meeting_tab_records_video(browser, tmp_path_factory) -> None:
+    messages = _record_real_share(browser, tmp_path_factory, "--auto-accept-this-tab-capture")
+    actions = [m["action"] for m in messages]
+    assert actions[0] == "VideoStarted", actions
+
+
+def test_a_real_share_of_another_tab_records_no_video(browser, tmp_path_factory) -> None:
+    messages = _record_real_share(
+        browser, tmp_path_factory, f"--auto-select-tab-capture-source-by-title={OTHER_TITLE}", plain_picker=True
+    )
+    actions = [m["action"] for m in messages]
+    assert actions == ["VideoUnavailable"], actions
+    assert messages[0]["reason"] == "not-meeting-tab"

@@ -34,9 +34,18 @@ export const VIDEO_OFF: VideoState = { status: 'off', message: '', slowGap: null
 
 /** What the panel says when the shared surface is not the meeting tab. */
 export const NOT_THE_MEETING_TAB =
-  'Screen video is recorded only from a browser tab (the meeting tab is offered first), and a window or the '
-  + 'whole screen was shared, so this meeting '
-  + 'records audio only.';
+  'Screen video is recorded only from the meeting tab, and another tab, a window or the whole screen was '
+  + 'shared, so this meeting records audio only.';
+/** What the panel says when this browser cannot confirm that the meeting tab was shared. */
+export const MEETING_TAB_UNCONFIRMED =
+  'Screen video is recorded only from the meeting tab, and this browser cannot confirm which tab was shared, '
+  + 'so this meeting records audio only.';
+
+/** The panel's message for each reason the recorder gives in VideoUnavailable. */
+const UNAVAILABLE_MESSAGES: Record<string, string> = {
+  'not-meeting-tab': NOT_THE_MEETING_TAB,
+  unverified: MEETING_TAB_UNCONFIRMED,
+};
 const UNSUPPORTED = 'This browser cannot record screen video in the format LMA needs, so this meeting records audio only.';
 
 type Options = {
@@ -118,7 +127,7 @@ export const createPanelVideo = ({
     if (!wanted || callId === null) return;
     if (request.action === 'VideoUnavailable') {
       wanted = false;
-      fail(request.reason === 'surface' ? NOT_THE_MEETING_TAB : UNSUPPORTED);
+      fail(UNAVAILABLE_MESSAGES[request.reason ?? ''] ?? UNSUPPORTED);
     } else if (request.action === 'VideoStarted') {
       monitor = createKeyframeMonitor({ onSlowKeyframes: (gap: number) => set({ slowGap: gap }) });
       uplink = createVideoUplink({

@@ -702,7 +702,7 @@ capabilities:
       - lma-ai-stack/source/lambda_functions/keyframe_text_extractor
     configuration: [EnableVideoRecording]
     tags: [video]
-    related: [limitation:no-video-from-browser-capture]
+    related: [limitation:screen-video-where-turned-on]
 
   - id: downloads
     title: Downloads of every meeting file, and one archive of all of them

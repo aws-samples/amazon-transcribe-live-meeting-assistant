@@ -22,9 +22,9 @@ chrome.runtime.onMessage.addListener(async function (request, sender, sendRespon
  * recorded with MediaRecorder as fragmented MP4 and handed to the side panel
  * chunk by chunk ("VideoChunk"), which sends it to the transcriber on its own
  * connection (src/lib/screen-video.js). Recorded only when the shared surface
- * is a browser tab (the meeting tab is offered first); a window or screen leaves
- * the audio running and tells
- * the panel ("VideoUnavailable"). These values match src/lib/screen-video.js,
+ * is the meeting tab, the tab this recorder runs in, as meeting-tab.js checks
+ * it. Another tab, a window or a screen leaves the audio running and tells the
+ * panel why ("VideoUnavailable"). These values match src/lib/screen-video.js,
  * which a test holds them to.
  */
 const VIDEO_MIME_TYPES = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1'];
@@ -35,7 +35,10 @@ const VIDEO_CONSTRAINTS = { frameRate: { ideal: 5, max: 5 }, width: { max: 1920 
 let videoRecorder = null;
 let videoTrack = null;
 let videoStopReason = null;
-// Whether this recorder is capturing a meeting: set once its share is granted.
+// Why the share is not recorded as video, when it is not (lmaMeetingTabCheck).
+let videoUnavailableReason = "not-meeting-tab";
+// Whether this recorder is capturing a meeting: set once its share is granted,
+// and cleared when the capture stops or its start fails.
 let capturing = false;
 
 const pickVideoMimeType = () => {
@@ -47,8 +50,9 @@ const startVideo = () => {
   // Only the recorder that is capturing this meeting answers.
   if (videoRecorder || !capturing) return;
   if (!videoTrack) {
-    // Told now, when the panel is ready for it: the share was not the meeting tab.
-    chrome.runtime.sendMessage({ action: "VideoUnavailable", reason: "surface" });
+    // Told now, when the panel is ready for it: the share was not the meeting
+    // tab, or this browser could not confirm that it was.
+    chrome.runtime.sendMessage({ action: "VideoUnavailable", reason: videoUnavailableReason });
     return;
   }
   const mimeType = pickVideoMimeType();
@@ -124,6 +128,11 @@ const convertToMono = (audioSource) => {
 
 const stopStreaming = async () => {
   console.log("recorder stop streaming");
+  // Cleared first, also for a start that failed before its audio was running,
+  // so that this recorder no longer answers the panel's video messages.
+  stopVideo("stopped");
+  capturing = false;
+  videoTrack = null;
   if (audioProcessor && audioProcessor.port) {
     audioProcessor.port.postMessage({
       message: 'UPDATE_RECORDING_STATE',
@@ -132,9 +141,6 @@ const stopStreaming = async () => {
     audioProcessor.port.close();
     audioProcessor.disconnect();
     audioProcessor = null;
-    stopVideo("stopped");
-    capturing = false;
-    videoTrack = null;
 
     displayStream.getTracks().forEach((track) => {
       track.stop();
@@ -151,6 +157,13 @@ const stopStreaming = async () => {
         audioContext = null;
       });
     }
+  } else {
+    // A start that failed part-way: release whatever it had been granted.
+    [displayStream, micStream].forEach((stream) => {
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+    });
+    displayStream = undefined;
+    micStream = undefined;
   }
 }
 
@@ -160,6 +173,10 @@ const startStreaming = async (withVideo = false) => {
       sampleRate: 8000
     });
     videoTrack = null;
+    videoUnavailableReason = "not-meeting-tab";
+    // Labelled before the share is asked for, so that the share can be checked
+    // against the label (meeting-tab.js).
+    const meetingTabLabel = withVideo ? await lmaLabelMeetingTab(window) : null;
     /* Get display media works */
     displayStream = await navigator.mediaDevices.getDisplayMedia({
       preferCurrentTab: true,
@@ -178,14 +195,15 @@ const startStreaming = async (withVideo = false) => {
     capturing = true;
     if (withVideo) {
       const [track] = displayStream.getVideoTracks();
-      const surface = track && track.getSettings ? track.getSettings().displaySurface : undefined;
-      if (track && surface === "browser") {
+      const reason = lmaMeetingTabCheck(track, meetingTabLabel);
+      if (reason === null) {
         videoTrack = track;
         track.addEventListener("ended", () => stopVideo("ended"));
       } else {
-        // A window or the whole screen: the audio goes on, with no video.
-        // The panel is told when it asks for the video (StartVideo).
-        console.log("LMA: the shared surface is not the meeting tab", surface || "unknown");
+        // Another tab, a window or the whole screen: the audio goes on, with
+        // no video. The panel is told when it asks for the video (StartVideo).
+        videoUnavailableReason = reason;
+        console.log("LMA: the shared surface is not recorded as video:", reason);
       }
     }
 
