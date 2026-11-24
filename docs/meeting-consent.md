@@ -664,7 +664,9 @@ placeholder) is handled as a chat reply without a sender: a consent is not
 recorded, and under the each-participant rule the chat says *"Live Meeting
 Assistant heard consent said aloud but could not tell who said it, so it was
 not recorded."*; an objection still stops capture and is recorded for
-*Unidentified participant*. Each reply is recorded with `voice` as its source.
+*Unidentified participant*. Each reply is recorded with `voice` as its source,
+and one heard while capture runs is also recorded with the transcript line it
+was read from (see [Which speaker gave a reply](#which-speaker-gave-a-reply)).
 The VP's own voice assistant is never read: it is not in the meeting audio the
 VP listens to, it has its own channel or session on both engines, and a reply
 attributed to one of the VP's own names is ignored.
@@ -1124,7 +1126,7 @@ holds:
 | `NoticeText` | The notice or request for this meeting, placeholders filled |
 | `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 9 are kept |
 | `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
-| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom |
+| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom, and, for a reply said aloud while the meeting was transcribed, the transcript line it was read from (`SpeakerLink`; see [Which speaker gave a reply](#which-speaker-gave-a-reply)) |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
 | `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken, a note, the vision model's check of it (`Verification`) when one ran, and when the image was deleted after its check (`ImageDeletedAt`) when screenshots are not kept |
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |
@@ -1165,6 +1167,60 @@ usually longer, so a record can go on listing images that have expired: their
 entries and anything stored about them remain, and a link to one leads nowhere.
 If the images are needed for as long as the record, keep the two retentions
 equal, or copy the images elsewhere before they expire.
+
+## Which speaker gave a reply
+
+A reply is recorded under the display name the meeting platform showed, which
+says who replied in the meeting but not which voice of the transcript it was.
+Where the reply is itself a line of the transcript, LMA records that line with
+it when the reply is recorded, so the [meeting export](meeting-export.md#participants)
+and the MCP [`get_meeting_consent`](mcp-tools-reference.md#get_meeting_consent)
+tool can give each transcript speaker their own consent. A reply is never
+linked to a speaker afterwards, and never by comparing names.
+
+**What is linked.** A reply said aloud to a Virtual Participant while the
+meeting is being transcribed, on every platform and with either transcription
+engine. Its words are a final line of the transcript the Virtual Participant
+writes itself, so the reply is recorded with that line's segment id, channel
+and speaker as stored (`SpeakerLink`, with the basis `same_segment`, when it
+was linked and by whom). It is linked only when the line's speaker, without the
+speech engine's voice label, is the participant the reply is recorded under,
+because the two were attributed together; the meeting consent resolver checks
+the same before storing the link. On Amazon Transcribe one result can be
+written as several lines with different speakers, and such a result is linked
+to none of them.
+
+**What is not linked**, and why:
+
+| Reply | Why it has no link |
+|---|---|
+| Typed in the meeting chat | A consent reply is kept out of the transcript, and the chat sender's name is read from another part of the platform's page than the name shown speaking, so nothing ties the two |
+| Said aloud while consent is awaited | It is heard on the Virtual Participant's separate listening session, which writes nothing to the transcript |
+| An objection with no speaker named (*Unidentified participant*) | There is no speaker to link it to |
+| Entered on the meeting page (`ui`), or an attestation | Neither is a line of the transcript; an attestation is about the whole meeting |
+| From Stream Audio or the Desktop Capture App | Their objection is the LMA user's report, not speech, and their opt-in is the owner's attestation |
+
+**When a link counts.** The export and `get_meeting_consent` give a linked
+reply's speaker only while the transcript still holds the linked line, final,
+on the same channel, under exactly the same speaker as stored, and nobody has
+named that one line as another person's on the meeting page. Renaming the voice
+on the meeting page does not change the link, because a line's stored speaker
+never changes; the participant keeps their consent under the new name. A voice
+merged with the linked one is not given its consent. If the same participant
+(by the name the record holds) later replies otherwise without a link to that
+speaker, for example by objecting in the chat after consenting aloud, the
+speaker's consent is reported as unknown, since the later reply is the one the
+record counts. In a meeting continued in more sessions, a link names its line by
+the session's own segment id (`s2-…`), and the record carries over with every
+link in it.
+
+**Retention.** The link is part of the reply's event, so it is kept and deleted
+with the consent record: deleted with the meeting, and kept when the transcript
+is deleted after the summary, as the rest of the record is. It holds the line's
+segment id and stored speaker, not its words. Once the transcript is gone the
+link is still reported, but it no longer names a speaker. A link never changes
+the meeting's status: when the record has to be shrunk to fit, links are among
+the last things given up, oldest first.
 
 ## Checking evidence with a vision model
 
@@ -1324,7 +1380,10 @@ fragment ConsentRecord on MeetingConsent {
   Mode Rule Status CaptureAllowed NoticeText NoticePostedAt
   Notices { Channel Text PostedAt PostedBy }
   Participants ParticipantsSeen
-  Events { EventId ParticipantName Decision Source Text OccurredAt RecordedAt RecordedBy }
+  Events {
+    EventId ParticipantName Decision Source Text OccurredAt RecordedAt RecordedBy
+    SpeakerLink { Basis SegmentId Channel Speaker LinkedAt LinkedBy }
+  }
   Attestation { AttestedBy Method Statement AttestedAt RecordedBy }
   Evidence {
     EvidenceId Kind S3Key CapturedAt AddedAt Note SignedUrl ImageDeletedAt
@@ -1423,7 +1482,12 @@ Arguments that are checked:
   changed and the change is added to the status history; the participants
   listed and when consent was first started are kept.
 - Every other mutation is refused until consent has been started.
-- A backend role's reply names its `Source`, `chat` or `voice`. An attestation
+- A backend role's reply names its `Source`, `chat` or `voice`. A backend
+  role's reply said aloud may name the transcript line it was read from
+  (`SpeakerLink: { SegmentId, Channel, Speaker }`); it is stored only as
+  [Which speaker gave a reply](#which-speaker-gave-a-reply) describes, and a
+  link that is not stored never stops the reply being recorded. A signed-in
+  user's link is ignored. An attestation
   a backend role relays is recorded as the meeting owner's; `AttestedBy`, when
   given, must name the owner.
 - Names are cut at 100 characters, reply and statement texts at 500, notices
@@ -1446,6 +1510,10 @@ also holds the reply classifier described above.
   themselves, two people can show the same name, and a guest's name is whatever
   they typed. A reply is recorded under the name its sender showed when it was
   sent, and two participants showing one name are counted as one.
+- **Most replies name no transcript speaker.** Only a reply said aloud while
+  the meeting is transcribed is linked to the speaker who said it; a chat reply
+  and every reply in a meeting whose consent is awaited are not. See
+  [Which speaker gave a reply](#which-speaker-gave-a-reply).
 - **Speech is read as words, and attributed by the speaker indicator.** A
   spoken reply is only as reliable as its transcript; a reply in a language the
   transcription is not set up for may not be read at all. It is recorded under

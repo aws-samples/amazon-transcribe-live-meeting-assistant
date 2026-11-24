@@ -86,6 +86,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "source": "chat",
                 "at": "2026-11-19T14:00:58Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
             {
                 "participantName": "Ana Silva",
@@ -93,6 +95,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "source": "voice",
                 "at": "2026-11-19T14:02:00Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
             {
                 "participantName": "Bo Chen",
@@ -100,6 +104,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "source": "ui",
                 "at": "2026-11-19T14:02:30Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
             {
                 "participantName": "Owner",
@@ -107,6 +113,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "source": "attestation",
                 "at": None,
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
         ],
         "attestation": None,
@@ -122,10 +130,98 @@ def test_the_notices_are_selected_with_their_channel(meeting):
     assert "Notices {" in query and "Channel" in query and "PostedAt" in query
 
 
-def test_a_speaker_is_never_matched_to_an_event_by_name(meeting):
+def test_a_speaker_is_never_matched_to_an_event_by_name(meeting, calls_table):
     """The record holds display names only; a name equal to a speaker's is not a link."""
+    calls_table.put(line("r1", "Ana Silva", 1.0))
     answer = consent.execute(caller(), "m1")
     assert {event["speakerId"] for event in answer["events"]} == {None}
+    # Nothing is linked, so the transcript is not read.
+    assert "trs#m1" not in transcript_reads(calls_table)
+
+
+def transcript_reads(table):
+    """The partition keys the tool queried."""
+    return [q["KeyConditionExpression"].get_expression()["values"][1] for q in table.queries]
+
+
+def line(segment_id, speaker, start, channel="REMOTE"):
+    return {
+        "PK": "trs#m1",
+        "SK": f"ts#{start}#{segment_id}",
+        "SegmentId": segment_id,
+        "Channel": channel,
+        "Speaker": speaker,
+        "Transcript": "words",
+        "StartTime": start,
+        "EndTime": start + 1,
+        "IsPartial": False,
+    }
+
+
+LINKED_RECORD = {
+    "CallId": "m1",
+    "CaptureAllowed": True,
+    "Consent": {
+        "Mode": "notify",
+        "Status": "granted",
+        "Events": [
+            {
+                "ParticipantName": "Bo Chen",
+                "Decision": "consent",
+                "Source": "voice",
+                "RecordedAt": "2026-11-19T14:02:00Z",
+                "SpeakerLink": {
+                    "Basis": "same_segment",
+                    "SegmentId": "r9",
+                    "Channel": "REMOTE",
+                    "Speaker": "Bo Chen (spk_1)",
+                    "LinkedAt": "2026-11-19T14:02:00Z",
+                },
+            },
+            {
+                "ParticipantName": "Ana Silva",
+                "Decision": "consent",
+                "Source": "voice",
+                "RecordedAt": "2026-11-19T14:03:00Z",
+                "SpeakerLink": {
+                    "Basis": "same_segment",
+                    "SegmentId": "gone",
+                    "Channel": "REMOTE",
+                    "Speaker": "Ana Silva (spk_0)",
+                    "LinkedAt": "2026-11-19T14:03:00Z",
+                },
+            },
+        ],
+    },
+}
+
+
+def test_a_linked_reply_gives_the_speaker_id_the_export_gives(calls_table, appsync):
+    calls_table.put(meeting_row())
+    calls_table.put(line("r1", "Ana Silva (spk_0)", 1.0))
+    calls_table.put(line("r9", "Bo Chen (spk_1)", 9.0))
+    appsync.answers["getMeetingConsent"] = {"getMeetingConsent": LINKED_RECORD}
+    answer = consent.execute(caller(), "m1")
+    bo, ana = answer["events"]
+    assert (bo["speakerId"], bo["speakerLinkBasis"], bo["speakerLinkedAt"]) == (
+        "remote-spk_1",
+        "same_segment",
+        "2026-11-19T14:02:00Z",
+    )
+    # Linked to a line the transcript no longer holds: the link is reported, not its speaker.
+    assert (ana["speakerId"], ana["speakerLinkBasis"]) == (None, "same_segment")
+    assert "SpeakerLink {" in appsync.calls[0][0]
+    assert "trs#m1" in transcript_reads(calls_table)
+
+
+def test_after_the_transcript_is_deleted_a_link_names_no_speaker(calls_table, appsync):
+    calls_table.put(meeting_row(TranscriptDeletedAt="2026-11-19T15:00:00Z"))
+    calls_table.put(line("r9", "Bo Chen (spk_1)", 9.0))
+    appsync.answers["getMeetingConsent"] = {"getMeetingConsent": LINKED_RECORD}
+    answer = consent.execute(caller(), "m1")
+    assert [e["speakerId"] for e in answer["events"]] == [None, None]
+    assert [e["speakerLinkBasis"] for e in answer["events"]] == ["same_segment"] * 2
+    assert "trs#m1" not in transcript_reads(calls_table)
 
 
 def test_another_user_is_refused_the_consent_record(meeting):

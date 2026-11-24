@@ -340,6 +340,58 @@ def test_each_participant_flow_end_to_end(dynamo) -> None:
     assert dynamo.consent()["ParticipantsSeen"] == ["Ana", "Bo", "Cy"]
 
 
+LINE = {"SegmentId": "s2-vp-REMOTE-r1-g0-s4", "Channel": "REMOTE", "Speaker": "Bo Chen (spk_0)"}
+
+
+def test_a_spoken_reply_is_stored_with_the_line_it_was_read_from(dynamo) -> None:
+    call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
+    result = call(
+        "recordMeetingConsentEvent",
+        BACKEND,
+        ParticipantName="Bo Chen",
+        Decision="consent",
+        Source="voice",
+        SpeakerLink=LINE,
+    )
+    (event,) = result["Consent"]["Events"]
+    assert event["SpeakerLink"] == {
+        **LINE,
+        "Basis": "same_segment",
+        "LinkedAt": event["RecordedAt"],
+        "LinkedBy": "LMA",
+    }
+
+
+@pytest.mark.parametrize(
+    "identity, name, source",
+    [
+        # Only the capture client that wrote the line links a reply to it.
+        (user(OWNER), "Bo Chen", "voice"),
+        # A chat reply is not a line of speech.
+        (BACKEND, "Bo Chen", "chat"),
+        # The line is somebody else's.
+        (BACKEND, "Ana Silva", "voice"),
+    ],
+)
+def test_a_reply_whose_link_does_not_hold_is_recorded_without_it(
+    dynamo, identity, name, source
+) -> None:
+    call("startMeetingConsent", BACKEND, Mode="notify")
+    decision = "objection"
+    result = call(
+        "recordMeetingConsentEvent",
+        identity,
+        ParticipantName=name,
+        Decision=decision,
+        Source=source,
+        SpeakerLink=LINE,
+    )
+    (event,) = result["Consent"]["Events"]
+    assert event["ParticipantName"] == name and event["Decision"] == decision
+    assert "SpeakerLink" not in event
+    assert result["Consent"]["Status"] == "objected"
+
+
 def test_a_shared_user_cannot_change_who_is_present(dynamo) -> None:
     call("startMeetingConsent", BACKEND, Mode="opt_in", Rule="each_participant")
     with pytest.raises(index.ForbiddenError):

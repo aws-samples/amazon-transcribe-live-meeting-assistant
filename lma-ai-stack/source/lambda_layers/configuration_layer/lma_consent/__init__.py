@@ -34,6 +34,8 @@ from .rules import (
     RULE_OWNER_ATTESTS,
     RULES,
     SOURCE_ATTESTATION,
+    SPEAKER_LINK_BASES,
+    SPEAKER_LINK_SAME_SEGMENT,
     STATUS_GRANTED,
     STATUS_NOT_REQUIRED,
     STATUS_OBJECTED,
@@ -54,6 +56,7 @@ from .rules import (
     override_permitted,
     record_size,
     render_notice,
+    speaker_link,
     split_phrases,
     strictness,
 )
@@ -84,6 +87,8 @@ __all__ = [
     "RULE_OWNER_ATTESTS",
     "RULES",
     "SOURCE_ATTESTATION",
+    "SPEAKER_LINK_BASES",
+    "SPEAKER_LINK_SAME_SEGMENT",
     "STATUS_GRANTED",
     "STATUS_NOT_REQUIRED",
     "STATUS_OBJECTED",
@@ -104,6 +109,7 @@ __all__ = [
     "override_permitted",
     "record_size",
     "render_notice",
+    "speaker_link",
     "split_phrases",
     "strictness",
 ]

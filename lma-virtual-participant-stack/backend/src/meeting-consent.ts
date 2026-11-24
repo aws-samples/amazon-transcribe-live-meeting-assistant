@@ -64,7 +64,7 @@ import type { ConsentApi, ConsentRecord, RecordEventInput, ReplySource } from '.
 import { ConsentApiError } from './consent-api.js';
 import { consentEvidenceKey, EvidenceShot } from './consent-evidence.js';
 import { consentHelpActive, consentHelpLineFor, setConsentHelpActive } from './consent-help.js';
-import { onSpokenUtterance } from './spoken-replies.js';
+import { onSpokenUtterance, type UtteranceLine } from './spoken-replies.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('meeting-consent');
@@ -551,7 +551,7 @@ export class MeetingConsentFlow {
             this.deps.capture.hold();
         }
         this.stopTimers.push(onParticipantSeen((name) => this.noteSpeaker(name)));
-        this.stopTimers.push(onSpokenUtterance((heard) => void this.handleSpeech(heard.speaker, heard.text)));
+        this.stopTimers.push(onSpokenUtterance((heard) => void this.handleSpeech(heard.speaker, heard.text, heard.line)));
         return { holdCapture: hold, deferVideo: hold };
     }
 
@@ -1177,7 +1177,7 @@ export class MeetingConsentFlow {
      * An objection stops capture before this returns, so the caller can rely
      * on nothing after it being captured.
      */
-    handleSpeech(speaker: string | null, text: string | null): ConsentDecision | null {
+    handleSpeech(speaker: string | null, text: string | null, line?: UtteranceLine): ConsentDecision | null {
         if (!this.active || this.offChoicePending || !this.readsSpokenReplies || !text || !text.trim()) return null;
         // The VP's own voice (its voice assistant) is never a reply.
         if (this.roster.isOwnIdentity(speaker)) return null;
@@ -1186,7 +1186,7 @@ export class MeetingConsentFlow {
         if (speaker && this.roster.noteSeen(speaker)) this.scheduleRosterSync();
         const decision = classifySpokenReply(text, this.settings.consentPhrases, this.settings.objectionPhrases);
         if (!decision) return null;
-        this.onDecision(speaker, decision, text, 'voice').catch((error) =>
+        this.onDecision(speaker, decision, text, 'voice', line).catch((error) =>
             log.error('[consent] a spoken reply could not be handled:', error),
         );
         return decision;
@@ -1196,7 +1196,13 @@ export class MeetingConsentFlow {
      * A reply read in the chat or heard. Nothing in it awaits before an
      * objection has stopped capture.
      */
-    private async onDecision(sender: string | null, decision: ConsentDecision, text: string, source: ReplySource): Promise<void> {
+    private async onDecision(
+        sender: string | null,
+        decision: ConsentDecision,
+        text: string,
+        source: ReplySource,
+        line?: UtteranceLine,
+    ): Promise<void> {
         // Some chat observers report one message twice; the second is dropped.
         const duplicateKey = `${source}|${normalizeParticipantName(sender)}|${normalizeReplyText(text)}`;
         const seenAt = this.recentReplies.get(duplicateKey);
@@ -1222,7 +1228,7 @@ export class MeetingConsentFlow {
             // stands for; it is neither counted nor recorded as consent.
             if (decision === 'consent') return;
         }
-        await this.onReply(named ?? UNKNOWN_SENDER, decision, text, source);
+        await this.onReply(named ?? UNKNOWN_SENDER, decision, text, source, named ? line : undefined);
     }
 
     private unattributedConsentLine(source: ReplySource): string {
@@ -1269,7 +1275,13 @@ export class MeetingConsentFlow {
         return 'Live Meeting Assistant cannot start until consent is given.';
     }
 
-    private async onReply(name: string, decision: ConsentDecision, text: string, source: ReplySource): Promise<void> {
+    private async onReply(
+        name: string,
+        decision: ConsentDecision,
+        text: string,
+        source: ReplySource,
+        line?: UtteranceLine,
+    ): Promise<void> {
         const key = normalizeParticipantName(name);
         const occurredAt = new Date(this.clock()).toISOString();
         const event: RecordEventInput = {
@@ -1279,6 +1291,8 @@ export class MeetingConsentFlow {
             OccurredAt: occurredAt,
             Source: source,
         };
+        const link = source === 'voice' ? speakerLinkFor(line, key) : undefined;
+        if (link) event.SpeakerLink = link;
         if (decision === 'objection') {
             if (this.isEchoedObjection(key, source)) {
                 log.info(`[consent] an objection ${source === 'voice' ? 'heard' : 'in the chat'} repeats one already acted on; not acted on again`);
@@ -1612,6 +1626,28 @@ export function grantEvidenceNote(record: ConsentRecord, mode: PlannedMode): str
         if (who) return `when ${who} consented`;
     }
     return 'when consent was granted';
+}
+
+const VOICE_LABEL = /\s*\(spk_\d+\)$/;
+
+/**
+ * The link of a spoken reply to the transcript line it was read from, or none.
+ *
+ * Only when the line's speaker as stored, without the speech engine's voice
+ * label, is the reply's participant (`key`, normalised as replies are): the
+ * reply and the line were attributed together, so a line named after anybody
+ * else -- an Amazon Transcribe result whose rows were named over a narrower
+ * span than the reply, a placeholder -- is no evidence of who replied, and the
+ * reply is recorded unlinked. The resolver applies the same rule.
+ */
+export function speakerLinkFor(
+    line: UtteranceLine | undefined,
+    key: string,
+): RecordEventInput['SpeakerLink'] | undefined {
+    if (!line || !line.segmentId || !key) return undefined;
+    const speaker = line.speaker.trim();
+    if (!speaker || normalizeParticipantName(speaker.replace(VOICE_LABEL, '').slice(0, 100)) !== key) return undefined;
+    return { SegmentId: line.segmentId, Channel: line.channel, Speaker: speaker };
 }
 
 /** Whether a display name reads as one of the participant list's placeholders, or the unknown sender. */

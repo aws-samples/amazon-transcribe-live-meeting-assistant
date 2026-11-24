@@ -138,6 +138,21 @@ MAX_STATUS_HISTORY = 100
 #: what it may; test_rules holds to that.
 MAX_RECORD_BYTES = 150_000
 
+#: How a reply was linked to the transcript speaker who gave it
+#: (``SpeakerLink.Basis``). ``same_segment``: the reply is that speaker's own
+#: final line of the transcript, so the line's channel and speaker as stored
+#: are the speaker. Recorded by the capture client that wrote the line, when the
+#: reply is recorded; never worked out afterwards from a name.
+SPEAKER_LINK_SAME_SEGMENT = "same_segment"
+SPEAKER_LINK_BASES: Tuple[str, ...] = (SPEAKER_LINK_SAME_SEGMENT,)
+#: The channels a linked line may be on: the meeting's speech.
+SPEAKER_LINK_CHANNELS: Tuple[str, ...] = ("REMOTE", "LOCAL")
+_STORED_SPEECH_CHANNEL = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
+MAX_SEGMENT_ID_LENGTH = 128
+#: A stored speaker: a display name with the speech engine's voice label.
+MAX_SPEAKER_LENGTH = 120
+_VOICE_LABEL = re.compile(r"\s*\(spk_\d+\)$")
+
 _SPACES = re.compile(r"\s+")
 _NOT_WORD = re.compile(r"[^\w']+")
 
@@ -153,6 +168,62 @@ def normalize_name(name: Any) -> str:
         return ""
     folded = unicodedata.normalize("NFKC", name).casefold()
     return _SPACES.sub(" ", folded).strip()
+
+
+def speaker_link(
+    value: Any,
+    participant_name: Any,
+    source: Any,
+    linked_at: str,
+    linked_by: str,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """``(link, "")`` to store on a reply, or ``(None, why not)``.
+
+    ``value`` is what the capture client sent: the ``SegmentId``, ``Channel``
+    and ``Speaker`` of the transcript line the reply was read from, as it wrote
+    them. Only a reply said aloud (``source`` ``voice``) is one of the
+    meeting's transcript lines, so only it can be linked this way. The line's
+    speaker, without the speech engine's voice label, must be the reply's
+    participant name (compared as replies are, by :func:`normalize_name`): the
+    two come from one attribution, so a difference means the client named the
+    reply and the line differently, and then neither is taken as the other.
+    The link names the line; whether the transcript still holds it is decided
+    by whoever reads the record (lma_speakers.participants).
+    """
+    if not isinstance(value, Mapping):
+        return None, "no link was given"
+    if source != "voice":
+        return None, "only a reply said aloud is a line of the transcript"
+    segment_id = clip(value.get("SegmentId"), MAX_SEGMENT_ID_LENGTH + 1)
+    if not segment_id or len(segment_id) > MAX_SEGMENT_ID_LENGTH:
+        return None, f"SegmentId must be 1 to {MAX_SEGMENT_ID_LENGTH} characters"
+    channel = clip(value.get("Channel"), 32) or ""
+    channel = _STORED_SPEECH_CHANNEL.get(channel, channel)
+    if channel not in SPEAKER_LINK_CHANNELS:
+        return None, f"Channel must be one of {', '.join(SPEAKER_LINK_CHANNELS)}"
+    speaker = clip(value.get("Speaker"), MAX_SPEAKER_LENGTH + 1)
+    if not speaker or len(speaker) > MAX_SPEAKER_LENGTH:
+        return None, f"Speaker must be 1 to {MAX_SPEAKER_LENGTH} characters"
+    base = _VOICE_LABEL.sub("", speaker)[:MAX_NAME_LENGTH]
+    name = normalize_name(participant_name)
+    if not name or normalize_name(base) != name:
+        return None, "the line's speaker is not the reply's participant"
+    return {
+        "Basis": SPEAKER_LINK_SAME_SEGMENT,
+        "SegmentId": segment_id,
+        "Channel": channel,
+        "Speaker": speaker,
+        "LinkedAt": linked_at,
+        "LinkedBy": linked_by,
+    }, ""
+
+
+def _link_key(event: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
+    """The speaker a reply is linked to, as its channel and speaker as stored."""
+    link = event.get("SpeakerLink")
+    if not isinstance(link, Mapping) or not link.get("Basis"):
+        return None
+    return (str(link.get("Channel") or ""), str(link.get("Speaker") or "").strip())
 
 
 def split_phrases(value: Any) -> List[str]:
@@ -323,17 +394,28 @@ def consented_outside_chat(record: Optional[Mapping[str, Any]]) -> List[str]:
 
 
 def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
-    """Each participant's latest reply and the latest attestation entry."""
+    """Each participant's latest reply, each linked speaker's latest reply, and
+    the latest attestation entry.
+
+    A linked speaker's latest reply is what the meeting export gives as that
+    speaker's consent, so it is kept although a later reply under the same name
+    is the one the status counts.
+    """
     keep, seen = set(), set()
     for position in range(len(events) - 1, -1, -1):
         event = events[position]
+        keys: List[Tuple[str, ...]] = []
         if event.get("Source") == SOURCE_ATTESTATION:
-            key: Tuple[str, ...] = ("attestation",)
+            keys.append(("attestation",))
         else:
-            key = ("reply", normalize_name(event.get("ParticipantName")))
-        if key not in seen:
-            seen.add(key)
-            keep.add(position)
+            keys.append(("reply", normalize_name(event.get("ParticipantName"))))
+            link = _link_key(event)
+            if link is not None:
+                keys.append(("speaker",) + link)
+        for key in keys:
+            if key not in seen:
+                seen.add(key)
+                keep.add(position)
     return keep
 
 
@@ -375,6 +457,8 @@ def record_size(record: Mapping[str, Any]) -> int:
 #: What a reply keeps when nothing else is left to shrink: enough to decide the
 #: status and to say when and where it was made.
 _ESSENTIAL_EVENT_FIELDS = ("ParticipantName", "Decision", "Source", "OccurredAt")
+#: What a speaker link keeps then: the line it names, how and when it was made.
+_ESSENTIAL_LINK_FIELDS = ("Basis", "SegmentId", "Channel", "Speaker", "LinkedAt")
 
 
 def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict[str, Any]:
@@ -391,8 +475,12 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     5. the names once listed but not present now;
     6. the replies the evidence check read in each image, and the participants it
        found no consent from, keeping its verdict;
-    7. every reply's other fields (its id, who recorded it and when), and each
-       evidence image's note and check summary.
+    7. every reply's other fields (its id, who recorded it and when), each
+       evidence image's note and check summary, and the speaker link of every
+       reply that is neither a participant's nor a linked speaker's latest;
+    8. the remaining speaker links, oldest first. The status never depends on
+       one; a reply without its link is no longer given as its speaker's in
+       the meeting export.
 
     Raises:
         RecordFull: the record is still over ``limit`` after all of that.
@@ -446,14 +534,32 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
             verification["ConsentedOutsideChat"] = []
     if record_size(record) <= limit:
         return record
-    # 7. The replies kept, down to who, how, where and when.
-    record["Events"] = [
-        {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS} for event in record["Events"]
-    ]
+    # 7. The replies kept, down to who, how, where and when, and the speaker
+    #    link of each reply the export's per-speaker consent is read from.
+    linked = _deciding_positions(record["Events"])
+    shrunk = []
+    for position, event in enumerate(record["Events"]):
+        entry = {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS}
+        link = event.get("SpeakerLink")
+        if position in linked and isinstance(link, Mapping) and link.get("Basis"):
+            entry["SpeakerLink"] = {key: link.get(key) for key in _ESSENTIAL_LINK_FIELDS}
+        shrunk.append(entry)
+    record["Events"] = shrunk
     for entry in record.get("Evidence") or []:
         entry["Note"] = None
         if isinstance(entry.get("Verification"), dict):
             entry["Verification"]["Summary"] = None
+    if record_size(record) <= limit:
+        return record
+    # 8. The speaker links, oldest first. The status never depends on one: a
+    #    reply that loses its link is only no longer given as its speaker's.
+    size = record_size(record)
+    for event in record["Events"]:
+        if size <= limit:
+            break
+        if event.get("SpeakerLink") is not None:
+            size -= piece(event["SpeakerLink"]) + len('"SpeakerLink":,')
+            event.pop("SpeakerLink")
     if record_size(record) <= limit:
         return record
     raise RecordFull(

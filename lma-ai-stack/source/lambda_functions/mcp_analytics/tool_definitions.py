@@ -484,9 +484,13 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "null), status (pending, granted, objected or not_required), captureAllowed, "
             "the notices posted (channel, postedAt), the owner's attestation, and one entry "
             "per consent event (participantName, decision consent or objection, source "
-            "chat, voice, ui or attestation, at, and speakerId, which is null because a "
-            "consent event is not linked to a transcript speaker). hasEvidence says whether "
-            "evidence exists; the evidence images are not returned."
+            "chat, voice, ui or attestation, at, speakerId, speakerLinkBasis and "
+            "speakerLinkedAt). A reply said aloud while the meeting was transcribed is "
+            "linked to the transcript speaker who said it (speakerLinkBasis same_segment), "
+            "and speakerId is then that speaker's id in get_meeting_export's participants "
+            "while the transcript holds the line; otherwise speakerId is null. A name is "
+            "never matched to a speaker. hasEvidence says whether evidence exists; the "
+            "evidence images are not returned."
         ),
         "inputSchema": {
             "type": "object",

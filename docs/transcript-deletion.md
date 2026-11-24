@@ -138,7 +138,10 @@ Kept:
   not be kept either;
 - shared-screen key frames and the text read from them, which follow
   **Days to keep transcript segments** in full;
-- the consent record, which is the evidence that participants were told;
+- the consent record, which is the evidence that participants were told,
+  including the transcript line each spoken reply was linked to (its segment
+  id and stored speaker, not its words; see
+  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply));
 - the meeting's notifications of other categories, and each user's dismissals
   and mutes.
 

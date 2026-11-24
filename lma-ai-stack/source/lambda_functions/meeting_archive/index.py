@@ -1056,8 +1056,13 @@ def meeting_export(
         segments = (
             query_items(f"trs#{call_id}")
             # The checklist evidence and the action items take their end
-            # times from the segments they name.
-            if retained and {"transcript", "chat", "checklist", "actionItems"} & set(wanted)
+            # times from the segments they name, and a consent event linked
+            # to a speaker its speakerId.
+            if retained
+            and (
+                {"transcript", "chat", "checklist", "actionItems"} & set(wanted)
+                or ("consent" in wanted and export.has_speaker_links(meeting.get("Consent")))
+            )
             else []
         )
     if keyframes is None:
