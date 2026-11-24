@@ -30,7 +30,7 @@ The left sidebar organizes the application into the following sections:
 
 ### Sources
 - **Virtual Participant** — Join meetings via a virtual participant bot
-- **Stream Audio (from Mic+Browser)** — Stream audio directly to LMA from any Chrome tab (meetings, softphones, YouTube, audio/video playback)
+- **Stream Audio (from Mic+Browser)** — Stream audio directly to LMA from any Chrome tab (meetings, softphones, YouTube, audio/video playback). **Continue an existing meeting…** streams into a meeting that already exists, even one shown as Done, as a further session on its transcript (see [Continue an existing meeting](stream-audio.md#continue-an-existing-meeting))
 - **Chrome Extension** — Information, download, and install instructions for the LMA Chrome browser extension (see [Browser Extension](browser-extension.md))
 
 ### Meetings
@@ -731,7 +731,14 @@ has ended and has not changed since it was started. A meeting still going on,
 or one that has changed since (its summary was written, or its transcript was
 deleted), gets a new archive.
 An archive whose files come to more than 5 GB is not built; the header says so, and the recordings can be downloaded
-on their own. The archive is a temporary copy: it is deleted a day after it was
+on their own.
+
+Each archive being built is one asynchronous invocation of the
+`<stack name>-MeetingArchive` function, which runs for up to 15 minutes with
+1 GB of memory. The function has no reserved concurrency, so builds share the
+account's unreserved Lambda concurrency with LMA's other functions: many
+archives prepared at once use as many concurrent executions, and a build that
+Lambda throttles is retried from its asynchronous queue. The archive is a temporary copy: it is deleted a day after it was
 written, and when the meeting is deleted. See
 [Privacy and Data Handling](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime).
 

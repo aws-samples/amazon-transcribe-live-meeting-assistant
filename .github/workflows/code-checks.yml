@@ -238,6 +238,14 @@ jobs:
         if: steps.areas.outputs.demo_recorder != 'false'
         run: make test-ux-recorder
 
+      # The solution profile (solution-profile/): the vendored contract validator,
+      # the cross-checks against the code, and the tests of the check and of the
+      # deterministic release build. Runs for the profile, the files its checks
+      # read and every file it cites as evidence. Seconds; no AWS.
+      - name: Solution profile check and tests
+        if: steps.areas.outputs.solution_profile != 'false'
+        run: make solution-profile-check test-solution-profile
+
       - name: WebSocket transcriber dependencies
         if: steps.areas.outputs.transcriber != 'false'
         working-directory: lma-websocket-transcriber-stack/source/app

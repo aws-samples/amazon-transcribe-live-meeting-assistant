@@ -43,12 +43,20 @@ client connects, and the API key scopes, are in
   (`search_lma_meetings`, `list_meetings`, `get_meeting_summary`,
   `get_meeting_transcript`, `get_virtual_participant_status`, `schedule_meeting`
   and `start_meeting_now`), without the meeting preparation arguments.
-- **Legacy keys** keep `schedule_meeting` and `start_meeting_now` as they were:
-  their `labels`, `audience`, `context`, `checklist` and `shareWith` arguments
-  need a **Read and write** key.
+- **Legacy keys** keep `schedule_meeting` and `start_meeting_now` with their
+  original arguments: their `labels`, `audience`, `context`, `checklist`,
+  `shareWith`, `summaryProfile` and `guidance` arguments need a **Read and
+  write** key. The answers are the
+  current ones on every endpoint and for every key.
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered
-  for, the read-only tools only.
+  for, the read-only tools only. `destructiveHint` is true for the tools whose
+  change cannot be taken back or takes something away from people. That
+  includes the tools that replace one of a meeting's preparation settings as a
+  whole and clear it when sent an empty one (`update_meeting_agenda`,
+  `set_meeting_context`, `set_meeting_checklist`, `update_meeting_metadata` and
+  `update_scheduled_meeting`); a tool that changes one part, such as
+  `update_checklist_item`, is not destructive.
 
 ## Every tool
 
@@ -419,8 +427,10 @@ Participant's owner or an Admin may end it.
 Beside `startDate`, `endDate`, `status`, `participant` and `limit`, it takes
 `labels` (every pair must match), `audience`, `updatedSince` and `endedSince`
 (ISO 8601). Each meeting has `labels`, `audience`, `status`, `startTime`,
-`endTime` (null until it has ended), `owner`, `summaryReady`, and
-`virtualParticipantId` when a Virtual Participant captured it, beside the
+`endTime` (null until it has ended), `owner`, `summaryProfile` (the summary
+profile the meeting is summarised with, null when the meeting names none, which
+means the shipped `default`), `summaryReady`,
+and `virtualParticipantId` when a Virtual Participant captured it, beside the
 earlier fields. The filters are applied before `limit`.
 
 Meetings are found by when they were created: `startDate` and `endDate` bound
@@ -439,7 +449,7 @@ also lists one that ended earlier and was changed after it.
 ```json
 {
   "meetings": [
-    {"meetingId": "e3b9…", "meetingName": "Website relaunch review", "status": "ENDED", "startTime": "2026-12-01T15:00:04Z", "endTime": "2026-12-01T15:58:40Z", "owner": "user@example.com", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryReady": true, "virtualParticipantId": "5f0c2c1e-…", "meetingUrl": "https://…"}
+    {"meetingId": "e3b9…", "meetingName": "Website relaunch review", "status": "ENDED", "startTime": "2026-12-01T15:00:04Z", "endTime": "2026-12-01T15:58:40Z", "owner": "user@example.com", "labels": {"project": "website-relaunch", "phase": "2"}, "audience": "external", "summaryProfile": null, "summaryReady": true, "virtualParticipantId": "5f0c2c1e-…", "meetingUrl": "https://…"}
   ],
   "count": 1,
   "filters": {"labels": {"project": "website-relaunch"}, "endedSince": "2026-12-01T00:00:00Z", "createdFrom": "2026-11-24T…", "…": "…"},
@@ -450,15 +460,43 @@ also lists one that ended earlier and was changed after it.
 ### get_meeting_consent
 
 The meeting's [consent record](meeting-consent.md), without the evidence
-images: `mode` (`off`, `notify` or `opt-in`), `consentGivenBy` for an opt-in
-meeting (`each_participant` or `owner_attests`), `status`, `captureAllowed`,
-`noticePostedAt`, the owner's `attestation`, one row per participant (`name`,
-`status` `consented`, `objected` or `no_reply`, `at` and `method`, the channel
-the reply came by), and `evidence` (`exists` and `count`). The record holds
-participants' display names only, so a row has no email address. A meeting
-whose consent is off, or was never started, answers `{"mode": "off"}`. The
-evidence images are in `get_meeting_record`'s `consent` section, for the
-meeting's owner and Admins.
+images. Every value is LMA's own, as the record stores it:
+
+| Field | Values |
+|---|---|
+| `mode` | `off`, `notify` or `opt_in` |
+| `rule` | `each_participant` or `owner_attests` for an opt-in meeting; null otherwise, as only opt-in uses a rule |
+| `status` | `pending`, `granted`, `objected` or `not_required` |
+| `captureAllowed` | Whether the meeting may be captured now |
+| `noticePostedAt` | When the notice was first posted |
+| `notices` | Each posting of the notice kept on the record: `channel` (`chat`, `voice`, `banner` or `invite`) and `postedAt` |
+| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt` |
+| `attestation` | The owner's attestation (`attestedBy`, `method`, `at`), or null |
+| `hasEvidence` | Whether evidence images exist; the images are not returned |
+| `startedAt`, `updatedAt` | When consent was started, and when the record last changed |
+
+The names are those the record stores, so no value is translated. `at` is when
+the reply or attestation happened, or when it was recorded if the record holds
+only that. A reply said aloud to a Virtual Participant while the meeting was
+being transcribed is linked, when it is recorded, to the transcript speaker who
+said it: `speakerLinkBasis` is then `same_segment` (the reply is that speaker's
+own line of the transcript) and `speakerLinkedAt` says when it was linked.
+`speakerId` is that speaker's id in
+[`get_meeting_export`](#get_meeting_export)'s `participants`, read from the
+meeting's transcript, and is null when the event was never linked or the
+transcript no longer holds the linked line under that speaker (including after
+the transcript was deleted). Every other event -- a chat reply, an entry on the
+meeting page, an attestation -- has all three null: LMA does not match a name
+to a speaker, because two people can show the same name. An event has no email
+address.
+
+A meeting whose consent was never started answers with `mode` `off`, `status`
+`not_required`, no notices or events, and `captureAllowed` as the meeting's
+capture gate. The evidence images are in `get_meeting_record`'s `consent`
+section, for the meeting's owner and Admins.
+
+The meeting export's `consent` part is the same record in the same shape; see
+[the meeting export](meeting-export.md#consent).
 
 ```json
 {"meetingId": "e3b9…"}
@@ -467,17 +505,22 @@ meeting's owner and Admins.
 ```json
 {
   "meetingId": "e3b9…",
-  "mode": "opt-in",
-  "consentGivenBy": "each_participant",
+  "mode": "opt_in",
+  "rule": "each_participant",
   "status": "granted",
   "captureAllowed": true,
   "noticePostedAt": "2026-12-01T15:00:30Z",
-  "attestation": null,
-  "participants": [
-    {"name": "Dana", "status": "consented", "at": "2026-12-01T15:01:02Z", "method": "chat"},
-    {"name": "Bo", "status": "consented", "at": "2026-12-01T15:01:40Z", "method": "voice"}
+  "notices": [{"channel": "chat", "postedAt": "2026-12-01T15:00:30Z"}],
+  "events": [
+    {"participantName": "Dana", "decision": "consent", "source": "chat", "at": "2026-12-01T15:01:02Z",
+     "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null},
+    {"participantName": "Bo", "decision": "consent", "source": "voice", "at": "2026-12-01T15:01:40Z",
+     "speakerId": "remote-spk_1", "speakerLinkBasis": "same_segment", "speakerLinkedAt": "2026-12-01T15:01:41Z"}
   ],
-  "evidence": {"exists": true, "count": 2}
+  "attestation": null,
+  "hasEvidence": true,
+  "startedAt": "2026-12-01T15:00:00Z",
+  "updatedAt": "2026-12-01T15:01:40Z"
 }
 ```
 

@@ -77,6 +77,7 @@ The meeting page always offers its download as a link of this kind.
 
 ```json
 {
+  "format": "lma-meeting-export",
   "schemaVersion": 1,
   "exportedAt": "2026-11-19T16:05:00Z",
   "lmaVersion": "0.4.1",
@@ -88,19 +89,23 @@ The meeting page always offers its download as a link of this kind.
     "summaryProfile": "discovery-session", "transcriptRetained": true
   },
   "participants": [
-    {"speakerId": "remote-spk_0", "label": "Other Participant (spk_0)", "name": "Priya Shah", "nameSource": "manual", "email": null}
+    {"speakerId": "remote-spk_0", "label": "Other Participant (spk_0)", "name": "Priya Shah", "nameSource": "manual", "email": null, "consent": "unknown"}
   ],
-  "consent": {"meetingId": "...", "mode": "opt-in", "participants": [], "evidence": {"exists": true, "count": 1}},
+  "consent": {"meetingId": "...", "mode": "opt_in", "rule": "each_participant", "status": "granted", "captureAllowed": true,
+              "noticePostedAt": "...", "notices": [{"channel": "chat", "postedAt": "..."}],
+              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null}],
+              "attestation": null, "hasEvidence": true, "startedAt": "...", "updatedAt": "..."},
   "agenda": {"text": "...", "source": "mcp"},
   "context": "...",
-  "checklist": [{"itemId": "q1", "text": "...", "kind": "question", "status": "covered", "evidence": []}],
+  "checklist": [{"itemId": "q1", "text": "...", "kind": "question", "status": "covered",
+                 "evidence": [{"segmentId": "...", "startTime": 12.5, "endTime": 15.0, "quote": "..."}]}],
   "transcript": [
     {"segmentId": "...", "startTime": 12.5, "endTime": 15.0, "speakerId": "remote-spk_0", "channel": "REMOTE", "kind": "speech", "text": "..."}
   ],
   "links": [{"url": "...", "startTime": 640.0, "sharedBy": "chat-1"}],
   "keyframes": [{"keyframeId": "...", "startTime": 900.0, "altText": "..."}],
   "summary": {"profile": "discovery-session", "source": "generated", "sections": [{"key": "DECISIONS", "label": "Decisions", "markdown": "..."}]},
-  "actionItems": [{"text": "...", "owner": null, "dueDate": null, "dueText": null, "startTime": 1832.5, "segmentId": "..."}],
+  "actionItems": [{"text": "...", "owner": null, "dueDate": null, "dueText": null, "startTime": 1832.5, "endTime": 1838.0, "segmentId": "..."}],
   "guidance": [{"type": "ask_question", "title": "...", "body": "...", "refs": ["..."], "createdAt": "..."}]
 }
 ```
@@ -109,6 +114,11 @@ The meeting page always offers its download as a link of this kind.
 `schemaVersion: 1`. A field added later is optional, and a consumer must ignore
 any field it does not know. A change that cannot follow those rules gets a new
 `schemaVersion`.
+
+**Recognising an export.** Every export starts with
+`"format": "lma-meeting-export"`, before `schemaVersion`, so a file can be
+recognised by its content alone. LMA always writes it. The schema lists it as
+optional, so a document validates with or without it.
 
 ### `meeting`
 
@@ -136,11 +146,28 @@ when speakers were separated. LMA does not merge voices into one person, even
 when the meeting page shows them under one name.
 
 - `speakerId` is opaque and unique within the export, for example
-  `remote-spk_0`, `local-1` or `chat-1`. Transcript entries and links refer to
-  it.
+  `remote-spk_0`, `local-1` or `chat-1`. Transcript entries, links and consent
+  events refer to it. A speaker has the same id whichever parts are exported,
+  and the same as `get_meeting_consent` gives, for the same transcript.
 - `label` is how LMA shows the speaker.
 - `name` is a person's name, or null when no name was given or confirmed. LMA
   never guesses one.
+- `consent` is `granted` or `objected`, from the speaker's latest reply among
+  the consent events linked to that speaker, and `unknown` when there is none.
+  A reply is linked to a speaker only when it was recorded: a reply said aloud
+  to a Virtual Participant while the meeting was being transcribed is that
+  speaker's own line of the transcript (see
+  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply)).
+  A chat reply, a reply heard while consent was awaited, an entry made on the
+  meeting page and an attestation are not linked to any speaker, and LMA does
+  not match a name to a speaker, because two people can show the same name and
+  a voice can be named after the meeting. A speaker's `consent` is also
+  `unknown` when the same participant (by the name the consent record holds)
+  replied otherwise afterwards in a reply not linked to that speaker, such as a
+  chat objection after a spoken consent, because nothing says which speaker
+  that later reply came from. A linked reply counts for the voice it was linked
+  to only: voices merged with it on the meeting page do not share it. The
+  meeting's consent itself is in [`consent`](#consent).
 
 `nameSource` says where a name came from:
 
@@ -175,20 +202,46 @@ images**, and no links to them; the summary's pictures become their alt text.
 
 ### `consent`
 
-`consent` is the consent record as the MCP `get_meeting_consent` tool gives it.
-It holds the mode, the status, the attestation, and one row per participant
-with their latest reply. The evidence is described only by whether it exists
-and how many entries there are. The evidence images themselves are only in the
-Everything archive, for the meeting's owner and Admins
-([meeting consent](meeting-consent.md)).
+`consent` is the consent record in LMA's own values, in the same shape as the
+answer of the MCP [`get_meeting_consent`](mcp-tools-reference.md#get_meeting_consent)
+tool, which is built by the same code:
+
+- `mode` is `off`, `notify` or `opt_in`; `rule` is `each_participant` or
+  `owner_attests` for an opt-in meeting, and null otherwise;
+- `status` is `pending`, `granted`, `objected` or `not_required`, and
+  `captureAllowed` says whether the meeting may be captured (null when its
+  consent was never started);
+- `notices` lists each posting of the notice with its `channel` and `postedAt`;
+- `events` has one entry per consent event, with `participantName`, `decision`
+  (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or
+  `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt`.
+  `speakerLinkBasis` says how the event was linked to the speaker who gave it,
+  and `speakerLinkedAt` when; both are null for an event that was never linked.
+  The one basis is `same_segment`: the reply is that speaker's own line of the
+  transcript. `speakerId` is the linked speaker's id in
+  [`participants`](#participants), and is null when the event was never
+  linked, or when the transcript no longer holds the linked line under that
+  speaker: the line expired or was deleted, or somebody named that one line as
+  another person's on the meeting page. After the transcript was deleted the
+  link is still given, with a null `speakerId`. LMA always writes
+  `speakerLinkBasis` and `speakerLinkedAt`, null when there is no link;
+- `hasEvidence` says whether evidence images exist.
+
+The evidence images themselves are only in the Everything archive, for the
+meeting's owner and Admins ([meeting consent](meeting-consent.md)).
 
 ### `checklist`
 
 `checklist` holds the checklist items as the MCP `get_meeting_checklist` tool
 gives them, with their status and evidence
-([meeting context and checklist](meeting-context-and-checklist.md)). Once the
-transcript was deleted, each piece of evidence keeps its segment id and time and
-has no quote.
+([meeting context and checklist](meeting-context-and-checklist.md)). Each piece
+of evidence has a `segmentId`, a `startTime` and an `endTime`, so it can be placed
+on the timeline even by a consumer that renumbers the segments. `startTime` is
+the time stored with the evidence, else its segment's start; `endTime` is its
+segment's end. Either is null when the evidence names no segment, or names one
+the transcript does not hold. Once the transcript was deleted, each piece of
+evidence keeps its segment id and its stored time, and has no quote and no
+`endTime`.
 
 ### `summary` and `actionItems`
 
@@ -208,7 +261,12 @@ profile that has them
 - `owner` is a name as said in the meeting, and null when nobody was named.
 - `dueDate` is a date written `YYYY-MM-DD`, and null when no date was said.
   `dueText` is how the due date was said.
-- `startTime` and `segmentId` place the item on the transcript.
+- `startTime`, `endTime` and `segmentId` place the item on the transcript, as
+  for checklist evidence: `endTime` is the end of the segment the item names,
+  and null when it names none or the transcript was deleted.
+
+The summary's sections are Markdown and name no segments, so they have no
+times. Guidance items refer to segments by id in `refs`.
 
 For a summary from a profile without structured action items, the list is
 empty.
@@ -219,7 +277,8 @@ When the transcript was deleted under the Retention settings:
 
 - `transcript`, `links` and `participants` are left out;
 - `meeting.transcriptRetained` is false;
-- checklist evidence has no quotes.
+- checklist evidence has no quotes, and neither it nor the action items have an
+  `endTime`.
 
 The guidance and the whiteboards are deleted with the transcript, so `guidance` and
 `whiteboards` are then empty. The

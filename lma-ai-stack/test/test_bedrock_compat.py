@@ -63,9 +63,9 @@ def compat():
 
 
 def test_every_package_ships_the_same_compat_module() -> None:
-    """Six packages carry this file; editing one and not the others is the risk.
+    """Every package in COMPAT_COPIES carries this file; editing one and not the others is the risk.
 
-    The five Lambda directories are zipped separately by SAM and the meeting
+    The Lambda directories are zipped separately by SAM and the meeting
     assist copy belongs to a different CloudFormation stack, so none of them can
     import a shared one. Only this test would notice a divergence: each copy is
     exercised by its own package's tests, which would all still pass.
@@ -79,8 +79,20 @@ def test_every_package_ships_the_same_compat_module() -> None:
         )
 
 
+def test_every_copy_in_the_repository_is_compared() -> None:
+    """A new package that copies the file is added to COMPAT_COPIES, so it is compared too."""
+    found = {
+        *LAMBDA_FUNCTIONS.glob("*/bedrock_compat.py"),
+        *(REPO / "lma-meetingassist-setup-stack").rglob("bedrock_compat.py"),
+    }
+    found = {
+        path for path in found if "node_modules" not in path.parts and ".aws-sam" not in path.parts
+    }
+    assert found == set(COMPAT_COPIES)
+
+
 def test_the_compat_module_has_no_third_party_imports(compat) -> None:
-    """It has to import cleanly in six packages with six different requirements."""
+    """It has to import cleanly in every package that ships it, each with its own requirements."""
     source = COMPAT_COPIES[0].read_text()
     imports = {
         line.split()[1].split(".")[0]

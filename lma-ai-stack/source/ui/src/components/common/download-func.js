@@ -5,6 +5,7 @@
  */
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
+import { ConsoleLogger } from 'aws-amplify/utils';
 import { canonicalChannel, isChatChannel, isSpeechChannel, REMOTE_CHANNEL } from './channels';
 import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from './speaker-identities';
 import { detectedLanguagesText, meetingLanguages, showsLanguageMarks } from './detected-languages';
@@ -13,6 +14,8 @@ import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
 import { fetchKeyframeThumbnails } from './keyframe-thumbnails';
 import { buildPdf } from './pdf-export';
+
+const logger = new ConsoleLogger('download-func');
 
 // eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file) =>
@@ -164,7 +167,7 @@ export const exportToDocxFile = async (text, nameFile, title = `Meeting Transcri
     // Generate and download the document
     docx.Packer.toBlob(doc).then((blob) => saveBlob(blob, `${nameFile}.docx`));
   } catch (error) {
-    console.error('Error exporting to DOCX:', error);
+    logger.error('Error exporting to DOCX:', error);
 
     // Fallback method if the docx library fails to load or process
     alert('Could not generate DOCX file. Please make sure you have an internet connection and try again.');
@@ -531,7 +534,7 @@ export const exportDocBlocksToDocxFile = async (blocks, nameFile) => {
     const doc = new docx.Document({ sections: [{ properties: {}, children: docxChildren(docx, blocks) }] });
     saveBlob(await docx.Packer.toBlob(doc), `${nameFile}.docx`);
   } catch (error) {
-    console.error('Error exporting to DOCX:', error);
+    logger.error('Error exporting to DOCX:', error);
     alert('Could not generate DOCX file. Please make sure you have an internet connection and try again.');
   }
 };
@@ -552,7 +555,7 @@ export const exportBlocksToPdfFile = async (
     const doc = await buildPdf(blocks, { jsPDF, title });
     saveBlob(doc.output('blob'), `${nameFile}.pdf`);
   } catch (error) {
-    console.error('Error exporting to PDF:', error);
+    logger.error('Error exporting to PDF:', error);
     alert('Could not generate PDF file. Please make sure you have an internet connection and try again.');
   }
 };
@@ -623,6 +626,27 @@ const frameIdsInText = (text) => [...String(text ?? '').matchAll(KEYFRAME_REFERE
 // asked for, so react-dom/server is not in the page's bundle.
 const loadHtmlExport = () => import('./html-export');
 
+/** The renderer, or an error marked `rendererUnavailable` when it cannot be loaded. */
+const loadRendererOrFail = async (loadRenderer) => {
+  try {
+    return await loadRenderer();
+  } catch (error) {
+    const failure = new Error('The web page renderer could not be loaded');
+    failure.rendererUnavailable = true;
+    failure.cause = error;
+    throw failure;
+  }
+};
+
+/**
+ * What a failed web page download tells the user. Only a renderer that could
+ * not be loaded points at the connection; anything else is the page itself.
+ */
+export const htmlDownloadMessage = (error) =>
+  error?.rendererUnavailable
+    ? 'Could not load what the web page download needs. Please make sure you have an internet connection and try again.'
+    : 'Could not prepare the web page for download. Please try again.';
+
 // The consent record as the body of a section, without the heading the Markdown download gives it.
 const consentBody = (consent) => (consent ? consentAsMarkdown(consent).replace(/^## Consent\n+/, '') : '');
 
@@ -643,7 +667,7 @@ export const summaryDownloadHtml = async (
   const sections = found.length ? found : [{ title: 'Summary', markdown: 'Not available' }];
   const frameIds = sections.flatMap((section) => frameIdsInText(section.markdown));
   const thumbnails = frameIds.length && meeting.callId ? (await loadThumbnails(meeting.callId, frameIds)) || {} : {};
-  const { renderSummaryHtml } = await loadRenderer();
+  const { renderSummaryHtml } = await loadRendererOrFail(loadRenderer);
   return renderSummaryHtml({
     title: meetingTitle(meeting.callId),
     facts: meetingFacts(meeting, [], participants),
@@ -666,7 +690,7 @@ export const transcriptDownloadHtml = async (
   { loadRenderer = loadHtmlExport } = {},
 ) => {
   const rows = transcriptDownloadRows(callTranscriptPerCallId, meeting);
-  const { renderTranscriptHtml } = await loadRenderer();
+  const { renderTranscriptHtml } = await loadRendererOrFail(loadRenderer);
   return renderTranscriptHtml({
     title: `Meeting Transcript: ${meetingTitle(meeting.callId)}`,
     facts: meetingFacts(
@@ -691,8 +715,8 @@ export const downloadSummaryAsHtml = async (meeting, consent = null, options = {
   try {
     exportToHtmlFile(await summaryDownloadHtml(meeting, consent, options), `Summary-${meeting.callId}`);
   } catch (error) {
-    console.error('Error exporting to HTML:', error);
-    alert('Could not generate the web page. Please make sure you have an internet connection and try again.');
+    logger.error('Error exporting to HTML:', error);
+    alert(htmlDownloadMessage(error));
   }
 };
 
@@ -704,7 +728,7 @@ export const downloadTranscriptAsHtml = async (callTranscriptPerCallId, meeting,
       `Transcript-${meeting.callId}`,
     );
   } catch (error) {
-    console.error('Error exporting to HTML:', error);
-    alert('Could not generate the web page. Please make sure you have an internet connection and try again.');
+    logger.error('Error exporting to HTML:', error);
+    alert(htmlDownloadMessage(error));
   }
 };

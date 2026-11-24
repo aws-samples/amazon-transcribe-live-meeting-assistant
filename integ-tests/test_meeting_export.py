@@ -20,9 +20,13 @@ it).
     items whose owners are names said in the meeting.
 ``test_the_export_over_mcp_matches_the_published_schema``
     ``get_meeting_export`` on that meeting validates against
-    docs/schemas/meeting-export-v1.schema.json, with its participants, links,
-    summary and action items. With ``LMA_TEST_MEETING_EXPORT_OUT`` set, the
-    export is also written to that file.
+    docs/schemas/meeting-export-v1.schema.json, starts with its ``format``, and
+    holds its participants, links, summary and action items. Checklist evidence
+    and action items carry their segment's start and end times; with a consent
+    reply recorded under a participant's exact name, every participant's
+    ``consent`` is still ``unknown``, as a name is never matched to a speaker.
+    With ``LMA_TEST_MEETING_EXPORT_OUT`` set, the export is also written to that
+    file.
 ``test_the_profile_is_set_on_the_meeting_and_chosen_for_a_regeneration``
     ``list_summary_profiles``; ``update_meeting_metadata`` sets and refuses a
     profile; ``regenerate_meeting_summary`` with ``healthcare`` writes that
@@ -36,6 +40,15 @@ it).
 ``test_an_export_after_the_transcript_was_deleted_leaves_it_out``
     Runs the transcript deletion function on the first meeting, as a scheduled
     deletion does, and exports again.
+``test_a_spoken_consent_is_given_as_its_speaker_s_through_the_live_pipeline``
+    A third meeting: two lines of speech put on the call data stream, then,
+    as the backend role a Virtual Participant signs as (an assumed role; the
+    test skips otherwise), a notify consent with a spoken reply linked to its
+    line, one whose line is somebody else's, and a chat reply under the other
+    voice's name. ``get_meeting_consent`` and the export give the linked
+    speaker's ``speakerId`` and ``granted``, and nothing for the others; a
+    rename keeps it; after the transcript deletion function runs the link is
+    kept and names no speaker.
 ``test_a_meeting_the_user_cannot_see_is_refused``
     A meeting owned by somebody else (skipped when the test user is an Admin).
 """
@@ -304,6 +317,16 @@ def discovery_meeting(env):
     chat_id, chat_start, chat_sender, chat_text = CHAT
     rows.append(meeting.segment(chat_id, chat_start, chat_start + 1, chat_sender, chat_text, "MEETING_CHAT"))
     meeting.put_segments(rows)
+    # Evidence that names a segment and no time, as a consumer that renumbers
+    # segments would need placing by its times.
+    env.ddb.update_item(
+        TableName=env.table,
+        Key={"PK": {"S": f"c#{meeting.call_id}"}, "SK": {"S": f"c#{meeting.call_id}"}},
+        UpdateExpression="SET Checklist[0].Evidence = :e",
+        ExpressionAttributeValues={
+            ":e": {"L": [{"M": {"SegmentId": {"S": "s6"}, "Quote": {"S": "Who owns the data migration?"}}}]}
+        },
+    )
     # The segments are written to the table directly, so the meeting gets the
     # duration the call event processor's aggregation would have given it.
     env.ddb.update_item(
@@ -356,10 +379,53 @@ def test_a_discovery_session_meeting_is_summarised_with_its_profile(env, discove
     env.state["action_items"] = items
 
 
+#: A consent record with a reply under a participant's exact name, written for
+#: the export test and removed after it.
+NAMED_REPLY_CONSENT = {
+    "M": {
+        "Mode": {"S": "opt_in"},
+        "Rule": {"S": "each_participant"},
+        "Status": {"S": "granted"},
+        "CaptureAllowed": {"BOOL": True},
+        "Events": {
+            "L": [
+                {
+                    "M": {
+                        "ParticipantName": {"S": "Priya Shah"},
+                        "Decision": {"S": "consent"},
+                        "Source": {"S": "chat"},
+                        "OccurredAt": {"S": "2026-11-20T00:00:00Z"},
+                    }
+                }
+            ]
+        },
+    }
+}
+
+
+def _set_consent(env, meeting: Meeting, consent: dict | None) -> None:
+    key = {"PK": {"S": f"c#{meeting.call_id}"}, "SK": {"S": f"c#{meeting.call_id}"}}
+    if consent is None:
+        env.ddb.update_item(TableName=env.table, Key=key, UpdateExpression="REMOVE Consent")
+    else:
+        env.ddb.update_item(
+            TableName=env.table,
+            Key=key,
+            UpdateExpression="SET Consent = :c",
+            ExpressionAttributeValues={":c": consent},
+        )
+
+
 def test_the_export_over_mcp_matches_the_published_schema(env, discovery_meeting) -> None:
-    error, document = env.call("get_meeting_export", {"meetingId": discovery_meeting.call_id})
+    _set_consent(env, discovery_meeting, NAMED_REPLY_CONSENT)
+    try:
+        error, document = env.call("get_meeting_export", {"meetingId": discovery_meeting.call_id})
+    finally:
+        _set_consent(env, discovery_meeting, None)
     assert not error, document
     valid(document)
+    assert list(document)[:2] == ["format", "schemaVersion"], list(document)[:3]
+    assert document["format"] == "lma-meeting-export"
     out = os.environ.get("LMA_TEST_MEETING_EXPORT_OUT")
     if out:
         Path(out).write_text(json.dumps(document, indent=2), encoding="utf-8")
@@ -373,8 +439,23 @@ def test_the_export_over_mcp_matches_the_published_schema(env, discovery_meeting
         {"url": "https://docs.example.com/claims-requirements", "startTime": 53.0, "sharedBy": sharer["speakerId"]}
     ]
     assert {e["kind"] for e in document["transcript"]} == {"speech", "chat"}
+    # A reply under "Priya Shah" is not matched to the speaker of that name.
+    assert {p["consent"] for p in document["participants"]} == {"unknown"}, document["participants"]
+    # The consent part is the record in LMA's own values, as get_meeting_consent gives it.
+    assert (document["consent"]["mode"], document["consent"]["rule"]) == ("opt_in", "each_participant")
+    assert [(e["participantName"], e["decision"], e["source"], e["speakerId"]) for e in document["consent"]["events"]] == [
+        ("Priya Shah", "consent", "chat", None)
+    ], document["consent"]["events"]
+    assert document["consent"]["hasEvidence"] is False
     assert document["actionItems"], "the export holds the structured action items"
+    times = {e["segmentId"]: (e["startTime"], e["endTime"]) for e in document["transcript"]}
+    for item in document["actionItems"]:
+        assert "endTime" in item, item
+        if item["segmentId"] in times:
+            assert item["endTime"] == times[item["segmentId"]][1], (item, times[item["segmentId"]])
     assert [c["itemId"] for c in document["checklist"]] == ["q1", "r1"]
+    evidence = document["checklist"][0]["evidence"]
+    assert [(e["segmentId"], e["startTime"], e["endTime"]) for e in evidence] == [("s6", 39.0, 46.0)], evidence
     error, partial = env.call(
         "get_meeting_export", {"meetingId": discovery_meeting.call_id, "include": ["summary", "actionItems"]}
     )
@@ -492,7 +573,155 @@ def test_an_export_after_the_transcript_was_deleted_leaves_it_out(env, discovery
     assert document["meeting"]["transcriptRetained"] is False
     assert "transcript" not in document and "participants" not in document and "links" not in document
     assert all(e["quote"] is None for item in document["checklist"] for e in item["evidence"])
+    # The segments went with the transcript, so the evidence's end is no longer known.
+    assert all(e["endTime"] is None for item in document["checklist"] for e in item["evidence"])
     assert document["summary"]["sections"], "the summary is kept"
+
+
+#: The consent mutations a Virtual Participant makes, as the backend role it signs with.
+START_CONSENT = """
+mutation Start($input: StartMeetingConsentInput!) { startMeetingConsent(input: $input) { CallId } }
+"""
+RECORD_REPLY = """
+mutation Reply($input: RecordMeetingConsentEventInput!) { recordMeetingConsentEvent(input: $input) { CallId } }
+"""
+READ_CONSENT = """
+query Read($CallId: ID!) { getMeetingConsent(CallId: $CallId) { Consent {
+  Events { ParticipantName Decision Source SpeakerLink { Basis SegmentId Channel Speaker LinkedAt LinkedBy } }
+} } }
+"""
+RENAME = """
+mutation Rename($input: UpdateSpeakerIdentitiesInput!) { updateSpeakerIdentities(input: $input) { CallId } }
+"""
+VOICE = "Integ Voice (spk_0)"
+OTHER_VOICE = "Integ Other (spk_1)"
+
+
+def _spoken_line(meeting: Meeting, segment_id: str, start: float, speaker: str, text: str) -> None:
+    """A final line of speech on the call data stream, as kinesis-stream.ts writes one."""
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "EventType": "ADD_TRANSCRIPT_SEGMENT",
+        "CallId": meeting.call_id,
+        "Channel": "REMOTE",
+        "SegmentId": segment_id,
+        "StartTime": start,
+        "EndTime": start + 2,
+        "Transcript": text,
+        "IsPartial": False,
+        "CreatedAt": now,
+        "UpdatedAt": now,
+        "Sentiment": None,
+        "TranscriptEvent": None,
+        "Speaker": speaker,
+        "AccessToken": "",
+        "IdToken": "",
+        "RefreshToken": "",
+    }
+    meeting.env.kinesis.put_record(
+        StreamName=meeting.env.stream, PartitionKey=meeting.call_id, Data=json.dumps(record).encode()
+    )
+
+
+def _stored_lines(meeting: Meeting) -> dict:
+    """The meeting's stored lines by segment id: (channel, speaker as stored)."""
+    pages = meeting.env.ddb.get_paginator("query").paginate(
+        TableName=meeting.env.table,
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": {"S": f"trs#{meeting.call_id}"}},
+        ConsistentRead=True,
+    )
+    return {
+        item["SegmentId"]["S"]: (item["Channel"]["S"], item["Speaker"]["S"])
+        for page in pages
+        for item in page.get("Items", [])
+        if "SegmentId" in item
+    }
+
+
+def test_a_spoken_consent_is_given_as_its_speaker_s_through_the_live_pipeline(env, client) -> None:
+    """A reply linked to its transcript line, as a Virtual Participant records one, end to end.
+
+    The lines go through the call data stream and the call event processor, so
+    the link is checked against what the stack actually stores; the reply goes
+    through AppSync's live schema and the consent resolver as the backend role.
+    """
+    arn = client.session.client("sts").get_caller_identity().get("Arn", "")
+    if ":assumed-role/" not in arn:
+        pytest.skip("needs an assumed role, which AppSync treats as the backend a Virtual Participant signs as")
+    meeting = env.meeting("speaker link")
+    meeting.start()
+    _spoken_line(meeting, "vp-REMOTE-r1-g0-s1", 1.0, VOICE, "LMA, I consent.")
+    _spoken_line(meeting, "vp-REMOTE-r1-g0-s2", 4.0, OTHER_VOICE, "Good morning, everyone.")
+    lines = _wait(lambda: (lambda found: found if len(found) >= 2 else None)(_stored_lines(meeting)), 120, 3)
+    assert lines and len(lines) == 2, f"the synthetic lines were not stored: {lines}"
+    channel, stored = lines["vp-REMOTE-r1-g0-s1"]
+    assert (channel, stored) == ("REMOTE", VOICE), lines
+
+    graphql = client.appsync.graphql
+    graphql(START_CONSENT, {"input": {"CallId": meeting.call_id, "Mode": "notify"}})
+    line = {"SegmentId": "vp-REMOTE-r1-g0-s1", "Channel": channel, "Speaker": stored}
+    reply = {"CallId": meeting.call_id, "Decision": "consent", "Source": "voice"}
+    graphql(RECORD_REPLY, {"input": {**reply, "ParticipantName": "Integ Voice", "SpeakerLink": line}})
+    # Under another participant's name the line is not theirs, so the reply is stored unlinked.
+    graphql(RECORD_REPLY, {"input": {**reply, "ParticipantName": "Integ Third", "SpeakerLink": line}})
+    # A chat reply under the other voice's exact name is not matched to it.
+    graphql(RECORD_REPLY, {"input": {**reply, "ParticipantName": "Integ Other", "Source": "chat"}})
+
+    stored_events = graphql(READ_CONSENT, {"CallId": meeting.call_id})["getMeetingConsent"]["Consent"]["Events"]
+    links = [e["SpeakerLink"] for e in stored_events]
+    assert links[0]["Basis"] == "same_segment" and links[0]["LinkedBy"] == "LMA", links
+    assert (links[0]["SegmentId"], links[0]["Channel"], links[0]["Speaker"]) == (
+        "vp-REMOTE-r1-g0-s1",
+        "REMOTE",
+        VOICE,
+    )
+    assert links[1:] == [None, None], links
+
+    error, answer = env.call("get_meeting_consent", {"meetingId": meeting.call_id})
+    assert not error, answer
+    given = [(e["participantName"], e["speakerId"], e["speakerLinkBasis"]) for e in answer["events"]]
+    assert given == [
+        ("Integ Voice", "remote-spk_0", "same_segment"),
+        ("Integ Third", None, None),
+        ("Integ Other", None, None),
+    ], answer["events"]
+    assert answer["events"][0]["speakerLinkedAt"], answer["events"]
+
+    error, document = env.call("get_meeting_export", {"meetingId": meeting.call_id})
+    assert not error, document
+    valid(document)
+    people = {p["speakerId"]: p for p in document["participants"]}
+    assert people["remote-spk_0"]["consent"] == "granted", document["participants"]
+    assert people["remote-spk_1"]["consent"] == "unknown", document["participants"]
+    # One shape for both, with the same speaker ids.
+    assert document["consent"]["events"] == answer["events"]
+
+    # Renaming the voice on the meeting page keeps its consent and its id.
+    identities = {
+        "identities": {f"REMOTE#{VOICE}": {"name": "Integ Renamed", "status": "confirmed", "source": "manual"}}
+    }
+    env.graphql(RENAME, {"input": {"CallId": meeting.call_id, "SpeakerIdentities": json.dumps(identities)}})
+    error, renamed = env.call("get_meeting_export", {"meetingId": meeting.call_id})
+    assert not error, renamed
+    voice = next(p for p in renamed["participants"] if p["speakerId"] == "remote-spk_0")
+    assert (voice["name"], voice["consent"]) == ("Integ Renamed", "granted"), voice
+
+    # Deleting the transcript keeps the link on the consent record; it no longer names a speaker.
+    response = env.d.session.client("lambda").invoke(
+        FunctionName=_deletion_function(env),
+        Payload=json.dumps({"CallId": meeting.call_id, "Trigger": "scheduled"}).encode(),
+    )
+    assert "FunctionError" not in response, response["Payload"].read()
+    error, after = env.call("get_meeting_consent", {"meetingId": meeting.call_id})
+    assert not error, after
+    assert [(e["speakerId"], e["speakerLinkBasis"]) for e in after["events"]] == [
+        (None, "same_segment"),
+        (None, None),
+        (None, None),
+    ], after["events"]
+    kept = graphql(READ_CONSENT, {"CallId": meeting.call_id})["getMeetingConsent"]["Consent"]["Events"]
+    assert kept[0]["SpeakerLink"]["SegmentId"] == "vp-REMOTE-r1-g0-s1", kept
 
 
 def test_a_meeting_the_user_cannot_see_is_refused(env) -> None:

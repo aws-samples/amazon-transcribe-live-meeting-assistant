@@ -61,6 +61,8 @@ export type CallEndEvent = CallEventBase<'END'> & {
 
 export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
     RecordingUrl: string,
+    /** The capture session the recording belongs to, when one is named. */
+    SessionNumber?: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -70,6 +72,8 @@ export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
 // call_event_processor -> updateVideoRecordingUrl pipeline consumes it as-is.
 export type CallVideoRecordingEvent = CallEventBase<'ADD_S3_VIDEO_RECORDING_URL'> & {
     VideoRecordingUrl: string,
+    /** The capture session the recording belongs to, when one is named. */
+    SessionNumber?: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

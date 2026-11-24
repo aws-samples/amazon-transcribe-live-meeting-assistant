@@ -1,0 +1,117 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# How the solution is deployed, where, and what a deployment needs.
+# Solution Profile contract v1 (schema/v1/README.md). The `cloudformation`
+# option's regions are checked against aws-release.sh by
+# scripts/solution_profile/check.py.
+options:
+  - id: cloudformation
+    title: Launch Stack from the published CloudFormation template
+    description: >-
+      The recommended first deployment: choose Launch Stack for a Region, enter the
+      admin email (which receives a temporary password) and optionally an allowed
+      email domain, review the other parameters, and create the stack from the
+      published template with no local build. Nested stacks create the VPC, the
+      transcriber service on Fargate, the AI stack with the web app, the Virtual
+      Participant, the on-demand speech engine, the browser extension and desktop
+      app builds, and the configuration stacks; container images and clients are
+      built by AWS CodeBuild in the customer's account.
+    evidence:
+      - README.md#quick-deploy
+      - docs/prerequisites-and-deployment.md#deploy-the-cloudformation-stack
+      - aws-release.sh
+    status: ga
+    regions: [us-east-1, us-west-2, ap-northeast-1, eu-west-1]
+    partitions: [aws]
+    time_to_deploy: about 35 to 40 minutes to CREATE_COMPLETE, as the deployment guide states
+
+  - id: cli-deploy
+    title: Deploy and update with the LMA CLI
+    description: >-
+      `lma deploy` creates or updates a stack from the command line and streams its
+      events, from the published template of the Region or, with `--from-code`, from
+      a local checkout that it builds and publishes into the deployer's own artifact
+      bucket first. It can deploy through a delegated CloudFormation service role.
+    evidence:
+      - docs/lma-cli.md#lma-deploy--deployupdate-stack
+      - docs/prerequisites-and-deployment.md#option-1-using-lma-cli-recommended
+      - docs/cloudformation-service-role.md#using-the-service-role-to-deploy-lma
+    status: ga
+    partitions: [aws]
+    time_to_deploy: about 35 to 40 minutes, as for the published template
+
+  - id: build-from-source
+    title: Build and publish the templates from source
+    description: >-
+      `publish.sh` (or `lma publish`) builds every stack from a checkout and uploads
+      the artifacts to the deployer's own S3 bucket, printing template URLs to deploy.
+      This is the path for a modified tree or a Region without published templates;
+      the Virtual Participant template needs a Region with AWS Lambda MicroVMs.
+    evidence:
+      - docs/developer-guide.md#building-and-publishing
+      - docs/stack-updates-and-upgrades.md#building-from-source
+      - publish.sh
+    status: ga
+    regions: [us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1]
+    partitions: [aws]
+    time_to_deploy: the build and upload, then about 35 to 40 minutes for the stack
+
+prerequisites:
+  - id: deploy-permissions
+    title: Permissions to create the stack's resources and IAM roles
+    description: >-
+      The deployer needs permission to create IAM roles and policies and resources
+      across S3, CloudFront, Cognito, AppSync, Kinesis, ECS and Fargate, Lambda,
+      Bedrock, VPC and CloudFormation; AdministratorAccess is the simplest. A
+      delegated CloudFormation service role lets users without those permissions
+      deploy and update LMA.
+    evidence:
+      - docs/prerequisites-and-deployment.md#aws-account-requirements
+      - docs/cloudformation-service-role.md
+    applies_to: [deployment:cloudformation, deployment:cli-deploy, deployment:build-from-source]
+
+  - id: bedrock-model-access
+    title: Amazon Bedrock model access in the deployment Region
+    description: >-
+      Access to Amazon Titan Text Embeddings V2 and to the Anthropic Claude models the
+      deployment will select (by default Claude Sonnet 5.5 for summaries and Claude
+      Haiku 5.5 for the assistant) must be enabled in the Bedrock console before
+      deploying; Amazon Nova models are optional alternatives.
+    evidence:
+      - docs/prerequisites-and-deployment.md#amazon-bedrock-model-access
+    applies_to: [deployment:cloudformation, deployment:cli-deploy, deployment:build-from-source]
+
+  - id: vpc-and-nat-capacity
+    title: Capacity for a VPC, NAT gateways and Elastic IPs, or an existing VPC
+    description: >-
+      The transcriber service needs a VPC with NAT gateways. The stack creates one
+      unless an existing VPC and subnets are given, so the Region needs VPC, NAT
+      gateway and Elastic IP capacity.
+    evidence:
+      - docs/troubleshooting.md#service-quotas
+      - docs/cloudformation-parameters.md#vpc-configuration
+    applies_to: [deployment:cloudformation, deployment:cli-deploy, deployment:build-from-source]
+
+  - id: transcribe-quota
+    title: Amazon Transcribe concurrent stream quota for the expected peak
+    description: >-
+      The default of 25 concurrent streams bounds concurrent meetings on Amazon
+      Transcribe; request an increase through Service Quotas before go-live if the
+      peak is higher.
+    evidence:
+      - docs/troubleshooting.md#service-quotas
+    applies_to: [deployment:cloudformation, deployment:cli-deploy, deployment:build-from-source]
+
+  - id: optional-third-party-credentials
+    title: Credentials for optional integrations
+    description: >-
+      Optional features need credentials from their providers: Tavily for web
+      search, ElevenLabs for that voice assistant, Simli for the avatar, Zoom Meeting
+      SDK app credentials, and an Azure Communication Services connection string for
+      the Teams ACS join. Each is entered as a stack parameter or an existing secret
+      and held in AWS Secrets Manager.
+    evidence:
+      - docs/infrastructure-and-security.md#integration-credentials
+      - docs/infrastructure-and-security.md#optional-integrations-outside-aws
+    applies_to: [deployment:cloudformation, deployment:cli-deploy, deployment:build-from-source]

@@ -246,12 +246,17 @@ test('assistant-channel results become VP rows and never drive wake phrases or s
     const assistant = methodBody('private handleAssistantChannelResult');
     assert.match(assistant, /assistantSegmentFromResult\(result, sessionOffsetSeconds, this\.vpName\(\)\)/);
     assert.match(assistant, /sendAsrTranscriptSegment\(segment\)/);
-    assert.doesNotMatch(assistant, /processTranscriptResult|sendAddTranscriptSegment|requestStopTalking/);
+    assert.doesNotMatch(
+        assistant,
+        /processTranscriptResult|sendAddTranscriptSegment|prepareTranscriptSegments|sendPreparedTranscriptSegments|requestStopTalking/,
+    );
 });
 
 test('participant rows on two channels are never named after the VP', () => {
     const events = methodBody('private async handleTranscriptEvents');
     assert.match(events, /const speaker = stereo \? currentParticipantSpeaker : currentSpeaker/);
-    assert.match(events, /sendAddTranscriptSegment\(\s*speaker,/);
+    // Its rows are built under that speaker, then sent as built.
+    assert.match(events, /prepareTranscriptSegments\(\s*speaker,/);
+    assert.match(events, /sendPreparedTranscriptSegments\(prepared\)/);
     assert.match(methodBody('async speakerChange'), /!isOwnIdentity\(speaker, this\.ownIdentities\(\)\)/);
 });

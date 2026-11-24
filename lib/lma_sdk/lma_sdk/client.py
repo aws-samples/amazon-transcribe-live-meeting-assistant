@@ -188,7 +188,8 @@ class LMAClient:
 
     @property
     def meetings(self):
-        """Meetings by their labels (``find_by_labels``, ``delete_by_labels``).
+        """Meetings: ``reopen`` one for another capture session, and find or delete
+        them by their labels (``find_by_labels``, ``delete_by_labels``).
 
         Returns:
             MeetingOperations instance.

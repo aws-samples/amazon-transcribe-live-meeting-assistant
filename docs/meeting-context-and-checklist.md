@@ -57,7 +57,15 @@ Each checklist item has these fields:
 
 Every limit is checked by the server, which refuses a change that breaks one
 with a message naming the limit; the meeting page and the Virtual Participant
-forms check the same limits before they send.
+forms check the same limits before they send. A change that breaks a limit is
+refused as a whole: nothing in it is shortened, dropped or partly applied.
+
+Label keys and values are opaque to LMA. A key must match the pattern below,
+and a key that does not is refused rather than changed; a value may be any
+text within its length. LMA stores, filters on and returns both exactly as
+given, without changing their case, spacing or characters. The meeting page's
+label editor and the meeting list's label filter keep what is typed too: the
+key is everything before the first `=` and the value everything after it.
 
 | Input | Limit |
 |---|---|
@@ -74,8 +82,11 @@ forms check the same limits before they send.
 Two further limits keep a checklist inside the meeting record, which also holds
 the summary, the speaker names and the consent record:
 
-- **At most 5 evidence entries per item.** When more are added, the 5 newest
-  are kept.
+- **At most 5 evidence entries per item.** A change that gives more than 5
+  entries, in `Evidence` and `AddEvidence` together, is refused. When entries added with
+  `AddEvidence` take the item past 5, its oldest stored entries make way, so
+  the 5 newest are kept; this is how the assistant keeps adding evidence
+  during a meeting.
 - **At most 128 KB for the stored checklist as a whole.** A change that would
   make it larger is refused.
 
@@ -123,8 +134,10 @@ change reaches every open meeting page through the `onUpdateCall`
 subscription, without a reload.
 
 **The meeting list** has two filters beside the search box: a label filter
-(`key=value`, or a key alone for any meeting with that label) and an audience
-filter (any, internal, external or unspecified). Like the list's search box, they apply to the meetings loaded for the list's date range. The list's Excel download has
+(`key=value`, or a key alone for any meeting with that label, matched exactly
+as typed; a key that is not a label key, such as `Project` or one with a
+trailing space, is shown with the same message the label editor gives) and an
+audience filter (any, internal, external or unspecified). Like the list's search box, they apply to the meetings loaded for the list's date range. The list's Excel download has
 each meeting's labels as `key=value` text; the meeting context and checklist
 are not in it.
 
@@ -233,7 +246,7 @@ to `onUpdateCall`:
 
 A backend role calling with IAM credentials must name a `StatusSource` (`user`
 or `assistant`) on `updateCallChecklist` and `updateCallChecklistItem`, and may name an `UpdatedBy` label
-on the meeting context, checklist and item mutations; a signed-in user's change
+(at most 128 characters) on the meeting context, checklist and item mutations; a signed-in user's change
 is always their own. A client that subscribes to `onUpdateCall` should select
 `Owner` and `SharedWith`, as the subscription requires them for every caller
 who is not an Admin.

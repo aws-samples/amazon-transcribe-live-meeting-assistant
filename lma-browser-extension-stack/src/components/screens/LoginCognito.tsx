@@ -22,7 +22,7 @@ function LoginCognito() {
   useEffect(() => {
     if (chrome && chrome.runtime) {
       const manifestData = chrome.runtime.getManifest();
-      setVersion(manifestData.version)
+      setVersion(manifestData.version_name || manifestData.version)
     } else {
       setVersion("dev/web");
     }

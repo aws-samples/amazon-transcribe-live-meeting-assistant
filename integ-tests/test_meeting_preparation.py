@@ -19,6 +19,12 @@ Default run (no meeting needed, about a minute, self-cleaning):
 ``test_a_replace_keeps_progress_and_the_assistant_never_overrides_a_user``
     On that meeting: a status set for a user survives a replace of the
     checklist, the assistant cannot change it, and a reset starts it again.
+``test_a_change_over_a_limit_is_refused_whole_and_names_the_limit``
+    On that meeting: more than 20 labels, more than 5 evidence entries in one
+    change, an over-long field and an over-long UpdatedBy are each refused with
+    the limit in the message, and nothing of them is written. It runs after
+    the replace test, whose item c1 it uses, and clears the labels at the end
+    whether or not the limit checks pass.
 ``test_deleting_the_transcript_removes_the_evidence_quotes``
     Runs the transcript deletion function on that meeting, as a scheduled
     deletion does, and checks each quote is gone and its segment id and time
@@ -53,7 +59,12 @@ from lma_sdk.exceptions import LMAError
 
 OWNER = "integ-test@lma.aws"
 
-LABELS = [{"Key": "project", "Value": "integ-test"}, {"Key": "phase", "Value": "1"}]
+# The last value's case, spacing and characters must come back unchanged.
+LABELS = [
+    {"Key": "project", "Value": "integ-test"},
+    {"Key": "phase", "Value": "1"},
+    {"Key": "customer", "Value": "  ACME Corp / Ünïcode "},
+]
 CONTEXT = "# Goals\nAgree the integration test plan."
 CHECKLIST = [
     {"ItemId": "q1", "Text": "Who owns the budget?", "Kind": "question", "Priority": "must"},
@@ -327,8 +338,44 @@ def test_a_replace_keeps_progress_and_the_assistant_never_overrides_a_user(
     assert r1["StatusSource"] == "assistant"
     assert r1["Evidence"] == [{"SegmentId": "seg-1", "StartTime": 12.5, "Quote": "we may be locked in"}]
 
-    cleared = graphql(UPDATE_LABELS, {"input": {"CallId": call_id, "Labels": []}})["updateCallLabels"]
+
+def test_a_change_over_a_limit_is_refused_whole_and_names_the_limit(
+    client: LMAClient, aws: dict[str, Any], prepared_meeting
+) -> None:
+    # Runs after the replace test, which leaves item c1 on the checklist; the
+    # labels are cleared at the end, once nothing compares them any more.
+    call_id, _meeting = prepared_meeting
+    graphql = client.appsync.graphql
+    before = live_meeting.read_meeting(aws["ddb"], aws["table"], call_id)
+    assert any(item["ItemId"] == "c1" for item in before["Checklist"]), "run with the replace test before it"
+    try:
+        _refuse_over_limit_changes(graphql, call_id)
+        after = live_meeting.read_meeting(aws["ddb"], aws["table"], call_id)
+        assert after["Labels"] == before["Labels"]
+        assert after["Checklist"] == before["Checklist"]
+    finally:
+        cleared = graphql(UPDATE_LABELS, {"input": {"CallId": call_id, "Labels": []}})["updateCallLabels"]
     assert cleared["Labels"] == [] and cleared["MeetingMetadataUpdatedAt"]
+
+
+def _refuse_over_limit_changes(graphql, call_id: str) -> None:
+    with pytest.raises(Exception, match="at most 20 labels"):
+        graphql(UPDATE_LABELS, {"input": {"CallId": call_id,
+                                          "Labels": [{"Key": f"k{n}", "Value": "v"} for n in range(21)]}})
+    with pytest.raises(Exception, match="at most 5 evidence entries"):
+        graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user", "Status": "covered",
+                                        "Evidence": [{"StartTime": n} for n in range(6)]}})
+    # A replace and an addition in one change are counted together.
+    with pytest.raises(Exception, match="at most 5 evidence entries; this change gives 7"):
+        graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user",
+                                        "Evidence": [{"StartTime": n} for n in range(3)],
+                                        "AddEvidence": [{"StartTime": 10 + n} for n in range(4)]}})
+    with pytest.raises(Exception, match="longer than 1000"):
+        graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user",
+                                        "Note": "n" * 1001}})
+    with pytest.raises(Exception, match="UpdatedBy is longer than 128"):
+        graphql(UPDATE_ITEM, {"input": {"CallId": call_id, "ItemId": "c1", "StatusSource": "user",
+                                        "Status": "covered", "UpdatedBy": "u" * 129}})
 
 
 def test_deleting_the_transcript_removes_the_evidence_quotes(

@@ -83,26 +83,33 @@ export const formatElapsed = (seconds) => {
 /** Labels as the editor shows them: one key=value per line. */
 export const labelsToText = (labels) => (labels || []).map(({ Key, Value }) => `${Key}=${Value}`).join('\n');
 
+/** Why `key` is not a label key, or null when it is one. */
+export const labelKeyProblem = (key) =>
+  LABEL_KEY.test(key)
+    ? null
+    : `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
+      'starting with a letter or digit, up to 63 characters';
+
 /**
  * The labels typed as key=value lines, checked as the server checks them.
  * Returns `{ labels, error }`; `error` is null when they can be saved.
+ *
+ * Labels are opaque, so each line is kept exactly as typed: the key is what
+ * comes before the first "=" and the value everything after it, spaces and
+ * case included. A key the server would refuse is refused here, not changed.
+ * Only lines holding nothing but spaces are skipped.
  */
 export const parseLabelsText = (text) => {
   const labels = [];
   const seen = new Set();
-  const lines = (text || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = (text || '').split(/\r?\n/).filter((line) => line.trim());
   let error = null;
   lines.some((line) => {
     const at = line.indexOf('=');
-    const key = (at >= 0 ? line.slice(0, at) : line).trim();
-    const value = at >= 0 ? line.slice(at + 1).trim() : '';
+    const key = at >= 0 ? line.slice(0, at) : line;
+    const value = at >= 0 ? line.slice(at + 1) : '';
     if (!LABEL_KEY.test(key)) {
-      error =
-        `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
-        'starting with a letter or digit, up to 63 characters';
+      error = labelKeyProblem(key);
     } else if (seen.has(key)) {
       error = `The label key ${key} is given more than once`;
     } else if (value.length > MAX_LABEL_VALUE_CHARS) {
@@ -117,13 +124,25 @@ export const parseLabelsText = (text) => {
   return { labels, error };
 };
 
-/** A meeting list label filter, "key=value" or "key" alone; null when blank. */
+/**
+ * A meeting list label filter, "key=value" or "key" alone; null when blank.
+ * Kept exactly as typed, as labels are matched exactly.
+ */
 export const parseLabelFilter = (text) => {
-  const trimmed = (text || '').trim();
-  if (!trimmed) return null;
-  const at = trimmed.indexOf('=');
-  if (at < 0) return { key: trimmed.toLowerCase(), value: null };
-  return { key: trimmed.slice(0, at).trim().toLowerCase(), value: trimmed.slice(at + 1).trim() };
+  if (!(text || '').trim()) return null;
+  const at = text.indexOf('=');
+  if (at < 0) return { key: text, value: null };
+  return { key: text.slice(0, at), value: text.slice(at + 1) };
+};
+
+/**
+ * Why a meeting list label filter can match no meeting, or null. A key that is
+ * not a label key (say "Project" or "project ") is told the same way the label
+ * editor tells it, since the filter is matched exactly.
+ */
+export const labelFilterProblem = (text) => {
+  const wanted = parseLabelFilter(text);
+  return wanted ? labelKeyProblem(wanted.key) : null;
 };
 
 /**

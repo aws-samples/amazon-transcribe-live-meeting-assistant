@@ -31,6 +31,23 @@ export interface TranscriptSegment {
   languageCode?: string;
 }
 
+/** A transcript line as it is stored on the meeting: its segment id, channel and speaker. */
+export interface StoredLine {
+  segmentId: string;
+  channel: string;
+  speaker: string;
+}
+
+/** The rows one Amazon Transcribe result is written as (prepareTranscriptSegments). */
+export interface PreparedTranscriptSegments {
+  /** The ADD_TRANSCRIPT_SEGMENT records, already on the meeting's timeline, without their tokens and times of sending. */
+  records: any[];
+  /** The highest EndTime among them; the time offset when there are none. */
+  maxEndTime: number;
+  /** Each record as the line it is stored as. */
+  lines: StoredLine[];
+}
+
 /** The record's LanguageCode field, or nothing when the language is not known. */
 const languageField = (code: string | undefined): { LanguageCode?: string } => (code ? { LanguageCode: code } : {});
 
@@ -446,49 +463,80 @@ class KinesisStreamManager {
   // so the caller can advance the cumulative reconnect offset. Returns
   // timeOffsetSeconds unchanged when nothing was written.
   async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
+    return this.sendPreparedTranscriptSegments(
+      this.prepareTranscriptSegments(speaker, transcriptResult, timeOffsetSeconds),
+    );
+  }
+
+  /**
+   * The rows one Amazon Transcribe result is written as, built now and sent by
+   * sendPreparedTranscriptSegments. Building them is not repeatable (it feeds
+   * the voice-label vote), so a caller that needs to know what will be written
+   * -- the consent flow, linking a spoken reply to its line -- prepares the
+   * result once and sends what it prepared.
+   */
+  prepareTranscriptSegments(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): PreparedTranscriptSegments {
     log.info("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
     // Every row of a result is in the result's language.
     const language = languageField(resultLanguageCode(transcriptResult));
     let maxEndTime = timeOffsetSeconds;
+    const records: any[] = [];
 
     for (const segment of Object.values(segments)) {
       const segEnd = (segment as any).EndTime;
       if (typeof segEnd === 'number' && segEnd > maxEndTime) {
         maxEndTime = segEnd;
       }
-      if (process.env.DEBUG) {
-        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
-      }
+      const record: any = {
+        EventType: 'ADD_TRANSCRIPT_SEGMENT',
+        CallId: this.callId,
+        Channel: REMOTE_CHANNEL,
+        SegmentId: (segment as any).SegmentId,
+        StartTime: (segment as any).StartTime !== null ? (segment as any).StartTime : 0,
+        EndTime: (segment as any).EndTime !== null ? (segment as any).EndTime : 0,
+        Transcript: (segment as any).Transcript,
+        IsPartial: KinesisStreamManager.isPartialResult(transcriptResult),
+        Sentiment: null,
+        TranscriptEvent: null,
+        Speaker: (segment as any).Speaker,
+        ...language,
+      };
+      records.push(this.onMeetingTimeline(record));
+    }
+    return {
+      records,
+      maxEndTime,
+      lines: records.map((record) => ({
+        segmentId: String(record.SegmentId),
+        channel: String(record.Channel),
+        speaker: String(record.Speaker ?? ''),
+      })),
+    };
+  }
 
+  /** Sends what prepareTranscriptSegments built; returns its highest EndTime, as sendTranscriptSegment does. */
+  async sendPreparedTranscriptSegments(prepared: PreparedTranscriptSegments): Promise<number> {
+    for (const record of prepared.records) {
+      if (process.env.DEBUG) {
+        log.info(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, record);
+      }
       try {
-        const record: any = {
-          EventType: 'ADD_TRANSCRIPT_SEGMENT',
-          CallId: this.callId,
-          Channel: REMOTE_CHANNEL,
-          SegmentId: (segment as any).SegmentId,
-          StartTime: (segment as any).StartTime !== null ? (segment as any).StartTime : 0,
-          EndTime: (segment as any).EndTime !== null ? (segment as any).EndTime : 0,
-          Transcript: (segment as any).Transcript,
-          IsPartial: KinesisStreamManager.isPartialResult(transcriptResult),
-          CreatedAt: new Date().toISOString(),
-          UpdatedAt: new Date().toISOString(),
-          Sentiment: null,
-          TranscriptEvent: null,
-          Speaker: (segment as any).Speaker,
-          ...language,
+        const now = new Date().toISOString();
+        await this.sendRecord({
+          ...record,
+          CreatedAt: now,
+          UpdatedAt: now,
           AccessToken: process.env.USER_ACCESS_TOKEN || '',
           IdToken: process.env.USER_ID_TOKEN || '',
           RefreshToken: process.env.USER_REFRESH_TOKEN || '',
-        };
-
-        await this.sendRecord(this.onMeetingTimeline(record));
+        });
         log.info(`Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.`);
       } catch (error) {
         log.error(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
       }
     }
-    return maxEndTime;
+    return prepared.maxEndTime;
   }
 
   /**
@@ -806,5 +854,11 @@ export const sendAsrTranscriptSegment = (segment: TranscriptSegment) =>
 export const sendChatSegment = (segment: TranscriptSegment) => kinesisStreamManager.sendChatSegment(segment);
 export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
   kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
+export const prepareTranscriptSegments = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
+  kinesisStreamManager.prepareTranscriptSegments(speaker, transcriptResult, timeOffsetSeconds);
+export const sendPreparedTranscriptSegments = (prepared: PreparedTranscriptSegments) =>
+  kinesisStreamManager.sendPreparedTranscriptSegments(prepared);
+/** A segment id as the meeting stores it (prefixed with the session from session 2 on). */
+export const meetingSegmentId = (segmentId: string) => kinesisStreamManager.meetingSegmentId(segmentId);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);
 export const sendCallVideoRecording = (url: string) => kinesisStreamManager.sendCallVideoRecording(url);

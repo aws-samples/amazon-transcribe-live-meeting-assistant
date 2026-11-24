@@ -35,6 +35,20 @@ Pin your new LMA extension to the browser tool bar - select the `extensions` ico
 
    <p align="center"><img src="../images/readme-pin-chrome-extension.png" alt="Pin the Chrome Extension" width="250"/></p>
 
+### Extension version
+
+Chrome shows the LMA version the extension was built from, such as `0.4.1` or `0.4.1.dev1`. Chrome accepts only one to four dot-separated integers in an extension's manifest `version`, so the build puts the LMA version in the manifest's `version_name`, which Chrome displays, and derives `version` from it as follows:
+
+| LMA version | Manifest `version` |
+|-------------|--------------------|
+| `X.Y.Z.devN` | `X.Y.Z.N` |
+| `X.Y.ZaN` | `X.Y.Z.(10000 + N)` |
+| `X.Y.ZbN` | `X.Y.Z.(20000 + N)` |
+| `X.Y.ZrcN` | `X.Y.Z.(30000 + N)` |
+| `X.Y.Z` (a release) | `X.Y.Z.65535` |
+
+Chrome compares the manifest `version` numerically, so a release sorts above every pre-release build of the same `X.Y.Z`, and every build sorts below any build of a later version. Other forms of the LMA version are rejected when the stack is published.
+
 ## How to use
 
 Once you have the extension installed, login with your LMA credentials.
@@ -51,6 +65,29 @@ Choose `Allow` on the popup asking you to share the browser tab.
    <p align="center"><img src="../images/readme-browser-extension-listening.png" alt="Browser Extension Listening" width="350"/></p>
 
 Choose `Open in LMA` to see your live transcript, select language, and to interact with the meeting assistant.
+
+### Continue an existing meeting
+
+To add to a meeting that already exists, even one shown as **Done**, select
+**Continue an existing meeting…** in the panel and paste the meeting's ID, or the
+link to its page in LMA, in place of the meeting topic. When you start
+listening, the extension asks LMA to reopen the meeting for one more capture
+session, then streams into it under the same meeting ID, on the same transcript
+timeline. While listening, the panel shows the meeting and its session number.
+
+Only the meeting's owner or an Admin can continue a meeting. LMA does not
+reopen a meeting that is still being captured, one whose transcript has been
+deleted, or a meeting ID it does not know; the panel shows LMA's reason, and
+does not start. The extension reopens the meeting only once the tab's capture
+has started, just before streaming. After a reopen, LMA waits up to 15 minutes
+for that session to start. If streaming fails after this point, choose **Start
+Listening** again: LMA answers with the same session, so the retry is not
+refused. A Virtual Participant rejoin, or another user continuing the meeting,
+is refused as still being captured until that session has started or the 15
+minutes have passed. A package from before this option has no
+**Continue an existing meeting…**, and one built without the address of LMA's
+API says it cannot continue meetings; download the extension again from LMA. See
+[Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting).
 
 ## How meeting speakers are named
 

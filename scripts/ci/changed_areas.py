@@ -87,6 +87,11 @@ AREAS: dict[str, str] = {
     "agent_instructions": "CLAUDE.md, AGENTS.md and .claude/ at any depth (instructions)",
     "docs_site": "the docs site's build: its package files, scripts and Astro config",
     "demo_recorder": "product demo recorder and its helpers",
+    "solution_profile": (
+        "the solution profile, its vendored contract and its check, and every file the "
+        "profile names as evidence"
+    ),
+    "solution_profile_check": "the solution profile's check and build (scripts/solution_profile)",
     "python_tooling": "Python generators the AI stack static tests run",
     "ai_stack_tests": "AI stack static tests (lma-ai-stack/test)",
     "ai_stack_inputs": "files elsewhere that the AI stack static tests scan wholesale",
@@ -202,6 +207,10 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     (".clinerules", "agent_instructions"),
     # The review harness, README included: it is what the AI review runs.
     ("scripts/pr_review/**", "pr_review"),
+    # The solution profile, its vendored contract (READMEs included) and its check.
+    # Before documentation, so a change to the profile is never a docs-only change.
+    ("solution-profile/**", "solution_profile"),
+    ("scripts/solution_profile/**", ("solution_profile", "solution_profile_check")),
     # --- documentation -------------------------------------------------------
     ("CHANGELOG.md", "docs"),
     ("CONTRIBUTING.md", "docs"),
@@ -376,13 +385,91 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # tests and the SDK's publish tests. (The demo recorder's session helper reads it
     # too; that step takes the whole `templates` area.)
     ("lma-main.yaml", ("asr", "lambdas", "sdk_cli")),
+    # The SDK's publish tests package the real browser extension stack and read the
+    # version tokens in these files.
+    ("lma-browser-extension-stack/public/manifest.json", "sdk_cli"),
+    ("lma-browser-extension-stack/package.json", "sdk_cli"),
+    ("lma-browser-extension-stack/template.yaml", "sdk_cli"),
     # The AI stack static tests scan every source file under utilities/ for
     # createVirtualParticipant selections (test_shared_with_access.py), and check the
     # anchors of every Markdown link into the parameters page in every *.md in the
     # repository (test_cloudformation_parameters_doc.py).
     ("utilities/**", "ai_stack_inputs"),
     ("**/*.md", "ai_stack_inputs"),
+    # The solution profile's cross-checks read the hosted MCP server's tool lists, the
+    # Virtual Participant platform table, the shipped configuration presets, the
+    # release Regions and the CHANGELOG (scripts/solution_profile/check.py,
+    # CROSS_CHECK_SOURCES). Every file the profile cites as evidence is added by
+    # evidence_paths() below.
+    (f"{FUNCTIONS}/mcp_analytics/index.py", "solution_profile"),
+    (f"{FUNCTIONS}/mcp_analytics/tool_definitions.py", "solution_profile"),
+    (f"{FUNCTIONS}/mcp_analytics/tools/platform_helper.py", "solution_profile"),
+    (f"{LAYERS}/configuration_layer/lma_config/presets/**", "solution_profile"),
+    ("aws-release.sh", "solution_profile"),
+    ("CHANGELOG.md", "solution_profile"),
+    ("VERSION", "solution_profile"),
 )
+
+#: The solution profile's files, whose ``evidence`` entries name repository paths.
+PROFILE_DIR = Path(__file__).resolve().parents[2] / "solution-profile"
+
+_EVIDENCE_FLOW = re.compile(r"^\s*(?:- )?evidence:\s*\[(.*)\]\s*$")
+_EVIDENCE_BLOCK = re.compile(r"^(\s*)(?:- )?evidence:\s*$")
+_BLOCK_ITEM = re.compile(r"^(\s*)- (\S+)\s*$")
+
+
+def read_evidence_paths(profile_dir: Path) -> frozenset[str] | None:
+    """Every repository path the profile cites as evidence, without its ``#anchor``.
+
+    A line reader for the two list forms the profile uses (``evidence: [a, b]`` and a
+    block list under ``evidence:``), because this script runs before any Python
+    package is installed and so cannot import PyYAML. ``test_changed_areas.py`` holds
+    it to a YAML parse of the real profile. ``None`` when the profile cannot be read,
+    which runs the profile's step for every change.
+    """
+    try:
+        files = sorted(profile_dir.glob("*.yaml"))
+        texts = [path.read_text(encoding="utf-8") for path in files]
+    except OSError:
+        return None
+    if not files:
+        return None
+    found: set[str] = set()
+    for text in texts:
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            flow = _EVIDENCE_FLOW.match(line)
+            if flow:
+                found.update(v.strip().strip("'\"") for v in flow.group(1).split(",") if v.strip())
+                continue
+            block = _EVIDENCE_BLOCK.match(line)
+            if not block:
+                continue
+            for item_line in lines[i + 1 :]:
+                item = _BLOCK_ITEM.match(item_line)
+                if not item or len(item.group(1)) < len(block.group(1)):
+                    break
+                found.add(item.group(2).strip("'\""))
+    return frozenset(
+        entry.split("#", 1)[0].rstrip("/") for entry in found if not entry.startswith("https://")
+    )
+
+
+_EVIDENCE_CACHE: dict[Path, frozenset[str] | None] = {}
+
+
+def evidence_paths() -> frozenset[str] | None:
+    """:func:`read_evidence_paths` of this checkout's profile, read once."""
+    if PROFILE_DIR not in _EVIDENCE_CACHE:
+        _EVIDENCE_CACHE[PROFILE_DIR] = read_evidence_paths(PROFILE_DIR)
+    return _EVIDENCE_CACHE[PROFILE_DIR]
+
+
+def is_evidence(path: str, evidence: frozenset[str] | None) -> bool:
+    """Whether ``path`` is, or is inside, a path the profile cites as evidence."""
+    if evidence is None:
+        return True
+    return path in evidence or any(path.startswith(f"{entry}/") for entry in evidence)
 
 
 @dataclass(frozen=True)
@@ -408,6 +495,7 @@ STEPS: dict[str, Step] = {
         "pr_review",
         "demo_recorder",
         "python_tooling",
+        "solution_profile_check",
     ),
     "sdk_cli": _step(
         "LMA SDK and CLI unit tests", "sdk_cli", "templates", "config_stacks", "test_fixtures"
@@ -459,6 +547,10 @@ STEPS: dict[str, Step] = {
     "demo_recorder": _step(
         "Demo recorder tests", "demo_recorder", "agent_instructions", "docs", "templates"
     ),
+    # Seconds. Runs for the profile and its check, for the files its cross-checks
+    # read, and for any file the profile cites as evidence (a deleted or renamed
+    # evidence file, or a changed heading an evidence anchor names, fails it).
+    "solution_profile": _step("Solution profile check and tests", "solution_profile"),
     "transcriber": _step("WebSocket transcriber tests and smoke test", "transcriber"),
     "browser_extension": _step(
         "Browser extension tests, build and browser smoke test", "browser_extension"
@@ -497,6 +589,8 @@ def areas_for(path: str) -> set[str]:
     for rule in EXTRA_RULES:
         if rule.matches(path):
             found.update(rule.areas)
+    if is_evidence(path, evidence_paths()):
+        found.add("solution_profile")
     return found
 
 

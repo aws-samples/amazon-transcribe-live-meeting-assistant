@@ -385,14 +385,16 @@ export class SessionLifecycle<W extends SessionSocket> {
             // of every meeting is still open when its stream ends, and its final
             // row exists only once the engine has been finished.
             await stopEngine();
-            // The END names the session the START was given, whatever the END
-            // frame itself carries: the session is the server's to decide.
-            await this.deps.writeCallEndEvent({
+            // The END, and the recording link written after it, name the
+            // session the START was given, whatever the END frame itself
+            // carries: the session is the server's to decide.
+            const checked: CallMetaData = {
                 ...callMetaData,
                 sessionNumber: session.callMetadata.sessionNumber,
                 sessionOffsetSeconds: session.callMetadata.sessionOffsetSeconds,
-            });
-            await this.deps.finishRecording(session, callMetaData);
+            };
+            await this.deps.writeCallEndEvent(checked);
+            await this.deps.finishRecording(session, checked);
         } finally {
             if (session.audioInputStream) {
                 session.audioInputStream.end();

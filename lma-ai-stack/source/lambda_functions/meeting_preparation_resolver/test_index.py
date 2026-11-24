@@ -290,6 +290,14 @@ def test_the_backend_names_who_it_acts_for(table):
     )
 
 
+def test_an_over_long_updated_by_is_refused_with_its_limit(table):
+    row = call("updateCallMeetingContext", BACKEND, MeetingContext="ctx", UpdatedBy="a" * 128)
+    assert row["MeetingContextUpdatedBy"] == "a" * 128
+    with pytest.raises(index.BadRequestError, match="UpdatedBy is longer than 128"):
+        call("updateCallMeetingContext", BACKEND, MeetingContext="other", UpdatedBy="a" * 129)
+    assert table.row["MeetingContext"] == "ctx"
+
+
 def test_an_over_long_context_is_refused_with_its_limit(table):
     with pytest.raises(index.BadRequestError, match="longer than 20000"):
         call("updateCallMeetingContext", user(OWNER), MeetingContext="x" * 20001)

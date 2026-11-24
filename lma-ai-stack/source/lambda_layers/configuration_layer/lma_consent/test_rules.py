@@ -400,3 +400,103 @@ def test_consent_outside_the_chat_is_listed_by_its_latest_reply() -> None:
     assert rules.consented_outside_chat(meeting) == ["Bo Chen", "Dee Ek"]
     assert rules.consented_outside_chat(None) == []
     assert rules.consented_outside_chat(record("notify")) == []
+
+
+# ── linking a reply to the transcript speaker who gave it ──────────────────
+
+
+def line(segment_id="s2-r1-g0-s4", channel="REMOTE", speaker="Bo Chen (spk_0)"):
+    return {"SegmentId": segment_id, "Channel": channel, "Speaker": speaker}
+
+
+def test_a_spoken_reply_is_linked_to_its_own_transcript_line() -> None:
+    link, why = rules.speaker_link(line(), "bo  chen", "voice", NOW, "LMA")
+    assert why == ""
+    assert link == {
+        "Basis": "same_segment",
+        "SegmentId": "s2-r1-g0-s4",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_0)",
+        "LinkedAt": NOW,
+        "LinkedBy": "LMA",
+    }
+    # A line without a voice label, on the channel's older stored name.
+    link, _ = rules.speaker_link(
+        line(channel="CALLER", speaker="Bo Chen"), "Bo Chen", "voice", NOW, "LMA"
+    )
+    assert (link["Channel"], link["Speaker"]) == ("REMOTE", "Bo Chen")
+
+
+@pytest.mark.parametrize(
+    "value, name, source",
+    [
+        (None, "Bo Chen", "voice"),
+        ("s1", "Bo Chen", "voice"),
+        # Only speech is a line of the transcript a reply can be.
+        (line(), "Bo Chen", "chat"),
+        (line(), "Bo Chen", "ui"),
+        (line(channel="MEETING_CHAT"), "Bo Chen", "voice"),
+        (line(channel="AGENT_ASSISTANT"), "Bo Chen", "voice"),
+        # The line's speaker is somebody else, or nobody in particular.
+        (line(), "Ana Silva", "voice"),
+        (line(speaker="Unknown (spk_0)"), "Unidentified participant", "voice"),
+        (line(speaker="Bo Chen (spk_0) and Ana"), "Bo Chen", "voice"),
+        (line(segment_id=""), "Bo Chen", "voice"),
+        (line(segment_id="x" * 129), "Bo Chen", "voice"),
+        (line(speaker="B" * 121), "B" * 100, "voice"),
+        (line(), "", "voice"),
+    ],
+)
+def test_a_link_that_does_not_name_the_reply_s_own_speech_is_not_stored(
+    value, name, source
+) -> None:
+    link, why = rules.speaker_link(value, name, source, NOW, "LMA")
+    assert link is None and why
+
+
+def linked(name, decision, speaker, segment_id="s1"):
+    event = reply(name, decision, source="voice")
+    event["SpeakerLink"] = {
+        "Basis": "same_segment",
+        "SegmentId": segment_id,
+        "Channel": "REMOTE",
+        "Speaker": speaker,
+        "LinkedAt": NOW,
+        "LinkedBy": "LMA",
+    }
+    return event
+
+
+def test_compaction_keeps_each_linked_speaker_s_latest_reply() -> None:
+    events = [linked("Bo", "consent", "Bo (spk_0)")]
+    events += [reply("Bo", "consent")] + [reply(f"p{n}", "consent") for n in range(20)]
+    kept = rules.compact_events(events, limit=5)
+    # Bo's latest reply is the chat one, but the linked one is still the speaker's.
+    assert events[0] in kept and events[1] in kept
+
+
+def test_a_record_at_every_cap_with_every_reply_linked_is_brought_within_the_budget() -> None:
+    full = _full_record()
+    for index, event in enumerate(full["Events"]):
+        name = event["ParticipantName"]
+        event.update(linked(name, "consent", f"{name} (spk_{index})", segment_id="s" * 128))
+    before = rules.evaluate(full)
+    rules.fit_to_budget(full)
+    assert rules.record_size(full) <= rules.MAX_RECORD_BYTES
+    # Links are given up last, oldest first, and never change the status.
+    assert rules.evaluate(full) == before
+    kept = [e for e in full["Events"] if e.get("SpeakerLink")]
+    assert kept and full["Events"][-1].get("SpeakerLink", {}).get("Basis") == "same_segment"
+
+
+def test_a_record_with_room_keeps_each_latest_reply_s_link() -> None:
+    meeting = record(
+        "opt_in",
+        "each_participant",
+        NoticeText="n" * 2000,
+        Events=[linked(f"p{n}", "consent", f"p{n} (spk_0)") for n in range(40)],
+    )
+    for event in meeting["Events"]:
+        event["Text"] = "w" * 500
+    rules.fit_to_budget(meeting, limit=rules.record_size(meeting) - 1000)
+    assert all(e["SpeakerLink"]["Basis"] == "same_segment" for e in meeting["Events"])

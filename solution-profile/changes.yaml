@@ -1,0 +1,163 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# What each release changed, newest first (Solution Profile contract v1,
+# changesFile). Written from CHANGELOG.md at each release; the latest ten releases
+# in CHANGELOG.md must each have an entry, which scripts/solution_profile/check.py
+# checks. A release build also needs an entry for the version being released
+# (.claude/skills/prepare-changelog.md, "Review the solution profile").
+releases:
+  - version: 0.4.0
+    date: 2026-11-15
+    summary: >-
+      A unified configuration store with one Configuration page, named profiles and
+      organisation presets for consent, retention and privacy; meeting consent with a
+      consent record on each meeting; Google Meet for the Virtual Participant; meeting
+      chat in the transcript; key frames of the shared screen; agendas; a Speakers
+      panel and voice enrollment (Beta); a cost estimate per meeting; summary
+      regeneration and editing; deleting the transcript after the summary; an AI
+      troubleshooting agent; operational alarms and a dashboard; a model inference
+      geography setting; and Claude 5.5 models as the defaults. The call analytics
+      features inherited from Live Call Analytics were removed.
+    action_required:
+      - text: >-
+          Read the v0.4.0 upgrade notes before updating. Stack parameters that were
+          defaults of runtime settings are removed without their values being carried
+          across, and some Amazon Bedrock models need access enabled first.
+        affects: [capability:configuration-profiles, capability:model-choice]
+      - text: >-
+          Saving runtime configuration is an Admin operation; add anyone who changes
+          those settings to the Admin group, and use the Configuration page rather than
+          editing the configuration tables directly.
+        affects: [capability:configuration-profiles]
+      - text: >-
+          Integrations that read the call analytics fields, Contact Lens channels or
+          the CALLER and AGENT channel names must move to REMOTE and LOCAL and stop
+          using the removed fields.
+        affects: [extension:transcript-segment-hook]
+      - text: >-
+          Grant kms:Decrypt on the stack's key to anything that reads the recordings
+          bucket from outside the stack, rotate each configured third-party
+          credential once after updating, and copy any noncurrent recordings-bucket
+          object versions you need before updating.
+        affects: [capability:encryption-and-residency, capability:retention-and-transcript-deletion]
+      - text: >-
+          Chat commands must be addressed to LMA (LMA pause, LMA start), and requests
+          made in the meeting use the current meeting only by default; set
+          In-meeting requests to Unrestricted to keep the previous behaviour.
+        affects: [capability:vp-meeting-chat, capability:in-meeting-requests]
+      - text: >-
+          A LAMBDA summary function that validates its input must accept the
+          RefreshConfiguration field.
+        affects: [extension:end-of-call-summary-lambda]
+    affects:
+      - capability:configuration-profiles
+      - capability:configuration-presets
+      - capability:meeting-consent
+      - capability:vp-google-meet
+      - capability:video-keyframes-and-slides
+      - capability:voice-enrollment
+      - capability:meeting-cost-estimate
+      - capability:troubleshooting-agent
+      - capability:monitoring-and-alarms
+    evidence: [CHANGELOG.md, docs/stack-updates-and-upgrades.md#v040]
+
+  - version: 0.3.10
+    date: 2026-10-09
+    summary: >-
+      Amazon Nova Sonic can be reached in another Region from the rest of the stack;
+      end-to-end diarization, two-pass and seven more model bundles for the on-demand
+      speech engine, with a new default bundle; and summaries generated from the
+      transcript as spoken.
+    action_required:
+      - text: >-
+          A deployment updating from 0.3.8 or earlier that had moved streaming meetings
+          onto the on-demand engine selects it again, because the saved setting was
+          renamed in 0.3.9.
+        affects: [capability:microvm-asr]
+    affects: [capability:voice-assistant, capability:microvm-asr, capability:summaries]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.9
+    date: 2026-09-19
+    summary: >-
+      Amazon Bedrock Guardrails for the meeting assistant, the on-demand speech engine
+      for Virtual Participant meetings, scaling controls for the transcriber service,
+      automatic closing of meetings whose client stops sending activity, short-lived
+      per-participant tokens for the Virtual Participant live view, and a
+      permissions-boundary parameter on the optional CloudFormation service role.
+    action_required:
+      - text: >-
+          Deployments that use the delegated CloudFormation service role must update
+          that role before updating LMA.
+        affects: [prerequisite:deploy-permissions]
+    affects: [capability:bedrock-guardrails, capability:microvm-asr, capability:virtual-participant]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.8
+    date: 2026-09-02
+    summary: >-
+      Fixes for the Virtual Participant on Lambda MicroVMs (scheduled launches and
+      ending a meeting), Teams joins under the default display name, the voice
+      assistant in Teams meetings and after session refreshes, and Zoom sign-in on
+      slow pages.
+    affects: [capability:virtual-participant, capability:voice-assistant]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.7
+    date: 2026-08-17
+    summary: >-
+      AWS Lambda MicroVMs became the default Virtual Participant platform,
+      WebSocket streaming sessions gained per-channel speaker identification, and the
+      published Regions became us-east-1, us-west-2, ap-northeast-1 and eu-west-1,
+      with ap-southeast-2 no longer published; existing deployments there were
+      unaffected.
+    affects: [capability:virtual-participant, capability:speaker-attribution, deployment:cloudformation]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.6
+    date: 2026-08-06
+    summary: >-
+      The Desktop Capture App for macOS and Windows as a new meeting source, and the
+      Microsoft Teams join through Azure Communication Services.
+    action_required:
+      - text: Building and developing LMA from source requires Node 22 LTS.
+        affects: [deployment:build-from-source]
+    affects: [capability:desktop-capture-app, capability:vp-microsoft-teams]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.5
+    date: 2026-06-16
+    summary: >-
+      The Zoom Meeting SDK join method and meeting video recording for the Virtual
+      Participant, URL-based joins and per-platform stored browser profiles.
+    affects: [capability:vp-zoom, capability:video-keyframes-and-slides]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.4
+    date: 2026-06-03
+    summary: >-
+      Per-user Zoom sign-in for the Virtual Participant with an AI-driven sign-in
+      loop, an AI page-element fallback for every platform, persistent per-user
+      browser profiles, browser notifications for manual action, capacity-provider
+      scaling and finer startup statuses.
+    affects: [capability:vp-zoom, capability:virtual-participant]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.3
+    date: 2026-05-15
+    summary: >-
+      Translator mode for the Nova Sonic voice assistant, a custom date range for the
+      meeting list, the `lma vp` CLI commands with the SDK's Virtual Participant and
+      AppSync namespaces, and the load simulator as a CLI plugin.
+    affects: [capability:voice-assistant, capability:lma-cli, capability:lma-sdk]
+    evidence: [CHANGELOG.md]
+
+  - version: 0.3.2
+    date: 2026-04-29
+    summary: >-
+      Upload Audio for recorded meetings, admin user management in the web app, an
+      optional WAF for the MCP API, deleting Virtual Participants from the web app,
+      and a local development workflow for the Virtual Participant.
+    affects: [capability:upload-audio, capability:user-management-and-sign-in, capability:mcp-server-api-key]
+    evidence: [CHANGELOG.md]

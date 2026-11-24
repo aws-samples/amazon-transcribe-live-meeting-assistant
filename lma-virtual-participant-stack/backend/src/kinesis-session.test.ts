@@ -124,6 +124,33 @@ describe('a rejoined VP', () => {
         assert.ok(end < 100, 'the reconnect offset the caller keeps is on the session clock');
     });
 
+    it('prepares a result as the lines it is stored as, and sends exactly those', async () => {
+        kinesisStreamManager.useSession(2, 40);
+        const result = {
+            ResultId: 'result-7',
+            IsPartial: false,
+            StartTime: 2,
+            EndTime: 3,
+            Alternatives: [
+                {
+                    Transcript: 'LMA, I consent.',
+                    Items: [{ Type: 'pronunciation', Content: 'consent', StartTime: 2, EndTime: 3 }],
+                },
+            ],
+        };
+        const prepared = kinesisStreamManager.prepareTranscriptSegments('Bo Chen', result);
+        assert.equal(sent.length, 0, 'nothing is sent while preparing');
+        await kinesisStreamManager.sendPreparedTranscriptSegments(prepared);
+        // What the consent flow is told a reply was written as is what the meeting stores.
+        assert.deepEqual(
+            prepared.lines,
+            sent.map((row) => ({ segmentId: row.SegmentId, channel: row.Channel, speaker: row.Speaker })),
+        );
+        assert.match(prepared.lines[0].segmentId, /^s2-result-7/);
+        assert.equal(prepared.lines[0].speaker, 'Bo Chen');
+        assert.ok(sent.every((row) => row.CreatedAt && row.EventType === 'ADD_TRANSCRIPT_SEGMENT'));
+    });
+
     it('keeps its session once START is sent', async () => {
         kinesisStreamManager.useSession(2, 50);
         manager.startSent = true;

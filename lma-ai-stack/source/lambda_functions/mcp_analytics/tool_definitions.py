@@ -11,9 +11,15 @@ A tool whose annotations carry ``readOnlyHint: true`` changes nothing and is
 answered for any key. Every other tool here changes something and is answered
 only for a key with the read-write scope (index.scope_allows); a key without it
 is not offered them in tools/list either. ``destructiveHint`` marks the tools
-whose change cannot be taken back or takes something away from people, and
-``idempotentHint`` the ones that change nothing more when called again with
-the same arguments.
+whose change cannot be taken back or takes something away from people. That
+includes the tools that replace one of a meeting's preparation settings as a
+whole and clear it when sent an empty one: update_meeting_agenda (the agenda),
+set_meeting_context, set_meeting_checklist (the whole checklist),
+update_meeting_metadata (which replaces the labels, and sets the audience,
+summary profile and live guidance it is given) and update_scheduled_meeting (a scheduled Virtual
+Participant's settings). A tool that changes one part, such
+as update_checklist_item, is not destructive. ``idempotentHint`` marks the ones
+that change nothing more when called again with the same arguments.
 
 Each value an argument accepts is named in its description too, as the
 original tools' descriptions do for the gateway's schema format, which has no
@@ -253,7 +259,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             "properties": {"meetingId": MEETING_ID, "agenda": AGENDA},
             "required": ["meetingId", "agenda"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "get_meeting_context",
@@ -473,11 +479,18 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "get_meeting_consent",
         "description": (
-            "Get a meeting's consent record: its mode (off, notify or opt-in), how consent "
-            "is given in an opt-in meeting (each_participant or owner_attests), when the "
-            "notice was posted, the owner's attestation, and one row per participant with "
-            "their latest reply (consented, objected or no_reply), when and how it was given. "
-            "Says whether evidence exists; the evidence images are not returned."
+            "Get a meeting's consent record in LMA's own values: mode (off, notify or "
+            "opt_in), rule for an opt-in meeting (each_participant or owner_attests, else "
+            "null), status (pending, granted, objected or not_required), captureAllowed, "
+            "the notices posted (channel, postedAt), the owner's attestation, and one entry "
+            "per consent event (participantName, decision consent or objection, source "
+            "chat, voice, ui or attestation, at, speakerId, speakerLinkBasis and "
+            "speakerLinkedAt). A reply said aloud while the meeting was transcribed is "
+            "linked to the transcript speaker who said it (speakerLinkBasis same_segment), "
+            "and speakerId is then that speaker's id in get_meeting_export's participants "
+            "while the transcript holds the line; otherwise speakerId is null. A name is "
+            "never matched to a speaker. hasEvidence says whether evidence exists; the "
+            "evidence images are not returned."
         ),
         "inputSchema": {
             "type": "object",
@@ -514,7 +527,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
             },
             "required": ["virtualParticipantId"],
         },
-        "annotations": WRITE_IDEMPOTENT,
+        "annotations": DESTRUCTIVE_IDEMPOTENT,
     },
     {
         "name": "end_meeting",

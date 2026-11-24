@@ -259,6 +259,9 @@ export const writeCallRecordingEvent = async (
         EventType: 'ADD_S3_RECORDING_URL',
         CallId: callMetaData.callId,
         RecordingUrl: recordingUrl,
+        // The session the recording belongs to: the link is written after the
+        // session's END, when the meeting may already be in a later session.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
@@ -275,6 +278,9 @@ export const writeCallVideoRecordingEvent = async (
         EventType: 'ADD_S3_VIDEO_RECORDING_URL',
         CallId: callMetaData.callId,
         VideoRecordingUrl: videoRecordingUrl,
+        // The session the recording belongs to, as the Virtual Participant
+        // names it; the call event processor files the link under it.
+        ...sessionEventFields(callMetaData),
         AccessToken: callMetaData.accessToken,
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,

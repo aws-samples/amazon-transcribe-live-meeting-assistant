@@ -712,3 +712,24 @@ test('the END names the capture session the START was given, whatever the END fr
     assert.equal(written[0]?.sessionOffsetSeconds, 1807);
     assert.equal(written[0]?.callEvent, 'END');
 });
+
+test('the recording is finished with the session the START was given, not the END frame\'s', async () => {
+    const finished: CallMetaData[] = [];
+    const { sessions } = lifecycle({
+        finishRecording: async (_session, meta) => {
+            finished.push(meta);
+        },
+    });
+    const ws = new FakeSocket('only');
+    const meeting = session();
+    meeting.callMetadata.sessionNumber = 3;
+    meeting.callMetadata.sessionOffsetSeconds = 1807;
+    sessions.register(ws, meeting);
+
+    const endFrame = { ...meeting.callMetadata, callEvent: 'END', sessionNumber: 9, sessionOffsetSeconds: 0 };
+    await sessions.end(ws, meeting, endFrame as CallMetaData);
+
+    assert.equal(finished.length, 1);
+    assert.equal(finished[0]?.sessionNumber, 3);
+    assert.equal(finished[0]?.sessionOffsetSeconds, 1807);
+});

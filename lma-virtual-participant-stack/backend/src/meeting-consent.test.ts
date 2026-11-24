@@ -34,6 +34,8 @@ import {
     grantEvidenceNote,
     planConsent,
     repostLeadIn,
+    speakerLinkFor,
+    UNKNOWN_SENDER,
 } from './meeting-consent.js';
 import { normalizeParticipantName, renderNotice } from './consent-matcher.js';
 import { noteParticipantSeen, UNIDENTIFIED_PARTICIPANT } from './consent-roster.js';
@@ -1597,6 +1599,77 @@ test('a spoken consent from a named speaker is recorded with source voice', asyn
     assert.equal(event.Source, 'voice');
     assert.equal(h.capture.on, true, 'the only participant present consented aloud');
     h.flow.stop();
+});
+
+// ─── Linking a spoken reply to the transcript speaker who gave it ──────────
+
+const BO_LINE = { segmentId: 's2-vp-REMOTE-r1-g0-s4', channel: 'REMOTE', speaker: 'Bo Chen (spk_0)' };
+
+test('a spoken reply is sent with the transcript line it was read from', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    assert.equal(h.flow.handleSpeech('Bo Chen', 'LMA, I object', BO_LINE), 'objection');
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.Source, 'voice');
+    assert.deepEqual(event.SpeakerLink, { SegmentId: BO_LINE.segmentId, Channel: 'REMOTE', Speaker: 'Bo Chen (spk_0)' });
+    h.flow.stop();
+});
+
+test('a spoken consent is linked to a line without a voice label, compared as names are', async () => {
+    const h = await harness({ deployment: OPT_IN_EACH });
+    h.flow.noteAttendeeCount(2);
+    h.flow.handleSpeech('bo  chen', 'LMA, I consent.', { ...BO_LINE, speaker: 'Bo Chen' });
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.SpeakerLink?.Speaker, 'Bo Chen');
+    h.flow.stop();
+});
+
+test('a reply is not linked to a line named after somebody else, or to no line', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    // The reply was attributed to Bo, its row to Ana: neither is taken as the other.
+    h.flow.handleSpeech('Bo Chen', 'LMA, I object', { ...BO_LINE, speaker: 'Ana Silva (spk_1)' });
+    await h.settle();
+    assert.equal(h.api.events[h.api.events.length - 1].SpeakerLink, undefined);
+    // An objection nobody can be named for has no speaker to link.
+    const unnamed = await harness({ deployment: { mode: 'notify' } });
+    unnamed.flow.handleSpeech(null, 'LMA, I object', { ...BO_LINE, speaker: 'Unknown (spk_0)' });
+    await unnamed.settle();
+    const event = unnamed.api.events[unnamed.api.events.length - 1];
+    assert.equal(event.ParticipantName, UNKNOWN_SENDER);
+    assert.equal(event.SpeakerLink, undefined);
+    // What the consent listener hears while consent is awaited is no line at all.
+    const listening = await harness({ deployment: OPT_IN_EACH });
+    listening.flow.noteAttendeeCount(2);
+    listening.flow.handleSpeech('Bo Chen', 'LMA, I consent.');
+    await listening.settle();
+    assert.equal(listening.api.events[listening.api.events.length - 1].SpeakerLink, undefined);
+    listening.flow.stop();
+    h.flow.stop();
+    unnamed.flow.stop();
+});
+
+test('a chat reply is never linked to a transcript speaker', async () => {
+    const h = await harness({ deployment: { mode: 'notify' } });
+    await h.flow.handleChat('Bo Chen', 'stop recording');
+    await h.settle();
+    const event = h.api.events[h.api.events.length - 1];
+    assert.equal(event.Source, 'chat');
+    assert.equal(event.SpeakerLink, undefined);
+    h.flow.stop();
+});
+
+test('speakerLinkFor keeps the line as stored and refuses anything else', () => {
+    assert.deepEqual(speakerLinkFor(BO_LINE, 'bo chen'), {
+        SegmentId: BO_LINE.segmentId,
+        Channel: 'REMOTE',
+        Speaker: 'Bo Chen (spk_0)',
+    });
+    assert.equal(speakerLinkFor(undefined, 'bo chen'), undefined);
+    assert.equal(speakerLinkFor({ ...BO_LINE, segmentId: '' }, 'bo chen'), undefined);
+    assert.equal(speakerLinkFor({ ...BO_LINE, speaker: ' ' }, 'bo chen'), undefined);
+    assert.equal(speakerLinkFor({ ...BO_LINE, speaker: 'Bo Chen (spk_0) and Ana' }, 'bo chen'), undefined);
+    assert.equal(speakerLinkFor(BO_LINE, ''), undefined);
 });
 
 test('a named speaker counts as present, so the each-participant rule can be met by speaking', async () => {
