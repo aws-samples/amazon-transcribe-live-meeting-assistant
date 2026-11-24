@@ -665,6 +665,132 @@ def test_after_the_transcript_is_deleted_the_link_is_kept_without_a_speaker(fake
     assert (event["speakerId"], event["speakerLinkBasis"]) == (None, "same_segment")
 
 
+# ── a chat consent linked by the platform's participant id ──────────────────
+
+BO_ID = "8:acs:0000-bo"
+
+
+def with_id(row, platform_id):
+    return {**row, "PlatformParticipantId": s(platform_id)}
+
+
+def typed_chat(name, decision, platform_id=BO_ID, speaker=BO):
+    event = {"ParticipantName": name, "Decision": decision, "Source": "chat"}
+    if platform_id is not None:
+        event["SpeakerLink"] = {
+            "Basis": "platform_identity",
+            "PlatformParticipantId": platform_id,
+            "Channel": "REMOTE",
+            "Speaker": speaker,
+            "LinkedAt": LINKED_AT,
+            "LinkedBy": "LMA",
+        }
+    return event
+
+
+def platform_export(fakes, events, rows=None, identities=None, **meeting):
+    parts = full_partitions()
+    parts[f"trs#{CALL}"] += rows or [
+        with_id(segment("v1", "REMOTE", BO, "Hello from Bo.", 16.0), BO_ID),
+        with_id(segment("v3", "REMOTE", BO, "More from Bo.", 20.0), BO_ID),
+        segment("v2", "REMOTE", "Bo Chen (spk_4)", "Second voice.", 18.0),
+    ]
+    consent = typed({"Mode": "notify", "Status": "granted", "Events": events})
+    row = full_meeting(Consent=consent, **meeting)
+    if identities:
+        row["SpeakerIdentities"] = s(json.dumps({**IDENTITIES, **identities}))
+    document = export_of(fakes, meeting=row, parts=parts)
+    valid(document)
+    return document
+
+
+def test_a_chat_consent_is_given_as_the_speaker_with_the_sender_s_platform_id(fakes) -> None:
+    document = platform_export(fakes, [typed_chat("Bo (guest)", "consent")])
+    people = consent_of(document)
+    assert people["remote-spk_3"] == "granted"
+    assert {v for k, v in people.items() if k != "remote-spk_3"} == {"unknown"}
+    (event,) = document["consent"]["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"], event["speakerLinkedAt"]) == (
+        "remote-spk_3",
+        "platform_identity",
+        LINKED_AT,
+    )
+    # The platform's id is never exported, only LMA's speaker id.
+    assert BO_ID not in json.dumps(document)
+
+
+@pytest.mark.parametrize(
+    "event, rows",
+    [
+        # No line carries the sender's id.
+        (typed_chat("Bo Chen", "consent", platform_id="8:acs:somebody-else"), None),
+        # The speaker's lines carry the id, but under another stored speaker.
+        (typed_chat("Bo Chen", "consent", speaker="Bo Chen (spk_9)"), None),
+        # One voice label over two people: its lines carry another id too.
+        (
+            typed_chat("Bo Chen", "consent"),
+            [
+                with_id(segment("v1", "REMOTE", BO, "Hello.", 16.0), BO_ID),
+                with_id(segment("v3", "REMOTE", BO, "Hi.", 20.0), "8:acs:0000-ana"),
+            ],
+        ),
+    ],
+)
+def test_a_platform_link_the_transcript_does_not_confirm_names_no_speaker(
+    fakes, event, rows
+) -> None:
+    document = platform_export(fakes, [event], rows=rows)
+    (out,) = document["consent"]["events"]
+    assert (out["speakerId"], out["speakerLinkBasis"]) == (None, "platform_identity")
+    assert set(consent_of(document).values()) == {"unknown"}
+
+
+def test_a_line_override_leaves_a_platform_link_unconfirmed(fakes) -> None:
+    document = platform_export(
+        fakes,
+        [typed_chat("Bo Chen", "consent")],
+        identities={"segmentOverrides": {"v3": "Ana Silva"}},
+    )
+    assert document["consent"]["events"][0]["speakerId"] is None
+
+
+def test_a_platform_link_follows_the_rules_of_a_spoken_one(fakes) -> None:
+    renamed = platform_export(
+        fakes,
+        [typed_chat("Bo Chen", "consent")],
+        identities={
+            "identities": {
+                f"REMOTE#{BO}": {"name": "Robert Chen", "status": "confirmed", "source": "manual"}
+            }
+        },
+    )
+    bo = next(p for p in renamed["participants"] if p["speakerId"] == "remote-spk_3")
+    assert (bo["name"], bo["consent"]) == ("Robert Chen", "granted")
+    merged = platform_export(
+        fakes,
+        [typed_chat("Bo Chen", "objection")],
+        identities={"merges": {"REMOTE#Bo Chen (spk_4)": f"REMOTE#{BO}"}},
+    )
+    assert consent_of(merged)["remote-spk_3"] == "objected"
+    assert consent_of(merged)["remote-spk_4"] == "unknown"
+    later = platform_export(
+        fakes, [typed_chat("Bo Chen", "consent"), typed_chat("bo chen", "objection", None)]
+    )
+    assert consent_of(later)["remote-spk_3"] == "unknown"
+
+
+def test_after_the_transcript_is_deleted_a_platform_link_keeps_only_its_basis(fakes) -> None:
+    event = typed_chat("Bo Chen", "consent")
+    del event["SpeakerLink"]["PlatformParticipantId"]
+    document = platform_export(fakes, [event], TranscriptDeletedAt=s("2026-11-04T00:00:00Z"))
+    (out,) = document["consent"]["events"]
+    assert (out["speakerId"], out["speakerLinkBasis"], out["speakerLinkedAt"]) == (
+        None,
+        "platform_identity",
+        LINKED_AT,
+    )
+
+
 def test_participants_are_named_only_from_a_name_given_or_confirmed(fakes) -> None:
     people = {p["speakerId"]: p for p in export_of(fakes)["participants"]}
     assert people["remote-spk_0"]["name"] == "Priya Shah"

@@ -217,12 +217,16 @@ tool, which is built by the same code:
   `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt`.
   `speakerLinkBasis` says how the event was linked to the speaker who gave it,
   and `speakerLinkedAt` when; both are null for an event that was never linked.
-  The one basis is `same_segment`: the reply is that speaker's own line of the
-  transcript. `speakerId` is the linked speaker's id in
+  The basis is `same_segment`, the reply is that speaker's own line of the
+  transcript, or `platform_identity`, a chat reply whose sender the meeting
+  platform gave the same participant id as that speaker's lines (Teams through
+  Azure Communication Services and the Zoom Meeting SDK; the id itself is not
+  exported). `speakerId` is the linked speaker's id in
   [`participants`](#participants), and is null when the event was never
-  linked, or when the transcript no longer holds the linked line under that
-  speaker: the line expired or was deleted, or somebody named that one line as
-  another person's on the meeting page. After the transcript was deleted the
+  linked, or when the transcript no longer confirms the link under that
+  speaker: the lines expired or were deleted, or somebody named one of them as
+  another person's on the meeting page. See
+  [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply). After the transcript was deleted the
   link is still given, with a null `speakerId`. LMA always writes
   `speakerLinkBasis` and `speakerLinkedAt`, null when there is no link;
 - `hasEvidence` says whether evidence images exist.

@@ -474,6 +474,22 @@ def test_a_segment_with_no_identified_language_carries_no_language_field(value):
     assert "LanguageCode" not in normalize_one(message)
 
 
+# ── the platform participant id ─────────────────────────────────────────────
+
+
+def test_a_virtual_participant_segment_keeps_its_platform_participant_id():
+    segment = normalize_one({**CUSTOM_BASE, "PlatformParticipantId": " 8:acs:0000-bo "})
+    assert segment["PlatformParticipantId"] == "8:acs:0000-bo"
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 16778240, "x" * 257])
+def test_a_segment_with_no_usable_platform_id_carries_no_such_field(value):
+    message = dict(CUSTOM_BASE)
+    if value is not None:
+        message["PlatformParticipantId"] = value
+    assert "PlatformParticipantId" not in normalize_one(message)
+
+
 def test_transcribe_streaming_event_keeps_the_identified_language():
     segment = normalize_one(
         {

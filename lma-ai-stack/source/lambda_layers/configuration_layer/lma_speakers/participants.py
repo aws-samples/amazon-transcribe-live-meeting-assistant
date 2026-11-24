@@ -49,6 +49,9 @@ NAME_SOURCES = ("enrolled", "manual", "transcript", "platform", "none")
 TRANSCRIPT_BASES = ("self-introduction", "addressed-by-name")
 
 VOICE_ID = re.compile(r"^spk_\d+$")
+#: The SpeakerLink basis of a chat reply linked by its sender's platform id
+#: (lma_consent.SPEAKER_LINK_PLATFORM_IDENTITY).
+PLATFORM_IDENTITY = "platform_identity"
 
 
 def segment_kind(row: Mapping[str, Any]) -> str:
@@ -95,6 +98,8 @@ class Speakers:
         self.order: List[Dict[str, Any]] = []
         self.used: Set[str] = set()
         self.rows_by_id: Dict[str, Mapping[str, Any]] = {}
+        # Each voice's final rows of speech, by channel and speaker as stored.
+        self.rows_by_key: Dict[Tuple[str, str], List[Mapping[str, Any]]] = {}
         self._numbers: Dict[str, int] = {}
         # Every row is given its id now, in time order, so the ids are the same
         # whichever rows a reader goes on to ask about.
@@ -102,6 +107,8 @@ class Speakers:
             if segment_kind(row) == "assistant":
                 continue
             self._entry(row)
+            if segment_kind(row) == "speech":
+                self.rows_by_key.setdefault(self._key(row), []).append(row)
             segment_id = row.get("SegmentId")
             if segment_id is not None:
                 self.rows_by_id.setdefault(str(segment_id), row)
@@ -187,14 +194,18 @@ class Speakers:
     def linked_id(self, link: Any) -> Optional[str]:
         """The id of the speaker a consent event's ``SpeakerLink`` names, when the transcript confirms it.
 
-        Confirmed only when the transcript still holds the linked segment as a
-        final line of speech, on the linked channel, under exactly the linked
-        speaker as stored, and nobody has named that one line as somebody
-        else's on the meeting page. The comparison is of stored values, never of
-        names. A linked speaker is listed as a participant.
+        A ``same_segment`` link is confirmed only when the transcript still
+        holds the linked segment as a final line of speech, on the linked
+        channel, under exactly the linked speaker as stored, and nobody has
+        named that one line as somebody else's on the meeting page. A
+        ``platform_identity`` link is confirmed by :meth:`_platform_linked_id`.
+        The comparison is of stored values, never of names. A linked speaker is
+        listed as a participant.
         """
         if not isinstance(link, Mapping):
             return None
+        if link.get("Basis") == PLATFORM_IDENTITY:
+            return self._platform_linked_id(link)
         segment_id = str(link.get("SegmentId") or "")
         row = self.rows_by_id.get(segment_id) if segment_id else None
         if row is None or segment_kind(row) != "speech":
@@ -209,6 +220,38 @@ class Speakers:
         if isinstance(override, str) and override:
             return None
         return self.id_of(row)
+
+    def _platform_linked_id(self, link: Mapping[str, Any]) -> Optional[str]:
+        """The speaker a ``platform_identity`` link names, when the transcript confirms it.
+
+        Confirmed when the transcript holds final lines of speech on the linked
+        channel, under exactly the linked speaker as stored, that carry the
+        linked ``PlatformParticipantId``; when none of that speaker's lines
+        carries another participant's id (one voice label over two people is
+        nobody's); and when nobody has named one of those lines as somebody
+        else's on the meeting page. Stored values are compared, never names.
+        """
+        platform_id = str(link.get("PlatformParticipantId") or "")
+        if not platform_id:
+            return None
+        channel = canonical_channel(link.get("Channel")) or str(link.get("Channel") or "")
+        rows = self.rows_by_key.get((channel, str(link.get("Speaker") or "").strip())) or []
+        ids = {
+            str(row.get("PlatformParticipantId"))
+            for row in rows
+            if row.get("PlatformParticipantId")
+        }
+        if ids != {platform_id}:
+            return None
+        carrying = [
+            row for row in rows if str(row.get("PlatformParticipantId") or "") == platform_id
+        ]
+        overrides = self.identities.get("segmentOverrides") or {}
+        for row in carrying:
+            override = overrides.get(str(row.get("SegmentId") or ""))
+            if isinstance(override, str) and override:
+                return None
+        return self.id_of(carrying[0])
 
     def participants(self) -> List[Dict[str, Any]]:
         """The speakers a reader asked about, in the order they first speak."""

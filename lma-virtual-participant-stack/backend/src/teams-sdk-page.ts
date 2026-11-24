@@ -82,6 +82,7 @@ w.__lmaSdkReady = false;
 w.__lmaJoinError = null;
 w.__lmaCallEndReason = null;
 w.__lmaActiveSpeaker = '';
+w.__lmaActiveSpeakerId = '';
 w.__lmaChatQueue = [];
 w.__lmaChatReady = false;
 
@@ -326,16 +327,33 @@ w.__lmaLeave = async () => {
     return 'timeout';
 };
 
+/**
+ * A participant's id as Azure Communication Services flattens it: the same
+ * string for the speaker's identifier and for a chat message's sender. '' when
+ * it cannot be read.
+ */
+function flatId(identifier: any): string {
+    try {
+        return identifier ? String(toFlatCommunicationIdentifier(identifier) || '') : '';
+    } catch {
+        return '';
+    }
+}
+
+/** The participant `identifier` names, by its id, or '' when the call does not list them. */
+function participantByIdName(identifier: any): string {
+    const state = getState();
+    if (!state || !state.call || !state.call.remoteParticipants) return '';
+    const key = flatId(identifier);
+    const p = key ? state.call.remoteParticipants[key] : null;
+    return p && p.displayName ? p.displayName : '';
+}
+
 function participantName(identifier: any): string {
     const state = getState();
     if (!state || !state.call || !state.call.remoteParticipants) return '';
-    try {
-        const key = toFlatCommunicationIdentifier(identifier);
-        const p = state.call.remoteParticipants[key];
-        if (p && p.displayName) return p.displayName;
-    } catch {
-        /* fall through */
-    }
+    const byId = participantByIdName(identifier);
+    if (byId) return byId;
     for (const p of Object.values(state.call.remoteParticipants) as any[]) {
         if (p && p.isSpeaking && p.displayName) return p.displayName;
     }
@@ -424,7 +442,11 @@ function setupListeners(): void {
     adapter.on('isSpeakingChanged', (e: any) => {
         if (!e || !e.isSpeaking) return;
         const name = participantName(e.identifier);
-        if (name) w.__lmaActiveSpeaker = name;
+        if (!name) return;
+        w.__lmaActiveSpeaker = name;
+        // The id only when the name was found by it: a name read from whoever
+        // the call marks as speaking is not tied to this identifier.
+        w.__lmaActiveSpeakerId = participantByIdName(e.identifier) === name ? flatId(e.identifier) : '';
     });
     adapter.on('chatInitialized', () => {
         w.__lmaChatReady = true;
@@ -449,6 +471,9 @@ function setupListeners(): void {
             const createdOn = msg.createdOn instanceof Date ? msg.createdOn.toISOString() : msg.createdOn || null;
             w.__lmaChatQueue.push({
                 senderName,
+                // The id the speaker's identifier flattens to, for linking a
+                // consent reply to its transcript speaker.
+                senderId: flatId(msg.sender) || null,
                 text,
                 id: msg.id || msg.messageId || null,
                 time: createdOn,

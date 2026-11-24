@@ -3,6 +3,8 @@
 # See the LICENSE file in the project root for full license information.
 """get_meeting_consent and share_meeting."""
 
+import json
+
 import pytest
 
 from tools import consent, meeting_actions
@@ -222,6 +224,74 @@ def test_after_the_transcript_is_deleted_a_link_names_no_speaker(calls_table, ap
     assert [e["speakerId"] for e in answer["events"]] == [None, None]
     assert [e["speakerLinkBasis"] for e in answer["events"]] == ["same_segment"] * 2
     assert "trs#m1" not in transcript_reads(calls_table)
+
+
+BO_ID = "8:acs:0000-bo"
+
+
+def chat_link_record(with_id=True):
+    """getMeetingConsent's answer, which never holds a platform id, and the stored record."""
+    link = {
+        "Basis": "platform_identity",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_1)",
+        "LinkedAt": "2026-11-19T14:02:00Z",
+    }
+    answer = {
+        "CallId": "m1",
+        "CaptureAllowed": True,
+        "Consent": {
+            "Mode": "notify",
+            "Status": "granted",
+            "Events": [
+                {
+                    "EventId": "e1",
+                    "ParticipantName": "Bo (guest)",
+                    "Decision": "consent",
+                    "Source": "chat",
+                    "RecordedAt": "2026-11-19T14:02:00Z",
+                    "SpeakerLink": {**link, "SegmentId": None},
+                }
+            ],
+        },
+    }
+    stored_link = {**link, "LinkedBy": "LMA"}
+    if with_id:
+        stored_link["PlatformParticipantId"] = BO_ID
+    stored = {
+        "Mode": "notify",
+        "Status": "granted",
+        "Events": [{"EventId": "e1", "Source": "chat", "SpeakerLink": stored_link}],
+    }
+    return answer, stored
+
+
+def id_line(segment_id, speaker, start, platform_id):
+    return {**line(segment_id, speaker, start), "PlatformParticipantId": platform_id}
+
+
+def test_a_chat_reply_linked_by_platform_id_gives_the_speaker_id_and_never_the_id(
+    calls_table, appsync
+):
+    answer, stored = chat_link_record()
+    calls_table.put(meeting_row(Consent=stored))
+    calls_table.put(line("r1", "Ana Silva (spk_0)", 1.0))
+    calls_table.put(id_line("r9", "Bo Chen (spk_1)", 9.0, BO_ID))
+    appsync.answers["getMeetingConsent"] = {"getMeetingConsent": answer}
+    result = consent.execute(caller(), "m1")
+    (event,) = result["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"]) == ("remote-spk_1", "platform_identity")
+    assert BO_ID not in json.dumps(result)
+    assert "EventId" in appsync.calls[0][0]
+
+
+def test_a_platform_link_whose_stored_id_is_gone_names_no_speaker(calls_table, appsync):
+    answer, stored = chat_link_record(with_id=False)
+    calls_table.put(meeting_row(Consent=stored))
+    calls_table.put(id_line("r9", "Bo Chen (spk_1)", 9.0, BO_ID))
+    appsync.answers["getMeetingConsent"] = {"getMeetingConsent": answer}
+    (event,) = consent.execute(caller(), "m1")["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"]) == (None, "platform_identity")
 
 
 def test_another_user_is_refused_the_consent_record(meeting):

@@ -75,6 +75,7 @@ export function buildZoomSdkPageHtml(version: string): string {
       w.__lmaInWaitingRoom = false;
       w.__lmaParticipantCount = 1;
       w.__lmaActiveSpeaker = '';
+      w.__lmaActiveSpeakerId = '';
       w.__lmaSelfLeaveReason = null;
       w.__lmaChatQueue = [];
 
@@ -101,7 +102,12 @@ export function buildZoomSdkPageHtml(version: string): string {
         });
         ZoomMtg.inMeetingServiceListener('onActiveSpeaker', function (data) {
           var first = Array.isArray(data) ? data[0] : data;
-          if (first && first.userName) w.__lmaActiveSpeaker = first.userName;
+          if (first && first.userName) {
+            w.__lmaActiveSpeaker = first.userName;
+            // The SDK's participant id for the meeting ([{userId, userName}]),
+            // the id a chat message's sender is given; '' when absent.
+            w.__lmaActiveSpeakerId = (first.userId !== undefined && first.userId !== null) ? String(first.userId) : '';
+          }
         });
         ZoomMtg.inMeetingServiceListener('onReceiveChatMsg', function (data) {
           try {
@@ -117,6 +123,9 @@ export function buildZoomSdkPageHtml(version: string): string {
             var receiver = data && data.receiver;
             w.__lmaChatQueue.push({
               senderName: senderName,
+              // The sender's participant id (the active speaker's userId), for
+              // linking a consent reply to its transcript speaker.
+              senderId: (selfId !== undefined && selfId !== null) ? String(selfId) : null,
               text: String(text),
               id: (data && (data.msgId || data.messageId || data.id)) || null,
               time: (data && (data.timestamp || data.time)) || null,

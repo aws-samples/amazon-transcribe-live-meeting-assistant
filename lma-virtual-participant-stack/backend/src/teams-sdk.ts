@@ -55,6 +55,7 @@ export default class TeamsSdk {
     private acsUser: { communicationUserId: string } | null = null;
     private identityClient: CommunicationIdentityClient | null = null;
     private lastMeetingSpeaker: string | null = null;
+    private lastMeetingSpeakerId: string | null = null;
     private lastReportedSpeaker: string | null = null;
     private detachAgentSpeaking: (() => void) | null = null;
 
@@ -150,10 +151,12 @@ export default class TeamsSdk {
     // voice agent / avatar is talking, measured on agent_output.monitor).
     // Without the second signal the agent's speech keeps the last human's
     // label. Mirrors the DOM Teams path.
-    private async reportSpeaker(speaker: string | null): Promise<void> {
-        if (!speaker || speaker === this.lastReportedSpeaker) return;
-        this.lastReportedSpeaker = speaker;
-        await transcriptionService.speakerChange(speaker).catch(() => {});
+    private async reportSpeaker(speaker: string | null, platformId: string | null = null): Promise<void> {
+        // Told apart by name and id: two participants may share a name.
+        const key = speaker ? `${speaker}\u0000${platformId ?? ''}` : null;
+        if (!speaker || key === this.lastReportedSpeaker) return;
+        this.lastReportedSpeaker = key;
+        await transcriptionService.speakerChange(speaker, platformId).catch(() => {});
     }
 
     private startAgentSpeakingAttribution(): void {
@@ -162,7 +165,7 @@ export default class TeamsSdk {
             this.reportSpeaker(details.scribeIdentity).catch(() => {});
         };
         const onAgentStop = () => {
-            this.reportSpeaker(this.lastMeetingSpeaker).catch(() => {});
+            this.reportSpeaker(this.lastMeetingSpeaker, this.lastMeetingSpeakerId).catch(() => {});
         };
         agentSpeakingDetector.on('started', onAgentStart);
         agentSpeakingDetector.on('stopped', onAgentStop);
@@ -465,7 +468,8 @@ export default class TeamsSdk {
                 if (this.ended || page.isClosed()) return;
                 let snap: {
                     speaker: string;
-                    chats: Array<{ senderName: string; text: string; id?: string | null; time?: string | null; links?: string[] }>;
+                    speakerId: string;
+                    chats: Array<{ senderName: string; senderId?: string | null; text: string; id?: string | null; time?: string | null; links?: string[] }>;
                     count: number;
                     call: { page: string; callState: string };
                     endReason: { code?: number; subCode?: number } | null;
@@ -476,6 +480,7 @@ export default class TeamsSdk {
                         const chats = w.__lmaChatQueue.splice(0, w.__lmaChatQueue.length);
                         return {
                             speaker: w.__lmaActiveSpeaker || '',
+                            speakerId: w.__lmaActiveSpeakerId || '',
                             chats,
                             count: w.__lmaParticipantCount(),
                             call: w.__lmaCallState(),
@@ -504,14 +509,16 @@ export default class TeamsSdk {
                     return;
                 }
 
-                if (snap.speaker && snap.speaker !== lastSpeaker) {
-                    lastSpeaker = snap.speaker;
+                const speakerKey = `${snap.speaker}\u0000${snap.speakerId}`;
+                if (snap.speaker && speakerKey !== lastSpeaker) {
+                    lastSpeaker = speakerKey;
                     if (snap.speaker !== details.scribeIdentity && snap.speaker !== details.scribeName) {
                         this.lastMeetingSpeaker = snap.speaker;
+                        this.lastMeetingSpeakerId = snap.speakerId || null;
                         // Don't overwrite the agent's label mid-utterance; the
                         // detector's 'stopped' handler restores this speaker.
                         if (!agentSpeakingDetector.isSpeaking()) {
-                            await this.reportSpeaker(snap.speaker);
+                            await this.reportSpeaker(snap.speaker, this.lastMeetingSpeakerId);
                         }
                     }
                 }
@@ -541,7 +548,7 @@ export default class TeamsSdk {
                     // Read with its address reduced to "LMA".
                     const body = route.text;
                     // A consent reply, or "LMA start" while consent is withheld.
-                    if (await meetingConsent.handleChat(sender, body)) continue;
+                    if (await meetingConsent.handleChat(sender, body, chat.senderId ?? null)) continue;
                     if (matchesEndCommand(body)) {
                         log.info(`[teams-sdk] asked to leave by ${sender || 'a participant'} (message of ${String(body ?? '').length} characters)`);
                         await this.sendMessages(page, exitMessagesFor(sender));

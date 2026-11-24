@@ -11,16 +11,26 @@
  * it rather than to whoever is active when it is emitted. The VP's own identities
  * are never recorded.
  */
+const VOICE_LABEL = /\s*\(spk_\d+\)$/;
+
 export class RosterTimeline {
     private readonly own: Set<string>;
     private readonly times: number[] = [];
     private readonly names: string[] = [];
+    // The platform's own id for each entry's participant, where the platform
+    // gives one with the active speaker ('' otherwise); see platformIdFor.
+    private readonly ids: string[] = [];
 
     constructor(ownIdentities: string[]) {
         this.own = new Set(ownIdentities.map((name) => name.trim()).filter((name) => name.length > 0));
     }
 
-    record(atSeconds: number, name: string): void {
+    /**
+     * `platformId` is the platform's own id for the participant, read from the
+     * same active-speaker report as the name; empty or absent where the
+     * platform gives none.
+     */
+    record(atSeconds: number, name: string, platformId?: string | null): void {
         const trimmed = name.trim();
         if (trimmed.length === 0 || trimmed === 'none' || this.own.has(trimmed)) {
             return;
@@ -28,6 +38,7 @@ export class RosterTimeline {
         const last = this.times.length > 0 ? this.times[this.times.length - 1] : -Infinity;
         this.times.push(Math.max(atSeconds, last));
         this.names.push(trimmed);
+        this.ids.push(typeof platformId === 'string' ? platformId.trim() : '');
     }
 
     speakerAt(atSeconds: number): string {
@@ -88,10 +99,43 @@ export class RosterTimeline {
         return this.times.length === 0 ? new Map() : this.cover(startSec, endSec, lagSeconds).covered;
     }
 
+    /**
+     * The platform id of the participant shown for most of [startSec,
+     * endSec], with the same lag as speakerFor, when that participant is
+     * `name` (a row's speaker as stored; the speech engine's voice label is
+     * ignored). Undefined when the platform gave no id for them, when somebody
+     * else was shown for most of the span, or when the span is before anyone
+     * was shown: the id goes on a row only where the platform's report that
+     * names the row also gives the id.
+     *
+     * Entries are told apart by name and id together, so two participants
+     * with one display name are never taken for one.
+     */
+    platformIdFor(startSec: number, endSec: number, name: string, lagSeconds = 0): string | undefined {
+        const wanted = name.replace(VOICE_LABEL, '').trim();
+        if (this.times.length === 0 || !wanted) return undefined;
+        const { covered, inEffect } = this.cover(startSec, endSec, lagSeconds, (i) => `${this.ids[i]}\u0000${this.names[i]}`);
+        let best: string | null = null;
+        let bestCovered = 0;
+        for (const [key, seconds] of covered) {
+            if (seconds >= bestCovered) {
+                best = key;
+                bestCovered = seconds;
+            }
+        }
+        if (best === null) {
+            if (inEffect < 0) return undefined;
+            best = `${this.ids[inEffect]}\u0000${this.names[inEffect]}`;
+        }
+        const [id, shown] = best.split('\u0000');
+        return shown === wanted && id ? id : undefined;
+    }
+
     private cover(
         startSec: number,
         endSec: number,
         lagSeconds: number,
+        keyOf: (index: number) => string = (index) => this.names[index],
     ): { covered: Map<string, number>; inEffect: number } {
         const count = this.times.length;
         const end = Math.max(endSec, startSec);
@@ -114,7 +158,8 @@ export class RosterTimeline {
             const from = Math.max(shifted(i), startSec);
             const to = Math.min(i + 1 < count ? shifted(i + 1) : Infinity, end);
             if (to > from) {
-                covered.set(this.names[i], (covered.get(this.names[i]) ?? 0) + (to - from));
+                const key = keyOf(i);
+                covered.set(key, (covered.get(key) ?? 0) + (to - from));
             }
         }
         return { covered, inEffect };

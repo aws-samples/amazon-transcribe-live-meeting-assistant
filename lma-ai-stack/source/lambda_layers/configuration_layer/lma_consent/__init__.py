@@ -35,6 +35,7 @@ from .rules import (
     RULES,
     SOURCE_ATTESTATION,
     SPEAKER_LINK_BASES,
+    SPEAKER_LINK_PLATFORM_IDENTITY,
     SPEAKER_LINK_SAME_SEGMENT,
     STATUS_GRANTED,
     STATUS_NOT_REQUIRED,
@@ -59,6 +60,7 @@ from .rules import (
     speaker_link,
     split_phrases,
     strictness,
+    without_platform_ids,
 )
 
 __all__ = [
@@ -88,6 +90,7 @@ __all__ = [
     "RULES",
     "SOURCE_ATTESTATION",
     "SPEAKER_LINK_BASES",
+    "SPEAKER_LINK_PLATFORM_IDENTITY",
     "SPEAKER_LINK_SAME_SEGMENT",
     "STATUS_GRANTED",
     "STATUS_NOT_REQUIRED",
@@ -112,4 +115,5 @@ __all__ = [
     "speaker_link",
     "split_phrases",
     "strictness",
+    "without_platform_ids",
 ]

@@ -65,6 +65,7 @@ import { ConsentApiError } from './consent-api.js';
 import { consentEvidenceKey, EvidenceShot } from './consent-evidence.js';
 import { consentHelpActive, consentHelpLineFor, setConsentHelpActive } from './consent-help.js';
 import { onSpokenUtterance, type UtteranceLine } from './spoken-replies.js';
+import { platformId, platformSpeakerFor } from './platform-speakers.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('meeting-consent');
@@ -1138,8 +1139,13 @@ export class MeetingConsentFlow {
      * commands, the dismissal command included; no dismissal command is a
      * reply (classifyChatReply), so the order only matters for a message such
      * as "LMA, stop recording", which is an objection and not a dismissal.
+     *
+     * `senderId` is the sender's platform participant id, on the joins whose
+     * platform gives the same id with the active speaker (Teams through Azure
+     * Communication Services, the Zoom Meeting SDK). A reply is linked to the
+     * transcript speaker last written with that id (platformIdentityLinkFor).
      */
-    async handleChat(sender: string | null, text: string | null): Promise<boolean> {
+    async handleChat(sender: string | null, text: string | null, senderId?: string | number | null): Promise<boolean> {
         if (!this.active || this.offChoicePending || !text || !text.trim()) return false;
         if (this.isOwnMessage(text) || this.roster.isOwnIdentity(sender)) return false;
         // A sender shown only as a placeholder ("Unknown") is nobody this flow
@@ -1162,7 +1168,7 @@ export class MeetingConsentFlow {
         }
         const decision = classifyChatReply(text, this.settings.consentPhrases, this.settings.objectionPhrases);
         if (!decision) return false;
-        await this.onDecision(sender, decision, text, 'chat');
+        await this.onDecision(sender, decision, text, 'chat', undefined, platformId(senderId ?? undefined));
         return true;
     }
 
@@ -1202,6 +1208,7 @@ export class MeetingConsentFlow {
         text: string,
         source: ReplySource,
         line?: UtteranceLine,
+        senderId?: string,
     ): Promise<void> {
         // Some chat observers report one message twice; the second is dropped.
         const duplicateKey = `${source}|${normalizeParticipantName(sender)}|${normalizeReplyText(text)}`;
@@ -1228,7 +1235,7 @@ export class MeetingConsentFlow {
             // stands for; it is neither counted nor recorded as consent.
             if (decision === 'consent') return;
         }
-        await this.onReply(named ?? UNKNOWN_SENDER, decision, text, source, named ? line : undefined);
+        await this.onReply(named ?? UNKNOWN_SENDER, decision, text, source, named ? line : undefined, named ? senderId : undefined);
     }
 
     private unattributedConsentLine(source: ReplySource): string {
@@ -1281,6 +1288,7 @@ export class MeetingConsentFlow {
         text: string,
         source: ReplySource,
         line?: UtteranceLine,
+        senderId?: string,
     ): Promise<void> {
         const key = normalizeParticipantName(name);
         const occurredAt = new Date(this.clock()).toISOString();
@@ -1291,7 +1299,8 @@ export class MeetingConsentFlow {
             OccurredAt: occurredAt,
             Source: source,
         };
-        const link = source === 'voice' ? speakerLinkFor(line, key) : undefined;
+        const link =
+            source === 'voice' ? speakerLinkFor(line, key) : source === 'chat' ? platformIdentityLinkFor(senderId) : undefined;
         if (link) event.SpeakerLink = link;
         if (decision === 'objection') {
             if (this.isEchoedObjection(key, source)) {
@@ -1648,6 +1657,23 @@ export function speakerLinkFor(
     const speaker = line.speaker.trim();
     if (!speaker || normalizeParticipantName(speaker.replace(VOICE_LABEL, '').slice(0, 100)) !== key) return undefined;
     return { SegmentId: line.segmentId, Channel: line.channel, Speaker: speaker };
+}
+
+/**
+ * The link of a chat reply to the transcript speaker who sent it, or none.
+ *
+ * By the platform's own participant id alone (basis `platform_identity`):
+ * the speaker most recently written with the chat sender's id, when a row of
+ * speech has carried it and that speaker's rows carried no other id
+ * (platform-speakers.ts). Names are not compared. Only Teams through Azure
+ * Communication Services and the Zoom Meeting SDK give a sender id; every
+ * other join's chat replies are recorded unlinked. While capture is held
+ * (opt-in, before consent) no row is written, so a reply then is unlinked.
+ */
+export function platformIdentityLinkFor(senderId: string | undefined): RecordEventInput['SpeakerLink'] | undefined {
+    const found = platformSpeakerFor(senderId);
+    if (!senderId || !found) return undefined;
+    return { Basis: 'platform_identity', PlatformParticipantId: senderId, Channel: found.channel, Speaker: found.speaker };
 }
 
 /** Whether a display name reads as one of the participant list's placeholders, or the unknown sender. */

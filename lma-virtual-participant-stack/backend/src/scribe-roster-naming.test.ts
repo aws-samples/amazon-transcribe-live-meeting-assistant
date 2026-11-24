@@ -349,6 +349,6 @@ describe('wiring', () => {
     });
 
     it('stamps every participant change on the roster clock', () => {
-        assert.match(scribe, /this\.rosterTimeline\.record\(this\.rosterClockSeconds\(\), speaker\)/);
+        assert.match(scribe, /this\.rosterTimeline\.record\(this\.rosterClockSeconds\(\), speaker, platformId\)/);
     });
 });

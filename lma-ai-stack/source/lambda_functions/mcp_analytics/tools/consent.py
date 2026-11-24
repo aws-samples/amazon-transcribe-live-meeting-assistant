@@ -19,7 +19,10 @@ transcript speaker who gave it, when it was recorded, gives that speaker's
 ``speakerId`` -- the participant id the meeting export gives the speaker -- and
 how and when it was linked; the ids come from the meeting's final transcript
 lines, read only when an event is linked and the transcript is still kept. A
-name is never matched to a speaker. The shaping is lma_consent.summary in the
+name is never matched to a speaker. A chat reply linked by its sender's
+platform participant id (``platform_identity``) is confirmed with that id,
+which getMeetingConsent does not give: it is read from the meeting's stored
+record, by the event's id, and is never part of the answer. The shaping is lma_consent.summary in the
 configuration layer.
 """
 
@@ -53,6 +56,7 @@ query GetMeetingConsent($CallId: ID!) {
       StartedAt
       UpdatedAt
       Events {
+        EventId
         ParticipantName
         Decision
         Source
@@ -80,6 +84,33 @@ query GetMeetingConsent($CallId: ID!) {
 """
 
 
+def with_stored_platform_ids(state: Any, stored: Any) -> Any:
+    """``state`` with each platform_identity link given its id from the stored record.
+
+    ``stored`` is the meeting row's ``Consent``, read with the meeting; an
+    event is matched by its ``EventId``. A link whose event is not found, or
+    whose stored link holds no id (the transcript was deleted), stays without
+    one and names no speaker.
+    """
+    consent_state = (state or {}).get("Consent")
+    if not isinstance(consent_state, dict) or not isinstance(stored, dict):
+        return state
+    ids = {}
+    for event in stored.get("Events") or []:
+        link = event.get("SpeakerLink") if isinstance(event, dict) else None
+        if isinstance(link, dict) and link.get("PlatformParticipantId") and event.get("EventId"):
+            ids[event["EventId"]] = link["PlatformParticipantId"]
+    events = []
+    for event in consent_state.get("Events") or []:
+        link = event.get("SpeakerLink") if isinstance(event, dict) else None
+        if isinstance(link, dict) and link.get("Basis") == "platform_identity":
+            platform_id = ids.get(event.get("EventId"))
+            if platform_id:
+                event = {**event, "SpeakerLink": {**link, "PlatformParticipantId": platform_id}}
+        events.append(event)
+    return {**state, "Consent": {**consent_state, "Events": events}}
+
+
 def execute(caller: Caller, meeting_id: Any) -> Dict[str, Any]:
     """get_meeting_consent."""
     meeting = require_meeting(meeting_id, caller)
@@ -89,4 +120,5 @@ def execute(caller: Caller, meeting_id: Any) -> Dict[str, Any]:
     if has_speaker_links((state or {}).get("Consent")) and not meeting.get("TranscriptDeletedAt"):
         # The ids the meeting export gives its speakers, from the same lines.
         speakers = Speakers(final_segments(read_final_rows(call_id, finals_only=False)), meeting)
+        state = with_stored_platform_ids(state, meeting.get("Consent"))
     return meeting_consent_output(call_id, state, speakers)

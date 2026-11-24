@@ -144,7 +144,18 @@ MAX_RECORD_BYTES = 150_000
 #: are the speaker. Recorded by the capture client that wrote the line, when the
 #: reply is recorded; never worked out afterwards from a name.
 SPEAKER_LINK_SAME_SEGMENT = "same_segment"
-SPEAKER_LINK_BASES: Tuple[str, ...] = (SPEAKER_LINK_SAME_SEGMENT,)
+#: ``platform_identity``: a chat reply whose sender the meeting platform gave the
+#: same participant id as the transcript speaker's rows carry
+#: (``PlatformParticipantId`` on the segment). Recorded by the Virtual
+#: Participant on the joins whose platform gives that id with both, naming the
+#: speaker most recently written with it; never worked out from a name.
+SPEAKER_LINK_PLATFORM_IDENTITY = "platform_identity"
+SPEAKER_LINK_BASES: Tuple[str, ...] = (
+    SPEAKER_LINK_SAME_SEGMENT,
+    SPEAKER_LINK_PLATFORM_IDENTITY,
+)
+#: A meeting platform's participant id, as a segment and a link carry it.
+MAX_PLATFORM_ID_LENGTH = 256
 #: The channels a linked line may be on: the meeting's speech.
 SPEAKER_LINK_CHANNELS: Tuple[str, ...] = ("REMOTE", "LOCAL")
 _STORED_SPEECH_CHANNEL = {"CALLER": "REMOTE", "AGENT": "LOCAL"}
@@ -179,24 +190,30 @@ def speaker_link(
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """``(link, "")`` to store on a reply, or ``(None, why not)``.
 
-    ``value`` is what the capture client sent: the ``SegmentId``, ``Channel``
-    and ``Speaker`` of the transcript line the reply was read from, as it wrote
-    them. Only a reply said aloud (``source`` ``voice``) is one of the
-    meeting's transcript lines, so only it can be linked this way. The line's
-    speaker, without the speech engine's voice label, must be the reply's
-    participant name (compared as replies are, by :func:`normalize_name`): the
-    two come from one attribution, so a difference means the client named the
-    reply and the line differently, and then neither is taken as the other.
-    The link names the line; whether the transcript still holds it is decided
-    by whoever reads the record (lma_speakers.participants).
+    ``value`` is what the capture client sent, by its ``Basis``
+    (``same_segment`` when it gives none):
+
+    * ``same_segment``: the ``SegmentId``, ``Channel`` and ``Speaker`` of the
+      transcript line the reply was read from, as it wrote them. Only a reply
+      said aloud (``source`` ``voice``) is one of the meeting's transcript
+      lines, so only it can be linked this way. The line's speaker, without the
+      speech engine's voice label, must be the reply's participant name
+      (compared as replies are, by :func:`normalize_name`): the two come from
+      one attribution, so a difference means the client named the reply and the
+      line differently, and then neither is taken as the other.
+    * ``platform_identity``: the ``PlatformParticipantId`` the meeting platform
+      gave the chat reply's sender, and the ``Channel`` and ``Speaker`` of the
+      transcript speaker most recently written with that id. Only a chat reply
+      (``source`` ``chat``). Names are not compared: the id is the link.
+
+    The link names the speaker; whether the transcript still confirms it is
+    decided by whoever reads the record (lma_speakers.participants).
     """
     if not isinstance(value, Mapping):
         return None, "no link was given"
-    if source != "voice":
-        return None, "only a reply said aloud is a line of the transcript"
-    segment_id = clip(value.get("SegmentId"), MAX_SEGMENT_ID_LENGTH + 1)
-    if not segment_id or len(segment_id) > MAX_SEGMENT_ID_LENGTH:
-        return None, f"SegmentId must be 1 to {MAX_SEGMENT_ID_LENGTH} characters"
+    basis = value.get("Basis") or SPEAKER_LINK_SAME_SEGMENT
+    if basis not in SPEAKER_LINK_BASES:
+        return None, f"Basis must be one of {', '.join(SPEAKER_LINK_BASES)}"
     channel = clip(value.get("Channel"), 32) or ""
     channel = _STORED_SPEECH_CHANNEL.get(channel, channel)
     if channel not in SPEAKER_LINK_CHANNELS:
@@ -204,6 +221,13 @@ def speaker_link(
     speaker = clip(value.get("Speaker"), MAX_SPEAKER_LENGTH + 1)
     if not speaker or len(speaker) > MAX_SPEAKER_LENGTH:
         return None, f"Speaker must be 1 to {MAX_SPEAKER_LENGTH} characters"
+    if basis == SPEAKER_LINK_PLATFORM_IDENTITY:
+        return _platform_identity_link(value, source, channel, speaker, linked_at, linked_by)
+    if source != "voice":
+        return None, "only a reply said aloud is a line of the transcript"
+    segment_id = clip(value.get("SegmentId"), MAX_SEGMENT_ID_LENGTH + 1)
+    if not segment_id or len(segment_id) > MAX_SEGMENT_ID_LENGTH:
+        return None, f"SegmentId must be 1 to {MAX_SEGMENT_ID_LENGTH} characters"
     base = _VOICE_LABEL.sub("", speaker)[:MAX_NAME_LENGTH]
     name = normalize_name(participant_name)
     if not name or normalize_name(base) != name:
@@ -216,6 +240,52 @@ def speaker_link(
         "LinkedAt": linked_at,
         "LinkedBy": linked_by,
     }, ""
+
+
+def _platform_identity_link(
+    value: Mapping[str, Any],
+    source: Any,
+    channel: str,
+    speaker: str,
+    linked_at: str,
+    linked_by: str,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """A ``platform_identity`` link (see :func:`speaker_link`), or why not."""
+    if source != "chat":
+        return None, "only a chat reply is linked by its sender's platform id"
+    platform_id = clip(value.get("PlatformParticipantId"), MAX_PLATFORM_ID_LENGTH + 1)
+    if not platform_id or len(platform_id) > MAX_PLATFORM_ID_LENGTH:
+        return None, f"PlatformParticipantId must be 1 to {MAX_PLATFORM_ID_LENGTH} characters"
+    return {
+        "Basis": SPEAKER_LINK_PLATFORM_IDENTITY,
+        "PlatformParticipantId": platform_id,
+        "Channel": channel,
+        "Speaker": speaker,
+        "LinkedAt": linked_at,
+        "LinkedBy": linked_by,
+    }, ""
+
+
+def without_platform_ids(record: Optional[Mapping[str, Any]]) -> Tuple[Dict[str, Any], bool]:
+    """The record with no reply's link holding a platform participant id, and whether one did.
+
+    Used when a meeting's transcript is deleted: the segments that carried the
+    ids are gone, and the consent record keeps no copy. A link keeps its basis
+    and when it was made; it names no speaker once the transcript is gone.
+    """
+    out = dict(record or {})
+    changed = False
+    events = []
+    for event in out.get("Events") or []:
+        link = event.get("SpeakerLink") if isinstance(event, Mapping) else None
+        if isinstance(link, Mapping) and "PlatformParticipantId" in link:
+            kept = {key: item for key, item in link.items() if key != "PlatformParticipantId"}
+            event = {**event, "SpeakerLink": kept}
+            changed = True
+        events.append(event)
+    if changed:
+        out["Events"] = events
+    return out, changed
 
 
 def _link_key(event: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
@@ -458,7 +528,14 @@ def record_size(record: Mapping[str, Any]) -> int:
 #: status and to say when and where it was made.
 _ESSENTIAL_EVENT_FIELDS = ("ParticipantName", "Decision", "Source", "OccurredAt")
 #: What a speaker link keeps then: the line it names, how and when it was made.
-_ESSENTIAL_LINK_FIELDS = ("Basis", "SegmentId", "Channel", "Speaker", "LinkedAt")
+_ESSENTIAL_LINK_FIELDS = (
+    "Basis",
+    "SegmentId",
+    "PlatformParticipantId",
+    "Channel",
+    "Speaker",
+    "LinkedAt",
+)
 
 
 def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict[str, Any]:
@@ -542,7 +619,9 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
         entry = {key: event.get(key) for key in _ESSENTIAL_EVENT_FIELDS}
         link = event.get("SpeakerLink")
         if position in linked and isinstance(link, Mapping) and link.get("Basis"):
-            entry["SpeakerLink"] = {key: link.get(key) for key in _ESSENTIAL_LINK_FIELDS}
+            entry["SpeakerLink"] = {
+                key: link.get(key) for key in _ESSENTIAL_LINK_FIELDS if key in link
+            }
         shrunk.append(entry)
     record["Events"] = shrunk
     for entry in record.get("Evidence") or []:

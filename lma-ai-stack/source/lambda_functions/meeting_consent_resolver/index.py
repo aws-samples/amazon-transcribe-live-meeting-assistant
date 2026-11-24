@@ -310,12 +310,12 @@ def _meeting_key(call_id: str) -> Dict[str, Any]:
 
 
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
-    """The meeting row's owner, sharing and consent record, read consistently."""
+    """The meeting row's owner, sharing, consent and TranscriptDeletedAt, read consistently."""
     item = DYNAMODB.get_item(
         TableName=EVENT_SOURCING_TABLE,
         Key=_meeting_key(call_id),
         ConsistentRead=True,
-        ProjectionExpression="CallId, #o, SharedWith, #c",
+        ProjectionExpression="CallId, #o, SharedWith, #c, TranscriptDeletedAt",
         ExpressionAttributeNames={"#o": "Owner", "#c": "Consent"},
     ).get("Item")
     if not item:
@@ -705,7 +705,12 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
 
 
 def reply_speaker_link(
-    caller: Mapping[str, Any], data: Mapping[str, Any], name: str, source: str, now: str
+    caller: Mapping[str, Any],
+    data: Mapping[str, Any],
+    name: str,
+    source: str,
+    now: str,
+    meeting: Optional[Mapping[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """The ``SpeakerLink`` to store on a reply, or None.
 
@@ -724,6 +729,11 @@ def reply_speaker_link(
     link, why = consent.speaker_link(given, name, source, now, BACKEND_ATTRIBUTION)
     if link is None:
         LOGGER.warning("SpeakerLink not stored for %s: %s", data.get("CallId"), why)
+    elif "PlatformParticipantId" in link and (meeting or {}).get("TranscriptDeletedAt"):
+        # The segments that carried the id are gone (transcript_deletion), and
+        # the record keeps no copy of it.
+        LOGGER.info("SpeakerLink not stored for %s: the transcript was deleted", data.get("CallId"))
+        return None
     return link
 
 
@@ -737,7 +747,7 @@ def record_meeting_consent_event(caller: Mapping[str, Any], data: Mapping[str, A
         # A signed-in user's entry is always their own, made on the page.
         source = "ui"
 
-    def change(record, _meeting, access, now):
+    def change(record, meeting, access, now):
         record = require_started(record)
         if not access["backend"] and decision == consent.DECISION_CONSENT:
             if not (access["owner"] or access["admin"]):
@@ -752,7 +762,7 @@ def record_meeting_consent_event(caller: Mapping[str, Any], data: Mapping[str, A
             "RecordedAt": now,
             "RecordedBy": actor(caller),
         }
-        link = reply_speaker_link(caller, data, name, source, now)
+        link = reply_speaker_link(caller, data, name, source, now, meeting)
         if link is not None:
             event["SpeakerLink"] = link
         record["Events"] = consent.compact_events(list(record.get("Events") or []) + [event])

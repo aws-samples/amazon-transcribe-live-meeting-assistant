@@ -454,6 +454,99 @@ def test_a_link_that_does_not_name_the_reply_s_own_speech_is_not_stored(
     assert link is None and why
 
 
+def by_id(platform_id="8:acs:bo", channel="REMOTE", speaker="Bo Chen (spk_0)", **extra):
+    return {
+        "Basis": "platform_identity",
+        "PlatformParticipantId": platform_id,
+        "Channel": channel,
+        "Speaker": speaker,
+        **extra,
+    }
+
+
+def test_a_chat_reply_is_linked_by_its_sender_s_platform_id_without_comparing_names() -> None:
+    link, why = rules.speaker_link(by_id(), "Robert (guest)", "chat", NOW, "LMA")
+    assert why == ""
+    assert link == {
+        "Basis": "platform_identity",
+        "PlatformParticipantId": "8:acs:bo",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_0)",
+        "LinkedAt": NOW,
+        "LinkedBy": "LMA",
+    }
+    # Nothing the client sent beyond the link's own fields is kept.
+    link, _ = rules.speaker_link(by_id(SegmentId="s1", Extra="x"), "Bo", "chat", NOW, "LMA")
+    assert set(link) == {
+        "Basis",
+        "PlatformParticipantId",
+        "Channel",
+        "Speaker",
+        "LinkedAt",
+        "LinkedBy",
+    }
+
+
+@pytest.mark.parametrize(
+    "value, source",
+    [
+        # Only a chat reply is linked by its sender's id.
+        (by_id(), "voice"),
+        (by_id(), "ui"),
+        (by_id(), "attestation"),
+        (by_id(platform_id=""), "chat"),
+        (by_id(platform_id="x" * 257), "chat"),
+        (by_id(platform_id=12345), "chat"),
+        (by_id(channel="MEETING_CHAT"), "chat"),
+        (by_id(speaker=""), "chat"),
+        (by_id(speaker="B" * 121), "chat"),
+        ({**by_id(), "Basis": "same_name"}, "chat"),
+        # A same_segment link is still only for a reply said aloud.
+        (line(), "chat"),
+    ],
+)
+def test_a_platform_link_that_does_not_hold_is_not_stored(value, source) -> None:
+    link, why = rules.speaker_link(value, "Bo Chen", source, NOW, "LMA")
+    assert link is None and why
+
+
+def test_removing_platform_ids_keeps_each_link_s_basis_and_time() -> None:
+    meeting = record("notify")
+    chat_link = {**by_id(), "LinkedAt": NOW, "LinkedBy": "LMA"}
+    meeting["Events"] = [
+        {**reply("Bo", "consent"), "SpeakerLink": chat_link},
+        linked("Ana", "consent", "Ana (spk_1)"),
+        reply("Cy", "objection"),
+    ]
+    stripped, changed = rules.without_platform_ids(meeting)
+    assert changed
+    assert stripped["Events"][0]["SpeakerLink"] == {
+        "Basis": "platform_identity",
+        "Channel": "REMOTE",
+        "Speaker": "Bo Chen (spk_0)",
+        "LinkedAt": NOW,
+        "LinkedBy": "LMA",
+    }
+    assert stripped["Events"][1:] == meeting["Events"][1:]
+    # The record read is not changed in place.
+    assert "PlatformParticipantId" in meeting["Events"][0]["SpeakerLink"]
+    assert rules.without_platform_ids(stripped) == (stripped, False)
+    assert rules.without_platform_ids(None) == ({}, False)
+
+
+def test_a_platform_link_is_kept_when_the_record_is_shrunk() -> None:
+    meeting = record("notify", NoticeText="n" * 2000)
+    meeting["Events"] = []
+    for n in range(40):
+        event = reply(f"p{n}", "consent", source="chat")
+        event["Text"] = "w" * 500
+        event["SpeakerLink"] = {**by_id(platform_id=f"id-{n}", speaker=f"p{n}"), "LinkedAt": NOW}
+        meeting["Events"].append(event)
+    rules.fit_to_budget(meeting, limit=rules.record_size(meeting) - 1000)
+    assert all(e["SpeakerLink"]["PlatformParticipantId"] for e in meeting["Events"])
+    assert all("SegmentId" not in e["SpeakerLink"] for e in meeting["Events"])
+
+
 def linked(name, decision, speaker, segment_id="s1"):
     event = reply(name, decision, source="voice")
     event["SpeakerLink"] = {
@@ -500,3 +593,23 @@ def test_a_record_with_room_keeps_each_latest_reply_s_link() -> None:
         event["Text"] = "w" * 500
     rules.fit_to_budget(meeting, limit=rules.record_size(meeting) - 1000)
     assert all(e["SpeakerLink"]["Basis"] == "same_segment" for e in meeting["Events"])
+
+
+def test_a_record_at_every_cap_with_every_reply_linked_by_platform_id_fits_the_budget() -> None:
+    full = _full_record()
+    for index, event in enumerate(full["Events"]):
+        name = event["ParticipantName"]
+        event["Source"] = "chat"
+        event["SpeakerLink"] = {
+            **by_id(platform_id="i" * 256, speaker=f"{name} (spk_{index})"),
+            "LinkedAt": NOW,
+            "LinkedBy": "LMA",
+        }
+    before = rules.evaluate(full)
+    rules.fit_to_budget(full)
+    assert rules.record_size(full) <= rules.MAX_RECORD_BYTES
+    assert rules.evaluate(full) == before
+    latest = full["Events"][-1].get("SpeakerLink") or {}
+    assert latest.get("Basis") == "platform_identity"
+    assert latest.get("PlatformParticipantId") == "i" * 256
+    assert "LinkedBy" not in latest and "SegmentId" not in latest
