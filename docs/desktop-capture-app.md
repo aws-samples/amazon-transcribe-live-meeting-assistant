@@ -654,12 +654,13 @@ Limitations:
     ([Continue an existing meeting](stream-audio.md#continue-an-existing-meeting));
   - from the browser extension
     ([Continue an existing meeting](browser-extension.md#continue-an-existing-meeting));
-  - by any streaming client, once the CLI (`lma meetings reopen`, see
-    [Meeting Operations](lma-cli.md#lma-meetings--meeting-operations)) or the SDK
-    (`client.meetings.reopen`, see
-    [Meeting Operations](lma-sdk.md#clientmeetings--meeting-operations)) has
-    reopened the meeting
-    ([Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting));
+  - by any streaming client, once the meeting has been reopened with the
+    `reopenMeeting` mutation
+    ([Continuing an existing meeting](websocket-streaming-api.md#continuing-an-existing-meeting)),
+    which the client can call itself or leave to the CLI (`lma meetings reopen`,
+    see [Meeting Operations](lma-cli.md#lma-meetings--meeting-operations)) or the
+    SDK (`client.meetings.reopen`, see
+    [Meeting Operations](lma-sdk.md#clientmeetings--meeting-operations));
   - with a Virtual Participant ([Rejoin](virtual-participant.md#rejoin)).
 
 ## Updating to a new version
