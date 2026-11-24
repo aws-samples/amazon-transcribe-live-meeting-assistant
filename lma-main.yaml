@@ -2997,6 +2997,7 @@ Resources:
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        UserSignInTableName: !GetAtt COGNITOSTACK.Outputs.UserSignInTableName
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket

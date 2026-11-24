@@ -89,6 +89,7 @@ class LMAClient:
         self._mcp_ops = None
         self._skill_ops = None
         self._meeting_ops = None
+        self._user_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -199,6 +200,20 @@ class LMAClient:
 
             self._meeting_ops = MeetingOperations(self)
         return self._meeting_ops
+
+    @property
+    def users(self):
+        """Users: ``list`` the deployment's users with their role, status and
+        last sign-in, for a user access review.
+
+        Returns:
+            UserOperations instance.
+        """
+        if self._user_ops is None:
+            from lma_sdk.operations.users import UserOperations
+
+            self._user_ops = UserOperations(self)
+        return self._user_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

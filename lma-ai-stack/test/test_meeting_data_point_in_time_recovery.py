@@ -68,6 +68,8 @@ OTHER_TABLES = {
         "DomSelectorCache",
     },
     "lma-asr-microvm-stack/template.yaml": {"AsrConfigTable"},
+    # Each user's last password sign-in time, for access reviews; no meeting content.
+    "lma-cognito-stack/deployment/lma-cognito-stack.yaml": {"UserSignInTable"},
     "lma-chat-button-config-stack/deployment/chat-button-config.yaml": {"ChatButtonConfigTable"},
     "lma-llm-template-setup-stack/deployment/llm-template-setup.yaml": {"LLMPromptTemplateTable"},
     "lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml": {"NovaSonicConfigTable"},
