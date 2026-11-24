@@ -40,6 +40,8 @@ FUNCTION = "CognitoPostAuthenticationFunction"
 TABLE = "UserSignInTable"
 #: How long Cognito waits for a trigger before failing the sign-in.
 COGNITO_TRIGGER_WAIT_S = 5
+#: What is left of that wait for the function's cold start.
+COLD_START_ALLOWANCE_S = 1
 
 
 @pytest.fixture(scope="module")
@@ -190,8 +192,10 @@ def test_the_write_gives_up_inside_the_time_cognito_waits(resources: dict) -> No
     (kwargs,) = trigger.made
     config = kwargs["config"]
     attempts = config.retries["total_max_attempts"]
-    worst_case = attempts * (config.connect_timeout + config.read_timeout)
-    assert worst_case < COGNITO_TRIGGER_WAIT_S
+    # botocore's standard mode waits up to a second before each retry.
+    worst_case = attempts * (config.connect_timeout + config.read_timeout) + (attempts - 1) * 1.0
+    # A second is left for the cold start (importing boto3), which Cognito counts too.
+    assert worst_case <= COGNITO_TRIGGER_WAIT_S - COLD_START_ALLOWANCE_S
     assert resources[FUNCTION]["Properties"]["Timeout"] <= COGNITO_TRIGGER_WAIT_S
 
 

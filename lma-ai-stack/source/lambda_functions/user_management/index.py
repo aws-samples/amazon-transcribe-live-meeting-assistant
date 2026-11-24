@@ -309,7 +309,7 @@ def _sub_of(username):
         return ""
     try:
         user = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
-    except ClientError:
+    except (ClientError, BotoCoreError):
         # A missing user is reported by the delete itself.
         return ""
     return _attr(user, "sub") or ""

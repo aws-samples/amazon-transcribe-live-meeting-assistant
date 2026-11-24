@@ -857,13 +857,15 @@ Resources:
         logger.setLevel(logging.INFO)
 
         TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
-        # Two attempts of at most two seconds each, inside Cognito's five.
+        # One attempt of at most three seconds, so with the cold start the
+        # function still answers inside the five seconds Cognito waits. A
+        # retry would add its backoff on top; a missed write is only logged.
         dynamodb = boto3.client(
             "dynamodb",
             config=Config(
                 connect_timeout=1,
-                read_timeout=1,
-                retries={"mode": "standard", "total_max_attempts": 2},
+                read_timeout=2,
+                retries={"mode": "standard", "total_max_attempts": 1},
             ),
         )
 

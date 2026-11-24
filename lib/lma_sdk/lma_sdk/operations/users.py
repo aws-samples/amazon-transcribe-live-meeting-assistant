@@ -100,7 +100,11 @@ class UserOperations:
                 StackName=cognito_stack, LogicalResourceId=SIGN_IN_TABLE_LOGICAL_ID
             )["StackResourceDetail"]["PhysicalResourceId"]
         except AWS_ERRORS as err:
-            if error_code(err) == "ValidationError" and "does not exist" in str(err):
+            if (
+                error_code(err) == "ValidationError"
+                and "does not exist" in str(err)
+                and SIGN_IN_TABLE_LOGICAL_ID in str(err)
+            ):
                 raise SignInTimesUnavailable(
                     f"stack {stack} records no sign-in times (its Cognito stack has no "
                     f"{SIGN_IN_TABLE_LOGICAL_ID}; update the stack to record them)"
