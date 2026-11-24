@@ -84,7 +84,7 @@ import {
     getVideoSession,
     videoRecordingEnabled,
 } from './videorecording';
-import { VIDEO_NOT_ENABLED_CLOSE, isBrowserVideoClient, keyframeSourceFor, videoAllowedFor } from './video-admission';
+import { VIDEO_NOT_ENABLED_CLOSE, isBrowserVideoClient, keyframeSourceFor, videoAllowedFor, videoStartedFrame } from './video-admission';
 
 import { ConsentApi, createSignedGraphqlCaller } from './consent/appsync';
 import { decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
@@ -1008,6 +1008,12 @@ const onTextMessage = async (
             keyframeSourceFor(audioSession.captureSource)
         );
         videoSocketMap.set(ws, session);
+        // Tells the client its stream has a session here, so a connection
+        // that drops from now on resumes it (docs/websocket-streaming-api.md,
+        // "6.1.6 Screen Video"). Clients that read no frames ignore it.
+        if (!session.discarding) {
+            sendFrame(ws, videoStartedFrame(callMetaData.callId));
+        }
     } else if (callMetaData.callEvent === 'END_VIDEO') {
         const session = videoSocketMap.get(ws);
         if (!session) {

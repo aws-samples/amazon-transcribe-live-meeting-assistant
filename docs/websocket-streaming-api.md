@@ -601,8 +601,8 @@ A client can record the screen, window or browser tab its user shares, beside
 the meeting's audio. The video is stored with the meeting as its video
 recording, muxed with the audio when the meeting ends, and its key frames
 become the meeting's shared-screen slides
-([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App and the Stream Audio/Video page
-send it this way, and so may the browser extension.
+([Meeting Video and Key Frames](meeting-video.md)). The Desktop Capture App, the Stream Audio/Video page and the
+browser extension send it this way.
 
 **Whether a client may send video.** The deployment must record video (the
 `EnableVideoRecording` stack parameter). The Stream Audio/Video page and the
@@ -684,6 +684,20 @@ send the initialization segment again), or without it when the encoder started
 again, in which case the stream begins with its own initialization segment.
 See [Reconnection](#reconnection) for how a restarted stream's key frames are
 placed.
+
+When the server has a video session for the stream, it answers the
+`START_VIDEO` on the video connection with:
+
+```json
+{ "event": "VIDEO_STARTED", "callId": "550e8400-e29b-41d4-a716-446655440000" }
+```
+
+From then on, a connection that drops can resume the stream (`videoResume:
+true`); before it, the server may have no session for it, so start the stream
+again from its initialization segment. A client that reads no frames on its
+video connection can ignore it. A stream from a client other than the two
+browser clients on a deployment that does not record video gets no
+`VIDEO_STARTED`, since it is discarded.
 
 **Continued meetings.** A meeting continued with `sessionNumber` (see
 [Continuing an existing meeting](#continuing-an-existing-meeting)) records the

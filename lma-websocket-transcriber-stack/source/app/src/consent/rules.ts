@@ -158,7 +158,8 @@ export const ruleForCaptureClients = (
         rule: null,
         reason:
             'This deployment needs every participant\'s own consent before a meeting is recorded, ' +
-            'which Stream Audio and the Desktop Capture App cannot collect. Use a Virtual Participant ' +
+            'which a streaming client (the Stream Audio/Video page, the browser extension or the Desktop ' +
+            'Capture App) cannot collect. Use a Virtual Participant ' +
             'for this meeting, or ask an administrator to allow a different choice per meeting.',
     };
 };

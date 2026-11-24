@@ -110,8 +110,7 @@ again after each capture, so the step always follows the settings in force.
   Opt-in, Start is refused until both are given, and nothing is recorded or
   transcribed until the transcriber has recorded your confirmation on the
   meeting. Start is also held while the panel is still reading the settings, and
-  while it waits for your answer about the
-  chat post.
+  while it waits for your answer about the chat post.
 - **Participant objected**, while capturing, with an optional name. The
   extension tells the transcriber, which ends the meeting, records the
   objection, and keeps what was captured before it; capture stops at once. If the
@@ -124,6 +123,42 @@ no longer applies to it. A deployment that refuses such clients can now use the
 extension. The consent record names the client "Browser extension". See
 [Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app)
 for what the transcriber records, and when.
+
+### Screen video
+
+The extension can also record the meeting tab as video, stored with the
+meeting: the meeting page plays it, and its key frames become the meeting's
+shared-screen slides (see [Meeting Video and Key Frames](meeting-video.md)).
+It is offered only where an administrator has turned on **Meeting Recording ›
+Record screen video from Stream Audio/Video and the browser extension** (off by
+default and in every preset) and the deployment records video
+(`EnableVideoRecording=true`).
+
+- **Turn it on for one meeting.** Switch on **Also record screen video** before
+  **Start Listening**. It is off at the start of every meeting.
+- **Only the meeting tab.** The extension records video only when what Chrome
+  shares is the meeting tab itself, which it asks for. If anything else is
+  shared, the audio is captured as usual, no video is recorded, and the panel
+  says so. While the video is on, Chrome's option to switch the share to
+  another tab is turned off.
+- **While capturing**, **Screen video is ON** shows that the video is being
+  recorded. **Stop video** ends the video and keeps the audio.
+- **Consent.** With a consent step, the notice ends with "The shared screen is
+  also recorded as video.", recorded with the notice; in Opt-in the video starts
+  only once the meeting's consent is granted, and an objection ends it with the
+  meeting.
+- **When the video stops on its own** — the transcriber refuses it, the tab
+  stops being shared, or its connection cannot be restored — the panel says
+  why and the audio carries on.
+- **Key frame spacing.** As on the Stream Audio/Video page, the panel reads the
+  spacing of the key frames the browser's encoder produces and warns when they
+  are further apart than LMA samples slides at.
+
+The video is sent over a second WebSocket connection, as the Desktop Capture App
+and the Stream Audio/Video page send theirs; see
+[Screen Video](websocket-streaming-api.md#616-screen-video). Key frames from the
+extension are stored with `Source` `BROWSER_EXTENSION`. Firefox is not
+supported.
 
 ## How meeting speakers are named
 

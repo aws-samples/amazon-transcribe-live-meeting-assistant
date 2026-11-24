@@ -224,13 +224,32 @@ describe('createVideoUplink', () => {
     expect(s.binary(retry).map((b) => new Uint8Array(b)[0])).toEqual([0, 1]);
   });
 
-  it('resumes, rather than restarts, a stream that drops before it is confirmed', async () => {
+  it('starts again from the first chunk when the connection drops before the transcriber took the stream', async () => {
     const s = fakeSockets();
     const t = timers();
     const uplink = createVideoUplink({ openSocket: s.openSocket, callId: 'c1', offsetMs: 0, ...t });
     uplink.send(chunk(0));
     await flush();
     s.made[0].onopen();
+    uplink.send(chunk(1));
+    // Dropped straight after START_VIDEO, with no VIDEO_STARTED.
+    s.made[0].onclose({ code: 1006 });
+    await t.advance(1000);
+    await flush();
+    const again = s.made[1];
+    again.onopen();
+    expect(s.json(again)).toEqual([{ callEvent: 'START_VIDEO', callId: 'c1', videoTimeOffsetMs: 0 }]);
+    expect(s.binary(again).map((b) => new Uint8Array(b)[0])).toEqual([0, 1]);
+  });
+
+  it('resumes, rather than restarts, a stream the transcriber said it took', async () => {
+    const s = fakeSockets();
+    const t = timers();
+    const uplink = createVideoUplink({ openSocket: s.openSocket, callId: 'c1', offsetMs: 0, ...t });
+    uplink.send(chunk(0));
+    await flush();
+    s.made[0].onopen();
+    s.made[0].onmessage({ data: JSON.stringify({ event: 'VIDEO_STARTED', callId: 'c1' }) });
     uplink.send(chunk(1));
     // Dropped after one second: the transcriber already holds the session.
     await t.advance(1000);

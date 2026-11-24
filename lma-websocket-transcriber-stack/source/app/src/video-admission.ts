@@ -27,6 +27,13 @@ import type { StreamingCaptureSource } from './calleventdata/capture-context';
  */
 export const VIDEO_NOT_ENABLED_CLOSE = { code: 1008, reason: 'screen video is not enabled for this client' } as const;
 
+/**
+ * The frame sent on a video connection once its START_VIDEO has a video
+ * session on this server: from then on a dropped connection resumes the
+ * session (videoResume), rather than starting a stream again.
+ */
+export const videoStartedFrame = (callId: string): Record<string, unknown> => ({ event: 'VIDEO_STARTED', callId });
+
 /** What took a key frame streamed to this server; see docs/meeting-video.md. */
 export type StreamedKeyframeSource = 'DESKTOP_CAPTURE' | 'STREAM_AUDIO' | 'BROWSER_EXTENSION';
 

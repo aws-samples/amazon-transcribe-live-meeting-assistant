@@ -11,7 +11,8 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 import { refusalMessage, reopenMeeting } from '../lib/continue-meeting';
-import { OBJECTION_NOT_SENT, captureStopped, parseServerFrame, withoutConsent } from '../lib/consent';
+import { OBJECTION_NOT_SENT, captureStopped, consentPayload, emptyStep, parseServerFrame, transcriberUrl, withoutConsent } from '../lib/consent';
+import { VIDEO_OFF, VideoState, createPanelVideo } from '../lib/panel-video';
 
 // A control frame of the WebSocket streaming API (docs/websocket-streaming-api.md).
 // The meeting-audio speaker is reported as it changes, by SPEAKER_CHANGE, so the
@@ -41,7 +42,8 @@ const initialIntegration = {
   fetchMetadata: () => { },
   // `continueMeeting`: the meeting ID or link of an existing meeting to continue.
   // `consent`: the consent step's START field (lib/consent.ts consentPayload).
-  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>) => { },
+  // `video`: whether to also record the meeting tab as screen video (lib/panel-video.ts).
+  startTranscription: async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>, video?: boolean) => { },
   // Why capture did not start, or stopped: a reopenMeeting refusal, or the
   // transcriber's. Empty otherwise.
   startError: "",
@@ -57,6 +59,9 @@ const initialIntegration = {
   postInMeetingChat: async (text: string) => false as boolean,
   // A participant objected: tells the transcriber, which ends the meeting, and stops capturing.
   reportObjection: (participantName: string) => { },
+  // This capture's screen video, and Stop video.
+  videoState: VIDEO_OFF as VideoState,
+  stopVideo: () => { },
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -79,6 +84,25 @@ function IntegrationProvider({ children }: any) {
   // Set when the transcriber has ended the meeting (its consent, or an
   // objection reported here): stopping then sends no END.
   const skipEndRef = useRef(false);
+
+  // Screen video of the meeting tab (lib/panel-video.ts): asked for at
+  // startTranscription, started once START is sent and consent allows capture.
+  const wantVideoRef = useRef(false);
+  const [videoState, setVideoState] = useState<VideoState>(VIDEO_OFF);
+  const userRef = useRef(user);
+  userRef.current = user;
+  const panelVideoRef = useRef<ReturnType<typeof createPanelVideo> | null>(null);
+  if (panelVideoRef.current === null) {
+    panelVideoRef.current = createPanelVideo({
+      openSocket: async () => new WebSocket(transcriberUrl(settings.wssEndpoint as string, userRef.current)),
+      sendToRecorder: (message) => {
+        if (chrome.runtime) chrome.runtime.sendMessage(message);
+      },
+      onState: (state) => setVideoState(state),
+      log: (message) => console.log(`LMA video: ${message}`),
+    });
+  }
+  const panelVideo = panelVideoRef.current;
   // The meeting ID or link to continue, from startTranscription until the
   // capture has started.
   const continueMeetingRef = useRef<string | undefined>(undefined);
@@ -108,6 +132,7 @@ function IntegrationProvider({ children }: any) {
         // The transcriber has ended the meeting and closes the connection:
         // nothing more is sent for it, END included.
         if (captureStopped(frame)) skipEndRef.current = true;
+        if (frame.status === "granted" && frame.captureAllowed !== false) panelVideoRef.current?.granted();
       }
     },
     onClose: (event) => {
@@ -235,7 +260,8 @@ function IntegrationProvider({ children }: any) {
     }
   }, []);
 
-  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>) => {
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string, continueMeeting?: string, consent?: Record<string, unknown>, video?: boolean) => {
+    wantVideoRef.current = video === true;
     if (await checkTokenExpired(user)) {
       login();
       return;
@@ -260,7 +286,7 @@ function IntegrationProvider({ children }: any) {
       activeSpeaker: 'n/a',
       // Always sent, as mode off when the settings were not read, so an opt-in
       // deployment refuses a START this panel did not ask about.
-      consent: consent ?? { mode: 'off', confirmed: false, client: 'Browser extension' },
+      consent: consent ?? consentPayload(null, emptyStep(), { lmaUser: userName, meetingName: meetingTopic, noticeText: '' }),
     }
 
     setCurrentCall(callMetadata);
@@ -269,7 +295,7 @@ function IntegrationProvider({ children }: any) {
       if (chrome.runtime) {
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (tab.id) {
-          const response = await chrome.tabs.sendMessage(tab.id, { action: "StartTranscription" });
+          const response = await chrome.tabs.sendMessage(tab.id, { action: "StartTranscription", video: wantVideoRef.current });
           // We send a message here, but not actually start the stream until we receive a new message with the sample rate.
         }
       }
@@ -290,6 +316,7 @@ function IntegrationProvider({ children }: any) {
       }
       setShouldConnect(false);
       setIsTranscribing(false);
+      panelVideoRef.current?.end();
       setPaused(false);
       sendStopMessage();
     }
@@ -303,8 +330,10 @@ function IntegrationProvider({ children }: any) {
         source: 'voice',
       }));
       // The transcriber ends the meeting on the objection and closes the
-      // connection, so no END is sent; capture stops here at once.
+      // connection, so no END is sent; capture stops here at once. The panel
+      // says so now, as the connection closes before the transcriber's answer.
       skipEndRef.current = true;
+      setConsentFrame({ event: 'CONSENT_STATE', status: 'objected', captureAllowed: false });
     } else {
       // The extension does not reconnect, so the objection cannot reach the
       // transcriber: capture stops, and the user is told to record it.
@@ -345,6 +374,7 @@ function IntegrationProvider({ children }: any) {
           sendMessage(JSON.stringify(currentCall));
           startSentRef.current = true;
           setIsTranscribing(true);
+          panelVideo.begin(currentCall.callId, wantVideoRef.current, (currentCall.consent as { mode?: string } | undefined)?.mode === "opt_in");
           sendRecordingMessage();
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN && startSentRef.current) {
@@ -356,6 +386,8 @@ function IntegrationProvider({ children }: any) {
           currentCall.activeSpeaker = request.active_speaker;
           setActiveSpeaker(request.active_speaker);
           sendMessage(JSON.stringify(withoutConsent(currentCall)));
+        } else if (["VideoStarted", "VideoChunk", "VideoStopped", "VideoUnavailable"].includes(request.action)) {
+          panelVideo.onRecorderMessage(request);
         } else if (request.action === "MuteChange") {
           setMuted(request.mute);
         }
@@ -391,7 +423,8 @@ function IntegrationProvider({ children }: any) {
       currentCall, isTranscribing, muted, setMuted, paused, setPaused,
       fetchMetadata, startTranscription, stopTranscription, metadata, platform,
       activeSpeaker, sendRecordingMessage, startError, setStartError,
-      consentFrame, postInMeetingChat, reportObjection
+      consentFrame, postInMeetingChat, reportObjection,
+      videoState, stopVideo: panelVideo.stop
     }}>
       {children}
     </IntegrationContext.Provider>

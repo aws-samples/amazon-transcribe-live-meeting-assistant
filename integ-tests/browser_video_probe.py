@@ -59,6 +59,8 @@ class Leg:
     audio_close_code: int | None = None
     audio_close_reason: str | None = None
     video_started: bool = False
+    # Frames the transcriber sent on the video connection (VIDEO_STARTED).
+    video_frames: list = field(default_factory=list)
     video_state: str | None = None
     video_close_code: int | None = None
     video_close_reason: str | None = None
@@ -180,12 +182,23 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
             async with websockets.connect(url, max_size=None, open_timeout=25) as video_ws:
                 video_start = time.monotonic()
                 leg.video_offset_seconds = round(video_start - t0, 3)
+                reader = None
                 try:
                     await video_ws.send(json.dumps({
                         "callEvent": "START_VIDEO", "callId": leg.call_id,
                         "videoTimeOffsetMs": int(leg.video_offset_seconds * 1000),
                     }))
                     leg.video_started = True
+
+                    async def read_frames() -> None:
+                        try:
+                            async for raw in video_ws:
+                                if isinstance(raw, str):
+                                    leg.video_frames.append(json.loads(raw))
+                        except websockets.ConnectionClosed:
+                            pass
+
+                    reader = asyncio.create_task(read_frames())
                     for i, frag in enumerate(frags):
                         # A fragment goes out once its two seconds have been
                         # captured, the init segment with the first, as the
@@ -213,6 +226,8 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
                         await asyncio.sleep(1.0)
                 except (TimeoutError, websockets.ConnectionClosed):
                     pass
+                if reader is not None:
+                    reader.cancel()
                 if leg.video_state is None:
                     leg.video_state = video_ws.state.name
             leg.video_closed_at = time.monotonic()

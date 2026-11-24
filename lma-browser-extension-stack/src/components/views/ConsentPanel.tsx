@@ -74,7 +74,7 @@ function ConsentPanel({ settings, noticeText, step, onStepChange, onPostInChat, 
                 header="Did the notice appear in the meeting chat?"
                 action={
                   <SpaceBetween direction="horizontal" size="xs">
-                    <Button onClick={() => update({ chatPost: 'confirmed', method: step.method || 'chat' })}>Yes, it appeared</Button>
+                    <Button onClick={() => update({ chatPost: 'confirmed', method: step.method || 'chat', ...(optIn ? {} : { confirmed: true }) })}>Yes, it appeared</Button>
                     <Button onClick={() => update({ chatPost: 'failed', method: step.method === 'chat' ? undefined : step.method })}>No</Button>
                   </SpaceBetween>
                 }
