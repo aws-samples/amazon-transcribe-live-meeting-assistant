@@ -57,13 +57,24 @@ code_checks:
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
-  # Cache UI deps across runs, keyed on the lockfile.
+  # Cache UI deps across runs, keyed on the lockfile; and Playwright's Chromium
+  # for the browser extension smoke test, keyed on the requirements file that
+  # pins its version (GitLab caches only paths inside the project directory, so
+  # PLAYWRIGHT_BROWSERS_PATH puts it there).
+  variables:
+    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
   cache:
-    key:
-      files:
-        - lma-ai-stack/source/ui/package-lock.json
-    paths:
-      - lma-ai-stack/source/ui/node_modules/
+    - key:
+        files:
+          - lma-ai-stack/source/ui/package-lock.json
+      paths:
+        - lma-ai-stack/source/ui/node_modules/
+    - key:
+        prefix: playwright
+        files:
+          - lma-browser-extension-stack/e2e/requirements.txt
+      paths:
+        - .cache/ms-playwright/
   before_script:
     - apt-get update -y
     - apt-get install -y make curl git
@@ -174,13 +185,22 @@ code_checks:
     # carries pre-existing warnings in six files — so that build would fail
     # here while the CodeBuild one succeeds. Clearing those warnings would let
     # this be tightened.
+    # The build is then loaded into headless Chromium by the Playwright smoke
+    # test (no AWS; every network request is answered or refused by the test).
+    # --with-deps installs Chromium's system libraries with apt, as root here.
     - |
       if ci_run BROWSER_EXTENSION; then
         cd "$CI_PROJECT_DIR/lma-browser-extension-stack"
         npm install --no-audit --no-fund
         CI=true npm test
         CI=false npm run build
+        cd "$CI_PROJECT_DIR"
+        make test-browser-extension-e2e PLAYWRIGHT_DEPS=--with-deps
       fi
+    # Not mirrored here: the Desktop Capture App's Windows and macOS build and
+    # self-test jobs of .github/workflows/code-checks.yml, which need Windows and
+    # macOS runners this GitLab instance does not have (GITHUB_ONLY_STEPS in
+    # scripts/ci/changed_areas.py).
 
 # ── security_review: SRT ────────────────────────────────────────────────────
 # Runs on MRs targeting `develop` only. Review decisions are read from the

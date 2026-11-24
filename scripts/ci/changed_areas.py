@@ -75,6 +75,8 @@ AREAS: dict[str, str] = {
     "load_simulator": "load simulator and ASR benchmark (utilities/load-simulator)",
     "transcriber": "WebSocket transcriber stack",
     "browser_extension": "browser extension",
+    "desktop_windows": "Desktop Capture App, Windows client",
+    "desktop_macos": "Desktop Capture App, macOS client",
     "websocket_client": "utilities/websocket-client sample client",
     "sdk_cli": "LMA SDK and CLI (lib/)",
     "templates": "CloudFormation templates",
@@ -280,6 +282,8 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("lma-bedrockkb-stack/**", "templates"),
     ("iam-roles/**", "templates"),
     ("lma-desktop-capture-app-stack/template.yaml", "templates"),
+    ("lma-desktop-capture-app-stack/source/windows/**", "desktop_windows"),
+    ("lma-desktop-capture-app-stack/source/macos/**", "desktop_macos"),
     ("lma-llm-template-setup-stack/**", "config_stacks"),
     ("lma-chat-button-config-stack/**", "config_stacks"),
     ("lma-nova-sonic-config-stack/**", "config_stacks"),
@@ -298,10 +302,8 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("scripts/bedrock_inference_catalog.py", "python_tooling"),
     # --- tracked, but built or tested by nothing in this job -----------------
     # Each of these is a deliberate "nothing to run" rather than an unknown. The
-    # desktop capture app, the other utilities and the placeholder packages have no
-    # suite here; the SRT files feed the separate security-review job; the rest are
-    # developer scripts.
-    ("lma-desktop-capture-app-stack/**", "no_ci_coverage"),
+    # other utilities and the placeholder packages have no suite here; the SRT files
+    # feed the separate security-review job; the rest are developer scripts.
     ("utilities/load-simulator/**", "load_simulator"),
     ("utilities/**", "no_ci_coverage"),
     ("pypi-placeholder-packages/**", "no_ci_coverage"),
@@ -361,6 +363,11 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # helpers (speaker modes, channels, summary state) to keep the two sides equal.
     (f"{UI}/src/graphql/**", "lambdas"),
     (f"{UI}/src/components/common/**", "lambdas"),
+    # The browser extension's Playwright smoke test checks that the extension id is
+    # the one the Cognito app client names as its sign-in callback.
+    ("lma-cognito-stack/deployment/lma-cognito-stack.yaml", "browser_extension"),
+    # ...and stages the manifest version with the SDK's publish mapping.
+    ("lib/lma_sdk/lma_sdk/_core/publish.py", "browser_extension"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.
     ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's
@@ -547,7 +554,26 @@ STEPS: dict[str, Step] = {
     # evidence file, or a changed heading an evidence anchor names, fails it).
     "solution_profile": _step("Solution profile check and tests", "solution_profile"),
     "transcriber": _step("WebSocket transcriber tests and smoke test", "transcriber"),
-    "browser_extension": _step("Browser extension tests and build", "browser_extension"),
+    "browser_extension": _step(
+        "Browser extension tests, build and browser smoke test", "browser_extension"
+    ),
+    # Separate jobs of the GitHub workflow, each gated as a whole; see
+    # GITHUB_ONLY_STEPS.
+    "desktop_windows": _step(
+        "Desktop Capture App: Windows build and self-test (GitHub job)", "desktop_windows"
+    ),
+    "desktop_macos": _step(
+        "Desktop Capture App: macOS build and self-test (GitHub job)", "desktop_macos"
+    ),
+}
+
+#: Steps the GitLab pipeline does not run, and why. Each is a job of its own in the
+#: GitHub workflow, on a hosted runner for an operating system GitLab has no runner
+#: for, and is gated as a whole by ``needs.select.outputs.<key>``. The GitLab job
+#: still receives a ``CI_RUN_<KEY>`` for each, and ignores it.
+GITHUB_ONLY_STEPS: dict[str, str] = {
+    "desktop_windows": "needs a Windows runner (windows-latest); GitLab has none",
+    "desktop_macos": "needs a macOS runner (macos-latest); GitLab has none",
 }
 
 

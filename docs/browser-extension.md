@@ -154,3 +154,26 @@ If that happens:
 - **Active Speaker is only shown while listening**, and only on platforms that
   expose who is speaking in their page. A blank active speaker does not affect
   the transcript, which is produced from the audio.
+
+## Automated tests
+
+Three layers cover the extension:
+
+- **Unit tests** (`npm test` in `lma-browser-extension-stack`) for the panel's
+  own logic.
+- **A browser smoke test** (`make test-browser-extension-e2e`, after `npm run
+  build`), run by CI on every pull request that changes the extension. It loads
+  the build into headless Chromium with Playwright and checks that the service
+  worker and side panel start, that the extension's id is the one the Cognito
+  app client accepts as its sign-in callback, that the sign-in screen and the
+  signed-in panel render, that **Login** starts the hosted sign-in and exchanges
+  the code it returns, and that the recorder is injected into pages. Nothing
+  reaches the network: the test answers or refuses every request.
+- **A live test** against a deployed stack, `integ-tests/test_browser_extension.py`
+  (opt-in; see [`integ-tests/README.md`](../integ-tests/README.md)). It signs in
+  on the hosted page, captures a stand-in meeting tab and a fake microphone, and
+  checks the transcript on the stack, then continues that meeting.
+
+What none of them does is capture a real meeting platform's tab: the live test
+plays a recording into a local page, and the share prompt is accepted by a
+Chromium switch rather than by a person.
