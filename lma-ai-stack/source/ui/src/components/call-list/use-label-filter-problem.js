@@ -12,9 +12,10 @@ export const LABEL_PROBLEM_DELAY_MS = 600;
 
 /**
  * Why the meeting list's label filter can match nothing (labelFilterProblem),
- * or null. The reason shows once typing pauses for LABEL_PROBLEM_DELAY_MS
- * rather than from the first character, so a key being typed is not flagged,
- * and it clears as soon as the filter is one that can match.
+ * or null. The reason first shows once typing pauses for LABEL_PROBLEM_DELAY_MS
+ * rather than from the first character, so a key being typed is not flagged.
+ * It then stays while the key is still not a label key (taking the new reason
+ * at the next pause) and clears as soon as the filter is one that can match.
  */
 const useLabelFilterProblem = (labelFilter) => {
   const [problem, setProblem] = useState(null);

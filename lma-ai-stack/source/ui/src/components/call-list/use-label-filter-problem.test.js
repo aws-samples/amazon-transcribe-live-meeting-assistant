@@ -6,7 +6,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LABEL_FILTER_KEY_PROBLEM } from '../common/meeting-preparation';
+import { LABEL_FILTER_KEY_PROBLEMS } from '../common/meeting-preparation';
 import useLabelFilterProblem, { LABEL_PROBLEM_DELAY_MS } from './use-label-filter-problem';
 
 describe('the meeting list label filter message', () => {
@@ -23,13 +23,13 @@ describe('the meeting list label filter message', () => {
     act(() => vi.advanceTimersByTime(LABEL_PROBLEM_DELAY_MS - 100));
     expect(hook.result.current).toBeNull();
     act(() => vi.advanceTimersByTime(100));
-    expect(hook.result.current).toBe(LABEL_FILTER_KEY_PROBLEM);
+    expect(hook.result.current).toBe(LABEL_FILTER_KEY_PROBLEMS.characters);
   });
 
   it('clears the message as soon as the filter can match', () => {
     const hook = typed('Project');
     act(() => vi.advanceTimersByTime(LABEL_PROBLEM_DELAY_MS));
-    expect(hook.result.current).toBe(LABEL_FILTER_KEY_PROBLEM);
+    expect(hook.result.current).toBe(LABEL_FILTER_KEY_PROBLEMS.characters);
     hook.rerender({ text: 'project' });
     expect(hook.result.current).toBeNull();
   });

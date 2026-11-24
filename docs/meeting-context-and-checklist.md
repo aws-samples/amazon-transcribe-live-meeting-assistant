@@ -135,13 +135,14 @@ subscription, without a reload.
 
 **The meeting list** has two filters beside the search box: a label filter
 (`key=value`, or a key alone for any meeting with that label, matched exactly
-as typed; once typing pauses, a key that is not a label key, such as `Project`
-or one with a trailing space, is flagged as one that can match no meeting) and
-an audience filter (any, internal, external or unspecified). Like the list's
-search box, they apply to the meetings loaded for the list's date range. The
-list's Excel download has
-each meeting's labels as `key=value` text; the meeting context and checklist
-are not in it.
+as typed) and an audience filter (any, internal, external or unspecified).
+Since the label filter is matched exactly, a key that is not a label key, such
+as `Project`, `my project`, `-acme` or one with a trailing space, can match no
+meeting; once typing pauses, the filter says which rule the key breaks (only
+`a-z`, `0-9`, `.`, `_` and `-`, starting with a letter or digit, up to 63
+characters). Like the list's search box, both filters apply to the meetings
+loaded for the list's date range. The list's Excel download has each meeting's
+labels as `key=value` text; the meeting context and checklist are not in it.
 
 ## Who can see and change them
 
