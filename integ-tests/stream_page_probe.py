@@ -17,9 +17,9 @@ seconds at which the transcriber samples key frames (the page asks its encoder
 for one every 1.8 seconds), so each slide is held for several samples. Each
 slide is shown for longer than ``KEYFRAME_BUSY_GAP_MS`` (videokeyframes.ts):
 slides that change sooner make the transcriber's key frame detector treat the
-screen as busy, and a busy picture is kept only once it has held still for six
-seconds, which a slide of eight seconds sampled every two does not reliably
-reach.
+screen as busy, and a busy picture is kept only once it has held still for
+``KEYFRAME_DESKTOP_BUSY_SETTLE_MS``, which a slide shorter than the busy gap,
+sampled every two seconds, does not reliably do.
 
 Chromium runs headed, because the picker flag picks a tab only there (headless,
 the fake picker always gives a synthetic screen); on a machine without a

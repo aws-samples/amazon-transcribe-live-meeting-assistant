@@ -4,7 +4,7 @@
 """The deployed Stream Audio/Video page records screen video, in Chromium.
 
 Signs in to the stack's web UI as the Cognito test user, switches on **Also
-record screen video**, and streams a canvas slideshow tab for about 40 seconds
+record screen video**, and streams a canvas slideshow tab for about 60 seconds (``STREAM_SECONDS``)
 through the page's own capture (getDisplayMedia and MediaRecorder; see
 stream_page_probe.py). Then checks the meeting: its capture source, a video
 recording, and key frames under ``Source`` ``STREAM_AUDIO``, about one per

@@ -1765,7 +1765,6 @@ def test_the_stream_page_probe_opens_the_route_the_web_ui_serves_the_page_on() -
     assert stream_page_probe.STREAM_PAGE_PATH == match.group(1)
 
 
-
 def _key_frame_default(name: str) -> int:
     source = (
         Path(__file__).resolve().parents[1]
@@ -1777,7 +1776,7 @@ def _key_frame_default(name: str) -> int:
 
 
 def test_the_stream_page_slides_change_too_rarely_to_make_the_screen_busy() -> None:
-    """Slides closer than the busy gap must hold still longer than a sampled slide reliably does."""
+    """Slides that change sooner than KEYFRAME_BUSY_GAP_MS make the screen busy, and a busy slide is not reliably kept."""
     import stream_page_probe  # imports playwright only when a run starts
 
     assert stream_page_probe.SLIDE_SECONDS * 1000 > _key_frame_default("KEYFRAME_BUSY_GAP_MS")
