@@ -7,7 +7,7 @@ title: "Solution Profile"
 
 # Solution Profile
 
-LMA publishes a **solution profile** with every release: a small, versioned,
+LMA publishes a **solution profile** with every final release: a small, versioned,
 machine-readable description of what LMA does, where it can be extended, where it
 stops, the questions that test whether it fits a need, and how a deployment usually
 starts. It is meant for AI assistants and for people who judge, early in a project,

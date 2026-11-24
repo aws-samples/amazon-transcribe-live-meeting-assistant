@@ -166,7 +166,7 @@ or by continuing it from Stream Audio/Video, the browser extension, the Desktop
 Capture App, or a streaming client through the CLI or the SDK (see
 [Continue an existing meeting](desktop-capture-app.md#continue-an-existing-meeting)).
 The CLI and the SDK may also reopen any meeting when they sign with an assumed
-IAM role, which LMA accepts as a backend role (see
+IAM role (not an IAM user's access keys), which LMA accepts as a backend role (see
 [Meeting Operations](lma-cli.md#lma-meetings--meeting-operations) in the CLI
 reference and [Meeting Operations](lma-sdk.md#clientmeetings--meeting-operations)
 in the SDK reference).

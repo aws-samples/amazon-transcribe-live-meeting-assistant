@@ -87,7 +87,7 @@ If the buggy code was introduced after the last tag, the fix is intra-cycle → 
 ## Review the solution profile
 
 The [solution profile](../../docs/solution-profile.md) in `solution-profile/` is
-attached to every GitHub Release, and a release build fails until a person has
+attached to every final GitHub Release (a pre-release gets none), and a release build fails until a person has
 reviewed it for that release. Do this after the `[Unreleased]` section is final,
 with the release's version in hand:
 
