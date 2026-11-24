@@ -298,8 +298,8 @@ Parameters:
     ConstraintDescription: A whole number of days from 0 to 35.
     Description: >-
       The point-in-time recovery window, in days, of the tables that hold meeting
-      content: the meetings table, the Virtual Participant table, the troubleshooting
-      jobs table and the voice enrollment table. 0 turns point-in-time recovery off
+      content: the meetings table, the Virtual Participant table and its task registry,
+      the troubleshooting jobs table and the voice enrollment table. 0 turns point-in-time recovery off
       on them, so a deleted item cannot be restored; 1 to 35 keeps it on with that
       recovery period. Every other table keeps a 35-day window.
 
@@ -10097,8 +10097,11 @@ Resources:
         - AttributeName: vpId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      PointInTimeRecoverySpecification: !If
+        - HasMeetingDataPointInTimeRecovery
+        - PointInTimeRecoveryEnabled: true
+          RecoveryPeriodInDays: !Ref MeetingDataPointInTimeRecoveryDays
+        - PointInTimeRecoveryEnabled: false
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS

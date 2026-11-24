@@ -14,8 +14,8 @@ Read-only, seconds, runs against any stack:
     ``MeetingDataPointInTimeRecoveryDays`` is 0, and on with that recovery period
     otherwise.
 ``test_other_tables_keep_a_35_day_window``
-    The AI stack's configuration table, and the voice consent log, Virtual
-    Participant task registry and skills table where the stack has them, keep
+    The AI stack's configuration table, and the voice consent log and skills
+    table where the stack has them, keep
     point-in-time recovery on for 35 days, whatever the parameter says.
 
 Both skip on a stack deployed before the parameter existed.
@@ -30,11 +30,12 @@ PARAMETER = "MeetingDataPointInTimeRecoveryDays"
 CONTENT_TABLES = (
     "EventSourcingTable",
     "VirtualParticipantTable",
+    "VPTaskRegistry",
     "TroubleshootingJobsTable",
     "VoiceEnrollmentTable",
 )
 #: Tables beside the content tables that keep 35 days; checked where the stack has them.
-OTHER_TABLES = ("ConfigurationTable", "VoiceConsentLogTable", "VPTaskRegistry", "SkillsTable")
+OTHER_TABLES = ("ConfigurationTable", "VoiceConsentLogTable", "SkillsTable")
 
 
 def _stack_resources(cfn, stack: str) -> list[dict]:
@@ -81,7 +82,12 @@ def _point_in_time_recovery(dynamodb, table: str) -> dict:
 def test_content_tables_point_in_time_recovery_matches_the_parameter(deployment: dict) -> None:
     days = deployment["days"]
     present = [t for t in CONTENT_TABLES if t in deployment["tables"]]
-    for always in ("EventSourcingTable", "VirtualParticipantTable", "TroubleshootingJobsTable"):
+    for always in (
+        "EventSourcingTable",
+        "VirtualParticipantTable",
+        "VPTaskRegistry",
+        "TroubleshootingJobsTable",
+    ):
         assert always in present, f"the AI stack has no {always}"
     for logical_id in present:
         pitr = _point_in_time_recovery(deployment["dynamodb"], deployment["tables"][logical_id])

@@ -382,6 +382,7 @@ set it keeps the 35-day window earlier versions had.
 |---|---|
 | The meetings table | Meeting records, transcript segments, summaries, consent records, chat lines and chat attachment items, key-frame items, meeting assistant answers, notifications, whiteboards and usage records |
 | The Virtual Participant table | Meeting names, platforms, meeting IDs and passwords, schedules and agendas |
+| The Virtual Participant task registry | Each launched Virtual Participant's launch configuration, with the meeting's ID, name and time; each item expires about nine hours after the launch |
 | The troubleshooting jobs table | The troubleshooting agent's answers, which can name a meeting and quote its logs; each job expires after seven days |
 | The voice enrollment table (only with `EnableVoiceEnrollment=true`) | Voiceprints |
 
@@ -407,8 +408,7 @@ holds meeting content and each is worth restoring after a mistake: the
 configuration table and its profiles (whose earlier objects in the configuration
 bucket are also kept for 35 days), the prompt template, chat button, Nova Sonic
 and speech engine configuration tables, the MCP server, skill and MCP API key
-tables, the OAuth state table, the Virtual Participant task registry (the hosts of
-running Virtual Participants), the selector cache, and the Cognito stack's sign-in
+tables, the OAuth state table, the selector cache, and the Cognito stack's sign-in
 table (each user's last sign-in time). The voice consent log also
 keeps 35 days: it is the append-only audit trail of consent given and withdrawn,
 LMA never deletes from it, and it holds no voiceprint or meeting content.

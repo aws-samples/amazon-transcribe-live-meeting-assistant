@@ -42,6 +42,9 @@ CONTENT_TABLES = {
     "EventSourcingTable",
     # Meeting name, platform, meeting ID and password, schedule, agenda.
     "VirtualParticipantTable",
+    # Each launched Virtual Participant's launch configuration, with the meeting's
+    # ID, name and time, for about nine hours.
+    "VPTaskRegistry",
     # The troubleshooting agent's answers about a meeting, which can quote it.
     "TroubleshootingJobsTable",
     # Voiceprints; a withdrawn enrollment must not stay restorable.
@@ -62,8 +65,6 @@ OTHER_TABLES = {
         "SkillsTable",
         # Short-lived OAuth flow state.
         "OAuthStateTable",
-        # Host identifiers of running Virtual Participants, for termination.
-        "VPTaskRegistry",
         # CSS selectors of meeting-platform pages.
         "DomSelectorCache",
     },
