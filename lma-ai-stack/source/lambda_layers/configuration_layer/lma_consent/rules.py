@@ -526,7 +526,9 @@ def record_size(record: Mapping[str, Any]) -> int:
 
 #: What a reply keeps when nothing else is left to shrink: enough to decide the
 #: status and to say when and where it was made.
-_ESSENTIAL_EVENT_FIELDS = ("ParticipantName", "Decision", "Source", "OccurredAt")
+#: The event's id stays too: get_meeting_consent finds a platform_identity
+#: link's stored id by it.
+_ESSENTIAL_EVENT_FIELDS = ("EventId", "ParticipantName", "Decision", "Source", "OccurredAt")
 #: What a speaker link keeps then: the line it names, how and when it was made.
 _ESSENTIAL_LINK_FIELDS = (
     "Basis",
@@ -552,7 +554,7 @@ def fit_to_budget(record: Dict[str, Any], limit: int = MAX_RECORD_BYTES) -> Dict
     5. the names once listed but not present now;
     6. the replies the evidence check read in each image, and the participants it
        found no consent from, keeping its verdict;
-    7. every reply's other fields (its id, who recorded it and when), each
+    7. every reply's other fields (who recorded it and when), each
        evidence image's note and check summary, and the speaker link of every
        reply that is neither a participant's nor a linked speaker's latest;
     8. the remaining speaker links, oldest first. The status never depends on

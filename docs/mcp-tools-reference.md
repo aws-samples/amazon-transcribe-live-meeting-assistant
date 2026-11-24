@@ -491,8 +491,8 @@ meeting's transcript, and is null when the event was never linked or the
 transcript no longer holds the linked line under that speaker (including after
 the transcript was deleted). Every other event -- a chat reply on any other
 join, an entry on the meeting page, an attestation -- has all three null: LMA
-does not match a name to a speaker, because two people can show the same name. An event has no email
-address.
+does not match a name to a speaker, because two people can show the same name.
+An event has no email address.
 
 A meeting whose consent was never started answers with `mode` `off`, `status`
 `not_required`, no notices or events, and `captureAllowed` as the meeting's

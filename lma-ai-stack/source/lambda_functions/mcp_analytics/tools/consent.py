@@ -22,8 +22,8 @@ lines, read only when an event is linked and the transcript is still kept. A
 name is never matched to a speaker. A chat reply linked by its sender's
 platform participant id (``platform_identity``) is confirmed with that id,
 which getMeetingConsent does not give: it is read from the meeting's stored
-record, by the event's id, and is never part of the answer. The shaping is lma_consent.summary in the
-configuration layer.
+record, by the event's id, and is never part of the answer. The shaping is
+lma_consent.summary in the configuration layer.
 """
 
 from typing import Any, Dict

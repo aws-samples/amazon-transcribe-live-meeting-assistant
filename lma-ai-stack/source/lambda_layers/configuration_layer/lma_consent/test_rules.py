@@ -609,6 +609,8 @@ def test_a_record_at_every_cap_with_every_reply_linked_by_platform_id_fits_the_b
     rules.fit_to_budget(full)
     assert rules.record_size(full) <= rules.MAX_RECORD_BYTES
     assert rules.evaluate(full) == before
+    # Each reply keeps its id, which get_meeting_consent matches a stored link by.
+    assert all(e.get("EventId") for e in full["Events"])
     latest = full["Events"][-1].get("SpeakerLink") or {}
     assert latest.get("Basis") == "platform_identity"
     assert latest.get("PlatformParticipantId") == "i" * 256
