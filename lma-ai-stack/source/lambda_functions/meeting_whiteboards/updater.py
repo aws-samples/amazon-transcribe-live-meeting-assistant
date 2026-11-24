@@ -181,67 +181,6 @@ def final_segments(
     return segments
 
 
-# How far before the last run's marker a run looks again, for a segment that
-# ended before the marker but was finalized after that run read the transcript
-# (a long utterance on another channel). Segments read within it are recorded on
-# the state row (ShownSegmentIds) so they are not read twice. As in
-# live_guidance_analyzer/pure.py.
-OVERLAP_SECONDS = 120.0
-
-
-def new_segments(
-    segments: Sequence[Segment], marker: Any, shown: Optional[Iterable[str]] = None
-) -> List[Segment]:
-    """The segments the last run did not read.
-
-    Those that ended after the last run's marker and, when the run recorded the
-    segments it read near its marker (``shown``), those that ended within
-    OVERLAP_SECONDS before it and are not among them. A state row written before
-    ``shown`` was recorded is read by the marker alone, as it was.
-    """
-    if marker is None:
-        return list(segments)
-    after = _seconds(marker)
-    if shown is None:
-        return [s for s in segments if s.end > after]
-    seen = set(shown)
-    return [
-        s
-        for s in segments
-        if s.end > after or (s.end > after - OVERLAP_SECONDS and s.segment_id not in seen)
-    ]
-
-
-def next_marker(fresh: Sequence[Segment], marker: Any) -> float:
-    """The marker after a run that read ``fresh``: never earlier than the last one."""
-    return max([s.end for s in fresh] + [_seconds(marker)])
-
-
-def shown_after_run(
-    segments: Sequence[Segment],
-    marker: Any,
-    shown: Optional[Iterable[str]],
-    fresh: Sequence[Segment],
-) -> List[str]:
-    """The ShownSegmentIds to record after a run that read ``fresh``.
-
-    Only the ids of segments ending within OVERLAP_SECONDS of the new marker are
-    kept, so the list stays as long as that much transcript. For a state row
-    without them, the earlier runs are taken to have read every segment up to
-    their marker, as the marker-only reading did.
-    """
-    if shown is None:
-        old = _seconds(marker) if marker is not None else None
-        shown = [s.segment_id for s in segments if old is not None and s.end <= old]
-    wanted = {*shown, *(s.segment_id for s in fresh)}
-    new_marker = next_marker(fresh, marker)
-    return sorted(
-        s.segment_id
-        for s in segments
-        if s.segment_id in wanted and s.end > new_marker - OVERLAP_SECONDS
-    )
-
-
 def transcript_block(segments: Sequence[Segment]) -> str:
     """The segments as "[m:ss] Speaker: text" lines, the most recent part when long."""
     kept: List[str] = []

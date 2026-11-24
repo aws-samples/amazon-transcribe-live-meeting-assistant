@@ -853,6 +853,27 @@ def test_partition_and_endpoint_literals_do_not_increase(raw: str):
     )
 
 
+VP_ENHANCEMENTS = TEMPLATE.parent / "virtual-participant-enhancements.yaml"
+
+
+def test_the_vp_enhancements_template_hardcodes_no_partition_or_endpoint():
+    """The template outside the AI stack's nesting is held to none at all.
+
+    A service principal such as ``lambda.amazonaws.com`` is the same in every
+    partition, so only those lines may name ``amazonaws.com``.
+    """
+    offending = [
+        line.strip()
+        for line in VP_ENHANCEMENTS.read_text().splitlines()
+        if not line.strip().startswith("#")
+        and (
+            "arn:aws:" in line
+            or ("amazonaws.com" in line and not line.strip().startswith("Service:"))
+        )
+    ]
+    assert offending == [], offending
+
+
 # AppSync's Velocity parser rejects a method call made directly on a list
 # literal (for example ``["a", "b"].contains($x)``) with a "Lexical error" at
 # request time, which cfn-lint and SAM validation do not catch. Assign the
