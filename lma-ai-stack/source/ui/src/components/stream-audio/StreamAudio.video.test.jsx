@@ -205,6 +205,22 @@ describe('StreamAudio screen video', () => {
     await waitFor(() => expect(screen.getByRole('checkbox', { name: /Also record screen video/ }).checked).toBe(false));
   });
 
+  it('keeps the video switch on when the share picker is cancelled', async () => {
+    vi.stubGlobal('alert', vi.fn());
+    window.navigator.mediaDevices.getDisplayMedia.mockRejectedValueOnce(
+      new DOMException('cancelled', 'NotAllowedError'),
+    );
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    serverSays(SETTINGS);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Also record screen video/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Streaming' }));
+    await waitFor(() => expect(window.alert).toHaveBeenCalled());
+    // Nothing streamed, so the next Start records video as the user chose.
+    expect(screen.getByRole('checkbox', { name: /Also record screen video/ }).checked).toBe(true);
+    expect(frames().some((f) => f.callEvent === 'START')).toBe(false);
+  });
+
   it('warns when the whole screen is shared', async () => {
     media.surface = 'monitor';
     render(<StreamAudio mode="stream" />);

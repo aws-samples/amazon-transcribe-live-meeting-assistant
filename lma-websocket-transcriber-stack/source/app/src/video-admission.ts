@@ -93,6 +93,34 @@ export const videoAdmission = (switches: VideoSwitches, handlesRefusal: boolean)
 export const keyframeSourceFor = (source: StreamingCaptureSource | undefined): StreamedKeyframeSource =>
     source === 'STREAM_AUDIO' || source === 'BROWSER_EXTENSION' ? source : 'DESKTOP_CAPTURE';
 
+/**
+ * Where a binary frame goes: into the connection's video session, held for the
+ * START_VIDEO still being handled on it (or dropped when too much is held), or,
+ * on a connection with neither, to the audio path.
+ */
+export type BinaryFrameRoute = 'video' | 'held' | 'dropped' | 'audio';
+
+/**
+ * Routes one binary frame (index.ts onBinaryMessage). A connection with a video
+ * session writes to it; one whose START_VIDEO is in progress holds the chunk;
+ * any other connection's binary frames are audio.
+ */
+export const routeBinaryFrame = <K>(
+    key: K,
+    chunk: Uint8Array,
+    hasVideoSession: boolean,
+    pending: PendingVideoChunks<K>
+): BinaryFrameRoute => {
+    if (hasVideoSession) {
+        return 'video';
+    }
+    const held = pending.hold(key, chunk);
+    if (held === 'held') {
+        return 'held';
+    }
+    return held === 'full' ? 'dropped' : 'audio';
+};
+
 /** What became of a chunk offered to {@link PendingVideoChunks.hold}. */
 export type VideoChunkHoldResult = 'held' | 'full' | 'no-start';
 
