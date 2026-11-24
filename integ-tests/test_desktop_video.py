@@ -207,6 +207,12 @@ def setting_off_run(client, run) -> dict:
         while allowed is not False and time.monotonic() < deadline:
             time.sleep(2)
             allowed = _video_allowed(stack, tokens)
+        if allowed is not False:
+            pytest.fail(
+                f"videoAllowed is still {allowed!r} 30 s after Record screen video from streaming clients "
+                "was turned off: the setting has not reached the transcriber, or the deployed transcriber "
+                "predates the one setting for every client"
+            )
         result = run_probe(client.stack_name, region=client.region, keyframe_wait_seconds=30,
                            call_label="desktop-video-off")
         result["video_allowed"] = allowed

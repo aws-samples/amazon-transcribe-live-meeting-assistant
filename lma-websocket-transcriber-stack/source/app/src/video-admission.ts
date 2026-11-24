@@ -13,10 +13,10 @@
  * every client, whatever client type it declares: video is recorded when the
  * deployment records video (the EnableVideoRecording stack parameter) and
  * Meeting Recording › Record screen video from streaming clients is on, as the
- * meeting's audio START read it. With the setting off a START_VIDEO is refused;
- * with only the stack parameter off it is accepted and discarded, as it always
- * has been, so a client that reconnects after any close it did not start
- * keeps one connection. The client type names only what the key frames are
+ * meeting's audio START read it. On a deployment that does not record video a
+ * START_VIDEO is accepted and discarded, whatever the setting, as it always has
+ * been, so a client that reconnects after any close it did not start keeps one
+ * connection; on one that does, it is refused with the setting off. The client type names only what the key frames are
  * recorded as (keyframeSourceFor).
  *
  * Kept free of AWS clients so it can be tested directly.
@@ -58,15 +58,16 @@ export const videoAllowed = (switches: VideoSwitches): boolean =>
 export type VideoAdmission = 'record' | 'discard' | 'refuse';
 
 /**
- * How a START_VIDEO is answered: refused (VIDEO_NOT_ENABLED_CLOSE) with the
- * setting off, accepted and discarded (no VIDEO_STARTED) on a deployment that
- * does not record video, and recorded otherwise. The same for every client.
+ * How a START_VIDEO is answered: accepted and discarded (no VIDEO_STARTED) on a
+ * deployment that does not record video, whatever the setting; refused
+ * (VIDEO_NOT_ENABLED_CLOSE) on one that does, with the setting off; and
+ * recorded otherwise. The same for every client.
  */
 export const videoAdmission = (switches: VideoSwitches): VideoAdmission => {
-    if (!switches.recordScreenVideo) {
-        return 'refuse';
+    if (!switches.stackRecordsVideo) {
+        return 'discard';
     }
-    return switches.stackRecordsVideo ? 'record' : 'discard';
+    return switches.recordScreenVideo ? 'record' : 'refuse';
 };
 
 /**

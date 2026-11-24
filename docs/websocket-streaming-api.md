@@ -662,13 +662,13 @@ received.
 | `no active call for callId` | No audio session of this `callId` is live on this server. Send `START_VIDEO` only once the audio is streaming |
 | `not authorized for callId` | The meeting's audio is being streamed by another user |
 | `meeting consent does not allow capture` | The meeting's [consent](#615-meeting-consent-frames) does not allow capture yet, or no longer does. In opt-in, wait for the `CONSENT_STATE` with `status: "granted"` on the audio connection before sending `START_VIDEO` |
-| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off |
+| `screen video is not enabled for this client` | Meeting Recording › Record screen video from streaming clients is off, on a deployment that records video |
 
 A refused video stream does not affect the audio: stop the video, tell the
 user, and carry on streaming audio. A client should not reconnect a refused
 video stream. On a deployment that does not record video
 (`EnableVideoRecording=false`) a `START_VIDEO` is accepted and discarded, from
-every client, and gets no `VIDEO_STARTED`; so is one that arrives after the
+every client and whatever the setting, and gets no `VIDEO_STARTED`; so is one that arrives after the
 meeting's video, or its mux, has ended. The settings answer's `videoAllowed` is
 `false` in both of the first two cases, so a client that reads it first sends
 no video.

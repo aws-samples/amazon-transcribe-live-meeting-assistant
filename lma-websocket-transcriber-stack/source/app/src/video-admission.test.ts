@@ -29,11 +29,13 @@ test('screen video is recorded only when the stack and the setting both allow it
     assert.equal(videoAllowed({ stackRecordsVideo: false, recordScreenVideo: false }), false);
 });
 
-test('START_VIDEO is refused with the setting off, discarded with only the stack off, else recorded', () => {
+test('START_VIDEO is discarded with the stack off, refused with only the setting off, else recorded', () => {
     assert.equal(videoAdmission(ON), 'record');
     assert.equal(videoAdmission(SETTING_OFF), 'refuse');
     assert.equal(videoAdmission(STACK_OFF), 'discard');
-    assert.equal(videoAdmission({ stackRecordsVideo: false, recordScreenVideo: false }), 'refuse');
+    // The stack switch wins: discarded, so a client that reconnects after a
+    // refusal does not reconnect over and over.
+    assert.equal(videoAdmission({ stackRecordsVideo: false, recordScreenVideo: false }), 'discard');
 });
 
 test('key frames are recorded under the client that streamed the video', () => {

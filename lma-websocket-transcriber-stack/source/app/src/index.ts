@@ -1008,8 +1008,9 @@ const onTextMessage = async (
         }
         // Every streaming client's video follows Meeting Recording › Record
         // screen video from streaming clients, as the meeting's START read it:
-        // refused with it off. On a deployment that does not record video the
-        // stream is accepted and discarded (startVideoSession). The client type
+        // refused with it off, on a deployment that records video. On one that
+        // does not, the stream is accepted and discarded (startVideoSession),
+        // whatever the setting. The client type
         // plays no part (video-admission.ts videoAdmission).
         if (
             videoAdmission({
