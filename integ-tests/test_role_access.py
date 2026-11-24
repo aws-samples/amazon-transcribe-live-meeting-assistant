@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 import pytest
 import role_access_probe as probe
+import security_report
 
 pytest.importorskip("pycognito")
 pytest.importorskip("graphql")
@@ -27,7 +28,10 @@ pytest.importorskip("graphql")
 
 @pytest.fixture(scope="module")
 def deployment(client) -> probe.Deployment:
-    return probe.Deployment.find(client.stack_name, client.region)
+    found = probe.Deployment.find(client.stack_name, client.region)
+    security_report.REPORT.stack = client.stack_name
+    security_report.REPORT.region = found.session.region_name or ""
+    return found
 
 
 @pytest.fixture(scope="module")
@@ -64,8 +68,16 @@ def test_each_role_is_refused_or_admitted_at_every_query_and_mutation_as_the_mat
         document, variables = probe.build_operation(schema, operation)
         response = probe.call(deployment, users[role], document, variables)
         refused = probe.refused_at_field(response, operation)
+        errors = [e.get("message", "")[:120] for e in response.get("errors") or []]
+        security_report.REPORT.record(
+            "AppSync role matrix",
+            operation,
+            role,
+            "refused" if expect_refused else "not refused",
+            "refused" if refused else "not refused",
+            "; ".join(errors) if refused != expect_refused else "",
+        )
         if refused != expect_refused:
-            errors = [e.get("message", "")[:120] for e in response.get("errors") or []]
             wrong.append(f"{operation} as {role}: {'refused' if refused else 'not refused'} {errors}")
     assert not wrong, "\n".join(wrong)
 

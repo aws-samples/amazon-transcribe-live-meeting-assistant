@@ -115,6 +115,16 @@ variable rather than failing; and the summary must stay free of Slack's
 literally. `junit_summary.py` must never raise — it runs after a job that may
 have died anywhere — and its cases are covered in `test_ci_plumbing.py`.
 
+## Security tests
+
+The access checks (`test_role_access.py`, `test_security_access.py`) are part
+of this suite and of the nightly run; they create throwaway users, one meeting
+and a temporary app client, and shorten the web UI app client's ID token
+lifetime for one sign-in. To run them alone, run the OWASP ZAP scan, or run the
+security set, follow `.claude/skills/run-security-tests.md`
+(`make stacktest-rbac`, `make stacktest-zap`, `make security-results`; see
+`docs/security-testing.md`).
+
 ## Prerequisites
 
 1. `make setup-cli-dev` — LMA SDK + CLI + test deps in `.venv`.

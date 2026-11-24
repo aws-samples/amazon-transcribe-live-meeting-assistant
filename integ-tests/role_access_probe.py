@@ -231,17 +231,30 @@ class Deployment:
             graphql_url=_graphql_url(outputs),
             identity_pool_id=cognito_outputs["AppIdentityPoolId"],
             ai_resources=ai,
-            email_domain=domains[0] if domains else "example.com",
+            # .invalid is reserved (RFC 2606), so no message can reach a mailbox. A
+            # stack that restricts sign-up to its domains refuses it even to an
+            # administrator, so the first of those is used there; MessageAction
+            # SUPPRESS sends no invitation either way.
+            email_domain=domains[0] if domains else "example.invalid",
         )
 
 
-def create_role_users(deployment: Deployment, stamp: str) -> list[RoleUser]:
-    """A confirmed user with a permanent password for each role; the caller deletes them."""
+ROLE_ACCOUNTS: tuple[tuple[str, str], ...] = (("admin", "Admin"), ("user", "User"), ("participant", "Participant"))
+
+
+def create_role_users(
+    deployment: Deployment, stamp: str, accounts: tuple[tuple[str, str], ...] = ROLE_ACCOUNTS
+) -> list[RoleUser]:
+    """A confirmed user with a permanent password for each (label, role); the caller deletes them.
+
+    The label names the account in its username, so a run may make several
+    accounts of one role (test_security_access.py makes three Users).
+    """
     cognito = deployment.session.client("cognito-idp")
     made: list[RoleUser] = []
     try:
-        for role in ("Admin", "User", "Participant"):
-            username = f"integ-rbac-{role.lower()}-{stamp}@{deployment.email_domain}"
+        for label, role in accounts:
+            username = f"integ-rbac-{label}-{stamp}@{deployment.email_domain}"
             cognito.admin_create_user(
                 UserPoolId=deployment.pool_id,
                 Username=username,

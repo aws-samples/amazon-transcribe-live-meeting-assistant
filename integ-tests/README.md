@@ -68,6 +68,18 @@ AWS_PROFILE=default .venv/bin/python -m pytest integ-tests/ \
 
 Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA`.
 
+## Access checks and security tests
+
+`test_role_access.py` and `test_security_access.py` call the stack as throwaway
+users: every role at every GraphQL operation, altered and expired tokens, one
+meeting as its owner, a user it is shared with and an unrelated user, and the
+transcriber, MCP, viewer, identity pool and sign-up entry points. They run in
+the nightly suite, or alone with `make stacktest-rbac STACK=<name>`, and write
+`scratch/api-test-results/report.md`. `make stacktest-zap` runs the OWASP ZAP
+scan. What each checks, what they create and change, and how to read their
+reports: [Security Testing](../docs/security-testing.md). Their helpers are
+unit-tested in `test_security_helpers.py` (no AWS, `make test-integ-plumbing`).
+
 ## What each test covers
 
 | Test | Validates | Batch risk it guards |

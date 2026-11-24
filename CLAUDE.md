@@ -270,6 +270,7 @@ patterns.
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
 | `.claude/skills/asr-benchmark.md` | Comparing ASR model bundles and Amazon Transcribe on a dev stack for cost and transcript quality (`make asr-benchmark`) |
 | `.claude/skills/product-demo.md` | Recording a narrated product demo video of the web UI against a deployed stack (`scripts/ux_recorder.py`, `make ux-record-deps`) |
+| `.claude/skills/run-security-tests.md` | Running the live access tests, the OWASP ZAP scan or the whole security set against a stack (`make stacktest-rbac`, `make stacktest-zap`, `make security-results`), and where their results may go |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
 produce a structured review answering the six questions (good PR / safe /

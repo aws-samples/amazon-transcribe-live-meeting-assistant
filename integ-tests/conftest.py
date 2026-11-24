@@ -164,3 +164,25 @@ def outputs(client: LMAClient) -> dict[str, str]:
             f"your AWS creds (AWS_PROFILE) correct?"
         )
     return {k: o.value for k, o in raw.items()}
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # pylint: disable=unused-argument
+    """Write the access-check report when the session's tests recorded any check.
+
+    test_role_access.py and test_security_access.py record every call they make
+    in security_report.REPORT; the report goes to scratch/api-test-results/
+    (ignored by git), or to $LMA_SECURITY_REPORT_DIR. A run that recorded
+    nothing writes nothing, so other suites leave an earlier report in place.
+    """
+    import security_report  # pylint: disable=import-outside-toplevel
+
+    written = security_report.write(security_report.REPORT)
+    if written:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        totals = security_report.REPORT.totals()
+        message = (
+            f"access checks: {totals['pass']} passed, {totals['fail']} failed, "
+            f"{totals['not-run']} not run; report: {written[1]}"
+        )
+        if reporter is not None:
+            reporter.write_line(message)

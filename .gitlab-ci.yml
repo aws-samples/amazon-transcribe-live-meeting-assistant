@@ -13,7 +13,9 @@
 #                            ONLY from a pipeline schedule, never on a push or
 #                            an MR, because it needs AWS credentials and a
 #                            deployed stack. One-time setup is required; see
-#                            docs/scheduled-integration-tests.md.
+#                            docs/scheduled-integration-tests.md. The same stage
+#                            holds zap_dast, a weekly or manual OWASP ZAP scan
+#                            of that stack (docs/security-testing.md).
 #
 # What is intentionally NOT here: docker-build-check needs a Docker daemon and
 # is run locally via `make docker-build-check`. See the 'integ-tests' skill and
@@ -966,4 +968,64 @@ nightly_integ_tests:
       # The posted message, so "what did Slack get told" is answerable from the
       # pipeline when the channel post looks wrong. Contains no credentials.
       - slack-payload.json
+    expire_in: 1 month
+
+
+# ── zap_dast: an OWASP ZAP scan of the integration stack, weekly or by hand ──
+# scripts/security/zap_scan.py against lma-integtest1: the AppSync GraphQL API
+# (as a throwaway Admin, queries only), the CloudFront web UI and the MCP API key
+# endpoint. See docs/security-testing.md.
+#
+# Not on pushes or merge requests, as in the IDP project: a scan takes up to half
+# an hour, needs AWS credentials and a deployed stack, and what it reports is
+# about the deployed stack rather than the change. It runs from a pipeline
+# schedule with ZAP_DAST = "true" (weekly; set no NIGHTLY_INTEG on that schedule,
+# so the nightly deploy does not run with it), or as a manual job of a pipeline
+# started from the web UI.
+#
+# PASSIVE only: zap_scan.py without --active, so ZAP sends no attack payloads
+# and no mutation. Never pass --active here: lma-integtest1 is shared by the
+# nightly run. WARN-only: findings do not fail the job, and allow_failure keeps a
+# scan that could not run from failing the pipeline. The job log prints counts
+# only (--counts-only); the reports are the job's artifacts.
+#
+# The ZAP image is the job image, because these runners have no Docker daemon
+# (see nightly_publish). Its Python takes the script's dependencies with --user.
+# Credentials come from the runner's credential vendor, as for the nightly jobs.
+zap_dast:
+  stage: scheduled_integration
+  image: ghcr.io/zaproxy/zaproxy:stable
+  needs: []
+  timeout: 50m
+  # The scan creates a user in the stack's pool and deletes it in a `finally`.
+  interruptible: false
+  # Not while the nightly deploy updates the same stack.
+  resource_group: integ-stack-$LMA_INTEG_STACK
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $ZAP_DAST == "true"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - when: never
+  variables:
+    LMA_INTEG_STACK: lma-integtest1
+    AWS_DEFAULT_REGION: us-west-2
+  before_script:
+    - python3 -m pip install --user --quiet --break-system-packages boto3 pycognito graphql-core websockets
+    - |
+      if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
+        echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2
+        echo "See docs/scheduled-integration-tests.md" >&2
+        exit 1
+      fi
+    - python3 -c "import boto3; print(boto3.client('sts').get_caller_identity()['Arn'])"
+  script:
+    - >
+      python3 scripts/security/zap_scan.py --stack-name "$LMA_INTEG_STACK"
+      --region "$AWS_DEFAULT_REGION" --runner local --counts-only
+      --report-dir "$CI_PROJECT_DIR/zap-reports"
+  artifacts:
+    when: always
+    paths:
+      - zap-reports/
     expire_in: 1 month

@@ -70,6 +70,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(COGNITO_SOURCE_DIR) \
 	$(CURDIR)/scripts/pr_review \
 	$(CURDIR)/scripts/ci \
+	$(CURDIR)/scripts/security \
 	$(CURDIR)/scripts/cloudformation_parameters_doc.py \
 	$(CURDIR)/scripts/bedrock_inference_catalog.py \
 	$(CURDIR)/scripts/ux_recorder.py \
@@ -504,9 +505,10 @@ test-ai-stack: ## Static AppSync contract + AI stack template tests (no AWS)
 # not, and it runs in the fast pipeline because it covers the machinery that
 # decides whether a scheduled integration run can report success without having
 # tested anything — credential resolution and the --no-skips hook.
-test-integ-plumbing: ## Unit tests for the scheduled integ-test machinery (no AWS)
+test-integ-plumbing: ## Unit tests for the scheduled integ-test machinery and the security test tooling (no AWS)
 	@echo "Running integration-test plumbing unit tests..."
-	$(PYTHON) -m pytest integ-tests/test_ci_plumbing.py -q
+	$(PYTHON) -m pytest integ-tests/test_ci_plumbing.py integ-tests/test_security_helpers.py -q
+	$(PYTHON) -m pytest scripts/security/tests -q
 	@echo -e "$(GREEN)✅ Integration-test plumbing tests passed!$(NC)"
 
 # The advisory AI review's own machinery. The disclosure guard is the part that
@@ -785,6 +787,51 @@ integ-deploy-and-test: ## Deploy (create/update) a stack from local code, then r
 		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --admin-email "$(ADMIN_EMAIL)" --wait; \
 	fi
 	@$(MAKE) integ-tests STACK="$(INTEG_DEPLOY_STACK)"
+
+##@ Security Testing
+# The live-stack security tests and the offline set: see docs/security-testing.md
+# and the 'run-security-tests' Claude skill. STACK, REGION and AWS_PROFILE=default
+# as for integ-tests. Reports go to scratch/ (ignored by git).
+SECTEST_STACK ?= $(or $(STACK),$(LMA_STACK_NAME))
+SECTEST_REGION_ENV = $(if $(REGION),LMA_REGION=$(REGION) AWS_DEFAULT_REGION=$(REGION))
+
+# Throwaway users, one throwaway meeting and a temporary app client, all deleted
+# afterwards; the web UI app client's ID token lifetime is shortened for one
+# sign-in and restored at once. --no-skips: a missing dependency fails the run
+# rather than reporting green having checked nothing.
+stacktest-rbac: ## Live access tests: roles, tokens, meeting access, other entry points (Usage: make stacktest-rbac STACK=<name> [REGION=<region>])
+ifeq ($(SECTEST_STACK),)
+	$(error Set STACK to the deployed stack to test. Usage: make stacktest-rbac STACK=<name> [REGION=<region>])
+endif
+	@if ! $(PYTHON) -c "import lma_sdk, pycognito, websockets, graphql" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: test dependencies missing. Run 'make setup-cli-dev' and '$(PIP) install -r integ-tests/requirements.txt'.$(NC)"; \
+		exit 1; \
+	fi
+	@echo -e "$(CYAN)Running the live access tests against '$(SECTEST_STACK)'...$(NC)"
+	$(SECTEST_REGION_ENV) $(PYTHON) -m pytest integ-tests/test_role_access.py integ-tests/test_security_access.py \
+		--stack-name "$(SECTEST_STACK)" --no-skips
+	@echo -e "$(GREEN)✅ Live access tests passed against '$(SECTEST_STACK)'. Report: scratch/api-test-results/report.md$(NC)"
+
+# OWASP ZAP in Docker. Passive unless ZAP_ACTIVE=1, which sends attack payloads
+# and mutations: for a throwaway stack only. WARN-only: findings do not fail it.
+stacktest-zap: ## OWASP ZAP scan of the GraphQL API, web UI and MCP endpoint (Usage: make stacktest-zap STACK=<name> [REGION=<region>] [ZAP_ACTIVE=1] [TARGETS=graphql,web,mcp])
+ifeq ($(SECTEST_STACK),)
+	$(error Set STACK to the deployed stack to scan. Usage: make stacktest-zap STACK=<name> [REGION=<region>] [ZAP_ACTIVE=1])
+endif
+	@if ! $(PYTHON) -c "import lma_sdk, pycognito, graphql" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: dependencies missing. Run 'make setup-cli-dev' and '$(PIP) install -r integ-tests/requirements.txt'.$(NC)"; \
+		exit 1; \
+	fi
+	$(SECTEST_REGION_ENV) $(PYTHON) scripts/security/zap_scan.py --stack-name "$(SECTEST_STACK)" \
+		$(if $(REGION),--region "$(REGION)") \
+		$(if $(filter 1 true yes,$(ZAP_ACTIVE)),--active) \
+		$(if $(TARGETS),--targets "$(TARGETS)")
+
+# Offline: SRT and the static role checks. With STACK: also stacktest-rbac and a
+# passive stacktest-zap. Every step runs; summary in scratch/security-results/.
+security-results: ## Run the security tests as a set (Usage: make security-results [STACK=<name> REGION=<region>])
+	$(SECTEST_REGION_ENV) $(PYTHON) scripts/security/security_results.py \
+		$(if $(STACK),--stack-name "$(STACK)") $(if $(REGION),--region "$(REGION)")
 
 ##@ Product Demo Recording
 # Narrated demo videos of the web UI: see .claude/skills/product-demo.md. The

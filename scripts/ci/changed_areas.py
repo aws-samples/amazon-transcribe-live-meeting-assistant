@@ -87,6 +87,7 @@ AREAS: dict[str, str] = {
     "config_stacks": "LLM template, chat button and Nova Sonic configuration stacks",
     "test_fixtures": "test-fixtures/ shared by the UI and the Python suites",
     "integ_plumbing": "integration-test machinery (integ-tests/)",
+    "security_tests": "live-stack security test tooling (scripts/security/: ZAP and the results set)",
     "pr_review": "advisory AI review harness (scripts/pr_review)",
     "agent_instructions": "CLAUDE.md, AGENTS.md and .claude/ at any depth (instructions)",
     "docs_site": "the docs site's build: its package files, scripts and Astro config",
@@ -301,6 +302,7 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("lib/**", "sdk_cli"),
     ("test-fixtures/**", "test_fixtures"),
     ("integ-tests/**", "integ_plumbing"),
+    ("scripts/security/**", "security_tests"),
     # --- demo recorder and tooling -------------------------------------------
     ("scripts/ux_recorder*.py", "demo_recorder"),
     ("scripts/ux_test_session.py", "demo_recorder"),
@@ -391,6 +393,11 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts", "integ_plumbing"),
     # ...and import the browser extension probe, which loads the extension's e2e helper.
     ("lma-browser-extension-stack/e2e/extension_browser.py", "integ_plumbing"),
+    # The security tests' helper tests read the recording prefixes the access doc
+    # names, the key-frame resolver's folder rule, and the ignore rule for scratch/.
+    ("docs/user-based-access-control.md", "integ_plumbing"),
+    (f"{FUNCTIONS}/video_keyframes_resolver/index.py", "integ_plumbing"),
+    (".gitignore", "integ_plumbing"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.
     ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's
@@ -530,6 +537,7 @@ STEPS: dict[str, Step] = {
         "python_tooling",
         "solution_profile_check",
         "extension_e2e_python",
+        "security_tests",
     ),
     "sdk_cli": _step(
         "LMA SDK and CLI unit tests", "sdk_cli", "templates", "config_stacks", "test_fixtures"
@@ -569,7 +577,10 @@ STEPS: dict[str, Step] = {
         "python_tooling",
         "docs",
     ),
-    "integ_plumbing": _step("Integration-test plumbing tests", "integ_plumbing", "sdk_cli"),
+    # Also runs the security tooling's tests (scripts/security/tests).
+    "integ_plumbing": _step(
+        "Integration-test plumbing tests", "integ_plumbing", "sdk_cli", "security_tests"
+    ),
     "asr": _step("ASR MicroVM runtime tests", "asr"),
     # It installs lib/lma_sdk, so an SDK change runs it too.
     "load_simulator": _step("Load simulator tests", "load_simulator", "sdk_cli"),
