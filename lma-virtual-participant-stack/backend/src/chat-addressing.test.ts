@@ -230,20 +230,20 @@ test("another VP's own messages are never acted on", () => {
 
 test('another VP is known from a chat sender, and the bare "LMA" then goes unanswered', () => {
     const addressing = new ChatAddressing(() => BOB, () => ['Live Meeting Assistant has left the room.']);
-    assert.equal(addressing.route('LMA help', 'Carol').act, true, 'alone');
-    addressing.route('Hello. I am an AI Live Meeting Assistant (LMA).', ALICE);
+    assert.equal(addressing.route('LMA help', 'Carol', 'everyone').act, true, 'alone');
+    addressing.route('Hello. I am an AI Live Meeting Assistant (LMA).', ALICE, 'everyone');
     assert.deepEqual(addressing.peers(), [ALICE]);
-    assert.equal(addressing.route('LMA help', 'Carol').act, false);
-    assert.equal(addressing.route('LMA Bob help', 'Carol').act, true);
+    assert.equal(addressing.route('LMA help', 'Carol', 'everyone').act, false);
+    assert.equal(addressing.route('LMA Bob help', 'Carol', 'everyone').act, true);
     // Its own name and a person's name are not another VP.
     addressing.notePeer(BOB);
     addressing.notePeer('Carol');
     addressing.notePeer('LMA');
     assert.deepEqual(addressing.peers(), [ALICE]);
     // A VP that posts its exit message has left.
-    addressing.route('Live Meeting Assistant has left the room.', ALICE);
+    addressing.route('Live Meeting Assistant has left the room.', ALICE, 'everyone');
     assert.deepEqual(addressing.peers(), []);
-    assert.equal(addressing.route('LMA help', 'Carol').act, true);
+    assert.equal(addressing.route('LMA help', 'Carol', 'everyone').act, true);
 });
 
 test('a whole participant list, where there is one, decides who is present', () => {
@@ -343,13 +343,13 @@ test('the introduction and the help name this VP against the other VPs known whe
 test('a VP not seen for PEER_TTL_MS stops counting, and the bare "LMA" is answered again', () => {
     let now = 1_000_000;
     const addressing = new ChatAddressing(() => BOB, () => [], () => now);
-    addressing.route('Hello. I am an AI Live Meeting Assistant (LMA).', ALICE);
-    assert.equal(addressing.route('LMA leave', 'Carol').act, false);
+    addressing.route('Hello. I am an AI Live Meeting Assistant (LMA).', ALICE, 'everyone');
+    assert.equal(addressing.route('LMA leave', 'Carol', 'everyone').act, false);
     now += PEER_TTL_MS - 1;
     assert.deepEqual(addressing.peers(), [ALICE]);
     now += 1;
     assert.deepEqual(addressing.peers(), []);
-    assert.equal(addressing.route('LMA leave', 'Carol').act, true);
+    assert.equal(addressing.route('LMA leave', 'Carol', 'everyone').act, true);
 });
 
 test('each sighting of a VP, as a sender, speaker or tile, keeps it counted', () => {
@@ -362,7 +362,7 @@ test('each sighting of a VP, as a sender, speaker or tile, keeps it counted', ()
     }
     assert.deepEqual(addressing.peers(), [ALICE]);
     now += PEER_TTL_MS - 1;
-    addressing.route('Live Meeting Assistant: the answer.', ALICE);
+    addressing.route('Live Meeting Assistant: the answer.', ALICE, 'everyone');
     now += PEER_TTL_MS - 1;
     assert.deepEqual(addressing.peers(), [ALICE], 'its chat message was a sighting');
 });
@@ -387,7 +387,7 @@ test("another deployment's VP is known to leave by the default exit message or i
     const addressing = new ChatAddressing(() => BOB, () => configured);
     addressing.notePeer(ALICE);
     addressing.notePeer(SMITH);
-    addressing.route("Thanks Carol — I'll head out now.", ALICE);
-    addressing.route(DEFAULT_EXIT_MESSAGE, SMITH);
+    addressing.route("Thanks Carol — I'll head out now.", ALICE, 'everyone');
+    addressing.route(DEFAULT_EXIT_MESSAGE, SMITH, 'everyone');
     assert.deepEqual(addressing.peers(), []);
 });

@@ -355,6 +355,7 @@ it then withholds capture until a later read succeeds (see
 [Choosing the mode for one meeting](#choosing-the-mode-for-one-meeting)). In every other mode it posts
 the notice in the meeting chat once it is admitted, records that it did, keeps
 the participant list on the record current, reads replies typed in the chat
+and sent to everyone (see [Replies in the chat](#replies-in-the-chat)),
 and listens for replies said aloud (see [Spoken replies](#spoken-replies)), and
 acts on `CaptureAllowed` in every answer the API gives.
 
@@ -567,6 +568,15 @@ It stops capture in the same way and posts *"An objection for <name> was
 recorded in LMA. …"*.
 
 ### Replies in the chat
+
+Only a message sent to everyone in the meeting is read as a reply. A consent
+or an objection sent privately, to the VP or to anyone else, is not recorded
+or counted, and the VP posts nothing in reply to it. Where the VP cannot read
+who a message was sent to (a Zoom chat shown in a language other than English,
+or a Zoom Meeting SDK message naming no receiver), it does not read it as a
+reply either; reply aloud there, or use the meeting page's Consent section. On
+Webex a message the chat panel marks as private is not read; an unmarked one
+is. See [Only messages sent to everyone](virtual-participant.md#only-messages-sent-to-everyone).
 
 The VP compares a chat message with the phrases as it compares its chat
 commands: case, punctuation and spacing are ignored, phrases match only as
