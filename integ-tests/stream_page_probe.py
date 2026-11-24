@@ -14,7 +14,12 @@ meeting afterwards (test_stream_page_video.py).
 
 The slideshow changes slide every ``SLIDE_SECONDS``, a multiple of the two
 seconds at which the transcriber samples key frames (the page asks its encoder
-for one every 1.8 seconds), so each slide is held for several samples.
+for one every 1.8 seconds), so each slide is held for several samples. Each
+slide is shown for longer than ``KEYFRAME_BUSY_GAP_MS`` (videokeyframes.ts):
+slides that change sooner make the transcriber's key frame detector treat the
+screen as busy, and a busy picture is kept only once it has held still for
+``KEYFRAME_DESKTOP_BUSY_SETTLE_MS``, which a slide shorter than the busy gap,
+sampled every two seconds, does not reliably do.
 
 Chromium runs headed, because the picker flag picks a tab only there (headless,
 the fake picker always gives a synthetic screen); on a machine without a
@@ -32,16 +37,22 @@ from dataclasses import dataclass, field
 
 # The page's route in the web UI (STREAM_AUDIO_PATH in the UI's routes/constants.js).
 STREAM_PAGE_PATH = "/stream"
-SLIDE_SECONDS = 6
+SLIDE_SECONDS = 12
+# Backgrounds whose grey levels are far apart, so each slide differs from every
+# other by more than the key frame detector's per-cell threshold
+# (KEYFRAME_PIXEL_DELTA in videokeyframes.ts).
+SLIDE_COLOURS = ("#ffffff", "#202a6a", "#f0d040", "#c03030")
 SLIDESHOW_TITLE = "LMA slideshow probe"
 SLIDESHOW_HTML = f"""<!doctype html><title>{SLIDESHOW_TITLE}</title>
 <body style="margin:0"><canvas id="c" width="1280" height="720"></canvas><script>
 const g = document.getElementById('c').getContext('2d');
-const colours = ['#ffffff', '#202a6a', '#f0d040', '#1a5a30'];
+const colours = {list(SLIDE_COLOURS)!r};
+const t0 = performance.now();
 let n = 0;
 setInterval(() => {{
   n += 1;
-  const slide = Math.floor(n / ({SLIDE_SECONDS} * 5));
+  // By the clock rather than by ticks, which a background tab may delay.
+  const slide = Math.floor((performance.now() - t0) / ({SLIDE_SECONDS} * 1000));
   g.fillStyle = colours[slide % colours.length]; g.fillRect(0, 0, 1280, 720);
   g.fillStyle = slide % 2 ? '#ffffff' : '#101010'; g.font = 'bold 96px sans-serif';
   g.fillText('Slide ' + (slide + 1), 80, 200);

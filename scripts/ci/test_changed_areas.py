@@ -188,6 +188,17 @@ def test_the_sdk_publish_mapping_runs_the_extension_smoke_test() -> None:
     assert "browser_extension" in ran(["lib/lma_sdk/lma_sdk/_core/publish.py"])
 
 
+def test_the_ui_routes_run_the_integration_plumbing_tests() -> None:
+    # test_ci_plumbing.py holds the Stream page probe's route to STREAM_AUDIO_PATH.
+    assert "integ_plumbing" in ran(["lma-ai-stack/source/ui/src/routes/constants.js"])
+
+
+def test_the_key_frame_sampler_runs_the_integration_plumbing_tests() -> None:
+    # test_ci_plumbing.py holds the Stream page probe's slides to the key frame detector.
+    areas = ran(["lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts"])
+    assert {"integ_plumbing", "transcriber"} <= areas
+
+
 def test_the_cognito_template_runs_the_extension_smoke_test() -> None:
     # The smoke test holds the extension id to the template's sign-in callback.
     assert {"browser_extension", "cfn_lint"} <= ran(
