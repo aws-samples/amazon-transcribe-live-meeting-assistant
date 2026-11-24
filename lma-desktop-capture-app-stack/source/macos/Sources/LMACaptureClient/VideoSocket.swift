@@ -18,6 +18,14 @@ import Foundation
 /// buffered — segments must never be dropped mid-stream (unlike audio, a gap
 /// makes the remainder undecodable). If the outage outlasts the buffer cap we
 /// give up on video for this call (audio is the priority) via onOverflow.
+///
+/// The transcriber answers an accepted START_VIDEO with a VIDEO_STARTED text
+/// frame, which this client reads and ignores. It closes the connection with
+/// code 1008 when it will not take the video: screen video is off for the
+/// deployment (Meeting Recording › Record screen video from streaming
+/// clients, or the EnableVideoRecording stack parameter), or the meeting's
+/// consent stops capture. A 1008 close is final for this meeting: the socket
+/// does not reconnect, and onRefused tells the caller why (audio continues).
 final class VideoSocket: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate {
     private let config: Config
     private var session: URLSession!
@@ -51,6 +59,30 @@ final class VideoSocket: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDe
     /// Fired once if the buffer cap is exceeded during an outage — the caller
     /// should stop video capture for this call (audio continues unaffected).
     var onOverflow: (() -> Void)?
+
+    /// Fired once when the transcriber refuses or stops the video with a 1008
+    /// close, with the message to show; the caller stops video capture for
+    /// this meeting and the audio carries on.
+    var onRefused: ((String) -> Void)?
+    private var refused = false
+
+    /// The close reason the transcriber gives when screen video is off for
+    /// the deployment (VIDEO_NOT_ENABLED_CLOSE in video-admission.ts).
+    static let notEnabledReason = "screen video is not enabled for this client"
+
+    /// What to tell the user when the transcriber closes the video connection,
+    /// or nil for a close that is not a refusal (the socket reconnects).
+    static func refusalMessage(closeCode: Int, reason: String) -> String? {
+        guard closeCode == 1008 else { return nil }
+        if reason == notEnabledReason {
+            return "Screen video is turned off for this LMA deployment, so this meeting records audio only."
+        }
+        if reason.localizedCaseInsensitiveContains("consent") {
+            return "Screen video stopped: the meeting's consent does not allow capture now."
+        }
+        let why = reason.isEmpty ? "" : " (\(reason))"
+        return "The transcriber did not accept the screen video\(why); audio continues."
+    }
 
     init(config: Config) {
         self.config = config
@@ -184,6 +216,8 @@ final class VideoSocket: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDe
             switch result {
             case .failure(let err):
                 if self.intentionalClose { return }
+                // A server close can surface here before the close delegate.
+                if self.handleServerClose(self.task.closeCode.rawValue, self.task.closeReason) { return }
                 FileHandle.standardError.write("video WS receive/closed: \(err)\n".data(using: .utf8)!)
                 self.scheduleReconnect("receive error")
             case .success:
@@ -211,7 +245,21 @@ final class VideoSocket: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDe
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         queue.async { self.isOpen = false }
         if intentionalClose { return }
+        if handleServerClose(closeCode.rawValue, reason) { return }
         scheduleReconnect("server closed \(closeCode.rawValue)")
+    }
+
+    /// A 1008 close from the transcriber: stop for good and say why. True
+    /// when the close was one; the caller then does not reconnect.
+    private func handleServerClose(_ code: Int, _ reasonData: Data?) -> Bool {
+        let reason = reasonData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        guard let message = VideoSocket.refusalMessage(closeCode: code, reason: reason) else { return false }
+        intentionalClose = true
+        if refused { return true }
+        refused = true
+        FileHandle.standardError.write("✗ video refused by the transcriber (\(code) \(reason)) — audio continues\n".data(using: .utf8)!)
+        DispatchQueue.main.async { self.onRefused?(message) }
+        return true
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,

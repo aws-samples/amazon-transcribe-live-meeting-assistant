@@ -218,8 +218,7 @@ AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     make integ-tests STACK=lma-integtest1 LMA_TEST_BROWSER_VIDEO=1
 ```
 
-It turns **Meeting Recording › Record screen video from Stream Audio/Video and
-the browser extension** on and Meeting Consent off, and later to opt-in and
+It turns **Meeting Recording › Record screen video from streaming clients** on and Meeting Consent off, and later to opt-in and
 notify, on the active profile (in a temporary Custom copy of it when the
 active profile is read-only, as `test_meeting_consent.py` does), and puts both
 sections back afterwards. It needs a stack with `EnableVideoRecording=true`; on

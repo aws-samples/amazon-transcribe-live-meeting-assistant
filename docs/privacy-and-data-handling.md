@@ -548,7 +548,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
 | Record meeting audio | On | On | Off | Off | Off | Off |
-| Record screen video from Stream Audio/Video and the browser extension | Off | Off | Off | Off | Off | Off |
+| Record screen video from streaming clients | On | On | Off | Off | Off | On |
 | Add the meeting chat to the transcript | On | On | Off | Off | On | On |
 | Redact personal information | Off | Off | On | On | Off | Off |
 | Model inference geography | Global | Global | Same geography | Same geography | Global | Global |

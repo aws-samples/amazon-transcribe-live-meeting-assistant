@@ -8,9 +8,8 @@ import assert from 'node:assert/strict';
 
 import {
     PendingVideoChunks,
-    isBrowserVideoClient,
     keyframeSourceFor,
-    videoAllowedFor,
+    videoAllowed,
     videoStartedFrame,
 } from './video-admission';
 
@@ -18,31 +17,20 @@ test('an accepted video stream is acknowledged with its callId', () => {
     assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
 });
 
-const ON = { stackRecordsVideo: true, recordBrowserVideo: true };
-const SETTING_OFF = { stackRecordsVideo: true, recordBrowserVideo: false };
-const STACK_OFF = { stackRecordsVideo: false, recordBrowserVideo: true };
+const ON = { stackRecordsVideo: true, recordScreenVideo: true };
+const SETTING_OFF = { stackRecordsVideo: true, recordScreenVideo: false };
+const STACK_OFF = { stackRecordsVideo: false, recordScreenVideo: true };
 
-test('the two browser clients are the ones the Meeting Recording setting governs', () => {
-    assert.equal(isBrowserVideoClient('STREAM_AUDIO'), true);
-    assert.equal(isBrowserVideoClient('BROWSER_EXTENSION'), true);
-    assert.equal(isBrowserVideoClient('DESKTOP_APP'), false);
-    assert.equal(isBrowserVideoClient('API'), false);
-    assert.equal(isBrowserVideoClient(undefined), false);
+test('screen video is recorded only when the stack and the setting both allow it', () => {
+    assert.equal(videoAllowed(ON), true);
+    assert.equal(videoAllowed(SETTING_OFF), false);
+    assert.equal(videoAllowed(STACK_OFF), false);
+    assert.equal(videoAllowed({ stackRecordsVideo: false, recordScreenVideo: false }), false);
 });
 
-test('browser clients send video only when the stack and the setting both allow it', () => {
-    for (const source of ['STREAM_AUDIO', 'BROWSER_EXTENSION'] as const) {
-        assert.equal(videoAllowedFor(source, ON), true, source);
-        assert.equal(videoAllowedFor(source, SETTING_OFF), false, source);
-        assert.equal(videoAllowedFor(source, STACK_OFF), false, source);
-    }
-});
-
-test('the desktop app and the streaming API keep following the stack switch alone', () => {
-    for (const source of ['DESKTOP_APP', 'API', undefined] as const) {
-        assert.equal(videoAllowedFor(source, SETTING_OFF), true, String(source));
-        assert.equal(videoAllowedFor(source, STACK_OFF), false, String(source));
-    }
+test('the rule takes no client type, so every client gets the same answer', () => {
+    // One argument: the switches. A client's declared type cannot reach it.
+    assert.equal(videoAllowed.length, 1);
 });
 
 test('key frames are recorded under the client that streamed the video', () => {

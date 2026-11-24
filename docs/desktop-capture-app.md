@@ -122,9 +122,20 @@ the Screen share tab ([Camera frames](meeting-video.md#camera-frames)).
 
 When screen video is enabled, the one-time consent gate and the live recording
 view both show a **"Screen video is ON"** notice, since screen contents are more
-sensitive than audio alone. Video recording can be disabled deployment-wide with
-the `EnableVideoRecording` CloudFormation parameter (the server then discards any
-video a client sends).
+sensitive than audio alone.
+
+The video is recorded only where the deployment allows it: **Meeting Recording ›
+Record screen video from streaming clients** on the Configuration page must be
+on (it is on by default and in the Standard, Internal meetings and Customer
+account presets, and off in the Team-hosted, Regulated and Regulated notify
+presets), and the `EnableVideoRecording` stack parameter must be `true`. One
+setting controls screen video from every streaming client: this app, the Stream
+Audio/Video page and the browser extension. Where it is off, the transcriber
+refuses the app's video; the app stops the video for that meeting, says
+*"Screen video is turned off for this LMA deployment, so this meeting records
+audio only."* in a notification and in its log, and the audio carries on. The
+app also stops the video, without reconnecting it, when the meeting's consent
+stops capture.
 
 > **Backward compatible.** The video stream is a purely additive, second WebSocket
 > announced by a new `START_VIDEO` message. Clients that don't send it, and

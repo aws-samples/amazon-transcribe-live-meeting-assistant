@@ -1,6 +1,6 @@
 {
   "title": "Customer account",
-  "description": "A starting point for a deployment in the account of the organization whose meetings it records, under that organization's own policies; decide each of these settings with that organization. Consent comes first: Meeting Consent mode Opt-in with the each-participant rule, streaming clients without a consent step are refused, evidence screenshots are kept, and whoever starts a meeting may choose another mode or rule for it. Meeting audio is not recorded unless the organization wants it. Anyone in the meeting may make a request to the meeting assistant, answered from the current meeting only, with no access to the meeting context and checklist. Web search is offered to no request, the meeting page's chat included; the installed MCP servers stay available. New meetings start with no summary profile, so they are summarized with the Transcript Summary prompts; the discovery-session profile can still be chosen per meeting. The transcript is kept, and the meeting chat added to it; personal information is not redacted and Amazon Bedrock models run as chosen (Global inference geography). Every other setting stays as it is. The retention periods (MeetingRecordExpirationInDays, TranscriptionExpirationInDays, AudioRecordingExpirationInDays), EnableVideoRecording, the document knowledge base, AllowedSignUpEmailDomain and LogLevel are stack parameters, set when the stack is deployed or updated as the organization requires. See docs/hosting-models.md.",
+  "description": "A starting point for a deployment in the account of the organization whose meetings it records, under that organization's own policies; decide each of these settings with that organization. Consent comes first: Meeting Consent mode Opt-in with the each-participant rule, streaming clients without a consent step are refused, evidence screenshots are kept, and whoever starts a meeting may choose another mode or rule for it. Meeting audio is not recorded unless the organization wants it; screen video from streaming clients may be recorded, when a user turns it on for a meeting. Anyone in the meeting may make a request to the meeting assistant, answered from the current meeting only, with no access to the meeting context and checklist. Web search is offered to no request, the meeting page's chat included; the installed MCP servers stay available. New meetings start with no summary profile, so they are summarized with the Transcript Summary prompts; the discovery-session profile can still be chosen per meeting. The transcript is kept, and the meeting chat added to it; personal information is not redacted and Amazon Bedrock models run as chosen (Global inference geography). Every other setting stays as it is. The retention periods (MeetingRecordExpirationInDays, TranscriptionExpirationInDays, AudioRecordingExpirationInDays), EnableVideoRecording, the document knowledge base, AllowedSignUpEmailDomain and LogLevel are stack parameters, set when the stack is deployed or updated as the organization requires. See docs/hosting-models.md.",
   "order": 5,
   "sections": {
     "meeting_consent": {
@@ -25,7 +25,7 @@
       "mode": "merge",
       "values": {
         "recordAudio": false,
-        "recordBrowserVideo": false
+        "recordScreenVideo": true
       }
     },
     "virtual_participant": {

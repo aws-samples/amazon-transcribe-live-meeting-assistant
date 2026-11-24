@@ -435,7 +435,7 @@ def test_the_transcriber_task_carries_the_fallback_variable(section, setting, en
 #: The transcriber's own copy of the default of each setting it applies that no
 #: stack parameter backs: (section, setting) -> exported name in session-settings.ts.
 TRANSCRIBER_SHIPPED_FALLBACKS = {
-    ("recording", "recordBrowserVideo"): "RECORD_BROWSER_VIDEO_DEFAULT",
+    ("recording", "recordScreenVideo"): "RECORD_SCREEN_VIDEO_DEFAULT",
 }
 
 

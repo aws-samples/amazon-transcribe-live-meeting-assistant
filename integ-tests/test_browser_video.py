@@ -8,8 +8,7 @@ client would (``clientType`` ``STREAM_AUDIO`` and ``BROWSER_EXTENSION``), over
 the same second connection the Desktop Capture App uses, and checks what the
 stack stored and refused (see browser_video_probe.py):
 
-1. With Meeting Recording › Record screen video from Stream Audio/Video and the
-   browser extension on, the settings answer allows video, and each client's
+1. With Meeting Recording › Record screen video from streaming clients on, the settings answer allows video, and each client's
    meeting gets one key frame per slide under its own ``Source``, a video
    recording and its capture source.
 2. A meeting continued for a second session records each session's video, and
@@ -18,8 +17,9 @@ stack stored and refused (see browser_video_probe.py):
    video; one whose consent is granted does once the grant arrives. With notify,
    an objection closes the video connection and ends the meeting, and the video
    recorded until then is kept.
-4. With the setting off, the settings answer says so and ``START_VIDEO`` from
-   either client is refused while the audio carries on.
+4. With the setting off, the settings answer says so for every client and
+   ``START_VIDEO`` from either browser client and from the desktop app is
+   refused while the audio carries on.
 
 The test changes two deployment-wide settings, Meeting Recording and Meeting
 Consent, through the configuration store, and always puts them back (see
@@ -154,13 +154,13 @@ def config(stack, user):
     consent.had_section = "meeting_consent" in record.body
     consent.saved = dict(record.body.get("meeting_consent") or {}) if consent.had_section else None
     try:
-        recording.apply(recordBrowserVideo=True)
+        recording.apply(recordScreenVideo=True)
         # Off, so legs without a consent step are accepted.
         _set_consent({"consent": consent}, stack, user, mode="off")
         answers = _wait_for_video_allowed(stack, user, True)
         if set(answers.values()) != {True}:
             pytest.fail(
-                f"Record screen video from Stream Audio/Video and the browser extension is on, but the "
+                f"Record screen video from streaming clients is on, but the "
                 f"transcriber reports videoAllowed {answers}: the stack does not record video "
                 "(EnableVideoRecording=false)"
             )
@@ -445,24 +445,24 @@ def setting_off(stack, user, media, config, objected):
     from browser_video_probe import new_call_id
 
     _set_consent(config, stack, user, mode="off")
-    config["recording"].apply(recordBrowserVideo=False)
+    config["recording"].apply(recordScreenVideo=False)
     answers = _wait_for_video_allowed(stack, user, False)
     legs = {
         client_type: _stream(stack, user, media, client_type=client_type, call_id=new_call_id(f"off-{client_type}"),
                              fragments=3)
-        for client_type in ("STREAM_AUDIO", "BROWSER_EXTENSION")
+        for client_type in ("STREAM_AUDIO", "BROWSER_EXTENSION", "DESKTOP_APP")
     }
     time.sleep(15)
     return {"answers": answers, "desktop": _answer(stack, user, "DESKTOP_APP")["videoAllowed"], "legs": legs,
             "frames": {c: _keyframes(stack, leg.call_id) for c, leg in legs.items()}}
 
 
-def test_with_the_setting_off_the_settings_answer_withholds_browser_video(setting_off) -> None:
+def test_with_the_setting_off_the_settings_answer_withholds_video_from_every_client(setting_off) -> None:
     assert setting_off["answers"] == {"STREAM_AUDIO": False, "BROWSER_EXTENSION": False}, setting_off["answers"]
-    assert setting_off["desktop"] is True, "the Desktop Capture App follows the stack parameter alone"
+    assert setting_off["desktop"] is False, "one setting controls screen video from every streaming client"
 
 
-def test_with_the_setting_off_browser_video_is_refused_and_the_audio_carries_on(setting_off) -> None:
+def test_with_the_setting_off_video_is_refused_and_the_audio_carries_on(setting_off) -> None:
     for client_type, leg in setting_off["legs"].items():
         assert leg.video_close_code == 1008 and leg.video_close_reason == NOT_ENABLED, leg.summary()
         assert not any(f.get("event") == "VIDEO_STARTED" for f in leg.video_frames), leg.video_frames

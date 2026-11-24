@@ -24,6 +24,7 @@ import { FastifyBaseLogger } from 'fastify';
 
 import { transcribeOptionsProblem, type ConfigurationStore } from '../config/configuration-store';
 import {
+    RECORD_SCREEN_VIDEO_DEFAULT,
     getSessionSettings,
     isRedactionApplied,
     resetSessionSettingsStore,
@@ -108,16 +109,16 @@ test('the sections win over the environment', async () => {
     assert.equal(settings.recording.recordAudio, false);
 });
 
-test('browser video is off unless the Meeting Recording section saves it on', async () => {
+test('screen video is on unless the Meeting Recording section saves it off', async () => {
     withEnv();
-    assert.equal(sessionSettingsFrom({}, {}).recording.recordBrowserVideo, false);
-    assert.equal(sessionSettingsFrom({}, { recordBrowserVideo: 'true' }).recording.recordBrowserVideo, false);
-    assert.equal(sessionSettingsFrom({}, { recordBrowserVideo: true }).recording.recordBrowserVideo, true);
-    // No stack parameter backs it, so an unreadable table leaves it off.
+    assert.equal(sessionSettingsFrom({}, {}).recording.recordScreenVideo, true);
+    assert.equal(sessionSettingsFrom({}, { recordScreenVideo: 'false' }).recording.recordScreenVideo, true);
+    assert.equal(sessionSettingsFrom({}, { recordScreenVideo: false }).recording.recordScreenVideo, false);
+    // No stack parameter backs it, so an unreadable table leaves the shipped default.
     useSessionSettingsStore(fakeStore('fail').store);
-    assert.equal((await getSessionSettings(log)).recording.recordBrowserVideo, false);
-    useSessionSettingsStore(fakeStore({ transcription: {}, recording: { recordBrowserVideo: true } }).store);
-    assert.equal((await getSessionSettings(log)).recording.recordBrowserVideo, true);
+    assert.equal((await getSessionSettings(log)).recording.recordScreenVideo, RECORD_SCREEN_VIDEO_DEFAULT);
+    useSessionSettingsStore(fakeStore({ transcription: {}, recording: { recordScreenVideo: false } }).store);
+    assert.equal((await getSessionSettings(log)).recording.recordScreenVideo, false);
 });
 
 test('a stored value of the wrong type is passed over for the environment', () => {

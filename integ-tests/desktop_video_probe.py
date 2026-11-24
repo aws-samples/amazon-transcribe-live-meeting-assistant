@@ -329,7 +329,7 @@ async def _stream(ws_ep: str, tokens: dict, call_id: str, agent_id: str, media: 
 
     url = _ws_url(ws_ep, tokens)
     observed: dict = {"audio_state": None, "video_state": None, "video_close": None,
-                      "fragments_sent": 0, "video_bytes": 0}
+                      "video_close_reason": None, "fragments_sent": 0, "video_bytes": 0}
     chunk_ms = 200
     chunk_bytes = SAMPLE_RATE * chunk_ms // 1000 * 4
 
@@ -385,6 +385,7 @@ async def _stream(ws_ep: str, tokens: dict, call_id: str, agent_id: str, media: 
                     # code rather than error out of the fixture.
                     observed["video_state"] = video_ws.state.name
             observed["video_close"] = video_ws.close_code
+            observed["video_close_reason"] = video_ws.close_reason
 
         await asyncio.gather(audio(), video())
         observed["audio_state"] = audio_ws.state.name
@@ -454,7 +455,7 @@ def check_images(s3, frames: list[dict]) -> list[dict]:
 
 
 def run_probe(stack_name: str, region: str | None = None, media: Media | None = None,
-              keyframe_wait_seconds: float = 90.0) -> dict:
+              keyframe_wait_seconds: float = 90.0, call_label: str = "desktop-video-probe") -> dict:
     session = boto3.Session(region_name=region)
     region = session.region_name
     cfn = session.client("cloudformation")
@@ -475,7 +476,7 @@ def run_probe(stack_name: str, region: str | None = None, media: Media | None = 
 
     media = media or build_media(region)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    call_id = f"desktop-video-probe-{stamp}"
+    call_id = f"{call_label}-{stamp}"
     table = _event_sourcing_table(cfn, stack_name)
 
     observed = asyncio.run(_stream(outs["LMAWebsocketEndpoint"], tokens, call_id, username, media))

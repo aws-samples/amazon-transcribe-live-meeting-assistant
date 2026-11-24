@@ -140,15 +140,15 @@ limitations:
     mitigations: [capability:virtual-participant, capability:speaker-attribution]
 
   - id: screen-video-where-turned-on
-    title: Uploads carry no video, and the browser clients record it only where turned on
+    title: Uploads carry no video, and the streaming clients record it only where turned on
     description: >-
       Uploads carry no video, so those meetings have no key frames, slide text or
-      screen-share summary. Stream Audio/Video and the Chrome extension record screen
-      video only where an administrator turns on Meeting Recording › Record screen video
-      from Stream Audio/Video and the browser extension (off by default and in every
-      preset), and then only for meetings whose user switches it on; the extension
-      records only the meeting tab. Their other meetings have no key frames,
-      slide text or screen-share summary.
+      screen-share summary. Stream Audio/Video, the Chrome extension and the Desktop
+      Capture App record screen video only where Meeting Recording › Record screen video
+      from streaming clients is on (on by default; off in the Team-hosted, Regulated and
+      Regulated notify presets), and then only for meetings whose user switches it on;
+      the extension records only the meeting tab. Their other meetings have no key
+      frames, slide text or screen-share summary.
     evidence:
       - docs/meeting-video.md#which-meetings-have-key-frames
     impact: low

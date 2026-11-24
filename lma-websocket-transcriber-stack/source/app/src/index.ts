@@ -65,7 +65,7 @@ import {
     noteStreamingSessionEnded,
     noteStreamingStartNotChecked,
 } from './metrics/session';
-import { getSessionSettings } from './calleventdata/session-settings';
+import { RECORD_SCREEN_VIDEO_DEFAULT, getSessionSettings } from './calleventdata/session-settings';
 import { startTranscriptionEngine } from './calleventdata/engine-start';
 import {
     applySpeakerFieldAliases,
@@ -87,9 +87,8 @@ import {
 import {
     PendingVideoChunks,
     VIDEO_NOT_ENABLED_CLOSE,
-    isBrowserVideoClient,
     keyframeSourceFor,
-    videoAllowedFor,
+    videoAllowed,
     videoStartedFrame,
 } from './video-admission';
 
@@ -1006,19 +1005,18 @@ const onTextMessage = async (
             pendingVideoChunks.drop(ws);
             return;
         }
-        // The Stream Audio/Video page and the browser extension send video only
-        // when the deployment records it and the Meeting Recording setting, as
-        // the meeting's START read it, allows it. Other clients keep the stack
-        // switch alone: with it off, their stream is accepted and discarded.
+        // Every streaming client sends video only when the deployment records
+        // it and Meeting Recording › Record screen video from streaming clients,
+        // as the meeting's START read it, is on. The client type plays no part.
         if (
-            isBrowserVideoClient(audioSession.captureSource) &&
-            !videoAllowedFor(audioSession.captureSource, {
+            !videoAllowed({
                 stackRecordsVideo: videoRecordingEnabled(),
-                recordBrowserVideo: audioSession.sessionSettings?.recording.recordBrowserVideo ?? false,
+                recordScreenVideo:
+                    audioSession.sessionSettings?.recording.recordScreenVideo ?? RECORD_SCREEN_VIDEO_DEFAULT,
             })
         ) {
             server.log.warn(
-                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video is not enabled for ${audioSession.captureSource} on this deployment; refusing video stream.`
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video is not enabled on this deployment; refusing video stream.`
             );
             ws.close(VIDEO_NOT_ENABLED_CLOSE.code, VIDEO_NOT_ENABLED_CLOSE.reason);
             pendingVideoChunks.drop(ws);
@@ -1094,8 +1092,8 @@ const onTextMessage = async (
  * shows), CONSENT_OBJECTION and CONSENT_EVIDENCE (for the meeting this socket
  * started). True when the frame was one of them.
  *
- * The CONSENT_SETTINGS answer also says whether the client the frame names
- * (`clientType`, as in START) may send screen video, so the Stream Audio/Video
+ * The CONSENT_SETTINGS answer also says whether a streaming client may send
+ * screen video (the same answer for every client), so the Stream Audio/Video
  * page and the browser extension offer video only where START_VIDEO would be
  * accepted. A meeting reads the setting again when it starts.
  */
@@ -1114,19 +1112,19 @@ const onConsentFrame = async (
             readConsentSettings(server.log),
             getSessionSettings(server.log),
         ]);
-        const videoAllowed = videoAllowedFor(captureSourceFor(frame['clientType']), {
+        const videoOffered = videoAllowed({
             stackRecordsVideo: videoRecordingEnabled(),
-            recordBrowserVideo: sessionSettings.recording.recordBrowserVideo,
+            recordScreenVideo: sessionSettings.recording.recordScreenVideo,
         });
         sendFrame(
             ws,
             settings
-                ? { ...settingsFrame(settings), videoAllowed }
+                ? { ...settingsFrame(settings), videoAllowed: videoOffered }
                 : {
                     event: 'CONSENT_SETTINGS',
                     available: false,
                     message: 'The meeting consent settings could not be read; try again.',
-                    videoAllowed,
+                    videoAllowed: videoOffered,
                 }
         );
         return true;

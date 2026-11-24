@@ -436,6 +436,14 @@ final class CaptureController {
             self?.stopVideo(sendEnd: false)
             self?.log("Screen video stopped (connection lost); audio unaffected")
         }
+        // The transcriber refused the video (screen video is off for the
+        // deployment) or stopped it for the meeting's consent: stop the video
+        // lane for this meeting, without END_VIDEO, and say why. Audio continues.
+        vSock.onRefused = { [weak self] message in
+            self?.stopVideo(sendEnd: false)
+            self?.log(message)
+            self?.onVideoFallback?(message)
+        }
         videoSocket = vSock
         videoCapture = vCap
         vSock.connect()

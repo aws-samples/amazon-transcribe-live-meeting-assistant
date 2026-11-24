@@ -24,6 +24,14 @@ namespace LMA;
 /// makes the remainder undecodable). If the outage outlasts the buffer cap we
 /// give up on video for this call (audio is the priority) via OnOverflow.
 ///
+/// The transcriber answers an accepted START_VIDEO with a VIDEO_STARTED text
+/// frame, which this client reads and ignores. It closes the connection with
+/// code 1008 when it will not take the video: screen video is off for the
+/// deployment (Meeting Recording › Record screen video from streaming clients,
+/// or the EnableVideoRecording stack parameter), or the meeting's consent stops
+/// capture. A 1008 close is final for this meeting: the socket does not
+/// reconnect, and OnRefused tells the caller why (audio continues).
+///
 /// Ported from macOS VideoSocket.swift.
 /// </summary>
 public sealed class VideoSocket
@@ -65,6 +73,48 @@ public sealed class VideoSocket
     /// call. Audio continues unaffected.
     /// </summary>
     public Action? OnOverflow;
+
+    /// <summary>
+    /// Fired once when the transcriber refuses or stops the video with a 1008
+    /// close, with the message to show; the caller stops video capture for
+    /// this meeting and the audio carries on.
+    /// </summary>
+    public Action<string>? OnRefused;
+    private int _refused;
+
+    /// <summary>
+    /// The close reason the transcriber gives when screen video is off for the
+    /// deployment (VIDEO_NOT_ENABLED_CLOSE in video-admission.ts).
+    /// </summary>
+    public const string NotEnabledReason = "screen video is not enabled for this client";
+
+    /// <summary>
+    /// What to tell the user when the transcriber closes the video connection,
+    /// or null for a close that is not a refusal (the socket reconnects).
+    /// </summary>
+    public static string? RefusalMessage(int? closeCode, string? reason)
+    {
+        if (closeCode != 1008) return null;
+        reason ??= "";
+        if (reason == NotEnabledReason)
+            return "Screen video is turned off for this LMA deployment, so this meeting records audio only.";
+        if (reason.Contains("consent", StringComparison.OrdinalIgnoreCase))
+            return "Screen video stopped: the meeting's consent does not allow capture now.";
+        var why = reason.Length == 0 ? "" : $" ({reason})";
+        return $"The transcriber did not accept the screen video{why}; audio continues.";
+    }
+
+    /// <summary>A 1008 close: stop for good and say why. True when the close was one.</summary>
+    private bool HandleServerClose(int? code, string? reason)
+    {
+        var message = RefusalMessage(code, reason);
+        if (message == null) return false;
+        _intentionalClose = true;
+        if (Interlocked.Exchange(ref _refused, 1) == 1) return true;
+        Console.Error.WriteLine($"✗ video refused by the transcriber ({code} {reason}) — audio continues");
+        OnRefused?.Invoke(message);
+        return true;
+    }
 
     public VideoSocket(Config config)
     {
@@ -263,11 +313,12 @@ public sealed class VideoSocket
                 {
                     lock (_sendLock) { _isOpen = false; }
                     if (_intentionalClose) return;
+                    if (HandleServerClose((int?)ws.CloseStatus, ws.CloseStatusDescription)) return;
                     ScheduleReconnect($"server closed {(int?)ws.CloseStatus}");
                     return;
                 }
-                // The transcriber doesn't send app-level frames back on the
-                // video socket; ignore anything received.
+                // The one text frame the transcriber sends here is
+                // VIDEO_STARTED, which this client does not need; ignore it.
             }
             if (!_intentionalClose)
             {
