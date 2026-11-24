@@ -59,16 +59,20 @@ function Capture() {
   // the user's step for the next meeting, which starts afresh every time.
   const [consentSettings, setConsentSettings] = React.useState<ConsentSettings | null>(null);
   const [consentStep, setConsentStep] = React.useState<ConsentStep>(emptyStep());
+  // The current tokens are read through a ref, so a token refresh (which Start
+  // can make) neither resets the step nor asks for the settings again.
+  const userRef = React.useRef(user);
+  userRef.current = user;
+  const signedIn = Boolean(user?.access_token);
   useEffect(() => {
-    if (isTranscribing || !settings.wssEndpoint || !user?.access_token) return undefined;
+    if (isTranscribing || !settings.wssEndpoint || !signedIn) return undefined;
     let cancelled = false;
-    fetchConsentSettings(transcriberUrl(settings.wssEndpoint, user)).then((answer) => {
+    fetchConsentSettings(transcriberUrl(settings.wssEndpoint, userRef.current)).then((answer) => {
       if (!cancelled) setConsentSettings(answer);
     });
     setConsentStep(emptyStep());
     return () => { cancelled = true; };
-    // The tokens, not the user object: a token refresh at Start must not reset the step.
-  }, [isTranscribing, settings.wssEndpoint, user?.access_token, user?.id_token]);
+  }, [isTranscribing, settings.wssEndpoint, signedIn]);
 
   // The notice as shown and as START records it.
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || topic;
@@ -205,7 +209,7 @@ function Capture() {
       onStepChange={(next) => { setConsentStep(next); setStartError(""); }}
       onPostInChat={() => postInMeetingChat(noticeText)}
       capturing={isTranscribing}
-      status={isTranscribing || captureStopped(consentFrame) ? describeConsentState(consentFrame) : null}
+      status={(isTranscribing || captureStopped(consentFrame)) && consentFrame?.message !== startError ? describeConsentState(consentFrame) : null}
       onObjection={(name) => reportObjection(name)}
     />
   ) : consentSettings?.available === false ? (

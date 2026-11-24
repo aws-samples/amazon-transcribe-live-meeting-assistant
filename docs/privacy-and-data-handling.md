@@ -211,7 +211,7 @@ statement of what any law requires.
 
 Whatever the mode, set **Streaming clients without a consent step** to **Refuse**
 in a deployment where every meeting must go through the consent step, and check
-first that no one relies on the browser extension or the Stream Audio/Video embed.
+first that no one relies on the Stream Audio embed or an older browser extension build.
 
 ## What LMA stores, and for how long
 

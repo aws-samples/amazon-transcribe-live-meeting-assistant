@@ -225,7 +225,8 @@ capabilities:
       the stack outputs, adds a side panel to Zoom, Teams, Chime, Webex and Google Meet
       tabs. It captures the user's microphone and the tab's audio without a bot, and
       reads the platform's participant names and active speaker from the page. Only
-      Chromium browsers are supported, and it has no consent step yet.
+      Chromium browsers are supported. It runs the meeting consent step
+      (docs/browser-extension.md#meeting-consent).
     evidence:
       - docs/browser-extension.md
       - lma-browser-extension-stack/template.yaml

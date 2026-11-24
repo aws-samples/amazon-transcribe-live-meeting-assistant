@@ -65,8 +65,6 @@ export type ConsentStep = {
 
 export const emptyStep = (): ConsentStep => ({ confirmed: false, statement: '', chatPost: 'none' });
 
-/** The codes with which the transcriber refuses a START: no meeting is created. */
-export const START_REFUSALS = new Set(['CONSENT_REQUIRED', 'CONSENT_NOT_CONFIRMED', 'CONSENT_RULE_UNSUPPORTED', 'MEETING_NOT_OWNED']);
 
 /** The notice with its placeholders filled as the server fills them. */
 export const renderNotice = (
