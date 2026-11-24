@@ -165,15 +165,25 @@ def deleted(stack, settings):
 
 
 def _recording_versions(stack, call_id: str) -> list[dict]:
-    """Every version and delete marker of this meeting's recordings: its id, as a file name, begins each."""
+    """Every version and delete marker of this meeting's recordings, by the transcriber's exact names.
+
+    ``<name>.wav`` and ``<name>.raw`` for the audio, ``<name>_<stamp>.mp4`` for
+    the muxed screen video, where ``<name>`` is the meeting id as a file name;
+    the probe's id is unique, and nothing else is matched by a prefix alone.
+    """
     s3 = stack.session.client("s3")
+    name = re.escape(_posix(call_id))
+    stamp = r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z"
+    exact = re.compile(
+        rf"^(lma-audio-recordings/{name}\.(wav|raw)|lma-video-recordings/{name}_{stamp}\.mp4)$"
+    )
     found = []
-    name = _posix(call_id)
-    for prefix in (f"lma-audio-recordings/{name}", f"lma-video-recordings/{name}"):
+    for prefix in (f"lma-audio-recordings/{_posix(call_id)}", f"lma-video-recordings/{_posix(call_id)}"):
         for page in s3.get_paginator("list_object_versions").paginate(
             Bucket=stack.recordings_bucket, Prefix=prefix
         ):
-            found += page.get("Versions", []) + page.get("DeleteMarkers", [])
+            entries = page.get("Versions", []) + page.get("DeleteMarkers", [])
+            found += [e for e in entries if exact.match(e["Key"])]
     return found
 
 

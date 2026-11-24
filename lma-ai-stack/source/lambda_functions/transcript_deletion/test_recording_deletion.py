@@ -327,17 +327,36 @@ def test_a_recording_named_like_the_meetings_but_not_linked_is_kept(aws):
         assert key + ".wav" in aws.s3.versions and key + ".raw" in aws.s3.versions, key
 
 
-def test_links_outside_the_recordings_prefixes_or_the_bucket_are_not_followed(aws):
-    meeting = _meeting(aws)
-    meeting["RecordingUrls"] += [
+def test_an_uploaded_meetings_s3_link_is_followed(aws):
+    # The upload finalizer stores s3://<bucket>/<key>, the key as it is.
+    uploaded = f"lma-audio-recordings/{CALL_ID}.m4a"
+    aws.s3.put(uploaded, count=2)
+    _meeting(aws).update(RecordingUrl=f"s3://{BUCKET}/{uploaded}", RecordingUrls=[])
+    del _meeting(aws)["RecordingUrlSessions"]
+    _scheduled_recordings()
+    assert uploaded not in aws.s3.versions
+    assert "RecordingUrl" not in _meeting(aws)
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
         f"https://another-bucket.s3.us-east-1.amazonaws.com/lma-audio-recordings/{NAME}x.wav",
+        f"s3://another-bucket/lma-audio-recordings/{NAME}x.wav",
         _url(f"lma-video-keyframes/{NAME}/0000001000-a.jpg"),
         _url(f"lma-audio-recordings/nested/{NAME}.wav"),
-    ]
-    aws.s3.put(f"lma-audio-recordings/nested/{NAME}.wav")
-    _scheduled_recordings()
+        "not a link",
+    ],
+)
+def test_a_link_to_no_recording_of_this_deployment_fails_the_run_and_changes_nothing(aws, link):
+    _meeting(aws)["RecordingUrls"].append(link)
+    with pytest.raises(lf.UnresolvedRecordingLink):
+        _scheduled_recordings()
+    # Nothing deleted, the links kept, no deletion recorded: the run is retried.
+    assert len(_recording_keys(aws)) == 6
     assert all(key in aws.s3.versions for key in KEPT)
-    assert f"lma-audio-recordings/nested/{NAME}.wav" in aws.s3.versions
+    assert link in _meeting(aws)["RecordingUrls"]
+    assert "RecordingsDeletedAt" not in _meeting(aws)
 
 
 def test_the_virtual_participants_video_segments_are_deleted(aws):

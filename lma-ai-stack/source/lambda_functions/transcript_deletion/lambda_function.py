@@ -752,23 +752,32 @@ class RecordingLinksKeptChanging(RuntimeError):
     """Recording links kept being added while the recordings were being deleted."""
 
 
+class UnresolvedRecordingLink(RuntimeError):
+    """The meeting links to a recording this function cannot name a key for."""
+
+
 def recording_key_from_url(url: Any, prefix: str) -> Optional[str]:
     """The recordings-bucket key a stored recording link names, or None.
 
-    The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, the key
-    URL-encoded by the Virtual Participant and as it is by the transcriber, as
-    meeting deletion and the meeting archive read them. Only a key in this
-    deployment's bucket, directly under ``prefix``, is returned, so a deletion
-    stays inside that kind of recording.
+    The streaming producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``,
+    the key URL-encoded by the Virtual Participant and as it is by the
+    transcriber; the upload finalizer stores ``s3://<bucket>/<key>``, the key as
+    it is. Only a key in this deployment's bucket, directly under ``prefix``, is
+    returned, so a deletion stays inside that kind of recording.
     """
     if not isinstance(url, str) or not url or not RECORDINGS_BUCKET:
         return None
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not (parsed.hostname or "").startswith(
-        f"{RECORDINGS_BUCKET}.s3."
-    ):
-        return None
-    key = unquote(parsed.path.lstrip("/"))
+    if url.startswith("s3://"):
+        bucket, _, key = url[len("s3://") :].partition("/")
+        if bucket != RECORDINGS_BUCKET:
+            return None
+    else:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not (parsed.hostname or "").startswith(
+            f"{RECORDINGS_BUCKET}.s3."
+        ):
+            return None
+        key = unquote(parsed.path.lstrip("/"))
     name = key[len(prefix) :]
     if not key.startswith(prefix) or not name or "/" in name or name in (".", ".."):
         return None
@@ -790,14 +799,21 @@ def linked_recording_keys(meeting: Dict[str, Any]) -> List[str]:
     """The keys of the recording files the meeting record links to, each once.
 
     A WAV's raw audio, which the transcriber stores beside it under the same
-    name, goes with it.
+    name, goes with it. A link no key can be named for raises
+    UnresolvedRecordingLink before anything is deleted: removing the links
+    would then leave a recording stored with nothing pointing at it, while the
+    meeting says its recordings were deleted. The run fails instead, and is
+    retried and then kept on the dead-letter queue, with the links in place.
     """
     keys: List[str] = []
     for fields, prefix in ((AUDIO_LINKS, AUDIO_PREFIX), (VIDEO_LINKS, VIDEO_PREFIX)):
         for url in _links(meeting, fields):
             key = recording_key_from_url(url, prefix)
             if not key:
-                continue
+                raise UnresolvedRecordingLink(
+                    f"a {fields[0]} link of the meeting names no recording under {prefix} "
+                    "in this deployment's bucket; its links are left in place"
+                )
             siblings = [key, key[: -len(".wav")] + ".raw"] if key.endswith(".wav") else [key]
             keys.extend(k for k in siblings if k not in keys)
     return keys

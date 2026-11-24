@@ -184,6 +184,17 @@ const retentionValue = (retention) => {
 };
 
 const recordingRetentionValue = (retention) => {
+  if (retention.state === 'deleted' && retention.files === 0) {
+    return (
+      <>
+        <div>No recording to delete</div>
+        <Note>
+          The Retention setting &quot;Delete the recordings after the summary&quot; applied, and no recording was stored
+          for this meeting. A recording stored for it later is deleted when it arrives.
+        </Note>
+      </>
+    );
+  }
   if (retention.state === 'deleted') {
     const counts =
       retention.files != null ? ` ${plural(retention.files, 'recording file', 'recording files')} removed.` : '';
@@ -230,7 +241,9 @@ const CaptureContextPanel = ({
   const source = captureSource(item, vp);
   const retention = transcriptRetention(item);
   const recordings = recordingRetention(item);
-  const recordingsDeleted = recordings.state === 'deleted';
+  // A deletion that removed no file says nothing of recordings that never
+  // existed: the rows keep their "Not recorded" or "Off" reason.
+  const recordingsDeleted = recordings.state === 'deleted' && recordings.files !== 0;
   const consent = consentSummary(consentState);
   const videoOff = Boolean(vp) && vp.enableVideoRecording === false;
   const engine = transcriptionEngine(item);

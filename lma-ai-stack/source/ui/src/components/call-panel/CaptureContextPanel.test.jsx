@@ -160,6 +160,17 @@ describe('CaptureContextPanel', () => {
     expect(screen.queryByText('Recorded')).toBeNull();
   });
 
+  it('says a meeting with no recording had nothing to delete, and keeps the reason on each row', () => {
+    renderPanel({
+      item: { ...ITEM, recordingUrl: null, recordingsDeletedAt: '2026-11-03T15:00:00Z', recordingFilesDeleted: 0 },
+      vp: { id: 'vp-1', enableVideoRecording: false },
+    });
+    expect(screen.getByText('No recording to delete')).toBeTruthy();
+    expect(screen.queryByText('None kept: recordings deleted after the summary')).toBeNull();
+    expect(screen.getByText('Not recorded')).toBeTruthy();
+    expect(screen.getByText('Off for this Virtual Participant')).toBeTruthy();
+  });
+
   it('says when recordings are to be deleted, and that they are kept otherwise', () => {
     const { unmount } = renderPanel({ item: { ...ITEM, recordingDeletionScheduledFor: '2026-11-03T15:30:00Z' } });
     expect(screen.getByText(/^To be deleted /)).toBeTruthy();

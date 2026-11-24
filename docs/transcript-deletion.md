@@ -306,7 +306,14 @@ each time it stores a recording link on a meeting; for a meeting whose
 recordings have been deleted, the function then deletes the new recording and
 its link. The deletion removes the links only once it has deleted the files
 they name, and only if no link was added meanwhile: if one was, it reads the
-meeting again and deletes that recording too.
+meeting again and deletes that recording too. A link that names no recording in
+the deployment's recordings bucket fails the deletion before anything is
+removed, so the meeting keeps its links and the failure goes to the
+dead-letter queue described below. The call event processor tells the function
+of every recording link it stores, on every deployment and with the setting
+Off too; for a meeting whose recordings have not been deleted, that costs one
+asynchronous invocation and one read of the meeting record, and changes
+nothing.
 
 Every step is safe to repeat. A deletion that fails is retried: by Lambda for
 an asynchronous invocation, and by EventBridge Scheduler for a schedule, for up
