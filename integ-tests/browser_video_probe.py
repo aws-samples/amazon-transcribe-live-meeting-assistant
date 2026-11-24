@@ -189,6 +189,10 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
                         "videoTimeOffsetMs": int(leg.video_offset_seconds * 1000),
                     }))
                     leg.video_started = True
+                    # The initialization segment goes straight behind START_VIDEO,
+                    # before the server has answered it, as the browser clients
+                    # send the chunks their recorder delivered while connecting.
+                    await video_ws.send(init)
 
                     async def read_frames() -> None:
                         try:
@@ -201,13 +205,10 @@ async def _stream_leg(url: str, start: dict, media: Media, leg: Leg, *, fragment
                     reader = asyncio.create_task(read_frames())
                     for i, frag in enumerate(frags):
                         # A fragment goes out once its two seconds have been
-                        # captured, the init segment with the first, as the
-                        # browser's MediaRecorder delivers them.
+                        # captured, as the browser's MediaRecorder delivers them.
                         delay = video_start + (i + 1) * KEYFRAME_SECONDS - time.monotonic()
                         if delay > 0:
                             await asyncio.sleep(delay)
-                        if i == 0:
-                            await video_ws.send(init)
                         await video_ws.send(frag)
                         leg.fragments_sent += 1
                         if objection_after_fragments is not None and leg.fragments_sent == objection_after_fragments:

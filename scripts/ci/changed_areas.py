@@ -371,6 +371,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-cognito-stack/deployment/lma-cognito-stack.yaml", "browser_extension"),
     # ...and stages the manifest version with the SDK's publish mapping.
     ("lib/lma_sdk/lma_sdk/_core/publish.py", "browser_extension"),
+    # The integration plumbing tests hold the Stream page probe's route to the UI's.
+    (f"{UI}/src/routes/constants.js", "integ_plumbing"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.
     ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's

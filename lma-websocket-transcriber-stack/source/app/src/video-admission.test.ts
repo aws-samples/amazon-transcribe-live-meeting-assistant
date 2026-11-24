@@ -6,7 +6,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isBrowserVideoClient, keyframeSourceFor, videoAllowedFor, videoStartedFrame } from './video-admission';
+import {
+    PendingVideoChunks,
+    isBrowserVideoClient,
+    keyframeSourceFor,
+    videoAllowedFor,
+    videoStartedFrame,
+} from './video-admission';
 
 test('an accepted video stream is acknowledged with its callId', () => {
     assert.deepEqual(videoStartedFrame('Weekly - 1'), { event: 'VIDEO_STARTED', callId: 'Weekly - 1' });
@@ -45,4 +51,41 @@ test('key frames are recorded under the client that streamed the video', () => {
     assert.equal(keyframeSourceFor('DESKTOP_APP'), 'DESKTOP_CAPTURE');
     assert.equal(keyframeSourceFor('API'), 'DESKTOP_CAPTURE');
     assert.equal(keyframeSourceFor(undefined), 'DESKTOP_CAPTURE');
+});
+
+test('chunks behind a START_VIDEO in progress are held and released in arrival order', () => {
+    const pending = new PendingVideoChunks<string>();
+    pending.begin('ws');
+    const init = Uint8Array.of(1, 2, 3);
+    const fragment = Uint8Array.of(4, 5);
+    assert.equal(pending.hold('ws', init), 'held');
+    assert.equal(pending.hold('ws', fragment), 'held');
+    assert.deepEqual(pending.release('ws'), [init, fragment]);
+    assert.equal(pending.hold('ws', fragment), 'no-start');
+    assert.deepEqual(pending.release('ws'), []);
+});
+
+test('a connection with no START_VIDEO in progress holds nothing', () => {
+    const pending = new PendingVideoChunks<string>();
+    assert.equal(pending.hold('ws', Uint8Array.of(1)), 'no-start');
+});
+
+test('held chunks are kept per connection and stop at the byte limit', () => {
+    const pending = new PendingVideoChunks<string>(4);
+    pending.begin('a');
+    pending.begin('b');
+    assert.equal(pending.hold('a', Uint8Array.of(1, 2, 3)), 'held');
+    assert.equal(pending.hold('a', Uint8Array.of(4, 5)), 'full');
+    assert.equal(pending.hold('b', Uint8Array.of(9)), 'held');
+    assert.deepEqual(pending.release('a'), [Uint8Array.of(1, 2, 3)]);
+    assert.deepEqual(pending.release('b'), [Uint8Array.of(9)]);
+});
+
+test('a refused START_VIDEO forgets the chunks held for it', () => {
+    const pending = new PendingVideoChunks<string>();
+    pending.begin('ws');
+    pending.hold('ws', Uint8Array.of(1));
+    pending.drop('ws');
+    assert.deepEqual(pending.release('ws'), []);
+    assert.equal(pending.hold('ws', Uint8Array.of(2)), 'no-start');
 });

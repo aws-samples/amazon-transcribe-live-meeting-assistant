@@ -26,6 +26,7 @@ is the role's trust policy, and the pipeline is what exercises it.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1750,3 +1751,15 @@ def test_an_operators_custom_profile_is_edited_in_place_not_replaced() -> None:
     override.save()
     assert calls == []
     assert override.profile == "custom"
+
+
+def test_the_stream_page_probe_opens_the_route_the_web_ui_serves_the_page_on() -> None:
+    """An unknown route shows the meetings list, so the probe would wait for a toggle that never appears."""
+    import stream_page_probe  # imports playwright only when a run starts
+
+    constants = (
+        Path(__file__).resolve().parents[1] / "lma-ai-stack" / "source" / "ui" / "src" / "routes" / "constants.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"export const STREAM_AUDIO_PATH = '([^']+)';", constants)
+    assert match, "STREAM_AUDIO_PATH is not defined in the UI's routes/constants.js"
+    assert stream_page_probe.STREAM_PAGE_PATH == match.group(1)

@@ -84,7 +84,14 @@ import {
     getVideoSession,
     videoRecordingEnabled,
 } from './videorecording';
-import { VIDEO_NOT_ENABLED_CLOSE, isBrowserVideoClient, keyframeSourceFor, videoAllowedFor, videoStartedFrame } from './video-admission';
+import {
+    PendingVideoChunks,
+    VIDEO_NOT_ENABLED_CLOSE,
+    isBrowserVideoClient,
+    keyframeSourceFor,
+    videoAllowedFor,
+    videoStartedFrame,
+} from './video-admission';
 
 import { ConsentApi, createSignedGraphqlCaller } from './consent/appsync';
 import { decideAtStart, parseClientConsent, settingsFrame } from './consent/rules';
@@ -200,6 +207,8 @@ const recordingStore = s3RecordingStore(s3Client, RECORDINGS_BUCKET_NAME, {
 // Sockets dedicated to a video stream (announced by START_VIDEO). Binary
 // frames on these sockets are fragmented-MP4 chunks, not audio PCM.
 const videoSocketMap = new Map<WebSocket, VideoSession>();
+// Chunks that arrive while their connection's START_VIDEO is still being handled.
+const pendingVideoChunks = new PendingVideoChunks<WebSocket>();
 
 /**
  * The live audio session for a callId, if any. Used to authorize START_VIDEO:
@@ -445,6 +454,17 @@ const onBinaryMessage = async (
         writeVideoChunk(videoSession, data, server);
         return;
     }
+    // Behind a START_VIDEO still being handled: written once it has a session.
+    const held = pendingVideoChunks.hold(ws, data);
+    if (held === 'held') {
+        return;
+    }
+    if (held === 'full') {
+        server.log.error(
+            `[ON BINARY MESSAGE]: [${clientIP}] - Too much video arrived before its START_VIDEO was handled; dropping a chunk.`
+        );
+        return;
+    }
 
     // Held while the connection's START is handled, otherwise written to its
     // session (writeSessionAudio).
@@ -637,6 +657,11 @@ const onTextMessage = async (
         pendingConsentFrames.begin(ws);
         sessions.holdAudio(ws, callMetaData.samplingRate);
     }
+    // ...and the video chunks a client sends right behind START_VIDEO, the
+    // initialization segment first, until the connection has its video session.
+    if (callMetaData.callEvent === 'START_VIDEO') {
+        pendingVideoChunks.begin(ws);
+    }
     if (!match) {
         server.log.error(
             `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. ${describeRequest(
@@ -645,6 +670,7 @@ const onTextMessage = async (
         );
         pendingConsentFrames.drop(ws);
         sessions.dropAudio(ws);
+        pendingVideoChunks.drop(ws);
         return;
     }
 
@@ -941,6 +967,7 @@ const onTextMessage = async (
             server.log.error(
                 `[START_VIDEO]: [${clientIP}] - START_VIDEO missing callId; ignoring.`
             );
+            pendingVideoChunks.drop(ws);
             return;
         }
         // AUTHORIZATION. A video stream is admitted for this callId only when
@@ -955,6 +982,7 @@ const onTextMessage = async (
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - No active audio call for this callId; refusing video stream.`
             );
             ws.close(1008, 'no active call for callId');
+            pendingVideoChunks.drop(ws);
             return;
         }
         if (
@@ -966,6 +994,7 @@ const onTextMessage = async (
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Caller does not own this call; refusing video stream.`
             );
             ws.close(1008, 'not authorized for callId');
+            pendingVideoChunks.drop(ws);
             return;
         }
         bindLogContext({ callId: callMetaData.callId });
@@ -974,6 +1003,7 @@ const onTextMessage = async (
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - The meeting's consent does not allow capture now; refusing video stream.`
             );
             ws.close(CONSENT_CLOSE.code, CONSENT_CLOSE.reason);
+            pendingVideoChunks.drop(ws);
             return;
         }
         // The Stream Audio/Video page and the browser extension send video only
@@ -991,6 +1021,7 @@ const onTextMessage = async (
                 `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Screen video is not enabled for ${audioSession.captureSource} on this deployment; refusing video stream.`
             );
             ws.close(VIDEO_NOT_ENABLED_CLOSE.code, VIDEO_NOT_ENABLED_CLOSE.reason);
+            pendingVideoChunks.drop(ws);
             return;
         }
         // Where the meeting's timeline is now, by the audio received: a video
@@ -1008,6 +1039,11 @@ const onTextMessage = async (
             keyframeSourceFor(audioSession.captureSource)
         );
         videoSocketMap.set(ws, session);
+        // The chunks that arrived while this START_VIDEO was handled, in order,
+        // before any that follow.
+        for (const chunk of pendingVideoChunks.release(ws)) {
+            writeVideoChunk(session, chunk, server);
+        }
         // Tells the client its stream has a session here, so a connection
         // that drops from now on resumes it (docs/websocket-streaming-api.md,
         // "6.1.6 Screen Video"). Clients that read no frames ignore it.
@@ -1263,6 +1299,7 @@ const stopCaptureForConsent = async (ws: WebSocket, socketData: SocketCallData, 
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
     ws.close(code);
     pendingConsentFrames.drop(ws);
+    pendingVideoChunks.drop(ws);
     const videoSession = videoSocketMap.get(ws);
     if (videoSession) {
         // Video socket closed without END_VIDEO (crash / network drop). The
