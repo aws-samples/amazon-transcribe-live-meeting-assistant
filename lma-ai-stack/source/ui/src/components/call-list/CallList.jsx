@@ -45,6 +45,7 @@ const CallList = () => {
   // The label (key=value, or key alone) and audience filters, applied before
   // the text filter.
   const [labelFilter, setLabelFilter] = useState('');
+  const labelProblem = labelFilterProblem(labelFilter);
   const [audienceFilter, setAudienceFilter] = useState(AUDIENCE_FILTER_OPTIONS[0]);
 
   const {
@@ -130,14 +131,14 @@ const CallList = () => {
             filteringPlaceholder="Find meetings"
             countText={getFilterCounterText(filteredItemsCount)}
           />
-          <FormField errorText={labelFilterProblem(labelFilter)}>
+          <FormField errorText={labelProblem}>
             <Input
               type="search"
               value={labelFilter}
               onChange={({ detail }) => setLabelFilter(detail.value)}
               placeholder="Label, e.g. project=acme"
               ariaLabel="Filter meetings by label (key=value)"
-              invalid={Boolean(labelFilterProblem(labelFilter))}
+              invalid={Boolean(labelProblem)}
             />
           </FormField>
           <Select

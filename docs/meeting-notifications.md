@@ -73,13 +73,12 @@ the same feed above the meeting's tabs, in a section that can be folded.
 **The count in the top navigation.** The bell in the top navigation counts the
 notifications that arrived **during the current visit to LMA**, for meetings
 you own or that are shared with you, other than the meeting you have open. Its
-menu lists those meetings by name (by meeting ID until the name is read, or
-for a meeting without one) and links to each. The count is not stored: a
-notification published while you were not using LMA is not counted (it is in
-that meeting's own feed), and the count starts again when the page is reloaded.
-Opening a meeting clears its count. An Admin receives every meeting's
-notifications, as for the meeting list, but the count includes only the
-meetings the Admin owns or that are shared with them.
+menu lists those meetings by their titles, as the meeting page shows them, and
+links to each. The count is not stored: a notification published while you were
+not using LMA is not counted (it is in that meeting's own feed), and the count
+starts again when the page is reloaded. Opening a meeting clears its count. An
+Admin receives every meeting's notifications, as for the meeting list, but the
+count includes only the meetings the Admin owns or that are shared with them.
 
 ## Who sees them
 

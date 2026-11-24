@@ -83,6 +83,13 @@ export const formatElapsed = (seconds) => {
 /** Labels as the editor shows them: one key=value per line. */
 export const labelsToText = (labels) => (labels || []).map(({ Key, Value }) => `${Key}=${Value}`).join('\n');
 
+/** Why `key` is not a label key, or null when it is one. */
+export const labelKeyProblem = (key) =>
+  LABEL_KEY.test(key)
+    ? null
+    : `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
+      'starting with a letter or digit, up to 63 characters';
+
 /**
  * The labels typed as key=value lines, checked as the server checks them.
  * Returns `{ labels, error }`; `error` is null when they can be saved.
@@ -92,13 +99,6 @@ export const labelsToText = (labels) => (labels || []).map(({ Key, Value }) => `
  * case included. A key the server would refuse is refused here, not changed.
  * Only lines holding nothing but spaces are skipped.
  */
-/** Why `key` is not a label key, or null when it is one. */
-export const labelKeyProblem = (key) =>
-  LABEL_KEY.test(key)
-    ? null
-    : `"${key}" is not a label key: use lower-case letters, digits, ".", "_" and "-", ` +
-      'starting with a letter or digit, up to 63 characters';
-
 export const parseLabelsText = (text) => {
   const labels = [];
   const seen = new Set();

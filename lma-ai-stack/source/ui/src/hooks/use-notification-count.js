@@ -8,24 +8,19 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import onMeetingNotification from '../graphql/queries/onMeetingNotification';
 import { isSharedWith } from '../components/common/shared-with';
+import { meetingTitle } from '../components/common/meeting-header';
 
 const logger = new ConsoleLogger('useNotificationCount');
 
 /** The most meetings the count keeps; the one heard from longest ago goes first. */
 export const MAX_MEETINGS = 20;
 
-/** A meeting's name, read once for each meeting in the count. */
-export const GET_MEETING_NAME = /* GraphQL */ `
-  query GetMeetingName($callId: ID!) {
-    getCall(CallId: $callId) {
-      CallId
-      MeetingTopic
-    }
-  }
-`;
-
-/** How the top navigation names a meeting: its name when known, else its CallId. */
-export const meetingLabel = (meeting) => meeting.name || meeting.callId;
+/**
+ * How the top navigation names a meeting: its title as the meeting page shows
+ * it (the Meeting ID without its time stamp; see meetingTitle), read from the
+ * CallId itself, so naming the meetings needs no request.
+ */
+export const meetingLabel = (meeting) => meetingTitle(meeting.callId);
 
 /**
  * Whether a notification counts for this user: on a meeting they own or that is
@@ -94,28 +89,9 @@ const useNotificationCount = ({ username, currentCallId, mutedEverywhere = [], c
     if (currentCallId) clear(currentCallId);
   }, [currentCallId, clear]);
 
-  // Each counted meeting's name, read once; a meeting whose name cannot be read
-  // (or that has none) is shown by its CallId.
-  const [names, setNames] = useState({});
-  const askedRef = useRef(new Set());
-  useEffect(() => {
-    Object.keys(byMeeting)
-      .filter((callId) => !askedRef.current.has(callId))
-      .forEach((callId) => {
-        askedRef.current.add(callId);
-        Promise.resolve()
-          .then(() => clientRef.current.graphql({ query: GET_MEETING_NAME, variables: { callId } }))
-          .then((response) => {
-            const name = response?.data?.getCall?.MeetingTopic;
-            if (name) setNames((current) => ({ ...current, [callId]: name }));
-          })
-          .catch((err) => logger.debug('could not read the meeting name', callId, err));
-      });
-  }, [byMeeting]);
-
   const meetings = Object.entries(byMeeting)
     .sort(([, a], [, b]) => b.last - a.last)
-    .map(([callId, entry]) => ({ callId, name: names[callId] || null, count: entry.ids.length }));
+    .map(([callId, entry]) => ({ callId, count: entry.ids.length }));
   const total = meetings.reduce((sum, meeting) => sum + meeting.count, 0);
   return { total, meetings, clear };
 };
