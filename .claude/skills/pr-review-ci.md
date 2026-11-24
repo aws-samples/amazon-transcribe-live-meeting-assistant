@@ -199,7 +199,7 @@ them on the one thing the reader can get for free:
 | Already run by `code_checks` | Covers |
 |---|---|
 | `make lint-cfn` | cfn-lint over every CloudFormation template |
-| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers, `scripts/pr_review`, `scripts/ci`, the demo recorder (`scripts/ux_recorder*.py`, `scripts/ux_test_session.py`) and `scripts/tests` |
+| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers, `scripts/pr_review`, `scripts/ci`, the demo recorder (`scripts/ux_recorder*.py`, `scripts/ux_test_session.py`), `scripts/tests`, `scripts/solution_profile` and the browser extension's e2e tests (`lma-browser-extension-stack/e2e`); `PYTHON_LINT_PATHS` in the Makefile is the full list |
 | `make lint-ui-force` | ESLint (airbnb-base) + Prettier over the React UI |
 | `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks and `utilities/websocket-client` |
 | `make test-sdk`, `test-cli`, `test-lambdas` | Python unit suites |

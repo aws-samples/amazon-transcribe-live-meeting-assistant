@@ -75,6 +75,10 @@ AREAS: dict[str, str] = {
     "load_simulator": "load simulator and ASR benchmark (utilities/load-simulator)",
     "transcriber": "WebSocket transcriber stack",
     "browser_extension": "browser extension",
+    "extension_e2e_python": (
+        "the browser extension's Python end-to-end tests (lma-browser-extension-stack/e2e), "
+        "which ruff lints"
+    ),
     "desktop_windows": "Desktop Capture App, Windows client",
     "desktop_macos": "Desktop Capture App, macOS client",
     "websocket_client": "utilities/websocket-client sample client",
@@ -272,6 +276,10 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     (f"{ASR}/lambda_functions/**", "lambdas"),
     (f"{ASR}/**", "asr"),
     ("lma-browser-extension-stack/template.yaml", ("browser_extension", "templates")),
+    (
+        "lma-browser-extension-stack/e2e/**/*.py",
+        ("browser_extension", "extension_e2e_python"),
+    ),
     ("lma-browser-extension-stack/**", "browser_extension"),
     ("utilities/websocket-client/**", "websocket_client"),
     # --- templates and configuration stacks ----------------------------------
@@ -371,10 +379,13 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-cognito-stack/deployment/lma-cognito-stack.yaml", "browser_extension"),
     # ...and stages the manifest version with the SDK's publish mapping.
     ("lib/lma_sdk/lma_sdk/_core/publish.py", "browser_extension"),
+    ("lib/lma_sdk/lma_sdk/operations/publish.py", "browser_extension"),
     # The integration plumbing tests hold the Stream page probe's route to the UI's,
     # and its slides to the transcriber's key frame detector.
     (f"{UI}/src/routes/constants.js", "integ_plumbing"),
     ("lma-websocket-transcriber-stack/source/app/src/videokeyframes.ts", "integ_plumbing"),
+    # ...and import the browser extension probe, which loads the extension's e2e helper.
+    ("lma-browser-extension-stack/e2e/extension_browser.py", "integ_plumbing"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.
     ("amazon-quick-desktop-skills-pack/skills/**", "lambdas"),
     # The ASR Lambdas' tests, and the voice-enrollment manager's, read the runtime's
@@ -505,6 +516,7 @@ STEPS: dict[str, Step] = {
         "demo_recorder",
         "python_tooling",
         "solution_profile_check",
+        "extension_e2e_python",
     ),
     "sdk_cli": _step(
         "LMA SDK and CLI unit tests", "sdk_cli", "templates", "config_stacks", "test_fixtures"

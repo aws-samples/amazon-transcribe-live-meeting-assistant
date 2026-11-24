@@ -10,11 +10,16 @@ from lma_sdk._core.publish import (
     STACK_NAMES,
     Publisher,
     check_prerequisites,
+    chrome_extension_version,
 )
 from lma_sdk.models.publish import PublishConfig, PublishResult
 
 if TYPE_CHECKING:
     from lma_sdk.client import LMAClient
+
+# ``chrome_extension_version`` is public: the browser extension's tests stage the
+# extension with the manifest ``version`` a publish writes, and import it from here.
+__all__ = ["PublishOperations", "chrome_extension_version"]
 
 
 class PublishOperations:

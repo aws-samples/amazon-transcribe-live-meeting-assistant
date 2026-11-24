@@ -76,7 +76,8 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/scripts/meeting_guest \
 	$(CURDIR)/scripts/tests \
 	$(CURDIR)/scripts/testing \
-	$(CURDIR)/scripts/solution_profile
+	$(CURDIR)/scripts/solution_profile \
+	$(CURDIR)/lma-browser-extension-stack/e2e
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
