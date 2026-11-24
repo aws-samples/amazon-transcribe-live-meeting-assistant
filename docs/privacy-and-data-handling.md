@@ -422,7 +422,11 @@ Three kinds of copy are outside this parameter:
   recovery on is deleted, DynamoDB keeps a backup of it, a system backup named
   `<table>$DeletedTableBackup`, for 35 days, whatever the recovery period was. This
   applies when the stack is deleted with `EnableDataRetentionOnDelete` set to
-  `false` and when a retained table is deleted afterwards; see
+  `false` and when a retained table is deleted afterwards. A table with
+  point-in-time recovery off gets no system backup: set
+  `MeetingDataPointInTimeRecoveryDays` to `0` in a stack update before deleting
+  the stack, and turn point-in-time recovery off on any other table, or on a
+  table kept after the stack is gone, before deleting it; see
   [Cleanup](cleanup.md#manual-cleanup).
 - **The DynamoDB stream** of the meetings table, which keeps each change for 24
   hours.

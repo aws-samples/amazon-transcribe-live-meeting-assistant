@@ -3,7 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 """The deployed tables' point-in-time recovery matches the stack parameter.
 
-See docs/privacy-and-data-handling.md#copies-that-follow-their-own-lifetime.
+See docs/privacy-and-data-handling.md#point-in-time-recovery-of-the-dynamodb-tables.
 
 Read-only, seconds, runs against any stack:
 
@@ -13,9 +13,10 @@ Read-only, seconds, runs against any stack:
     reports, from ``DescribeContinuousBackups``, point-in-time recovery off when
     ``MeetingDataPointInTimeRecoveryDays`` is 0, and on with that recovery period
     otherwise.
-``test_configuration_tables_keep_a_35_day_window``
-    The AI stack's configuration table keeps point-in-time recovery on for 35
-    days, whatever the parameter says.
+``test_other_tables_keep_a_35_day_window``
+    The AI stack's configuration table, and the voice consent log, Virtual
+    Participant task registry and skills table where the stack has them, keep
+    point-in-time recovery on for 35 days, whatever the parameter says.
 
 Both skip on a stack deployed before the parameter existed.
 """
@@ -32,7 +33,8 @@ CONTENT_TABLES = (
     "TroubleshootingJobsTable",
     "VoiceEnrollmentTable",
 )
-CONFIGURATION_TABLES = ("ConfigurationTable",)
+#: Tables beside the content tables that keep 35 days; checked where the stack has them.
+OTHER_TABLES = ("ConfigurationTable", "VoiceConsentLogTable", "VPTaskRegistry", "SkillsTable")
 
 
 def _stack_resources(cfn, stack: str) -> list[dict]:
@@ -89,9 +91,9 @@ def test_content_tables_point_in_time_recovery_matches_the_parameter(deployment:
             assert pitr.get("RecoveryPeriodInDays") == days, f"{logical_id}: {pitr}"
 
 
-def test_configuration_tables_keep_a_35_day_window(deployment: dict) -> None:
-    for logical_id in CONFIGURATION_TABLES:
-        assert logical_id in deployment["tables"], f"the AI stack has no {logical_id}"
+def test_other_tables_keep_a_35_day_window(deployment: dict) -> None:
+    assert "ConfigurationTable" in deployment["tables"], "the AI stack has no ConfigurationTable"
+    for logical_id in (t for t in OTHER_TABLES if t in deployment["tables"]):
         pitr = _point_in_time_recovery(deployment["dynamodb"], deployment["tables"][logical_id])
         assert pitr["PointInTimeRecoveryStatus"] == "ENABLED", f"{logical_id}: {pitr}"
         assert pitr.get("RecoveryPeriodInDays", 35) == 35, f"{logical_id}: {pitr}"
