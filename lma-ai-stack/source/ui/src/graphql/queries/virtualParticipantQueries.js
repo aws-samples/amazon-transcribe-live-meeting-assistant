@@ -32,6 +32,7 @@ export const listVirtualParticipants = /* GraphQL */ `
       meetingName
       meetingPlatform
       enableVideoRecording
+      videoRecordingOffReason
     }
   }
 `;

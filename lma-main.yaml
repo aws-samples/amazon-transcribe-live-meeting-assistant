@@ -486,9 +486,11 @@ Parameters:
     Description: >-
       Enables meeting video (screen recording) in addition to audio, for BOTH
       video sources: the Virtual Participant and the Desktop Capture App. For the
-      Virtual Participant this is the deployment-wide default and users can
-      override it per meeting with the "Record meeting video" toggle in the LMA
-      UI; for the Desktop Capture App it is a hard on/off (users opt in per
+      Virtual Participant it is a hard on/off too: with "false" no Virtual
+      Participant records video; with "true" the Configuration page's Meeting
+      Recording > Record Virtual Participant meeting video setting and the
+      per-meeting "Record meeting video" toggle in the LMA UI decide; for the
+      Desktop Capture App it is a hard on/off (users opt in per
       machine in the app's Settings, and the server discards video when this is
       false). Video recordings consume additional CPU, ephemeral storage, and S3
       storage. Leaving this at "true" also pins the WebSocket transcriber service

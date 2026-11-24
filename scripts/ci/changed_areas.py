@@ -346,6 +346,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # the VP's.
     (f"{VP}/backend/src/chat-attachments.ts", "lambdas"),
     (f"{FUNCTIONS}/configuration_seeder/defaults/**", ("transcriber", "vp")),
+    # The VP's video recording rule holds its default to the shipped one
+    # (video-recording-rule.test.ts).
+    (f"{LAYERS}/configuration_layer/lma_config/setting_defaults.json", "vp"),
     # The section schemas: read by the transcriber's tests, as above, and by the
     # UI's configuration editor tests, which render every section from its schema
     # and compile its patterns as JavaScript.

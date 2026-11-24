@@ -27,6 +27,12 @@
  * inMeetingRequesters, read by in-meeting-requesters.ts); unless it is anyone,
  * the voice assistant provider is set to none as well.
  *
+ * Whether the meeting's video is recorded (Meeting Recording ›
+ * Record Virtual Participant meeting video) is applied too, as a limit on the
+ * launch's own Record meeting video switch rather than a value copied over it:
+ * see video-recording-rule.ts, which also applies the EnableVideoRecording
+ * stack parameter, on every path, including when the table cannot be read.
+ *
  * Rather than change every place that reads one of these variables, this module
  * reads the three sections and sets each variable the configuration holds a
  * value for, before anything reads it. A variable the configuration does not
@@ -58,6 +64,7 @@ import {
 } from './configuration-store.js';
 import { answersInMeetingRequests, inMeetingRequesters } from './in-meeting-requesters.js';
 import { createLogger } from './logger.js';
+import { applyVideoRecordingRule, videoRecordingNote } from './video-recording-rule.js';
 
 const log = createLogger('stack-settings');
 
@@ -137,6 +144,25 @@ export interface AppliedSettings {
 
 type Sections = Record<string, Record<string, unknown>>;
 
+/**
+ * Applies the video recording rule (video-recording-rule.ts) and records what it
+ * changed. Run with the saved setting, or with none when the configuration
+ * cannot be read, so the deployment's switch applies on every path.
+ */
+const applyVideoRecording = (
+    setting: unknown,
+    env: Record<string, string | undefined>,
+    applied: string[],
+    notes: string[],
+): void => {
+    const outcome = applyVideoRecordingRule(env, typeof setting === 'boolean' ? setting : undefined);
+    const note = videoRecordingNote(outcome);
+    if (note) {
+        applied.push('ENABLE_VIDEO_RECORDING');
+        notes.push(note);
+    }
+};
+
 /** The settings the deploy-time combination check covers; see transcribeOptionsProblem. */
 const COMBINED_SETTINGS: ReadonlySet<string> = new Set([
     'languageCode',
@@ -212,6 +238,12 @@ export const applySections = (sections: Sections, env: Record<string, string | u
         applied.push(CONTENT_REDACTION_REQUESTED_VARIABLE);
     }
 
+    // Whether this Virtual Participant records the meeting's video: the
+    // deployment, then Meeting Recording › Record Virtual Participant meeting
+    // video, then the launch's own switch (video-recording-rule.ts). A setting
+    // that is off overrides what the launch asked for.
+    applyVideoRecording(coerceSetting('boolean', (sections['recording'] ?? {})['recordVpMeetingVideo']), env, applied, notes);
+
     // The voice assistant answers whoever speaks to it, and this Virtual
     // Participant cannot tell the owner from a guest, so unless anyone may make
     // a request in the meeting (inMeetingRequesters) it does not start one.
@@ -238,7 +270,10 @@ export const applyConfiguredSettings = async (
 ): Promise<AppliedSettings> => {
     const tableName = env['CONFIGURATION_TABLE_NAME'] || '';
     if (!tableName && !store) {
-        return { applied: [], notes: ['no configuration table is named'] };
+        const applied: string[] = [];
+        const notes = ['no configuration table is named'];
+        applyVideoRecording(undefined, env, applied, notes);
+        return { applied, notes };
     }
     try {
         const reader =
@@ -269,10 +304,10 @@ export const applyConfiguredSettings = async (
             env,
         );
     } catch (error) {
-        return {
-            applied: [],
-            notes: [`could not read the configuration table; using the values this task started with: ${String(error)}`],
-        };
+        const applied: string[] = [];
+        const notes = [`could not read the configuration table; using the values this task started with: ${String(error)}`];
+        applyVideoRecording(undefined, env, applied, notes);
+        return { applied, notes };
     }
 };
 

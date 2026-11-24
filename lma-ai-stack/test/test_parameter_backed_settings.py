@@ -450,11 +450,26 @@ def test_a_transcriber_fallback_is_the_shipped_default(key) -> None:
     assert json.loads(match.group(1)) == parameters.shipped_setting_defaults()[section][setting]
 
 
+#: The Meeting Recording settings that only the Virtual Participant applies
+#: (stack-settings.ts and the createVirtualParticipant pipeline), not the
+#: transcriber.
+VIRTUAL_PARTICIPANT_ONLY_RECORDING_SETTINGS = {"recordVpMeetingVideo"}
+
+
 def test_every_recording_setting_is_applied_by_the_transcriber() -> None:
-    """Each Meeting Recording setting is a parameter-backed table entry or a pinned fallback."""
+    """Each Meeting Recording setting is a parameter-backed table entry or a pinned fallback,
+    or one of the Virtual Participant's own."""
     applied = {setting for section, setting, *_ in TYPESCRIPT_ENTRIES if section == "recording"}
     applied |= {setting for section, setting in TRANSCRIBER_SHIPPED_FALLBACKS if section == "recording"}
+    applied |= VIRTUAL_PARTICIPANT_ONLY_RECORDING_SETTINGS
     assert applied == set(schema.section_schema("recording")["properties"])
+
+
+def test_the_virtual_participant_reads_its_own_recording_settings() -> None:
+    """Each setting only the Virtual Participant applies is read by stack-settings.ts."""
+    text = (REPO_ROOT / "lma-virtual-participant-stack" / "backend" / "src" / "stack-settings.ts").read_text(encoding="utf-8")
+    for setting in VIRTUAL_PARTICIPANT_ONLY_RECORDING_SETTINGS:
+        assert f"'{setting}'" in text, f"stack-settings.ts does not read recording › {setting}"
 
 
 def test_the_transcriber_task_can_read_the_configuration_table() -> None:

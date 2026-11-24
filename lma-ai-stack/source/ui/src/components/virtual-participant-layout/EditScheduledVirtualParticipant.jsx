@@ -10,6 +10,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { Alert, Box, Button, Checkbox, Form, FormField, Modal, SpaceBetween } from '@cloudscape-design/components';
 
 import useMeetingConsentDefaults from '../../hooks/use-meeting-consent-defaults';
+import useVpVideoRecordingSetting from '../../hooks/use-vp-video-recording-setting';
 import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import VirtualParticipantFormFields from './VirtualParticipantFormFields';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
@@ -84,6 +85,8 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
   }, [visible]);
 
   const consentDefaults = useMeetingConsentDefaults(visible);
+  // Meeting Recording › Record Virtual Participant meeting video, read when the form opens.
+  const videoRecordingAllowed = useVpVideoRecordingSetting(visible);
   // The summary profiles the form offers, read when it opens.
   const summaryProfiles = useSummaryProfiles(visible);
   // A consent choice the platform cannot support, or the deployment would not
@@ -191,6 +194,7 @@ const EditScheduledVirtualParticipant = ({ vp, visible, onDismiss, onSaved, zoom
             consentDefaults={consentDefaults}
             summaryProfiles={summaryProfiles}
             enableVideoRecording={state.enableVideoRecording}
+            videoRecordingAllowed={videoRecordingAllowed}
             onEnableVideoRecordingChange={(checked) => setState((prev) => ({ ...prev, enableVideoRecording: checked }))}
             guidanceChoice={state.guidanceChoice}
             onGuidanceChoiceChange={(value) => setState((prev) => ({ ...prev, guidanceChoice: value }))}

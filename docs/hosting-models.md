@@ -57,8 +57,9 @@ the full table.
 | | Meeting Consent › Streaming clients without a consent step | Refuse the meeting | A client that cannot ask for consent does not capture. |
 | | Meeting Consent › Virtual Participant leaves after an objection | On | An objection ends the Virtual Participant's part in the meeting. |
 | | Meeting Consent › Keep evidence screenshots | On | The consent record keeps the evidence of each reply. |
-| Recordings | Meeting Recording › Record meeting audio | Off | Only the transcript is kept. Meeting video is a stack parameter; see [Settings no preset can set](#settings-no-preset-can-set). |
+| Recordings | Meeting Recording › Record meeting audio | Off | Only the transcript is kept. Whether video can be recorded at all is a stack parameter; see [Settings no preset can set](#settings-no-preset-can-set). |
 | | Meeting Recording › Record screen video from streaming clients | Off | No streaming client (the Stream Audio/Video page, the browser extension or the Desktop Capture App) records screen video. This one setting controls screen video from every streaming client; `EnableVideoRecording`, under [Settings no preset can set](#settings-no-preset-can-set), controls video from every client, the Virtual Participant included. |
+| | Meeting Recording › Record Virtual Participant meeting video | Off | No Virtual Participant records the meeting's video or keeps its key frames, whatever its Record meeting video toggle says; the toggle is shown off and disabled. |
 | | Retention › Delete the transcript after the summary | Off | The transcript is kept for the retention period, 90 days by default. |
 | | Virtual Participant › Add the meeting chat to the transcript | On | The chat is part of the meeting's record and is deleted with it. |
 | In-meeting requests | Meeting Assistant › In-meeting requests: who may ask | Off | No request made in the meeting is answered, and a Virtual Participant does not start its voice assistant. See [Who may ask](#who-may-ask). |
@@ -131,8 +132,9 @@ is one to **decide with the customer**.
 | Meeting Consent › Consent mode, rule | Opt-in, each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
 | Meeting Consent › Allow a different choice per meeting | On | Whether the owner of a meeting may choose another mode or rule for it, such as owner attestation for an internal meeting. |
 | Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the Stream Audio embed and older clients may capture without asking. |
-| Meeting Recording › Record meeting audio | Off | Whether recordings are wanted. Meeting video is the `EnableVideoRecording` stack parameter. |
+| Meeting Recording › Record meeting audio | Off | Whether recordings are wanted. Whether video can be recorded at all is the `EnableVideoRecording` stack parameter. |
 | Meeting Recording › Record screen video from streaming clients | On | Whether users may record the screen, window or tab they share from the Stream Audio/Video page, the browser extension and the Desktop Capture App, where `EnableVideoRecording` is `true`. Each client's own switch is off until its user turns it on. |
+| Meeting Recording › Record Virtual Participant meeting video | On | Whether a Virtual Participant may record the meeting's video, where `EnableVideoRecording` is `true`. Each Virtual Participant's own Record meeting video toggle is on unless its user turns it off. |
 | Retention | Transcript kept for the retention period | The periods their policy requires: the retention stack parameters, and **Retention › Delete the transcript after the summary**. |
 | Knowledge base | Allowed | The document knowledge base holds the customer's own documents; it is chosen with the `MeetingAssistService` stack parameter and its data sources. |
 | Meeting Assistant › Web search | Off | Whether meeting content may be sent to a web search provider. |

@@ -15,7 +15,7 @@ import {
   describeConsent,
   describeMeetingPassword,
   describeStart,
-  describeToggle,
+  describeVideoRecording,
   describeZoomAccount,
   meetingIdLabel,
 } from './launch-settings';
@@ -82,7 +82,7 @@ const LaunchSettings = ({ vp, headerActions = null }) => {
   ];
 
   const captureItems = [
-    { label: 'Video (screen) recording', value: describeToggle(vp.enableVideoRecording) },
+    { label: 'Video (screen) recording', value: describeVideoRecording(vp) },
     { label: 'Live guidance', value: describeGuidance(vp) },
     {
       label: 'Audio recording and transcript',
@@ -137,6 +137,7 @@ LaunchSettings.propTypes = {
     agenda: PropTypes.string,
     agendaSource: PropTypes.string,
     enableVideoRecording: PropTypes.bool,
+    videoRecordingOffReason: PropTypes.string,
     guidanceEnabled: PropTypes.bool,
     consentMode: PropTypes.string,
     consentRule: PropTypes.string,

@@ -70,6 +70,7 @@ const getVirtualParticipant = `
       vncReady
       userAcknowledgedFailure
       enableVideoRecording
+      videoRecordingOffReason
       agenda
       agendaSource
       labels {
