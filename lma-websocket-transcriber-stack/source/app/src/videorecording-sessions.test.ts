@@ -167,3 +167,20 @@ test('a withheld stream leaves the video the meeting already recorded to be uplo
     await video.awaitPendingMuxes(quietServer, 5_000);
     assert.equal(videoEvents(events).length, 1, 'the video recorded before the change is still uploaded');
 });
+
+test('a stream started after a withheld one records, once the setting is back on', async (t) => {
+    const events = stubAws(t);
+    const callId = 'video-session-withheld-then-recorded';
+    const withheld = video.startVideoSession(meta(callId), quietServer, 0, 0, 'DESKTOP_CAPTURE', true);
+    assert.equal(video.getVideoSession(callId), undefined, 'a withheld session is not stored');
+    video.writeVideoChunk(withheld, CHUNK, quietServer);
+    // The setting is turned back on; the client's video reconnects.
+    const recording = video.startVideoSession(meta(callId), quietServer, 0);
+    assert.notEqual(recording, withheld);
+    assert.equal(recording.discarding, false);
+    video.writeVideoChunk(recording, CHUNK, quietServer);
+    await video.endVideoSession(callId, quietServer);
+    video.notifyAudioRecordingDone(callId, undefined, quietServer);
+    await video.awaitPendingMuxes(quietServer, 5_000);
+    assert.equal(videoEvents(events).length, 1, 'the video started after the setting came back on is uploaded');
+});
