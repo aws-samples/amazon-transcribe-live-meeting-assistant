@@ -66,6 +66,19 @@ def test_with_confirm_it_deletes_and_prints_the_count(runner):
     assert "Deleted 2 of 2 meeting(s) from stack LMA-team in us-east-1." in result.output
 
 
+def test_an_aws_error_is_printed_as_one_line_without_a_traceback(runner):
+    from lma_sdk.exceptions import LMAConfigurationError
+
+    client = MagicMock()
+    client.meetings.delete_by_labels.side_effect = LMAConfigurationError(
+        "Could not read the meeting records in T; the caller needs dynamodb:BatchGetItem on it"
+    )
+    result = _run(runner, ["--label", "engagement=acme", "--user-name", "alice"], client)
+    assert result.exit_code == 1
+    assert "dynamodb:BatchGetItem" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_a_failure_is_named_and_the_command_exits_non_zero(runner):
     client = MagicMock()
     client.meetings.delete_by_labels.return_value = _result(

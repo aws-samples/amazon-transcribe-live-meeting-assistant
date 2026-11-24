@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
 
 from lma_sdk.exceptions import (
     LMAAppSyncError,
@@ -448,3 +449,34 @@ class TestRejoin:
         appsync.graphql.return_value = {}
         with pytest.raises(LMAVirtualParticipantError):
             client.vp.rejoin("vp-1")
+
+
+# ── AWS errors ─────────────────────────────────────────────────────────────
+
+
+def _raises(operation):
+    def call(*_args, **_kwargs):
+        raise ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}}, operation
+        )
+
+    return call
+
+
+@pytest.mark.parametrize(
+    "service, method, action",
+    [
+        ("cognito", "admin_list_groups_for_user", "cognito-idp:AdminListGroupsForUser"),
+        ("dynamodb", "query", "dynamodb:Query"),
+        ("dynamodb", "batch_get_item", "dynamodb:BatchGetItem"),
+    ],
+)
+def test_an_aws_error_is_one_line_naming_the_action(client, aws, service, method, action):
+    """A missing permission, a throttle or a wrong user pool is an LMAError, not a traceback."""
+    setattr(getattr(aws, service), method, _raises(method))
+    with pytest.raises(meeting_ops.LMAConfigurationError) as caught:
+        client.meetings.delete_by_labels({"engagement": "acme"}, as_user="alice", confirm=False)
+    message = str(caught.value)
+    assert action in message
+    assert "not authorized" in message
+    assert "\n" not in message

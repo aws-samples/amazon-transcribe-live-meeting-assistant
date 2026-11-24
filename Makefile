@@ -205,6 +205,9 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo "Installing Python lint/dev tools..."
 # aws-sam-translator: lma-ai-stack/test/test_resource_budget.py runs the SAM
 # transform to count the AI stack's resources. cfn-lint no longer installs it.
+# jsonschema: meeting_archive/test_export.py validates the meeting export against
+# docs/schemas/meeting-export-v1.schema.json; listed here so that test does not
+# depend on the SDK's dev extras bringing it in.
 	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
 		aws-sam-translator \
