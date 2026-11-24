@@ -149,13 +149,14 @@ def test_every_table_is_classified(tables):
 
 
 @pytest.mark.parametrize("which", ["main", "ai_stack"])
-def test_parameter_is_a_whole_number_of_days_from_0_to_35_defaulting_to_35(which, request):
+def test_parameter_allows_only_whole_days_from_0_to_35_defaulting_to_35(which, request):
     template = request.getfixturevalue(which)
     parameter = template["Parameters"][PARAMETER]
     assert parameter["Type"] == "Number"
     assert parameter["MinValue"] == 0
     assert parameter["MaxValue"] == 35
     assert parameter["Default"] == 35
+    assert [int(v) for v in parameter["AllowedValues"]] == list(range(36))
 
 
 def test_main_stack_passes_the_parameter_to_the_ai_stack(main):

@@ -723,10 +723,10 @@ Number of days to retain turn by turn meeting transcriptions. Transcriptions wil
 Console label: *Meeting Data Point-in-Time Recovery Days*
 
 - **Default:** `35`
-- **Allowed values:** 0 to 35
+- **Allowed values:** `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `17`, `18`, `19`, `20`, `21`, `22`, `23`, `24`, `25`, `26`, `27`, `28`, `29`, `30`, `31`, `32`, `33`, `34`, `35`
 - **Kind:** Resource. Sets the point-in-time recovery of the tables that hold meeting content: off at 0, otherwise on with that recovery period.
 
-Point-in-time recovery window, in days, of the DynamoDB tables that hold meeting content: the meetings table (meeting records, transcripts, summaries, consent records, notifications, whiteboards and chat attachment items), the Virtual Participant table, the troubleshooting jobs table and the voice enrollment table. 1 to 35 keeps point-in-time recovery on with that recovery period, so an item deleted from these tables can be restored for that many days. 0 turns point-in-time recovery off on them, so a deletion is final and no restorable copy is kept; it also means the tables cannot be restored after an accidental write or deletion. The configuration tables keep a 35-day window. AWS Backup plans and on-demand backups are separate and not changed by this parameter.
+Point-in-time recovery window, in days, of the DynamoDB tables that hold meeting content: the meetings table (meeting records, transcripts, summaries, consent records, notifications, whiteboards and chat attachment items), the Virtual Participant table, the troubleshooting jobs table and the voice enrollment table. 1 to 35 keeps point-in-time recovery on with that recovery period, so an item deleted from these tables can be restored for that many days. 0 turns point-in-time recovery off on them, so a deletion is final and no restorable copy is kept; it also means the tables cannot be restored after an accidental write or deletion. Every other table, including the configuration tables and the voice consent log, keeps a 35-day window. AWS Backup plans and on-demand backups are separate and not changed by this parameter.
 
 ### `AudioRecordingExpirationInDays`
 

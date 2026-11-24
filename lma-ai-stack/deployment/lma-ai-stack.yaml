@@ -257,13 +257,51 @@ Parameters:
     Default: 35
     MinValue: 0
     MaxValue: 35
+    # Listed so that only whole days are accepted; RecoveryPeriodInDays is an integer.
+    AllowedValues:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+      - 17
+      - 18
+      - 19
+      - 20
+      - 21
+      - 22
+      - 23
+      - 24
+      - 25
+      - 26
+      - 27
+      - 28
+      - 29
+      - 30
+      - 31
+      - 32
+      - 33
+      - 34
+      - 35
     ConstraintDescription: A whole number of days from 0 to 35.
     Description: >-
       The point-in-time recovery window, in days, of the tables that hold meeting
       content: the meetings table, the Virtual Participant table, the troubleshooting
       jobs table and the voice enrollment table. 0 turns point-in-time recovery off
       on them, so a deleted item cannot be restored; 1 to 35 keeps it on with that
-      recovery period. The configuration tables keep a 35-day window.
+      recovery period. Every other table keeps a 35-day window.
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
