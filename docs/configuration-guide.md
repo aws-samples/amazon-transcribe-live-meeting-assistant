@@ -458,8 +458,8 @@ spoken replies** is off), on every join, and it leaves the meeting after an
 objection, so nothing is recorded or kept after it. Stream Audio/Video and the Desktop Capture App
 show the notice for the LMA user to share in the meeting and capture from
 Start; an objection takes effect when the user records it with **Participant
-objected**. Clients that show no consent step (the browser extension, the
-Stream Audio/Video embed and Desktop Capture App builds from before the consent step)
+objected**. Clients that show no consent step (the Stream Audio embed, and
+browser extension and Desktop Capture App builds from before the consent step)
 are refused, as under Regulated. See
 [Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 

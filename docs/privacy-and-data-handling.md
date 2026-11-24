@@ -135,7 +135,7 @@ participant consents** and that does not allow a different choice per meeting
 refuses Start from both. See
 [Stream Audio/Video and the Desktop Capture App](meeting-consent.md#stream-audiovideo-and-the-desktop-capture-app).
 
-**Clients without a consent step.** The browser extension, the Stream Audio/Video embed,
+**Clients without a consent step.** The Stream Audio embed, browser extension and
 Desktop Capture App builds from before the consent step, and scripts written
 against the streaming API send no consent step. In Notify or Opt-in the setting
 **Streaming clients without a consent step** decides what happens to their

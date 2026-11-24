@@ -167,7 +167,7 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# started before these fields existed. See
 	# docs/websocket-streaming-api.md#capture-context.
 	# CaptureSource: VIRTUAL_PARTICIPANT, STREAM_AUDIO (the Stream Audio/Video page and
-	# its embeddable component), BROWSER_EXTENSION, DESKTOP_APP, UPLOAD, or API
+	# the Stream Audio embed), BROWSER_EXTENSION, DESKTOP_APP, UPLOAD, or API
 	# (any other client of the streaming API, or one that did not say).
 	CaptureSource: String
 	# TRANSCRIBE (Amazon Transcribe) or MICROVM_ASR (the on-demand ASR MicroVM).

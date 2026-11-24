@@ -377,13 +377,15 @@ limitations:
     mitigations: [extension:recording-policy-and-legal-review]
 
   - id: capture-methods-without-consent-step
-    title: The Chrome extension has no consent step, and streamed consent is the user's word
+    title: The Stream Audio embed has no consent step, and streamed consent is the user's word
     description: >-
-      The Chrome extension does not run the consent flow yet, so its meetings are
-      accepted or refused as the deployment's setting for clients without a consent
-      step says. Stream Audio/Video and the Desktop Capture App cannot see participants, so
-      an opt-in meeting from them is granted on the LMA user's attestation alone, and
-      under the consent-required preset they cannot start a meeting.
+      The Stream Audio embed, and browser extension and Desktop Capture App builds
+      from before the consent step, do not run the consent flow, so their meetings
+      are accepted or refused as the deployment's setting for clients without a
+      consent step says. Stream Audio/Video, the Chrome extension and the Desktop
+      Capture App cannot see participants, so an opt-in meeting from them is granted
+      on the LMA user's attestation alone, and under the consent-required preset
+      they cannot start a meeting.
     evidence:
       - docs/meeting-consent.md#flows-by-capture-method
       - docs/meeting-consent.md#clients-without-a-consent-step

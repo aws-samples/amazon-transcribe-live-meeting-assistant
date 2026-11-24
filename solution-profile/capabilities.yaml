@@ -276,7 +276,8 @@ capabilities:
   - id: embeddable-components
     title: Embeddable transcript, assistant, stream and Virtual Participant views
     description: >-
-      LMA views (Stream Audio/Video, Upload Audio, a meeting's transcript, summary and
+      LMA views (Stream Audio, which streams audio only, Upload Audio, a meeting's
+      transcript, summary and
       assistant, and a Virtual Participant with its live view) can be embedded in
       another web application in an iframe, with a postMessage API and three
       authentication options.
