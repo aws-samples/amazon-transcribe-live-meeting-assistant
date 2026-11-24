@@ -96,10 +96,17 @@ test("the flow's defaults are the ones the configuration seeder ships", () => {
     // And every value was taken from the file, not from the fallback.
     assert.equal(fromShipped.notifyNoticeText, shipped.notifyNoticeText);
     assert.equal(fromShipped.optInNoticeText, shipped.optInNoticeText);
+    assert.equal(fromShipped.videoNoticeText, shipped.videoNoticeText);
     assert.equal(fromShipped.leaveOnObjection, shipped.leaveOnObjection);
 });
 
 test('the Teams handler posts the start messages only when the consent flow has not already started transcription', () => {
     const teams = source('teams.ts');
     assert.match(teams, /if \(details\.start && !transcriptionService\.transcribing\) \{\s+log\.info\(details\.startMessages\[0\]\);/);
+});
+
+test('the consent flow is told whether this VP records video, as index.ts decides', () => {
+    const runtime = source('consent-runtime.ts');
+    assert.match(runtime, /videoRecorded: \(\) => details\.enableVideoRecording && !!details\.recordingsBucketName,/);
+    assert.match(source('index.ts'), /if \(details\.enableVideoRecording && details\.recordingsBucketName\)/);
 });

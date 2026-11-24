@@ -202,6 +202,18 @@ def consent_settings() -> Dict[str, Any]:
     return consent.effective_settings(offered_settings(MEETING_CONSENT.name, values))
 
 
+def with_video_sentence(notice: str, settings: Mapping[str, Any], includes_video: bool) -> str:
+    """The notice, ending with the Meeting Consent video sentence when the meeting's video is recorded.
+
+    The sentence is part of the notice text the record keeps, so the record
+    says that the participants were told the video is recorded.
+    """
+    sentence = str(settings.get("videoNoticeText") or "").strip()
+    if not includes_video or not sentence:
+        return notice
+    return consent.clip(f"{notice} {sentence}", consent.MAX_NOTICE_LENGTH) or notice
+
+
 def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
     """The ``MeetingConsentSettings`` GraphQL shape."""
     return {
@@ -209,6 +221,7 @@ def settings_out(settings: Mapping[str, Any]) -> Dict[str, Any]:
         "Rule": settings["consentRule"],
         "NotifyNoticeText": settings["notifyNoticeText"],
         "OptInNoticeText": settings["optInNoticeText"],
+        "VideoNoticeText": settings["videoNoticeText"],
         "ConsentPhrases": list(settings["consentPhrases"]),
         "ObjectionPhrases": list(settings["objectionPhrases"]),
         "AllowPerMeetingOverride": bool(settings["allowPerMeetingOverride"]),
@@ -599,12 +612,16 @@ def start_meeting_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
                 if mode == consent.MODE_OPT_IN
                 else settings["notifyNoticeText"]
             )
-            notice = consent.render_notice(
-                template,
-                lma_user=consent.clip(data.get("LmaUser"), consent.MAX_NAME_LENGTH) or "",
-                meeting=consent.clip(data.get("MeetingName"), consent.MAX_NAME_LENGTH) or "",
-                consent_phrase=(settings["consentPhrases"] or [""])[0],
-                objection_phrase=(settings["objectionPhrases"] or [""])[0],
+            notice = with_video_sentence(
+                consent.render_notice(
+                    template,
+                    lma_user=consent.clip(data.get("LmaUser"), consent.MAX_NAME_LENGTH) or "",
+                    meeting=consent.clip(data.get("MeetingName"), consent.MAX_NAME_LENGTH) or "",
+                    consent_phrase=(settings["consentPhrases"] or [""])[0],
+                    objection_phrase=(settings["objectionPhrases"] or [""])[0],
+                ),
+                settings,
+                data.get("IncludesVideo") is True,
             )
         started = {
             "Mode": mode,

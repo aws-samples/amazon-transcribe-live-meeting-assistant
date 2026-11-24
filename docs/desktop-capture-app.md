@@ -166,6 +166,10 @@ mode Off, or a transcriber from before this feature, no block is shown.
 
 - **The notice** to share, filled with your microphone label and the meeting
   name: read it out, or press **Copy notice** and paste it into the meeting chat.
+  With **Also record screen video** on, and a deployment that records screen
+  video from streaming clients, it ends with the deployment's video sentence
+  (Meeting Consent › **Video sentence**), and the meeting's consent record keeps
+  the notice with it.
 - **The confirmation**: in Opt-in, *Everyone in the meeting agreed to it being
   recorded and transcribed*, with **how** (out loud, in the meeting chat, or in
   the invitation's terms) and an optional note. In Notify, *I have told everyone

@@ -262,10 +262,13 @@ public sealed class PanelView : Border
     }
 
     /// <summary>The notice for the meeting about to start, as the panel shows it.</summary>
+    // With screen video on, the notice ends with the deployment's video sentence.
     private string ConsentNoticeText =>
         _consentSettings is { Required: true } s
-            ? Consent.RenderNotice(s.NoticeTemplate, EffectiveMicLabel(), _meetingName.Text,
-                s.ConsentPhrase, s.ObjectionPhrase)
+            ? Consent.NoticeWithVideo(
+                Consent.RenderNotice(s.NoticeTemplate, EffectiveMicLabel(), _meetingName.Text,
+                    s.ConsentPhrase, s.ObjectionPhrase),
+                s, AppSettings.VideoEnabled)
             : "";
 
     /// <summary>

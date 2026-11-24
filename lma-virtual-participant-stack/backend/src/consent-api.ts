@@ -65,6 +65,8 @@ export interface StartConsentInput {
     Rule?: string;
     LmaUser?: string;
     MeetingName?: string;
+    /** This VP records the meeting's video: the notice ends with the deployment's video sentence. */
+    IncludesVideo?: boolean;
 }
 
 /** Where a reply was read: typed in the meeting chat, or said aloud and heard. */

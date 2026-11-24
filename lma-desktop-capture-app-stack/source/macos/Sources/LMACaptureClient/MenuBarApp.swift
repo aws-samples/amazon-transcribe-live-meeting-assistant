@@ -264,9 +264,11 @@ final class MenuBarAppState: ObservableObject {
     /// The notice for the meeting about to start, as the panel shows it.
     var consentNoticeText: String {
         guard let settings = consentSettings, settings.required else { return "" }
-        return Consent.renderNotice(settings.noticeTemplate, lmaUser: effectiveMicLabel,
-                                    meeting: meetingName, consentPhrase: settings.consentPhrase,
-                                    objectionPhrase: settings.objectionPhrase)
+        let notice = Consent.renderNotice(settings.noticeTemplate, lmaUser: effectiveMicLabel,
+                                          meeting: meetingName, consentPhrase: settings.consentPhrase,
+                                          objectionPhrase: settings.objectionPhrase)
+        // With screen video on, the notice ends with the deployment's video sentence.
+        return Consent.noticeWithVideo(notice, settings: settings, videoEnabled: videoEnabled)
     }
 
     func copyConsentNotice() {

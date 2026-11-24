@@ -543,6 +543,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | Consent rule (opt-in) | Each participant | Each participant | Each participant | Each participant | Each participant | Each participant |
 | Allow a different choice per meeting | On | On | Off (stricter only) | Off (stricter only) | Off (stricter only) | On |
 | Keep evidence screenshots | On | On | On | On | On | On |
+| Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
 | Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse | Refuse | Refuse |
 | Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |

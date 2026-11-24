@@ -64,7 +64,13 @@ public static class Consent
         string NoticeTemplate,
         string ConsentPhrase,
         string ObjectionPhrase,
-        string Message)
+        string Message,
+        // The sentence the notice gains while screen video is recorded (Meeting
+        // Consent › videoNoticeText); the shipped one from a transcriber that sends none.
+        string VideoNoticeText = DefaultVideoNoticeText,
+        // Whether the transcriber takes screen video from streaming clients; true
+        // from a transcriber that does not say.
+        bool VideoAllowed = true)
     {
         /// <summary>Whether a consent step is needed before Start.</summary>
         public bool Required => Available && Mode != Mode.Off;
@@ -103,6 +109,18 @@ public static class Consent
     /// <summary>The client name sent with START, used in the attestation's statement.</summary>
     public const string ClientName = "the LMA Desktop Capture App";
 
+    /// <summary>The shipped Meeting Consent › videoNoticeText.</summary>
+    public const string DefaultVideoNoticeText =
+        "Video of the meeting, including shared screens and any visible camera feeds, is also recorded.";
+
+    /// <summary>
+    /// The notice as shown and recorded: with the video sentence after it when this
+    /// meeting's screen video is recorded (Also record screen video is on and the
+    /// transcriber takes it). The consent record keeps it.
+    /// </summary>
+    public static string NoticeWithVideo(string notice, Settings settings, bool videoEnabled) =>
+        videoEnabled && settings.VideoAllowed && notice.Length > 0 ? $"{notice} {settings.VideoNoticeText}" : notice;
+
     /// <summary>The consent evidence checker reads at most this many bytes.</summary>
     public const int MaxEvidenceBytes = 3_932_160;
 
@@ -130,7 +148,10 @@ public static class Consent
             NoticeTemplate: Str(o, "noticeTemplate") ?? "",
             ConsentPhrase: Str(o, "consentPhrase") ?? "",
             ObjectionPhrase: Str(o, "objectionPhrase") ?? "",
-            Message: Str(o, "message") ?? "");
+            Message: Str(o, "message") ?? "",
+            VideoNoticeText: string.IsNullOrWhiteSpace(Str(o, "videoNoticeText"))
+                ? DefaultVideoNoticeText : Str(o, "videoNoticeText")!.Trim(),
+            VideoAllowed: Bool(o, "videoAllowed") ?? true);
     }
 
     /// <summary>A CONSENT_STATE frame, or null for anything else.</summary>
@@ -320,6 +341,22 @@ public static class Consent
         Check("state: evidence result keeps capture", (evidence?.StopsCapture ?? true).ToString(), "False");
         Check("state: evidence verdict described", evidence == null ? "null" : Describe(evidence),
             "Evidence screenshot stored; the check was inconclusive.");
+
+        Check("settings: shipped video sentence when none is sent", optIn.VideoNoticeText, DefaultVideoNoticeText);
+        Check("settings: video allowed when the answer does not say", optIn.VideoAllowed.ToString(), "True");
+        var custom = ParseSettings("{\"event\":\"CONSENT_SETTINGS\",\"available\":true,\"mode\":\"notify\","
+            + "\"videoNoticeText\":\"Video too.\",\"videoAllowed\":false}");
+        if (custom == null) { Check("CONSENT_SETTINGS with a video sentence parses", "null", "settings"); return o; }
+        Check("settings: video sentence read", custom.VideoNoticeText, "Video too.");
+        Check("settings: video not allowed read", custom.VideoAllowed.ToString(), "False");
+        Check("notice: no video sentence when the transcriber takes no video",
+            NoticeWithVideo("Recorded.", custom, true), "Recorded.");
+        Check("notice: video sentence while screen video is on",
+            NoticeWithVideo("Recorded.", custom with { VideoAllowed = true }, true), "Recorded. Video too.");
+        Check("notice: no video sentence while screen video is off",
+            NoticeWithVideo("Recorded.", custom with { VideoAllowed = true }, false), "Recorded.");
+        Check("shipped video sentence", DefaultVideoNoticeText,
+            "Video of the meeting, including shared screens and any visible camera feeds, is also recorded.");
 
         Check("notice placeholders filled",
             RenderNotice(optIn.NoticeTemplate, "Ana", "Sync", optIn.ConsentPhrase, optIn.ObjectionPhrase),

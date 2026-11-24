@@ -30,6 +30,14 @@ function Harness({ settings = NOTIFY, capturing = false, onPostInChat = async ()
 }
 
 describe('ConsentPanel', () => {
+  test('marks the notice as copied when Copy is pressed', async () => {
+    Object.assign(navigator, { clipboard: { writeText: jest.fn(async () => undefined) } });
+    const onStep = jest.fn();
+    render(<Harness onStep={onStep} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Copy/ })); });
+    expect(onStep).toHaveBeenLastCalledWith(expect.objectContaining({ noticeCopied: true }));
+  });
+
   test('shows the notice with Copy and Post in meeting chat', () => {
     render(<Harness />);
     expect(screen.getByTestId('consent-notice').textContent).toBe('Ana is recording this meeting.');

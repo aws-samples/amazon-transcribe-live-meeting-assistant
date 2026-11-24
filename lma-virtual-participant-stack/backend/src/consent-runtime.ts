@@ -109,6 +109,8 @@ export const meetingConsent = new MeetingConsentFlow({
         );
     },
     callId: () => kinesisStreamManager.currentCallId,
+    // As index.ts decides whether to start the screen recording.
+    videoRecorded: () => details.enableVideoRecording && !!details.recordingsBucketName,
     lmaUser: details.lmaUser,
     meetingName: details.invite.meetingName,
     ownIdentities: [details.lmaIdentity, details.scribeIdentity, details.scribeName],

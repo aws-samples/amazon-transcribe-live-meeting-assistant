@@ -76,6 +76,8 @@ export interface ConsentSettings {
     rule: ConsentRule;
     notifyNoticeText: string;
     optInNoticeText: string;
+    /** Added to the notice when this VP records the meeting's video (Meeting Consent › videoNoticeText). */
+    videoNoticeText: string;
     consentPhrases: string[];
     objectionPhrases: string[];
     allowPerMeetingOverride: boolean;
@@ -97,6 +99,7 @@ export const DEFAULT_CONSENT_SETTINGS: ConsentSettings = {
     optInNoticeText:
         '{LMA_USER} would like to record and transcribe this meeting ({meeting}) with Live Meeting Assistant. ' +
         'Nothing is recorded or transcribed until everyone has agreed.',
+    videoNoticeText: 'Video of the meeting, including shared screens and any visible camera feeds, is also recorded.',
     consentPhrases: ['I consent', 'I agree', 'I accept'],
     objectionPhrases: [
         'I object',
@@ -131,6 +134,7 @@ export function effectiveConsentSettings(values: Record<string, unknown> | null 
         rule: isConsentRule(v.consentRule) ? v.consentRule : DEFAULT_CONSENT_SETTINGS.rule,
         notifyNoticeText: text('notifyNoticeText', DEFAULT_CONSENT_SETTINGS.notifyNoticeText),
         optInNoticeText: text('optInNoticeText', DEFAULT_CONSENT_SETTINGS.optInNoticeText),
+        videoNoticeText: text('videoNoticeText', DEFAULT_CONSENT_SETTINGS.videoNoticeText).trim(),
         consentPhrases: phrases('consentPhrases', DEFAULT_CONSENT_SETTINGS.consentPhrases),
         objectionPhrases: phrases('objectionPhrases', DEFAULT_CONSENT_SETTINGS.objectionPhrases),
         allowPerMeetingOverride:
@@ -255,6 +259,12 @@ export interface ConsentFlowDeps {
     markJoined?: () => Promise<void>;
     upload: (key: string, body: Buffer) => Promise<void>;
     callId: () => string;
+    /**
+     * Whether this VP records the meeting's video (its Record meeting video
+     * toggle). The notice then ends with the deployment's video sentence, as
+     * posted and as recorded on the meeting's consent record.
+     */
+    videoRecorded?: () => boolean;
     lmaUser: string;
     meetingName: string;
     ownIdentities: string[];
@@ -680,7 +690,13 @@ export class MeetingConsentFlow {
                 requested = { ...this.plan.requested };
             }
             try {
-                const record = await this.api.start({ ...requested, LmaUser: this.deps.lmaUser, MeetingName: this.deps.meetingName });
+                const record = await this.api.start({
+                    ...requested,
+                    LmaUser: this.deps.lmaUser,
+                    MeetingName: this.deps.meetingName,
+                    // Sent only when true, so the input is unchanged for a VP recording no video.
+                    ...(this.recordsVideo() ? { IncludesVideo: true } : {}),
+                });
                 this.started = true;
                 await this.afterStart(record);
                 return true;
@@ -805,15 +821,25 @@ export class MeetingConsentFlow {
         this.stop();
     }
 
-    /** The notice rendered here, for when the API cannot be reached. */
+    private recordsVideo(): boolean {
+        return this.deps.videoRecorded?.() === true;
+    }
+
+    /**
+     * The notice rendered here, for when the API cannot be reached: as the API
+     * renders it, with the video sentence after it when this VP records video.
+     */
     private localNotice(): string {
         const template = this.plan.mode === 'opt_in' ? this.settings.optInNoticeText : this.settings.notifyNoticeText;
-        return renderNotice(template, {
+        const notice = renderNotice(template, {
             lmaUser: this.deps.lmaUser,
             meeting: this.deps.meetingName,
             consentPhrase: this.settings.consentPhrases[0],
             objectionPhrase: this.settings.objectionPhrases[0],
         });
+        return this.recordsVideo() && this.settings.videoNoticeText
+            ? `${notice} ${this.settings.videoNoticeText}`
+            : notice;
     }
 
     /**

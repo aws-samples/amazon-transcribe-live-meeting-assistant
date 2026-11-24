@@ -1354,7 +1354,9 @@ reason=NOT_DOWNLOADABLE)`), never its file name, sender or content.
 When the deployment's consent mode (the Meeting Consent section of the
 Configuration page), or the **Meeting consent** choice made on the Create Virtual
 Participant form, is Notify or Opt-in, the VP posts a notice in the meeting chat
-once it is admitted and reads the replies typed in the chat and, unless the
+once it is admitted (ending with the Meeting Consent **Video sentence** when the
+VP records the meeting's video; see
+[When video is recorded](meeting-consent.md#when-video-is-recorded)) and reads the replies typed in the chat and, unless the
 Meeting Consent setting **Read spoken replies** is off, those said aloud and
 addressed to LMA (*"LMA, I consent"*, *"LMA, I object"*). In
 Notify it records and transcribes from the start, and stops at once when a

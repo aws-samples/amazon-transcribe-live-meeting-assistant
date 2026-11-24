@@ -38,7 +38,7 @@ import { uploadErrorMessage, uploadLanguageLabel } from './upload-language';
 import useTranscriberSocket, { transcriberUrl } from '../../hooks/use-transcriber-socket';
 import { STREAM_AUDIO_CLIENT_TYPE, toStreamingFrame } from '../common/streaming-frame';
 import {
-  SCREEN_VIDEO_NOTICE,
+  noticeWithVideo,
   VIDEO_CONSTRAINTS,
   WHOLE_SCREEN_WARNING,
   describeSurface,
@@ -240,6 +240,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // meeting. `videoState.status` is off, waiting (for an opt-in meeting's
   // consent), on, stopped (by the user) or failed (stopped on its own).
   const [videoEnabled, setVideoEnabled] = useState(false);
+  // Whether the consent notice has been copied for this meeting (see videoSwitchLocked).
+  const [noticeCopied, setNoticeCopied] = useState(false);
   const [videoState, setVideoState] = useState({ status: 'off', surface: null, message: '', slowGap: null });
   const screenVideoRef = useRef(null);
   // The meeting whose video waits for its consent to be granted.
@@ -479,6 +481,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const resetConsentStep = () => {
     setConsentStep({ confirmed: false, method: '', statement: '' });
     setConsentEvidence({ dataUrl: '', capturing: false, error: '' });
+    setNoticeCopied(false);
   };
 
   const stopRecording = async () => {
@@ -567,16 +570,30 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || meetingTopic;
 
   // The notice the consent step shows, as START records it: with screen video
-  // on, it says so in a fixed sentence, which the consent record then keeps
-  // with the notice.
+  // on, it ends with the deployment's video sentence (Meeting Consent ›
+  // videoNoticeText), which the consent record then keeps with the notice.
   const noticeText = consentRequired(consentSettings)
-    ? `${renderNotice(consentSettings.noticeTemplate, {
-        lmaUser: callMetaData.agentId,
-        meeting: consentMeetingName,
-        consentPhrase: consentSettings.consentPhrase,
-        objectionPhrase: consentSettings.objectionPhrase,
-      })}${videoOn ? ` ${SCREEN_VIDEO_NOTICE}` : ''}`
+    ? noticeWithVideo(
+        renderNotice(consentSettings.noticeTemplate, {
+          lmaUser: callMetaData.agentId,
+          meeting: consentMeetingName,
+          consentPhrase: consentSettings.consentPhrase,
+          objectionPhrase: consentSettings.objectionPhrase,
+        }),
+        consentSettings,
+        videoOn,
+      )
     : '';
+  // Once the notice has been copied, or the user has confirmed it was given,
+  // the video switch stays as it is: the notice shared in the meeting says
+  // whether the screen is recorded, and START records that same notice.
+  const videoSwitchLocked = consentRequired(consentSettings) && (noticeCopied || consentStep.confirmed);
+  let videoSwitchHint;
+  if (!videoMimeType) {
+    videoSwitchHint = 'This browser cannot record screen video in the format LMA needs.';
+  } else if (videoSwitchLocked) {
+    videoSwitchHint = 'Fixed once the notice is copied or confirmed: the notice says whether the screen is recorded.';
+  }
 
   const startRecording = async () => {
     console.log(`
@@ -1150,15 +1167,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                       'Also record the tab, window or screen you share as video, with the meeting. Its slides ' +
                       'appear on the meeting page. Off at the start of every meeting.'
                     }
-                    constraintText={
-                      videoMimeType ? undefined : 'This browser cannot record screen video in the format LMA needs.'
-                    }
+                    constraintText={videoSwitchHint}
                     stretch
                   >
                     <Toggle
                       checked={videoEnabled}
                       onChange={({ detail }) => setVideoEnabled(detail.checked)}
-                      disabled={recording || !videoMimeType}
+                      disabled={recording || !videoMimeType || videoSwitchLocked}
                     >
                       Also record screen video
                     </Toggle>
@@ -1319,6 +1334,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
               <ConsentStep
                 settings={consentSettings}
                 noticeText={noticeText}
+                onNoticeCopied={() => setNoticeCopied(true)}
                 step={consentStep}
                 onStepChange={(next) => {
                   setConsentStep(next);

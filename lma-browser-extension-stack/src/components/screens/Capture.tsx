@@ -19,7 +19,7 @@ import { nameFromIdToken } from '../../lib/identity';
 import { prefillField } from '../../lib/capture';
 import { INVALID_MEETING_ID, meetingIdFrom } from '../../lib/continue-meeting';
 import ConsentPanel from '../views/ConsentPanel';
-import { SCREEN_VIDEO_NOTICE } from '../../lib/screen-video';
+import { noticeWithVideo } from '../../lib/screen-video';
 import {
   ConsentSettings,
   ConsentStep,
@@ -28,7 +28,7 @@ import {
   consentRequired,
   describeConsentState,
   emptyStep,
-  noticePosted,
+  noticeShared,
   fetchConsentSettings,
   renderNotice,
   startBlockedReason,
@@ -88,17 +88,19 @@ function Capture() {
   const videoAllowed = consentSettings?.videoAllowed === true;
   const videoOn = videoAllowed && videoEnabled;
 
-  // The notice as shown and as START records it: with screen video on, it says
-  // so in a fixed sentence, which the consent record keeps with the notice.
+  // The notice as shown and as START records it: with screen video on, it ends
+  // with the deployment's video sentence (Meeting Consent › videoNoticeText),
+  // which the consent record keeps with the notice.
   const consentMeetingName = (continuing && meetingIdFrom(continueInput)) || topic;
   const noticeText = consentRequired(consentSettings)
-    ? renderNotice(consentSettings?.noticeTemplate, {
+    ? noticeWithVideo(renderNotice(consentSettings?.noticeTemplate, {
       lmaUser: agentName,
       meeting: consentMeetingName,
       consentPhrase: consentSettings?.consentPhrase,
       objectionPhrase: consentSettings?.objectionPhrase,
-    }) + (videoOn ? ` ${SCREEN_VIDEO_NOTICE}` : '')
+    }), consentSettings, videoOn)
     : '';
+  const videoSwitchLocked = consentRequired(consentSettings) && noticeShared(consentStep);
 
   // componentDidMount:
   useEffect(() => {
@@ -372,13 +374,13 @@ function Capture() {
                   stretch={true}
                   label="Screen video:"
                   description="Also record the shared tab as video, with the meeting. Its slides appear on the meeting page. Only a browser tab (the meeting tab is offered first) is recorded. Off at the start of every meeting."
-                  constraintText={noticePosted(consentStep) ? 'Fixed once the notice is posted in the chat, which says whether the screen is recorded.' : undefined}
+                  constraintText={videoSwitchLocked ? 'Fixed once the notice is copied, posted or confirmed: the notice says whether the screen is recorded.' : undefined}
                 >
                   <Toggle
                     checked={videoEnabled}
                     onChange={({ detail }) => setVideoEnabled(detail.checked)}
-                    // The notice already posted says whether the screen is recorded.
-                    disabled={noticePosted(consentStep)}
+                    // The notice already shared says whether the screen is recorded.
+                    disabled={videoSwitchLocked}
                   >
                     Also record screen video
                   </Toggle>

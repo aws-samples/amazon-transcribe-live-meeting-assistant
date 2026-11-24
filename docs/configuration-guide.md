@@ -410,6 +410,7 @@ The presets, by id:
 | Meeting Consent › Consent rule (opt-in) | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents | Each participant consents |
 | Meeting Consent › Allow a different choice per meeting | On | On | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | Off (a meeting may only use this mode or a stricter one) | On |
 | Meeting Consent › Keep evidence screenshots | On | On | On | On | On | On |
+| Meeting Consent › Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
 | Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting |
 | Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off |

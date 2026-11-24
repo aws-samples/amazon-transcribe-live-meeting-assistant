@@ -49,6 +49,13 @@ enum Consent {
         var objectionPhrase: String
         /// Why the settings are unavailable, when they are.
         var message: String
+        /// The sentence the notice gains while screen video is recorded
+        /// (Meeting Consent › videoNoticeText); the shipped one from a
+        /// transcriber that sends none.
+        var videoNoticeText: String = Consent.defaultVideoNoticeText
+        /// Whether the transcriber takes screen video from streaming clients;
+        /// true from a transcriber that does not say.
+        var videoAllowed: Bool = true
 
         /// Whether a consent step is needed before Start.
         var required: Bool { available && mode != .off }
@@ -93,6 +100,10 @@ enum Consent {
     /// The client name sent with START, used in the attestation's statement.
     static let clientName = "the LMA Desktop Capture App"
 
+    /// The shipped Meeting Consent › videoNoticeText.
+    static let defaultVideoNoticeText =
+        "Video of the meeting, including shared screens and any visible camera feeds, is also recorded."
+
     /// The consent evidence checker reads at most this many bytes.
     static let maxEvidenceBytes = 3_932_160
 
@@ -114,7 +125,12 @@ enum Consent {
                 noticeTemplate: obj["noticeTemplate"] as? String ?? "",
                 consentPhrase: obj["consentPhrase"] as? String ?? "",
                 objectionPhrase: obj["objectionPhrase"] as? String ?? "",
-                message: obj["message"] as? String ?? ""))
+                message: obj["message"] as? String ?? "",
+                videoNoticeText: {
+                    let text = (obj["videoNoticeText"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return text.isEmpty ? Consent.defaultVideoNoticeText : text
+                }(),
+                videoAllowed: obj["videoAllowed"] as? Bool ?? true))
         case "CONSENT_STATE":
             let evidence = obj["evidence"] as? [String: Any]
             return .state(State(
@@ -156,6 +172,14 @@ enum Consent {
             out.append(rest.removeFirst())
         }
         return String(out.prefix(2000))
+    }
+
+    /// The notice as shown and recorded: with the video sentence after it when
+    /// this meeting's screen video is recorded (the app's Also record screen
+    /// video is on and the transcriber takes it). The consent record keeps it.
+    static func noticeWithVideo(_ notice: String, settings: Settings, videoEnabled: Bool) -> String {
+        guard videoEnabled, settings.videoAllowed, !notice.isEmpty else { return notice }
+        return "\(notice) \(settings.videoNoticeText)"
     }
 
     /// Why Start must wait, or nil when it may go ahead. Opt-in needs the

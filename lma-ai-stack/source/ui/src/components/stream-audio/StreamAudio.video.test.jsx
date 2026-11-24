@@ -48,7 +48,7 @@ vi.mock('../../contexts/settings', () => ({
 // eslint-disable-next-line import/first
 import StreamAudio from './StreamAudio';
 // eslint-disable-next-line import/first
-import { SCREEN_VIDEO_NOTICE, VIDEO_CONSTRAINTS } from './screen-video';
+import { DEFAULT_VIDEO_NOTICE_TEXT, VIDEO_CONSTRAINTS } from './screen-video';
 
 const node = () => ({ connect: vi.fn(), disconnect: vi.fn() });
 
@@ -229,15 +229,62 @@ describe('StreamAudio screen video', () => {
     expect(screen.getByRole('button', { name: 'Stop Streaming' })).toBeTruthy();
   });
 
-  it('says in the consent notice that the screen is recorded, and records it with the notice', async () => {
+  it("ends the consent notice with the deployment's video sentence, and records it with the notice", async () => {
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    serverSays({
+      ...SETTINGS,
+      mode: 'notify',
+      rule: null,
+      supported: true,
+      noticeTemplate: 'Recorded.',
+      videoNoticeText: 'Video too.',
+    });
+    expect(screen.getByTestId('consent-notice').textContent).toBe('Recorded.');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Also record screen video/ }));
+    expect(screen.getByTestId('consent-notice').textContent).toBe('Recorded. Video too.');
+    const start = await startStreaming();
+    expect(start.consent.noticeText).toBe('Recorded. Video too.');
+  });
+
+  it('uses the shipped video sentence when the transcriber sends none', async () => {
     render(<StreamAudio mode="stream" />);
     openSocket();
     serverSays({ ...SETTINGS, mode: 'notify', rule: null, supported: true, noticeTemplate: 'Recorded.' });
-    expect(screen.getByTestId('consent-notice').textContent).toBe('Recorded.');
     fireEvent.click(screen.getByRole('checkbox', { name: /Also record screen video/ }));
-    expect(screen.getByTestId('consent-notice').textContent).toBe(`Recorded. ${SCREEN_VIDEO_NOTICE}`);
+    expect(screen.getByTestId('consent-notice').textContent).toBe(`Recorded. ${DEFAULT_VIDEO_NOTICE_TEXT}`);
+  });
+
+  it('keeps the video switch as it is once the notice has been copied', async () => {
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    serverSays({ ...SETTINGS, mode: 'notify', rule: null, supported: true, noticeTemplate: 'Recorded.' });
+    const toggle = () => screen.getByRole('checkbox', { name: /Also record screen video/ });
+    fireEvent.click(toggle());
+    expect(toggle().disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('consent-notice-copy').querySelector('button'));
+    expect(toggle().disabled).toBe(true);
+    expect(toggle().checked).toBe(true);
+    expect(screen.getByText(/Fixed once the notice is copied or confirmed/)).toBeTruthy();
     const start = await startStreaming();
-    expect(start.consent.noticeText).toBe(`Recorded. ${SCREEN_VIDEO_NOTICE}`);
+    expect(start.consent.noticeText).toBe(`Recorded. ${DEFAULT_VIDEO_NOTICE_TEXT}`);
+  });
+
+  it('keeps the video switch as it is once the notice is confirmed as given', () => {
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    serverSays({ ...SETTINGS, mode: 'notify', rule: null, supported: true, noticeTemplate: 'Recorded.' });
+    fireEvent.click(screen.getByRole('checkbox', { name: /I have told everyone in the meeting/ }));
+    const toggle = screen.getByRole('checkbox', { name: /Also record screen video/ });
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('leaves the video switch free when the deployment shows no consent step', () => {
+    render(<StreamAudio mode="stream" />);
+    openSocket();
+    serverSays(SETTINGS);
+    expect(screen.getByRole('checkbox', { name: /Also record screen video/ }).disabled).toBe(false);
   });
 
   it("starts an opt-in meeting's video only once its consent is granted", async () => {

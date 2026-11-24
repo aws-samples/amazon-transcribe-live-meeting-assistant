@@ -237,6 +237,16 @@ def test_the_settings_answer_allows_video_from_both_browser_clients(stack, user,
         assert _answer(stack, user, client_type)["videoAllowed"] is True, client_type
 
 
+def test_the_settings_answer_carries_the_video_sentence(stack, user, config) -> None:
+    """Meeting Consent › videoNoticeText, which a client adds to its notice while video is on."""
+    for client_type in ("STREAM_AUDIO", "BROWSER_EXTENSION", "DESKTOP_APP"):
+        sentence = _answer(stack, user, client_type).get("videoNoticeText")
+        assert isinstance(sentence, str) and sentence.strip(), (
+            f"{client_type}: the settings answer has no videoNoticeText ({sentence!r}); deploy a "
+            "transcriber that sends it"
+        )
+
+
 @pytest.fixture(scope="module")
 def stream_page(stack, user, media, config):
     from browser_video_probe import expected_timestamps, new_call_id
@@ -389,16 +399,25 @@ def objected(stack, user, media, config, granted):
     from meeting_consent_probe import read_meeting, wait_for
 
     _set_consent(config, stack, user, mode="notify")
+    # With video on, a client ends its notice with the deployment's video sentence.
+    sentence = _answer(stack, user, "BROWSER_EXTENSION").get("videoNoticeText") or ""
     leg = _stream(stack, user, media, client_type="BROWSER_EXTENSION", call_id=new_call_id("objected"),
                   fragments=TWO_SLIDES + 4, objection_after_fragments=TWO_SLIDES,
-                  consent={"mode": "notify", "confirmed": True, "method": "chat", "noticeText": NOTICE,
+                  consent={"mode": "notify", "confirmed": True, "method": "chat",
+                           "noticeText": f"{NOTICE} {sentence}".strip(),
                            "client": "LMA integration test"})
     meeting = wait_for(
         lambda: (m := read_meeting(stack, leg.call_id) or {}) and m.get("Status") == "ENDED"
         and m.get("VideoRecordingUrl") and m,
         timeout=150,
     ) or read_meeting(stack, leg.call_id) or {}
-    return {"leg": leg, "meeting": meeting}
+    return {"leg": leg, "meeting": meeting, "sentence": sentence}
+
+
+def test_the_consent_record_keeps_the_notice_with_the_video_sentence(objected) -> None:
+    notices = (objected["meeting"].get("Consent") or {}).get("Notices") or []
+    assert objected["sentence"], "the settings answer has no videoNoticeText"
+    assert notices and (notices[0].get("Text") or "").endswith(objected["sentence"]), notices
 
 
 def test_an_objection_closes_the_video_connection(objected) -> None:

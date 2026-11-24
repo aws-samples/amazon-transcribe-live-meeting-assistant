@@ -43,8 +43,21 @@ export const VIDEO_CONSTRAINTS = { frameRate: { ideal: 5, max: 5 }, width: { max
 /** The transcriber's key frame lane samples at least every two seconds; a little jitter is allowed. */
 export const KEYFRAME_GAP_WARNING_SECONDS = 2.5;
 
-/** The fixed sentence the consent notice gains when screen video is on. */
-export const SCREEN_VIDEO_NOTICE = 'The shared screen is also recorded as video.';
+/**
+ * The sentence the consent notice gains when screen video is on: the Meeting
+ * Consent setting `videoNoticeText`, which the transcriber's CONSENT_SETTINGS
+ * answer carries, or this shipped default from a transcriber that sends none.
+ */
+export const DEFAULT_VIDEO_NOTICE_TEXT =
+  'Video of the meeting, including shared screens and any visible camera feeds, is also recorded.';
+
+/** The video sentence a CONSENT_SETTINGS answer gives, or the shipped one. */
+export const videoNoticeText = (settings) =>
+  (typeof settings?.videoNoticeText === 'string' && settings.videoNoticeText.trim()) || DEFAULT_VIDEO_NOTICE_TEXT;
+
+/** The notice as shown and recorded: with the video sentence after it while video is on. */
+export const noticeWithVideo = (notice, settings, videoOn) =>
+  videoOn && notice ? `${notice} ${videoNoticeText(settings)}` : notice;
 
 /** The first supported MP4 type, or null when this browser cannot record one. */
 export const pickVideoMimeType = (Recorder = browserGlobal('MediaRecorder')) => {

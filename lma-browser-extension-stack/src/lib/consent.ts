@@ -47,6 +47,8 @@ export type ConsentSettings = {
   message?: string,
   /** Whether this client may send screen video (docs/websocket-streaming-api.md, "6.1.6 Screen Video"). */
   videoAllowed?: boolean,
+  /** The sentence added to the notice while screen video is on (Meeting Consent › videoNoticeText). */
+  videoNoticeText?: string,
 };
 
 /**
@@ -61,6 +63,8 @@ export type ConsentStep = {
   method?: ConsentMethod,
   statement: string,
   chatPost: ChatPost,
+  /** The notice was copied with Copy, to be pasted or read out by the user. */
+  noticeCopied?: boolean,
 };
 
 export const emptyStep = (): ConsentStep => ({ confirmed: false, statement: '', chatPost: 'none' });
@@ -70,6 +74,14 @@ export const emptyStep = (): ConsentStep => ({ confirmed: false, statement: '', 
  * confirmed): what it said, screen video included, is then fixed for the meeting.
  */
 export const noticePosted = (step: ConsentStep): boolean => step.chatPost === 'sent' || step.chatPost === 'confirmed';
+
+/**
+ * Whether the notice has left the panel: copied, posted in the chat, or
+ * confirmed as given. What it said, screen video included, is then fixed for
+ * the meeting, so the notice START records is the one the meeting was given.
+ */
+export const noticeShared = (step: ConsentStep): boolean =>
+  noticePosted(step) || step.noticeCopied === true || step.confirmed;
 
 export const SETTINGS_LOADING = 'Reading the meeting consent settings; try again in a moment.';
 export const OBJECTION_NOT_SENT =
