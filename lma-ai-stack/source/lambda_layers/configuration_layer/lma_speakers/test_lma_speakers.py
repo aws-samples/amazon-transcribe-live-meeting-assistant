@@ -148,3 +148,63 @@ def test_other_channels_form_no_group() -> None:
 def test_the_map_keeps_its_sections_whatever_it_holds() -> None:
     parsed = speakers.parse_speaker_identities('{"identities": [], "speakerModes": 3}')
     assert parsed == {"identities": {}, "merges": {}, "segmentOverrides": {}, "speakerModes": {}}
+
+
+class _Watched(dict):
+    """A segment row that records every field read from it."""
+
+    read: set = set()
+
+    def get(self, key, default=None):
+        _Watched.read.add(key)
+        return super().get(key, default)
+
+    def __getitem__(self, key):
+        _Watched.read.add(key)
+        return super().__getitem__(key)
+
+
+def _segments():
+    return [
+        {
+            "PK": "trs#m1",
+            "SK": f"ts#{start}#{segment_id}",
+            "SegmentId": segment_id,
+            "Channel": channel,
+            "Speaker": speaker,
+            "Transcript": "words",
+            "StartTime": start,
+            "EndTime": start + 1,
+            "IsPartial": partial,
+            "Sentiment": "NEUTRAL",
+        }
+        for segment_id, channel, speaker, start, partial in [
+            ("a", "REMOTE", "Ana Silva (spk_0)", 1.0, False),
+            ("b", "LOCAL", "Bob", 2.0, False),
+            ("c", "MEETING_CHAT", "Carla", 3.0, False),
+            ("d", "REMOTE", "Bo Chen (spk_1)", 4.0, False),
+            ("e", "REMOTE", "Bo Chen (spk_1)", 5.0, True),
+            ("f", "AGENT_ASSISTANT", "Assistant", 6.0, False),
+        ]
+    ]
+
+
+def _ids(rows):
+    from lma_speakers.participants import Speakers, final_segments
+
+    meeting = {"SpeakerIdentities": json.dumps({"identities": {}})}
+    found = Speakers(final_segments(rows), meeting)
+    link = {"SegmentId": "d", "Channel": "REMOTE", "Speaker": "Bo Chen (spk_1)"}
+    return found.linked_id(link), [entry["speakerId"] for entry in found.order]
+
+
+def test_speaker_ids_read_only_the_speaker_fields() -> None:
+    """get_meeting_consent reads SPEAKER_FIELDS alone, and must get the export's ids."""
+    from lma_speakers.participants import SPEAKER_FIELDS
+
+    _Watched.read = set()
+    full = _ids([_Watched(row) for row in _segments()])
+    assert _Watched.read <= set(SPEAKER_FIELDS), _Watched.read - set(SPEAKER_FIELDS)
+    projected = [{k: v for k, v in row.items() if k in SPEAKER_FIELDS} for row in _segments()]
+    assert _ids(projected) == full
+    assert full[0] is not None

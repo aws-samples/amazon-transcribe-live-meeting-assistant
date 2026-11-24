@@ -73,8 +73,8 @@ from botocore.exceptions import ClientError
 # pylint: disable-next=import-error
 from lma_consent.summary import has_speaker_links  # configuration layer
 
-# Stdlib logging rather than aws_lambda_powertools: this function carries no
-# layer and uses the runtime's own boto3.
+# Stdlib logging rather than aws_lambda_powertools, which the configuration
+# layer does not provide.
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 

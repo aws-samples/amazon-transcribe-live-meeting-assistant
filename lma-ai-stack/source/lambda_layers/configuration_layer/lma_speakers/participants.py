@@ -50,6 +50,11 @@ TRANSCRIPT_BASES = ("self-introduction", "addressed-by-name")
 
 VOICE_ID = re.compile(r"^spk_\d+$")
 
+#: Every segment field that final_segments and Speakers read, so a reader that
+#: only needs speaker ids (get_meeting_consent) can read just these from the
+#: transcript; test_lma_speakers holds the two to this list.
+SPEAKER_FIELDS = ("PK", "SegmentId", "StartTime", "EndTime", "IsPartial", "Channel", "Speaker")
+
 
 def segment_kind(row: Mapping[str, Any]) -> str:
     """``speech``, ``chat`` or ``assistant``: what a segment's channel holds."""

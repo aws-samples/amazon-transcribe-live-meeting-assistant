@@ -223,8 +223,9 @@ tool, which is built by the same code:
   linked, or when the transcript no longer holds the linked line under that
   speaker: the line expired or was deleted, or somebody named that one line as
   another person's on the meeting page. After the transcript was deleted the
-  link is still given, with a null `speakerId`. LMA always writes
-  `speakerLinkBasis` and `speakerLinkedAt`, null when there is no link;
+  link is still given, with a null `speakerId`. Every event has
+  `speakerLinkBasis` and `speakerLinkedAt` (the schema requires both), null
+  when there is no link;
 - `hasEvidence` says whether evidence images exist.
 
 The evidence images themselves are only in the Everything archive, for the

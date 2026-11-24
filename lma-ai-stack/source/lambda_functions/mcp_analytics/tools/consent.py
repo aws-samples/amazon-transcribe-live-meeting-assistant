@@ -29,7 +29,7 @@ from typing import Any, Dict
 from lma_consent.summary import has_speaker_links, meeting_consent_output
 
 # pylint: disable-next=import-error
-from lma_speakers.participants import Speakers, final_segments
+from lma_speakers.participants import SPEAKER_FIELDS, Speakers, final_segments
 
 from tools.access import Caller, require_meeting
 from tools.appsync_client import graphql
@@ -87,6 +87,8 @@ def execute(caller: Caller, meeting_id: Any) -> Dict[str, Any]:
     state = graphql(GET_MEETING_CONSENT, {"CallId": call_id}).get("getMeetingConsent")
     speakers = None
     if has_speaker_links((state or {}).get("Consent")) and not meeting.get("TranscriptDeletedAt"):
-        # The ids the meeting export gives its speakers, from the same lines.
-        speakers = Speakers(final_segments(read_final_rows(call_id, finals_only=False)), meeting)
+        # The ids the meeting export gives its speakers, from the same lines;
+        # only the fields the ids are worked out from are read.
+        rows = read_final_rows(call_id, finals_only=False, fields=SPEAKER_FIELDS)
+        speakers = Speakers(final_segments(rows), meeting)
     return meeting_consent_output(call_id, state, speakers)
