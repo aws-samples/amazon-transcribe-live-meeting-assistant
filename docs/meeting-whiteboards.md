@@ -339,5 +339,5 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
 - [Live Guidance](live-guidance.md)
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
 - [Meeting Export](meeting-export.md)
-- [Transcript Deletion After the Summary](transcript-deletion.md)
+- [Transcript and Recording Deletion After the Summary](transcript-deletion.md)
 - [MCP Tools Reference](mcp-tools-reference.md)

@@ -18,7 +18,8 @@
     "retention": {
       "mode": "merge",
       "values": {
-        "transcriptDeletionAfterSummary": "off"
+        "transcriptDeletionAfterSummary": "off",
+        "recordingDeletionAfterSummary": "off"
       }
     },
     "recording": {

@@ -1,3 +1,4 @@
 {
-  "transcriptDeletionAfterSummary": "off"
+  "transcriptDeletionAfterSummary": "off",
+  "recordingDeletionAfterSummary": "off"
 }

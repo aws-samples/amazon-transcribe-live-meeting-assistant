@@ -694,6 +694,11 @@ finds the images. The item has:
   it. A file expired by a lifecycle rule leaves a noncurrent version, which the
   bucket removes about a day later (see
   [Earlier versions in the recordings bucket](privacy-and-data-handling.md#earlier-versions-in-the-recordings-bucket)).
+- **After the summary.** **Retention › Delete the recordings after the
+  summary** deletes the meeting's video recordings, with every version and any
+  segments left, once the meeting is summarized, and keeps its key frames and
+  their text. See
+  [Transcript and Recording Deletion After the Summary](transcript-deletion.md).
 
 ## Reading key frames
 

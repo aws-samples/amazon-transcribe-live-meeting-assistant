@@ -2521,6 +2521,32 @@ def test_a_recording_link_of_a_meeting_that_cannot_be_read_is_stored_without_a_s
 
 
 @pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+def test_a_stored_recording_link_tells_the_deletion_function(
+    schema, emitted, kind, deletion_function, monkeypatch
+):
+    _, _, mutation = RECORDING_EVENTS[kind]
+    session = QueuedSession(schema, [{mutation: {"CallId": "call-1"}}])
+    process_event(session, _recording_event(kind, SessionNumber=1), monkeypatch)
+    assert _deletion_payloads(deletion_function) == [
+        {"CallId": "call-1", "Trigger": "recording-added"}
+    ]
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
+def test_a_failure_to_tell_the_deletion_function_of_a_recording_fails_the_record(
+    schema, emitted, kind, deletion_function, monkeypatch
+):
+    def refuse(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(deletion_function, "invoke", refuse)
+    _, _, mutation = RECORDING_EVENTS[kind]
+    session = QueuedSession(schema, [{mutation: {"CallId": "call-1"}}])
+    with pytest.raises(RuntimeError, match="throttled"):
+        process_event(session, _recording_event(kind, SessionNumber=1), monkeypatch)
+
+
+@pytest.mark.parametrize("kind", sorted(RECORDING_EVENTS))
 def test_a_recording_link_against_an_older_schema_names_no_session(
     schema, emitted, kind, monkeypatch
 ):

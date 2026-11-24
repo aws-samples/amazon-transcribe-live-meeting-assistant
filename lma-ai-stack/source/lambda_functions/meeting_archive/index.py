@@ -352,13 +352,13 @@ def _instant(stamp: Any) -> Optional[dt.datetime]:
 
 def built_after_last_change(found: Mapping[str, Any], meeting: Mapping[str, Any]) -> bool:
     """Whether an archive was started after the meeting record last changed, and
-    after its transcript was deleted. Not every addition to a meeting changes its
+    after its transcript or recordings were deleted. Not every addition to a meeting changes its
     record (a new key frame or transcript segment does not), so reusable_archive
     also offers a ready archive again only once the meeting has ended."""
     started = _instant(found.get("CreatedAt"))
     if started is None:
         return False
-    for attribute in ("UpdatedAt", "TranscriptDeletedAt"):
+    for attribute in ("UpdatedAt", "TranscriptDeletedAt", "RecordingsDeletedAt"):
         changed = _instant(meeting.get(attribute))
         if changed is not None and changed >= started:
             return False
@@ -802,6 +802,9 @@ DETAILS_FIELDS = (
     "TranscriptDeletedAt",
     "TranscriptSegmentsDeleted",
     "TranscriptFilesDeleted",
+    "RecordingDeletionScheduledFor",
+    "RecordingsDeletedAt",
+    "RecordingFilesDeleted",
 )
 
 
@@ -928,7 +931,12 @@ def plan_archive(
                 f"recordings/{kind}-session-{number}{extension_of(key)}", key, size, label
             )
             sessions.append({"Kind": kind, "Session": number, "File": path})
-        if not urls:
+        if not urls and meeting.get("RecordingsDeletedAt"):
+            plan.leave_out(
+                f"{kind.capitalize()} recording",
+                f"deleted under the Retention settings on {meeting['RecordingsDeletedAt']}",
+            )
+        elif not urls:
             plan.leave_out(f"{kind.capitalize()} recording", "the meeting has none")
 
     # The rest of the archive does not depend on the export, so a failure to

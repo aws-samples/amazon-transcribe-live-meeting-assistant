@@ -108,6 +108,9 @@ export const mergeCallUpdate = (existing, call) => ({
   TranscriptDeletedAt: call.TranscriptDeletedAt || existing?.TranscriptDeletedAt,
   TranscriptSegmentsDeleted: call.TranscriptSegmentsDeleted ?? existing?.TranscriptSegmentsDeleted,
   TranscriptFilesDeleted: call.TranscriptFilesDeleted ?? existing?.TranscriptFilesDeleted,
+  RecordingDeletionScheduledFor: call.RecordingDeletionScheduledFor || existing?.RecordingDeletionScheduledFor,
+  RecordingsDeletedAt: call.RecordingsDeletedAt || existing?.RecordingsDeletedAt,
+  RecordingFilesDeleted: call.RecordingFilesDeleted ?? existing?.RecordingFilesDeleted,
   ExpiresAfter: call.ExpiresAfter ?? existing?.ExpiresAfter,
   // Recorded when the meeting starts and selected only by getCall.
   CaptureSource: call.CaptureSource || existing?.CaptureSource,

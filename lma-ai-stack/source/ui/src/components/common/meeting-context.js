@@ -232,3 +232,31 @@ export const transcriptRetention = (item) => {
   }
   return { state: 'kept', at: null, recordExpiresAt };
 };
+
+/**
+ * What happens to the meeting's audio and video recordings under the
+ * deployment's Retention settings, from what the meeting record says:
+ * { state, at, files }. `state` is 'deleted' (deleted after the summary, at
+ * `at`, `files` recording files in all), 'scheduled' (to be deleted at `at`),
+ * or 'kept' (kept as the deployment's recording retention says). A deletion
+ * takes precedence over a time still recorded: after a deletion made at once,
+ * the meeting is checked once more a few minutes later.
+ */
+export const recordingRetention = (item) => {
+  if (item?.recordingsDeletedAt) {
+    return { state: 'deleted', at: item.recordingsDeletedAt, files: item.recordingFilesDeleted ?? null };
+  }
+  if (item?.recordingDeletionScheduledFor) {
+    return { state: 'scheduled', at: item.recordingDeletionScheduledFor, files: null };
+  }
+  return { state: 'kept', at: null, files: null };
+};
+
+/** Whether the mapped meeting links to any audio or video recording. */
+export const hasRecordings = (item) =>
+  Boolean(
+    item?.recordingUrl ||
+      item?.videoRecordingUrl ||
+      (item?.recordingUrls || []).some(Boolean) ||
+      (item?.videoRecordingUrls || []).some(Boolean),
+  );

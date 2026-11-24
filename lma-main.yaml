@@ -3485,15 +3485,18 @@ Resources:
     Properties:
       AlarmName: !Sub "${AWS::StackName}-transcript-deletion-dead-letter-queue-depth"
       AlarmDescription: >-
-        A transcript deletion did not complete after its retries, so a meeting's
-        transcript is still stored although the Retention settings say it should
-        have been deleted. Check the TranscriptDeletionFunction log group for
-        the error, then read a message from this queue: each one carries the
-        CallId. Once the cause is fixed, invoke the function with
-        {"CallId": "<id>", "Trigger": "scheduled"} for each meeting, which
-        deletes it, and purge the queue. Messages stay for 14 days. OK
-        notifications are enabled, since the queue returning to empty means a
-        person acted.
+        A transcript or recording deletion did not complete after its retries,
+        so a meeting's transcript or recordings may still be stored although
+        the Retention settings say they should have been deleted. Check the
+        TranscriptDeletionFunction log group for the error, which names the
+        kind of deletion that failed, then read a message from this queue: each
+        one carries the CallId. Once the cause is fixed, for each meeting invoke
+        the function with {"CallId": "<id>", "Trigger": "scheduled"} to delete
+        its transcript, or with "Kind": "recordings" added to delete its
+        recordings (a message with that Kind, or with the Trigger
+        recording-added, is a recording deletion), and purge the queue.
+        Messages stay for 14 days. OK notifications are enabled, since the
+        queue returning to empty means a person acted.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:

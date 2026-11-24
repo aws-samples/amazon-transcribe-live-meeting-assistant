@@ -3,12 +3,16 @@
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
 
-"""Deletes a meeting's transcript once it is summarized, when the Retention section says to.
+"""Deletes a meeting's transcript, and its recordings, once it is summarized, when the
+Retention section says to.
 
 The Retention section's "Delete the transcript after the summary" setting
 (``lma_config.deletion_delay_minutes``) is off, or a delay: immediately, or 15,
-30 or 60 minutes after the summary is written. This function is invoked with
-the meeting's ``CallId`` and a ``Trigger``:
+30 or 60 minutes after the summary is written. "Delete the recordings after the
+summary" (``lma_config.recording_deletion_delay_minutes``) has the same choices
+and is independent of it: each of the two is scheduled, recorded on the meeting
+and run on its own, by the same rules (see "The recordings" below). This
+function is invoked with the meeting's ``CallId`` and a ``Trigger``:
 
 ``meeting-ended``
     By the call event processor, on the meeting's first END. Schedules the
@@ -24,13 +28,21 @@ the meeting's ``CallId`` and a ``Trigger``:
     invokes it before writing ``ENDED``.
 ``scheduled``
     By the one-time EventBridge Scheduler schedule either of the above made.
-    Deletes.
+    Deletes: the transcript, or with ``"Kind": "recordings"`` the recordings.
 ``meeting-reopened``
     By the call event processor, with the ``SessionNumber``, when a rejoined
     session of the meeting has started and made it live again
     (docs/virtual-participant.md#rejoin). Cancels the pending deletion while the
     meeting is still live in that session and the setting is on, because that
     session's END schedules one afresh; see cancel_deletion.
+``recording-added``
+    By the call event processor, each time it stores a recording link on the
+    meeting. Recordings only: once a meeting's recordings have been deleted,
+    one stored after that -- a late upload, or a later session's -- is deleted
+    at once, whatever the setting says now.
+
+``meeting-ended``, ``summary-written`` and ``meeting-reopened`` act on both
+settings, each independently of the other.
 
 A schedule is only ever moved earlier, so a redelivered END cannot postpone a
 deletion. After a deletion made on the spot, one more is scheduled
@@ -61,6 +73,15 @@ The meeting record is then stamped with when its transcript was deleted, and
 how many segments and files were removed, which the meeting page shows. The
 summary, the meeting record, the recordings and the consent record are kept.
 
+The recordings, when their own setting says so (delete_recordings): every
+version of every audio and video recording file the meeting record links to,
+in every capture session, with the transcriber's raw audio beside each WAV
+and any WAV it stored for the meeting without a link; and the Virtual
+Participant's video segments (``lma-video-chunks/<CallId>/``). The record's
+links are removed and it is stamped with when, and how many files went. Key
+frames, chat attachments, consent evidence, the summary and the transcript are
+kept.
+
 Every step is idempotent, so a failure raises and the invocation is retried:
 by Lambda for an asynchronous invoke, by EventBridge Scheduler for a schedule,
 each with a dead-letter queue behind it.
@@ -73,6 +94,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import unquote, urlparse
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -85,6 +107,7 @@ from lma_config import (  # configuration layer
     TABLE_NAME_ENV_VAR,
     ConfigurationStore,
     deletion_delay_minutes,
+    recording_deletion_delay_minutes,
 )
 from lma_consent import without_platform_ids  # configuration layer
 from lma_meeting_preparation.rules import strip_quotes  # configuration layer
@@ -103,6 +126,9 @@ EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 TRANSCRIPT_PREFIX = os.environ.get("TRANSCRIPT_PREFIX", "lma-transcripts/")
 ATTACHMENTS_PREFIX = os.environ.get("ATTACHMENTS_PREFIX", "lma-chat-attachments/")
+AUDIO_PREFIX = os.environ.get("AUDIO_PREFIX", "lma-audio-recordings/")
+VIDEO_PREFIX = os.environ.get("VIDEO_PREFIX", "lma-video-recordings/")
+VIDEO_CHUNKS_PREFIX = os.environ.get("VIDEO_CHUNKS_PREFIX", "lma-video-chunks/")
 TRANSCRIPT_KB_ID = os.environ.get("TRANSCRIPT_KB_ID", "")
 SCHEDULE_GROUP_NAME = os.environ.get("SCHEDULE_GROUP_NAME", "")
 SCHEDULER_ROLE_ARN = os.environ.get("SCHEDULER_ROLE_ARN", "")
@@ -118,7 +144,34 @@ MEETING_ENDED = "meeting-ended"
 SUMMARY_WRITTEN = "summary-written"
 SCHEDULED = "scheduled"
 MEETING_REOPENED = "meeting-reopened"
-TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED, MEETING_REOPENED)
+RECORDING_ADDED = "recording-added"
+TRIGGERS = (MEETING_ENDED, SUMMARY_WRITTEN, SCHEDULED, MEETING_REOPENED, RECORDING_ADDED)
+
+#: What a deletion removes: the transcript, or the recordings. A scheduled
+#: event names its ``Kind``; one that names none is the transcript's, as every
+#: schedule made before the recordings could be deleted is.
+TRANSCRIPT = "transcript"
+RECORDINGS = "recordings"
+
+
+class _Kind:
+    """Where one kind of deletion keeps its state, and how its schedule is named."""
+
+    def __init__(self, name: str, scheduled_field: str, deleted_field: str, what: str) -> None:
+        self.name = name
+        self.scheduled_field = scheduled_field
+        self.deleted_field = deleted_field
+        self.what = what
+
+
+KINDS = {
+    TRANSCRIPT: _Kind(
+        TRANSCRIPT, "TranscriptDeletionScheduledFor", "TranscriptDeletedAt", "transcript"
+    ),
+    RECORDINGS: _Kind(
+        RECORDINGS, "RecordingDeletionScheduledFor", "RecordingsDeletedAt", "recordings"
+    ),
+}
 
 _clients: Dict[str, Any] = {}
 
@@ -144,18 +197,32 @@ def _error_code(error: ClientError) -> str:
 _STORE: Optional[Any] = None
 
 
+def _fresh_store() -> Optional[Any]:
+    """The configuration store with its cache dropped, or None without the table named."""
+    global _STORE  # pylint: disable=global-statement -- one store per process
+    if _STORE is None and os.environ.get(TABLE_NAME_ENV_VAR):
+        _STORE = ConfigurationStore()
+    if _STORE is not None:
+        _STORE.invalidate()
+    return _STORE
+
+
 def current_delay() -> Optional[int]:
     """The setting as saved now, not as cached: a save applies to the next meeting to end.
 
     One read of the configuration table, twice a meeting. Without the table
     named, off (None).
     """
-    global _STORE  # pylint: disable=global-statement -- one store per process
-    if _STORE is None and os.environ.get(TABLE_NAME_ENV_VAR):
-        _STORE = ConfigurationStore()
-    if _STORE is not None:
-        _STORE.invalidate()
-    return deletion_delay_minutes(store=_STORE)
+    return deletion_delay_minutes(store=_fresh_store())
+
+
+def current_recording_delay() -> Optional[int]:
+    """The recordings' setting as saved now, read as current_delay reads the transcript's."""
+    return recording_deletion_delay_minutes(store=_fresh_store())
+
+
+def delay_of(kind: str) -> Optional[int]:
+    return current_recording_delay() if kind == RECORDINGS else current_delay()
 
 
 def _now() -> datetime:
@@ -198,9 +265,13 @@ def transcript_file_keys(call_id: str) -> List[str]:
     ]
 
 
-def schedule_name(call_id: str) -> str:
-    """A schedule name for the meeting: at most 64 characters, from a fixed alphabet."""
-    return "transcript-" + hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:48]
+def schedule_name(call_id: str, kind: str = TRANSCRIPT) -> str:
+    """A schedule name for the meeting: at most 64 characters, from a fixed alphabet.
+
+    One per kind, so the transcript's and the recordings' deletions are
+    scheduled, moved and cancelled independently.
+    """
+    return f"{KINDS[kind].what}-" + hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:48]
 
 
 # ── the meeting record ──────────────────────────────────────────────────────
@@ -209,18 +280,21 @@ def schedule_name(call_id: str) -> str:
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
     response = _table().get_item(
         Key=meeting_key(call_id),
-        ProjectionExpression="PK, #status, TranscriptDeletionScheduledFor, TranscriptDeletedAt",
+        ProjectionExpression=(
+            "PK, #status, TranscriptDeletionScheduledFor, TranscriptDeletedAt, "
+            "RecordingDeletionScheduledFor, RecordingsDeletedAt"
+        ),
         ExpressionAttributeNames={"#status": "Status"},
         ConsistentRead=True,
     )
     return response.get("Item")
 
 
-def record_schedule(call_id: str, moment: datetime) -> None:
+def record_schedule(call_id: str, moment: datetime, kind: str = TRANSCRIPT) -> None:
     try:
         _table().update_item(
             Key=meeting_key(call_id),
-            UpdateExpression="SET TranscriptDeletionScheduledFor = :at",
+            UpdateExpression=f"SET {KINDS[kind].scheduled_field} = :at",
             ConditionExpression="attribute_exists(PK)",
             ExpressionAttributeValues={":at": _iso(moment)},
         )
@@ -660,6 +734,266 @@ def delete_transcript(call_id: str, trigger: str) -> Dict[str, Any]:
     }
 
 
+# ── the recordings ──────────────────────────────────────────────────────────
+
+#: The meeting record's recording links: the current one of each kind, and the
+#: list of every capture session's (Call.RecordingUrls, Call.VideoRecordingUrls),
+#: with the prefix a key each names must be directly under.
+AUDIO_LINKS = ("RecordingUrl", "RecordingUrls")
+VIDEO_LINKS = ("VideoRecordingUrl", "VideoRecordingUrls")
+#: Kept in step with the link lists by the updateCall resolver, and removed with them.
+LINK_SESSION_FIELDS = ("RecordingUrlSessions", "VideoRecordingUrlSessions")
+
+#: Attempts at removing the links while a recording link is being added.
+LINK_REMOVE_ATTEMPTS = 4
+
+#: The transcriber's stamp on a WAV it stores beside the meeting's own
+#: (recordingStamp in its utils/recording-upload.ts).
+_STAMP = r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z"
+
+
+class RecordingLinksKeptChanging(RuntimeError):
+    """Recording links kept being added while the recordings were being deleted."""
+
+
+def recording_key_from_url(url: Any, prefix: str) -> Optional[str]:
+    """The recordings-bucket key a stored recording link names, or None.
+
+    The producers store ``https://<bucket>.s3.<region>.<suffix>/<key>``, the key
+    URL-encoded by the Virtual Participant and as it is by the transcriber, as
+    meeting deletion and the meeting archive read them. Only a key in this
+    deployment's bucket, directly under ``prefix``, is returned, so a deletion
+    stays inside that kind of recording.
+    """
+    if not isinstance(url, str) or not url or not RECORDINGS_BUCKET:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not (parsed.hostname or "").startswith(
+        f"{RECORDINGS_BUCKET}.s3."
+    ):
+        return None
+    key = unquote(parsed.path.lstrip("/"))
+    name = key[len(prefix) :]
+    if not key.startswith(prefix) or not name or "/" in name or name in (".", ".."):
+        return None
+    return key
+
+
+def _links(meeting: Dict[str, Any], fields: Iterable[str]) -> List[str]:
+    """Every link the record holds in ``fields`` (a string or a list of them), each once."""
+    urls: List[str] = []
+    for field in fields:
+        value = meeting.get(field)
+        for url in value if isinstance(value, list) else [value]:
+            if isinstance(url, str) and url and url not in urls:
+                urls.append(url)
+    return urls
+
+
+def linked_recording_keys(meeting: Dict[str, Any]) -> List[str]:
+    """The keys of the recording files the meeting record links to, each once.
+
+    A WAV's raw audio, which the transcriber stores beside it under the same
+    name, goes with it.
+    """
+    keys: List[str] = []
+    for fields, prefix in ((AUDIO_LINKS, AUDIO_PREFIX), (VIDEO_LINKS, VIDEO_PREFIX)):
+        for url in _links(meeting, fields):
+            key = recording_key_from_url(url, prefix)
+            if not key:
+                continue
+            siblings = [key, key[: -len(".wav")] + ".raw"] if key.endswith(".wav") else [key]
+            keys.extend(k for k in siblings if k not in keys)
+    return keys
+
+
+def transcriber_audio_pattern(call_id: str) -> "re.Pattern[str]":
+    """The names the transcriber gives a meeting's audio, whether or not a link names them.
+
+    ``<name>.wav`` and ``.raw``, ``<name>_s<N>`` for a later session, and either
+    with ``_<stamp>`` when the session already had a recording and this one
+    was stored beside it, unlinked. ``<name>`` is the meeting id as a file name
+    (posixify_filename), which is how the transcriber names it.
+    """
+    name = re.escape(f"{AUDIO_PREFIX}{posixify_filename(call_id)}")
+    return re.compile(rf"^{name}(_s\d+)?(_{_STAMP})?\.(wav|raw)$")
+
+
+def _delete_versions(entries: List[Dict[str, str]], what: str) -> None:
+    """Delete the listed versions, a thousand at a time; raise when S3 keeps any."""
+    for start in range(0, len(entries), 1000):
+        response = _client("s3").delete_objects(
+            Bucket=RECORDINGS_BUCKET,
+            Delete={"Objects": entries[start : start + 1000], "Quiet": True},
+        )
+        errors = response.get("Errors") or []
+        if errors:
+            raise RuntimeError(
+                f"could not delete {len(errors)} version(s) of {what}: "
+                + "; ".join(f"{e.get('Code')}: {e.get('Message')}" for e in errors[:3])
+            )
+
+
+def _listed_versions(prefix: str, keep) -> List[Dict[str, str]]:
+    """Every version and delete marker under ``prefix`` whose key ``keep`` accepts."""
+    found: List[Dict[str, str]] = []
+    paginator = _client("s3").get_paginator("list_object_versions")
+    for page in paginator.paginate(Bucket=RECORDINGS_BUCKET, Prefix=prefix):
+        for entry in page.get("Versions", []) + page.get("DeleteMarkers", []):
+            if keep(entry.get("Key", "")):
+                found.append({"Key": entry["Key"], "VersionId": entry["VersionId"]})
+    return found
+
+
+def delete_recording_files(call_id: str, meeting: Dict[str, Any]) -> int:
+    """Delete every version of the meeting's recording files; the number of files that had any.
+
+    The files the record links to (linked_recording_keys), the transcriber's
+    audio by its names (transcriber_audio_pattern), and the Virtual
+    Participant's video segments in ``<chunks prefix><CallId>/`` -- the meeting
+    id as it is, with a trailing slash so that one meeting's folder never
+    matches another whose id merely begins the same way. The video files'
+    names are not searched: both producers turn the meeting id into a file
+    name by replacing characters, and add more, so a name is no proof of whose
+    video it is; a video is found through its link.
+    """
+    if not RECORDINGS_BUCKET:
+        return 0
+    entries: List[Dict[str, str]] = []
+    for key in linked_recording_keys(meeting):
+        entries.extend(_listed_versions(key, lambda k, key=key: k == key))
+    pattern = transcriber_audio_pattern(call_id)
+    named = _listed_versions(
+        f"{AUDIO_PREFIX}{posixify_filename(call_id)}", lambda k: bool(pattern.match(k))
+    )
+    linked = {(e["Key"], e["VersionId"]) for e in entries}
+    entries.extend(e for e in named if (e["Key"], e["VersionId"]) not in linked)
+    folder = f"{VIDEO_CHUNKS_PREFIX}{call_id}/"
+    entries.extend(_listed_versions(folder, lambda k: k.startswith(folder)))
+    _delete_versions(entries, f"the recordings of {call_id}")
+    return len({e["Key"] for e in entries})
+
+
+def _read_links(call_id: str) -> Optional[Dict[str, Any]]:
+    names = {f"#l{n}": field for n, field in enumerate(AUDIO_LINKS + VIDEO_LINKS)}
+    response = _table().get_item(
+        Key=meeting_key(call_id),
+        ProjectionExpression=", ".join(["PK", *names]),
+        ExpressionAttributeNames=names,
+        ConsistentRead=True,
+    )
+    return response.get("Item")
+
+
+def record_recordings_deletion(
+    call_id: str, trigger: str, meeting: Dict[str, Any], files: int
+) -> bool:
+    """Remove the meeting's recording links and stamp the deletion; False if a link was added.
+
+    The write is conditional on the links being as ``meeting`` read them: the
+    current link of each kind the same, and each list of them as long, since
+    the updateCall resolver only ever appends to it. A link added between the
+    read and this write fails the condition, and the caller reads the meeting
+    again and deletes that recording too, rather than removing a link to a
+    file it never deleted. A link added after it is the processor's
+    ``recording-added``, which finds the meeting's recordings deleted.
+    The first time and trigger are kept; the count adds up.
+    """
+    names: Dict[str, str] = {}
+    values: Dict[str, Any] = {":now": _iso(_now()), ":trigger": trigger, ":files": files}
+    conditions = ["attribute_exists(PK)"]
+    for n, field in enumerate(AUDIO_LINKS + VIDEO_LINKS):
+        names[f"#l{n}"] = field
+        value = meeting.get(field)
+        if value is None:
+            conditions.append(f"attribute_not_exists(#l{n})")
+        elif isinstance(value, list):
+            conditions.append(f"size(#l{n}) = :l{n}")
+            values[f":l{n}"] = len(value)
+        else:
+            conditions.append(f"#l{n} = :l{n}")
+            values[f":l{n}"] = value
+    for n, field in enumerate(LINK_SESSION_FIELDS):
+        names[f"#s{n}"] = field
+    removed = ", ".join(["RecordingDeletionScheduledFor", *names])
+    try:
+        _table().update_item(
+            Key=meeting_key(call_id),
+            UpdateExpression=(
+                "SET RecordingsDeletedAt = if_not_exists(RecordingsDeletedAt, :now), "
+                "RecordingDeletionTrigger = if_not_exists(RecordingDeletionTrigger, :trigger), "
+                "RecordingDeletionLastRunAt = :now "
+                "ADD RecordingFilesDeleted :files "
+                f"REMOVE {removed}"
+            ),
+            ConditionExpression=" AND ".join(conditions),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as error:
+        if _error_code(error) != "ConditionalCheckFailedException":
+            raise
+        return False
+    return True
+
+
+def delete_recordings(call_id: str, trigger: str) -> Dict[str, Any]:
+    """Delete the meeting's recordings, remove its links to them, and stamp the deletion."""
+    files = 0
+    for _attempt in range(LINK_REMOVE_ATTEMPTS):
+        meeting = _read_links(call_id)
+        files += delete_recording_files(call_id, meeting or {})
+        if meeting is None:
+            LOGGER.info(
+                "meeting %s has no record; its recordings were deleted all the same", call_id
+            )
+            break
+        if record_recordings_deletion(call_id, trigger, meeting, files):
+            break
+        LOGGER.info(
+            "a recording link was added to %s while its recordings were deleted; reading it again",
+            call_id,
+        )
+    else:
+        # Raised, so the invocation fails and is retried: every step is safe
+        # to run again, and a link must not be removed while its file is kept.
+        raise RecordingLinksKeptChanging(
+            f"recording links kept being added to {call_id} while its recordings were deleted"
+        )
+    LOGGER.info(
+        json.dumps(
+            {
+                "msg": "deleted the meeting's recordings",
+                "callId": call_id,
+                "trigger": trigger,
+                "filesDeleted": files,
+            }
+        )
+    )
+    return {"action": "deleted", "filesDeleted": files}
+
+
+def recording_added(call_id: str) -> Dict[str, Any]:
+    """A recording link was stored: delete the recordings again if they have been deleted.
+
+    Once a meeting's recordings are deleted they stay deleted. A recording
+    uploaded after that -- the transcriber stores a session's recording after
+    its END, and a video can take longer than the summary -- or one of a later
+    session, is deleted when its link is stored, whatever the setting says now.
+    Until then, a recording waits for the meeting's deletion, if it has one.
+    """
+    meeting = read_meeting(call_id) or {}
+    if not meeting.get("RecordingsDeletedAt"):
+        return {"action": "none"}
+    return delete_recordings(call_id, RECORDING_ADDED)
+
+
+def delete_kind(call_id: str, trigger: str, kind: str) -> Dict[str, Any]:
+    if kind == RECORDINGS:
+        return delete_recordings(call_id, trigger)
+    return delete_transcript(call_id, trigger)
+
+
 # ── scheduling ──────────────────────────────────────────────────────────────
 
 
@@ -668,29 +1002,42 @@ def _target_arn(context: Any) -> str:
     return ":".join(context.invoked_function_arn.split(":")[:7])
 
 
-def schedule_deletion(call_id: str, moment: datetime, context: Any) -> Dict[str, Any]:
-    """Schedule the meeting's deletion for ``moment``, unless one is already due sooner."""
+def schedule_deletion(
+    call_id: str, moment: datetime, context: Any, kind: str = TRANSCRIPT
+) -> Dict[str, Any]:
+    """Schedule the meeting's deletion of ``kind`` for ``moment``, unless one is due sooner."""
+    spec = KINDS[kind]
     meeting = read_meeting(call_id) or {}
-    current = _parse_iso(meeting.get("TranscriptDeletionScheduledFor"))
+    current = _parse_iso(meeting.get(spec.scheduled_field))
     # EventBridge Scheduler runs a one-time schedule on the minute; one in the
     # past would not run at all.
     moment = max(moment, _now() + timedelta(minutes=1))
     if current is not None and _now() < current <= moment:
-        LOGGER.info("meeting %s is already due for deletion at %s", call_id, _iso(current))
+        LOGGER.info(
+            "meeting %s is already due for %s deletion at %s", call_id, spec.what, _iso(current)
+        )
         return {"action": "unchanged", "scheduledFor": _iso(current)}
 
     definition = {
-        "Name": schedule_name(call_id),
+        "Name": schedule_name(call_id, kind),
         "GroupName": SCHEDULE_GROUP_NAME,
         "ScheduleExpression": f"at({moment.astimezone(timezone.utc):%Y-%m-%dT%H:%M:%S})",
         "ScheduleExpressionTimezone": "UTC",
         "FlexibleTimeWindow": {"Mode": "OFF"},
         "ActionAfterCompletion": "DELETE",
-        "Description": "Deletes one meeting's transcript (LMA Retention settings)",
+        "Description": f"Deletes one meeting's {spec.what} (LMA Retention settings)",
         "Target": {
             "Arn": _target_arn(context),
             "RoleArn": SCHEDULER_ROLE_ARN,
-            "Input": json.dumps({"CallId": call_id, "Trigger": SCHEDULED}),
+            # A transcript schedule names no Kind, as every one made before
+            # the recordings could be deleted does not.
+            "Input": json.dumps(
+                {
+                    "CallId": call_id,
+                    "Trigger": SCHEDULED,
+                    **({"Kind": kind} if kind != TRANSCRIPT else {}),
+                }
+            ),
             "RetryPolicy": {"MaximumEventAgeInSeconds": 86400, "MaximumRetryAttempts": 185},
             **(
                 {"DeadLetterConfig": {"Arn": DEAD_LETTER_QUEUE_ARN}}
@@ -706,10 +1053,10 @@ def schedule_deletion(call_id: str, moment: datetime, context: Any) -> Dict[str,
         if _error_code(error) != "ConflictException":
             raise
         scheduler.update_schedule(**definition)
-    record_schedule(call_id, moment)
+    record_schedule(call_id, moment, kind)
     LOGGER.info(
         json.dumps(
-            {"msg": "scheduled the transcript deletion", "callId": call_id, "at": _iso(moment)}
+            {"msg": f"scheduled the {spec.what} deletion", "callId": call_id, "at": _iso(moment)}
         )
     )
     return {"action": "scheduled", "scheduledFor": _iso(moment)}
@@ -723,8 +1070,8 @@ def _session_of(value: Any) -> int:
     return max(number, 1)
 
 
-def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
-    """Cancel the meeting's pending deletion while rejoined ``session`` is live.
+def cancel_deletion(call_id: str, session: int, kind: str = TRANSCRIPT) -> Dict[str, Any]:
+    """Cancel the meeting's pending deletion of ``kind`` while rejoined ``session`` is live.
 
     Only while the meeting is STARTED in that session: this is invoked
     asynchronously when the session starts, so it can arrive after the
@@ -738,10 +1085,11 @@ def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
     same time, the transcript still there -- and the schedule is deleted only
     when that write succeeds.
     """
+    spec = KINDS[kind]
     response = _table().get_item(
         Key=meeting_key(call_id),
         ProjectionExpression=(
-            "PK, #status, SessionStartedNumber, TranscriptDeletionScheduledFor, TranscriptDeletedAt"
+            f"PK, #status, SessionStartedNumber, {spec.scheduled_field}, {spec.deleted_field}"
         ),
         ExpressionAttributeNames={"#status": "Status"},
         ConsistentRead=True,
@@ -749,8 +1097,12 @@ def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
     meeting = response.get("Item")
     if meeting is None:
         return {"action": "none"}
-    if meeting.get("TranscriptDeletedAt"):
-        return {"action": "deleted", "transcriptDeletedAt": meeting["TranscriptDeletedAt"]}
+    if meeting.get(spec.deleted_field):
+        deleted_key = spec.deleted_field[0].lower() + spec.deleted_field[1:]
+        return {"action": "deleted", deleted_key: meeting[spec.deleted_field]}
+    scheduled_for = meeting.get(spec.scheduled_field)
+    if not scheduled_for:
+        return {"action": "none"}
     if (
         meeting.get("Status") != "STARTED"
         or _session_of(meeting.get("SessionStartedNumber")) != session
@@ -759,20 +1111,17 @@ def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
             "meeting %s is not live in session %s; deletion left as it is", call_id, session
         )
         return {"action": "unchanged"}
-    scheduled_for = meeting.get("TranscriptDeletionScheduledFor")
-    if not scheduled_for:
-        return {"action": "none"}
-    if current_delay() is None:
-        LOGGER.info("deletion is off; meeting %s keeps its pending deletion", call_id)
+    if delay_of(kind) is None:
+        LOGGER.info("%s deletion is off; meeting %s keeps its pending one", spec.what, call_id)
         return {"action": "kept", "scheduledFor": scheduled_for}
     try:
         _table().update_item(
             Key=meeting_key(call_id),
-            UpdateExpression="REMOVE TranscriptDeletionScheduledFor",
+            UpdateExpression=f"REMOVE {spec.scheduled_field}",
             ConditionExpression=(
-                "attribute_exists(PK) AND attribute_not_exists(TranscriptDeletedAt) "
+                f"attribute_exists(PK) AND attribute_not_exists({spec.deleted_field}) "
                 "AND #status = :started AND SessionStartedNumber = :session "
-                "AND TranscriptDeletionScheduledFor = :at"
+                f"AND {spec.scheduled_field} = :at"
             ),
             ExpressionAttributeNames={"#status": "Status"},
             ExpressionAttributeValues={
@@ -788,37 +1137,26 @@ def cancel_deletion(call_id: str, session: int) -> Dict[str, Any]:
         return {"action": "unchanged"}
     try:
         _client("scheduler").delete_schedule(
-            Name=schedule_name(call_id), GroupName=SCHEDULE_GROUP_NAME
+            Name=schedule_name(call_id, kind), GroupName=SCHEDULE_GROUP_NAME
         )
     except ClientError as error:
         if _error_code(error) != "ResourceNotFoundException":
             raise
-    LOGGER.info(json.dumps({"msg": "cancelled the transcript deletion", "callId": call_id}))
+    LOGGER.info(json.dumps({"msg": f"cancelled the {spec.what} deletion", "callId": call_id}))
     return {"action": "cancelled"}
 
 
-def delete_now(call_id: str, trigger: str, context: Any) -> Dict[str, Any]:
-    outcome = delete_transcript(call_id, trigger)
+def delete_now(call_id: str, trigger: str, context: Any, kind: str = TRANSCRIPT) -> Dict[str, Any]:
+    outcome = delete_kind(call_id, trigger, kind)
     outcome["sweep"] = schedule_deletion(
-        call_id, _now() + timedelta(minutes=SWEEP_MINUTES), context
+        call_id, _now() + timedelta(minutes=SWEEP_MINUTES), context, kind
     )
     return outcome
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    call_id = event.get("CallId")
-    trigger = event.get("Trigger")
-    if not isinstance(call_id, str) or not call_id or trigger not in TRIGGERS:
-        raise ValueError("expected a CallId and a Trigger of " + ", ".join(TRIGGERS))
-
-    # A scheduled deletion runs whatever the setting says now: participants may
-    # have been told the transcript would be deleted at that time.
-    if trigger == SCHEDULED:
-        return delete_transcript(call_id, trigger)
-    if trigger == MEETING_REOPENED:
-        return cancel_deletion(call_id, _session_of(event.get("SessionNumber")))
-
-    delay = current_delay()
+def on_meeting_event(call_id: str, trigger: str, context: Any, kind: str) -> Dict[str, Any]:
+    """A meeting ended or was summarized: delete ``kind`` now, or schedule it, by its setting."""
+    delay = delay_of(kind)
     if delay is None:
         return {"action": "none"}
 
@@ -835,5 +1173,48 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return {"action": "live"}
         wait = delay
     if wait == 0:
-        return delete_now(call_id, trigger, context)
-    return schedule_deletion(call_id, _now() + timedelta(minutes=wait), context)
+        return delete_now(call_id, trigger, context, kind)
+    return schedule_deletion(call_id, _now() + timedelta(minutes=wait), context, kind)
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    call_id = event.get("CallId")
+    trigger = event.get("Trigger")
+    if not isinstance(call_id, str) or not call_id or trigger not in TRIGGERS:
+        raise ValueError("expected a CallId and a Trigger of " + ", ".join(TRIGGERS))
+
+    # A scheduled deletion runs whatever the setting says now: participants may
+    # have been told the transcript, or the recordings, would be deleted then.
+    if trigger == SCHEDULED:
+        return delete_kind(
+            call_id, trigger, RECORDINGS if event.get("Kind") == RECORDINGS else TRANSCRIPT
+        )
+    if trigger == RECORDING_ADDED:
+        return recording_added(call_id)
+
+    # The two settings are independent: each kind is acted on whatever the
+    # other did, and a failure of either fails the invocation, after both have
+    # run, so that it is retried. Every step is safe to repeat.
+    outcomes: Dict[str, Dict[str, Any]] = {}
+    failures: List[Exception] = []
+    for kind in (TRANSCRIPT, RECORDINGS):
+        try:
+            if trigger == MEETING_REOPENED:
+                outcomes[kind] = cancel_deletion(
+                    call_id, _session_of(event.get("SessionNumber")), kind
+                )
+            else:
+                outcomes[kind] = on_meeting_event(call_id, trigger, context, kind)
+        except Exception as error:  # pylint: disable=broad-except -- raised below
+            LOGGER.exception(
+                "the %s deletion of %s failed on %s", KINDS[kind].what, call_id, trigger
+            )
+            failures.append(error)
+    if failures:
+        raise failures[0]
+    # The transcript's outcome, as before the recordings could be deleted, and
+    # the recordings' beside it when their setting did anything.
+    outcome = dict(outcomes[TRANSCRIPT])
+    if outcomes[RECORDINGS] != {"action": "none"}:
+        outcome["recordings"] = outcomes[RECORDINGS]
+    return outcome

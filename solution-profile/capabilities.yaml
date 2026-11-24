@@ -807,13 +807,13 @@ capabilities:
       - question:consent-policy
 
   - id: retention-and-transcript-deletion
-    title: Retention periods, and deleting the transcript once it is summarized
+    title: Retention periods, and deleting the transcript and recordings once summarized
     description: >-
       Stack parameters set the longest meeting records, transcripts, recordings and
-      logs are kept, and a setting can delete each meeting's transcript permanently
-      once it is summarized, immediately or 15, 30 or 60 minutes later. Audio
-      recording, chat in the transcript and personal-information redaction are
-      settings too.
+      logs are kept, and two independent settings can delete each meeting's
+      transcript, and its audio and video recordings, permanently once it is
+      summarized, immediately or 15, 30 or 60 minutes later. Audio recording, chat
+      in the transcript and personal-information redaction are settings too.
     evidence:
       - docs/privacy-and-data-handling.md#what-lma-stores-and-for-how-long
       - docs/transcript-deletion.md

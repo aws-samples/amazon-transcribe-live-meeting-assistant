@@ -17,8 +17,8 @@ describes it in full:
 
 - [Meeting Consent](meeting-consent.md) — the consent modes, the consent record
   and how each capture method runs the consent flow.
-- [Transcript Deletion After the Summary](transcript-deletion.md) — deleting a
-  meeting's transcript once it is summarized.
+- [Transcript and Recording Deletion After the Summary](transcript-deletion.md) — deleting a
+  meeting's transcript, and its recordings, once it is summarized.
 - [Configuration Guide](configuration-guide.md) — the runtime settings, the
   [Retention](configuration-guide.md#retention-settings-the-stack-limits) section
   and the [configuration presets](configuration-guide.md#configuration-presets).
@@ -277,7 +277,7 @@ are rewritten or expire (see
 
 | Data | Where it is stored | Kept by default | Controlled by | Deleting the meeting |
 |---|---|---|---|---|
-| **Meeting record**: title, owner, sharing list, times, participants, speaker names, sentiment, transcript-deletion stamps | The meetings table, the meeting's row and its meeting-list rows | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
+| **Meeting record**: title, owner, sharing list, times, participants, speaker names, sentiment, transcript and recording deletion stamps | The meetings table, the meeting's row and its meeting-list rows | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
 | **Transcript segments**: every turn, partial or final, on every channel | The meetings table, the meeting's transcript items | 90 days | `TranscriptionExpirationInDays`; **Days to keep transcript segments**; **Delete the transcript after the summary** | Deleted |
 | **Meeting chat lines** a Virtual Participant adds to the transcript | Stored with the transcript segments | As the transcript | As the transcript; **Virtual Participant › Add the meeting chat to the transcript** (default On) decides whether they are captured. See [Meeting Chat in the Transcript](virtual-participant.md#meeting-chat-in-the-transcript) | Deleted |
 | **Chat attachments**: images and files shared in the meeting chat, and each one's AI title and summary | Files in the recordings bucket, `lma-chat-attachments/<meeting>/`, encrypted with the stack's key; one item each in the meetings table (file name, kind, type, size, title, summary). Captured only from a chat line that is added to the transcript, and only while **Virtual Participant › Capture chat attachments** (default Off) is on; an attachment that is not stored keeps its file name only | 90 days | Items: as the transcript, including **Delete the transcript after the summary**. Files: the `lma-chat-attachments/` lifecycle rule, from `TranscriptionExpirationInDays`, and deleted with the transcript. **AI titles and summaries for chat attachments** (default On) decides whether the model reads them. See [Chat Attachments](virtual-participant.md#chat-attachments) | Deleted; the files, every version |
@@ -286,12 +286,12 @@ are rewritten or expire (see
 | **Other model outputs**: the derived agenda, speaker names found from the transcript, key-frame text | On the meeting record (agenda, speaker names) or on the key-frame items (text) | As the record they are on | As that record | Deleted |
 | **Transcript and summary files**: the transcript as text (speech only, without chat lines, followed by the shared screen's text), the formatted summary, a metadata file for each, and for an uploaded meeting the Amazon Transcribe output | The recordings bucket, `lma-transcripts/`. The summary step writes the transcript file for every meeting (the MCP server's transcript tool reads it), and the summary file only when the transcript knowledge base is deployed, because nothing else reads it | 90 days | The `lma-transcripts/` lifecycle rule, from `TranscriptionExpirationInDays`, for the summary file as for the transcript files: see [The knowledge base's copy of the summary](#the-knowledge-bases-copy-of-the-summary). **Delete the transcript after the summary** deletes the transcript files (every version) and keeps the summary file | Deleted, every version |
 | **Transcript knowledge base entries** | The transcript knowledge base the stack creates (`TranscriptKnowledgeBase`, on by default): an Amazon Bedrock knowledge base over `lma-transcripts/`, with its vectors in an Amazon S3 Vectors index, which uses the service's default encryption (the template names no customer-managed key). Synced every 15 minutes | As long as the files they were built from | Set `TranscriptKnowledgeBase` to `DISABLED` to deploy no transcript knowledge base | Removed at the next sync, within about 15 minutes, once the files are gone |
-| **Audio recording** | The recordings bucket, `lma-audio-recordings/` | 90 days | `AudioRecordingExpirationInDays`; **Meeting Recording › Record meeting audio** (default On) decides whether it is recorded | Deleted, every version |
-| **Meeting video** (screen recording) from a Virtual Participant or the Desktop Capture App | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`), the **Record meeting video** toggle per Virtual Participant, and the Desktop Capture App's own setting per machine. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
-| **Key frames** of the shared screen, and the text read from them | Images in the recordings bucket, `lma-video-keyframes/<meeting>/`; items in the meetings table. Taken only when the meeting's video is recorded | 90 days | Items: as the transcript, including the page setting. Images: the lifecycle rule, from `TranscriptionExpirationInDays` only. Not removed by **Delete the transcript after the summary**. See [Retention, access and deletion](meeting-video.md#retention-access-and-deletion) | Deleted; the images, every version |
+| **Audio recording** | The recordings bucket, `lma-audio-recordings/` | 90 days | `AudioRecordingExpirationInDays`; **Meeting Recording › Record meeting audio** (default On) decides whether it is recorded; **Delete the recordings after the summary** deletes it, every version, once the meeting is summarized | Deleted, every version |
+| **Meeting video** (screen recording) from a Virtual Participant or the Desktop Capture App | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`), the **Record meeting video** toggle per Virtual Participant, and the Desktop Capture App's own setting per machine; **Delete the recordings after the summary** deletes it, and any segments left, once the meeting is summarized. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
+| **Key frames** of the shared screen, and the text read from them | Images in the recordings bucket, `lma-video-keyframes/<meeting>/`; items in the meetings table. Taken only when the meeting's video is recorded | 90 days | Items: as the transcript, including the page setting. Images: the lifecycle rule, from `TranscriptionExpirationInDays` only. Not removed by **Delete the transcript after the summary** or **Delete the recordings after the summary**. See [Retention, access and deletion](meeting-video.md#retention-access-and-deletion) | Deleted; the images, every version |
 | **Agenda** | On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row | Deleted, from the meeting and from its Virtual Participant records |
 | **Consent record** | On the meeting record (`Consent`) | As the meeting record | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
-| **Consent evidence images** | The recordings bucket, `lma-consent-evidence/<meeting>/` | 90 days | The lifecycle rule, from `TranscriptionExpirationInDays`; **Keep evidence screenshots** off deletes each image once checked | Deleted, every version |
+| **Consent evidence images** | The recordings bucket, `lma-consent-evidence/<meeting>/` | 90 days | The lifecycle rule, from `TranscriptionExpirationInDays`; **Keep evidence screenshots** off deletes each image once checked. Kept when the transcript or the recordings are deleted after the summary | Deleted, every version |
 | **Meeting notifications**: guidance for the people running the meeting, and other categories a feature publishes; each user's dismissals and categories muted on that meeting | The meetings table, under the meeting. A user's categories muted on every meeting are one item per user | Guidance: as the transcript. Other categories and users' views: as the meeting record | Guidance follows the transcript, including **Delete the transcript after the summary**; the others follow **Days to keep meeting records**. A user's every-meeting mutes are deleted with the user. See [Meeting Notifications](meeting-notifications.md#retention) | Deleted |
 | **Meeting whiteboards**: named panels made by hand or kept by the assistant from the transcript, every version of them, and the assistant's notes | The meetings table, under the meeting | As the transcript | Follow the transcript, including **Delete the transcript after the summary**, whoever wrote them. See [Meeting Whiteboards](meeting-whiteboards.md#retention) | Deleted |
 | **Usage records** behind the meeting's cost estimate | The meetings table | 90 days | `MeetingRecordExpirationInDays`; **Days to keep meeting records** | Deleted |
@@ -323,14 +323,14 @@ that neither the retention settings nor deleting a meeting change:
 | The Kinesis call data stream | 24 hours |
 | The meetings table's DynamoDB stream | 24 hours |
 | The point-in-time recovery of the stack's DynamoDB tables | 35 days; a deleted item can be restored from it until then. Point-in-time recovery is a safety protection and stays on |
-| Earlier versions of objects in the recordings bucket | Up to about two days after they stop being current; see [Earlier versions in the recordings bucket](#earlier-versions-in-the-recordings-bucket). Deleting a meeting, and **Delete the transcript after the summary**, delete every version of the files they remove at once |
-| A meeting archive prepared for download | One day after it was written (up to about two, with its earlier version), whatever the retention settings say of the files it copied. **Delete the transcript after the summary** and the other retention rules do not reach into an archive already prepared; deleting the meeting deletes its archives. A person who downloaded an archive keeps their copy, as with any download |
+| Earlier versions of objects in the recordings bucket | Up to about two days after they stop being current; see [Earlier versions in the recordings bucket](#earlier-versions-in-the-recordings-bucket). Deleting a meeting, **Delete the transcript after the summary** and **Delete the recordings after the summary** delete every version of the files they remove at once |
+| A meeting archive prepared for download | One day after it was written (up to about two, with its earlier version), whatever the retention settings say of the files it copied. **Delete the transcript after the summary**, **Delete the recordings after the summary** and the other retention rules do not reach into an archive already prepared; deleting the meeting deletes its archives. A person who downloaded an archive keeps their copy, as with any download |
 | CloudWatch logs | `CloudWatchLogsExpirationInDays` |
 | Amazon Bedrock model invocation logging | As configured for the account. Off by default; if the account has it on, every prompt is logged, including summary prompts that contain the whole transcript |
 | Optional integrations outside AWS | Under each provider's own terms; see [Optional integrations outside AWS](infrastructure-and-security.md#optional-integrations-outside-aws) |
 
-[Copies outside the transcript store](transcript-deletion.md#copies-outside-the-transcript-store)
-lists the same places for a transcript deleted after its summary.
+[Copies outside LMA's stores](transcript-deletion.md#copies-outside-lmas-stores)
+lists the same places for a transcript, or recordings, deleted after the summary.
 
 ### Earlier versions in the recordings bucket
 
@@ -351,9 +351,9 @@ restored from point-in-time recovery refers to, while nothing in LMA restores an
 earlier version of a recording or transcript file, and for meeting content the
 retention period is the point.
 
-Deleting a meeting, and **Delete the transcript after the summary**, do not wait
-for the rule: they delete every version and delete marker of the files they
-remove at once. LMA's other deletions in the bucket remove the current version
+Deleting a meeting, **Delete the transcript after the summary** and **Delete the
+recordings after the summary** do not wait for the rule: they delete every
+version and delete marker of the files they remove at once. LMA's other deletions in the bucket remove the current version
 and leave the rest to the rule: a consent evidence image deleted once checked,
 with **Keep evidence screenshots** off; an uploaded file once it is processed;
 and a Virtual Participant's video segments once its video is assembled.
@@ -401,9 +401,10 @@ within the minute it is due.
   transcript files in the recordings bucket (every version), and their entries
   in the transcript knowledge base.
 - **What is kept.** The summary (on the meeting and in the knowledge base), the
-  meeting record, the audio and video recordings, key frames and their text, and
-  the consent record. Turn **Record meeting audio** off and set
-  `EnableVideoRecording` to `false` if the recordings must not be kept either.
+  meeting record, key frames and their text, and the consent record. The audio
+  and video recordings follow their own setting, below. Turn **Record meeting
+  audio** off and set `EnableVideoRecording` to `false` if no recording may be
+  made at all.
 - **What users see.** The meeting page says when the transcript will be, or was,
   deleted; after it, **Regenerate** on the summary is refused.
 
@@ -412,7 +413,33 @@ answer is written with a DynamoDB time to live of at most two days. A deletion
 that keeps failing is retried for up to 24 hours and then raises the
 `transcript-deletion-dead-letter-queue-depth` alarm (see
 [Monitoring & Alerting](monitoring.md)). See
-[Transcript Deletion After the Summary](transcript-deletion.md).
+[Transcript and Recording Deletion After the Summary](transcript-deletion.md).
+
+### Recording deletion after the summary
+
+**Retention › Delete the recordings after the summary** deletes each meeting's
+audio and video recordings permanently once the meeting is summarized, with the
+same choices, the same timing rules and the same retries and alarm as the
+transcript's setting, and independently of it: either can be on without the
+other. It ships set to Off.
+
+- **What is deleted.** Every audio and video recording the meeting record links
+  to, in every capture session, every version and delete marker of each file;
+  the WebSocket transcriber's raw audio beside each recording and any recording
+  it stored for the meeting without a link; a Virtual Participant's leftover
+  video segments; and the meeting record's links to them.
+- **What is kept.** The summary, the transcript (which follows its own setting),
+  key frames and their text, chat attachments, the consent record and its
+  evidence images, and the meeting record.
+- **Late recordings.** A recording stored after the deletion, which happens
+  because the transcriber stores a session's recording after the session ends,
+  or one from a later session of a rejoined or continued meeting, is deleted as
+  soon as it reaches the meeting record.
+- **What users see.** The meeting page says when the recordings will be, or
+  were, deleted; once they are, it offers no player and no recording download.
+
+The two Regulated presets set it to **Immediately**; the other presets leave it
+Off. See [Transcript and Recording Deletion After the Summary](transcript-deletion.md).
 
 ### Deleting a meeting
 
@@ -562,6 +589,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse | Refuse | Refuse |
 | Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
 | Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
+| Delete the recordings after the summary | Off | Off | Immediately | Immediately | Off | Off |
 | Record meeting audio | On | On | Off | Off | Off | Off |
 | Record screen video from streaming clients | On | On | Off | Off | Off | On |
 | Add the meeting chat to the transcript | On | On | Off | Off | On | On |
@@ -592,7 +620,7 @@ regulated posture sets them when it deploys or updates the stack:
 | `AppSyncFieldLogLevel` | `ERROR` | Keep `ERROR` or `NONE` |
 | `MeetingRecordExpirationInDays` | 90 | The longest meeting records, summaries and consent records are kept, and how long Virtual Participant records are kept |
 | `TranscriptionExpirationInDays` | 90 | The longest transcript segments are kept, and how long transcript and summary files, key-frame images and consent evidence images stay in the recordings bucket |
-| `AudioRecordingExpirationInDays` | 90 | How long audio and video recordings are kept |
+| `AudioRecordingExpirationInDays` | 90 | How long audio and video recordings are kept, unless **Delete the recordings after the summary** deletes them sooner |
 | `CloudWatchLogsExpirationInDays` | 90 | How long logs are kept |
 | `EnableVideoRecording` | `true` | Video is not part of any preset. Set `false` if no meeting video, and so no key frames, may be kept; otherwise a Virtual Participant records video unless its **Record meeting video** toggle is turned off |
 | `TranscriptKnowledgeBase` | `BEDROCK_KNOWLEDGE_BASE (Create)` | `DISABLED` if transcripts and summaries must not be indexed for search across meetings |
@@ -637,7 +665,7 @@ they expire.
 ## Related
 
 - [Meeting Consent](meeting-consent.md)
-- [Transcript Deletion After the Summary](transcript-deletion.md)
+- [Transcript and Recording Deletion After the Summary](transcript-deletion.md)
 - [Configuration Guide](configuration-guide.md) and
   [Unified Configuration Store](configuration-store.md)
 - [Infrastructure & Security](infrastructure-and-security.md)

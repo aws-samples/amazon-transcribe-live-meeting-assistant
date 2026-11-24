@@ -396,12 +396,12 @@ limitations:
     mitigations: [capability:virtual-participant]
 
   - id: transcript-deletion-deployment-wide
-    title: Deleting the transcript after the summary is a deployment-wide setting
+    title: Deleting the transcript or recordings after the summary is deployment-wide
     description: >-
-      Deleting transcripts once they are summarized applies to every meeting in the
-      deployment; there is no per-meeting choice. Some copies, such as the indexed
-      summary and Bedrock invocation logs if the account enables them, follow their
-      own lifetimes.
+      Deleting transcripts, or recordings, once they are summarized applies to every
+      meeting in the deployment; there is no per-meeting choice. Some copies, such as
+      the indexed summary, a download archive already prepared, and Bedrock
+      invocation logs if the account enables them, follow their own lifetimes.
     evidence:
       - docs/transcript-deletion.md#limitations
       - docs/privacy-and-data-handling.md#copies-that-follow-their-own-lifetime
