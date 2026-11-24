@@ -220,7 +220,10 @@ test('a MicroVM acquired for listening is handed to transcription, and released 
 test('live final participant results reach the consent flow before they are written, the assistant channel never', () => {
     const transcribe = methodBody('private async handleTranscriptEvents');
     const noted = transcribe.indexOf('this.noteSpokenResult(result');
-    assert.ok(noted > 0 && noted < transcribe.indexOf('sendAddTranscriptSegment('), 'read before the result is written');
+    assert.ok(noted > 0 && noted < transcribe.indexOf('sendPreparedTranscriptSegments('), 'read before the result is written');
+    // Its rows are built first, so a reply is linked to the line it is written as.
+    const prepared = transcribe.indexOf('prepareTranscriptSegments(');
+    assert.ok(prepared > 0 && prepared < noted, 'the rows are built before the result is read');
     assert.ok(transcribe.indexOf("resultChannel(result, stereo) === 'assistant'") < noted, 'after the assistant channel is set aside');
     const microvm = methodBody('private handleMeetingAsrSegment');
     assert.ok(microvm.indexOf('noteSpokenUtterance(') < microvm.indexOf('sendAsrTranscriptSegment('));

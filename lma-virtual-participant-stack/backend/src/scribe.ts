@@ -12,6 +12,9 @@ import { createWriteStream } from 'fs';
 import { details } from './details.js';
 import {
     sendAddTranscriptSegment,
+    meetingSegmentId,
+    prepareTranscriptSegments,
+    sendPreparedTranscriptSegments,
     sendAsrTranscriptSegment,
     sendStartMeeting,
     sendEndMeeting,
@@ -34,7 +37,7 @@ import { PartialNameHold } from './partial-name-hold.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { recordedAudio } from './recorded-audio.js';
 import { noteParticipantSeen } from './consent-roster.js';
-import { noteSpokenUtterance } from './spoken-replies.js';
+import { noteSpokenUtterance, singleSpeakerLine, type UtteranceLine } from './spoken-replies.js';
 import type { HeardResult, ListenerEngines, ListeningSession } from './consent-listener.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, foldWakeSpellings, isStopTalkingRequest } from './stop-request.js';
@@ -1110,8 +1113,16 @@ export class TranscriptionService {
             // the row is named after (without the voice id, which is no name).
             // An objection stops capture at once; this row, the objection's own
             // words said while capture was on, still closes the row its
-            // partials opened.
-            noteSpokenUtterance({ speaker: attribution.name, text: segment.text });
+            // partials opened. The row is the reply's own line of the
+            // transcript, named as it is stored, so a reply read from it is
+            // linked to the row's speaker.
+            noteSpokenUtterance({
+                speaker: attribution.name,
+                text: segment.text,
+                line: singleSpeakerLine([
+                    { segmentId: meetingSegmentId(segment.segmentId), channel: REMOTE_CHANNEL, speaker: speaker ?? '' },
+                ]),
+            });
         }
         this.trackSegmentSend(sendAsrTranscriptSegment({
             channel: REMOTE_CHANNEL,
@@ -1511,15 +1522,29 @@ export class TranscriptionService {
         return currentParticipantSpeaker;
     }
 
-    /** One final participant result of the live Amazon Transcribe stream, for the consent flow. */
-    private noteSpokenResult(result: any, sessionOffsetSeconds: number, fallbackSpeaker: string): void {
+    /**
+     * One final participant result of the live Amazon Transcribe stream, for
+     * the consent flow, with the lines it is written as. A result split
+     * between speakers is linked to none of them (singleSpeakerLine), and the
+     * consent flow links one only when its speaker is the reply's.
+     */
+    private noteSpokenResult(
+        result: any,
+        sessionOffsetSeconds: number,
+        fallbackSpeaker: string,
+        lines: readonly UtteranceLine[] = [],
+    ): void {
         const text = result.Alternatives?.[0]?.Transcript || '';
         if (!text.trim()) {
             return;
         }
         const start = sessionOffsetSeconds + (result.StartTime ?? 0);
         const end = sessionOffsetSeconds + (result.EndTime ?? result.StartTime ?? 0);
-        noteSpokenUtterance({ speaker: this.rosterNameFor(start, end) ?? fallbackSpeaker, text });
+        noteSpokenUtterance({
+            speaker: this.rosterNameFor(start, end) ?? fallbackSpeaker,
+            text,
+            line: singleSpeakerLine(lines),
+        });
     }
 
     // ─── Listening for spoken consent replies ────────────────────────────────
@@ -2114,18 +2139,25 @@ export class TranscriptionService {
                     // while the assistant speaks, and its rows are named after
                     // the latest participant rather than the VP.
                     const speaker = stereo ? currentParticipantSpeaker : currentSpeaker;
+                    // Built before the consent flow reads the result, so a
+                    // reply can be linked to the line it is written as. A
+                    // result that cannot be built is still read for a reply.
+                    let prepared: ReturnType<typeof prepareTranscriptSegments> | null = null;
+                    let prepareError: unknown = null;
+                    try {
+                        prepared = prepareTranscriptSegments(speaker, result, sessionOffsetSeconds);
+                    } catch (error) {
+                        prepareError = error;
+                    }
                     if (!result.IsPartial) {
                         // A spoken consent reply or objection. An objection
                         // stops capture at once; this result, its own words
                         // said while capture was on, still closes its row.
-                        this.noteSpokenResult(result, sessionOffsetSeconds, speaker);
+                        this.noteSpokenResult(result, sessionOffsetSeconds, speaker, prepared?.lines ?? []);
                     }
                     try {
-                        const segMaxEndTime = await sendAddTranscriptSegment(
-                            speaker,
-                            result,
-                            sessionOffsetSeconds,
-                        );
+                        if (!prepared) throw prepareError;
+                        const segMaxEndTime = await sendPreparedTranscriptSegments(prepared);
                         if (segMaxEndTime > observedMaxEndTime) {
                             observedMaxEndTime = segMaxEndTime;
                         }

@@ -485,6 +485,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "source": "chat",
                 "at": "2026-11-03T14:06:00Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
             {
                 "participantName": "Priya Shah",
@@ -492,6 +494,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "source": "voice",
                 "at": "2026-11-03T14:07:00Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
             {
                 "participantName": "owner@example.com",
@@ -499,6 +503,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "source": "attestation",
                 "at": "2026-11-03T14:08:00Z",
                 "speakerId": None,
+                "speakerLinkBasis": None,
+                "speakerLinkedAt": None,
             },
         ],
         "attestation": {
@@ -513,6 +519,150 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
     # No notice text, reply words, evidence key or other stored detail is copied.
     text = json.dumps(document["consent"])
     assert "no thanks" not in text and "LMA is recording" not in text and ".jpg" not in text
+
+
+# ── consent linked to the speaker who gave it ──────────────────────────────
+
+BO = "Bo Chen (spk_3)"
+LINKED_AT = "2026-11-03T14:06:10Z"
+
+
+def typed(value):
+    """A Python value as DynamoDB stores it."""
+    from boto3.dynamodb.types import TypeSerializer
+
+    return TypeSerializer().serialize(value)
+
+
+def spoken(name, decision, segment_id="v1", speaker=BO, source="voice"):
+    event = {"ParticipantName": name, "Decision": decision, "Source": source}
+    if segment_id:
+        event["SpeakerLink"] = {
+            "Basis": "same_segment",
+            "SegmentId": segment_id,
+            "Channel": "REMOTE",
+            "Speaker": speaker,
+            "LinkedAt": LINKED_AT,
+            "LinkedBy": "LMA",
+        }
+    return event
+
+
+def linked_export(fakes, events, include=None, identities=None, **meeting):
+    parts = full_partitions()
+    parts[f"trs#{CALL}"] += [
+        segment("v1", "REMOTE", BO, "LMA, I consent.", 16.0),
+        segment("v2", "REMOTE", "Bo Chen (spk_4)", "Second voice.", 18.0),
+    ]
+    consent = typed({"Mode": "notify", "Status": "granted", "Events": events})
+    row = full_meeting(Consent=consent, **meeting)
+    if identities:
+        row["SpeakerIdentities"] = s(json.dumps({**IDENTITIES, **identities}))
+    document = export_of(fakes, meeting=row, include=include, parts=parts)
+    valid(document)
+    return document
+
+
+def consent_of(document):
+    return {p["speakerId"]: p["consent"] for p in document["participants"]}
+
+
+def test_a_spoken_consent_is_given_as_its_speaker_s(fakes) -> None:
+    document = linked_export(fakes, [spoken("Bo Chen", "consent")])
+    people = consent_of(document)
+    assert people["remote-spk_3"] == "granted"
+    assert {v for k, v in people.items() if k != "remote-spk_3"} == {"unknown"}
+    (event,) = document["consent"]["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"], event["speakerLinkedAt"]) == (
+        "remote-spk_3",
+        "same_segment",
+        LINKED_AT,
+    )
+    # A reply never linked has no basis.
+    plain = linked_export(fakes, [spoken("Bo Chen", "consent", segment_id=None)])
+    assert plain["consent"]["events"][0]["speakerLinkBasis"] is None
+    assert set(consent_of(plain).values()) == {"unknown"}
+
+
+def test_a_renamed_speaker_keeps_its_consent_and_its_id(fakes) -> None:
+    identities = {
+        "identities": {
+            f"REMOTE#{BO}": {"name": "Robert Chen", "status": "confirmed", "source": "manual"}
+        }
+    }
+    document = linked_export(fakes, [spoken("Bo Chen", "consent")], identities=identities)
+    bo = next(p for p in document["participants"] if p["speakerId"] == "remote-spk_3")
+    assert (bo["name"], bo["consent"]) == ("Robert Chen", "granted")
+
+
+def test_a_merged_voice_does_not_take_the_link(fakes) -> None:
+    identities = {"merges": {"REMOTE#Bo Chen (spk_4)": f"REMOTE#{BO}"}}
+    document = linked_export(fakes, [spoken("Bo Chen", "objection")], identities=identities)
+    people = consent_of(document)
+    assert people["remote-spk_3"] == "objected"
+    assert people["remote-spk_4"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "later, expected",
+    [
+        # The participant later replied otherwise, and nothing says from which speaker.
+        (spoken("bo  chen", "objection", segment_id=None, source="chat"), "unknown"),
+        (spoken("Bo Chen", "objection", segment_id="v2", speaker="Bo Chen (spk_4)"), "unknown"),
+        # The same answer again takes nothing away.
+        (spoken("Bo Chen", "consent", segment_id=None, source="chat"), "granted"),
+        # Somebody else's reply is not this speaker's.
+        (spoken("Ana Silva", "objection", segment_id=None, source="chat"), "granted"),
+        # An attestation is not a reply.
+        (spoken("owner@example.com", "consent", segment_id=None, source="attestation"), "granted"),
+    ],
+)
+def test_a_later_reply_by_the_same_participant_can_only_take_consent_away(
+    fakes, later, expected
+) -> None:
+    document = linked_export(fakes, [spoken("Bo Chen", "consent"), later])
+    assert consent_of(document)["remote-spk_3"] == expected
+
+
+@pytest.mark.parametrize(
+    "link, identities",
+    [
+        # The transcript does not hold the line (it expired, or never arrived).
+        ({"segment_id": "gone"}, None),
+        # The line is stored under another speaker.
+        ({"speaker": "Bo Chen (spk_9)"}, None),
+        # Somebody named that one line as another person's on the meeting page.
+        ({}, {"segmentOverrides": {"v1": "Ana Silva"}}),
+    ],
+)
+def test_a_link_the_transcript_does_not_confirm_names_no_speaker(fakes, link, identities) -> None:
+    document = linked_export(fakes, [spoken("Bo Chen", "consent", **link)], identities=identities)
+    (event,) = document["consent"]["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"]) == (None, "same_segment")
+    assert set(consent_of(document).values()) == {"unknown"}
+
+
+def test_a_speaker_has_the_same_id_whichever_parts_are_exported(fakes) -> None:
+    events = [spoken("Bo Chen", "consent")]
+    alone = linked_export(fakes, events, include=["consent"])
+    assert alone["consent"]["events"][0]["speakerId"] == "remote-spk_3"
+    chat_only = linked_export(fakes, events, include=["chat", "consent"])
+    assert chat_only["consent"]["events"][0]["speakerId"] == "remote-spk_3"
+    # The speaker a consent is linked to is listed with the chat's senders.
+    assert consent_of(chat_only)["remote-spk_3"] == "granted"
+    full = linked_export(fakes, events)
+    assert [p["speakerId"] for p in full["participants"]] == [
+        p["speakerId"] for p in export_of(fakes, parts=None)["participants"]
+    ] + ["remote-spk_3", "remote-spk_4"]
+
+
+def test_after_the_transcript_is_deleted_the_link_is_kept_without_a_speaker(fakes) -> None:
+    document = linked_export(
+        fakes, [spoken("Bo Chen", "consent")], TranscriptDeletedAt=s("2026-11-04T00:00:00Z")
+    )
+    assert "participants" not in document
+    (event,) = document["consent"]["events"]
+    assert (event["speakerId"], event["speakerLinkBasis"]) == (None, "same_segment")
 
 
 def test_participants_are_named_only_from_a_name_given_or_confirmed(fakes) -> None:

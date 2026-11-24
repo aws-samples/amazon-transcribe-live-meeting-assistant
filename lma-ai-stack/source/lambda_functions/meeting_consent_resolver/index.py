@@ -704,6 +704,29 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
     return write_consent(caller, call_id, change)
 
 
+def reply_speaker_link(
+    caller: Mapping[str, Any], data: Mapping[str, Any], name: str, source: str, now: str
+) -> Optional[Dict[str, Any]]:
+    """The ``SpeakerLink`` to store on a reply, or None.
+
+    Only a backend role -- the capture client that wrote the transcript line the
+    reply was read from -- can link a reply to its speaker. A link that does not
+    hold (see lma_consent.rules.speaker_link) is left off and logged; the reply
+    itself is always recorded, because a consent or an objection matters more
+    than knowing which transcript speaker gave it.
+    """
+    given = data.get("SpeakerLink")
+    if given is None:
+        return None
+    if not caller["is_backend"]:
+        LOGGER.info("SpeakerLink from a signed-in user ignored for %s", data.get("CallId"))
+        return None
+    link, why = consent.speaker_link(given, name, source, now, BACKEND_ATTRIBUTION)
+    if link is None:
+        LOGGER.warning("SpeakerLink not stored for %s: %s", data.get("CallId"), why)
+    return link
+
+
 def record_meeting_consent_event(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     call_id = data["CallId"]
     name = required_text(data.get("ParticipantName"), "ParticipantName", consent.MAX_NAME_LENGTH)
@@ -729,6 +752,9 @@ def record_meeting_consent_event(caller: Mapping[str, Any], data: Mapping[str, A
             "RecordedAt": now,
             "RecordedBy": actor(caller),
         }
+        link = reply_speaker_link(caller, data, name, source, now)
+        if link is not None:
+            event["SpeakerLink"] = link
         record["Events"] = consent.compact_events(list(record.get("Events") or []) + [event])
         return record
 

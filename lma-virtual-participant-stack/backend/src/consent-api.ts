@@ -77,6 +77,14 @@ export interface RecordEventInput {
     OccurredAt?: string;
     /** `chat` when omitted. */
     Source?: ReplySource;
+    /**
+     * A reply said aloud: the transcript line it was read from, as written to
+     * the meeting. The resolver stores it as the reply's link to that line's
+     * speaker when the line's speaker is the reply's participant. Not read
+     * back: the VP selects no link in its answers, so it works with an API
+     * that has none.
+     */
+    SpeakerLink?: { SegmentId: string; Channel: string; Speaker: string };
 }
 
 export interface AddEvidenceInput {
@@ -197,8 +205,21 @@ export function createConsentApi(callId: string, send: GraphqlSender): ConsentAp
         recordNotice: (text) => mutate('recordMeetingConsentNotice', 'RecordMeetingConsentNoticeInput', { Channel: 'chat', Text: text }),
         setParticipants: (names) =>
             mutate('setMeetingConsentParticipants', 'SetMeetingConsentParticipantsInput', { Participants: names }),
-        recordEvent: (input) =>
-            mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', { ...input, Source: input.Source ?? 'chat' }),
+        recordEvent: async (input) => {
+            const event = { ...input, Source: input.Source ?? 'chat' };
+            try {
+                return await mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', event);
+            } catch (error) {
+                // An API from before speaker links refuses the field. The
+                // reply matters more than its link, so it is sent again without.
+                if (!event.SpeakerLink || !(error instanceof ConsentApiError) || !/SpeakerLink/.test(error.message)) {
+                    throw error;
+                }
+                log.warn('[consent] the consent API does not take a speaker link; the reply is recorded without it');
+                const { SpeakerLink: _unused, ...withoutLink } = event;
+                return mutate('recordMeetingConsentEvent', 'RecordMeetingConsentEventInput', withoutLink);
+            }
+        },
         addEvidence: (input) =>
             mutate('addMeetingConsentEvidence', 'AddMeetingConsentEvidenceInput', { ...input, Kind: 'screenshot' }),
         verifyEvidence: async (evidenceId) => {

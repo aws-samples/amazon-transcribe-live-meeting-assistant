@@ -36,17 +36,8 @@ from lma_consent.summary import (  # configuration layer
     meeting_consent_output,
     participant_consent,
 )
-from lma_speakers import (  # configuration layer
-    DEFAULT_OTHER_SPEAKER_NAME,
-    is_unknown_name,
-    looks_like_room,
-    parse_speaker_identities,
-    resolve_merge_target,
-    resolve_speaker,
-    speaker_groups,
-    speaker_key,
-    split_diarization_label,
-)
+from lma_speakers.participants import Speakers, final_segments  # configuration layer
+from lma_speakers.participants import segment_kind as _kind  # configuration layer
 from lma_summary_profiles import DEFAULT_PROFILE, action_items_output  # configuration layer
 from lma_whiteboards import rules as whiteboard_rules  # configuration layer
 
@@ -70,22 +61,11 @@ PARTS = (
 )
 DEFAULT_INCLUDE = PARTS
 
-MEETING_CHAT = "MEETING_CHAT"
-ASSISTANT_CHANNELS = ("AGENT_ASSISTANT", "CHAT_ASSISTANT")
 CAMERA_CONTENT = "CAMERA"
 GUIDANCE = "guidance"
 
-#: Where a participant's name came from (``nameSource``). ``enrolled`` is part
-#: of the format but not produced: an enrolled voice is stored as its name alone,
-#: the same form a platform's name takes, so a stored label cannot show it.
-NAME_SOURCES = ("enrolled", "manual", "transcript", "platform", "none")
-#: The speaker-naming bases that name somebody from what was said
-#: (speaker_name_resolver: a self-introduction, or being addressed by name).
-TRANSCRIPT_BASES = ("self-introduction", "addressed-by-name")
-
 MAX_ALT_TEXT = 200
 KEYFRAME_IMAGE = re.compile(r"!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)")
-VOICE_ID = re.compile(r"^spk_\d+$")
 
 
 def parse_include(value: Any) -> List[str]:
@@ -165,124 +145,7 @@ def meeting_part(meeting: Mapping[str, Any], name: str) -> Dict[str, Any]:
     return part
 
 
-# ── the speakers ────────────────────────────────────────────────────────────
-
-
-class Speakers:
-    """Each speaker of the transcript as a participant, with an id unique in the export.
-
-    Speech is grouped by its channel and its speaker as stored (one voice); a
-    chat message by its sender. The id is opaque: ``remote-spk_0`` for a
-    separated voice, ``local-1`` for a channel's unseparated speaker, ``chat-1``
-    for a chat sender. The name is a person's name only where one was given or
-    confirmed; otherwise null, never a guess.
-    """
-
-    def __init__(self, segments: Sequence[Mapping[str, Any]], meeting: Mapping[str, Any]):
-        self.identities = parse_speaker_identities(meeting.get("SpeakerIdentities"))
-        self.speech = [s for s in segments if _kind(s) == "speech"]
-        self.groups = speaker_groups(self.speech, self.identities)
-        self.fallback = meeting.get("CustomerPhoneNumber")
-        self.by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        self.order: List[Dict[str, Any]] = []
-        self._numbers: Dict[str, int] = {}
-
-    def _next(self, prefix: str) -> str:
-        self._numbers[prefix] = self._numbers.get(prefix, 0) + 1
-        return f"{prefix}-{self._numbers[prefix]}"
-
-    def id_of(self, row: Mapping[str, Any]) -> str:
-        kind = _kind(row)
-        stored = str(row.get("Speaker") or "").strip()
-        channel = canonical_channel(row.get("Channel")) or str(row.get("Channel") or "")
-        key = (MEETING_CHAT if kind == "chat" else channel, stored)
-        known = self.by_key.get(key)
-        if known is not None:
-            return str(known["speakerId"])
-        entry: Dict[str, Any]
-        if kind == "chat":
-            entry = {
-                "speakerId": self._next("chat"),
-                "label": stored or "Unknown sender",
-                "name": stored if stored and not is_unknown_name(stored) else None,
-                "nameSource": "platform" if stored and not is_unknown_name(stored) else "none",
-                "email": None,
-            }
-        else:
-            base, suffix = split_diarization_label(stored)
-            voice = suffix.strip()[1:-1] if suffix else ""
-            prefix = channel.lower() or "speech"
-            speaker_id = f"{prefix}-{voice}" if VOICE_ID.match(voice) else self._next(prefix)
-            while any(e["speakerId"] == speaker_id for e in self.order):
-                speaker_id = self._next(prefix)
-            name, source, label = self._name(row, base.strip())
-            entry = {
-                "speakerId": speaker_id,
-                "label": label,
-                "name": name,
-                "nameSource": source,
-                "email": None,
-            }
-        self.by_key[key] = entry
-        self.order.append(entry)
-        return str(entry["speakerId"])
-
-    def _name(self, row: Mapping[str, Any], base: str) -> Tuple[Optional[str], str, str]:
-        """(name, nameSource, label) of one voice, from the meeting's speaker identities."""
-        resolved = resolve_speaker(row, self.identities, self.fallback, self.groups)
-        label = str(resolved.get("name") or base or "Unknown speaker")
-        if resolved.get("overridden"):
-            # A name given to one line alone does not name the voice.
-            resolved = resolve_speaker(
-                {**row, "SegmentId": None}, self.identities, self.fallback, self.groups
-            )
-            label = str(resolved.get("name") or base or "Unknown speaker")
-        status = resolved.get("status")
-        if status == "confirmed":
-            target = resolve_merge_target(
-                speaker_key(row.get("Channel"), row.get("Speaker")), self.identities["merges"]
-            )
-            entry = self.identities["identities"].get(target)
-            source = entry.get("source") if isinstance(entry, Mapping) else None
-            kind = "transcript" if source in TRANSCRIPT_BASES else "manual"
-            return str(resolved["name"]), kind, label
-        if status == "proposed":
-            # Suggested from the transcript and not confirmed by anybody: not a name yet.
-            return None, "none", base or label
-        if base and base != DEFAULT_OTHER_SPEAKER_NAME and not is_unknown_name(base):
-            if not looks_like_room(base):
-                return base, "platform", label
-        return None, "none", label
-
-    def participants(self) -> List[Dict[str, Any]]:
-        return [dict(entry) for entry in self.order]
-
-
-def _kind(row: Mapping[str, Any]) -> str:
-    channel = row.get("Channel")
-    if channel == MEETING_CHAT:
-        return "chat"
-    if channel in ASSISTANT_CHANNELS:
-        return "assistant"
-    return "speech"
-
-
 # ── the timeline ────────────────────────────────────────────────────────────
-
-
-def final_segments(segments: Iterable[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
-    """The meeting's final segments of speech and chat, in time order."""
-    rows = [
-        s
-        for s in segments
-        if isinstance(s, Mapping)
-        and s.get("IsPartial") is not True
-        and _kind(s) != "assistant"
-        and str(s.get("PK") or "trs#").startswith("trs#")
-    ]
-    return sorted(
-        rows, key=lambda s: (_seconds(s.get("StartTime")) or 0.0, str(s.get("SegmentId")))
-    )
 
 
 SegmentTimes = Dict[str, Tuple[Optional[float], Optional[float]]]
@@ -542,8 +405,11 @@ def build_export(
     frames = shared_frames(keyframes)
     rows = final_segments(segments) if retained else []
     times = segment_times(rows)
-    if retained and wanted & {"transcript", "chat"}:
-        speakers = Speakers(rows, meeting)
+    # Indexed over the whole transcript, so a speaker has the same id whichever
+    # parts are asked for, and a consent event's speakerId names the same
+    # participant as get_meeting_consent's does.
+    speakers = Speakers(rows, meeting) if retained else None
+    if speakers is not None and wanted & {"transcript", "chat"}:
         export["transcript"] = transcript_part(
             rows,
             speakers,
@@ -554,14 +420,17 @@ def build_export(
         )
         if "chat" in wanted:
             export["links"] = links_part(rows, speakers)
-        events = consent_events(meeting.get("Consent") or {})
+        # Before the list: a speaker a consent event is linked to is listed.
+        events = consent_events(meeting.get("Consent") or {}, speakers)
         export["participants"] = [
             {**entry, "consent": participant_consent(entry["speakerId"], events)}
             for entry in speakers.participants()
         ]
     if "consent" in wanted:
         # The same shape as get_meeting_consent's answer.
-        export["consent"] = meeting_consent_output(call_id, {"Consent": meeting.get("Consent")})
+        export["consent"] = meeting_consent_output(
+            call_id, {"Consent": meeting.get("Consent")}, speakers
+        )
     if "checklist" in wanted:
         export["checklist"] = checklist_part(meeting, quotes=retained, times=times)
     if "keyframes" in wanted:
