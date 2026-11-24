@@ -5,7 +5,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { NOT_THE_MEETING_TAB, VideoState, createPanelVideo, dataUrlBytes } from './panel-video';
+import { MEETING_TAB_UNCONFIRMED, NOT_THE_MEETING_TAB, VideoState, createPanelVideo, dataUrlBytes } from './panel-video';
 
 type FakeSocket = {
   sent: unknown[],
@@ -97,8 +97,21 @@ describe('the panel\'s screen video', () => {
   test('says so when the shared surface is not the meeting tab, and the audio goes on', () => {
     const h = setup();
     h.video.begin('m', true, false);
-    h.video.onRecorderMessage({ action: 'VideoUnavailable', reason: 'surface' });
+    h.video.onRecorderMessage({ action: 'VideoUnavailable', reason: 'not-meeting-tab' });
     expect(h.last()).toMatchObject({ status: 'failed', message: NOT_THE_MEETING_TAB });
+    expect(h.sockets).toHaveLength(0);
+  });
+
+  test('says so when the browser cannot confirm the meeting tab was shared', () => {
+    const h = setup();
+    h.video.begin('m', true, false);
+    h.video.onRecorderMessage({ action: 'VideoUnavailable', reason: 'unverified' });
+    expect(h.last()).toMatchObject({ status: 'failed', message: MEETING_TAB_UNCONFIRMED });
+  });
+
+  test('names the meeting tab in both messages, and only the meeting tab', () => {
+    expect(NOT_THE_MEETING_TAB).toContain('only from the meeting tab');
+    expect(MEETING_TAB_UNCONFIRMED).toContain('only from the meeting tab');
   });
 
   test('stops the recorder when the transcriber refuses the video', async () => {

@@ -141,7 +141,7 @@ questions:
     answer_type: boolean
     priority: should
     phase: discovery
-    tests: [capability:video-keyframes-and-slides, limitation:no-video-from-browser-capture]
+    tests: [capability:video-keyframes-and-slides, limitation:screen-video-where-turned-on]
     implications:
       - when: "yes"
         then: Keep video recording on and use the Virtual Participant or the Desktop Capture App. See docs/meeting-video.md.
