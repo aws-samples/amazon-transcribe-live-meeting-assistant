@@ -23,7 +23,8 @@ def test_offline_the_plan_is_srt_and_the_static_role_checks() -> None:
 def test_with_a_stack_the_plan_adds_the_live_checks_for_that_stack_and_region() -> None:
     steps = security_results.plan("LMA-dev", "us-west-2", "python3")
     assert [s.name for s in steps] == ["srt", "static-roles", "live-rbac", "zap"]
-    assert steps[2].command == ["make", "stacktest-rbac", "STACK=LMA-dev", "REGION=us-west-2"]
+    assert steps[2].command[:4] == ["make", "stacktest-rbac", "STACK=LMA-dev", "REGION=us-west-2"]
+    assert steps[2].command[4].startswith("RBAC_PYTEST_ARGS=--junitxml=")
     assert steps[3].command == ["make", "stacktest-zap", "STACK=LMA-dev", "REGION=us-west-2"]
     assert "ZAP_ACTIVE=1" not in steps[3].command
 
