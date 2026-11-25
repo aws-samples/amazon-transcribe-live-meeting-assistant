@@ -3,7 +3,7 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
@@ -41,13 +41,14 @@ const pathCallId = (rest) => {
 };
 
 // The page each path the Participant role may open shows; Access denied for
-// every other path, as the role's route table says.
-const pageFor = (pathname) => {
+// every other path, as the role's route table says. `setToolsOpen` opens the
+// help panel, for the Info links on a meeting's page.
+const pageFor = (pathname, setToolsOpen) => {
   if (!roleMayOpen(PARTICIPANT, pathname)) return <ParticipantAccessDenied />;
   if (pathname === SHARED_MEETINGS_PATH) return <ParticipantMeetingList />;
   if (pathname.startsWith(`${SHARED_MEETINGS_PATH}/`)) {
     const callId = pathCallId(pathname.slice(SHARED_MEETINGS_PATH.length + 1));
-    return <ParticipantMeetingPage callId={callId} />;
+    return <ParticipantMeetingPage callId={callId} setToolsOpen={setToolsOpen} />;
   }
   if (pathname === VOICE_ENROLLMENT_PATH || pathname.startsWith(`${VOICE_ENROLLMENT_PATH}/`)) {
     return <VoiceEnrollmentPage />;
@@ -58,17 +59,24 @@ const pageFor = (pathname) => {
 
 const ParticipantPage = () => {
   const { pathname } = useLocation();
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const pageProps = { toolsOpen, setToolsOpen };
   if (pathname === MY_CONSENTS_PATH) {
     return (
       <ParticipantLayout
+        // eslint-disable-next-line react/jsx-props-no-spreading
+        {...pageProps}
         breadcrumbs={<MyConsentsBreadcrumbs homeHref={`#${HOME_PATH}`} />}
         tools={<MyConsentsToolsPanel />}
       >
-        {pageFor(pathname)}
+        {pageFor(pathname, setToolsOpen)}
       </ParticipantLayout>
     );
   }
-  return <ParticipantLayout>{pageFor(pathname)}</ParticipantLayout>;
+  return (
+    // eslint-disable-next-line react/jsx-props-no-spreading
+    <ParticipantLayout {...pageProps}>{pageFor(pathname, setToolsOpen)}</ParticipantLayout>
+  );
 };
 
 /**

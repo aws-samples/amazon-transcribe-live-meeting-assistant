@@ -10,6 +10,7 @@ import {
   Alert,
   AppLayout,
   Box,
+  BreadcrumbGroup,
   Container,
   Flashbar,
   Header,
@@ -21,9 +22,11 @@ import {
 import CallAnalyticsTopNavigation from '../call-analytics-top-navigation';
 import { appLayoutLabels } from '../common/labels';
 import { NAV_HEADER } from '../common/navigation-items';
+import { meetingTitle } from '../common/meeting-header';
 import useAppContext from '../../contexts/app';
 import useNotifications from '../../hooks/use-notifications';
 import { HOME_PATH, MY_CONSENTS_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
+import ParticipantToolsPanel from './tools-panel';
 
 const PARTICIPANT_NAV_HEADER = { ...NAV_HEADER, href: `#${HOME_PATH}` };
 
@@ -57,16 +60,52 @@ const activeHref = (pathname) => {
   return `#${HOME_PATH}`;
 };
 
+// A meeting id as a shared meeting's path holds it (encoded by the list's link).
+const decodedCallId = (rest) => {
+  try {
+    return decodeURIComponent(rest);
+  } catch (e) {
+    return rest;
+  }
+};
+
+/** The breadcrumbs of a Participant page: Home, then the page and, on a meeting's page, the meeting. */
+export const participantBreadcrumbs = (pathname) => {
+  const home = { text: 'Home', href: `#${HOME_PATH}` };
+  const shared = { text: 'Shared meetings', href: `#${SHARED_MEETINGS_PATH}` };
+  if (pathname.startsWith(`${SHARED_MEETINGS_PATH}/`)) {
+    const rest = pathname.slice(SHARED_MEETINGS_PATH.length + 1);
+    return [home, shared, { text: meetingTitle(decodedCallId(rest)), href: `#${pathname}` }];
+  }
+  if (pathname === SHARED_MEETINGS_PATH) return [home, shared];
+  if (pathname === MY_CONSENTS_PATH) return [home, { text: 'My consents', href: `#${MY_CONSENTS_PATH}` }];
+  if (pathname.startsWith(VOICE_ENROLLMENT_PATH)) {
+    return [home, { text: 'Voice enrollment', href: `#${VOICE_ENROLLMENT_PATH}` }];
+  }
+  return [home];
+};
+
 /**
- * The page frame of every Participant page: the top navigation, the side
- * navigation, the notifications and the content, with the page's breadcrumbs
- * and help panel when it has them.
+ * The page frame of every Participant page, as every other page has: the top
+ * navigation, the side navigation, the breadcrumbs, the notifications
+ * (Flashbar), the page's help panel at the right, and the content. A page may
+ * give its own `breadcrumbs` and help panel (`tools`); otherwise they follow
+ * the path. The help panel is opened from its (i) button or from an Info link
+ * on the page, which calls `setToolsOpen` (given by the caller, or kept here).
  */
-export const ParticipantLayout = ({ children, breadcrumbs = undefined, tools = undefined }) => {
+export const ParticipantLayout = ({
+  children,
+  breadcrumbs = undefined,
+  tools = undefined,
+  toolsOpen = undefined,
+  setToolsOpen = undefined,
+}) => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { pathname } = useLocation();
   const notifications = useNotifications();
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [ownToolsOpen, setOwnToolsOpen] = useState(false);
+  const open = toolsOpen === undefined ? ownToolsOpen : toolsOpen;
+  const setOpen = setToolsOpen || setOwnToolsOpen;
   return (
     <div>
       <CallAnalyticsTopNavigation />
@@ -81,12 +120,13 @@ export const ParticipantLayout = ({ children, breadcrumbs = undefined, tools = u
         }
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+        breadcrumbs={
+          breadcrumbs || <BreadcrumbGroup ariaLabel="Breadcrumbs" items={participantBreadcrumbs(pathname)} />
+        }
         notifications={<Flashbar items={notifications} />}
-        breadcrumbs={breadcrumbs}
-        tools={tools}
-        toolsHide={!tools}
-        toolsOpen={toolsOpen}
-        onToolsChange={({ detail }) => setToolsOpen(detail.open)}
+        tools={tools || <ParticipantToolsPanel pathname={pathname} />}
+        toolsOpen={open}
+        onToolsChange={({ detail }) => setOpen(detail.open)}
         content={children}
         ariaLabels={appLayoutLabels}
       />
@@ -98,6 +138,8 @@ ParticipantLayout.propTypes = {
   children: PropTypes.node.isRequired,
   breadcrumbs: PropTypes.node,
   tools: PropTypes.node,
+  toolsOpen: PropTypes.bool,
+  setToolsOpen: PropTypes.func,
 };
 
 /** The Participant home page. */

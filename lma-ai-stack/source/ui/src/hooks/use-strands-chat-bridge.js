@@ -93,6 +93,31 @@ export const mergeChatButtons = (result) => {
   return Object.keys(customButtons).length > 0 ? { ...customButtons } : { ...defaultButtons };
 };
 
+/**
+ * The chat buttons a Participant's frame shows, in the stored form ("N#LABEL":
+ * prompt). A Participant's questions are answered with the Participant use
+ * tools, which always include the current meeting's transcript and agenda and
+ * nothing else unless an Admin offers more (docs/meeting-assistant.md#participant-use).
+ * So these are the shipped buttons that need only those: the ones that ask
+ * about past meetings, documents or the web, or ask the assistant to act in
+ * the meeting, are left out. The deployment's own button set is read by Admins
+ * and Users only, so a Participant always sees these.
+ */
+export const PARTICIPANT_CHAT_BUTTONS = Object.freeze({
+  '1#SUMMARIZE': 'Summarize this meeting',
+  '2#ACTIONS': 'What were the action items?',
+  '3#TOPICS': 'What topics were discussed?',
+  '4#AGENDA CHECK':
+    'How are we doing against the agenda? For each agenda item, say whether it is covered, in progress or ' +
+    'remaining, with the transcript times where it came up.',
+  '5#CLARITY CHECK':
+    'Which important points in this meeting so far are unclear, ambiguous or unresolved and should be revisited ' +
+    'before the meeting ends? For each, say why it is unclear, with the transcript time where it came up.',
+  '6#MISSING ACTION OWNER or ETA':
+    'List the follow-up actions agreed in this meeting so far that have no clear owner or no due date. For each, ' +
+    'say what is missing, with the transcript time where it came up.',
+});
+
 const userContextMessage = ({ user, userGroups, isAdmin }) => ({
   type: 'STRANDS_USER_CONTEXT',
   userGroups,
@@ -146,8 +171,13 @@ const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
         reply(userContextMessage(contextRef.current));
       } else if (data.type === 'STRANDS_BUTTON_CONFIG_REQUEST' && contextRef.current.role === PARTICIPANT) {
         // The chat buttons are read by Admins and Users only; a Participant's
-        // frame shows none, without a request the API would refuse.
-        reply({ type: 'STRANDS_BUTTON_CONFIG_RESPONSE', requestId: data.requestId, success: true, config: {} });
+        // frame shows the Participant set, without a request the API would refuse.
+        reply({
+          type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
+          requestId: data.requestId,
+          success: true,
+          config: { ...PARTICIPANT_CHAT_BUTTONS },
+        });
       } else if (data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
         try {
           const result = await gql.graphql({

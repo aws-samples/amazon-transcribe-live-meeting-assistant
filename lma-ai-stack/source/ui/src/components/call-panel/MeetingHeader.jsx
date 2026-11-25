@@ -26,6 +26,10 @@
  * agent's diagnosis of this meeting, for Admins; troubleshooting/DiagnoseButton.jsx)
  * and, under the "more" menu, Delete. Share and Delete are the meeting list's own
  * dialogs (common/meeting-controls.js).
+ *
+ * On a Participant's page (`participantMode`) the header shows the meeting and
+ * the Assistant button only: Share, Download, Diagnose, Delete and the cost
+ * estimate are the owner's.
  */
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
@@ -130,8 +134,10 @@ const MeetingHeader = ({
   onShowSpeakers = undefined,
   onSelectSpeaker = undefined,
   assistant = undefined,
+  participantMode = false,
 }) => {
-  const { calls } = useCallsContext();
+  // Not provided on a Participant's page.
+  const { calls } = useCallsContext() || {};
   const consent = consentState?.consent || null;
   const consentInfo = consentSummary(consentState);
   const [deleteRequest, setDeleteRequest] = useState(0);
@@ -167,25 +173,29 @@ const MeetingHeader = ({
                   )}
                 </ToggleButton>
               )}
-              {shareModal({ ...controls, triggerText: 'Share' })}
-              <MeetingDownloadMenu
-                item={item}
-                consent={consent}
-                speakers={speakers}
-                callTranscriptPerCallId={callTranscriptPerCallId}
-                keyframeCount={keyframeCount}
-                chapters={chapters}
-              />
-              <DiagnoseButton callId={item.callId} resourceLabel={title} />
-              <ButtonDropdown
-                variant="icon"
-                ariaLabel="More actions"
-                items={[{ id: 'delete', text: 'Delete meeting', iconName: 'remove' }]}
-                onItemClick={({ detail }) => {
-                  if (detail.id === 'delete') setDeleteRequest(Date.now());
-                }}
-              />
-              {deleteModal({ ...controls, hideTrigger: true, openRequest: deleteRequest })}
+              {!participantMode && (
+                <>
+                  {shareModal({ ...controls, triggerText: 'Share' })}
+                  <MeetingDownloadMenu
+                    item={item}
+                    consent={consent}
+                    speakers={speakers}
+                    callTranscriptPerCallId={callTranscriptPerCallId}
+                    keyframeCount={keyframeCount}
+                    chapters={chapters}
+                  />
+                  <DiagnoseButton callId={item.callId} resourceLabel={title} />
+                  <ButtonDropdown
+                    variant="icon"
+                    ariaLabel="More actions"
+                    items={[{ id: 'delete', text: 'Delete meeting', iconName: 'remove' }]}
+                    onItemClick={({ detail }) => {
+                      if (detail.id === 'delete') setDeleteRequest(Date.now());
+                    }}
+                  />
+                  {deleteModal({ ...controls, hideTrigger: true, openRequest: deleteRequest })}
+                </>
+              )}
             </SpaceBetween>
           }
         >
@@ -249,7 +259,7 @@ const MeetingHeader = ({
               )}
             </Box>
           )}
-          <CostChip cost={cost} />
+          {!participantMode && <CostChip cost={cost} />}
         </SpaceBetween>
         {shownSpeakers.length > 0 && (
           <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
@@ -326,6 +336,8 @@ MeetingHeader.propTypes = {
     // eslint-disable-next-line react/forbid-prop-types
     buttonRef: PropTypes.object,
   }),
+  /** A Participant's page: the meeting and the Assistant button, without the owner's actions. */
+  participantMode: PropTypes.bool,
 };
 
 export default MeetingHeader;

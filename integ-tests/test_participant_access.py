@@ -23,6 +23,15 @@ preparation are written to the meeting directly. Then:
     Participant with the view's fields only: no meeting context, checklist,
     labels, sharing list or participant addresses, and no line on the meeting
     assistant's channels.
+``test_the_participant_page_is_the_meeting_page_without_the_owners_panels``
+    In Chromium (headless, when playwright and its Chromium are installed;
+    skipped otherwise), the listed Participant signs in to the web UI and opens
+    the meeting's page: it shows the seeded spoken and chat lines on the
+    meeting page's tabs (Summary, Transcript, Details) with Auto-scroll, and
+    the meeting assistant panel where the deployment has the assistant; it
+    shows none of the owner's panels or controls (Share, Download, Translate,
+    Whiteboards, meeting context, labels); and every GraphQL request it sends
+    over HTTP is a Participant operation or the chat's own, none refused.
 ``test_the_participant_follows_the_live_transcript``
     onAddParticipantTranscriptSegment delivers a new line to the listed
     Participant, and refuses a selection of a field outside the view.
@@ -515,6 +524,58 @@ async def _subscribe(
                 received.append(message)
                 break
     return received
+
+
+#: What a Participant's page may ask the API over HTTP: the Participant view
+#: and the meeting assistant chat (subscriptions go over the WebSocket).
+PARTICIPANT_PAGE_OPERATIONS = {
+    "listParticipantMeetings",
+    "getParticipantMeeting",
+    "getParticipantMeetingTranscript",
+    "getParticipantMeetingRecordings",
+    "sendChatMessage",
+}
+
+
+def test_the_participant_page_is_the_meeting_page_without_the_owners_panels(
+    deployment, users, meeting, shared
+) -> None:
+    pytest.importorskip("playwright.sync_api")
+    from participant_page_probe import read_shared_meeting_page
+
+    call_id, _created, _seeded = meeting
+    url = deployment.outputs.get("ApplicationCloudfrontEndpoint")
+    assert url, "the stack has no ApplicationCloudfrontEndpoint output"
+    listed = users["listed"]
+    try:
+        run = read_shared_meeting_page(
+            url,
+            listed.username,
+            listed.password,
+            call_id,
+            lines=["integ spoken line", "integ chat line"],
+        )
+    except Exception as err:
+        # Only a missing browser is a skip; anything else fails the test.
+        if "Executable doesn't exist" in str(err):
+            pytest.skip("playwright's Chromium is not installed (python -m playwright install chromium)")
+        raise
+    print(f"participant page: tabs {run.tabs}, operations {sorted(set(run.operations))}, errors {run.errors}")
+    assert not run.errors, run.errors
+    assert run.lines_shown == ["integ spoken line", "integ chat line"]
+    assert run.tabs == ["Summary", "Transcript", "Details"]
+    assert "Auto-scroll" in run.switches
+    assert run.breadcrumbs[:2] == ["Home", "Shared meetings"]
+    if "Assistant" in run.buttons:
+        assert run.assistant_panel, "the Assistant button is shown but the assistant panel is not"
+    for owner_only in ("Share", "Download", "Diagnose", "Name speakers", "Edit labels and audience"):
+        assert owner_only not in run.buttons, owner_only
+    assert "Translate" not in run.switches
+    for hidden in (OWNER_ONLY_CONTEXT, "integ-owner-only", OWNER_ONLY_ANSWER, "Whiteboards"):
+        assert hidden not in run.text, hidden
+    assert set(run.operations) <= PARTICIPANT_PAGE_OPERATIONS, sorted(set(run.operations))
+    assert "getParticipantMeeting" in run.operations
+    assert not run.refused, run.refused
 
 
 def test_the_participant_follows_the_live_transcript(deployment, users, meeting, shared) -> None:

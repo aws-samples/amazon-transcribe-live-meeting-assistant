@@ -398,6 +398,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
             "lma-llm-template-setup-stack/source/lambda_functions/LLMPromptSummaryTemplate.json",
             "lambdas",
         ),
+        # The Participant chat buttons, held to the shipped prompts.
+        ("lma-chat-button-config-stack/source/lambda_functions/ChatButtonConfig.json", "ui"),
         # The VP's inference catalogue copy, compared with the layer's.
         ("lma-virtual-participant-stack/backend/src/bedrock-inference-catalog.json", "ai_stack"),
         # The VP unit tests read these.
