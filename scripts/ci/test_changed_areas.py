@@ -895,7 +895,7 @@ def test_the_security_tooling_is_linted_and_tested_by_the_plumbing_step() -> Non
 
 
 @pytest.mark.parametrize("path", ["scripts/srt/setup.py", "scripts/srt/run.py"])
-def test_a_change_to_srt_setup_runs_its_tests_in_the_security_tooling_suite(path: str) -> None:
+def test_a_change_to_srt_tooling_runs_its_tests_in_the_security_tooling_suite(path: str) -> None:
     assert "security_tests" in ca.areas_for(path)
     assert "integ_plumbing" in ran([path])
 

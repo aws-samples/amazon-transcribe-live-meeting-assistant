@@ -201858,6 +201858,6 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-11-25T15:02:26.640Z",
     "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-11-25 against the code (develop). Accepted, consistent with the existing DDB-002 decisions on sister tables: CloudTrail data-plane logging for DynamoDB is left for operators to enable. UserSignInTable holds one last-sign-in time per user, written only by the Cognito post-authentication function, whose role allows dynamodb:UpdateItem on this table and no other data-plane action. The table is encrypted with the deployment's customer-managed KMS key and has point-in-time recovery."
+    "suppressionReason": "Reviewed 2026-11-25 against the code (develop). Accepted, consistent with the existing DDB-002 decisions on sister tables: CloudTrail data-plane logging for DynamoDB is left for operators to enable. UserSignInTable holds each user's last sign-in and last-active times. Its data-plane access is dynamodb:UpdateItem for the three functions that record those times (the Cognito post-authentication and pre-token-generation functions and the MCP API key authorizer), and dynamodb:BatchGetItem and dynamodb:DeleteItem for the user management function, which serves the listUsers and deleteUser operations that the AppSync schema restricts to the Admin group. The table is encrypted with the deployment's customer-managed KMS key and has point-in-time recovery."
   }
 ]

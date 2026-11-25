@@ -20,7 +20,7 @@ def scan_env(srt_dir, env=None):
     """
     env = dict(os.environ if env is None else env)
     venv_bin = str(Path(srt_dir) / ".venv" / "bin")
-    env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]) if env.get("PATH") else venv_bin
+    env["PATH"] = os.pathsep.join(p for p in (venv_bin, env.get("PATH")) if p)
     return env
 
 
