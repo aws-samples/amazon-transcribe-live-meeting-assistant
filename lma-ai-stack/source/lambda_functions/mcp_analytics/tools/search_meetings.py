@@ -131,25 +131,24 @@ def execute(
     # Date range filters, on when each meeting was created. A document written
     # before the summary step wrote this key has none, so it is not found by a
     # search given either date.
-    if start_date:
-        filters.append(
-            {
-                "greaterThanOrEquals": {
-                    "key": CREATED_AT_METADATA_KEY,
-                    "value": _date_bound(start_date, "startDate", end_of_day=False),
-                }
-            }
+    start_bound = _date_bound(start_date, "startDate", end_of_day=False) if start_date else None
+    end_bound = _date_bound(end_date, "endDate", end_of_day=True) if end_date else None
+
+    # A range that ends before it starts matches nothing; say so rather than
+    # answer as if no meeting had been found.
+    if start_bound is not None and end_bound is not None and start_bound > end_bound:
+        raise ValueError(
+            f"startDate ({start_date.strip()}) is later than endDate ({end_date.strip()}), "
+            "so no meeting can match; give a startDate on or before the endDate"
         )
 
-    if end_date:
+    if start_bound is not None:
         filters.append(
-            {
-                "lessThanOrEquals": {
-                    "key": CREATED_AT_METADATA_KEY,
-                    "value": _date_bound(end_date, "endDate", end_of_day=True),
-                }
-            }
+            {"greaterThanOrEquals": {"key": CREATED_AT_METADATA_KEY, "value": start_bound}}
         )
+
+    if end_bound is not None:
+        filters.append({"lessThanOrEquals": {"key": CREATED_AT_METADATA_KEY, "value": end_bound}})
 
     kb_id = os.environ.get("TRANSCRIPT_KB_ID")
 

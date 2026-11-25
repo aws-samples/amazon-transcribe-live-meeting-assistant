@@ -328,6 +328,37 @@ class TestDateBounds(unittest.TestCase):
         conditions = self._conditions(start_date="2026-11-01", end_date="2026-11-01")
         self.assertEqual(len(conditions), 2)
 
+    def test_a_start_date_and_end_date_on_the_same_day_are_accepted(self):
+        """An end given as a date alone covers its whole day, so a start that day is before it."""
+        conditions = self._conditions(start_date="2026-11-01T09:00:00Z", end_date="2026-11-01")
+        self.assertEqual(len(conditions), 2)
+
+    def test_a_start_date_later_than_the_end_date_is_refused_with_both_named(self):
+        """Without this the search ran and matched nothing, as if no meeting were found."""
+        for start, end in (
+            ("2026-11-30", "2026-11-01"),
+            ("2026-11-01T10:00:00Z", "2026-11-01T09:00:00Z"),
+            ("2026-11-02", "2026-11-01T23:00:00Z"),
+        ):
+            with self.subTest(start=start, end=end):
+                with self.assertRaises(ValueError) as ctx:
+                    self._conditions(start_date=start, end_date=end)
+                message = str(ctx.exception)
+                self.assertIn(f"startDate ({start}) is later than endDate ({end})", message)
+
+    def test_a_reversed_range_is_refused_before_any_aws_call(self):
+        """Also on a stack without a knowledge base or a model."""
+        with (
+            patch.dict(os.environ, {"TRANSCRIPT_KB_ID": "", "MODEL_ARN": ""}, clear=False),
+            patch.object(search_meetings, "_configured_model_id") as model,
+            patch.object(search_meetings, "boto3") as mock_boto3,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                search_meetings.execute(query="q", start_date="2026-11-30", end_date="2026-11-01")
+        self.assertIn("is later than endDate", str(ctx.exception))
+        model.assert_not_called()
+        mock_boto3.client.assert_not_called()
+
     def test_a_value_that_is_not_a_date_is_refused_with_the_argument_named(self):
         with self.assertRaises(ValueError) as ctx:
             self._conditions(start_date="last week")
