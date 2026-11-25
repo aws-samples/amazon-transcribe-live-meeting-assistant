@@ -216,6 +216,10 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     # Before documentation, so a change to the profile is never a docs-only change.
     ("solution-profile/**", "solution_profile"),
     ("scripts/solution_profile/**", ("solution_profile", "solution_profile_check")),
+    # The published security test snapshots, README included. Before documentation:
+    # the security tooling's tests hold every snapshot to the curator's guard, and a
+    # new snapshot is never a docs-only change.
+    ("security/test-results/**", "security_tests"),
     # --- documentation -------------------------------------------------------
     ("CHANGELOG.md", "docs"),
     ("CONTRIBUTING.md", "docs"),
