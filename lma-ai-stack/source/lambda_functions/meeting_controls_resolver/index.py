@@ -1145,21 +1145,23 @@ def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.Aut
                 ",".join(recipients),
                 owner,
             )
+    update = {
+        "Key": {"PK": pk, "SK": pk},
+        "ExpressionAttributeNames": {"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
+        # Not on a meeting deleted meanwhile, which would be written back as a stub.
+        "ConditionExpression": "attribute_exists(PK)",
+    }
     if plan.auto_shared:
-        ddbTable.update_item(
-            Key={"PK": pk, "SK": pk},
-            UpdateExpression="SET #auto = :auto",
-            ExpressionAttributeNames={"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
-            ExpressionAttributeValues={":auto": plan.auto_shared},
-            ConditionExpression="attribute_exists(PK)",
-        )
+        update["UpdateExpression"] = "SET #auto = :auto"
+        update["ExpressionAttributeValues"] = {":auto": plan.auto_shared}
     else:
-        ddbTable.update_item(
-            Key={"PK": pk, "SK": pk},
-            UpdateExpression="REMOVE #auto",
-            ExpressionAttributeNames={"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
-            ConditionExpression="attribute_exists(PK)",
-        )
+        update["UpdateExpression"] = "REMOVE #auto"
+    try:
+        ddbTable.update_item(**update)
+    except ClientError as err:
+        if err.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+        logger.info("Meeting %s was deleted before its shares were recorded", call_id)
 
 
 def handle_meeting_stream(event: Mapping[str, Any]) -> dict:

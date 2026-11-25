@@ -279,3 +279,19 @@ def test_dropping_the_last_auto_share_removes_the_attribute(stream, monkeypatch)
     index.lambda_handler({"Records": [_record(item)]}, None)
     assert stream[0][3] == CARL
     assert table.updates[0]["UpdateExpression"] == "REMOVE #auto"
+
+
+def test_a_meeting_deleted_before_its_shares_are_recorded_is_not_retried(
+    stream, monkeypatch
+) -> None:
+    from botocore.exceptions import ClientError
+
+    item = _meeting(Participants=_people(ANA))
+
+    class DeletedMeanwhile(StreamTable):
+        def update_item(self, **kwargs):
+            assert kwargs["ConditionExpression"] == "attribute_exists(PK)"
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+
+    monkeypatch.setattr(index, "ddbTable", DeletedMeanwhile([item]))
+    assert index.lambda_handler({"Records": [_record(item)]}, None) == {"batchItemFailures": []}
