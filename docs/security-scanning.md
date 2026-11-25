@@ -25,6 +25,8 @@ git add .srt/suppressions.json
 git commit -m "chore(security): update SRT review decisions"
 ```
 
+SRT's scanners run in their own virtual environment, `.srt/.venv`, built with Python 3.13, the version of the CI job's image, because Bandit reports different findings, and some on different lines, under different Python versions. `make srt-setup` builds it with `python3.13` from `PATH`, or with the interpreter `SRT_PYTHON` names, and rebuilds a venv made with another version. Install Python 3.13 first if you don't have it, for example with `uv python install 3.13`; without it setup warns and falls back to the default `python3`, and a local scan can then disagree with CI.
+
 SRT is not part of `make lint` or `make test` — it runs automatically in GitLab CI on merge requests targeting `develop`.
 
 SRT reads the repository. The tests that call a deployed stack, the live access tests and the OWASP ZAP scan, and `make security-results`, which runs SRT with them as a set, are described in [Security Testing](security-testing.md).
@@ -169,6 +171,8 @@ Set `SRT_VERSION` as a GitLab CI/CD project variable for reproducible pipeline s
 **Config prompts hang in CI** — `setup.py` auto-detects CI via `CI`, `GITLAB_CI`, or `GITHUB_ACTIONS`. If none are set, export `CI=1` before running `make srt-setup`.
 
 **Platform not supported** — SRT supports Linux x64/arm64 and macOS x64/arm64. Windows is not yet available.
+
+**A local scan disagrees with CI** — check the scanner venv's Python version with `grep version .srt/.venv/pyvenv.cfg`; it should be 3.13. Run `make srt-setup` again after installing Python 3.13 to rebuild it.
 
 **Reconfigure SRT** — `cd .srt && ./srt config`
 
