@@ -4455,14 +4455,18 @@ Resources:
       SourceArn: !GetAtt StaleMeetingReaperScheduleRule.Arn
 
   ##########################################################################
-  # Transcript deletion after the summary
+  # Transcript and recording deletion after the summary
   #
   # When the Retention section's "Delete the transcript after the summary"
   # setting is on, the call event processor tells TranscriptDeletionFunction
   # when each meeting ends and when its summary is stored. The function either
   # deletes the transcript there and then or creates a one-time EventBridge
   # Scheduler schedule, in TranscriptDeletionScheduleGroup, that invokes it at
-  # the minute the deletion is due. See docs/transcript-deletion.md.
+  # the minute the deletion is due. "Delete the recordings after the summary"
+  # is carried out by the same function, on the same events, with a schedule of
+  # its own; the processor also tells it each time a recording link is stored,
+  # so a recording stored after the meeting's recordings were deleted is
+  # deleted too. See docs/transcript-deletion.md.
   ##########################################################################
   TranscriptDeletionFunction:
     Type: AWS::Serverless::Function
@@ -4476,7 +4480,7 @@ Resources:
         # lma_config, for the setting. Pure Python, so compatible with arm64.
         - !Ref ConfigurationPythonLayer
       CodeUri: ../source/lambda_functions/transcript_deletion
-      Description: Deletes a meeting's transcript once it is summarized, as the Retention settings say
+      Description: Deletes a meeting's transcript, and its recordings, once it is summarized, as the Retention settings say
       MemorySize: 256
       Timeout: 300
       Tracing: Active
@@ -4491,6 +4495,9 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
+          AUDIO_PREFIX: !Ref AudioFilePrefix
+          VIDEO_PREFIX: lma-video-recordings/
+          VIDEO_CHUNKS_PREFIX: lma-video-chunks/
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           SCHEDULE_GROUP_NAME: !Ref TranscriptDeletionScheduleGroup
           SCHEDULER_ROLE_ARN: !GetAtt TranscriptDeletionSchedulerRole.Arn
@@ -4557,7 +4564,9 @@ Resources:
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
               # Every version of the meeting's transcript files, and of its
-              # chat attachments, which are deleted with the transcript.
+              # chat attachments, which are deleted with the transcript; and of
+              # its audio and video recordings and the Virtual Participant's
+              # video segments, which are deleted under their own setting.
               - Effect: Allow
                 Action:
                   - s3:ListBucketVersions
@@ -4567,6 +4576,9 @@ Resources:
                     "s3:prefix":
                       - !Sub "${TranscriptFilePrefix}*"
                       - "lma-chat-attachments/*"
+                      - !Sub "${AudioFilePrefix}*"
+                      - "lma-video-recordings/*"
+                      - "lma-video-chunks/*"
               - Effect: Allow
                 Action:
                   - s3:DeleteObject
@@ -4574,6 +4586,9 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/${TranscriptFilePrefix}*"
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-chat-attachments/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/${AudioFilePrefix}*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-recordings/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-chunks/*"
               # The one-time schedules, in this stack's group only. A schedule
               # is deleted when the meeting is rejoined.
               - Effect: Allow
@@ -4688,7 +4703,8 @@ Resources:
       KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       KmsDataKeyReusePeriodSeconds: 300
       # 14 days, the SQS maximum: each message names a meeting whose
-      # transcript still has to be deleted, by running the function again.
+      # transcript, or recordings, still have to be deleted, by running the
+      # function again.
       MessageRetentionPeriod: 1209600
 
   ResolveSpeakerNamesResolver:

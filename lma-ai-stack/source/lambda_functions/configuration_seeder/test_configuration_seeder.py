@@ -1669,7 +1669,7 @@ def test_the_handler_passes_the_revision_bucket_through(seeder, monkeypatch) -> 
 
 
 def test_the_baseline_ships_transcript_deletion_off_beside_the_retention_parameters(seeder) -> None:
-    """The deletion setting has no stack parameter; the two periods in days do."""
+    """The deletion settings have no stack parameter; the two periods in days do."""
     store, dynamo = build_store()
     seeder.seed(
         store,
@@ -1681,6 +1681,7 @@ def test_the_baseline_ships_transcript_deletion_off_beside_the_retention_paramet
     )
     assert dynamo.body("Config#default")["retention"] == {
         "transcriptDeletionAfterSummary": "off",
+        "recordingDeletionAfterSummary": "off",
         "meetingRecordExpirationInDays": 30,
         "transcriptionExpirationInDays": 7,
     }
@@ -1828,6 +1829,7 @@ def test_the_minimised_content_profile_holds_the_summary_profile_it_selects(seed
     default = dynamo.body("Config#default")
     assert body["meeting_assist"]["systemPrompt"] == default["meeting_assist"]["systemPrompt"]
     assert body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
+    assert body["retention"]["recordingDeletionAfterSummary"] == "immediately"
     assert _managed(dynamo)["minimised-content"]["Description"] == (
         "Minimised content – summary only"
     )

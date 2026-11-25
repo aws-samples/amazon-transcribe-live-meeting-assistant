@@ -108,6 +108,7 @@ def test_the_minimised_content_preset_is_a_managed_profile_with_its_values(stack
         for key, value in change["values"].items():
             assert stored.get(key) == value, f"{PRESET_ID}: {section}.{key} is {stored.get(key)!r}"
     assert record.body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
+    assert record.body["retention"]["recordingDeletionAfterSummary"] == "immediately"
     assert record.body["recording"]["recordAudio"] is False
     assert record.body["recording"]["recordScreenVideo"] is False
     assert record.body["recording"]["recordVpMeetingVideo"] is False

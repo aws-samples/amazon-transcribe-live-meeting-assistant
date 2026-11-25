@@ -468,6 +468,21 @@ def test_transcript_is_left_out_once_deleted_under_retention(fakes):
     assert "deleted under the Retention settings" in archive.read("README.md").decode()
 
 
+def test_recordings_are_left_out_with_the_reason_once_deleted_under_retention(fakes):
+    # The deletion removes the meeting's links along with the files.
+    meeting = meeting_item(RecordingsDeletedAt=s("2026-11-10T00:00:00Z"))
+    for link in ("RecordingUrl", "VideoRecordingUrl", "RecordingUrls", "VideoRecordingUrls"):
+        meeting.pop(link, None)
+    s3, answer, _ready = build_for(fakes, OWNER, meeting=meeting)
+    archive = archive_of(s3, answer)
+    assert not [n for n in archive.namelist() if n.startswith("recordings/")]
+    readme = archive.read("README.md").decode()
+    assert "**Audio recording**: deleted under the Retention settings on 2026-11-10" in readme
+    assert "**Video recording**: deleted under the Retention settings on 2026-11-10" in readme
+    details = json.loads(archive.read("meeting.json"))
+    assert details["RecordingsDeletedAt"] == "2026-11-10T00:00:00Z"
+
+
 def test_every_session_recording_is_included(fakes):
     earlier = f"{HOST}/lma-audio-recordings/{POSIX}-first.wav"
     meeting = meeting_item(
@@ -635,7 +650,7 @@ def test_meeting_json_holds_only_listed_fields(fakes):
     assert details["CallId"] == CALL and details["Owner"] == "owner@example.com"
 
 
-@pytest.mark.parametrize("attribute", ["UpdatedAt", "TranscriptDeletedAt"])
+@pytest.mark.parametrize("attribute", ["UpdatedAt", "TranscriptDeletedAt", "RecordingsDeletedAt"])
 def test_an_archive_older_than_the_meetings_last_change_is_not_offered_again(fakes, attribute):
     dynamo, _s3, lam = fakes()
     first = prepare(OWNER)

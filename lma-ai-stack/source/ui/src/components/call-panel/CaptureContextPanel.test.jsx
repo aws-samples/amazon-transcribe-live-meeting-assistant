@@ -147,6 +147,46 @@ describe('CaptureContextPanel', () => {
     expect(screen.queryByText('Transcription engine')).toBeNull();
   });
 
+  it('explains deleted recordings: when, why, how many files, and what is kept', () => {
+    renderPanel({
+      item: { ...ITEM, recordingUrl: null, recordingsDeletedAt: '2026-11-03T15:00:00Z', recordingFilesDeleted: 3 },
+    });
+    expect(
+      screen.getByText(/Deleted on schedule by the Retention setting "Delete the recordings after the summary"/),
+    ).toBeTruthy();
+    expect(screen.getByText(/3 recording files removed/)).toBeTruthy();
+    expect(screen.getByText(/A recording stored for the meeting afterwards is deleted when it arrives/)).toBeTruthy();
+    expect(screen.getAllByText('Deleted after the summary')).toHaveLength(2);
+    expect(screen.queryByText('Recorded')).toBeNull();
+  });
+
+  it('says a meeting with no recording had nothing to delete, and keeps the reason on each row', () => {
+    renderPanel({
+      item: { ...ITEM, recordingUrl: null, recordingsDeletedAt: '2026-11-03T15:00:00Z', recordingFilesDeleted: 0 },
+      vp: { id: 'vp-1', enableVideoRecording: false },
+    });
+    expect(screen.getByText('No recording to delete')).toBeTruthy();
+    expect(screen.queryByText('Deleted after the summary')).toBeNull();
+    expect(screen.getByText('Not recorded')).toBeTruthy();
+    expect(screen.getByText('Off for this Virtual Participant')).toBeTruthy();
+  });
+
+  it('says when recordings are to be deleted, and that they are kept otherwise', () => {
+    const { unmount } = renderPanel({ item: { ...ITEM, recordingDeletionScheduledFor: '2026-11-03T15:30:00Z' } });
+    expect(screen.getByText(/^To be deleted /)).toBeTruthy();
+    expect(screen.getByText(/Delete the recordings after the summary/)).toBeTruthy();
+    expect(screen.getByText('Recorded')).toBeTruthy();
+    unmount();
+    renderPanel();
+    expect(screen.getByText(/Kept as the deployment's recording retention says/)).toBeTruthy();
+  });
+
+  it('says a deleted transcript leaves the recordings to their own setting', () => {
+    renderPanel({ item: { ...ITEM, transcriptDeletedAt: '2026-11-03T15:00:00Z' } });
+    expect(screen.getByText(/the recordings follow their own setting/)).toBeTruthy();
+    expect(screen.getByText('Recorded')).toBeTruthy();
+  });
+
   it('says a live meeting has no recordings yet', () => {
     renderPanel({ item: { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS, recordingUrl: undefined } });
     expect(screen.getByText('Stored when the meeting ends, if audio is recorded')).toBeTruthy();

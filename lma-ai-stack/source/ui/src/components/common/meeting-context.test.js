@@ -23,6 +23,8 @@ import {
   transcriptionEngine,
   transcriptionLanguage,
   transcriptRetention,
+  recordingRetention,
+  hasRecordings,
 } from './meeting-context';
 
 describe('the capture context a meeting recorded', () => {
@@ -163,6 +165,41 @@ describe('consentPauseDueAt', () => {
     const granted = consentSummary({ consent: { Mode: 'opt_in', Status: 'granted', CaptureAllowed: true } });
     expect(consentPauseDueAt({ isLive: true, summary: granted, startedAt })).toBeNull();
     expect(consentPauseDueAt({ isLive: true, summary: consentSummary({ consent: null }), startedAt })).toBeNull();
+  });
+});
+
+describe('recordingRetention', () => {
+  it('says when the recordings were deleted, and how many files went', () => {
+    const item = { recordingsDeletedAt: '2026-11-05T11:00:00Z', recordingFilesDeleted: 3 };
+    expect(recordingRetention(item)).toEqual({ state: 'deleted', at: '2026-11-05T11:00:00Z', files: 3 });
+  });
+
+  it('takes a deletion over a time still recorded for the check after it', () => {
+    const item = { recordingsDeletedAt: '2026-11-05T11:00:00Z', recordingDeletionScheduledFor: '2026-11-05T11:10:00Z' };
+    expect(recordingRetention(item).state).toBe('deleted');
+  });
+
+  it('says when the recordings are to be deleted, and that they are kept otherwise', () => {
+    expect(recordingRetention({ recordingDeletionScheduledFor: '2026-11-05T11:30:00Z' })).toEqual({
+      state: 'scheduled',
+      at: '2026-11-05T11:30:00Z',
+      files: null,
+    });
+    expect(recordingRetention({})).toEqual({ state: 'kept', at: null, files: null });
+  });
+
+  it('is independent of the transcript', () => {
+    expect(recordingRetention({ transcriptDeletedAt: '2026-11-05T11:00:00Z' }).state).toBe('kept');
+    expect(transcriptRetention({ recordingsDeletedAt: '2026-11-05T11:00:00Z' }).state).toBe('kept');
+  });
+});
+
+describe('hasRecordings', () => {
+  it('finds a recording link of either kind, current or of an earlier session', () => {
+    expect(hasRecordings({ recordingUrl: 'https://b/a.wav' })).toBe(true);
+    expect(hasRecordings({ videoRecordingUrls: [null, 'https://b/v.mp4'] })).toBe(true);
+    expect(hasRecordings({ recordingUrl: null, recordingUrls: [], videoRecordingUrls: [] })).toBe(false);
+    expect(hasRecordings(null)).toBe(false);
   });
 });
 

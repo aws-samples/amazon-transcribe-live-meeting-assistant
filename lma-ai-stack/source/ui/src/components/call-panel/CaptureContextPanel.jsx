@@ -8,11 +8,12 @@
  * How the meeting was captured and processed, on the Details tab: where its
  * audio came from (and the Virtual Participant, when one joined), whether its
  * voices were told apart, which recordings were kept, the consent setting that
- * applied, and what the deployment's Retention settings do to its transcript --
- * so that a transcript that is missing, or that stops, can be explained from
- * the page. Read from the meeting record and what the page already loaded
- * (common/meeting-context.js). The capture source, transcription engine,
- * language and speaker separation are the ones the meeting recorded when it
+ * applied, and what the deployment's Retention settings do to its transcript
+ * and its recordings -- so that a transcript or a recording that is missing, or
+ * a transcript that stops, can be explained from the page. Read from the
+ * meeting record and what the page already loaded (common/meeting-context.js).
+ * The capture source, transcription engine, language and speaker separation
+ * are the ones the meeting recorded when it
  * started; a meeting started before those were recorded shows its source and
  * speaker separation as inferred, and says so, and no engine or language. The
  * detected languages are the ones the speech engine identified in the meeting
@@ -34,6 +35,7 @@ import {
   transcriptionEngine,
   transcriptionLanguage,
   transcriptRetention,
+  recordingRetention,
 } from '../common/meeting-context';
 import { detectedLanguagesText, meetingLanguages } from '../common/detected-languages';
 
@@ -99,7 +101,8 @@ const separationValue = (separation, transcriptDeleted, recordedSetting) => {
   );
 };
 
-const recordingValue = (url, { live, off, kind }) => {
+const recordingValue = (url, { live, off, kind, deleted }) => {
+  if (deleted) return <StatusIndicator type="stopped">Deleted after the summary</StatusIndicator>;
   if (url) return <StatusIndicator type="success">Recorded</StatusIndicator>;
   if (off) return <StatusIndicator type="stopped">Off for this Virtual Participant</StatusIndicator>;
   if (live)
@@ -153,7 +156,7 @@ const retentionValue = (retention) => {
         <StatusIndicator type="stopped">{`Deleted ${formatTime(retention.at)}`}</StatusIndicator>
         <Note>
           {`Deleted on schedule by the Retention setting "Delete the transcript after the summary".${counts} ` +
-            'The summary, the recordings and the meeting record are kept.'}
+            'The summary and the meeting record are kept; the recordings follow their own setting.'}
         </Note>
         {record}
       </>
@@ -180,6 +183,51 @@ const retentionValue = (retention) => {
   );
 };
 
+const recordingRetentionValue = (retention) => {
+  if (retention.state === 'deleted' && retention.files === 0) {
+    return (
+      <>
+        <div>No recording to delete</div>
+        <Note>
+          The Retention setting &quot;Delete the recordings after the summary&quot; applied, and no recording was stored
+          for this meeting. A recording stored for it later is deleted when it arrives.
+        </Note>
+      </>
+    );
+  }
+  if (retention.state === 'deleted') {
+    const counts =
+      retention.files != null ? ` ${plural(retention.files, 'recording file', 'recording files')} removed.` : '';
+    return (
+      <>
+        <StatusIndicator type="stopped">{`Deleted ${formatTime(retention.at)}`}</StatusIndicator>
+        <Note>
+          {`Deleted on schedule by the Retention setting "Delete the recordings after the summary".${counts} ` +
+            'A recording stored for the meeting afterwards is deleted when it arrives. The summary, the ' +
+            'shared-screen slides, the chat attachments and the consent record are kept.'}
+        </Note>
+      </>
+    );
+  }
+  if (retention.state === 'scheduled') {
+    return (
+      <>
+        <StatusIndicator type="warning">{`To be deleted ${formatTime(retention.at)}`}</StatusIndicator>
+        <Note>
+          By the Retention setting &quot;Delete the recordings after the summary&quot;. Download them from the Download
+          menu before then if you need a copy.
+        </Note>
+      </>
+    );
+  }
+  return (
+    <>
+      <div>Kept as the deployment&apos;s recording retention says</div>
+      <Note>Not deleted after the summary.</Note>
+    </>
+  );
+};
+
 const CaptureContextPanel = ({
   item,
   vp = null,
@@ -192,6 +240,10 @@ const CaptureContextPanel = ({
   const live = item.recordingStatusLabel === IN_PROGRESS_STATUS;
   const source = captureSource(item, vp);
   const retention = transcriptRetention(item);
+  const recordings = recordingRetention(item);
+  // A deletion that removed no file says nothing of recordings that never
+  // existed: the rows keep their "Not recorded" or "Off" reason.
+  const recordingsDeleted = recordings.state === 'deleted' && recordings.files !== 0;
   const consent = consentSummary(consentState);
   const videoOff = Boolean(vp) && (vp.enableVideoRecording === false || Boolean(vp.videoRecordingOffReason));
   const engine = transcriptionEngine(item);
@@ -216,13 +268,20 @@ const CaptureContextPanel = ({
         ]
       : []),
     { label: 'Speaker separation', value: separation },
-    { label: 'Audio recording', value: recordingValue(item.recordingUrl, { live, kind: 'audio' }) },
-    { label: 'Video recording', value: recordingValue(item.videoRecordingUrl, { live, off: videoOff, kind: 'video' }) },
+    {
+      label: 'Audio recording',
+      value: recordingValue(item.recordingUrl, { live, kind: 'audio', deleted: recordingsDeleted }),
+    },
+    {
+      label: 'Video recording',
+      value: recordingValue(item.videoRecordingUrl, { live, off: videoOff, kind: 'video', deleted: recordingsDeleted }),
+    },
     {
       label: 'Consent',
       value: <div id={CONSENT_SETTING_ID}>{consentValue(consent, consentState?.consent, onShowConsentRecord)}</div>,
     },
     { label: 'Transcript retention', value: retentionValue(retention) },
+    { label: 'Recording retention', value: recordingRetentionValue(recordings) },
   ];
 
   return (

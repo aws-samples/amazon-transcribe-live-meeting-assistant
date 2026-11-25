@@ -71,7 +71,7 @@ export default defineConfig({
             { label: "Meeting Whiteboards", slug: "meeting-whiteboards" },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
-              label: "Transcript Deletion After the Summary",
+              label: "Transcript and Recording Deletion After the Summary",
               slug: "transcript-deletion",
             },
             { label: "Meeting Video and Key Frames", slug: "meeting-video" },

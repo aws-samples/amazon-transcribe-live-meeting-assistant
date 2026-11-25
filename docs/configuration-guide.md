@@ -170,10 +170,17 @@ for more:
   stack parameter: it ships set to Off, and any of its choices can be saved. It
   deletes each meeting's transcript
   permanently once the meeting is summarized, transcript files included; see
-  [Transcript Deletion After the Summary](transcript-deletion.md).
+  [Transcript and Recording Deletion After the Summary](transcript-deletion.md).
+- **Delete the recordings after the summary**, beside it, has no stack
+  parameter either and ships set to Off. It deletes each meeting's audio and
+  video recordings, every version of each file, once the meeting is summarized,
+  independently of the transcript; a recording stored for the meeting after
+  that is deleted when it arrives. Key frames, chat attachments and the consent
+  evidence are kept.
 - The recordings bucket's lifecycle rules, which delete transcript files and
   key-frame images after `TranscriptionExpirationInDays` days and recordings
-  after `AudioRecordingExpirationInDays` days, follow the stack parameters only.
+  after `AudioRecordingExpirationInDays` days, follow the stack parameters only;
+  the two deletion settings above delete sooner, at the minute they are due.
   Shortening transcript retention on the page does not delete those files
   sooner. Nor does shortening meeting-record retention shorten the expiry of
   Virtual Participant records, which follows
@@ -417,6 +424,7 @@ The presets, by id:
 | Meeting Consent › Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting | Refuse the meeting |
 | Meeting Consent › Virtual Participant leaves after an objection | Off | Off | On | On | On | Off | On |
 | Retention › Delete the transcript after the summary | Off | Off | 15 minutes after the summary | 15 minutes after the summary | Off | Off | Immediately |
+| Retention › Delete the recordings after the summary | Off | Off | Immediately | Immediately | Off | Off | Immediately |
 | Meeting Recording › Record meeting audio | On | On | Off | Off | Off | Off | Off |
 | Meeting Recording › Record screen video from streaming clients | On | On | Off | Off | Off | On | Off |
 | Meeting Recording › Record Virtual Participant meeting video | On | On | Off | Off | Off | On | Off |
@@ -439,9 +447,9 @@ instructions**, so applying one keeps the instructions an Admin wrote.
 
 The Minimised content preset (`minimised-content`) uses the consent settings of
 the Regulated – consent required preset, with the same consequences for Stream
-Audio/Video, the Desktop Capture App and the Webex join, and deletes the
-transcript as soon as the summary is written, so the summary is the record of
-what was said that is kept. New meetings are summarized with the shipped `minimised-content`
+Audio/Video, the Desktop Capture App and the Webex join, records no audio or
+video, and deletes the transcript, and any recording still stored, as soon as the
+summary is written, so the summary is the record of what was said that is kept. New meetings are summarized with the shipped `minimised-content`
 summary profile, and **Meeting Assistant › Leave out sensitive personal
 information** is on, which appends the same rule after the assistant's
 instructions, whatever they say: the model is told to leave out health
@@ -521,7 +529,7 @@ posture of either Regulated preset also sets them when the stack is deployed or 
 Where each service that receives meeting content runs is listed in
 [Where meeting content is processed](infrastructure-and-security.md#where-meeting-content-is-processed).
 The consent settings are described in [Meeting Consent](meeting-consent.md), and
-the deletion in [Transcript Deletion After the Summary](transcript-deletion.md).
+the deletion in [Transcript and Recording Deletion After the Summary](transcript-deletion.md).
 
 To start a new deployment from a preset, or from a configuration
 file of your own, set the `ConfigurationPreset` and `CustomConfigPath` stack

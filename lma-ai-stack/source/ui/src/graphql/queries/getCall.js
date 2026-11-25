@@ -61,6 +61,9 @@ export default /* GraphQL */ `
       TranscriptDeletedAt
       TranscriptSegmentsDeleted
       TranscriptFilesDeleted
+      RecordingDeletionScheduledFor
+      RecordingsDeletedAt
+      RecordingFilesDeleted
       ExpiresAfter
       CreatedAt
       CustomerPhoneNumber
