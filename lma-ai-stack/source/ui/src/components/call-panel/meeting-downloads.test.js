@@ -152,7 +152,7 @@ describe('the Email summary entry', () => {
         { name: 'No address', email: '' },
       ],
     });
-    expect(link.startsWith('mailto:ana%40example.com,bob%2Blma%40example.com?subject=')).toBe(true);
+    expect(link.startsWith('mailto:ana@example.com,bob%2Blma@example.com?subject=')).toBe(true);
     expect(link).toContain(`subject=${encodeURIComponent(ITEM.callId)}&body=`);
   });
 

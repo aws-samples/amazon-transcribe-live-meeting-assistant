@@ -92,12 +92,12 @@ export const copyText = async (text) => {
 };
 
 const summaryEmailRecipients = (item) => {
-  const seen = new Set();
-  return participantsInput(item.participants)
-    .map((p) => p.email.trim())
-    .filter((email) => email && !seen.has(email.toLowerCase()) && seen.add(email.toLowerCase()))
-    .map(encodeURIComponent)
-    .join(',');
+  const byAddress = new Map();
+  participantsInput(item.participants).forEach(({ email }) => {
+    const address = email.trim();
+    if (address && !byAddress.has(address.toLowerCase())) byAddress.set(address.toLowerCase(), address);
+  });
+  return [...byAddress.values()].map((address) => encodeURIComponent(address).replace(/%40/g, '@')).join(',');
 };
 
 /**
@@ -124,8 +124,8 @@ export const runSummaryAction = async (id, item, consent = null, { participants 
   } else if (id === 'copy') {
     return copyText(summaryDownloadMarkdown(item, consent, options));
   } else if (id === 'email') {
-    // Both halves are encoded: a meeting name is free text, and
-    // getEmailFormattedSummary returns an encoded body.
+    // The recipients, the subject and the body are each encoded: addresses and
+    // a meeting name are free text, and getEmailFormattedSummary encodes the body.
     const subject = encodeURIComponent(item.callId ?? '');
     const to = summaryEmailRecipients(item);
     const body = getEmailFormattedSummary(item.callSummaryText);
