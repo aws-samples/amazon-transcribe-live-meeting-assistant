@@ -126,7 +126,10 @@ def test_the_query_leaves_the_assistant_channel_out_only_when_asked() -> None:
 @pytest.mark.parametrize("value", ["owner_only", "off"])
 def test_who_may_ask_applies_to_it_as_to_the_meeting_chat(configured, value) -> None:  # noqa: F811
     configured({"inMeetingRequesters": value})
-    assert handler_module.in_meeting_request_refusal(PARTICIPANT_PAGE)
+    assert (
+        handler_module.in_meeting_request_refusal(PARTICIPANT_PAGE)
+        == handler_module.PARTICIPANT_PAGE_REFUSAL_TEXT
+    )
 
 
 def test_anyone_lets_a_participant_ask(configured) -> None:  # noqa: F811

@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 #
+import dataclasses
 import json
 import logging
 import re
@@ -1088,16 +1089,59 @@ def delete_vp_registry_entry(vp_id):
 # Sharing with the participant list (Meeting Sharing; see auto_share.py)
 
 
+_CONFIGURATION_STORE = None
+
+
 def _auto_share_enabled() -> bool:
-    """Meeting Sharing › Share meetings with their listed participants; on unless saved off."""
+    """Meeting Sharing › Share meetings with their listed participants; on unless saved off.
+
+    Read now (the section's tier is immediate), and never assumed: if the
+    section cannot be read the error is raised, so the stream record is retried
+    rather than shared under a setting an Admin may have turned off. A section
+    that does not hold the setting has the shipped default, on.
+    """
+    global _CONFIGURATION_STORE  # noqa: PLW0603 -- one store per process
+    from lma_config import (
+        ConfigurationStore,
+        ConfigurationTableNotConfigured,
+    )  # configuration layer
+
     try:
-        from lma_config import read_setting  # configuration layer
-    except ImportError:  # pragma: no cover - the layer is attached in every deployment
-        logger.warning(
-            "Configuration layer not available; using the shipped Meeting Sharing default"
+        if _CONFIGURATION_STORE is None:
+            _CONFIGURATION_STORE = ConfigurationStore()
+        values = _CONFIGURATION_STORE.get_section("meeting_sharing").values or {}
+    except ConfigurationTableNotConfigured:
+        # A function deployed without the table name; every deployed copy has it.
+        logger.warning("CONFIGURATION_TABLE_NAME is unset; Meeting Sharing is not applied")
+        return False
+    return values.get("shareWithListedParticipants", True) is not False
+
+
+# The user pool, to share with an account under its own username.
+USER_POOL_ID = environ.get("VITE_USER_POOL_ID", "")
+_cognito = None
+
+
+def account_username(address: str) -> str:
+    """The username of the account with this address, as getCall compares it; else the address.
+
+    The user pool compares usernames ignoring case, so an address listed as
+    Jane.Doe@Example.com finds the account made as jane.doe@example.com, and the
+    share is written under that account's own username, which is what every
+    reader of SharedWith compares with the caller's.
+    """
+    global _cognito  # noqa: PLW0603 -- one client per process
+    if not USER_POOL_ID:
+        return address
+    if _cognito is None:
+        _cognito = boto3.client("cognito-idp")
+    try:
+        return (
+            _cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=address).get("Username")
+            or address
         )
-        return True
-    return read_setting("meeting_sharing", "shareWithListedParticipants", default=True) is not False
+    except _cognito.exceptions.UserNotFoundException:
+        return address
 
 
 def _stream_image(record: Mapping[str, Any]) -> dict:
@@ -1214,6 +1258,11 @@ def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.Aut
     meeting's SharedWith as it is afterwards, should another share have landed
     while the items were being written.
     """
+    if plan.add:
+        # Each new address under its account's own username, where it has one.
+        added = [account_username(address) for address in plan.add]
+        kept = plan.auto_shared[: len(plan.auto_shared) - len(plan.add)]
+        plan = dataclasses.replace(plan, add=added, auto_shared=kept + added)
     recipients = None
     list_key = None
     if plan.changes_sharing:

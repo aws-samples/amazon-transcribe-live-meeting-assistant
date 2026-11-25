@@ -295,14 +295,21 @@ with (`AutoSharedWith`), so that:
   and is shared with again only if they are taken off and put back;
 - the meeting's owner is never added.
 
-Addresses are compared ignoring case and shared as the list writes them, so a
-listed person is admitted when their LMA username is that address, which it is
-for every account created in LMA. Turned off, no meeting is shared this way from
-then on; the shares already made stay until the owner removes them.
+Addresses are compared ignoring case. A listed address that has an LMA
+account is shared with under that account's own username, as the user pool
+finds it ignoring case, so a list entry `Jane.Doe@Example.com` reaches the
+account `jane.doe@example.com`; an address with no account yet is shared with
+as the list writes it, and reaches an account made later from the list, whose
+username is that address. Turned off, no meeting is shared this way from
+then on; the shares already made stay until the owner removes them. The
+setting is read for every change, and if it cannot be read the change is
+retried rather than made.
 
 A share or removal is written on condition that the meeting's sharing list is
-still the one it was planned from, so a change the owner makes in the share
-dialog at the same moment is kept and the plan is made again. A record whose
+still the one it was planned from, so a change the owner saves in the share
+dialog just before it is kept and the plan is made again. The dialog's own save
+is not conditional: a dialog opened before an automatic share and saved after it
+removes that share, which then counts as the owner unsharing by hand. A record whose
 sharing still fails after three retries, or an hour, is described in the queue
 the AI stack names in its `MeetingSharingFailuresQueueName` output. A meeting
 still in progress is planned again with its next write, but an ended meeting is

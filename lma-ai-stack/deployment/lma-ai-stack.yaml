@@ -3851,6 +3851,12 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
+              # Meeting Sharing shares with a listed address under its account's
+              # own username; read-only, and of this user pool alone.
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
               # Where MeetingSharingEventSourceMapping describes the records it gave up on.
               - Effect: Allow
                 Action:

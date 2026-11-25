@@ -2435,6 +2435,10 @@ OWNER_CAPTURE_SOURCES = frozenset({'STREAM_AUDIO', 'DESKTOP_APP', 'BROWSER_EXTEN
 IN_MEETING_REQUESTS_OFF_TEXT = (
     "Requests made in the meeting are turned off on this deployment, so I can't answer here."
 )
+# A Participant's question on a shared meeting's page, under Owner only or Off.
+PARTICIPANT_PAGE_REFUSAL_TEXT = (
+    "The meeting assistant is not available to participants on this deployment."
+)
 IN_MEETING_REQUESTS_OWNER_ONLY_TEXT = (
     "On this deployment only the meeting's owner can make requests in the meeting, and LMA "
     "cannot confirm who made this one, so I can't answer here."
@@ -2482,6 +2486,8 @@ def in_meeting_request_refusal(event: Dict[str, Any]) -> str:
     requesters = configured_in_meeting_requesters()
     if requesters == IN_MEETING_REQUESTERS_ANYONE:
         return ''
+    if event.get('toolScope') == PARTICIPANT_PAGE_SCOPE:
+        return PARTICIPANT_PAGE_REFUSAL_TEXT
     if requesters == IN_MEETING_REQUESTERS_OWNER_ONLY:
         return '' if is_owner_request(event) else IN_MEETING_REQUESTS_OWNER_ONLY_TEXT
     return IN_MEETING_REQUESTS_OFF_TEXT

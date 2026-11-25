@@ -225,6 +225,7 @@ def stream(monkeypatch):
     monkeypatch.setattr(index, "appsync_client", Client())
     monkeypatch.setattr(index, "DSLSchema", lambda schema: schema)
     monkeypatch.setattr(index, "_auto_share_enabled", lambda: True)
+    monkeypatch.setattr(index, "account_username", lambda address: address)
 
     def use(table):
         table_ref["table"] = table
@@ -394,3 +395,88 @@ def test_the_transaction_is_sent_in_the_low_level_form(monkeypatch) -> None:
     meeting = sent[0][0]["Update"]
     assert meeting["Key"] == {"PK": {"S": "c#m1"}, "SK": {"S": "c#m1"}}
     assert meeting["ExpressionAttributeValues"][":sw"] == {"L": [{"S": ANA}]}
+
+
+# ── the account a listed address belongs to ─────────────────────────────────
+
+
+def test_a_listed_address_is_shared_under_its_accounts_own_username(stream, monkeypatch) -> None:
+    item = _meeting(Participants=[{"name": "Jane", "email": "Jane.Doe@Example.com"}])
+    stream["use"](StreamTable([item]))
+    monkeypatch.setattr(
+        index, "account_username", lambda address: address.lower() if "Jane" in address else address
+    )
+    index.lambda_handler({"Records": [_record(item)]}, None)
+    meeting = stream["transactions"][0][0]["Update"]
+    assert meeting["ExpressionAttributeValues"][":sw"] == ["jane.doe@example.com"]
+    assert meeting["ExpressionAttributeValues"][":auto"] == ["jane.doe@example.com"]
+    # The next record of the same meeting finds nothing to do.
+    again = _meeting(
+        Participants=[{"name": "Jane", "email": "Jane.Doe@Example.com"}],
+        SharedWith=["jane.doe@example.com"],
+        AutoSharedWith=["jane.doe@example.com"],
+    )
+    assert not index._auto_share_plan(again).changes_anything
+
+
+def test_the_account_lookup_answers_the_pools_username_or_the_address(monkeypatch) -> None:
+    class NotFound(Exception):
+        pass
+
+    class Cognito:
+        exceptions = type("E", (), {"UserNotFoundException": NotFound})
+
+        def admin_get_user(self, UserPoolId, Username):  # noqa: N803
+            assert UserPoolId == "pool-1"
+            if Username.lower() == "jane.doe@example.com":
+                return {"Username": "jane.doe@example.com"}
+            raise NotFound()
+
+    monkeypatch.setattr(index, "USER_POOL_ID", "pool-1")
+    monkeypatch.setattr(index, "_cognito", Cognito())
+    assert index.account_username("Jane.Doe@Example.com") == "jane.doe@example.com"
+    assert index.account_username("Nobody@Example.com") == "Nobody@Example.com"
+
+
+# ── the setting is read, not assumed ────────────────────────────────────────
+
+
+def _with_section(monkeypatch, values=None, error=None):
+    import sys
+    import types
+    from pathlib import Path
+
+    layer = Path(__file__).resolve().parents[2] / "lambda_layers" / "configuration_layer"
+    if str(layer) not in sys.path:
+        sys.path.insert(0, str(layer))
+    import lma_config  # noqa: F401 -- the configuration layer
+
+    class Store:
+        def get_section(self, name):
+            assert name == "meeting_sharing"
+            if error:
+                raise error
+            return types.SimpleNamespace(values=values)
+
+    module = sys.modules["lma_config"]
+    monkeypatch.setattr(module, "ConfigurationStore", Store)
+    monkeypatch.setattr(index, "_CONFIGURATION_STORE", None)
+
+
+def test_the_setting_saved_off_turns_sharing_off_and_unset_is_on(monkeypatch) -> None:
+    _with_section(monkeypatch, {"shareWithListedParticipants": False})
+    assert index._auto_share_enabled() is False
+    _with_section(monkeypatch, {})
+    assert index._auto_share_enabled() is True
+
+
+def test_a_setting_that_cannot_be_read_fails_the_record_rather_than_sharing(monkeypatch) -> None:
+    from botocore.exceptions import ClientError
+
+    _with_section(monkeypatch, error=ClientError({"Error": {"Code": "Throttling"}}, "GetItem"))
+    with pytest.raises(ClientError):
+        index._auto_share_enabled()
+    item = _meeting(Participants=_people(ANA))
+    monkeypatch.setattr(index, "ddbTable", StreamTable([item]))
+    result = index.lambda_handler({"Records": [_record(item, "9")]}, None)
+    assert result == {"batchItemFailures": [{"itemIdentifier": "9"}]}
