@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/language_models",
   "title": "Amazon Bedrock models",
-  "description": "The Amazon Bedrock model each feature uses. The defaults are the shipped models, or the default profile's; a model chosen here is used instead until it is reset. Enable access to a model in the Amazon Bedrock console before choosing it: this page does not check access, and a feature whose model cannot be invoked reports the error when it runs.",
+  "description": "The Amazon Bedrock model each feature uses. Enable model access in the Amazon Bedrock console first; this page does not check it.",
   "sectionLabel": "Amazon Bedrock Models",
-  "appliesText": "A saved change applies within about five minutes, to each summary, answer or key frame started after that; one already under way finishes with the model it started with.",
+  "appliesText": "Applies within about five minutes; work already under way keeps the model it started with.",
   "order": 6,
   "collapsible": true,
   "defaultExpanded": false,
@@ -15,7 +15,7 @@
       "order": 0,
       "type": "string",
       "title": "Model inference geography",
-      "description": "Where Amazon Bedrock may run the models below and the Meeting Consent section's evidence check model. Global: each model id is used as chosen, and a global. inference profile may run inference in any commercial AWS Region. Same geography as this deployment: inference stays within the geography of this deployment's Region (the United States, Europe, Canada, Asia Pacific, or Japan, Australia or India where Amazon Bedrock has a profile for that country); a model whose id routes outside it is run as the same model through the geography's inference profile, or as the in-region model. In-region only: inference stays in this deployment's Region, which most Claude models are not offered in on demand. A feature whose model has no id in the selected geography reports an error rather than leaving it; the notice above lists them. Amazon Nova Sonic, the voice assistant, runs in the Region set by the AmazonNovaSonicRegion stack parameter and is not affected.",
+      "description": "Where Amazon Bedrock may run these models: any commercial Region, this deployment's geography, or this Region only.",
       "enum": ["global", "geography", "in_region"],
       "enumLabels": {
         "global": "Global (any commercial AWS Region)",
@@ -27,7 +27,7 @@
       "order": 1,
       "type": "string",
       "title": "Summaries and meeting insights",
-      "description": "Writes the end-of-meeting summary, reads pasted meeting invitations, names speakers from what they say, derives the agenda, and answers questions over past meeting transcripts.",
+      "description": "Writes summaries, reads pasted invitations, names speakers, derives agendas and searches past meetings.",
       "enum": [
         "amazon.nova-micro-v1:0",
         "amazon.nova-lite-v1:0",
@@ -54,7 +54,7 @@
       "order": 2,
       "type": "string",
       "title": "Meeting assistant",
-      "description": "Answers in the meeting assistant chat, for the voice assistant's lookups and for questions typed in the meeting chat, and runs the troubleshooting agent. It answers mid-meeting, so time to the first word matters more here than for summaries.",
+      "description": "Answers the meeting assistant, voice assistant and meeting-chat questions; pick a fast model.",
       "enum": [
         "amazon.nova-micro-v1:0",
         "amazon.nova-lite-v1:0",
@@ -81,7 +81,7 @@
       "order": 3,
       "type": "string",
       "title": "Meeting assistant knowledge bases",
-      "description": "Writes the answer the document-search and past-meeting-search tools return from what they retrieve. Only models verified to work with a Bedrock knowledge base are offered.",
+      "description": "Writes answers from document and past-meeting search results; only knowledge-base-compatible models are offered.",
       "enum": [
         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "us.anthropic.claude-sonnet-4-6",
@@ -96,7 +96,7 @@
       "order": 4,
       "type": "string",
       "title": "Key frame text",
-      "description": "Reads the text of each key frame of the shared screen, once, when the frame is stored. Image-capable models only.",
+      "description": "Reads the text of each stored shared-screen key frame; image-capable models only.",
       "enum": [
         "amazon.nova-lite-v1:0",
         "amazon.nova-pro-v1:0",

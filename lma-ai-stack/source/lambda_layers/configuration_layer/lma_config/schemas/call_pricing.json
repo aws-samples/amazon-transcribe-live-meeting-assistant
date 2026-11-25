@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/call_pricing",
   "title": "Meeting cost prices",
-  "description": "The unit prices each meeting's estimated cost is calculated with, in US dollars, and where each shipped price came from. Change a price to use your own rate, for example a private pricing agreement; the meeting's Details tab then shows that line at your price, with the shipped price beside it.",
+  "description": "The US dollar unit prices used to estimate each meeting's cost; change one to use your own rate.",
   "sectionLabel": "Meeting Cost Prices",
   "order": 5,
   "collapsible": true,
@@ -15,7 +15,7 @@
       "order": 0,
       "type": "object",
       "title": "Prices",
-      "description": "Prices by region, then by service, then by unit. The prices under \"default\" are those of the base region and apply wherever a region lists no price of its own.",
+      "description": "Prices by region, service and unit; \"default\" holds the base region's prices, used where a region has none.",
       "keyLabel": "Region",
       "itemLabel": "Region",
       "propertyNames": { "pattern": "^(default|[a-z]{2}(-gov)?-[a-z]+-[0-9])$" },
@@ -43,7 +43,7 @@
       "order": 1,
       "type": "object",
       "title": "Price sources",
-      "description": "Where each shipped price came from, by region and service, laid out as the prices are.",
+      "description": "Where each shipped price came from, laid out like the prices.",
       "keyLabel": "Region",
       "itemLabel": "Region",
       "propertyNames": { "pattern": "^(default|[a-z]{2}(-gov)?-[a-z]+-[0-9])$" },
@@ -93,7 +93,7 @@
       "order": 3,
       "type": "array",
       "title": "Regions with their own prices",
-      "description": "An estimate for usage in a region not listed here says that it used the base region's prices.",
+      "description": "Regions with their own prices; estimates elsewhere say they used the base region's prices.",
       "itemLabel": "Region",
       "items": { "type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$" }
     },
@@ -101,7 +101,7 @@
       "order": 4,
       "type": "array",
       "title": "Units shown without a price",
-      "description": "Counted on the estimate for reference, such as requests, and not billed on their own.",
+      "description": "Units shown on the estimate for reference, such as requests, but not billed on their own.",
       "itemLabel": "Unit",
       "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" }
     },
@@ -109,7 +109,7 @@
       "order": 5,
       "type": "object",
       "title": "How usage is measured",
-      "description": "Shown on the estimate beside a service's lines.",
+      "description": "Notes shown on the estimate beside a service's lines.",
       "keyLabel": "Service",
       "itemLabel": "Note",
       "additionalProperties": { "type": "string", "format": "textarea", "rows": 2 }
@@ -126,7 +126,7 @@
       "order": 7,
       "type": "string",
       "title": "Prices as of",
-      "description": "The date the shipped prices were read, as YYYY-MM-DD.",
+      "description": "The date the shipped prices were read (YYYY-MM-DD).",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
     },
     "source": {

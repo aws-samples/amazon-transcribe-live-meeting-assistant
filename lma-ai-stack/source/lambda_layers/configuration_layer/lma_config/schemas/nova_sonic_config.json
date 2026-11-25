@@ -59,7 +59,7 @@
       "order": 5,
       "type": "string",
       "title": "Meeting mode",
-      "description": "Group and Translator take effect only when the voice assistant activation mode in the Virtual Participant section is always_active (Always listening).",
+      "description": "Group and Translator need the Virtual Participant's activation mode set to always_active.",
       "enum": ["normal", "group", "translator"],
       "enumLabels": {
         "normal": "Normal",
@@ -105,7 +105,7 @@
       "order": 10,
       "type": "boolean",
       "title": "Group meeting mode (legacy)",
-      "description": "Read only when no meeting mode is set. Set the meeting mode instead.",
+      "description": "Used only when no meeting mode is set; set the meeting mode instead.",
       "hidden": true
     }
   },

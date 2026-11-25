@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_sharing",
   "title": "Meeting sharing",
-  "description": "Whether a meeting is shared with the people on its participant list. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
+  "description": "Whether a meeting is shared with the people on its participant list.",
   "sectionLabel": "Meeting Sharing",
   "appliesText": "A saved change applies to the next change of any meeting's record: a meeting that starts, or whose participant list changes, after the save.",
   "order": 14,
@@ -15,7 +15,7 @@
       "order": 0,
       "type": "boolean",
       "title": "Share meetings with their listed participants",
-      "description": "On, the default: a meeting is shared with each address on its participant list as soon as the meeting record exists, so a listed person who signs in to LMA can follow the transcript while the meeting is in progress, and again whenever the list changes. Someone taken off the list loses the share LMA made for them; a share the owner made by hand is never removed this way, and a listed person the owner unshared by hand is not shared with again unless they are taken off the list and put back. The meeting's owner is never added. A Participant sees a read-only page with the transcript, summary, meeting chat, recordings and consent record, and not the owner's own material (see docs/user-based-access-control.md). The people listed see each other's names on that page. Off: no meeting is shared this way from then on; the shares already made stay until the owner removes them. The owner can share and unshare by hand either way."
+      "description": "Share each meeting, read-only, with the people on its participant list, and keep the shares in step with the list."
     }
   },
   "additionalProperties": false

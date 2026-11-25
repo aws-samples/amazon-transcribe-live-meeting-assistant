@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_assist",
   "title": "Meeting assistant",
-  "description": "When a transcript wakes the meeting assistant, whether its answers use Amazon Bedrock prompt caching, how much its model reasons before answering, what a request made in the meeting is answered from, the assistant's instructions, and which installed MCP servers and skills it uses. The default is the shipped value, or the default profile's; a value set here is used instead until it is reset.",
+  "description": "When the meeting assistant wakes, how it answers, and which tools, MCP servers and skills it may use.",
   "sectionLabel": "Meeting Assistant",
   "appliesText": "A saved change applies within about five minutes, to transcript segments processed and answers started after that.",
   "order": 9,
@@ -15,7 +15,7 @@
       "order": 0,
       "type": "string",
       "title": "Wake phrase (regular expression)",
-      "description": "A Python regular expression searched for in each finished transcript segment; a segment it matches is sent to the meeting assistant. A pattern that is not a valid regular expression is logged and the shipped one is used.",
+      "description": "Python regular expression that, when found in a transcript segment, sends it to the meeting assistant.",
       "examples": ["(OK|Okay)[.,! ]*[Aa]ssistant"],
       "minLength": 1,
       "maxLength": 256
@@ -24,13 +24,13 @@
       "order": 1,
       "type": "boolean",
       "title": "Use Amazon Bedrock prompt caching",
-      "description": "Mark the assistant's instructions, tool definitions and, on Claude models, the conversation so far as cacheable, so the model calls of one answer, and answers given within a few minutes of each other, read the repeated part from the cache at a lower price instead of paying for it again. Applies only to the meeting assistant models that support prompt caching (Claude 4 and later, Nova Micro, Lite and Pro, and Nova 2 Lite); other models are unaffected. The answers themselves do not change."
+      "description": "Cache the repeated part of the assistant's prompts to lower model cost; answers are unchanged."
     },
     "assistantReasoningEffort": {
       "order": 2,
       "type": "string",
       "title": "Reasoning effort",
-      "description": "How much the meeting assistant model reasons before it answers. Low answers soonest and costs least; medium is the model's own default; high reasons longest, for questions that need several steps, and costs the most, since reasoning is billed as output. Applies only to the Claude 5 generation (Claude Haiku, Sonnet and Opus 5.5); other meeting assistant models are unaffected.",
+      "description": "How much the model reasons before answering; higher is slower and costs more. Claude 5 models only.",
       "enum": ["low", "medium", "high"],
       "enumLabels": {
         "low": "Low (fastest, lowest cost)",
@@ -42,19 +42,19 @@
       "order": 3,
       "type": "boolean",
       "title": "Web search",
-      "description": "Offer web search (Tavily) to the meeting assistant. On, the default, offers it wherever a request is allowed it: always to the meeting page's own chat (Owner use), and to other requests as Participant use allows. Off offers it to no request, the meeting page's chat included. Either way web search needs a Tavily API key on the stack."
+      "description": "Offer web search (Tavily) to the assistant. Off turns it off for every request. Needs a Tavily API key."
     },
     "mcpServersEnabled": {
       "order": 4,
       "type": "boolean",
       "title": "MCP servers",
-      "description": "Let the meeting assistant use the MCP servers installed on the MCP Servers page. On, the default, uses them as Tool selection and Participant use allow. Off loads none of them for any request, the meeting page's chat included; the servers stay installed. LMA's own MCP server, which other applications use to reach LMA, is not affected."
+      "description": "Let the meeting assistant use installed MCP servers. Off turns them off for every request."
     },
     "inMeetingRequestTools": {
       "order": 5,
       "type": "string",
       "title": "Participant use",
-      "description": "What the meeting assistant may use to answer a request from anyone other than the meeting's owner and the users it is shared with: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant or with the wake phrase, and a question a Participant asks on the page of a meeting shared with them. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers, skills and the Virtual Participant browser controls. Selected tools answers from the current meeting plus the tools switched on in the Participant use settings below, each of which is off until it is switched on; the switches apply only with Selected tools. A Participant's question on a shared meeting's page is never offered the Virtual Participant browser controls, nor the meeting context and checklist, and is not given the assistant's earlier answers. The meeting page's own assistant chat for the owner, the users the meeting is shared with and Admins (Owner use) is offered every tool, except one that Web search or MCP servers turns off for every request.",
+      "description": "What the assistant may use to answer meeting participants (anyone but the owner and shared users).",
       "enum": ["current_meeting_only", "unrestricted", "selected"],
       "enumLabels": {
         "current_meeting_only": "Current meeting only (default)",
@@ -67,48 +67,48 @@
       "order": 6,
       "type": "boolean",
       "title": "Participant use: web search",
-      "description": "With Participant use set to Selected tools, offer web search (Tavily) for Participant use. The search query is written by the assistant from the request and the meeting, and is sent to Tavily. Needs a Tavily API key on the stack (TavilyApiKey or TavilyApiKeySecretArn); without one, the assistant says that web search is not available."
+      "description": "With Selected tools, offer web search to participants. Queries are sent to Tavily."
     },
     "inMeetingDocumentSearch": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 7,
       "type": "boolean",
       "title": "Participant use: document knowledge base",
-      "description": "With Participant use set to Selected tools, offer the document knowledge base for Participant use, so anyone in the meeting, and a Participant on a shared meeting's page, can hear or read what it returns. Needs a document knowledge base on the stack."
+      "description": "With Selected tools, offer the document knowledge base to participants, who see what it returns."
     },
     "inMeetingMeetingHistory": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 8,
       "type": "boolean",
       "title": "Participant use: the owner's past meetings",
-      "description": "With Participant use set to Selected tools, offer the meeting owner's past meetings (their list, and search of their transcripts) for Participant use, acting for the owner whoever asked. Needs the transcript knowledge base on the stack."
+      "description": "With Selected tools, let participants search the owner's past meetings, acting as the owner."
     },
     "inMeetingMcpServers": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 9,
       "type": "boolean",
       "title": "Participant use: MCP servers",
-      "description": "With Participant use set to Selected tools, offer every installed MCP server for Participant use, using each server's own connection whoever asked."
+      "description": "With Selected tools, offer installed MCP servers to participants, using each server's own credentials."
     },
     "inMeetingVpControls": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 10,
       "type": "boolean",
       "title": "Participant use: Virtual Participant controls",
-      "description": "With Participant use set to Selected tools, offer the Virtual Participant's VNC preview and browser controls for Participant use. Never offered to a Participant's question on a shared meeting's page."
+      "description": "With Selected tools, offer the Virtual Participant browser controls to participants in the meeting."
     },
     "inMeetingSkills": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 11,
       "type": "boolean",
       "title": "Participant use: skills",
-      "description": "With Participant use set to Selected tools, offer every skill on the Skills page for Participant use, except one whose own setting under Tool selection says otherwise. A skill is guidance an administrator wrote; it gives the assistant no tool it is not otherwise offered."
+      "description": "With Selected tools, offer skills to participants, unless a skill's Tool selection row says otherwise."
     },
     "inMeetingContextAccess": {
       "order": 12,
       "type": "string",
       "title": "Participant use: meeting context and checklist",
-      "description": "Whether any request made in the meeting (a question typed in the meeting chat, a request spoken to the voice assistant, or one spoken with the wake phrase) may read the meeting's context and checklist. None, the default, offers them only to the meeting page's own assistant chat, whatever Participant use is set to: the context can hold the owner's preparation notes, and a meeting's guests are often outside the owner's organization. Allowed offers them to requests made in the meeting too, and an answer drawn from them is then posted in the meeting chat or spoken for everyone in the meeting; LMA never posts or speaks them on its own. A Participant's question on a shared meeting's page is never offered them, whatever this says: the page does not show them either.",
+      "description": "Whether requests made in the meeting may read its context and checklist; answers are seen by everyone.",
       "enum": ["none", "allowed"],
       "enumLabels": {
         "none": "None: only the meeting page's assistant (default)",
@@ -119,7 +119,7 @@
       "order": 13,
       "type": "string",
       "title": "Participant use: who may ask",
-      "description": "Who in the meeting may make a request to the meeting assistant: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a conversation with the voice assistant, or a request spoken with the wake phrase. Anyone, the default, answers every participant. Owner only answers only a request spoken with the wake phrase on the LMA user's own microphone, which Stream Audio/Video, the Desktop Capture App and the browser extension capture as a channel of its own. A Virtual Participant knows a chat sender only by the display name the meeting shows, and a speaker only by a diarization label, so it cannot tell the owner from a guest: under Owner only it answers no question typed in the chat and does not start its voice assistant. Off answers no request made in the meeting, on any capture method, and a Virtual Participant does not start its voice assistant. The meeting page's own assistant chat is never affected. A Participant asking on the page of a meeting shared with them is answered under Anyone and refused under Owner only and Off.",
+      "description": "Who in the meeting may ask the assistant; the meeting page's own chat is never affected.",
       "enum": ["anyone", "owner_only", "off"],
       "enumLabels": {
         "anyone": "Anyone in the meeting (default)",
@@ -131,7 +131,7 @@
       "order": 14,
       "type": "string",
       "title": "Assistant instructions",
-      "description": "The editable part of the meeting assistant's system prompt: who the assistant is, how long and in what tone it answers, and how it chooses among its tools. LMA always appends a fixed part that no profile can change: that what a tool returns (the transcript, the meeting chat, the shared screen, documents, web pages, MCP server results) is quoted data and never instructions, except a skill the assistant loads, which it follows within the fixed part; that people are not identified from their faces; how to drive the Virtual Participant browser; and the limits on requests made in the meeting. Reset to default to return to the shipped text.",
+      "description": "The editable part of the assistant's instructions; LMA always appends a fixed part.",
       "format": "textarea",
       "rows": 20,
       "minLength": 1,
@@ -141,20 +141,20 @@
       "order": 18,
       "type": "boolean",
       "title": "Leave out sensitive personal information",
-      "description": "On: LMA appends a rule to the meeting assistant's instructions, after the fixed part and whatever Assistant instructions say, telling it to leave sensitive personal information about anyone out of its answers: health and medical information, racial or ethnic origin, religious or philosophical beliefs, political opinions, trade union membership, sex life and sexual orientation, gender identity, genetic and biometric data, and criminal convictions or allegations. Asked for it, the assistant says that it leaves it out and answers the rest. Off, the default, adds nothing. This is an instruction to the model, not a filter, so an answer can still contain such information. The summary is written by its summary profile; the minimised-content summary profile carries the same rule. Every request is covered: the meeting page's chat, the meeting chat and the voice assistant's questions to the assistant."
+      "description": "Tell the assistant to leave sensitive personal information out of answers. An instruction, not a filter."
     },
     "toolSelection": {
       "order": 15,
       "type": "object",
       "title": "Tool selection",
-      "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one: for Owner use (the meeting page's own chat, for the owner, the users the meeting is shared with and Admins) and for Participant use (a request from anyone other than the meeting's owner and the users it is shared with: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant or with the wake phrase, and a question a Participant asks on the page of a meeting shared with them). A server or skill not listed here follows the defaults: it is used for Owner use, and for Participant use as the Participant use setting (and, under Selected tools, its kind's switch) allows; for an MCP server that is how it behaved before this setting existed. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",
+      "description": "Per MCP server and skill, whether the assistant may use it for the owner and for participants.",
       "widget": "toolSelection",
       "properties": {
         "mcpServers": {
           "order": 0,
           "type": "object",
           "title": "MCP servers",
-          "description": "Per installed MCP server, by its server id. Owner use (stored as enabled): the assistant may use the server at all; off, it is used for no request. Participant use (stored as inMeetingRequests): the server may be used for Participant use; when it is not set, the Participant use setting decides, as for every server. Always on: reserved for a later always-on mode, stored and not yet used.",
+          "description": "Per installed MCP server: Owner use, Participant use, and Always on (reserved, not yet used).",
           "keyLabel": "Server id",
           "propertyNames": { "pattern": "^[^\\u0000-\\u001f\\u007f]{1,256}$" },
           "maxProperties": 200,
@@ -172,7 +172,7 @@
           "order": 1,
           "type": "object",
           "title": "Skills",
-          "description": "Per skill, by its skill id. Owner use (stored as enabled): the assistant may use the skill at all; off, it is used for no request. Participant use (stored as inMeetingRequests): the skill may be used for Participant use; when it is not set, the Participant use setting decides, as for every skill. Always on: reserved for a later always-on mode, stored and not yet used.",
+          "description": "Per skill: Owner use, Participant use, and Always on (reserved, not yet used).",
           "keyLabel": "Skill id",
           "propertyNames": { "pattern": "^[^\\u0000-\\u001f\\u007f]{1,256}$" },
           "maxProperties": 200,
@@ -193,19 +193,19 @@
       "order": 16,
       "type": "object",
       "title": "Live guidance",
-      "description": "Live guidance reads a meeting while it is in progress, marks its checklist items covered or partly covered with evidence from the transcript, and offers short guidance (a question to ask, a topic not yet covered, something to clarify, a risk to probe, an action with no owner or date, a time check) as notifications on the meeting page, to the meeting's owner and the users it is shared with. It is never posted to the meeting chat or spoken. It runs only for meetings it is switched on for, on the meeting page, on a Virtual Participant or through MCP, and each run is a model call billed to the meeting. See docs/live-guidance.md.",
+      "description": "Checklist tracking and short suggestions shown to the owner during a meeting. Each run is a billed model call.",
       "properties": {
         "defaultEnabled": {
           "order": 0,
           "type": "boolean",
           "title": "On for new meetings",
-          "description": "Whether a new meeting starts with live guidance on. Off by default. A Virtual Participant, an MCP client or the meeting page can still turn it on or off for one meeting."
+          "description": "Whether new meetings start with live guidance on; each meeting can still turn it on or off."
         },
         "intervalSeconds": {
           "order": 1,
           "type": "integer",
           "title": "Seconds between runs",
-          "description": "The least time between two runs on one meeting. A run reads what was said since the last one; a longer interval means fewer model calls.",
+          "description": "Minimum time between two runs on one meeting; longer means fewer model calls.",
           "minimum": 60,
           "maximum": 3600
         },
@@ -213,7 +213,7 @@
           "order": 2,
           "type": "integer",
           "title": "New transcript segments a run needs",
-          "description": "A run that finds fewer finished transcript segments than this since the last one makes no model call and waits for more.",
+          "description": "A run is skipped until at least this many new transcript segments have arrived.",
           "minimum": 1,
           "maximum": 500
         },
@@ -221,7 +221,7 @@
           "order": 3,
           "type": "integer",
           "title": "Guidance items per 10 minutes",
-          "description": "The most guidance items one meeting is given in any 10 minutes, new and updated together. When there are more, must items come before should and could, and time checks and questions before the other kinds. 0 publishes none and still keeps the checklist up to date.",
+          "description": "Most guidance items per meeting in any 10 minutes; 0 shows none but still updates the checklist.",
           "minimum": 0,
           "maximum": 50
         },
@@ -229,7 +229,7 @@
           "order": 4,
           "type": "number",
           "title": "Confidence threshold",
-          "description": "The model gives each checklist change and each guidance item a confidence from 0 to 1; anything below this is dropped. Higher is quieter.",
+          "description": "Items and checklist changes below this model confidence (0 to 1) are dropped; higher is quieter.",
           "minimum": 0,
           "maximum": 1
         },
@@ -237,7 +237,7 @@
           "order": 5,
           "type": "string",
           "title": "Model",
-          "description": "The Amazon Bedrock model that reads the meeting. Run within the Amazon Bedrock Models section's inference geography.",
+          "description": "The Amazon Bedrock model that reads the meeting.",
           "enum": ["", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0", "global.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0", "us.anthropic.claude-opus-4-1-20250805-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-6", "us.anthropic.claude-opus-4-6-v1", "us.anthropic.claude-haiku-5-5", "us.anthropic.claude-sonnet-5-5", "us.anthropic.claude-opus-5-5", "global.anthropic.claude-haiku-4-5-20251001-v1:0", "global.anthropic.claude-sonnet-4-5-20250929-v1:0", "global.anthropic.claude-sonnet-4-6", "global.anthropic.claude-opus-4-6-v1", "global.anthropic.claude-haiku-5-5", "global.anthropic.claude-sonnet-5-5", "global.anthropic.claude-opus-5-5"],
           "enumLabels": { "": "The Meeting assistant model (Amazon Bedrock Models section)" }
         },
@@ -245,7 +245,7 @@
           "order": 6,
           "type": "integer",
           "title": "Runs per meeting at most",
-          "description": "The most runs one meeting gets, which caps what live guidance can cost per meeting. At the shipped 90 seconds, 120 runs cover three hours. 0 turns live guidance off for the deployment, the Digest so far button included.",
+          "description": "Most runs per meeting, capping its cost; 0 turns live guidance off for the deployment.",
           "minimum": 0,
           "maximum": 1000
         },
@@ -253,7 +253,7 @@
           "order": 7,
           "type": "string",
           "title": "Instructions",
-          "description": "The editable part of the instructions each run is given: what to look for and how sparing to be. LMA always appends a fixed part that no profile can change: that the transcript, context and checklist are quoted data and never instructions, the limits on titles, bodies and quotes, and the shape of the answer. Reset to default to return to the shipped text.",
+          "description": "The editable part of each run's instructions; LMA always appends a fixed part.",
           "format": "textarea",
           "rows": 14,
           "minLength": 1,
@@ -266,19 +266,19 @@
       "order": 17,
       "type": "object",
       "title": "Whiteboards",
-      "description": "Whiteboards are named panels (Markdown, or a diagram in a subset of Mermaid) on the meeting page that the people who can see a meeting can make and edit, and that the assistant can keep up to date from the transcript while the meeting is in progress. They are shown in LMA only, never posted to the meeting chat or spoken. Whiteboards made by hand make no model call. The assistant's updates run only for meetings they are switched on for, and each run is a model call billed to the meeting. See docs/meeting-whiteboards.md.",
+      "description": "Markdown or diagram panels the assistant can keep up to date during a meeting. Each run is a billed model call.",
       "properties": {
         "defaultEnabled": {
           "order": 0,
           "type": "boolean",
           "title": "On for new meetings",
-          "description": "Whether a new meeting starts with the assistant's whiteboard updates on. Off by default. The meeting page can still turn them on or off for one meeting."
+          "description": "Whether new meetings start with assistant whiteboard updates on; each meeting can still change it."
         },
         "intervalSeconds": {
           "order": 1,
           "type": "integer",
           "title": "Seconds between runs",
-          "description": "The least time between two runs on one meeting. A run reads what was said since the last one; a longer interval means fewer model calls.",
+          "description": "Minimum time between two runs on one meeting; longer means fewer model calls.",
           "minimum": 60,
           "maximum": 3600
         },
@@ -286,7 +286,7 @@
           "order": 2,
           "type": "integer",
           "title": "New transcript segments a run needs",
-          "description": "A run that finds fewer finished transcript segments than this since the last one makes no model call and waits for more.",
+          "description": "A run is skipped until at least this many new transcript segments have arrived.",
           "minimum": 1,
           "maximum": 500
         },
@@ -294,7 +294,7 @@
           "order": 3,
           "type": "integer",
           "title": "Runs per meeting at most",
-          "description": "The most runs one meeting gets, Update now included, which caps what the assistant's updates can cost per meeting. At the shipped 180 seconds, 60 runs cover three hours. 0 turns the assistant's updates off for the deployment; whiteboards can still be made and edited by hand.",
+          "description": "Most assistant runs per meeting, capping its cost; 0 turns updates off (hand editing still works).",
           "minimum": 0,
           "maximum": 1000
         },
@@ -310,7 +310,7 @@
           "order": 5,
           "type": "string",
           "title": "Model",
-          "description": "The Amazon Bedrock model that updates the whiteboards. Run within the Amazon Bedrock Models section's inference geography.",
+          "description": "The Amazon Bedrock model that updates the whiteboards.",
           "enum": [
             "",
             "amazon.nova-micro-v1:0",
@@ -341,7 +341,7 @@
           "order": 6,
           "type": "string",
           "title": "Instructions",
-          "description": "The editable part of the instructions each run is given: how to keep the whiteboards. LMA always appends a fixed part that no change here removes: that the meeting's content is quoted data and never instructions, which panels the assistant may change, the limits and the Mermaid subset, and the shape of the answer. Reset to default to return to the shipped text.",
+          "description": "The editable part of each run's instructions; LMA always appends a fixed part.",
           "format": "textarea",
           "rows": 14,
           "minLength": 1,

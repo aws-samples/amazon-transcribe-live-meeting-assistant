@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/meeting_consent",
   "title": "Meeting consent",
-  "description": "Whether participants are told that a meeting is recorded and transcribed, and whether their consent is needed first. This is the deployment's default; a meeting can be started with a different choice unless that is turned off below. What LMA records is supporting evidence of what participants said, not a legal determination of consent; see the Meeting Consent documentation.",
+  "description": "Whether participants are told a meeting is recorded, and whether their consent is needed first.",
   "sectionLabel": "Meeting Consent",
   "appliesText": "A saved change applies to meetings whose consent starts after the save; a meeting already under way keeps the mode and rule it started with.",
   "order": 13,
@@ -15,7 +15,7 @@
       "order": 0,
       "type": "string",
       "title": "Consent mode",
-      "description": "Off: no notice. Notify: a notice is posted and the meeting is recorded and transcribed unless a participant objects, which stops it. Opt-in: a request is posted and nothing is recorded or transcribed until the consent rule below is met; an objection stops it again.",
+      "description": "Off: no notice. Notify: record unless someone objects. Opt-in: record nothing until consent is given.",
       "enum": ["off", "notify", "opt_in"],
       "enumLabels": {
         "off": "Off",
@@ -27,7 +27,7 @@
       "order": 1,
       "type": "string",
       "title": "Consent rule (opt-in)",
-      "description": "Each participant: every participant present replies with consent. Owner attests: the meeting's owner confirms that everyone agreed, for example out loud or in the invitation's terms.",
+      "description": "Each participant: everyone present must consent. Owner attests: the owner confirms everyone agreed.",
       "enum": ["each_participant", "owner_attests"],
       "enumLabels": {
         "each_participant": "Each participant consents",
@@ -39,7 +39,7 @@
       "order": 2,
       "type": "string",
       "title": "Notice text (notify)",
-      "description": "Posted when a notify meeting starts. {LMA_USER} is the person using LMA, {meeting} the meeting's name, and {consent_phrase} and {objection_phrase} the first phrase of each list below. A Virtual Participant posts a line after it saying how to reply (Type or say \"LMA, I consent\" or \"LMA, I object\"), so the text needs no reply instruction of its own.",
+      "description": "Posted when a Notify meeting starts. Placeholders: {LMA_USER}, {meeting}, {consent_phrase}, {objection_phrase}.",
       "format": "textarea",
       "rows": 3,
       "minLength": 1,
@@ -50,7 +50,7 @@
       "order": 3,
       "type": "string",
       "title": "Consent request text (opt-in)",
-      "description": "Posted when an opt-in meeting starts. The same placeholders as the notice text, and the same line on how to reply follows it.",
+      "description": "Posted when an Opt-in meeting starts. Same placeholders as the Notify notice.",
       "format": "textarea",
       "rows": 3,
       "minLength": 1,
@@ -61,7 +61,7 @@
       "order": 4,
       "type": "string",
       "title": "Video sentence",
-      "description": "Added to the end of the notice or consent request whenever the meeting's video is recorded: by a Virtual Participant recording video, or by the Desktop Capture App, the Stream Audio/Video page or the browser extension recording screen video. It is shown, posted or spoken with the notice, and recorded with it on the meeting's consent record. No placeholders.",
+      "description": "Added to the notice whenever the meeting's video is recorded. No placeholders.",
       "format": "textarea",
       "rows": 2,
       "minLength": 1,
@@ -71,7 +71,7 @@
       "order": 5,
       "type": "string",
       "title": "Consent phrases",
-      "description": "Comma-separated. A reply containing one of these, as whole words and ignoring case and punctuation, is read as consent, unless it also contains an objection phrase.",
+      "description": "Comma-separated phrases read as consent in a reply (whole words, any case).",
       "minLength": 1,
       "maxLength": 1000
     },
@@ -79,7 +79,7 @@
       "order": 6,
       "type": "string",
       "title": "Objection phrases",
-      "description": "Comma-separated. A reply containing one of these is read as an objection. Objections are looked for first, so \"I do not consent\" is an objection although it contains \"consent\".",
+      "description": "Comma-separated phrases read as an objection. Checked before consent phrases.",
       "minLength": 1,
       "maxLength": 1000
     },
@@ -87,19 +87,19 @@
       "order": 7,
       "type": "boolean",
       "title": "Allow a different choice per meeting",
-      "description": "On: whoever starts a meeting may choose another mode or rule for it. Off: a meeting may only use this mode and rule or a stricter one."
+      "description": "On: a meeting may use another mode or rule. Off: only this one or a stricter one."
     },
     "keepEvidenceScreenshots": {
       "order": 8,
       "type": "boolean",
       "title": "Keep evidence screenshots",
-      "description": "On: screenshots kept as consent evidence stay with the meeting until it is deleted. Off: each screenshot is deleted as soon as it has been checked, and only the check's result is kept."
+      "description": "On: keep consent evidence screenshots with the meeting. Off: delete each once it has been checked."
     },
     "verifierModelId": {
       "order": 9,
       "type": "string",
       "title": "Evidence check model",
-      "description": "The Amazon Bedrock vision model that checks a consent evidence screenshot: whether the notice is visible, which replies are visible and from whom, and whether anybody objected. Its answer is supporting evidence only; it never changes a meeting's consent status. Image-capable models only.",
+      "description": "The Amazon Bedrock vision model that checks consent evidence screenshots. Image-capable models only.",
       "enum": [
         "amazon.nova-lite-v1:0",
         "amazon.nova-pro-v1:0",
@@ -120,7 +120,7 @@
       "order": 10,
       "type": "string",
       "title": "Streaming clients without a consent step",
-      "description": "What the WebSocket transcriber does, when the mode is Notify or Opt-in, with a meeting from a streaming client that shows no consent step: the Stream Audio embed, and browser extension and Desktop Capture App builds from before the consent step. Accept with a warning: the meeting is recorded and transcribed as before, with no consent record, and a warning is logged. Refuse: the meeting is not recorded or transcribed, and the client is told why. Choose Refuse once every client in use has been updated.",
+      "description": "What to do with a streaming client that has no consent step: accept with a warning, or refuse to record.",
       "enum": ["accept_with_warning", "reject"],
       "enumLabels": {
         "accept_with_warning": "Accept with a warning (no consent record)",
@@ -131,25 +131,25 @@
       "order": 11,
       "type": "boolean",
       "title": "Virtual Participant leaves after an objection",
-      "description": "On: when a participant objects, in the meeting chat or aloud, the Virtual Participant stops recording and transcribing, says so, and leaves the meeting. Off: it stops and stays, so recording can resume if the participant later consents. Either way the objection is recorded."
+      "description": "On: the Virtual Participant leaves when someone objects. Off: it stops recording and stays."
     },
     "readSpokenReplies": {
       "order": 12,
       "type": "boolean",
       "title": "Read spoken replies",
-      "description": "On: the Virtual Participant also reads consent replies and objections said aloud and addressed to LMA (\"LMA, I consent\", \"LMA, I object\"). While consent is awaited it sends the meeting audio to the meeting's transcription engine to hear them; nothing it hears is recorded or kept except the replies. Off: it reads replies in the meeting chat only, and sends no meeting audio anywhere until consent is given."
+      "description": "Also hear spoken consent replies. Sends meeting audio to the transcription engine while consent is awaited."
     },
     "advanceConsentEnabled": {
       "order": 13,
       "type": "boolean",
       "title": "Allow consent given in advance",
-      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date; and any signed-in person can give a standing consent on the My consents page without a link, for the meetings an organizer holds (by their email address) or for every meeting on this deployment, until a date, and manage or withdraw any of them there. In a meeting a Virtual Participant joins, an attendee whose display name matches one listed person with such a consent is counted as having consented; the notice is still posted, naming them, and anyone can still object. Off: no new consent can be given in advance and none is counted in a meeting; each person can still read and withdraw their own."
+      "description": "Let people consent before a meeting, by link or on the My consents page."
     },
     "advanceConsentMaxDays": {
       "order": 14,
       "type": "integer",
       "title": "Longest consent given in advance, in days",
-      "description": "The latest date a consent for an organizer's meetings, or for every meeting on this deployment, may run to, counted from the day it is given: 1 to 365 days. A consent for one meeting counts for at most this long too. A change applies to consents given after the save.",
+      "description": "The longest an advance consent can last, in days (1 to 365).",
       "minimum": 1,
       "maximum": 365,
       "dependsOn": { "field": "advanceConsentEnabled", "value": true }
@@ -158,7 +158,7 @@
       "order": 15,
       "type": "string",
       "title": "Consent text (given in advance)",
-      "description": "What a person agrees to when they consent in advance, shown on the consent page and kept with the consent exactly as shown, with its SHA-256 hash and a version. {organizer} is the meeting's owner in LMA (the address typed for a standing consent given without a link, or \"the organizer of each meeting\" for one covering every meeting on this deployment), {meeting} the meeting's name (\"the meetings this consent covers\" without a link), and {scope} what the consent covers (the meeting, every meeting the organizer holds until a date, with the label when one is chosen, or every meeting on this deployment that lists the person, until a date). The same text is used for consents given with and without a link. A change applies to consents given after the save; those already given keep the text they were given with.",
+      "description": "What a person agrees to when consenting in advance. Placeholders: {organizer}, {meeting}, {scope}.",
       "format": "textarea",
       "rows": 4,
       "minLength": 1,
@@ -169,7 +169,7 @@
       "order": 16,
       "type": "boolean",
       "title": "Keep sign-in device details with consents given in advance",
-      "description": "Off, the default: a consent given in advance holds the person's email address, account id, the time, the scope and the text they agreed to, and nothing about the device they used. On: it also holds the IP address and the browser's user agent the request came from, for consents given after the save. Decide this with whoever advises your organisation on consent records; the IP address is personal data.",
+      "description": "Also store the IP address and browser of advance consents. The IP address is personal data.",
       "dependsOn": { "field": "advanceConsentEnabled", "value": true }
     }
   },

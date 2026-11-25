@@ -16,10 +16,11 @@ import React from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SchemaNode, SectionProvider } from './fields';
-import ToolSelectionField, { withFlag } from './ToolSelectionField';
+import ToolSelectionField, { IN_MEETING_OPTIONS, withFlag } from './ToolSelectionField';
 
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: vi.fn() }) }));
 
@@ -106,6 +107,30 @@ describe('Tool selection', () => {
     expect(await screen.findByText('Not installed')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Remove gone'));
     expect(stored(onChange)).toEqual({});
+  });
+
+  it('names the Participant use choices plainly, keeping the stored values', () => {
+    expect(IN_MEETING_OPTIONS).toEqual([
+      { value: 'default', label: 'Follow the Participant use setting' },
+      { value: 'true', label: 'Allowed for participants' },
+      { value: 'false', label: 'Not allowed for participants' },
+    ]);
+  });
+
+  it('opens Participant use over the page, so the table does not clip its options', async () => {
+    const { onChange } = renderField();
+    await screen.findByText('Alpha');
+    const select = createWrapper(screen.getByLabelText('Participant use: Alpha').closest('td')).findSelect();
+    expect(select.findTrigger().getElement().textContent).toBe('Follow the Participant use setting');
+    select.openDropdown();
+    // With expandToViewport the options render in a portal outside the table.
+    const labels = select
+      .findDropdown({ expandToViewport: true })
+      .findOptions()
+      .map((option) => option.getElement().textContent);
+    expect(labels).toEqual(IN_MEETING_OPTIONS.map((option) => option.label));
+    select.selectOptionByValue('false', { expandToViewport: true });
+    expect(stored(onChange)).toEqual({ alpha: { inMeetingRequests: false } });
   });
 
   it('a read-only profile offers no change', async () => {

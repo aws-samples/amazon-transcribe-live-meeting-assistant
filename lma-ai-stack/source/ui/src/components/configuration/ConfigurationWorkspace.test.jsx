@@ -288,6 +288,25 @@ describe('the editor', () => {
     expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
   });
 
+  it('opens with every section collapsed, and a ?section= link opens only that one', async () => {
+    const toggleOf = (heading) => section(heading).querySelector('[aria-expanded]');
+    graphqlMock.mockResolvedValue(answer());
+    const { unmount } = renderEditor();
+    await screen.findByText('Transcript Summary');
+    const sections = document.querySelectorAll('[id^="configuration-section-"]');
+    expect(sections.length).toBe(SECTIONS.length);
+    sections.forEach((element) =>
+      expect(element.querySelector('[aria-expanded]').getAttribute('aria-expanded')).toBe('false'),
+    );
+    SECTIONS.forEach(({ Schema }) => expect(Schema.defaultExpanded).not.toBe(true));
+    unmount();
+
+    renderEditor({ route: '/configuration/settings?section=summary_prompt_templates' });
+    await screen.findByText('Transcript Summary');
+    expect(toggleOf('Transcript Summary').getAttribute('aria-expanded')).toBe('true');
+    expect(toggleOf('Meeting Cost Prices').getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('keeps every editor action in the header that stays in view, below the top navigation', async () => {
     const nav = document.createElement('div');
     nav.id = 'top-navigation';
@@ -592,7 +611,8 @@ describe('the editor', () => {
   it('turns a shipped summary section off, and back on, without touching the others', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();
-    const summary = section(await screen.findByText('Transcript Summary'));
+    openSection(await screen.findByText('Transcript Summary'));
+    const summary = section('Transcript Summary');
     const details = within(summary).getByText('DETAILS').closest('.lma-config-field');
     fireEvent.click(within(details).getByRole('button', { name: 'Turn off' }));
     expect(within(summary).getByText('Turned off')).toBeTruthy();
@@ -610,7 +630,8 @@ describe('the editor', () => {
   it('brings a turned-off summary section back with Turn on', async () => {
     graphqlMock.mockResolvedValueOnce(answer({ custom: { summary_prompt_templates: { '2#DETAILS': 'NONE' } } }));
     renderEditor();
-    const summary = section(await screen.findByText('Transcript Summary'));
+    openSection(await screen.findByText('Transcript Summary'));
+    const summary = section('Transcript Summary');
     fireEvent.click(within(summary).getByRole('button', { name: 'Turn on' }));
     expect(within(summary).queryByText('Turned off')).toBeNull();
   });

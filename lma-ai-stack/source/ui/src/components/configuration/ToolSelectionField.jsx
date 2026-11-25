@@ -100,10 +100,12 @@ const KINDS = {
   },
 };
 
-const inMeetingOptions = (noun) => [
-  { value: 'default', label: `As Participant use sets for every ${noun}` },
-  { value: 'true', label: 'Allowed' },
-  { value: 'false', label: 'Not allowed' },
+// Participant use for one item. Unset (stored by leaving the flag out) follows
+// the section's Participant use setting, as an item with no row does.
+export const IN_MEETING_OPTIONS = [
+  { value: 'default', label: 'Follow the Participant use setting' },
+  { value: 'true', label: 'Allowed for participants' },
+  { value: 'false', label: 'Not allowed for participants' },
 ];
 
 /** The flags of one kind of item, as a table of the items the stack lists. */
@@ -114,7 +116,7 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
   const [error, setError] = useState(null);
   const itemsPath = [...path, kind];
   const entries = getAt(values, itemsPath) || {};
-  const options = inMeetingOptions(spec.noun);
+  const options = IN_MEETING_OPTIONS;
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +212,8 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
                     options={options}
                     disabled={readOnly}
                     ariaLabel={`Participant use: ${row.name}`}
+                    // The table clips its cells, so the options open over the page.
+                    expandToViewport
                     onChange={({ detail }) => {
                       const chosen = detail.selectedOption.value;
                       setFlag(row.id, 'inMeetingRequests', chosen === 'default' ? undefined : chosen === 'true');

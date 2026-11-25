@@ -96,7 +96,7 @@ def test_the_section_says_when_a_change_reaches_an_upload():
 
 def test_the_section_says_what_an_upload_uses():
     schema = section_schema("transcription")
-    assert "at least two language options" in schema["description"]
+    assert "at least two language options" in schema["properties"]["languageOptions"]["description"]
     assert transcribe_options.MIN_BATCH_LANGUAGE_OPTIONS == 2
     preferred = schema["properties"]["preferredLanguage"]["description"]
     assert "Not used by uploads" in preferred
