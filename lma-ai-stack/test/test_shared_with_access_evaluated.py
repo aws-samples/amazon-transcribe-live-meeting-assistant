@@ -962,3 +962,100 @@ def test_an_unshare_answers_with_the_entries_removed(client) -> None:
         },
     )
     assert json.loads(response["evaluationResult"]) == {"id": "vp1", "SharedWith": [LISTED]}
+
+
+# ── participantTranscriptSubscription.js: a Participant's live transcript ──
+
+PARTICIPANT = {"username": LISTED, "groups": ["Participant"]}
+SEGMENT_FIELDS = ["CallId", "SegmentId", "Transcript", "Channel", "Speaker", "IsPartial"]
+
+
+def _participant_subscription(client, identity: dict, meeting, selection=SEGMENT_FIELDS) -> dict:
+    return client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "participantTranscriptSubscription.js").read_text(encoding="utf-8"),
+        context=json.dumps(
+            {
+                "arguments": {"CallId": "c1"},
+                "identity": identity,
+                "result": meeting,
+                "info": {
+                    "fieldName": "onAddParticipantTranscriptSegment",
+                    "parentTypeName": "Subscription",
+                    "selectionSetGraphQL": "",
+                    "selectionSetList": selection,
+                    "variables": {},
+                },
+            }
+        ),
+        function="response",
+    )
+
+
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_a_participant_the_meeting_is_shared_with_may_follow_its_transcript(client, shape) -> None:
+    meeting = {"PK": "c#c1", "SK": "c#c1", "Owner": OWNER, "SharedWith": SHAPES[shape]}
+    response = _participant_subscription(client, PARTICIPANT, meeting)
+    assert not response.get("error"), response
+
+
+PARTICIPANT_REFUSALS = [
+    # Not shared with them.
+    (
+        {"username": "carol@example.com", "groups": ["Participant"]},
+        {"Owner": OWNER, "SharedWith": [LISTED]},
+    ),
+    # Owning the meeting is not enough for the role.
+    ({"username": OWNER, "groups": ["Participant"]}, {"Owner": OWNER, "SharedWith": [LISTED]}),
+    # Part of an entry is not an entry.
+    (
+        {"username": "ob@example.com", "groups": ["Participant"]},
+        {"Owner": OWNER, "SharedWith": f"[{LISTED}]"},
+    ),
+    # No meeting.
+    (PARTICIPANT, None),
+    # Another role.
+    ({"username": LISTED, "groups": ["User"]}, {"Owner": OWNER, "SharedWith": [LISTED]}),
+]
+
+
+@pytest.mark.parametrize("identity,meeting", PARTICIPANT_REFUSALS)
+def test_anyone_else_is_refused_a_participant_transcript(client, identity, meeting) -> None:
+    assert _participant_subscription(client, identity, meeting).get("error")
+
+
+@pytest.mark.parametrize("extra", ["SharedWith", "Owner", "Sentiment", "SentimentScore"])
+def test_a_selection_beyond_the_participant_fields_is_refused(client, extra) -> None:
+    meeting = {"Owner": OWNER, "SharedWith": [LISTED]}
+    response = _participant_subscription(client, PARTICIPANT, meeting, SEGMENT_FIELDS + [extra])
+    assert response.get("error"), response
+
+
+def test_the_participant_subscription_reads_the_meeting_it_names(client) -> None:
+    response = client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "participantTranscriptSubscription.js").read_text(encoding="utf-8"),
+        context=json.dumps({"arguments": {"CallId": "c1"}, "identity": PARTICIPANT}),
+        function="request",
+    )
+    assert json.loads(response["evaluationResult"]) == {
+        "operation": "GetItem",
+        "key": {"PK": {"S": "c#c1"}, "SK": {"S": "c#c1"}},
+        "consistentRead": True,
+    }
+
+
+def test_a_participant_follows_a_chat_answer_only_on_a_meeting_shared_with_them(client) -> None:
+    arguments = {"CallId": "c1", "MessageId": "m1"}
+    shared = {"Owner": OWNER, "SharedWith": [LISTED]}
+    owned = {"Owner": LISTED, "SharedWith": []}
+    user = {"username": LISTED, "groups": ["User"]}
+
+    def answered(identity, meeting) -> bool:
+        context = {"arguments": arguments, "identity": identity, "result": meeting}
+        return not _evaluate_chat(client, "response", context).get("error")
+
+    assert answered(PARTICIPANT, shared)
+    assert not answered(PARTICIPANT, owned)
+    # A User who owns the meeting is answered as before.
+    assert answered(user, owned)

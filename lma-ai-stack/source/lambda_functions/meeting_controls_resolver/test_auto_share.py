@@ -98,8 +98,14 @@ def test_a_cleared_list_removes_every_auto_share() -> None:
     assert shared_with_after([ANA, BEN, CARL], plan) == [CARL]
 
 
-def test_an_address_holding_a_separator_is_never_shared_with() -> None:
+def test_an_address_the_share_dialog_would_refuse_is_never_shared_with() -> None:
     assert listed_addresses([{"email": "a,b@example.com"}, {"email": "[x@example.com"}]) == []
+    assert listed_addresses([{"email": "not-an-address"}, {"email": "a b@example.com"}]) == []
+    assert listed_addresses([{"email": "x@y@example.com"}, {"email": "x@example"}]) == []
+    # Every address the list keeps is one share_meetings accepts.
+    assert all(
+        index.RECIPIENT_PATTERN.fullmatch(a) for a in listed_addresses(_people(ANA, BEN, CARL))
+    )
     assert listed_addresses("not a list") == []
     assert listed_addresses([{"email": ANA}, {"email": ANA.upper()}, {"name": "no email"}]) == [ANA]
 

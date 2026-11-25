@@ -773,7 +773,7 @@ In the form fields, enter one person per line as `Name <email>` or as an email a
 - an address listed twice, compared ignoring case, is kept once, with the first name given for it;
 - a meeting lists at most 100 people. A longer list is refused rather than cut short.
 
-Listing someone does not share the meeting with them, and does not give them access to it. Sharing is separate: use **Share** on the meeting, or the `shareWith` argument of the MCP tools.
+With **Meeting Sharing › Share meetings with their listed participants** on, which it is by default and in every configuration preset, listing someone shares the meeting with their address, read-only, from the time the meeting record exists, and taking them off the list removes that share; see [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list). A person with a Participant account then reads it on their **Shared meetings** page, and a User or Admin in their meetings list. With the setting off, listing someone does not share the meeting. Either way the owner can share and unshare by hand with **Share** on the meeting, or the `shareWith` argument of the MCP tools.
 
 ### Who has an LMA account
 

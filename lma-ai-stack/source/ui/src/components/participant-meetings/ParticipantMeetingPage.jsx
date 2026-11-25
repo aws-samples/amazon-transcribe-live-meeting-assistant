@@ -96,6 +96,9 @@ const Recordings = ({ meeting, client }) => {
   const [links, setLinks] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // A player that fails is given fresh links once (the hour-long ones may have
+  // lapsed); a second failure shows the error rather than asking again.
+  const [retried, setRetried] = useState(false);
   const has = meeting.HasAudioRecording || meeting.HasVideoRecording;
 
   const load = useCallback(async () => {
@@ -114,6 +117,16 @@ const Recordings = ({ meeting, client }) => {
       setLoading(false);
     }
   }, [client, meeting.CallId]);
+
+  const onPlayerError = useCallback(() => {
+    if (retried) {
+      setLinks(null);
+      setError('The recording could not be played. Try again later.');
+      return;
+    }
+    setRetried(true);
+    load();
+  }, [retried, load]);
 
   if (!has) {
     return (
@@ -144,10 +157,10 @@ const Recordings = ({ meeting, client }) => {
           </Box>
           {link.Kind === 'VIDEO' ? (
             // eslint-disable-next-line jsx-a11y/media-has-caption
-            <video controls preload="metadata" src={link.Url} style={{ maxWidth: '100%' }} onError={load} />
+            <video controls preload="metadata" src={link.Url} style={{ maxWidth: '100%' }} onError={onPlayerError} />
           ) : (
             // eslint-disable-next-line jsx-a11y/media-has-caption
-            <audio controls preload="metadata" src={link.Url} onError={load} />
+            <audio controls preload="metadata" src={link.Url} onError={onPlayerError} />
           )}
         </div>
       ))}

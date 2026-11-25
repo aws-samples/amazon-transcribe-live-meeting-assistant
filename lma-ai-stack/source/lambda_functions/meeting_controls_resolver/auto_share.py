@@ -29,11 +29,18 @@ AutoSharedWith.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, List, Mapping, Optional, Sequence
 
 #: The meeting record attribute that lists the addresses auto-share added.
 AUTO_SHARED_ATTRIBUTE = "AutoSharedWith"
+
+#: One recipient of a share: an email address. Every address it matches is one
+#: the share dialog's check (index.RECIPIENT_PATTERN) accepts too, and it also
+#: refuses white space and ",": "[", "]" and "," only ever separate SharedWith
+#: entries, so an address containing one is not an entry that can be stored.
+RECIPIENT_PATTERN = re.compile(r"[^@\[\],\s]+@[^@\[\],\s]+\.[^@\[\],\s]+")
 
 
 def _key(address: str) -> str:
@@ -52,10 +59,10 @@ def listed_addresses(participants: Any) -> List[str]:
         email = entry.get("email")
         if not isinstance(email, str) or not email.strip():
             continue
-        # "[", "]" and "," only ever separate SharedWith entries; the list's own
-        # validation refuses such an address, and one that reached the record
-        # another way is not shared with.
-        if any(separator in email for separator in "[],"):
+        # Only an address the share dialog would accept; the list's own
+        # validation refuses any other, and one that reached the record another
+        # way is not shared with.
+        if not RECIPIENT_PATTERN.fullmatch(email.strip()):
             continue
         if _key(email) in seen:
             continue

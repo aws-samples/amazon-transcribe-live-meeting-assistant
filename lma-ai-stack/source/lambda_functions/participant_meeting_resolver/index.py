@@ -319,6 +319,7 @@ def handler(event: Dict[str, Any], context: Any) -> Any:  # pylint: disable=unus
     try:
         return _plain(operation(event))
     except Refused as refusal:
-        LOGGER.info("Refused %s: %s", field, refusal)
+        # The field only: the refusal names the caller, whose address is personal data.
+        LOGGER.info("Refused %s", field)
         # AppSync's own word for a refusal, which the UI and the role probe read.
         raise PermissionError(f"Unauthorized: {refusal}") from None

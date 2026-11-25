@@ -194,7 +194,10 @@ const MeetingParticipants = ({
         <Header
           variant="h3"
           counter={people.length ? `(${people.length})` : undefined}
-          description="The people expected at the meeting. Listing someone does not share the meeting with them."
+          description={
+            "The people expected at the meeting. With the deployment's Meeting Sharing setting on (the default), " +
+            'the meeting is shared, read-only, with each person listed.'
+          }
           actions={actions}
         >
           Participants

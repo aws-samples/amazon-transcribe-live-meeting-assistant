@@ -995,7 +995,8 @@ input CreateVirtualParticipantInput {
 	meetingSharedWith: [String!]
 	# Optional: the people expected at the meeting, as Call.Participants holds
 	# them (at most 100). Stored on the row and put on the meeting when the VP
-	# creates it. Listing someone does not share the meeting with them.
+	# creates it. With Meeting Sharing on (the default), the meeting is
+	# shared with each person listed; see docs/user-based-access-control.md.
 	participants: [MeetingParticipantInput!]
 	# Optional meeting consent choice for this meeting: "off", "notify" or
 	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,

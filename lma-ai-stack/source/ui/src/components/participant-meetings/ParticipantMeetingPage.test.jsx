@@ -186,4 +186,48 @@ describe('the Participant meetings list', () => {
     expect(sharedMeetingHref('a b+c')).toBe('#/shared-meetings/a%20b%2Bc');
     expect(screen.getByText('owner@example.com')).toBeTruthy();
   });
+
+  it('keeps reading while a page comes back empty with more to read', async () => {
+    const pages = [
+      { Meetings: [], nextToken: 't1' },
+      { Meetings: [], nextToken: 't2' },
+      { Meetings: [MEETING], nextToken: null },
+    ];
+    const graphql = vi.fn(async () => ({ data: { listParticipantMeetings: pages.shift() } }));
+    render(
+      <MemoryRouter>
+        <ParticipantMeetingList client={{ graphql }} />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('link', { name: 'Weekly sync' })).toBeTruthy();
+    expect(graphql.mock.calls.map((call) => call[0].variables.nextToken)).toEqual([null, 't1', 't2']);
+  });
+
+  it('says older meetings remain rather than that none is shared', async () => {
+    const graphql = vi.fn(async () => ({ data: { listParticipantMeetings: { Meetings: [], nextToken: 'more' } } }));
+    render(
+      <MemoryRouter>
+        <ParticipantMeetingList client={{ graphql }} />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Choose Show more to search older ones/)).toBeTruthy();
+    expect(screen.queryByText('No meeting has been shared with you yet.')).toBeNull();
+    expect(graphql).toHaveBeenCalledTimes(10);
+  });
+});
+
+describe('recording playback', () => {
+  it('asks for fresh links once after a player error, then shows the error', async () => {
+    const client = fakeClient();
+    const { container } = renderPage(client);
+    fireEvent.click(await screen.findByRole('button', { name: 'Play recordings' }));
+    await waitFor(() => expect(container.querySelector('audio')).toBeTruthy());
+    const recordingCalls = () =>
+      client.graphql.mock.calls.filter((call) => call[0].query === queries.getParticipantMeetingRecordings).length;
+    fireEvent.error(container.querySelector('audio'));
+    await waitFor(() => expect(recordingCalls()).toBe(2));
+    fireEvent.error(container.querySelector('audio'));
+    expect(await screen.findByText('The recording could not be played. Try again later.')).toBeTruthy();
+    expect(recordingCalls()).toBe(2);
+  });
 });

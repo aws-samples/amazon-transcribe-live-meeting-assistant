@@ -22,6 +22,10 @@ import { formatDuration } from './participant-transcript';
 const logger = new ConsoleLogger('ParticipantMeetingList');
 
 const PAGE_SIZE = 50;
+// The server reads a bounded part of the meetings index per request, so a page
+// can come back empty with a token while older meetings remain. Up to this many
+// requests are made in a row until one returns meetings or the list ends.
+const MAX_EMPTY_PAGES = 10;
 
 /** The page of a shared meeting, as a hash link. */
 export const sharedMeetingHref = (callId) => `#${SHARED_MEETINGS_PATH}/${encodeURIComponent(callId)}`;
@@ -53,13 +57,22 @@ const ParticipantMeetingList = ({ client: givenClient = undefined }) => {
   const load = useCallback(async (token) => {
     setLoading(true);
     try {
-      const result = await clientRef.current.graphql({
-        query: listParticipantMeetings,
-        variables: { limit: PAGE_SIZE, nextToken: token || null },
-      });
-      const page = result?.data?.listParticipantMeetings || {};
-      setMeetings((current) => (token ? [...current, ...(page.Meetings || [])] : page.Meetings || []));
-      setNextToken(page.nextToken || null);
+      let next = token || null;
+      let found = [];
+      for (let request = 0; request < MAX_EMPTY_PAGES; request += 1) {
+        // Each request needs the token of the one before it.
+        // eslint-disable-next-line no-await-in-loop
+        const result = await clientRef.current.graphql({
+          query: listParticipantMeetings,
+          variables: { limit: PAGE_SIZE, nextToken: next },
+        });
+        const page = result?.data?.listParticipantMeetings || {};
+        found = page.Meetings || [];
+        next = page.nextToken || null;
+        if (found.length > 0 || !next) break;
+      }
+      setMeetings((current) => (token ? [...current, ...found] : found));
+      setNextToken(next);
       setError('');
     } catch (e) {
       logger.error('listParticipantMeetings failed', e);
@@ -93,7 +106,9 @@ const ParticipantMeetingList = ({ client: givenClient = undefined }) => {
           <Alert type="error">{error}</Alert>
         ) : (
           <Box textAlign="center" color="inherit">
-            No meeting has been shared with you yet.
+            {nextToken
+              ? 'No shared meeting found among the most recent meetings. Choose Show more to search older ones.'
+              : 'No meeting has been shared with you yet.'}
           </Box>
         )
       }
