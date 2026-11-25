@@ -445,6 +445,13 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("lma-ai-stack/source/appsync/role-matrix.json", "lambdas"),
         ("lma-ai-stack/source/appsync/role-matrix.json", "integ_plumbing"),
         ("lma-ai-stack/source/appsync/schema.graphql", "integ_plumbing"),
+        # The security tests' helper tests read these.
+        ("docs/user-based-access-control.md", "integ_plumbing"),
+        (
+            "lma-ai-stack/source/lambda_functions/video_keyframes_resolver/index.py",
+            "integ_plumbing",
+        ),
+        (".gitignore", "integ_plumbing"),
         # The Cognito pre token generation trigger is tested with the Lambdas.
         ("lma-cognito-stack/source/pre_token_generation/index.py", "lambdas"),
         # ...and read the AI stack through the AI stack tests' template helper.
@@ -870,3 +877,18 @@ def test_the_evidence_reader_reads_both_list_forms(tmp_path) -> None:
 def test_an_unreadable_profile_runs_the_profile_step_for_everything(tmp_path) -> None:
     assert ca.read_evidence_paths(tmp_path / "missing") is None
     assert ca.is_evidence("anything/at/all.txt", None)
+
+
+def test_the_security_tooling_is_linted_and_tested_by_the_plumbing_step() -> None:
+    """scripts/security/ is ruff-clean (PYTHON_LINT_PATHS) and its tests run with the plumbing tests."""
+    paths = (
+        "scripts/security/zap_scan.py",
+        "scripts/security/zap-rules.conf",
+        "scripts/security/tests/test_zap_scan.py",
+    )
+    for path in paths:
+        assert set(ca.areas_for(path)) == {"security_tests"}, path
+        assert {"python_lint", "integ_plumbing"} <= ran([path]), path
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    assert "$(CURDIR)/scripts/security \\" in makefile
+    assert "pytest scripts/security/tests" in makefile

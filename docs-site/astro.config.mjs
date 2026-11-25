@@ -145,6 +145,10 @@ export default defineConfig({
               label: "Security Scanning (SRT)",
               slug: "security-scanning",
             },
+            {
+              label: "Security Testing",
+              slug: "security-testing",
+            },
           ],
         },
         {
