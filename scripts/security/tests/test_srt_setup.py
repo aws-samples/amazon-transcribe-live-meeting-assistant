@@ -49,6 +49,7 @@ def test_srt_placeholder_is_written_on_a_ci_runner_without_asking_instance_metad
     monkeypatch.setattr(srt_setup.urllib.request, "urlopen", no_network)
     written = srt_setup.write_placeholder_credentials(runner, tmp_path)
     assert written == tmp_path / ".aws" / "credentials"
+    assert written.read_text() == srt_setup.PLACEHOLDER_CREDENTIALS
 
 
 def test_no_placeholder_when_the_aws_config_has_its_own_credential_source(tmp_path: Path) -> None:

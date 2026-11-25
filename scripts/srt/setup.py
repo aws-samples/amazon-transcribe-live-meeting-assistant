@@ -208,8 +208,9 @@ def other_credentials_available(env=None, home=None):
     """True when the environment or ~/.aws/config names a credential source of its own.
 
     The instance metadata service is not consulted: the placeholder is only ever
-    written on a CI runner, whose job container is discarded when the job ends,
-    and a runner's host can answer metadata requests from inside that container.
+    written on a CI runner, whose host can answer metadata requests from inside
+    the job even when no credentials are meant for the job, and the placeholder
+    is removed again as soon as ``srt config`` ends.
     """
     env = os.environ if env is None else env
     home = Path.home() if home is None else Path(home)
@@ -301,6 +302,9 @@ def main():
         # values are deliberately NOT in AWS access-key format (no AKIA prefix,
         # no 40-char secret). Outside a CI runner the placeholder is never
         # written, since it would take precedence over the host's own credentials.
+        # On a runner it takes precedence over an instance profile while
+        # `srt config` runs, for every process sharing this HOME; the GitLab job
+        # runs in its own container, so that is the job alone.
         placeholder = write_placeholder_credentials()
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),

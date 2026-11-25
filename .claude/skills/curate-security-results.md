@@ -49,7 +49,8 @@ template description; each part's commit is `git rev-parse HEAD`.
   `make srt-setup` once in a terminal and pick the profile. Never set
   `GITLAB_CI` or `GITHUB_ACTIONS` on a developer host or a shared box.
   `scripts/srt/setup.py` writes SRT's placeholder AWS credentials only on a CI
-  runner with no other credential source, and removes them when setup ends.
+  runner whose environment and `~/.aws/config` name no credential source (the
+  instance metadata service is not consulted), and removes them when setup ends.
 - On a stack others are testing, add `SHARED=1` (make passes it on to
   `stacktest-rbac`): the web UI app client is left alone, and the token expiry
   check and its control are recorded as *not run*, with that reason.
