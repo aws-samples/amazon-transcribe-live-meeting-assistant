@@ -143,13 +143,13 @@
       "order": 13,
       "type": "boolean",
       "title": "Allow consent given in advance",
-      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date, and manage or withdraw it on the My consents page. In a meeting a Virtual Participant joins, an attendee whose display name matches one listed person with such a consent is counted as having consented; the notice is still posted, naming them, and anyone can still object. Off: no new consent can be given in advance and none is counted in a meeting; each person can still read and withdraw their own."
+      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date; and any signed-in person can give a standing consent on the My consents page without a link, for the meetings an organizer holds (by their email address) or for every meeting on this deployment, until a date, and manage or withdraw any of them there. In a meeting a Virtual Participant joins, an attendee whose display name matches one listed person with such a consent is counted as having consented; the notice is still posted, naming them, and anyone can still object. Off: no new consent can be given in advance and none is counted in a meeting; each person can still read and withdraw their own."
     },
     "advanceConsentMaxDays": {
       "order": 14,
       "type": "integer",
       "title": "Longest consent given in advance, in days",
-      "description": "The latest date a consent for an organizer's meetings may run to, counted from the day it is given: 1 to 365 days. A consent for one meeting counts for at most this long too. A change applies to consents given after the save.",
+      "description": "The latest date a consent for an organizer's meetings, or for every meeting on this deployment, may run to, counted from the day it is given: 1 to 365 days. A consent for one meeting counts for at most this long too. A change applies to consents given after the save.",
       "minimum": 1,
       "maximum": 365,
       "dependsOn": { "field": "advanceConsentEnabled", "value": true }
@@ -158,7 +158,7 @@
       "order": 15,
       "type": "string",
       "title": "Consent text (given in advance)",
-      "description": "What a person agrees to when they consent in advance, shown on the consent page and kept with the consent exactly as shown, with its SHA-256 hash and a version. {organizer} is the meeting's owner in LMA, {meeting} the meeting's name, and {scope} what the consent covers (the meeting, or every meeting the organizer holds until a date, with the label when one is chosen). A change applies to consents given after the save; those already given keep the text they were given with.",
+      "description": "What a person agrees to when they consent in advance, shown on the consent page and kept with the consent exactly as shown, with its SHA-256 hash and a version. {organizer} is the meeting's owner in LMA (the address typed for a standing consent given without a link, or \"the organizer of each meeting\" for one covering every meeting on this deployment), {meeting} the meeting's name (\"the meetings this consent covers\" without a link), and {scope} what the consent covers (the meeting, every meeting the organizer holds until a date, with the label when one is chosen, or every meeting on this deployment that lists the person, until a date). The same text is used for consents given with and without a link. A change applies to consents given after the save; those already given keep the text they were given with.",
       "format": "textarea",
       "rows": 4,
       "minLength": 1,

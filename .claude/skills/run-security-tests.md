@@ -14,6 +14,7 @@ and its schedule is `docs/security-testing.md`; read it before changing a test.
 | ZAP scan, active | `... make stacktest-zap STACK=<name> ZAP_ACTIVE=1`: **only on a throwaway stack the user names for it** |
 | Everything, offline | `make security-results` (SRT + the static role checks) |
 | Everything, with a stack | `AWS_PROFILE=default make security-results STACK=<name> REGION=<region>` |
+| The release's published snapshot | add `SNAPSHOT=1`, then follow `.claude/skills/curate-security-results.md` before committing it |
 
 Prerequisites: `make setup-cli-dev`, then `.venv/bin/pip install -r
 integ-tests/requirements.txt`; Docker running for ZAP; `AWS_PROFILE=default`

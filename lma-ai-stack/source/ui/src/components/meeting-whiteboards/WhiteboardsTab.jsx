@@ -44,6 +44,9 @@ const INSTRUCTIONS_HINT =
 const TAB_DESCRIPTION =
   'Named panels the assistant keeps up to date during the meeting, and anyone who can change the meeting can ' +
   'edit. Shown in LMA only.';
+const ENDED_HINT =
+  'This meeting has ended, so the assistant no longer updates its whiteboards by itself. While the switch is on, ' +
+  'Update now updates them from the transcript.';
 
 const templateOption = (template) => ({
   value: template.name,
@@ -396,20 +399,25 @@ const WhiteboardView = ({ board, readOnly, whiteboards }) => {
  * The meeting page's Whiteboards tab. `whiteboards` is use-meeting-whiteboards'
  * state, held by the page so the tab's label can count them; `readOnly` is the
  * page's own rule for who may change the meeting, which the server enforces.
- * `assistantEnabled` is the meeting's switch as the page last read it.
+ * `assistantEnabled` is the meeting's switch as the page last read it; a change
+ * made here is shown from the moment it is stored, and the page's copy is
+ * followed again once it moves. `meetingEnded` says the meeting has ended.
  */
-const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = undefined }) => {
+const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = undefined, meetingEnded = false }) => {
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [chosen, setChosen] = useState(undefined);
+  useEffect(() => setChosen(undefined), [assistantEnabled]);
   const { items, writable, assistantAvailable, maxWhiteboards } = whiteboards;
-  const enabled = assistantEnabled ?? whiteboards.whiteboardsEnabled;
+  const enabled = chosen ?? assistantEnabled ?? whiteboards.whiteboardsEnabled;
   const canChange = !readOnly && writable;
   const selected = items.find((b) => b.WhiteboardId === selectedId) || items[0] || null;
 
   const toggle = async (checked) => {
     const message = await whiteboards.setAssistantEnabled(checked);
+    if (!message) setChosen(checked);
     setNotice(message ? { type: 'error', text: message } : null);
   };
   const updateNow = async () => {
@@ -455,6 +463,11 @@ const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = unde
         <Toggle checked={Boolean(enabled)} onChange={({ detail }) => toggle(detail.checked)}>
           Assistant keeps whiteboards updated (each update is a model call billed to the meeting)
         </Toggle>
+      )}
+      {canChange && assistantAvailable && meetingEnded && (
+        <Box variant="small" color="text-status-inactive">
+          {ENDED_HINT}
+        </Box>
       )}
       {notice && (
         <Alert type={notice.type} dismissible onDismiss={() => setNotice(null)}>

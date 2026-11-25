@@ -1789,6 +1789,8 @@ Resources:
       Environment:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          # updateCallParticipants named by VirtualParticipantId.
+          VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
           ADMIN_GROUP: "Admin"
           LOG_LEVEL: !Ref LogLevel
           # The summary profiles a meeting may name are read from it.
@@ -1859,6 +1861,14 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "c#*"
+              # A Virtual Participant's row: read for its Owner and CallId, and
+              # updated with its participant list (updateCallParticipants named
+              # by VirtualParticipantId) until its meeting exists.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !Ref VirtualParticipantTableArn
               # Read-only, on the shared configuration table: the summary
               # profiles a meeting may name (its summary_profiles section).
               - Effect: Allow

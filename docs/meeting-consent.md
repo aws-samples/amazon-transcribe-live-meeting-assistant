@@ -1191,9 +1191,34 @@ it was shown for, and capture waits for the record.
 
 A person on a meeting's [participant list](virtual-participant.md#participant-list)
 can say, before the meeting, that they agree to its being recorded and
-transcribed. They do it signed in to LMA, from the meeting's **consent link**,
-and see and withdraw what they gave on the **My consents** page. Every role has
-the page: an Admin, a User and a Participant each see their own consents only.
+transcribed. They do it signed in to LMA on the **My consents** page: from the
+meeting's **consent link**, for that meeting or its organizer's meetings, or
+with no link at all, for the meetings one organizer holds or for every meeting
+on this deployment, until a date (a **standing consent**; see
+[Giving consent without a link](#giving-consent-without-a-link)). They see and
+withdraw everything they gave on the same page. Every role has the page: an
+Admin, a User and a Participant each see their own consents only.
+
+My consents is an ordinary page of the web UI, in the same layout as the
+others: the side navigation (a Participant's shows their own pages), the
+notifications, breadcrumbs and a help panel (the **(i)** button). The **My
+consents** entry in the navigation, and every link to the page in LMA, opens it
+in the same tab.
+
+**After signing in, a Participant may land on My consents.** When the
+deployment takes consent given in advance, a Participant who signs in without
+a link and has no consent on record (in force or not) is taken to My consents
+rather than their home page, with an information banner: *"Meetings recorded
+with Live Meeting Assistant ask everyone for consent. You can record your
+choice here to avoid being asked in every meeting — for one meeting, for
+meetings with an organizer, or for all meetings on this deployment. You can
+change or withdraw it at any time, and you can still object in any meeting."*
+**Not now** dismisses the banner and does nothing else; nothing is recorded,
+and from then on signing in opens the home page. The banner is shown on My
+consents opened without a link, not on a meeting's consent page. The dismissal is kept in that
+browser's local storage, under the person's Cognito sub, so it is per person
+and per browser: it is a display preference, not a consent decision, so it is
+not stored on the server. Admins and Users are never redirected.
 
 ### The meeting's consent link and the invitation
 
@@ -1206,7 +1231,11 @@ meeting's, with the meeting's own participant list.
 The meeting's owner sends it. In the **Participants** section of the meeting
 page, or of a Virtual Participant's page, the owner (and only the owner, not an
 Admin or someone the meeting is shared with) has **Invite participants to
-consent**. It shows one email to everyone on the list: the addresses, a subject
+consent** whenever the list has people on it: before, during and after the
+meeting. The list itself can be changed at any time, on either page (see
+[One list at a time](virtual-participant.md#one-list-at-a-time)), so people
+added once the meeting has started can be sent the link too. It shows one
+email to everyone on the list: the addresses, a subject
 and a text with the one link. **Open in mail app** opens it in the owner's own
 mail client (a `mailto:` link), and **Copy text** copies it. LMA does not send
 it. When the list is too long for a mail link, the mail app opens without the
@@ -1216,7 +1245,23 @@ The **Create accounts for participants without one** button (see
 [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting))
 sends each new account Cognito's invitation, which then also names the meeting
 and gives its consent link, so a new Participant can consent once they have
-signed in.
+signed in. An Admin can do the same for one new account of any role from
+User Management, with **Create user**'s optional **Meeting to invite them to**,
+which also adds the address to the meeting's list (see
+[Inviting a new user to a meeting](user-management.md#inviting-a-new-user-to-a-meeting)).
+
+While **Allow consent given in advance** is on, every invitation LMA has
+Cognito send also mentions the **My consents** page, with a link to it: a
+Participant's has a short, neutral paragraph saying that meetings recorded with
+LMA ask everyone for consent, that the person can record a choice on My
+consents after signing in, for one meeting, for meetings with a particular
+organizer or for all meetings on this deployment, for a period they choose,
+that they can change or withdraw it at any time, and that they can still
+object in any meeting; a User's
+or an Admin's has one line saying where the page is. It never asks for
+consent. With the setting off, or when it cannot be read, nothing is said
+about it. See
+[What the invitation says about consent](user-management.md#what-the-invitation-says-about-consent).
 
 The page needs sign-in, and checks that the email address the user pool holds
 for the signed-in account (it must be verified) is on that meeting's participant
@@ -1252,7 +1297,7 @@ most 20 times a day.
 
 ### What a consent covers
 
-The page offers two scopes:
+A meeting's consent page offers two scopes:
 
 - **This meeting only.** It counts for the meeting the link names, by its
   CallId or by the Virtual Participant that creates it, for at most the
@@ -1266,10 +1311,64 @@ The page offers two scopes:
   meeting's name, its organizer and its labels; a Participant does not see the
   labels anywhere else.
 
-A person cannot name another organizer: a standing consent is always given from
-a meeting they are on the list of, for that meeting's owner. A new consent for
-the same thing (the same meeting, or the same organizer and label) replaces the
-one before it, which is kept marked **Replaced**.
+On the meeting's consent page, a standing consent is for that meeting's owner;
+without a link the person names the organizer themselves (below). A new consent
+for the same thing (the same meeting, the same organizer and label, or every
+meeting on the deployment) replaces the one before it, which is kept marked
+**Replaced**.
+
+### Giving consent without a link
+
+Opened with no link (`<web UI address>/#/consents`), My consents offers
+**Give a standing consent**, to any signed-in person, whatever their role and
+whether or not they are on any meeting's participant list. Nothing is chosen
+for them; they pick one of:
+
+- **Meetings organized by one person, until a date.** The person types the
+  organizer's email address, the address the organizer signs in to LMA with
+  (LMA's usernames are email addresses). It is compared with each meeting's
+  owner ignoring case, and is kept in lower case. The page suggests the
+  organizers named on the person's own earlier consents, and nothing else. It
+  can be limited to the meetings with one label, typed as its name and value,
+  compared exactly.
+- **All meetings on this deployment, until a date.** Every meeting on the
+  deployment, whoever organizes it.
+
+Either runs to the end (23:59:59 UTC) of a date the person chooses, at most
+**Longest consent given in advance, in days** ahead: 365 as shipped and in the
+*Standard*, *Customer account*, *Internal meetings* and *Minimised content*
+presets, 180 in the two *Regulated* presets and *Team-hosted (external
+meetings)*. The setting is read when the consent is given, so
+a deployment that shortens it applies the new limit to consents given after the
+save.
+
+**The organizer is never looked up.** The page and the API answer the same
+whether or not anyone has the address typed: they do not say whether it
+belongs to an account, and offer no list of users or organizers to choose
+from. That keeps the user list from a Participant, who otherwise sees only the
+meetings shared with them. An address nobody organizes with simply covers no
+meeting.
+
+**The text is the deployment's.** A standing consent is given with the same
+**Consent text (given in advance)** as one from a meeting's link, shown before
+the person agrees and stored exactly as shown, with its SHA-256 hash and
+version, by the same hash check. Without a meeting, `{organizer}` is the
+address typed (or *the organizer of each meeting* for every meeting on the
+deployment), `{meeting}` reads *the meetings this consent covers*, and
+`{scope}` says what it covers, with the date: for example *every meeting on
+this Live Meeting Assistant deployment that I am listed for, until the end of
+2027-03-31 (UTC)*.
+
+**It counts only where the person is listed.** A standing consent, like every
+consent given in advance, counts in a meeting only for an attendee matched to
+the person on that meeting's participant list (see
+[In the meeting](#in-the-meeting)). It gives no access to any meeting, and an
+objection in the meeting still wins.
+
+**Allow consent given in advance** decides whether standing consents can be
+given, as it does for the consent link; with it off the page says so, and the
+person can still read and withdraw their own. There is no separate setting for
+which scopes are offered.
 
 ### What is recorded
 
@@ -1283,9 +1382,9 @@ the meetings table under the person's address and holds:
 | Field | Meaning |
 |---|---|
 | `Email`, `Subject`, `Username` | The address the user pool holds for the account, in lower case, the account's Cognito sub and its username |
-| `Scope` | `meeting` or `organizer` |
-| `CallId`, `VirtualParticipantId`, `MeetingName` | The meeting it was given from, as named then |
-| `Organizer`, `LabelKey`, `LabelValue` | The meeting's owner, and the label an `organizer` consent is limited to |
+| `Scope` | `meeting`, `organizer` or `deployment` (every meeting on the deployment) |
+| `CallId`, `VirtualParticipantId`, `MeetingName` | The meeting it was given from, as named then; absent on a standing consent given without a link |
+| `Organizer`, `LabelKey`, `LabelValue` | The meeting's owner, or the address typed without a link, and the label an `organizer` consent is limited to; absent on a `deployment` consent |
 | `GrantedAt`, `ValidUntil` | When it was given, and until when it counts |
 | `WithdrawnAt`, `WithdrawnReason` | When it stopped counting, and why: `withdrawn`, `replaced` or `account_deleted` |
 | `NoticeText`, `NoticeHash`, `NoticeVersion` | The exact text agreed to, its SHA-256, and the first 12 hex digits of the SHA-256 of the configured wording it came from |
@@ -1327,7 +1426,9 @@ Opt-in:
    attendee matches only when exactly one listed person has that name and only
    one attendee shows it.
 3. **A matched attendee with a consent that covers the meeting is recorded as
-   consented**, source `pre_meeting`, with the basis of the match
+   consented** (a `meeting` consent for this meeting, an `organizer` consent
+   for its owner and, when it names one, its label, or a `deployment`
+   consent), source `pre_meeting`, with the basis of the match
    (`MatchBasis: display_name`), the consent's scope, when it was given and
    until when, and the hash and version of its text (`PreMeeting` on the
    event). The person's address is not copied to the meeting's record. In
@@ -1848,15 +1949,32 @@ mutation {
   }
 }
 
+# A standing consent with no meeting named: "deployment", or "organizer" with
+# the organizer's address (and optionally LabelKey and LabelValue).
+query {
+  getAdvanceConsentInvitation(Scope: "deployment", ValidUntil: "2027-03-31") {
+    Scope ValidUntil NoticeText NoticeHash MaxDays ActiveConsents { ConsentId Scope }
+  }
+}
+mutation {
+  giveAdvanceConsent(input: { Scope: "organizer", Organizer: "owner@example.com",
+    LabelKey: "engagement", LabelValue: "acme", ValidUntil: "2027-03-31",
+    NoticeHash: "<NoticeHash>" }) { ConsentId Status Organizer }
+}
+
 mutation { withdrawAdvanceConsent(input: { ConsentId: "<ConsentId>" }) { ConsentId Status WithdrawnAt } }
 
 mutation { askToBeAddedToMeeting(input: { CallId: "<CallId>", Name: "Bo Chen" }) { Requested Listed } }
 ```
 
-Each names the meeting with exactly one of `CallId` and `VirtualParticipantId`.
-`Scope` is `meeting` (the default) or `organizer`; `ValidUntil`, written
-`YYYY-MM-DD`, is required for `organizer`, and may be at most the deployment's
-longest period ahead; `LabelKey` must be one of the meeting's labels. A
+A meeting is named with exactly one of `CallId` and `VirtualParticipantId`.
+With a meeting named, `Scope` is `meeting` (the default) or `organizer`, and
+`LabelKey` must be one of the meeting's labels. With none, `Scope` is
+`organizer` (with `Organizer`, an email address, and optionally both
+`LabelKey` and `LabelValue`) or `deployment`, and the answer has `Listed:
+false` and nothing about any meeting. `ValidUntil`, written `YYYY-MM-DD`, is
+required for `organizer` and `deployment`, and may be at most the deployment's
+longest period ahead. A
 `giveAdvanceConsent` whose `NoticeHash` is not the hash of the text the server
 would store is refused, and nothing is stored. Withdrawing a consent that is not
 the caller's is refused as one that does not exist. A person may have at most

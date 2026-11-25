@@ -90,6 +90,7 @@ describe('a stored consent', () => {
     expect(consentScopeLabel({ Scope: 'organizer', Organizer: 'o', LabelKey: 'engagement', LabelValue: 'acme' })).toBe(
       'Meetings organized by o, labelled engagement: acme',
     );
+    expect(consentScopeLabel({ Scope: 'deployment', Organizer: null })).toBe('All meetings on this deployment');
   });
 
   it('labels its status', () => {

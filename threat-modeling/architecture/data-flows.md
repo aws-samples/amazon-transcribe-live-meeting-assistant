@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
 
 ## 1. Overview
@@ -239,11 +239,47 @@ sequenceDiagram
     Browser->>Cognito: Authenticate (email/password + optional MFA)
     Cognito-->>Browser: JWT tokens (ID, Access, Refresh)
     Browser->>AppSync: GraphQL request + JWT
-    AppSync->>AppSync: Validate JWT, check Cognito groups (admin)
+    AppSync->>AppSync: Validate JWT, check the role the operation names (Admin, User, Participant)
     AppSync-->>Browser: Authorized response
 ```
 
 **Trust boundary crossings**: TB1→TB2 (browser to CloudFront/WAF/Cognito), TB2→TB3 (JWT to AppSync).
+
+At every sign-in and token refresh, Cognito's pre token generation trigger writes the account's one role into the token and records the user's last activity in the Cognito stack's `UserSignInTable`; the PostAuthentication trigger records the last sign-in there. The identity pool gives a Participant a role with no permissions.
+
+### 5.1a Participant Read-Only Access
+
+```mermaid
+sequenceDiagram
+    participant Browser as Browser (Participant)
+    participant AppSync as AppSync
+    participant Resolver as Participant Meeting Lambda
+    participant DDB as DynamoDB
+
+    Browser->>AppSync: listParticipantMeetings / getParticipantMeeting + JWT
+    AppSync->>AppSync: Admit the Participant role only
+    AppSync->>Resolver: Request
+    Resolver->>DDB: Read meeting; check SharedWith names the caller
+    Resolver-->>Browser: Allowlisted ParticipantMeeting fields
+    Browser->>AppSync: getParticipantMeetingRecordings
+    Resolver->>Resolver: Check the share; sign a one-hour GET under the playback prefixes
+    Resolver-->>Browser: Signed links
+    Browser->>AppSync: onAddParticipantTranscriptSegment
+    AppSync->>DDB: Admit only while the meeting is shared with the caller
+    AppSync-->>Browser: Lines filtered on meeting, channel and each line's sharing list
+```
+
+**Trust boundary crossings**: TB1→TB3. The Participant never receives AWS credentials; every read is answered by the server after the sharing check.
+
+### 5.1b Participant List, Automatic Sharing and Consent Given in Advance
+
+1. The meeting's owner or an Admin sets the participant list (Create Virtual Participant form, MCP tools, or the meeting page). It is stored on the Virtual Participant record and on the meeting record.
+2. With Meeting Sharing on, the meeting controls function reads each write of a meeting record from the meetings table's stream and shares the meeting with the listed addresses, recording them as `AutoSharedWith`.
+3. The owner or an Admin may look up whether each listed address has an account (`getMeetingParticipantAccounts`, counted per day in hashed items under the caller's `usr#` key) and create Participant accounts for those without one; Cognito's CustomMessage trigger adds the meeting's consent link to the invitation.
+4. A listed person signs in from the consent link, and the advance consent resolver stores their consent in the meetings table under their address. Someone not on the list may ask to be added, which reaches the people who can see the list as a meeting notification, or on the Virtual Participant record before the meeting exists.
+5. In the meeting, the Virtual Participant lists who is present; the meeting consent resolver matches attendees to the list by display name and records a consent given in advance on the meeting's consent record, with `MatchBasis: display_name`.
+
+**Trust boundary crossings**: TB1→TB3 (owner, Participant and consenting person to AppSync), TB3→TB8 (VP notice and covered names posted in the meeting).
 
 ### 5.2 Real-Time Meeting UI Flow
 
@@ -383,4 +419,9 @@ sequenceDiagram
 | Lambda hooks | TB3 | TB7 | High (transcript data) | IAM, invocation-only |
 | Browser extension audio | TB1 | TB2 | High (tab audio) | WSS/TLS, extension permissions |
 | Real-time subscriptions | TB3 | TB1 | High (live transcripts) | JWT auth, WSS |
+| Participant meeting view and live transcript | TB3 | TB1 | High (shared meeting content) | Participant-only operations, sharing check, allowlisted fields, per-line sharing filter |
+| Participant recording links | TB3 | TB1 | High (recordings) | Server-signed, one hour, playback prefixes only |
+| Consent given in advance | TB1 | TB3 | Medium (consent records, addresses) | Sign-in, verified listed address, text hash check |
+| Participant account invitations | TB3 | TB1 | Low (meeting name, consent link) | Cognito email, owner/Admin only, listed addresses only |
+| Web UI responses | TB2 | TB1 | Variable | Response headers policy (CSP, HSTS, framing, nosniff) |
 | MCP API inbound | TB1 | TB3 | Variable | API key, Lambda authorizer, rate limiting |

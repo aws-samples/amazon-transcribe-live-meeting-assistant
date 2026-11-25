@@ -892,3 +892,22 @@ def test_the_security_tooling_is_linted_and_tested_by_the_plumbing_step() -> Non
     makefile = (REPO_ROOT / "Makefile").read_text()
     assert "$(CURDIR)/scripts/security \\" in makefile
     assert "pytest scripts/security/tests" in makefile
+
+
+@pytest.mark.parametrize("path", ["scripts/srt/setup.py", "scripts/srt/run.py"])
+def test_a_change_to_srt_tooling_runs_its_tests_in_the_security_tooling_suite(path: str) -> None:
+    assert "security_tests" in ca.areas_for(path)
+    assert "integ_plumbing" in ran([path])
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["security/test-results/0.4.1/summary.md", "security/test-results/README.md"],
+)
+def test_a_security_snapshot_runs_the_security_tooling_tests_and_is_not_documentation(
+    path: str,
+) -> None:
+    # The tooling's tests hold every committed snapshot to the curator's guard.
+    assert ca.primary_area(path) == ("security_tests",)
+    assert "integ_plumbing" in ran([path])
+    assert not ca.docs_only([path])

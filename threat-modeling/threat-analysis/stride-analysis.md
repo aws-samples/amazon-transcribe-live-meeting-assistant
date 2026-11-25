@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
 | **Methodology** | STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) |
 
@@ -27,6 +27,8 @@ Spoofing threats involve an attacker pretending to be something or someone they 
 | **MCP API key compromise** impersonating authorized clients | MCP Integration | High (6) | SHA-256 hashing, rate limiting, Lambda Authorizer |
 | **Wake phrase spoofing** triggering unauthorized voice assistant activation | Voice Assistant | High (6) | Configurable wake phrase, admin-controlled activation |
 | **WAF bypass** via direct endpoint access | Authentication | Low (2) | Defense-in-depth (WAF supplementary), Cognito auth required |
+| **Consent given in advance for the wrong person** — a forwarded consent link or a shared sign-in | Recording/Storage | Medium (3) | Verified address on the participant list, text hash check, longest period, withdrawal, objection always wins |
+| **Display-name match** — an attendee shows a listed person's name to be counted under their consent given in advance | Virtual Participant | Medium (3) | Documented design limit: unique match only, notice always posted, covered names posted, `MatchBasis` recorded, objection always wins |
 
 ### 2.2 Service Spoofing
 
@@ -52,6 +54,8 @@ Tampering threats involve unauthorized modification of data or code.
 | **Hook result tampering** — modified transcripts returned by hook | Lambda Hooks | Medium (3) | Original preservation, schema validation, diff logging |
 | **Speaker attribution manipulation** — audio channel swapping | Audio Streaming | Low (2) | Two-channel separation, diarization confidence scores |
 | **Avatar video manipulation** — tampered visual content | Voice Assistant | Low (2) | TLS to Simli, admin-only config |
+| **Private chat instructions** — commands, questions or consent replies sent to the VP privately | Virtual Participant | Low (2) | VP acts only on messages sent to everyone, posts nothing in reply |
+| **Browser-side script loading** — content loading scripts or connecting to origins the web UI does not use | Web UI | Medium (3) | Content-Security-Policy and response headers policy, header tests |
 
 ### 3.2 Configuration Tampering
 
@@ -69,8 +73,11 @@ Repudiation threats involve users denying they performed an action.
 | **Recording without consent** — no proof participants were notified | Recording/Storage | Very High (9) | VP bot identification, configurable consent workflow |
 | **Speaker attribution manipulation** — "I never said that" | Audio Streaming | Low (2) | Two-channel audio, diarization, confidence scores |
 | **Meeting data deletion** without audit trail | Recording/Storage | Medium (3) | CloudTrail logging, DynamoDB streams |
-| **VP launch without justification** — who authorized the bot? | Virtual Participant | Medium (3) | Admin-only launch, CloudWatch logging, audit trail |
+| **VP launch without justification** — who authorized the bot? | Virtual Participant | Medium (3) | Admin and User roles only, launching user recorded on the VP, CloudWatch logging, audit trail |
 | **Hook modification untracked** — changes without logging | Lambda Hooks | Low (2) | Invocation logging, result comparison |
+| **Dormant accounts and keys unnoticed** — no record of last use for access reviews | Authentication | Medium (4) | Last sign-in, last active and API key last use recorded; `lma users list` export |
+| **Consent given in advance disputed** — which text was agreed to, and when it was withdrawn | Recording/Storage | Medium (3) | Exact text, hash and wording version kept; replaced and withdrawn consents kept with times |
+| **Private consent replies** — a reply others in the meeting cannot see | Virtual Participant | Low (2) | Only replies sent to everyone are recorded |
 
 ## 5. Information Disclosure
 
@@ -92,6 +99,11 @@ Information disclosure threats involve exposure of sensitive data to unauthorize
 | **DynamoDB over-access** — Lambda reads all meeting data | Recording/Storage | Medium (3) | Per-table IAM, KMS encryption |
 | **S3 Vectors data exposure** — direct vector store access | Knowledge Base | Medium (3) | IAM policies, encryption |
 | **AppSync subscription eavesdropping** — listen to other meetings | Web UI | High (6) | Subscription authorization, user-scoped filters |
+| **Automatic sharing over-reach** — a meeting shared with an unintended listed address | Recording/Storage | Medium (4) | Owner/Admin-only list, `AutoSharedWith` removal, manual shares respected, setting can be turned off |
+| **Participant view over-exposure** — fields or meetings beyond the share | Web UI | Medium (3) | Participant-only operations, allowlisted types, per-message sharing filter on the live transcript |
+| **Participant recording links** — links beyond the share | Recording/Storage | Low (2) | Server-signed, one hour, only for a shared meeting, only under the playback prefixes |
+| **Restorable deleted content** — point-in-time recovery keeps deleted items | Recording/Storage | Medium (3) | `MeetingDataPointInTimeRecoveryDays` 0-35, restore needs account permissions |
+| **Account lookup** — learning who has an LMA account from a participant list | Authentication | Low (2) | Owner/Admin only, status only, 1,000 addresses a day, hashed counters |
 
 ### 5.2 Session/Configuration Exposure
 
@@ -128,7 +140,9 @@ Elevation of privilege threats involve gaining capabilities beyond what was auth
 | **Hook IAM over-privilege** — hook accessing platform resources | Lambda Hooks | Medium (3) | Separate roles, resource policies |
 | **MCP unauthorized tool registration** — adding malicious tools | MCP Integration | Medium (3) | IaC-managed, admin-only deployment |
 | **Prompt injection → tool execution** — transcript manipulation triggers actions | Meeting Assistant | Very High (9) | Guardrails, prompt hardening, tool confirmation |
-| **VP unauthorized launch** — non-admin launching virtual participants | Virtual Participant | Medium (3) | Admin-only Cognito group check |
+| **Participant role over-reach** — a Participant reaching member operations | Authentication | Medium (3) | Role in every token, roles named on every operation, role matrix tests, no-permission identity pool role |
+| **Participant account creation over-reach** — accounts for unlisted addresses or other roles | Authentication | Low (2) | Listed addresses only, Participant role only, per-day limits |
+| **VP unauthorized launch** — a role without launch rights starting virtual participants | Virtual Participant | Medium (3) | Roles named on the launch operations (Admin and User), Participant refused |
 
 ## 8. Cross-Cutting Threats
 
@@ -154,8 +168,8 @@ Elevation of privilege threats involve gaining capabilities beyond what was auth
 
 | Threat | Impact | Mitigations |
 |--------|--------|-------------|
-| **Recording without consent** | Legal liability, fines | Consent workflow, notifications, documentation |
-| **Data retention non-compliance** | Regulatory penalties | TTL configuration, unified deletion, lifecycle policies |
+| **Recording without consent** | Legal liability, fines | Meeting Consent modes, notices, objections, consent given in advance with withdrawal, documentation |
+| **Data retention non-compliance** | Regulatory penalties | TTL configuration, transcript and recordings deletion after the summary, recovery window parameter, lifecycle policies |
 | **Cross-jurisdictional data flow** | GDPR/privacy violations | Geo restrictions, regional deployment, data residency |
 | **PII in transcripts/summaries** | Privacy breaches | Guardrails PII detection, configurable redaction |
 

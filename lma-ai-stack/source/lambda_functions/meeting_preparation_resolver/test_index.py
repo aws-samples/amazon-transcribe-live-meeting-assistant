@@ -157,8 +157,15 @@ class FakeDynamo:
     def row(self) -> Dict[str, Any]:
         return self.items[f"c#{CALL_ID}"]
 
+    @staticmethod
+    def _key(kwargs) -> str:
+        # Meeting rows by PK; Virtual Participant rows by id, under "vp#".
+        if "id" in kwargs["Key"]:
+            return f"vp#{kwargs['Key']['id']['S']}"
+        return kwargs["Key"]["PK"]["S"]
+
     def get_item(self, **kwargs):
-        item = self.items.get(kwargs["Key"]["PK"]["S"])
+        item = self.items.get(self._key(kwargs))
         if item is None:
             return {}
         return {"Item": {key: SER.serialize(index._dynamo(value)) for key, value in item.items()}}
@@ -167,7 +174,7 @@ class FakeDynamo:
         if self.before_write:
             hook, self.before_write = self.before_write, None
             hook()
-        key = kwargs["Key"]["PK"]["S"]
+        key = self._key(kwargs)
         item = self.items.get(key, {})
         names = kwargs["ExpressionAttributeNames"]
         values = kwargs["ExpressionAttributeValues"]
@@ -537,6 +544,129 @@ def test_an_invalid_participant_is_refused_and_nothing_is_written(table):
     with pytest.raises(index.BadRequestError, match="not an email address"):
         call("updateCallParticipants", user(OWNER), Participants=[{"email": "nobody"}])
     assert "Participants" not in table.row
+
+
+@pytest.mark.parametrize("status", ["STARTED", "TRANSCRIBING", "ENDED"])
+def test_the_owner_changes_the_list_of_a_meeting_in_progress_or_ended(table, status):
+    table.row.update(Status=status)
+    row = call("updateCallParticipants", user(OWNER), Participants=PEOPLE)
+    assert [p["email"] for p in row["Participants"]] == ["ana@example.com", "bo@example.org"]
+
+
+# ── a Virtual Participant's list ────────────────────────────────────────────
+
+VP_ID = "6f1c2c8e-2a52-4c1b-9d55-0c7d1c0f9a10"
+
+
+@pytest.fixture
+def vp(table, monkeypatch):
+    """A Virtual Participant of OWNER's that has not created its meeting yet."""
+    monkeypatch.setattr(index, "VIRTUAL_PARTICIPANT_TABLE", "lma-virtual-participants")
+    table.items[f"vp#{VP_ID}"] = {"id": VP_ID, "Owner": OWNER, "status": "JOINING"}
+    return table.items[f"vp#{VP_ID}"]
+
+
+def call_vp(identity: Dict[str, Any], **data):
+    return index.handler(
+        {
+            "info": {"fieldName": "updateCallParticipants"},
+            "identity": identity,
+            "arguments": {"input": {"VirtualParticipantId": VP_ID, **data}},
+        },
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [user(OWNER), user("admin@example.com", admin=True), BACKEND],
+    ids=["owner", "admin", "backend"],
+)
+def test_a_vp_without_a_meeting_has_its_own_list_changed(table, vp, identity):
+    table.items.pop(f"c#{CALL_ID}")
+    assert call_vp(identity, Participants=PEOPLE) is None
+    assert [p["email"] for p in vp["participants"]] == ["ana@example.com", "bo@example.org"]
+
+
+def test_a_vp_that_set_its_call_id_before_its_meeting_exists_has_its_own_list_changed(table, vp):
+    table.items.pop(f"c#{CALL_ID}")
+    vp["CallId"] = CALL_ID
+    assert call_vp(user(OWNER), Participants=PEOPLE) is None
+    assert len(vp["participants"]) == 2
+
+
+def test_a_vp_whose_meeting_exists_changes_the_meeting_s_list_only(table, vp):
+    vp["CallId"] = CALL_ID
+    row = call_vp(user(OWNER), Participants=PEOPLE)
+    assert row["CallId"] == CALL_ID
+    assert [p["email"] for p in table.row["Participants"]] == ["ana@example.com", "bo@example.org"]
+    assert table.row["ParticipantsUpdatedBy"] == OWNER
+    assert "participants" not in vp
+
+
+def test_a_meeting_created_while_the_vp_s_list_is_written_gets_the_list_too(table, vp):
+    meeting = table.items.pop(f"c#{CALL_ID}")
+
+    def meeting_created():
+        table.items[f"c#{CALL_ID}"] = meeting
+        vp["CallId"] = CALL_ID
+
+    table.before_write = meeting_created
+    row = call_vp(user(OWNER), Participants=PEOPLE)
+    assert row["CallId"] == CALL_ID
+    assert len(table.row["Participants"]) == 2
+    assert len(vp["participants"]) == 2
+
+
+def test_a_linked_meeting_with_another_owner_is_not_followed(table, vp):
+    vp["CallId"] = CALL_ID
+    table.row.update(Owner=OTHER)
+    assert call_vp(user(OWNER), Participants=PEOPLE) is None
+    assert "Participants" not in table.row
+    assert len(vp["participants"]) == 2
+
+
+@pytest.mark.parametrize("with_meeting", [False, True], ids=["no-meeting", "meeting"])
+def test_only_the_vp_s_owner_or_an_admin_changes_its_list(table, vp, with_meeting):
+    if with_meeting:
+        vp["CallId"] = CALL_ID
+    else:
+        table.items.pop(f"c#{CALL_ID}")
+    for identity in (user(SHARED), user(OTHER)):
+        with pytest.raises(index.ForbiddenError):
+            call_vp(identity, Participants=PEOPLE)
+    assert "participants" not in vp
+    assert with_meeting is False or "Participants" not in table.row
+
+
+def test_a_vp_re_owned_between_the_read_and_the_write_keeps_its_list(table, vp):
+    table.items.pop(f"c#{CALL_ID}")
+    table.before_write = lambda: vp.update(Owner=OTHER)
+    with pytest.raises(index.ForbiddenError):
+        call_vp(user(OWNER), Participants=PEOPLE)
+    assert "participants" not in vp
+
+
+def test_a_missing_vp_is_refused_to_a_user_and_named_to_the_backend(table, vp):
+    table.items.pop(f"vp#{VP_ID}")
+    with pytest.raises(index.ForbiddenError):
+        call_vp(user(OWNER), Participants=PEOPLE)
+    with pytest.raises(index.BadRequestError, match="no Virtual Participant"):
+        call_vp(BACKEND, Participants=PEOPLE)
+
+
+def test_the_list_names_exactly_one_meeting(table, vp):
+    with pytest.raises(index.BadRequestError, match="exactly one"):
+        call("updateCallParticipants", user(OWNER), VirtualParticipantId=VP_ID, Participants=[])
+    with pytest.raises(index.BadRequestError, match="exactly one"):
+        index.handler(
+            {
+                "info": {"fieldName": "updateCallParticipants"},
+                "identity": user(OWNER),
+                "arguments": {"input": {"Participants": []}},
+            },
+            None,
+        )
 
 
 # ── the Virtual Participant pipelines ───────────────────────────────────────

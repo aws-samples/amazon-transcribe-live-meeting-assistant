@@ -11592,6 +11592,12 @@ Resources:
           VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
           USER_SIGN_IN_TABLE: !Ref UserSignInTableName
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
+          # Meeting Consent › Allow consent given in advance, which decides
+          # what an invitation says about the My consents page.
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      # lma_config and lma_consent, for that setting. Pure Python.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -11607,6 +11613,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UserManagementFunctionLogGroup
+      # It reads the Meeting Consent section (CONFIGURATION_TABLE_NAME).
+      - SeedConfiguration
 
   UserManagementFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -11673,11 +11681,13 @@ Resources:
                     "dynamodb:LeadingKeys":
                       - "pmc#*"
               # A meeting's owner and participant list, read to decide who may
-              # see its attendees' account status or create their accounts:
-              # GetItem only, and only meeting rows.
+              # see its attendees' account status or create their accounts,
+              # and appended to when an Admin creates a user for the meeting
+              # (createUser's inviteToMeeting): only meeting rows.
               - Effect: Allow
                 Action:
                   - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
                   ForAllValues:StringLike:
@@ -11688,7 +11698,13 @@ Resources:
               - Effect: Allow
                 Action:
                   - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
                 Resource: !GetAtt VirtualParticipantTable.Arn
+              # Read-only: the Meeting Consent section of the configuration.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: !GetAtt ConfigurationTable.Arn
               # Each listed user's last sign-in time, and a deleted user's
               # entry, in the Cognito stack's sign-in table.
               - !If

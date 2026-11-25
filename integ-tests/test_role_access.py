@@ -135,7 +135,35 @@ PARTICIPANT_LIST_CALLS = (
         ),
         {"input": {"CallId": probe.PLACEHOLDER_ID, "Participants": []}},
     ),
+    (
+        # The same list named by a Virtual Participant's id, as its page names it.
+        "Mutation.updateCallParticipants",
+        (
+            "mutation Probe($input: UpdateCallParticipantsInput!) "
+            "{ updateCallParticipants(input: $input) { CallId } }"
+        ),
+        {"input": {"VirtualParticipantId": probe.PLACEHOLDER_ID, "Participants": []}},
+    ),
 )
+
+CREATE_USER_FOR_A_MEETING = (
+    "mutation Probe($input: CreateUserInput!) { createUser(input: $input) { username } }"
+)
+
+
+def test_creating_a_user_for_a_meeting_is_refused_to_a_user_and_a_participant(deployment, users) -> None:
+    """createUser with inviteToMeeting stays with User Management: refused at the field to
+    everyone but an Admin. test_meeting_participants.py creates one as an Admin."""
+    variables = {
+        "input": {
+            "email": f"integ-never-created-{probe.PLACEHOLDER_ID}@example.invalid",
+            "role": "Participant",
+            "inviteToMeeting": probe.PLACEHOLDER_ID,
+        }
+    }
+    for role in ("User", "Participant"):
+        response = probe.call(deployment, users[role], CREATE_USER_FOR_A_MEETING, variables)
+        assert probe.refused_at_field(response, "Mutation.createUser"), (role, response)
 
 
 def test_the_participant_list_operations_refuse_a_participant_and_a_user_who_does_not_own_the_meeting(
