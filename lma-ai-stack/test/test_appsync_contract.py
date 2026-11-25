@@ -250,6 +250,7 @@ UNRESTRICTED_READS = [
     ("Query", "getSkill"),
     ("Query", "exportSkill"),
     ("Query", "listSummaryProfiles"),
+    ("Query", "getVirtualParticipantVideoRecording"),
 ]
 
 # Everything else the schema declares. Listed so that the three lists together

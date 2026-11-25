@@ -191,6 +191,47 @@ test('with no table named nothing is read', async () => {
     assert.deepEqual(env, started());
 });
 
+test('Record Virtual Participant meeting video off overrides a launch that asked for video', () => {
+    const env: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'true', DEPLOYMENT_VIDEO_RECORDING: 'true' };
+    const result = applySections({ recording: { recordVpMeetingVideo: false } }, env);
+    assert.equal(env['ENABLE_VIDEO_RECORDING'], 'false');
+    assert.equal(env['VIDEO_RECORDING_OFF_REASON'], 'configuration');
+    assert.ok(result.applied.includes('ENABLE_VIDEO_RECORDING'));
+    assert.match(result.notes.join(' '), /Record Virtual Participant meeting video is off/);
+});
+
+test('with the setting on, the launch decides, and a launch without video stays without', () => {
+    const asked: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'true', DEPLOYMENT_VIDEO_RECORDING: 'true' };
+    const on = applySections({ recording: { recordVpMeetingVideo: true } }, asked);
+    assert.equal(asked['ENABLE_VIDEO_RECORDING'], 'true');
+    assert.equal(asked['VIDEO_RECORDING_OFF_REASON'], undefined);
+    assert.ok(!on.applied.includes('ENABLE_VIDEO_RECORDING'));
+
+    const declined: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'false', DEPLOYMENT_VIDEO_RECORDING: 'true' };
+    applySections({ recording: { recordVpMeetingVideo: true } }, declined);
+    assert.equal(declined['ENABLE_VIDEO_RECORDING'], 'false');
+    assert.equal(declined['VIDEO_RECORDING_OFF_REASON'], undefined, 'the user chose it, so no reason is recorded');
+});
+
+test('a deployment that does not record video overrides the launch and the setting', () => {
+    const env: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'true', DEPLOYMENT_VIDEO_RECORDING: 'false' };
+    applySections({ recording: { recordVpMeetingVideo: true } }, env);
+    assert.equal(env['ENABLE_VIDEO_RECORDING'], 'false');
+    assert.equal(env['VIDEO_RECORDING_OFF_REASON'], 'deployment');
+});
+
+test('the deployment switch applies even when the table cannot be read; the setting then reads as on', async () => {
+    const off: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'true', DEPLOYMENT_VIDEO_RECORDING: 'false' };
+    const result = await applyConfiguredSettings(off, fakeStore('fail'));
+    assert.equal(off['ENABLE_VIDEO_RECORDING'], 'false');
+    assert.equal(off['VIDEO_RECORDING_OFF_REASON'], 'deployment');
+    assert.deepEqual(result.applied, ['ENABLE_VIDEO_RECORDING']);
+
+    const on: Record<string, string | undefined> = { ...started(), ENABLE_VIDEO_RECORDING: 'true', DEPLOYMENT_VIDEO_RECORDING: 'true' };
+    await applyConfiguredSettings(on, fakeStore('fail'));
+    assert.equal(on['ENABLE_VIDEO_RECORDING'], 'true');
+});
+
 test('the meeting retention is applied, and never raised past the stack parameter', () => {
     const shorter = { ...started(), METERING_EXPIRATION_DAYS: '90' };
     const applied = applySections({ retention: { meetingRecordExpirationInDays: 14 } }, shorter);

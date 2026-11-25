@@ -1,0 +1,19 @@
+## Second function of the createVirtualParticipant pipeline: reads Meeting
+## Recording > Record Virtual Participant meeting video with the meeting
+## preparation resolver Lambda, so the write function can record on the new row
+## why its video will not be recorded (videoRecordingOffReason). The VP
+## container reads the setting again when it starts, and that is what decides.
+##
+## Nothing of the request is sent. A request that turns the video off itself
+## does not invoke the Lambda: there is nothing for the setting to refuse.
+#if( $util.defaultIfNull($ctx.args.input.enableVideoRecording, true) == false )
+  #return({})
+#end
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "info": { "fieldName": "virtualParticipantVideoRecording" },
+    "arguments": {}
+  }
+}

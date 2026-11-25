@@ -198,9 +198,13 @@ Opt-in) ends with the **Video sentence** setting, so the participants are told,
 and the notice the meeting's consent record keeps says so. The same setting is
 used by every client:
 
-- **Virtual Participant**, when its **Record meeting video** toggle is on: the
-  notice it posts and records ends with the sentence (it asks the consent API
-  for it with `IncludesVideo` on `startMeetingConsent`).
+- **Virtual Participant**, when it records the meeting's video: its **Record
+  meeting video** toggle is on, Meeting Recording › Record Virtual Participant
+  meeting video is on and the deployment records video (`EnableVideoRecording`).
+  The notice it posts and records then ends with the sentence (it asks the
+  consent API for it with `IncludesVideo` on `startMeetingConsent`); with any of
+  the three off, the notice has no video sentence (see
+  [Meeting Video Recording](virtual-participant.md#meeting-video-recording)).
 - **Desktop Capture App** (macOS and Windows), when **Also record screen
   video** is on and the transcriber takes screen video.
 - **Stream Audio/Video page** and **browser extension**, while their **Also

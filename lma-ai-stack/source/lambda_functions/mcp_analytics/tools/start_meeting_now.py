@@ -18,7 +18,7 @@ from tools.agenda_helper import normalize_agenda
 from tools.platform_helper import check_zoom_meeting, normalize_meeting_id, normalize_platform
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
-from tools.vp_preparation import platform_fields
+from tools.vp_preparation import platform_fields, video_recording_fields
 
 logger = logging.getLogger()
 
@@ -97,6 +97,7 @@ def execute(
             SharedWith
             createdAt
             CallId
+            videoRecordingOffReason
             vncEndpoint
             vncPort
         }
@@ -260,6 +261,7 @@ def execute(
             "status": vp_data["status"],
             "owner": vp_data.get("owner", user_id),
             "message": "Virtual participant is initializing and will join the meeting shortly. Check LMA UI for live status.",
+            **video_recording_fields(vp_data),
         }
 
         call_id = vp_data.get("CallId")

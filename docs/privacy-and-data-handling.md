@@ -232,7 +232,7 @@ first that no one relies on the Stream Audio embed or an older browser extension
 
 ### Retention controls
 
-Five stack parameters set how long meeting data is kept, each defaulting to 90
+Six stack parameters set how long meeting data is kept, each defaulting to 90
 days except where noted. Two of them can be shortened, but not lengthened, from
 the **Retention** section of the Configuration page (see
 [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits)):
@@ -244,6 +244,7 @@ the **Retention** section of the Configuration page (see
 | `AudioRecordingExpirationInDays` | Stack parameter | 90 | The S3 lifecycle rules on audio and video recordings |
 | `CloudWatchLogsExpirationInDays` | Stack parameter | 90 | The retention of the stack's CloudWatch log groups |
 | `VPSchedulerStateMachineLogsExpirationInDays` | Stack parameter | 7 | The retention of the scheduled Virtual Participant state machine's log group |
+| `MeetingDataPointInTimeRecoveryDays` | Stack parameter | 35 | The DynamoDB point-in-time recovery window of the tables that hold meeting content: for how many days a deleted item can still be restored. 0 turns point-in-time recovery off on them. See [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables) |
 | **Retention › Delete the transcript after the summary** | Setting | Off | Deletes each meeting's transcript at a fixed time after its summary; see [Deleting data](#deleting-data) |
 
 A value saved in the Retention section applies to records written about five
@@ -287,7 +288,7 @@ are rewritten or expire (see
 | **Transcript and summary files**: the transcript as text (speech only, without chat lines, followed by the shared screen's text), the formatted summary, a metadata file for each, and for an uploaded meeting the Amazon Transcribe output | The recordings bucket, `lma-transcripts/`. The summary step writes the transcript file for every meeting (the MCP server's transcript tool reads it), and the summary file only when the transcript knowledge base is deployed, because nothing else reads it | 90 days | The `lma-transcripts/` lifecycle rule, from `TranscriptionExpirationInDays`, for the summary file as for the transcript files: see [The knowledge base's copy of the summary](#the-knowledge-bases-copy-of-the-summary). **Delete the transcript after the summary** deletes the transcript files (every version) and keeps the summary file | Deleted, every version |
 | **Transcript knowledge base entries** | The transcript knowledge base the stack creates (`TranscriptKnowledgeBase`, on by default): an Amazon Bedrock knowledge base over `lma-transcripts/`, with its vectors in an Amazon S3 Vectors index, which uses the service's default encryption (the template names no customer-managed key). Synced every 15 minutes | As long as the files they were built from | Set `TranscriptKnowledgeBase` to `DISABLED` to deploy no transcript knowledge base | Removed at the next sync, within about 15 minutes, once the files are gone |
 | **Audio recording** | The recordings bucket, `lma-audio-recordings/` | 90 days | `AudioRecordingExpirationInDays`; **Meeting Recording › Record meeting audio** (default On) decides whether it is recorded | Deleted, every version |
-| **Meeting video** (screen recording) from a Virtual Participant or the Desktop Capture App | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`), the **Record meeting video** toggle per Virtual Participant, and the Desktop Capture App's own setting per machine. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
+| **Meeting video** (screen recording) from a Virtual Participant or the Desktop Capture App | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`); for a Virtual Participant, **Meeting Recording › Record Virtual Participant meeting video** (default On), which overrides the **Record meeting video** toggle per Virtual Participant when it is off; for the streaming clients, **Meeting Recording › Record screen video from streaming clients** and the Desktop Capture App's own setting per machine. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
 | **Key frames** of the shared screen, and the text read from them | Images in the recordings bucket, `lma-video-keyframes/<meeting>/`; items in the meetings table. Taken only when the meeting's video is recorded | 90 days | Items: as the transcript, including the page setting. Images: the lifecycle rule, from `TranscriptionExpirationInDays` only. Not removed by **Delete the transcript after the summary**. See [Retention, access and deletion](meeting-video.md#retention-access-and-deletion) | Deleted; the images, every version |
 | **Agenda** | On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row | Deleted, from the meeting and from its Virtual Participant records |
 | **Consent record** | On the meeting record (`Consent`) | As the meeting record | As the meeting record. Kept when the transcript is deleted after the summary | Deleted |
@@ -323,7 +324,8 @@ that neither the retention settings nor deleting a meeting change:
 |---|---|
 | The Kinesis call data stream | 24 hours |
 | The meetings table's DynamoDB stream | 24 hours |
-| The point-in-time recovery of the stack's DynamoDB tables | 35 days; a deleted item can be restored from it until then. Point-in-time recovery is a safety protection and stays on |
+| The point-in-time recovery of the DynamoDB tables that hold meeting content | `MeetingDataPointInTimeRecoveryDays` days, 35 by default; a deleted item can be restored from it until then. With 0 there is no point-in-time recovery on these tables and nothing to restore from. See [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables) |
+| AWS Backup plans, on-demand DynamoDB backups and table exports, if anyone has set them up in the account | As each was configured; LMA creates none of them and the stack parameters do not change them |
 | Earlier versions of objects in the recordings bucket | Up to about two days after they stop being current; see [Earlier versions in the recordings bucket](#earlier-versions-in-the-recordings-bucket). Deleting a meeting, and **Delete the transcript after the summary**, delete every version of the files they remove at once |
 | A meeting archive prepared for download | One day after it was written (up to about two, with its earlier version), whatever the retention settings say of the files it copied. **Delete the transcript after the summary** and the other retention rules do not reach into an archive already prepared; deleting the meeting deletes its archives. A person who downloaded an archive keeps their copy, as with any download |
 | CloudWatch logs | `CloudWatchLogsExpirationInDays` |
@@ -358,6 +360,78 @@ remove at once. LMA's other deletions in the bucket remove the current version
 and leave the rest to the rule: a consent evidence image deleted once checked,
 with **Keep evidence screenshots** off; an uploaded file once it is processed;
 and a Virtual Participant's video segments once its video is assembled.
+
+### Point-in-time recovery of the DynamoDB tables
+
+DynamoDB point-in-time recovery keeps a continuous backup of a table, from which
+someone with access to the AWS account can restore the table, as a new table, to
+any second within its recovery period. The restored table holds the items as they
+were at that moment, including items that have since been deleted by a meeting
+deletion, by **Delete the transcript after the summary**, by a time to live, or by
+hand. Point-in-time recovery is a safety protection: it is how a table is brought
+back after an accidental write, a faulty update or a mistaken deletion. It also
+means that, for as long as the recovery period lasts, a deletion from the table is
+not final.
+
+The `MeetingDataPointInTimeRecoveryDays` stack parameter sets the recovery period
+of the tables that hold meeting content. It is a whole number from 0 to 35, and 35,
+the longest period DynamoDB offers, is the default, so a deployment that does not
+set it keeps the 35-day window earlier versions had.
+
+| Table | What it holds |
+|---|---|
+| The meetings table | Meeting records, transcript segments, summaries, consent records, chat lines and chat attachment items, key-frame items, meeting assistant answers, notifications, whiteboards and usage records |
+| The Virtual Participant table | Meeting names, platforms, meeting IDs and passwords, schedules and agendas |
+| The Virtual Participant task registry | Each launched Virtual Participant's launch configuration, with the meeting's ID, name and time; each item expires about nine hours after the launch |
+| The troubleshooting jobs table | The troubleshooting agent's answers, which can name a meeting and quote its logs; each job expires after seven days |
+| The voice enrollment table (only with `EnableVoiceEnrollment=true`) | Voiceprints |
+
+- **1 to 35**: point-in-time recovery is on, with that recovery period. An item
+  deleted from one of these tables can still be restored until that many days
+  after it was deleted. A short window keeps the protection while limiting the
+  restorable copy: with 1, a deleted meeting or transcript can be restored for a
+  day after its deletion and not after, and an accidental change can be undone
+  only if it is noticed within that day. Lowering the period takes effect at once:
+  DynamoDB stops offering restore points older than the new period.
+- **0**: point-in-time recovery is off on these tables. Nothing can be restored
+  from it, so a deletion is final as far as these tables are concerned, and an
+  accidental write or deletion cannot be undone either. Turning it off ends the
+  table's existing recovery history; turning it on again starts a new one from
+  that moment. Set 0 when a deletion must leave no restorable copy.
+
+Changing the parameter is a stack update that changes the tables' backup setting
+in place; the tables are not replaced. DynamoDB charges for point-in-time recovery
+by table size, not by the length of the period, so only 0 changes its cost.
+
+The other tables keep point-in-time recovery on for 35 days, because none of them
+holds meeting content and each is worth restoring after a mistake: the
+configuration table and its profiles (whose earlier objects in the configuration
+bucket are also kept for 35 days), the prompt template, chat button, Nova Sonic
+and speech engine configuration tables, the MCP server, skill and MCP API key
+tables, the OAuth state table, the selector cache, and the Cognito stack's sign-in
+table (each user's last sign-in time). The voice consent log also
+keeps 35 days: it is the append-only audit trail of consent given and withdrawn,
+LMA never deletes from it, and it holds no voiceprint or meeting content.
+
+Three kinds of copy are outside this parameter:
+
+- **AWS Backup and on-demand backups.** An AWS Backup plan that selects the
+  account's DynamoDB tables, an on-demand backup, or an export of a table to
+  Amazon S3 is a separate copy, kept for as long as it was configured. LMA creates
+  none of them. A deployment that must make deletion final should check that no
+  backup plan in the account covers these tables.
+- **The system backup of a deleted table.** When a table that has point-in-time
+  recovery on is deleted, DynamoDB keeps a backup of it, a system backup named
+  `<table>$DeletedTableBackup`, for 35 days, whatever the recovery period was. This
+  applies when the stack is deleted with `EnableDataRetentionOnDelete` set to
+  `false` and when a retained table is deleted afterwards. A table with
+  point-in-time recovery off gets no system backup: set
+  `MeetingDataPointInTimeRecoveryDays` to `0` in a stack update before deleting
+  the stack, and turn point-in-time recovery off on any other table, or on a
+  table kept after the stack is gone, before deleting it; see
+  [Cleanup](cleanup.md#manual-cleanup).
+- **The DynamoDB stream** of the meetings table, which keeps each change for 24
+  hours.
 
 ### The knowledge base's copy of the summary
 
@@ -455,7 +529,10 @@ It does not change the copies listed in
 the Kinesis and DynamoDB streams, point-in-time recovery, CloudWatch logs, and
 anything already downloaded or sent to an integration. In particular, the deleted
 meeting's items can still be restored from the DynamoDB tables' point-in-time
-recovery for 35 days. Deleting a user from [User Management](user-management.md)
+recovery for `MeetingDataPointInTimeRecoveryDays` days, 35 by default, and not
+at all when it is 0 (see
+[Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables)).
+Deleting a user from [User Management](user-management.md)
 does not delete the meetings they own.
 
 ### Deleting a stack
@@ -565,6 +642,7 @@ hosting presets, Team-hosted and Customer account, are explained in
 | Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
 | Record meeting audio | On | On | Off | Off | Off | Off |
 | Record screen video from streaming clients | On | On | Off | Off | Off | On |
+| Record Virtual Participant meeting video | On | On | Off | Off | Off | On |
 | Add the meeting chat to the transcript | On | On | Off | Off | On | On |
 | Redact personal information | Off | Off | On | On | Off | Off |
 | Model inference geography | Global | Global | Same geography | Same geography | Global | Global |
@@ -595,7 +673,7 @@ regulated posture sets them when it deploys or updates the stack:
 | `TranscriptionExpirationInDays` | 90 | The longest transcript segments are kept, and how long transcript and summary files, key-frame images and consent evidence images stay in the recordings bucket |
 | `AudioRecordingExpirationInDays` | 90 | How long audio and video recordings are kept |
 | `CloudWatchLogsExpirationInDays` | 90 | How long logs are kept |
-| `EnableVideoRecording` | `true` | Video is not part of any preset. Set `false` if no meeting video, and so no key frames, may be kept; otherwise a Virtual Participant records video unless its **Record meeting video** toggle is turned off |
+| `EnableVideoRecording` | `true` | Set `false` if no meeting video, and so no key frames, may be kept from any source; no setting can turn it back on. With `true`, the Regulated presets turn off both video settings (**Record screen video from streaming clients** and **Record Virtual Participant meeting video**), and an Admin may turn them on again |
 | `TranscriptKnowledgeBase` | `BEDROCK_KNOWLEDGE_BASE (Create)` | `DISABLED` if transcripts and summaries must not be indexed for search across meetings |
 | `EnableDataRetentionOnDelete` | `true` | Decide whether data must outlive the stack |
 
@@ -630,8 +708,11 @@ they expire.
    model in use; the Amazon Bedrock Models section shows which features have
    none.
 9. Decide how the day or two for which the recordings bucket keeps noncurrent
-   object versions, the 35-day DynamoDB point-in-time recovery window, and Amazon
-   Bedrock model invocation logging in the account fit your policy.
+   object versions and Amazon Bedrock model invocation logging in the account fit
+   your policy, and set `MeetingDataPointInTimeRecoveryDays`: 0 if a deletion must
+   leave no restorable copy, or the shortest window your recovery needs allow.
+   Check that no AWS Backup plan in the account covers the stack's tables (see
+   [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables)).
 10. Set `EnableDataRetentionOnDelete` to match what must happen to the data when
     the deployment is removed.
 
