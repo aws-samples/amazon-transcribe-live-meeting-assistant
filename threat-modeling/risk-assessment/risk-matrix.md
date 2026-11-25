@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
-| **Total Threats Identified** | 54 |
+| **Total Threats Identified** | 65 |
 
 ## 1. Risk Scoring Methodology
 
@@ -103,6 +103,14 @@
 | HOOK.T03 | Hook Lambda failure cascade | 2 | 2 | **4** | Lambda Hooks | Mitigated |
 | HOOK.T04 | Hook IAM over-privilege | 1 | 3 | **3** | Lambda Hooks | Mitigated |
 | HOOK.T05 | Supply chain attack via hook dependencies | 1 | 3 | **3** | Lambda Hooks | Accepted |
+| AUTH.T07 | Participant role privilege boundary | 1 | 3 | **3** | Authentication | Mitigated |
+| AUTH.T09 | Dormant accounts and unused API keys undetected in access reviews | 2 | 2 | **4** | Authentication | Mitigated |
+| UI.T06 | Participant read-only view and live transcript subscription | 1 | 3 | **3** | Web UI | Mitigated |
+| UI.T07 | Browser-side script loading, framing and transport downgrade | 1 | 3 | **3** | Web UI | Mitigated |
+| REC.T06 | Automatic sharing with a meeting's listed participants | 2 | 2 | **4** | Recording/Storage | Mitigated |
+| REC.T07 | Consent given in advance recorded for the wrong person or beyond its terms | 1 | 3 | **3** | Recording/Storage | Partially Mitigated |
+| REC.T08 | Deleted meeting content restorable from point-in-time recovery | 1 | 3 | **3** | Recording/Storage | Mitigated |
+| VP.T07 | Consent given in advance matched by display name | 1 | 3 | **3** | Virtual Participant | Partially Mitigated |
 
 ### Low Risk (Score 1-2)
 
@@ -115,15 +123,18 @@
 | KB.T05 | Knowledge Base denial of service | 1 | 1 | **1** | Knowledge Base | Accepted |
 | AUTH.T06 | WAF bypass / IP restriction evasion | 1 | 2 | **2** | Authentication | Mitigated |
 | UI.T05 | CloudFront configuration exposure | 2 | 1 | **2** | Web UI | Accepted |
+| AUTH.T08 | Participant account creation and account lookup from a participant list | 1 | 2 | **2** | Authentication | Mitigated |
+| REC.T09 | Recording links issued to Participants | 1 | 2 | **2** | Recording/Storage | Mitigated |
+| VP.T08 | Instructions sent to the VP as private chat messages | 1 | 2 | **2** | Virtual Participant | Mitigated |
 
 ## 3. Risk Distribution Summary
 
 ```mermaid
-pie title Risk Distribution (54 Threats)
+pie title Risk Distribution (65 Threats)
     "Very High (8-9)" : 6
     "High (6)" : 15
-    "Medium (3-4)" : 26
-    "Low (1-2)" : 7
+    "Medium (3-4)" : 34
+    "Low (1-2)" : 10
 ```
 
 ### By Component
@@ -132,32 +143,34 @@ pie title Risk Distribution (54 Threats)
 |-----------|-----------|------|--------|-----|-------|
 | Audio Streaming | 0 | 1 | 4 | 1 | 6 |
 | Meeting Assistant | 1 | 1 | 3 | 0 | 5 |
-| Virtual Participant | 1 | 1 | 3 | 1 | 6 |
+| Virtual Participant | 1 | 1 | 4 | 2 | 8 |
 | Voice Assistant | 0 | 2 | 2 | 1 | 5 |
 | MCP Integration | 1 | 3 | 1 | 1 | 6 |
 | Knowledge Base | 1 | 2 | 1 | 1 | 5 |
-| Authentication | 0 | 3 | 2 | 1 | 6 |
-| Web UI | 0 | 1 | 3 | 1 | 5 |
-| Recording/Storage | 1 | 1 | 3 | 0 | 5 |
+| Authentication | 0 | 3 | 4 | 2 | 9 |
+| Web UI | 0 | 1 | 5 | 1 | 7 |
+| Recording/Storage | 1 | 1 | 6 | 1 | 9 |
 | Lambda Hooks | 1 | 0 | 4 | 0 | 5 |
 
 ### By STRIDE Category
 
+A threat with two STRIDE categories is counted under each, as the [glossary](../threat-id-glossary.md) lists them.
+
 | STRIDE Category | Threats | Highest Risk |
 |----------------|---------|--------------|
-| **Spoofing** | 9 | High (6) |
-| **Tampering** | 16 | Very High (9) |
-| **Repudiation** | 5 | Very High (9) |
-| **Information Disclosure** | 19 | Very High (9) |
+| **Spoofing** | 13 | High (6) |
+| **Tampering** | 18 | Very High (9) |
+| **Repudiation** | 7 | Very High (9) |
+| **Information Disclosure** | 28 | Very High (9) |
 | **Denial of Service** | 8 | Medium (4) |
-| **Elevation of Privilege** | 9 | Very High (9) |
+| **Elevation of Privilege** | 12 | Very High (9) |
 
 ### Mitigation Status
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Mitigated** | 33 | Controls implemented and verified |
-| **Partially Mitigated** | 14 | Some controls in place, additional measures recommended |
+| **Mitigated** | 42 | Controls implemented and verified |
+| **Partially Mitigated** | 16 | Some controls in place, additional measures recommended |
 | **Accepted** | 7 | Risk accepted with documented rationale |
 
 ## 4. Top 10 Priority Threats
@@ -202,3 +215,6 @@ These threats require the most attention based on risk score and business impact
 3. **MCP tool invocation audit**: Regular review of MCP tool calls and data volumes
 4. **Recording consent audit**: Verify consent mechanisms are active for all recording sessions
 5. **VP launch monitoring**: Alert on unusual VP launch patterns or failed meeting joins
+6. **User access reviews (AUTH.T09)**: Review `lma users list` periodically; disable accounts and revoke MCP API keys with no recent activity
+7. **Participant lists and sharing (REC.T06, REC.T07)**: Owners review participant lists before meetings; Admins decide whether automatic sharing and consent given in advance suit the deployment
+8. **Recovery window (REC.T08)**: Set `MeetingDataPointInTimeRecoveryDays` to match the deployment's retention policy
