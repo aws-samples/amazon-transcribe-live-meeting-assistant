@@ -117,7 +117,8 @@ def test_the_markdown_report_lists_counts_then_only_the_checks_that_did_not_pass
     assert "Query.x with no token" not in text
 
 
-def test_the_json_report_holds_every_check(tmp_path: Path) -> None:
+def test_the_json_report_holds_every_check(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
     written = security_report.write(_report(), tmp_path)
     assert written is not None
     data = json.loads(written[0].read_text())
@@ -150,6 +151,22 @@ def test_in_ci_the_failure_message_gives_counts_only(monkeypatch) -> None:
     assert "secretOperation" not in message and "detail" not in message and "getCall" not in message
     monkeypatch.delenv("CI")
     assert "Query.secretOperation" in security_report.describe_failures(report.failures())
+
+
+def test_in_ci_the_written_report_withholds_what_failed_checks_observed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CI", "true")
+    json_path, md_path = security_report.write(_report(), tmp_path)
+    text = json_path.read_text() + md_path.read_text()
+    assert "Query.y with no token" not in text and "HTTP 200" not in text and "no viewer path" not in text
+    data = json.loads(json_path.read_text())
+    assert data["totals"] == {PASS: 2, FAIL: 1, NOT_RUN: 1}
+    assert "Query.x with no token" in text  # passed checks stay
+
+
+def test_a_failed_live_test_uses_pytest_fail_so_its_checks_are_not_printed_twice() -> None:
+    for name in ("test_security_access.py", "test_role_access.py"):
+        source = (HERE / name).read_text()
+        assert "pytrace=False" in source and "assert not failed" not in source and "assert not wrong" not in source
 
 
 def test_the_default_report_directory_is_ignored_by_git() -> None:

@@ -15,7 +15,8 @@ root (or ``$LMA_SECURITY_REPORT_DIR``):
 ``scratch/`` is ignored by git. The report names the stack and the calls made,
 so it is a local file: it is not attached to a pull request or a CI job, and in
 CI (``CI`` set) a failed test's assertion message gives counts only
-(``describe_failures``), because the scheduled run's log, JUnit report and Slack
+(``describe_failures``) and the report withholds what a failed check observed
+(``counts_only``), because the scheduled run's log, JUnit report and Slack
 summary are kept and shared.
 
 Outcomes: ``pass`` (observed what was expected), ``fail`` (observed something
@@ -172,10 +173,26 @@ def to_markdown(report: Report, generated_at: datetime | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def counts_only(report: Report) -> Report:
+    """The report with every check that did not pass reduced to its suite and outcome."""
+    reduced = Report(stack=report.stack, region=report.region)
+    reduced.checks = [
+        c if c.outcome == PASS else Check(c.suite, "(withheld in CI)", "", "", "", c.outcome) for c in report.checks
+    ]
+    return reduced
+
+
 def write(report: Report, directory: Path | None = None) -> tuple[Path, Path] | None:
-    """Write report.json and report.md; nothing (None) when no check was recorded."""
+    """Write report.json and report.md; nothing (None) when no check was recorded.
+
+    In CI (``CI`` set) the checks that did not pass are written with their suite
+    and outcome only: the scheduled run's triage agent reads the checkout and its
+    reading is posted, so the details stay with a local run.
+    """
     if not report.checks:
         return None
+    if os.environ.get("CI"):
+        report = counts_only(report)
     target = Path(directory or os.environ.get("LMA_SECURITY_REPORT_DIR") or DEFAULT_DIR)
     target.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)

@@ -67,7 +67,9 @@ def recorded():
     start = len(REPORT.checks)
     yield
     failed = [c for c in REPORT.checks[start:] if c.outcome == security_report.FAIL]
-    assert not failed, security_report.describe_failures(failed)
+    if failed:
+        # pytest.fail, not assert: assertion rewriting would print the checks too.
+        pytest.fail(security_report.describe_failures(failed), pytrace=False)
 
 
 # ── fixtures ───────────────────────────────────────────────────────────────

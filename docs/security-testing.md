@@ -56,7 +56,7 @@ Virtual Participant viewer path under the MicroVM launch type).
 
 | Suite (in the report) | Module | What must hold |
 |---|---|---|
-| AppSync role matrix | `test_role_access.py` | Every query and mutation is refused at the field to each role the matrix does not list, and every query is answered to each role it lists. Each token names one role (`cognito:groups`, `lma_role`). The transcriber, the identity pool and the MCP API key endpoint admit each role as the matrix says. |
+| AppSync role matrix | `test_role_access.py` | Every query and mutation is refused at the field to each role the matrix does not list, and every query is answered to each role it lists. The same module also checks, as plain test assertions rather than report lines, that each token names one role (`cognito:groups`, `lma_role`) and that the transcriber, the identity pool and the MCP API key endpoint admit each role as the matrix says. |
 | AppSync authentication | `test_security_access.py` | Every query and mutation is refused with no `Authorization` header. A User's ID token is refused when its claims were changed (a role group added, the expiry moved), its signature altered, its header set to `alg: none`, or its claims signed by another key, with this pool's issuer or another one's. A genuine ID token issued to another app client of the user pool is refused. A genuine ID token is answered while fresh and refused after it expires. |
 | AppSync backend-only operations | `test_security_access.py` | Every operation only backend roles may call (the matrix's `backendOnly`), and every query that also accepts backend roles (`alsoIam`), is refused to a request signed with SigV4 by the web UI's identity-pool credentials, for an Admin, a User and a Participant. |
 | Meeting access | `test_security_access.py` | One meeting, owned by one User and shared with a second, is read (`getCall`, the transcript, the transcript with sentiment, the key frames with their signed links, the meeting list) by its owner, the shared user and an Admin, and by no other User. The operations that name the meeting (chat attachments, consent, cost, whiteboards, notifications, the archive) answer its owner and refuse the other User. Labels are changed by the owner and the shared user and not by the other User; sharing and deleting are done by the owner only; a deleted meeting is no longer returned. The web UI's identity-pool credentials read the audio and video recording prefixes of the recordings bucket and no other prefix, and a Participant's read none. |
@@ -121,8 +121,9 @@ them):
 A test fails on any check it recorded that did not pass, and its assertion
 message lists those checks. In CI (`CI` set, as in the scheduled run) the message
 gives only the number of failed checks per suite, because the job log, the JUnit
-report and the Slack summary are kept and shared; rerun `make stacktest-rbac`
-to read the details. A `not-run` is not a pass: it means the condition
+report and the Slack summary are kept and shared, and the report written there
+keeps only the suite and outcome of each check that did not pass; rerun
+`make stacktest-rbac` locally to read the details. A `not-run` is not a pass: it means the condition
 the check needs was absent on the stack.
 
 Treat a failure as real until it is shown to be a test problem. The report holds
