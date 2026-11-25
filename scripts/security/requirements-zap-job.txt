@@ -4,5 +4,5 @@
 # integ-tests/requirements.txt provide the same packages.
 boto3==1.44.11
 pycognito==2024.5.1
-graphql-core==3.2.6
+graphql-core==3.2.12
 websockets==17.4
