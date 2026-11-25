@@ -26,7 +26,7 @@
     "@cloudscape-design/components": "^3.0.1413",
     "@cloudscape-design/global-styles": "^1.0.72",
     "@novnc/novnc": "1.7.0",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
     "aws-amplify": "^6.22.2",
