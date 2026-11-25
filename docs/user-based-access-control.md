@@ -246,8 +246,9 @@ from the Participant operations above, and the page makes no other request.
   images.
 - **Details** tab: the names on the participant list and the consent record,
   without the controls that record an objection or an attestation.
-- **Meeting assistant** panel, beside the tabs as on the owner's page (over
-  them on a narrow window), with the chat buttons for questions the current
+- **Meeting assistant** panel, where the deployment has the meeting
+  assistant, as on the owner's page: beside the tabs (over them on a narrow
+  window), with the chat buttons for questions the current
   meeting can answer: **SUMMARIZE**, **ACTIONS**, **TOPICS**, **AGENDA CHECK**,
   **CLARITY CHECK** and **MISSING ACTION OWNER or ETA**, with the prompts the
   deployment ships for them. The buttons that ask about past meetings,

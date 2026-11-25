@@ -38,9 +38,10 @@ The left sidebar organizes the application into the following sections:
 - **Meetings Query Tool** — Advanced search and filtering across meetings
 
 ### A Participant's navigation
-A [Participant](user-based-access-control.md#participant) sees none of the sections above. Their navigation has three entries:
+A [Participant](user-based-access-control.md#participant) sees none of the sections above. Their navigation has four entries:
 - **Home** — What the Participant's account is for
 - **Shared meetings** — The meetings shared with them, each opening the [Meeting Detail Page](#meeting-detail-page) read-only: the header, the Summary, Transcript (with Auto-scroll and, once the meeting has ended, the player) and Details tabs, and the meeting assistant panel beside them, without the owner's panels and controls (see [The shared meeting's page](user-based-access-control.md#the-shared-meetings-page))
+- **My consents** — The consents they gave before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance))
 - **Voice enrollment** — Enrolling their own voice, and deleting it (see [Voice Enrollment](voice-enrollment.md))
 
 Their pages have the same frame as every other page: this navigation, the breadcrumbs, the notifications and the help panel at the right.
