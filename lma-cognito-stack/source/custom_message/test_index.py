@@ -124,3 +124,81 @@ def test_a_long_meeting_name_is_cut():
         {"lmaInvitation": "meeting_participant", "meetingName": "x" * 500, "consentQuery": "vp=a"}
     )["response"]["emailMessage"]
     assert "x" * 200 in message and "x" * 201 not in message
+
+
+# ── what the invitation says about the My consents page ──────────────────────
+
+MEETING = {
+    "lmaInvitation": "meeting_participant",
+    "meetingName": "Planning",
+    "consentQuery": "vp=abc-123",
+}
+CONSENTS_LINK = f'<a href="{URL}/#/consents">My consents</a>'
+#: Cognito's limit on a custom invitation's message, in characters.
+COGNITO_EMAIL_MESSAGE_LIMIT = 20000
+
+
+@pytest.mark.parametrize("role", ["Participant", "User", "Admin"])
+@pytest.mark.parametrize("advance", [True, False], ids=["advance-on", "advance-off"])
+@pytest.mark.parametrize("with_meeting", [True, False], ids=["meeting", "no-meeting"])
+def test_each_role_s_invitation_says_what_the_setting_allows(role, advance, with_meeting):
+    metadata = {"lmaRole": role, **({"lmaAdvanceConsent": "on"} if advance else {})}
+    if with_meeting:
+        metadata.update(MEETING)
+    message = invitation(metadata)["response"]["emailMessage"]
+
+    assert "{####}" in message
+    # The meeting's own paragraph is kept whenever the invitation names one.
+    assert ("<strong>Planning</strong>" in message) is with_meeting
+    assert (f"{URL}/#/consents?vp=abc-123" in message) is with_meeting
+    explained = "ask everyone for consent" in message
+    one_line = "You can manage your meeting consents on the" in message
+    if not advance:
+        assert CONSENTS_LINK not in message and not explained and not one_line
+    elif role == "Participant":
+        assert CONSENTS_LINK in message and explained and not one_line
+    else:
+        assert CONSENTS_LINK in message and one_line and not explained
+    assert len(message) < COGNITO_EMAIL_MESSAGE_LIMIT
+
+
+def test_the_participant_paragraph_asks_for_nothing():
+    """Consent has to be freely given: the text says what the page is for, nothing more."""
+    text = index.PARTICIPANT_CONSENT_TEXT.lower()
+    assert "please" not in text and "should" not in text and "must" not in text
+    assert "withdraw" in text and "object" in text
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"lmaAdvanceConsent": "on"},
+        {"lmaAdvanceConsent": "on", "lmaRole": "Guest"},
+        {"lmaAdvanceConsent": "true", "lmaRole": "Participant"},
+        {"lmaRole": "Participant"},
+    ],
+    ids=["no-role", "unknown-role", "not-on", "setting-unread"],
+)
+def test_without_a_known_role_and_the_setting_on_nothing_is_said(metadata):
+    message = invitation(metadata)["response"]["emailMessage"]
+    assert "/#/consents" not in message
+
+
+def test_no_consent_paragraph_before_the_web_ui_address_is_known(monkeypatch):
+    monkeypatch.setattr(index, "ssm", FakeSsm({}))
+    metadata = {"lmaRole": "Participant", "lmaAdvanceConsent": "on"}
+    message = invitation(metadata)["response"]["emailMessage"]
+    assert "/#/consents" not in message and "ask everyone for consent" not in message
+
+
+def test_the_longest_invitation_is_within_cognito_s_limit():
+    metadata = {
+        "lmaRole": "Participant",
+        "lmaAdvanceConsent": "on",
+        "lmaInvitation": "meeting_participant",
+        "meetingName": "&" * 200,
+        "consentQuery": "vp=" + "a" * 1500,
+    }
+    message = invitation(metadata)["response"]["emailMessage"]
+    assert "ask everyone for consent" in message
+    assert len(message) < COGNITO_EMAIL_MESSAGE_LIMIT

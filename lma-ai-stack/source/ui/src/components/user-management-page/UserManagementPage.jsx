@@ -9,6 +9,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import {
   Alert,
+  Autosuggest,
   Badge,
   Box,
   Button,
@@ -23,7 +24,14 @@ import {
   TextFilter,
 } from '@cloudscape-design/components';
 
-import { listUsers, createUser, deleteUser, setUserRole } from '../../graphql/queries/userManagementQueries';
+import {
+  listUsers,
+  createUser,
+  deleteUser,
+  setUserRole,
+  listInvitableMeetings,
+} from '../../graphql/queries/userManagementQueries';
+import { INVITABLE_MEETING_DAYS, invitableMeetingOptions, meetingRefFromText } from './invite-meeting';
 
 const client = generateClient();
 const logger = new ConsoleLogger('UserManagementPage');
@@ -128,6 +136,10 @@ const UserManagementPage = () => {
   const [newRole, setNewRole] = useState(ROLE_OPTIONS[0]);
   const [createBusy, setCreateBusy] = useState(false);
   const [createErr, setCreateErr] = useState(null);
+  // "Meeting to invite them to": what was chosen, typed or pasted.
+  const [inviteMeeting, setInviteMeeting] = useState('');
+  const [meetingOptions, setMeetingOptions] = useState([]);
+  const [meetingOptionsStatus, setMeetingOptionsStatus] = useState('pending');
 
   const [roleOpen, setRoleOpen] = useState(false);
   const [roleChoice, setRoleChoice] = useState(ROLE_OPTIONS[0]);
@@ -173,12 +185,39 @@ const UserManagementPage = () => {
     );
   }, [users, filterText]);
 
+  // The meetings the form offers, read when it opens; a paste works without them.
+  const loadInvitableMeetings = async () => {
+    setMeetingOptionsStatus('loading');
+    try {
+      const end = new Date();
+      const start = new Date(end.getTime() - INVITABLE_MEETING_DAYS * 86400000);
+      const result = await client.graphql({
+        query: listInvitableMeetings,
+        variables: { startDateTime: start.toISOString(), endDateTime: end.toISOString() },
+      });
+      setMeetingOptions(
+        invitableMeetingOptions(result?.data?.listVirtualParticipants, result?.data?.listCallsDateRange?.Calls),
+      );
+      setMeetingOptionsStatus('finished');
+    } catch (err) {
+      logger.error('listing the meetings to invite to failed', err);
+      setMeetingOptionsStatus('error');
+    }
+  };
+
   const handleOpenCreate = () => {
     setNewEmail('');
     setNewRole(ROLE_OPTIONS[0]);
+    setInviteMeeting('');
     setCreateErr(null);
     setCreateOpen(true);
+    loadInvitableMeetings();
   };
+
+  const meetingRef = meetingRefFromText(inviteMeeting);
+  const chosenMeeting = meetingRef
+    ? meetingOptions.flatMap((group) => group.options).find((option) => option.value === meetingRef)
+    : null;
 
   const handleCreate = async () => {
     setCreateErr(null);
@@ -191,9 +230,14 @@ const UserManagementPage = () => {
     try {
       await client.graphql({
         query: createUser,
-        variables: { input: { email, role: newRole.value } },
+        variables: { input: { email, role: newRole.value, ...(meetingRef ? { inviteToMeeting: meetingRef } : {}) } },
       });
-      setSuccess(`User ${email} created. An invitation email with a temporary password has been sent.`);
+      setSuccess(
+        meetingRef
+          ? `User ${email} created. An invitation email with a temporary password and the meeting's consent link ` +
+              "has been sent, and the address is on the meeting's participant list."
+          : `User ${email} created. An invitation email with a temporary password has been sent.`,
+      );
       setCreateOpen(false);
       await fetchUsers();
     } catch (err) {
@@ -376,6 +420,33 @@ const UserManagementPage = () => {
               selectedOption={newRole}
               options={ROLE_OPTIONS}
               onChange={({ detail }) => setNewRole(detail.selectedOption)}
+            />
+          </FormField>
+          <FormField
+            label={
+              <span>
+                Meeting to invite them to <i>- optional</i>
+              </span>
+            }
+            description={
+              'The invitation then names the meeting and links to its consent page, and the address is added to ' +
+              "the meeting's participant list. Choose a Virtual Participant or a recent meeting, or paste a meeting " +
+              'or Virtual Participant id or link.'
+            }
+            constraintText={chosenMeeting ? `Invites them to ${chosenMeeting.label}` : undefined}
+          >
+            <Autosuggest
+              value={inviteMeeting}
+              onChange={({ detail }) => setInviteMeeting(detail.value)}
+              options={meetingOptions}
+              statusType={meetingOptionsStatus}
+              loadingText="Loading meetings"
+              errorText="The meetings could not be listed; paste an id instead."
+              empty="No meetings to choose from; paste an id instead."
+              enteredTextLabel={(value) => `Use: "${meetingRefFromText(value)}"`}
+              placeholder="No meeting"
+              ariaLabel="Meeting to invite them to"
+              filteringType="auto"
             />
           </FormField>
         </SpaceBetween>

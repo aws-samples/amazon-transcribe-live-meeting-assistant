@@ -146,6 +146,7 @@ const MeetingParticipants = ({
   scheduledFor = '',
   requests = [],
   onSave = undefined,
+  description = '',
 }) => {
   const people = participantsInput(participants);
   const listKey = JSON.stringify(people);
@@ -251,18 +252,19 @@ const MeetingParticipants = ({
     });
   }
 
+  const startEditing = () => {
+    setDraft(participantsToText(people));
+    setSaveError('');
+    setEditing(true);
+  };
+  // "Add participants" while the list is empty, so the way to start one is plain.
+  const editLabel = people.length ? 'Edit' : 'Add participants';
+
   const actions = canManage ? (
     <SpaceBetween size="xs" direction="horizontal">
-      {canEdit && (
-        <Button
-          iconName="edit"
-          onClick={() => {
-            setDraft(participantsToText(people));
-            setSaveError('');
-            setEditing(true);
-          }}
-        >
-          Edit
+      {canEdit && !editing && (
+        <Button iconName={people.length ? 'edit' : 'add-plus'} onClick={startEditing}>
+          {editLabel}
         </Button>
       )}
       {isOwner && people.length > 0 && hasRef && (
@@ -289,10 +291,14 @@ const MeetingParticipants = ({
         <Header
           variant="h3"
           counter={people.length ? `(${people.length})` : undefined}
-          description={
+          description={[
             "The people expected at the meeting. With the deployment's Meeting Sharing setting on (the default), " +
-            'the meeting is shared, read-only, with each person listed.'
-          }
+              'the meeting is shared, read-only, with each person listed.',
+            canEdit ? 'The list can be changed at any time, before, during and after the meeting.' : '',
+            description,
+          ]
+            .filter(Boolean)
+            .join(' ')}
           actions={actions}
         >
           Participants
@@ -346,7 +352,16 @@ const MeetingParticipants = ({
             items={people}
             columnDefinitions={columns}
             trackBy="email"
-            empty={<Box color="text-body-secondary">No participants listed.</Box>}
+            empty={
+              <SpaceBetween size="xs" alignItems="center">
+                <Box color="text-body-secondary">No participants listed.</Box>
+                {canEdit && (
+                  <Button iconName="add-plus" onClick={startEditing} ariaLabel="Add participants to the list">
+                    Add participants
+                  </Button>
+                )}
+              </SpaceBetween>
+            }
           />
         )}
       </SpaceBetween>
@@ -410,6 +425,9 @@ MeetingParticipants.propTypes = {
   // People not on the list who asked to be added (a Virtual Participant's).
   requests: PropTypes.arrayOf(PropTypes.shape({ name: PropTypes.string, email: PropTypes.string })),
   onSave: PropTypes.func,
+  // Added to the section's description: which list it shows, on a Virtual
+  // Participant's page.
+  description: PropTypes.string,
 };
 
 export default MeetingParticipants;

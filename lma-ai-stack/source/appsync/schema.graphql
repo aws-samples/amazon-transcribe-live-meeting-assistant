@@ -487,6 +487,10 @@ type Mutation @aws_iam {
 	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Replaces the meeting's participant list. For the meeting's owner and
 	# Admins only (not the users it is shared with), and backend roles with IAM.
+	# Named by VirtualParticipantId (its owner or an Admin), it changes the list
+	# of the meeting the Virtual Participant created, and answers that meeting;
+	# until the meeting exists it changes the Virtual Participant's own list
+	# and answers null.
 	# Not published to onUpdateCall. See docs/virtual-participant.md#participant-list.
 	updateCallParticipants(input: UpdateCallParticipantsInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A short digest of the meeting so far, published to its notifications as a
@@ -1997,8 +2001,10 @@ input MeetingParticipantInput {
 	email: String!
 }
 
+# The meeting is named by exactly one of CallId and VirtualParticipantId.
 input UpdateCallParticipantsInput {
-	CallId: ID!
+	CallId: ID
+	VirtualParticipantId: ID
 	# The whole list; [] clears it.
 	Participants: [MeetingParticipantInput!]!
 	# For a backend role: who the change is recorded as made by. A signed-in
@@ -3364,6 +3370,10 @@ type UserList @aws_cognito_user_pools {
 input CreateUserInput {
 	email: String!
 	role: String!
+	# Optional: a meeting's CallId or a Virtual Participant's id. The invitation
+	# then names that meeting and links to its consent page, and the address is
+	# added to the meeting's participant list if it is not on it.
+	inviteToMeeting: String
 }
 
 input DeleteUserInput {

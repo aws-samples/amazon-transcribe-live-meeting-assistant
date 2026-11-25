@@ -28,7 +28,7 @@ import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import LaunchSettings from './LaunchSettings';
-import MeetingParticipants from '../call-panel/MeetingParticipants';
+import VpParticipants from './VpParticipants';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
@@ -1107,20 +1107,14 @@ const VirtualParticipantDetails = () => {
           ) : null
         }
       />
-      {/* The participant list this Virtual Participant was started or
-          scheduled with, read and acted on as its own row holds it: the
-          account statuses and new accounts are for the same list shown here.
-          The meeting it creates has its own copy, changed on the meeting page. */}
-      <MeetingParticipants
-        participants={vpDetails.participants}
-        callId=""
-        virtualParticipantId={vpDetails.id}
-        canManage={!!isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
-        isOwner={!!user?.username && vpDetails.Owner === user.username}
-        meetingName={vpDetails.meetingName || ''}
-        owner={vpDetails.Owner || ''}
-        scheduledFor={vpDetails.scheduledFor || ''}
-        requests={vpDetails.participantListRequests || []}
+      {/* The participant list, changeable by the owner and Admins at any
+          status: the Virtual Participant's own list until it has created its
+          meeting, and the meeting's list from then on (VpParticipants). */}
+      <VpParticipants
+        vp={vpDetails}
+        username={user?.username || ''}
+        isAdmin={!!isAdmin}
+        onVpListSaved={(participants) => setVpDetails((prev) => ({ ...prev, participants }))}
       />
       {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (
         <EditScheduledVirtualParticipant
