@@ -38,10 +38,114 @@ The embed page is a chrome-free (no navigation sidebar, top bar, or breadcrumbs)
 
 - LMA deployed and accessible (v0.2.23 or later)
 - Your LMA CloudFront endpoint URL (found in CloudFormation Outputs as `CloudFrontEndpoint`)
+- Your application's origin listed in the stack parameter `AllowedEmbedOrigins` (see
+  [Allowing your application to frame LMA](#allowing-your-application-to-frame-lma)). Without it the
+  browser refuses to show LMA in an iframe on any origin but LMA's own.
 - One of the following authentication approaches configured:
   - **Cognito login** (default) — users log in via LMA's Cognito User Pool
   - **Cognito Identity Federation** — users authenticate via your IdP, federated through Cognito
   - **Token passing via postMessage** — your app obtains tokens and passes them to the iframe
+
+## Allowing your application to frame LMA
+
+The web UI's CloudFront distribution sends a `Content-Security-Policy` whose `frame-ancestors`
+directive names the origins whose pages may show LMA in an iframe. By default it names only LMA's own
+origin (`frame-ancestors 'self'`, together with `X-Frame-Options: DENY`), so a browser shows an
+embedded component only on a page served from the LMA CloudFront URL itself.
+
+To embed components in your own application, set the stack parameter **`AllowedEmbedOrigins`**
+(console label *Origins Allowed to Embed the Web UI*, in the *Amazon CloudFront Configuration* group)
+to the origins of the pages that will contain the iframes, and update the stack. For example:
+
+```text
+https://crm.example.com,https://portal.example.org:8443
+```
+
+- An origin is `https://`, a lowercase host name or IP address, and an optional port. It has no path
+  and no trailing slash: the browser compares the embedding page's origin, never its path.
+- Separate origins with commas and no spaces. The whole value may be up to 600 characters, which keeps
+  the policy within CloudFront's limit on the length of the header.
+- A host may start with `*.` to match every subdomain of the rest of the host:
+  `https://*.intranet.example.com` matches `https://app.intranet.example.com` but not
+  `https://intranet.example.com` itself, so list that separately if you need it. At least two labels
+  must follow the `*.`. Prefer exact hosts: a wildcard also admits every other site served under
+  that domain, including any the deployment's operator does not control. `http://` origins and
+  other schemes are not accepted.
+- Every page of the web UI is sent with the same policy, so the setting applies to `#/embed` and to
+  the rest of the application alike.
+
+With the parameter set, the distribution sends `frame-ancestors 'self'` followed by the listed origins,
+and no longer sends `X-Frame-Options`, which cannot name a list of origins (a browser that understands
+`frame-ancestors` ignores `X-Frame-Options` when both are present). Empty, the default, keeps the
+headers described above. The new headers apply once the stack update finishes; a page a browser has
+already loaded keeps the headers it was loaded with until it is reloaded.
+
+To try the hosted [demo pages](#interactive-demo-page) against your stack, add the docs site's origin,
+`https://aws-samples.github.io`, to `AllowedEmbedOrigins`.
+
+### What the embedding page must do
+
+1. **Delegate the capture features.** A cross-origin iframe can use the microphone, the camera or
+   screen capture only if the embedding page delegates them. Add an `allow` attribute naming the
+   features the component needs. The stream-audio component needs the microphone and display capture;
+   `camera` can be listed too:
+
+   ```html
+   <iframe
+     src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=stream-audio&allowedOrigins=https://crm.example.com"
+     allow="microphone; display-capture; camera"
+   ></iframe>
+   ```
+
+   `allow="microphone"` delegates the feature to the iframe's `src` origin, which is what you want. If
+   your own page sends a `Permissions-Policy` header, it must also allow these features for LMA's
+   origin, for example `microphone=(self "https://YOUR_LMA_CLOUDFRONT_URL")`; a page whose policy says
+   `microphone=(self)` or `microphone=()` cannot delegate the microphone to any iframe. LMA's own
+   `Permissions-Policy` stays `camera=(self), microphone=(self), display-capture=(self)` whatever
+   `AllowedEmbedOrigins` says: inside your iframe, `self` is still LMA's origin, and the allowlist in
+   that header governs LMA's page and the frames LMA itself embeds, not the pages that embed LMA.
+
+2. **Pass `allowedOrigins`.** The embed addresses every `postMessage` event it sends (`LMA_AUTH_READY`,
+   `LMA_EMBED_LOADED`, `LMA_MEETING_STARTED` and the rest) to the first origin in the `allowedOrigins`
+   query parameter, and accepts messages (`LMA_AUTH` tokens, `LMA_START_MEETING`, `LMA_CREATE_VP` and
+   the rest) only from the origins in it. When the parameter is absent, both are LMA's own origin.
+   So a page on another origin that sends the embed messages, uses `authMode=token`, or listens for
+   its events must pass its own origin there. Use the exact origin of the embedding page, for example
+   `allowedOrigins=https://crm.example.com` (URL-encode it if you build the URL by hand).
+   `allowedOrigins` is compared exactly and takes no wildcards, even where `AllowedEmbedOrigins`
+   uses a `*.` entry: list each embedding page's origin.
+
+3. **Address messages to LMA's origin and check `event.origin`**, as in
+   [Security Best Practices](#security-best-practices).
+
+4. **Do not require cross-origin isolation for the page.** If your page sends
+   `Cross-Origin-Embedder-Policy: require-corp`, the browser refuses an iframe whose document does not
+   allow being embedded across origins, and LMA sends `Cross-Origin-Resource-Policy: same-origin`.
+
+### Signing in inside an iframe
+
+The embed's default sign-in (`authMode=cognito`) is the same form the web UI shows. It calls Amazon
+Cognito directly from the page, with no redirect and no cookies, and keeps the session in the browser's
+local storage for LMA's origin. Current browsers partition the storage of a cross-origin iframe by the
+top-level site: Chrome, Edge, Firefox and Safari all do, and Safari also limits it further with
+Intelligent Tracking Prevention. That has these consequences:
+
+- A user who has signed in to LMA directly, at its CloudFront URL, is not signed in inside your
+  iframe, and signs in once more there. The session in the iframe is then kept for your site and
+  shared by the LMA iframes on your site's pages, until it expires or the user signs out in an iframe.
+- Signing out of LMA directly does not sign the user out inside your iframe, and the other way round.
+- A browser set to block third-party storage entirely, or a Safari session in which tracking prevention
+  has removed the iframe's stored data, asks the user to sign in again.
+
+Federated sign-in through a hosted sign-in page (see
+[Option 2](#option-2-cognito-identity-federation)) sends the browser to the identity provider's pages,
+and most identity providers do not allow their sign-in pages to be shown inside an iframe. For an
+embedded component, either let the user complete federated sign-in in a top-level window, or use token
+passing (`authMode=token`, [Option 3](#option-3-token-passing-via-postmessage)), where your application
+signs the user in and the iframe needs no stored session.
+
+These notes describe how browsers treat storage in cross-origin iframes in general. Test sign-in in the
+browsers your users have, with your origin listed in `AllowedEmbedOrigins`.
 
 ## Interactive Demo Page
 
@@ -203,6 +307,7 @@ Show the VNC live view and transcript for a virtual participant session:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `authMode` | string | `cognito` | Authentication mode: `cognito` (standard login) or `token` (postMessage token passing) |
+| `allowedOrigins` | string | (LMA's own origin) | Comma-separated origins of the embedding page. Events are sent to the first; messages from the parent (tokens, meeting and Virtual Participant control) are accepted only from the listed origins. A page on another origin must pass its own origin here to send messages or receive events; see [What the embedding page must do](#what-the-embedding-page-must-do) |
 
 ## Authentication Options
 
@@ -223,6 +328,9 @@ The simplest approach. When the iframe loads, if the user is not already authent
 
 **Best for**: Internal tools, admin dashboards, cases where users already have LMA accounts.
 
+In an iframe on another origin the user signs in once inside the iframe, even if already signed in to
+LMA directly; see [Signing in inside an iframe](#signing-in-inside-an-iframe).
+
 ### Option 2: Cognito Identity Federation
 
 If your application uses its own Identity Provider (IdP), you can configure Cognito Identity Federation so your users are automatically authenticated in LMA when they're logged into your app.
@@ -237,6 +345,9 @@ If your application uses its own Identity Provider (IdP), you can configure Cogn
 
 **Best for**: Enterprise SSO, organizations with existing IdP infrastructure.
 
+Most identity providers' sign-in pages cannot be shown inside an iframe, so with an embedded component
+users complete this sign-in in a top-level window, or your application uses token passing (Option 3).
+
 ### Option 3: Token Passing via postMessage
 
 For maximum control, your application can obtain Cognito tokens directly (by calling the Cognito API) and pass them to the iframe via the `postMessage` Web API. This avoids showing any login UI in the iframe.
@@ -244,7 +355,7 @@ For maximum control, your application can obtain Cognito tokens directly (by cal
 ```html
 <iframe
   id="lma-embed"
-  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=stream-audio&authMode=token"
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=stream-audio&authMode=token&allowedOrigins=https://YOUR_APP_ORIGIN"
   width="100%"
   height="400px"
   style="border: none;"
@@ -536,7 +647,7 @@ A compact widget that lets users start a meeting recording with one click:
   <div class="recorder-widget">
     <iframe
       id="recorder"
-      src="https://YOUR_LMA_URL/#/embed?component=stream-audio&meetingTopic=Quick+Recording&autoStart=false"
+      src="https://YOUR_LMA_URL/#/embed?component=stream-audio&meetingTopic=Quick+Recording&autoStart=false&allowedOrigins=https://YOUR_APP_ORIGIN"
       width="100%"
       height="100%"
       style="border: none;"
@@ -605,7 +716,7 @@ Start and stop meetings entirely from your parent application:
 ```html
 <iframe
   id="meeting"
-  src="https://YOUR_LMA_URL/#/embed?component=meeting-loader&authMode=cognito"
+  src="https://YOUR_LMA_URL/#/embed?component=meeting-loader&authMode=cognito&allowedOrigins=https://YOUR_APP_ORIGIN"
   width="100%"
   height="300px"
   style="border: none;"
@@ -624,13 +735,13 @@ function startMeeting() {
     meetingTopic: 'Automated Meeting',
     participants: 'Team',
     owner: 'admin@company.com'
-  }, '*');
+  }, 'https://YOUR_LMA_URL');
 }
 
 function stopMeeting() {
   iframe.contentWindow.postMessage({
     type: 'LMA_STOP_MEETING'
-  }, '*');
+  }, 'https://YOUR_LMA_URL');
 }
 
 window.addEventListener('message', (event) => {
@@ -741,25 +852,27 @@ of them shows the whole meeting panel (header and tabs), beside or under the
 ></iframe>
 ```
 
-For cross-origin iframes, you may also need:
-```html
-<iframe
-  allow="microphone https://YOUR_LMA_URL; display-capture https://YOUR_LMA_URL"
-  src="..."
-></iframe>
-```
+`allow="microphone"` delegates the feature to the iframe's `src` origin; the explicit form
+`allow="microphone https://YOUR_LMA_URL; display-capture https://YOUR_LMA_URL"` is equivalent. If your
+page sends its own `Permissions-Policy` header, it must allow these features for LMA's origin as well;
+see [What the embedding page must do](#what-the-embedding-page-must-do).
 
 ### Issue: postMessage not received by iframe
 
-**Cause**: Origin mismatch or timing issue.
+**Cause**: The parent page's origin is not in the iframe's `allowedOrigins` query parameter, or an
+origin mismatch or timing issue.
 
 **Solutions**:
-1. Wait for the `LMA_AUTH_READY` or `LMA_EMBED_LOADED` message before sending
-2. Verify the target origin matches the iframe's origin:
+1. Add your page's exact origin to the iframe URL, for example
+   `&allowedOrigins=https://YOUR_APP_ORIGIN`. The embed accepts messages only from the origins in
+   `allowedOrigins` (LMA's own origin when it is absent) and sends its events to the first of them;
+   see [What the embedding page must do](#what-the-embedding-page-must-do).
+2. Wait for the `LMA_AUTH_READY` or `LMA_EMBED_LOADED` message before sending
+3. Verify the target origin matches the iframe's origin:
    ```javascript
    iframe.contentWindow.postMessage(data, 'https://YOUR_LMA_CLOUDFRONT_URL');
    ```
-3. Check browser console for cross-origin errors
+4. Check browser console for cross-origin errors
 
 ### Issue: "Meeting not found" when using callId
 
@@ -812,10 +925,15 @@ postMessage event to the parent, just as if it had loaded normally.
 
 ### Issue: Cross-origin errors in browser console
 
-**Cause**: CORS or Content Security Policy restrictions.
+**Cause**: The page's origin is not allowed to frame LMA, or your own Content Security Policy does not
+allow the LMA origin in a frame.
 
 **Solutions**:
-1. Ensure your LMA CloudFront distribution allows your domain in CORS headers
+1. A console message that the frame was refused because an ancestor violates the `frame-ancestors`
+   directive means your page's origin is not in the stack parameter `AllowedEmbedOrigins`. Add it
+   exactly (scheme, host and port, no path) and update the stack; see
+   [Allowing your application to frame LMA](#allowing-your-application-to-frame-lma). Every page that
+   contains the iframe, directly or through another frame, must be on a listed origin.
 2. If using a Content Security Policy, add the LMA domain to `frame-src`:
    ```html
    <meta http-equiv="Content-Security-Policy"
@@ -919,7 +1037,7 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 
 **Meeting Loader (with token auth):**
 ```
-/#/embed?component=meeting-loader&authMode=token
+/#/embed?component=meeting-loader&authMode=token&allowedOrigins=https://YOUR_APP_ORIGIN
 ```
 
 **VP Loader (waiting for postMessage):**

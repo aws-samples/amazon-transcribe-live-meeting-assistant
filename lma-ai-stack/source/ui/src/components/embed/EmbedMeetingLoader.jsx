@@ -41,6 +41,7 @@ import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import { STREAM_AUDIO_CLIENT_TYPE } from '../common/streaming-frame';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { isAcceptedEmbedMessage } from '../../hooks/embed-message-origin';
 import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
 const logger = new ConsoleLogger('EmbedMeetingLoader');
@@ -237,6 +238,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
   // Listen for parent control messages
   useEffect(() => {
     const handleMessage = (event) => {
+      if (!isAcceptedEmbedMessage(event, params.allowedOrigins)) return;
       const { data } = event;
       if (!data || !data.type) return;
 
@@ -264,7 +266,7 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [state]);
+  }, [state, params.allowedOrigins]);
 
   // Notify parent we're ready
   useEffect(() => {
@@ -481,6 +483,7 @@ EmbedMeetingLoader.propTypes = {
     owner: PropTypes.string,
     autoStart: PropTypes.bool,
     callId: PropTypes.string,
+    allowedOrigins: PropTypes.arrayOf(PropTypes.string),
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

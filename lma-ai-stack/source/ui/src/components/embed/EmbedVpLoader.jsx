@@ -66,6 +66,7 @@ import {
   StatusDetails as VPStatusDetails,
   ConnectionDetails as VPConnectionDetails,
 } from '../virtual-participant-layout/VirtualParticipantDetails';
+import { isAcceptedEmbedMessage } from '../../hooks/embed-message-origin';
 
 const client = generateClient();
 const logger = new ConsoleLogger('EmbedVpLoader');
@@ -426,6 +427,7 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
 
   useEffect(() => {
     const handleMessage = (event) => {
+      if (!isAcceptedEmbedMessage(event, params.allowedOrigins)) return;
       const { data } = event;
       if (!data?.type) return;
       switch (data.type) {
@@ -453,7 +455,7 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [doCreate, doEnd, sendToParent]);
+  }, [doCreate, doEnd, sendToParent, params.allowedOrigins]);
 
   useEffect(() => {
     sendToParent({
@@ -621,6 +623,7 @@ EmbedVpLoader.propTypes = {
     meetingPassword: PropTypes.string,
     autoStart: PropTypes.bool,
     simple: PropTypes.bool,
+    allowedOrigins: PropTypes.arrayOf(PropTypes.string),
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

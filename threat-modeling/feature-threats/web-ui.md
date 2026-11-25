@@ -103,9 +103,9 @@ flowchart TD
 | **Severity** | Medium (2) |
 | **Risk Score** | **4 (Medium)** |
 | **Affected Components** | Embeddable iframe components, CloudFront response headers, React UI |
-| **Existing Mitigations** | X-Frame-Options / Content-Security-Policy frame-ancestors configuration in the web UI's response headers policy (see UI.T07), origin validation for postMessage communication |
-| **Status** | Partially Mitigated |
-| **Recommendations** | Implement strict frame-ancestors CSP directive with allowlisted domains, validate all postMessage origins, minimize data exposed through iframe API, add iframe sandbox attributes |
+| **Existing Mitigations** | Content-Security-Policy `frame-ancestors` of `'self'` plus the origins in the `AllowedEmbedOrigins` stack parameter (empty by default) in the web UI's response headers policy (see UI.T07), with `X-Frame-Options: DENY` while that list is empty; embed `postMessage` listeners accept messages only from the `allowedOrigins` query parameter's origins, or the embed's own origin when it is empty, and send events only to the first of them |
+| **Status** | Mitigated |
+| **Recommendations** | Keep `AllowedEmbedOrigins` to the exact origins that embed LMA, preferring exact hosts to a `*.` wildcard where the parent domain also serves sites the operator does not control; minimize data exposed through the iframe API |
 
 ### UI.T04: GraphQL API Abuse / Introspection
 
@@ -171,7 +171,7 @@ flowchart TD
 | **Severity** | High (3) |
 | **Risk Score** | **3 (Medium)** |
 | **Affected Components** | CloudFront distribution of the web UI, response headers policy `SecurityHeadersPolicy`, React SPA |
-| **Existing Mitigations** | The distribution adds a response headers policy to every response: a Content-Security-Policy whose directives name each source the web UI uses (`script-src 'self'` with no `eval`, `object-src` and `base-uri` `'none'`, `connect-src` limited to the stack's AppSync, Cognito, S3 and other named AWS endpoints in the stack's Region and the few named external hosts), framing restrictions (`X-Frame-Options` and `frame-ancestors`), `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` that allows camera, microphone and display capture only for the web UI's own origin and denies other device features, and `Cross-Origin-Resource-Policy: same-origin`; the origin's `Server` header is removed; a unit test fails when the UI constructs an AWS SDK client whose service is not in `connect-src`, and an integration test checks the deployed headers |
+| **Existing Mitigations** | The distribution adds a response headers policy to every response: a Content-Security-Policy whose directives name each source the web UI uses (`script-src 'self'` with no `eval`, `object-src` and `base-uri` `'none'`, `connect-src` limited to the stack's AppSync, Cognito, S3 and other named AWS endpoints in the stack's Region and the few named external hosts), framing restrictions (`frame-ancestors 'self'` plus the `AllowedEmbedOrigins` origins, and `X-Frame-Options: DENY` while that list is empty), `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` that allows camera, microphone and display capture only for the web UI's own origin and denies other device features, and `Cross-Origin-Resource-Policy: same-origin`; the origin's `Server` header is removed; a unit test fails when the UI constructs an AWS SDK client whose service is not in `connect-src`, and an integration test checks the deployed headers |
 | **Status** | Mitigated |
 | **Recommendations** | When customizing the web UI, add each new origin to the matching directive rather than widening a directive; see [Response headers](../../docs/infrastructure-and-security.md#response-headers) |
 
@@ -183,7 +183,7 @@ flowchart TD
 | **CSP headers** | Content-Security-Policy via CloudFront response headers | UI.T01, UI.T03 |
 | **Subscription authorization** | AppSync resolver auth on subscriptions | UI.T02 |
 | **Cognito authentication** | Required for all API operations | UI.T02, UI.T04, UI.T05 |
-| **X-Frame-Options** | Framing restrictions via response headers | UI.T03 |
+| **frame-ancestors** | CSP `frame-ancestors 'self'` plus `AllowedEmbedOrigins`; `X-Frame-Options: DENY` while that list is empty | UI.T03 |
 | **Rate limiting** | AppSync built-in throttling | UI.T04 |
 | **CloudFront OAC** | Origin Access Control for S3 | UI.T05 |
 | **Geo restrictions** | CloudFront geographic access control | UI.T01, UI.T04 |

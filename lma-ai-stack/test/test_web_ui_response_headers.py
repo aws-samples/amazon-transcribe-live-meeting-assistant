@@ -20,9 +20,12 @@ import re
 from pathlib import Path
 
 import pytest
-from ai_stack_templates import flattened
+from ai_stack_templates import TEMPLATE, flattened, load
 
 ROOT = Path(__file__).resolve().parents[2]
+MAIN_TEMPLATE = ROOT / "lma-main.yaml"
+
+
 UI = ROOT / "lma-ai-stack" / "source" / "ui"
 MCP_INDEX = ROOT / "lma-ai-stack" / "source" / "lambda_functions" / "mcp_analytics" / "index.py"
 
@@ -76,6 +79,80 @@ SECURITY_HEADERS = {
 # CloudFront's limit on a Content-Security-Policy value.
 CSP_MAX_LENGTH = 1783
 
+PERMISSIONS_POLICY = (
+    "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), "
+    "usb=(), serial=(), hid=(), bluetooth=(), midi=()"
+)
+FRAME_OPTIONS = {"Override": True, "FrameOption": "DENY"}
+
+NO_VALUE = object()
+
+
+def evaluate(node, parameters: dict[str, str]):
+    """Evaluate the intrinsics the headers policy uses, for the given AllowedEmbedOrigins value."""
+    if isinstance(node, dict) and len(node) == 1:
+        [(name, args)] = node.items()
+        allowed = parameters["AllowedEmbedOrigins"] != ""
+        if name == "Fn::If":
+            condition, when_true, when_false = args
+            assert condition == "ShouldAllowEmbedOrigins", condition
+            return evaluate(when_true if allowed else when_false, parameters)
+        if name == "Ref" and args in parameters:
+            return parameters[args]
+        if name == "Ref" and args == "AWS::NoValue":
+            return NO_VALUE
+        if name == "Fn::Join":
+            separator, items = args
+            return separator.join(evaluate(items, parameters))
+        if name == "Fn::Split":
+            separator, value = args
+            return evaluate(value, parameters).split(separator)
+    if isinstance(node, list):
+        return [evaluate(item, parameters) for item in node]
+    if isinstance(node, dict):
+        return {key: value for key, value in ((k, evaluate(v, parameters)) for k, v in node.items()) if value is not NO_VALUE}
+    return node
+
+
+def render_csp(csp_sub: list, origins: str) -> str:
+    """The Fn::Sub template string with EmbedAncestors substituted; AWS and AppSync variables stay."""
+    template, variables = csp_sub
+    ancestors = evaluate(variables["EmbedAncestors"], {"AllowedEmbedOrigins": origins})
+    assert isinstance(ancestors, str)
+    return template.replace("${EmbedAncestors}", ancestors)
+
+
+def parse_csp(value: str) -> dict[str, str]:
+    directives = {}
+    for part in value.split(";"):
+        if part.strip():
+            name, _, sources = part.strip().partition(" ")
+            assert name not in directives, f"{name} is declared twice"
+            directives[name] = " ".join(sources.split())
+    return directives
+
+
+def headers_for(policy: dict, csp_sub: list, origins: str) -> dict[str, str]:
+    """The headers the policy adds with AllowedEmbedOrigins = ``origins`` (CSP left as a Sub template)."""
+    config = evaluate(policy, {"AllowedEmbedOrigins": origins})
+    security = config["SecurityHeadersConfig"]
+    headers = {"Content-Security-Policy": render_csp(csp_sub, origins)}
+    if "FrameOptions" in security:
+        headers["X-Frame-Options"] = security["FrameOptions"]["FrameOption"]
+    for item in config["CustomHeadersConfig"]["Items"]:
+        headers[item["Header"]] = item["Value"]
+    return headers
+
+
+def _render_long_deployment(csp: str) -> str:
+    """``csp`` for the longest Region name, a China URL suffix and AppSync hosts of the length AppSync generates."""
+    return (
+        csp.replace("${AWS::Region}", "ap-southeast-5")
+        .replace("${AWS::URLSuffix}", "amazonaws.com.cn")
+        .replace("${AppSyncApiEncrypted.GraphQLDns}", f"{'a' * 26}.appsync-api.ap-southeast-5.amazonaws.com.cn")
+        .replace("${AppSyncApiEncrypted.RealtimeDns}", f"{'a' * 26}.appsync-realtime-api.ap-southeast-5.amazonaws.com.cn")
+    )
+
 
 @pytest.fixture(scope="module")
 def resources() -> dict:
@@ -88,21 +165,23 @@ def policy(resources) -> dict:
 
 
 @pytest.fixture(scope="module")
-def csp_template(policy) -> str:
+def csp_sub(policy) -> list:
     value = policy["SecurityHeadersConfig"]["ContentSecurityPolicy"]["ContentSecurityPolicy"]
-    assert set(value) == {"Fn::Sub"} and isinstance(value["Fn::Sub"], str)
+    assert set(value) == {"Fn::Sub"} and isinstance(value["Fn::Sub"], list) and len(value["Fn::Sub"]) == 2
     return value["Fn::Sub"]
 
 
 @pytest.fixture(scope="module")
+def csp_template(csp_sub) -> str:
+    """The policy as deployed with AllowedEmbedOrigins empty."""
+    template, variables = csp_sub
+    assert set(variables) == {"EmbedAncestors"}
+    return render_csp(csp_sub, "")
+
+
+@pytest.fixture(scope="module")
 def csp(csp_template) -> dict[str, str]:
-    directives = {}
-    for part in csp_template.split(";"):
-        if part.strip():
-            name, _, sources = part.strip().partition(" ")
-            assert name not in directives, f"{name} is declared twice"
-            directives[name] = " ".join(sources.split())
-    return directives
+    return parse_csp(csp_template)
 
 
 def test_content_security_policy_directives(csp) -> None:
@@ -176,14 +255,7 @@ def test_the_ui_sends_step_functions_only_sync_executions() -> None:
 
 
 def test_content_security_policy_fits_cloudfront_limit(csp_template) -> None:
-    # A long deployment: the longest Region name, a China URL suffix, and
-    # AppSync hosts of the length AppSync generates.
-    rendered = (
-        csp_template.replace("${AWS::Region}", "ap-southeast-5")
-        .replace("${AWS::URLSuffix}", "amazonaws.com.cn")
-        .replace("${AppSyncApiEncrypted.GraphQLDns}", f"{'a' * 26}.appsync-api.ap-southeast-5.amazonaws.com.cn")
-        .replace("${AppSyncApiEncrypted.RealtimeDns}", f"{'a' * 26}.appsync-realtime-api.ap-southeast-5.amazonaws.com.cn")
-    )
+    rendered = _render_long_deployment(csp_template)
     assert "${" not in rendered
     assert len(rendered) <= CSP_MAX_LENGTH
 
@@ -206,7 +278,9 @@ def test_other_security_headers(policy) -> None:
         "Preload": False,
     }
     assert security["ContentTypeOptions"] == {"Override": True}
-    assert security["FrameOptions"] == {"Override": True, "FrameOption": "DENY"}
+    assert security["FrameOptions"] == {
+        "Fn::If": ["ShouldAllowEmbedOrigins", {"Ref": "AWS::NoValue"}, FRAME_OPTIONS]
+    }
     assert security["ReferrerPolicy"] == {"Override": True, "ReferrerPolicy": "strict-origin-when-cross-origin"}
 
 
@@ -215,8 +289,7 @@ def test_custom_headers(policy) -> None:
     assert headers == {
         "Permissions-Policy": {
             "Header": "Permissions-Policy",
-            "Value": "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), "
-            "usb=(), serial=(), hid=(), bluetooth=(), midi=()",
+            "Value": PERMISSIONS_POLICY,
             "Override": True,
         },
         "Cross-Origin-Resource-Policy": {
@@ -250,6 +323,136 @@ def test_origin_server_header_is_removed(policy) -> None:
 def test_policy_applies_to_the_web_app(resources) -> None:
     behavior = resources["WebAppCloudFrontDistribution"]["Properties"]["DistributionConfig"]["DefaultCacheBehavior"]
     assert behavior["ResponseHeadersPolicyId"] == {"Ref": "SecurityHeadersPolicy"}
+
+
+EMBED_ORIGINS = "https://crm.example.com,https://*.intranet.example.com:8443"
+
+
+def _parameter(template_path: Path) -> dict:
+    return load(template_path)["Parameters"]["AllowedEmbedOrigins"]
+
+
+def test_headers_with_no_embed_origins(policy, csp_sub) -> None:
+    headers = headers_for(policy, csp_sub, "")
+    assert parse_csp(headers["Content-Security-Policy"]) == EXPECTED_CSP
+    assert headers["Content-Security-Policy"].endswith("; frame-ancestors 'self'")
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["Permissions-Policy"] == PERMISSIONS_POLICY
+
+
+def test_headers_with_embed_origins(policy, csp_sub) -> None:
+    headers = headers_for(policy, csp_sub, EMBED_ORIGINS)
+    ancestors = "'self' https://crm.example.com https://*.intranet.example.com:8443"
+    assert parse_csp(headers["Content-Security-Policy"]) == dict(EXPECTED_CSP, **{"frame-ancestors": ancestors})
+    # The same policy, with the origins appended to the last directive.
+    assert headers["Content-Security-Policy"] == (
+        render_csp(csp_sub, "") + " https://crm.example.com https://*.intranet.example.com:8443"
+    )
+    # X-Frame-Options cannot name the origins, so it is not sent.
+    assert "X-Frame-Options" not in headers
+    # The embed's own origin is still "self" inside another origin's iframe;
+    # the embedding page grants the features through its iframe's allow attribute.
+    assert headers["Permissions-Policy"] == PERMISSIONS_POLICY
+
+
+def test_one_embed_origin(policy, csp_sub) -> None:
+    headers = headers_for(policy, csp_sub, "https://crm.example.com")
+    assert parse_csp(headers["Content-Security-Policy"])["frame-ancestors"] == "'self' https://crm.example.com"
+    assert "X-Frame-Options" not in headers
+
+
+def test_ai_stack_declares_the_parameter_as_the_main_stack_does() -> None:
+    main, ai = _parameter(MAIN_TEMPLATE), _parameter(TEMPLATE)
+    for key in ("Type", "Default", "MaxLength", "AllowedPattern", "ConstraintDescription"):
+        assert ai[key] == main[key], key
+    assert main["Type"] == "String" and main["Default"] == ""
+
+
+def test_main_stack_passes_the_parameter_to_the_ai_stack() -> None:
+    resources = load(MAIN_TEMPLATE)["Resources"]
+    passing = [
+        name
+        for name, resource in resources.items()
+        if ((resource.get("Properties") or {}).get("Parameters") or {}).get("AllowedEmbedOrigins")
+        == {"Ref": "AllowedEmbedOrigins"}
+    ]
+    assert passing == ["AISTACK"]
+
+
+def test_main_stack_shows_the_parameter_with_the_cloudfront_settings() -> None:
+    interface = load(MAIN_TEMPLATE)["Metadata"]["AWS::CloudFormation::Interface"]
+    group = next(g for g in interface["ParameterGroups"] if "AllowedEmbedOrigins" in g["Parameters"])
+    assert group["Label"]["default"] == "Amazon CloudFront Configuration"
+    assert interface["ParameterLabels"]["AllowedEmbedOrigins"]["default"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "https://crm.example.com",
+        "https://crm.example.com,https://portal.example.org:8443",
+        "https://*.example.com",
+        "https://*.intranet.example.com:8443",
+        "https://localhost:3000",
+        "https://10.0.0.5",
+        "https://my-app.example.co.uk",
+    ],
+)
+def test_pattern_accepts(value) -> None:
+    assert re.fullmatch(_parameter(MAIN_TEMPLATE)["AllowedPattern"], value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://crm.example.com",
+        "crm.example.com",
+        "https://crm.example.com/",
+        "https://crm.example.com/app",
+        "https://crm.example.com, https://portal.example.org",
+        "https://crm.example.com,",
+        ",https://crm.example.com",
+        "https://*",
+        "https://*.com",
+        "*.example.com",
+        "https://a.*.example.com",
+        "https://Crm.Example.com",
+        "https://crm.example.com:",
+        "https://-crm.example.com",
+        "https://crm.example.com;script-src *",
+        "https://crm.example.com 'unsafe-inline'",
+        "'self'",
+        "*",
+        "https:",
+        "wss://crm.example.com",
+    ],
+)
+def test_pattern_refuses(value) -> None:
+    assert not re.fullmatch(_parameter(MAIN_TEMPLATE)["AllowedPattern"], value)
+
+
+def _origins_of_length(length: int) -> str:
+    """A valid AllowedEmbedOrigins value exactly ``length`` characters long."""
+    origins: list[str] = []
+    while len(",".join([*origins, "https://e00.example.com"])) + len(",https://p.example.com") <= length:
+        origins.append(f"https://e{len(origins):02d}.example.com")
+    padding = length - len(",".join(origins)) - len(",https://.example.com")
+    value = ",".join([*origins, f"https://{'p' * padding}.example.com"])
+    assert len(value) == length
+    return value
+
+
+def test_content_security_policy_with_the_longest_origin_list_fits_cloudfront_limit(policy, csp_sub) -> None:
+    max_length = _parameter(MAIN_TEMPLATE)["MaxLength"]
+    origins = _origins_of_length(max_length)
+    assert re.fullmatch(_parameter(MAIN_TEMPLATE)["AllowedPattern"], origins)
+    rendered = _render_long_deployment(headers_for(policy, csp_sub, origins)["Content-Security-Policy"])
+    assert "${" not in rendered
+    assert len(rendered) <= CSP_MAX_LENGTH, (
+        f"with {max_length} characters of origins the policy is {len(rendered)} characters: "
+        "lower AllowedEmbedOrigins' MaxLength in both templates, or shorten the policy"
+    )
 
 
 def _lambda_response_headers() -> dict[str, str]:

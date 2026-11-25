@@ -98,12 +98,34 @@ def ui_env(outputs) -> dict[str, str]:
     return env
 
 
+@pytest.fixture(scope="module")
+def embed_origins(client) -> list[str]:
+    """The stack's AllowedEmbedOrigins parameter, as a list (empty when unset or not declared)."""
+    cloudformation = client.session.client("cloudformation", region_name=client.region)
+    stack = cloudformation.describe_stacks(StackName=client.stack_name)["Stacks"][0]
+    value = next(
+        (p.get("ParameterValue", "") for p in stack.get("Parameters", []) if p["ParameterKey"] == "AllowedEmbedOrigins"),
+        "",
+    )
+    return [origin for origin in value.split(",") if origin]
+
+
 def test_web_ui_scripts_and_styles(csp) -> None:
     assert csp["script-src"] == ["'self'"]
     assert csp["style-src"] == ["'self'", "'unsafe-inline'"]
     assert csp["default-src"] == ["'self'"]
     assert csp["object-src"] == ["'none'"]
-    assert csp["frame-ancestors"] == ["'self'"]
+
+
+def test_frame_ancestors_are_this_origin_and_the_allowed_embed_origins(csp, embed_origins) -> None:
+    assert csp["frame-ancestors"] == ["'self'", *embed_origins]
+
+
+def test_frame_options_follow_the_allowed_embed_origins(web, embed_origins) -> None:
+    # X-Frame-Options cannot name a list of origins, so it is sent only when
+    # no other origin may frame the web UI.
+    expected = None if embed_origins else "DENY"
+    assert web.get("X-Frame-Options") == expected
 
 
 def test_web_ui_policy_has_no_whole_scheme_or_any_host_source(csp) -> None:
@@ -146,10 +168,12 @@ def test_web_ui_security_headers(web) -> None:
     assert web.get("X-Content-Type-Options") == "nosniff"
     assert web.get("Cross-Origin-Resource-Policy") == "same-origin"
     assert web.get("Referrer-Policy") == "strict-origin-when-cross-origin"
-    assert web.get("X-Frame-Options") == "DENY"
 
 
 def test_web_ui_permissions_policy(web) -> None:
+    # The same whatever AllowedEmbedOrigins is: inside another origin's iframe
+    # "self" is still the web UI's origin, and the embedding page grants the
+    # features through the iframe's allow attribute.
     value = web.get("Permissions-Policy")
     assert value, "the web UI sends no Permissions-Policy"
     features = dict(part.strip().split("=", 1) for part in value.split(","))

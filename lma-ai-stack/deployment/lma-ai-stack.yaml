@@ -217,6 +217,22 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
+  AllowedEmbedOrigins:
+    Type: String
+    Default: ""
+    MaxLength: 600
+    Description: >-
+      Comma separated list of https:// origins (no spaces, no paths) whose pages may show the web UI
+      and its embeddable components in an iframe, for example
+      https://crm.example.com,https://portal.example.org:8443. A host that starts with *. matches
+      every subdomain of the rest of the host. Leave empty to allow only the web UI's own origin to
+      frame its pages. See docs/embeddable-components.md.
+    AllowedPattern: '^$|^https://(\*\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)(:[0-9]{1,5})?(,https://(\*\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)(:[0-9]{1,5})?)*$'
+    ConstraintDescription: >-
+      Empty, or a comma separated list (no spaces) of lowercase https://host or https://host:port
+      origins, where the host may start with *. followed by at least two labels; no paths,
+      trailing slashes or other schemes
+
   IsLambdaAgentAssistEnabled:
     Type: String
     Default: "false"
@@ -684,6 +700,7 @@ Metadata:
         Parameters:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
+          - AllowedEmbedOrigins
     ParameterLabels:
       S3BucketName:
         default: Call Audio Bucket Name
@@ -691,6 +708,8 @@ Metadata:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
+      AllowedEmbedOrigins:
+        default: Origins Allowed to Embed the Web UI
       IsSentimentAnalysisEnabled:
         default: Enable Sentiment Analysis
       ComprehendLanguageCode:
@@ -735,6 +754,7 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  ShouldAllowEmbedOrigins: !Not [!Equals [!Ref AllowedEmbedOrigins, ""]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   # Biometric data, so this gates the EXISTENCE of the resources rather than
   # just their use: with it false there is nowhere for a voiceprint to be stored.
@@ -13628,8 +13648,20 @@ Resources:
             #       wss://*.lambda-microvm.<region>.on.aws: the per-MicroVM
             #         noVNC endpoint used when VPLaunchType=MICROVM.
             #   - object-src 'none', base-uri 'none', form-action 'self'.
-            #   - frame-ancestors 'self': only this origin may frame the app.
-            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; media-src 'self' blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self'; connect-src 'self' https://${AppSyncApiEncrypted.GraphQLDns} wss://${AppSyncApiEncrypted.RealtimeDns} https://cognito-idp.${AWS::Region}.${AWS::URLSuffix} https://cognito-identity.${AWS::Region}.${AWS::URLSuffix} https://ssm.${AWS::Region}.${AWS::URLSuffix} https://sync-states.${AWS::Region}.${AWS::URLSuffix} https://translate.${AWS::Region}.${AWS::URLSuffix} https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix} https://registry.modelcontextprotocol.io wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+            #   - frame-ancestors 'self', then the AllowedEmbedOrigins
+            #     parameter's origins, space separated: the origins whose
+            #     pages may frame the app (the embeddable components). Every
+            #     ancestor is checked, so the chat frame (strands-chat.html)
+            #     inside an embed on another origin needs the same list,
+            #     which it gets because it is served with this policy. The
+            #     parameter's MaxLength keeps the whole value within
+            #     CloudFront's limit on this header.
+            ContentSecurityPolicy: !Sub
+              - "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; media-src 'self' blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self'; connect-src 'self' https://${AppSyncApiEncrypted.GraphQLDns} wss://${AppSyncApiEncrypted.RealtimeDns} https://cognito-idp.${AWS::Region}.${AWS::URLSuffix} https://cognito-identity.${AWS::Region}.${AWS::URLSuffix} https://ssm.${AWS::Region}.${AWS::URLSuffix} https://sync-states.${AWS::Region}.${AWS::URLSuffix} https://translate.${AWS::Region}.${AWS::URLSuffix} https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix} https://registry.modelcontextprotocol.io wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'${EmbedAncestors}"
+              - EmbedAncestors: !If
+                  - ShouldAllowEmbedOrigins
+                  - !Join ["", [" ", !Join [" ", !Split [",", !Ref AllowedEmbedOrigins]]]]
+                  - ""
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
@@ -13637,9 +13669,14 @@ Resources:
             Preload: false
           ContentTypeOptions:
             Override: true
-          FrameOptions:
-            Override: true
-            FrameOption: DENY
+          # X-Frame-Options names no list of origins, and a browser that
+          # receives both headers obeys frame-ancestors, so the header is
+          # sent only when no other origin may frame the app.
+          FrameOptions: !If
+            - ShouldAllowEmbedOrigins
+            - !Ref AWS::NoValue
+            - Override: true
+              FrameOption: DENY
           ReferrerPolicy:
             Override: true
             ReferrerPolicy: strict-origin-when-cross-origin
@@ -13647,7 +13684,12 @@ Resources:
           Items:
             # Microphone, camera and screen capture for this origin only
             # (Stream Audio/Video and the stream-audio embeds); the other
-            # listed features are off for every origin.
+            # listed features are off for every origin. The allowlist names
+            # the origins of this document and of the frames it embeds, so it
+            # is the same when AllowedEmbedOrigins is set: an embed on another
+            # origin gets these features from the embedding page, through
+            # its iframe's allow attribute, and "self" here is still the
+            # embed's own origin.
             - Header: Permissions-Policy
               Value: "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=()"
               Override: true

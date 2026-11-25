@@ -64,6 +64,8 @@ const closeSocket = (target) => act(() => socket.options.onClose({ target, code:
 const stoppedMessages = (sendToParent) =>
   sendToParent.mock.calls.map(([m]) => m).filter((m) => m.type === 'LMA_MEETING_STOPPED');
 
+const OWN_ORIGIN = window.location.origin;
+
 describe('EmbedStreamAudio', () => {
   let sendToParent;
 
@@ -90,11 +92,35 @@ describe('EmbedStreamAudio', () => {
   const start = async () => {
     render(<EmbedStreamAudio params={{ meetingTopic: 'Weekly' }} sendToParent={sendToParent} />);
     const first = openSocket();
-    act(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'LMA_START_MEETING' } })));
+    act(() =>
+      window.dispatchEvent(new MessageEvent('message', { origin: OWN_ORIGIN, data: { type: 'LMA_START_MEETING' } })),
+    );
     await screen.findByRole('button', { name: 'Stop Streaming' });
     await waitFor(() => expect(first.sent).toEqual(['START']));
     return first;
   };
+
+  it('starts only for a control message from an allowed origin', async () => {
+    render(
+      <EmbedStreamAudio
+        params={{ meetingTopic: 'Weekly', allowedOrigins: ['https://crm.example.com'] }}
+        sendToParent={sendToParent}
+      />,
+    );
+    const first = openSocket();
+    [OWN_ORIGIN, 'https://other.example.com'].forEach((origin) =>
+      act(() => window.dispatchEvent(new MessageEvent('message', { origin, data: { type: 'LMA_START_MEETING' } }))),
+    );
+    expect(screen.queryByRole('button', { name: 'Stop Streaming' })).toBeNull();
+    expect(first.sent).toEqual([]);
+
+    act(() =>
+      window.dispatchEvent(
+        new MessageEvent('message', { origin: 'https://crm.example.com', data: { type: 'LMA_START_MEETING' } }),
+      ),
+    );
+    await screen.findByRole('button', { name: 'Stop Streaming' });
+  });
 
   it('tells the parent the meeting ended for a lost connection', async () => {
     const first = await start();

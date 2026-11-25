@@ -402,6 +402,22 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
+  AllowedEmbedOrigins:
+    Type: String
+    Default: ""
+    MaxLength: 600
+    Description: >-
+      Comma separated list of https:// origins (no spaces, no paths) whose pages may show the web UI
+      and its embeddable components in an iframe, for example
+      https://crm.example.com,https://portal.example.org:8443. A host that starts with *. matches
+      every subdomain of the rest of the host. Leave empty to allow only the web UI's own origin to
+      frame its pages. See docs/embeddable-components.md.
+    AllowedPattern: '^$|^https://(\*\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)(:[0-9]{1,5})?(,https://(\*\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*)(:[0-9]{1,5})?)*$'
+    ConstraintDescription: >-
+      Empty, or a comma separated list (no spaces) of lowercase https://host or https://host:port
+      origins, where the host may start with *. followed by at least two labels; no paths,
+      trailing slashes or other schemes
+
   ZoomMeetingSdkClientId:
     Type: String
     Default: ""
@@ -1059,6 +1075,7 @@ Metadata:
         Parameters:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
+          - AllowedEmbedOrigins
       - Label:
           default: Configuration
         Parameters:
@@ -1191,6 +1208,8 @@ Metadata:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
+      AllowedEmbedOrigins:
+        default: Origins Allowed to Embed the Web UI
       MeetingRecordExpirationInDays:
         default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
@@ -2988,6 +3007,7 @@ Resources:
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
+        AllowedEmbedOrigins: !Ref AllowedEmbedOrigins
         IsLambdaAgentAssistEnabled: "true"
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         # Named rather than read from MEETINGASSISTSETUP's output, because that
