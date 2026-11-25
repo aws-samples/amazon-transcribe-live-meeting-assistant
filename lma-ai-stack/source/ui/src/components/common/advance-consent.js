@@ -87,6 +87,7 @@ export const consentInvitation = ({ meetingName = '', organizer = '', scheduledF
 export const consentScopeLabel = (consent) => {
   if (!consent) return '';
   if (consent.Scope === 'meeting') return `This meeting: ${consent.MeetingName || consent.CallId || ''}`.trim();
+  if (consent.Scope === 'deployment') return 'All meetings on this deployment';
   const label = consent.LabelKey ? `, labelled ${consent.LabelKey}: ${consent.LabelValue || ''}` : '';
   return `Meetings organized by ${consent.Organizer || 'the organizer'}${label}`;
 };

@@ -327,3 +327,83 @@ def test_the_withdrawal_entry_point_is_not_reached_through_appsync(dynamo) -> No
             },
             None,
         )
+
+
+# ── a consent for every meeting on the deployment ───────────────────────────
+
+
+def everywhere(dynamo, email):
+    return dynamo.give(email, Scope="deployment", CallId=None, Organizer=None)
+
+
+def test_a_consent_for_every_meeting_counts_for_a_listed_attendee(dynamo) -> None:
+    given = everywhere(dynamo, "bo@example.com")
+    everywhere(dynamo, "cy@example.com")
+    start()
+    record = present("Bo Chen", "Cy Diaz")
+    assert record["Status"] == "granted" and record["CaptureAllowed"] is True
+    bo = next(e for e in record["Events"] if e["ParticipantName"] == "Bo Chen")
+    assert bo["Source"] == "pre_meeting" and bo["PreMeeting"]["Scope"] == "deployment"
+    assert bo["PreMeeting"]["ConsentId"] == given["ConsentId"]
+    assert dynamo.applied[(given["PK"], given["SK"])] == {CALL_ID}
+
+
+def test_a_consent_for_every_meeting_counts_only_while_in_force(dynamo) -> None:
+    dynamo.give(
+        "bo@example.com",
+        Scope="deployment",
+        CallId=None,
+        Organizer=None,
+        ValidUntil=iso(NOW - timedelta(hours=1)),
+    )
+    dynamo.give(
+        "cy@example.com",
+        Scope="deployment",
+        CallId=None,
+        Organizer=None,
+        WithdrawnAt=iso(NOW - timedelta(hours=1)),
+    )
+    start()
+    record = present("Bo Chen", "Cy Diaz")
+    assert record["Events"] == [] and record["CaptureAllowed"] is False
+
+
+def test_a_consent_for_every_meeting_does_not_reach_an_attendee_who_is_not_listed(dynamo) -> None:
+    everywhere(dynamo, "dee@example.com")
+    start()
+    record = present("Dee Evans")
+    assert record["Events"] == [] and dynamo.queries == []
+
+
+def test_an_objection_wins_over_a_consent_for_every_meeting(dynamo) -> None:
+    everywhere(dynamo, "bo@example.com")
+    start()
+    present("Bo Chen")
+    base.call(
+        "recordMeetingConsentEvent",
+        base.BACKEND,
+        ParticipantName="Bo Chen",
+        Decision="objection",
+        Source="chat",
+    )
+    record = present("Bo Chen")
+    assert record["Status"] == "objected" and record["CaptureAllowed"] is False
+
+
+def test_withdrawing_a_consent_for_every_meeting_during_one_is_an_objection(dynamo) -> None:
+    given = everywhere(dynamo, "bo@example.com")
+    start(mode="notify")
+    present("Bo Chen")
+    answer = index.handler(
+        {"advanceConsentWithdrawn": {"CallId": CALL_ID, "ConsentId": given["ConsentId"]}}, None
+    )
+    assert answer == {"CallId": CALL_ID, "Recorded": 1}
+    record = dynamo.consent()
+    assert record["Status"] == "objected" and record["CaptureAllowed"] is False
+    assert record["Events"][-1]["PreMeeting"]["Withdrawn"] is True
+
+
+def test_a_typed_organizer_counts_whatever_the_case_of_the_owner(dynamo) -> None:
+    dynamo.give("bo@example.com", Scope="organizer", CallId=None, Organizer=OWNER.upper())
+    start()
+    assert present("Bo Chen")["Events"][0]["PreMeeting"]["Scope"] == "organizer"

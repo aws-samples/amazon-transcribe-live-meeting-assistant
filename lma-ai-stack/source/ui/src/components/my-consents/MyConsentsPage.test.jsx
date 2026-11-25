@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { graphql } = vi.hoisted(() => ({ graphql: vi.fn() }));
+const { graphql, appContext } = vi.hoisted(() => ({ graphql: vi.fn(), appContext: vi.fn(() => null) }));
 
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql }) }));
 vi.mock('aws-amplify/utils', () => ({
@@ -34,8 +34,12 @@ vi.mock('aws-amplify/utils', () => ({
   },
 }));
 
-// eslint-disable-next-line import/first
+vi.mock('../../contexts/app', () => ({ default: () => appContext() }));
+
+/* eslint-disable import/first */
 import MyConsentsPage from './MyConsentsPage';
+import { CONSENT_PROMPT_TEXT } from './consent-prompt';
+/* eslint-enable import/first */
 
 const TEXT = 'I agree that owner@example.com may record and transcribe the meeting "Weekly sync".';
 
@@ -226,5 +230,166 @@ describe('a meeting’s consent page', () => {
     });
     renderAt('/consents?meeting=Weekly%20sync');
     expect(await screen.findByText(/You already have consent in force for this meeting: This meeting/)).toBeTruthy();
+  });
+});
+
+describe('My consents with no link', () => {
+  const standing = (variables) => ({
+    Listed: false,
+    Requested: false,
+    Enabled: true,
+    Email: 'bo@example.org',
+    Scope: variables.Scope,
+    Organizer: variables.Organizer || null,
+    ValidUntil: `${variables.ValidUntil}T23:59:59Z`,
+    LabelKey: variables.LabelKey || null,
+    LabelValue: variables.LabelValue || null,
+    NoticeText: `standing text for ${variables.Scope} ${variables.Organizer || ''}`.trim(),
+    NoticeHash: 'c'.repeat(64),
+    MaxDays: 180,
+    ActiveConsents: [],
+  });
+
+  it('offers a standing consent for an organizer’s meetings or for every meeting, enabled', async () => {
+    answer({ listMyAdvanceConsents: () => ({ Enabled: true, MaxDays: 180, Email: 'bo@example.org', Consents: [] }) });
+    renderAt('/consents');
+    expect(await screen.findByText('Give a standing consent')).toBeTruthy();
+    const organizer = screen.getByLabelText(/Meetings organized by one person/);
+    const everywhere = screen.getByLabelText(/All meetings on this deployment/);
+    expect(organizer.disabled).toBe(false);
+    expect(everywhere.disabled).toBe(false);
+    // Nothing is chosen for the person, and nothing is asked of the server until they choose.
+    expect(organizer.checked).toBe(false);
+    expect(everywhere.checked).toBe(false);
+    expect(calls('getAdvanceConsentInvitation')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Give consent' })).toBeNull();
+  });
+
+  it('gives a consent for every meeting with the text the server returned, after agreeing', async () => {
+    answer({
+      listMyAdvanceConsents: () => ({ Enabled: true, MaxDays: 180, Email: 'bo@example.org', Consents: [] }),
+      getAdvanceConsentInvitation: standing,
+      giveAdvanceConsent: () => consent({ Scope: 'deployment', CallId: null, Organizer: null }),
+    });
+    renderAt('/consents');
+    fireEvent.click(await screen.findByLabelText(/All meetings on this deployment/));
+    await waitFor(() =>
+      expect(screen.getByTestId('standing-consent-text').textContent).toBe('standing text for deployment'),
+    );
+    const asked = calls('getAdvanceConsentInvitation').at(-1).variables;
+    expect(asked.Scope).toBe('deployment');
+    expect(asked.CallId).toBeUndefined();
+    expect(asked.ValidUntil).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const give = screen.getByRole('button', { name: 'Give consent' });
+    expect(give.disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText('I have read this text and agree to it'));
+    fireEvent.click(give);
+    await waitFor(() => expect(calls('giveAdvanceConsent')).toHaveLength(1));
+    expect(calls('giveAdvanceConsent')[0].variables).toEqual({
+      input: { Scope: 'deployment', ValidUntil: asked.ValidUntil, NoticeHash: 'c'.repeat(64) },
+    });
+    expect(await screen.findByText(/Your consent is recorded/)).toBeTruthy();
+  });
+
+  it('gives a consent for the organizer typed, optionally with a label', async () => {
+    answer({
+      listMyAdvanceConsents: () => ({ Enabled: true, MaxDays: 180, Consents: [] }),
+      getAdvanceConsentInvitation: standing,
+      giveAdvanceConsent: () => consent({ Scope: 'organizer', CallId: null }),
+    });
+    renderAt('/consents');
+    fireEvent.click(await screen.findByLabelText(/Meetings organized by one person/));
+    const address = screen.getByRole('combobox', { name: "Organizer's email address" });
+    fireEvent.change(address, { target: { value: 'owner@exa' } });
+    // Not yet an address: nothing is asked.
+    expect(calls('getAdvanceConsentInvitation')).toHaveLength(0);
+    fireEvent.change(address, { target: { value: 'owner@example.com' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Label name' }), { target: { value: 'engagement' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Label value' }), { target: { value: 'acme' } });
+    await waitFor(() => expect(calls('getAdvanceConsentInvitation').at(-1).variables.LabelValue).toBe('acme'));
+    await waitFor(() =>
+      expect(screen.getByTestId('standing-consent-text').textContent).toBe(
+        'standing text for organizer owner@example.com',
+      ),
+    );
+    fireEvent.click(screen.getByLabelText('I have read this text and agree to it'));
+    fireEvent.click(screen.getByRole('button', { name: 'Give consent' }));
+    await waitFor(() => expect(calls('giveAdvanceConsent')).toHaveLength(1));
+    expect(calls('giveAdvanceConsent')[0].variables.input).toMatchObject({
+      Scope: 'organizer',
+      Organizer: 'owner@example.com',
+      LabelKey: 'engagement',
+      LabelValue: 'acme',
+      NoticeHash: 'c'.repeat(64),
+    });
+  });
+
+  it('says when the deployment takes no consent given in advance', async () => {
+    answer({ listMyAdvanceConsents: () => ({ Enabled: false, Consents: [] }) });
+    renderAt('/consents');
+    expect(await screen.findByText('This deployment does not take consent given in advance.')).toBeTruthy();
+    expect(screen.queryByText('Give a standing consent')).toBeNull();
+  });
+
+  it('withdraws a consent for every meeting from the list', async () => {
+    answer({
+      listMyAdvanceConsents: () => ({
+        Enabled: true,
+        Consents: [consent({ Scope: 'deployment', CallId: null, Organizer: null, MeetingName: null })],
+      }),
+      withdrawAdvanceConsent: () => consent({ Scope: 'deployment', Status: 'withdrawn' }),
+    });
+    renderAt('/consents');
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw All meetings on this deployment' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => expect(calls('withdrawAdvanceConsent')).toHaveLength(1));
+  });
+});
+
+describe('the prompt a Participant lands on', () => {
+  const renderPrompt = (props = { offerPrompt: true }) =>
+    render(
+      <MemoryRouter initialEntries={['/consents']}>
+        <MyConsentsPage offerPrompt={Boolean(props.offerPrompt)} />
+      </MemoryRouter>,
+    );
+
+  beforeEach(() => {
+    localStorage.clear();
+    appContext.mockReturnValue({ currentSession: { tokens: { idToken: { payload: { sub: 'sub-bo' } } } } });
+  });
+
+  it('shows the banner to a person with no consent on record, and Not now only dismisses it', async () => {
+    answer({ listMyAdvanceConsents: () => ({ Enabled: true, MaxDays: 365, Consents: [] }) });
+    renderPrompt();
+    expect(await screen.findByText(CONSENT_PROMPT_TEXT)).toBeTruthy();
+    const before = graphql.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+    expect(graphql.mock.calls.length).toBe(before);
+    expect(localStorage.getItem('lma.consentPrompt.dismissed.sub-bo')).toBe('true');
+    // The rest of the page is as it was.
+    expect(screen.getByText('Give a standing consent')).toBeTruthy();
+    cleanup();
+    renderPrompt();
+    await screen.findByText('Give a standing consent');
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+  });
+
+  it('is not shown with a consent on record, with it turned off, or outside a Participant’s pages', async () => {
+    answer({ listMyAdvanceConsents: () => ({ Enabled: true, Consents: [consent()] }) });
+    renderPrompt();
+    await screen.findByText('This meeting: Weekly sync');
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+    cleanup();
+    answer({ listMyAdvanceConsents: () => ({ Enabled: false, Consents: [] }) });
+    renderPrompt();
+    await screen.findByText('This deployment does not take consent given in advance.');
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+    cleanup();
+    answer({ listMyAdvanceConsents: () => ({ Enabled: true, Consents: [] }) });
+    renderPrompt({});
+    await screen.findByText('Give a standing consent');
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
   });
 });

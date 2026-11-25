@@ -6,7 +6,8 @@
 """Consent given in advance: its scopes, its period, its text, and what it covers.
 
 A signed-in person can consent before a meeting to its being recorded and
-transcribed, from the meeting's consent page. The consent is kept under the
+transcribed: from the meeting's consent page, or, for a standing consent, on
+the My consents page with no meeting named. The consent is kept under the
 person's email address, with the scope it was given for, when it was given,
 until when it counts, when it was withdrawn, and the exact text they agreed to.
 Everything here is free of AWS, so every reader of these consents decides what
@@ -20,6 +21,13 @@ Scopes:
 ``organizer``
     Every meeting the named organizer (the meeting's owner in LMA) holds until
     a date, at most a year ahead, optionally only those that carry one label.
+    The organizer is the meeting's owner when the consent is given from a
+    meeting's link, or the address the person types when it is given on its
+    own; owners are compared ignoring case, as the user pool compares usernames.
+``deployment``
+    Every meeting on this deployment until a date, within the same longest
+    period. Like every other scope, it counts in a meeting only for an attendee
+    matched to the person on that meeting's participant list.
 """
 
 from __future__ import annotations
@@ -36,7 +44,12 @@ SOURCE_PRE_MEETING = "pre_meeting"
 
 SCOPE_MEETING = "meeting"
 SCOPE_ORGANIZER = "organizer"
-SCOPES: Tuple[str, ...] = (SCOPE_MEETING, SCOPE_ORGANIZER)
+SCOPE_DEPLOYMENT = "deployment"
+SCOPES: Tuple[str, ...] = (SCOPE_MEETING, SCOPE_ORGANIZER, SCOPE_DEPLOYMENT)
+#: The scopes a consent given from a meeting's link may have.
+LINK_SCOPES: Tuple[str, ...] = (SCOPE_MEETING, SCOPE_ORGANIZER)
+#: The scopes a standing consent, given with no meeting named, may have.
+STANDING_SCOPES: Tuple[str, ...] = (SCOPE_ORGANIZER, SCOPE_DEPLOYMENT)
 
 STATUS_ACTIVE = "active"
 STATUS_WITHDRAWN = "withdrawn"
@@ -53,11 +66,49 @@ DEFAULT_TEXT: str = DEFAULT_SETTINGS["advanceConsentText"]
 MAX_TEXT_LENGTH = 2000
 MAX_NAME_LENGTH = 200
 MAX_LABEL_LENGTH = 256
+#: The longest organizer address a standing consent may name.
+MAX_ORGANIZER_LENGTH = 254
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class InvalidConsent(ValueError):
     """A consent that cannot be given as asked; the message says why."""
+
+
+def organizer_address(value: Any) -> str:
+    """The organizer a standing consent names, as typed: an email address, in lower case.
+
+    LMA's usernames are email addresses, compared ignoring case. The address is
+    taken as written and never looked up, so the answer is the same whether
+    or not anyone has that address.
+
+    Raises:
+        InvalidConsent: it is missing, too long, or not an email address.
+    """
+    text = value.strip() if isinstance(value, str) else ""
+    if not text or len(text) > MAX_ORGANIZER_LENGTH or not _ADDRESS.match(text):
+        raise InvalidConsent("Organizer must be the organizer's email address")
+    return text.casefold()
+
+
+def typed_label(key: Any, value: Any) -> Optional[Tuple[str, str]]:
+    """The label a standing consent is limited to, as typed, or None for none.
+
+    Raises:
+        InvalidConsent: only one of the two is given, or one is too long.
+    """
+    key = key.strip() if isinstance(key, str) else ""
+    value = value.strip() if isinstance(value, str) else ""
+    if not key and not value:
+        return None
+    if not key or not value:
+        raise InvalidConsent("A label needs both LabelKey and LabelValue")
+    if len(key) > MAX_LABEL_LENGTH or len(value) > MAX_LABEL_LENGTH:
+        raise InvalidConsent(
+            f"LabelKey and LabelValue may be at most {MAX_LABEL_LENGTH} characters"
+        )
+    return (key, value)
 
 
 def parse_time(value: Any) -> Optional[datetime]:
@@ -88,7 +139,7 @@ def max_days(setting: Any) -> int:
 def valid_until(scope: str, requested: Any, now: datetime, days: int) -> datetime:
     """Until when a consent given ``now`` counts.
 
-    ``organizer``: the end (23:59:59 UTC) of the ``YYYY-MM-DD`` date asked for,
+    ``organizer`` and ``deployment``: the end (23:59:59 UTC) of the ``YYYY-MM-DD`` date asked for,
     which must be today or later and at most ``days`` days ahead. ``meeting``:
     ``days`` days from now, which is longer than any meeting is scheduled ahead
     in practice; a date asked for is used when it is sooner.
@@ -125,6 +176,11 @@ def scope_phrase(
     """What a consent covers, in words, as the text the person agrees to says it."""
     if scope == SCOPE_MEETING:
         return f'the meeting "{meeting_name}"' if meeting_name else "this meeting"
+    if scope == SCOPE_DEPLOYMENT:
+        phrase = "every meeting on this Live Meeting Assistant deployment that I am listed for"
+        if until is not None:
+            phrase += f", until the end of {iso(until)[:10]} (UTC)"
+        return phrase
     phrase = "every meeting they organize"
     if label:
         phrase += f" that is labelled {label[0]}: {label[1]}"
@@ -133,15 +189,25 @@ def scope_phrase(
     return phrase
 
 
-def render_text(template: Any, *, organizer: str, meeting_name: str, scope: str) -> str:
+#: ``{organizer}`` in a consent for every meeting on the deployment.
+EACH_ORGANIZER = "the organizer of each meeting"
+#: ``{meeting}`` in a standing consent given with no meeting named.
+COVERED_MEETINGS = "the meetings this consent covers"
+
+
+def render_text(
+    template: Any, *, organizer: str, meeting_name: str, scope: str, standing: bool = False
+) -> str:
     """The text the person agrees to, with its placeholders filled in.
 
-    Any other text in braces is left as written, as the meeting notices do.
+    ``standing`` is a consent given with no meeting named: ``{meeting}`` then
+    reads as the meetings it covers. Any other text in braces is left as
+    written, as the meeting notices do.
     """
     text = template if isinstance(template, str) and template.strip() else DEFAULT_TEXT
     values = {
         "{organizer}": organizer or "The meeting organizer",
-        "{meeting}": meeting_name or "this meeting",
+        "{meeting}": meeting_name or (COVERED_MEETINGS if standing else "this meeting"),
         "{scope}": scope,
     }
     pattern = re.compile("|".join(re.escape(key) for key in values))
@@ -194,8 +260,9 @@ def covers(consent: Mapping[str, Any], meeting: Mapping[str, Any], now: datetime
     ``meeting`` consent counts for the meeting it names, by CallId or by the
     Virtual Participant that created it. An ``organizer`` consent counts for any
     meeting whose owner is that organizer, compared exactly, as LMA compares
-    owners, and, when it names a label, that carries that label (key and value
-    compared exactly).
+    owners (ignoring case, as the user pool compares usernames), and, when it
+    names a label, that carries that label (key and value compared exactly). A
+    ``deployment`` consent counts for every meeting.
     """
     if status_of(consent, now) != STATUS_ACTIVE:
         return False
@@ -212,13 +279,16 @@ def covers(consent: Mapping[str, Any], meeting: Mapping[str, Any], now: datetime
         )
     if scope == SCOPE_ORGANIZER:
         organizer = consent.get("Organizer")
-        if not organizer or organizer != meeting.get("Owner"):
+        owner = meeting.get("Owner")
+        if not isinstance(organizer, str) or not organizer or not isinstance(owner, str):
+            return False
+        if organizer.casefold() != owner.casefold():
             return False
         key, value = consent.get("LabelKey"), consent.get("LabelValue")
         if key:
             return (key, value or "") in _labels(meeting.get("Labels"))
         return True
-    return False
+    return scope == SCOPE_DEPLOYMENT
 
 
 def covering(
@@ -246,8 +316,10 @@ def same_scope(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
                 and a.get("VirtualParticipantId") == b.get("VirtualParticipantId")
             )
         )
+    if a.get("Scope") == SCOPE_DEPLOYMENT:
+        return True
     return (
-        a.get("Organizer") == b.get("Organizer")
+        str(a.get("Organizer") or "").casefold() == str(b.get("Organizer") or "").casefold()
         and (a.get("LabelKey") or "") == (b.get("LabelKey") or "")
         and (a.get("LabelValue") or "") == (b.get("LabelValue") or "")
     )

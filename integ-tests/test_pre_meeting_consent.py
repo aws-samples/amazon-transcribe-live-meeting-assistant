@@ -36,6 +36,12 @@ participant list sends, and given a label. Then:
     an objection on the meeting within a minute. Skipped unless the runner's
     credentials are an assumed role, which the consent API treats as a backend
     role.
+``test_a_participant_with_no_link_gives_standing_consents_and_withdraws_one``
+    Runs last. The unlisted Participant, with no meeting named, reads and gives
+    a consent for every meeting on the deployment until a date (refused past
+    the deployment's longest period) and one for the owner's meetings with the
+    label, by the address typed; both are listed on My consents, one is
+    withdrawn, and the other Participant cannot withdraw the other.
 
 What the Virtual Participant posts in the chat, and its matching of a live
 roster, need a live meeting and are not part of this run.
@@ -519,3 +525,82 @@ def test_a_meeting_counts_a_consent_given_in_advance_and_a_withdrawal_as_an_obje
         "pre_meeting",
         True,
     )
+
+
+STANDING = """
+query Standing($Scope: String, $ValidUntil: String, $Organizer: String, $LabelKey: String,
+               $LabelValue: String) {
+  getAdvanceConsentInvitation(Scope: $Scope, ValidUntil: $ValidUntil, Organizer: $Organizer,
+                              LabelKey: $LabelKey, LabelValue: $LabelValue) {
+    Listed Enabled Email MeetingName Organizer Scope ValidUntil LabelKey LabelValue
+    NoticeText NoticeHash MaxDays ActiveConsents { ConsentId Scope }
+  }
+}
+"""
+
+
+def test_a_participant_with_no_link_gives_standing_consents_and_withdraws_one(
+    deployment, users
+) -> None:
+    """Runs last: it gives the unlisted Participant consents, which the test
+    above asserts they do not have."""
+    person = users["unlisted"]
+    until = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    everywhere = {"Scope": "deployment", "ValidUntil": until}
+    page = _data(probe.call(deployment, person, STANDING, everywhere), "getAdvanceConsentInvitation")
+    if not page["Enabled"]:
+        pytest.skip("Meeting Consent › Allow consent given in advance is off on this stack")
+    assert page["Scope"] == "deployment" and page["MeetingName"] is None
+    assert page["Organizer"] is None and f"until the end of {until} (UTC)" in page["NoticeText"]
+    assert page["NoticeHash"] == hashlib.sha256(page["NoticeText"].encode()).hexdigest()
+    # The deployment's longest period caps it, as it caps a consent for an organizer.
+    too_late = (datetime.now(timezone.utc) + timedelta(days=page["MaxDays"] + 1)).strftime(
+        "%Y-%m-%d"
+    )
+    late = probe.call(deployment, person, STANDING, {**everywhere, "ValidUntil": too_late})
+    assert "at most" in _errors(late), late
+    all_meetings = _data(
+        probe.call(
+            deployment, person, GIVE, {"input": {**everywhere, "NoticeHash": page["NoticeHash"]}}
+        ),
+        "giveAdvanceConsent",
+    )
+    assert all_meetings["Scope"] == "deployment" and all_meetings["CallId"] is None
+    assert all_meetings["NoticeText"] == page["NoticeText"]
+
+    # An organizer, by the address typed (in any case), with a label typed too.
+    organizer = users["owner"].username
+    by_organizer = {
+        "Scope": "organizer",
+        "ValidUntil": until,
+        "Organizer": organizer.upper(),
+        "LabelKey": LABEL["Key"],
+        "LabelValue": LABEL["Value"],
+    }
+    page = _data(probe.call(deployment, person, STANDING, by_organizer), "getAdvanceConsentInvitation")
+    assert page["Organizer"] == organizer.casefold() and organizer.casefold() in page["NoticeText"]
+    given = _data(
+        probe.call(
+            deployment, person, GIVE, {"input": {**by_organizer, "NoticeHash": page["NoticeHash"]}}
+        ),
+        "giveAdvanceConsent",
+    )
+    assert given["Scope"] == "organizer" and given["Organizer"] == organizer.casefold()
+    assert (given["LabelKey"], given["LabelValue"]) == (LABEL["Key"], LABEL["Value"])
+
+    mine = _data(probe.call(deployment, person, LIST_MINE, {}), "listMyAdvanceConsents")
+    status = {c["ConsentId"]: c["Status"] for c in mine["Consents"]}
+    assert status == {all_meetings["ConsentId"]: "active", given["ConsentId"]: "active"}
+    withdrawn = _data(
+        probe.call(deployment, person, WITHDRAW, {"input": {"ConsentId": all_meetings["ConsentId"]}}),
+        "withdrawAdvanceConsent",
+    )
+    assert withdrawn["Status"] == "withdrawn"
+    mine = _data(probe.call(deployment, person, LIST_MINE, {}), "listMyAdvanceConsents")
+    status = {c["ConsentId"]: c["Status"] for c in mine["Consents"]}
+    assert status == {all_meetings["ConsentId"]: "withdrawn", given["ConsentId"]: "active"}
+    # Nobody else can withdraw it.
+    other = probe.call(
+        deployment, users["listed"], WITHDRAW, {"input": {"ConsentId": given["ConsentId"]}}
+    )
+    assert "not one of your consents" in _errors(other), other

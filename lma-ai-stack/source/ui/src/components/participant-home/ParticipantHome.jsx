@@ -3,7 +3,7 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
 import {
@@ -11,6 +11,7 @@ import {
   AppLayout,
   Box,
   Container,
+  Flashbar,
   Header,
   Link,
   SideNavigation,
@@ -21,6 +22,7 @@ import CallAnalyticsTopNavigation from '../call-analytics-top-navigation';
 import { appLayoutLabels } from '../common/labels';
 import { NAV_HEADER } from '../common/navigation-items';
 import useAppContext from '../../contexts/app';
+import useNotifications from '../../hooks/use-notifications';
 import { HOME_PATH, MY_CONSENTS_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
 
 const PARTICIPANT_NAV_HEADER = { ...NAV_HEADER, href: `#${HOME_PATH}` };
@@ -55,10 +57,16 @@ const activeHref = (pathname) => {
   return `#${HOME_PATH}`;
 };
 
-/** The page frame of every Participant page: the top navigation, the side navigation and the content. */
-export const ParticipantLayout = ({ children }) => {
+/**
+ * The page frame of every Participant page: the top navigation, the side
+ * navigation, the notifications and the content, with the page's breadcrumbs
+ * and help panel when it has them.
+ */
+export const ParticipantLayout = ({ children, breadcrumbs = undefined, tools = undefined }) => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { pathname } = useLocation();
+  const notifications = useNotifications();
+  const [toolsOpen, setToolsOpen] = useState(false);
   return (
     <div>
       <CallAnalyticsTopNavigation />
@@ -73,7 +81,12 @@ export const ParticipantLayout = ({ children }) => {
         }
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
-        toolsHide
+        notifications={<Flashbar items={notifications} />}
+        breadcrumbs={breadcrumbs}
+        tools={tools}
+        toolsHide={!tools}
+        toolsOpen={toolsOpen}
+        onToolsChange={({ detail }) => setToolsOpen(detail.open)}
         content={children}
         ariaLabels={appLayoutLabels}
       />
@@ -81,7 +94,11 @@ export const ParticipantLayout = ({ children }) => {
   );
 };
 
-ParticipantLayout.propTypes = { children: PropTypes.node.isRequired };
+ParticipantLayout.propTypes = {
+  children: PropTypes.node.isRequired,
+  breadcrumbs: PropTypes.node,
+  tools: PropTypes.node,
+};
 
 /** The Participant home page. */
 export const ParticipantHome = () => (
@@ -95,7 +112,8 @@ export const ParticipantHome = () => (
       </Box>
       <Box variant="p">
         Under <Link href={`#${MY_CONSENTS_PATH}`}>My consents</Link> you can give consent before a meeting to its being
-        recorded and transcribed, from the consent link its organizer sends you, and withdraw it at any time.
+        recorded and transcribed, for one meeting from the consent link its organizer sends you, or for the meetings one
+        organizer holds or every meeting on this deployment until a date, and withdraw it at any time.
       </Box>
       <Box variant="p">
         Under <Link href={`#${VOICE_ENROLLMENT_PATH}`}>Voice enrollment</Link> you can enroll your own voice, so the
