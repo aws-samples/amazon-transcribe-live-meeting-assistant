@@ -113,7 +113,7 @@ flowchart TD
 |-----------|-------|
 | **Threat ID** | UI.T04 |
 | **Category** | STRIDE: Information Disclosure, Denial of Service |
-| **Description** | AppSync GraphQL API with 39 resolvers exposes a rich query surface. Attackers could use introspection to discover the full schema, craft expensive queries to cause DoS, or exploit overly permissive queries to extract more data than intended. |
+| **Description** | The AppSync GraphQL API exposes a rich query surface. Attackers could use introspection to discover the full schema, craft expensive queries to cause DoS, or exploit overly permissive queries to extract more data than intended. |
 | **Attack Vector** | Attacker uses GraphQL introspection to map the full API schema, then crafts deeply nested or batched queries that consume excessive Lambda/DynamoDB resources, or discovers undocumented queries that expose additional data |
 | **Impact** | API schema disclosure aiding further attacks, DDoS via expensive queries, unauthorized data access via discovered queries |
 | **Likelihood** | Medium (2) |

@@ -111,7 +111,7 @@ flowchart TD
 | **Affected Components** | AppSync resolvers, DynamoDB meeting access table, Lambda authorization logic |
 | **Existing Mitigations** | AppSync resolver-level authorization checks, meeting access validation in Lambda, user-scoped DynamoDB queries, UUID meeting IDs (non-predictable), roles named on every GraphQL operation and tested against the role matrix (see AUTH.T07) |
 | **Status** | Mitigated |
-| **Recommendations** | Comprehensive authorization audit of all 39 AppSync resolvers, add meeting access middleware to all data access paths, implement meeting ID opacity (no sequential patterns), add authorization unit tests |
+| **Recommendations** | Authorization audit of every GraphQL operation against the role matrix, add meeting access middleware to all data access paths, implement meeting ID opacity (no sequential patterns), add authorization unit tests |
 
 ### AUTH.T04: Admin Group Privilege Escalation
 
@@ -223,7 +223,7 @@ flowchart TD
 | **Email verification** | Required for account activation | AUTH.T01 |
 | **Short-lived tokens** | 1-hour access token lifetime | AUTH.T02 |
 | **React XSS protection** | Framework-level protection + CSP | AUTH.T02 |
-| **Resolver authorization** | All 39 AppSync resolvers check auth | AUTH.T03 |
+| **Resolver authorization** | Every GraphQL operation names its roles; resolvers apply per-meeting rules on top | AUTH.T03 |
 | **UUID meeting IDs** | Non-predictable meeting identifiers | AUTH.T03 |
 | **IAM-protected admin ops** | Cognito admin APIs restricted by IAM | AUTH.T04 |
 | **CloudTrail logging** | Audit trail for auth operations | AUTH.T01, AUTH.T04 |

@@ -358,7 +358,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 
 ### Post-Deployment
 
-- [ ] Verify all 39 AppSync resolvers enforce authorization
+- [ ] Verify every GraphQL operation's roles match `lma-ai-stack/source/appsync/role-matrix.json`
 - [ ] Check the web UI's response headers (`integ-tests/test_response_headers.py`)
 - [ ] Choose `MeetingDataPointInTimeRecoveryDays` and the Retention deletion settings for the deployment's retention policy
 - [ ] Decide **Meeting Sharing › Share meetings with their listed participants** and **Allow consent given in advance**
@@ -373,7 +373,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 
 ### Ongoing Operations
 
-- [ ] Regular AppSync authorization audit (all resolvers)
+- [ ] Regular AppSync authorization audit against the role matrix
 - [ ] Monitor KB access patterns for cross-meeting leakage
 - [ ] Review MCP tool invocation logs for anomalies
 - [ ] Audit VP launch events and recording sessions

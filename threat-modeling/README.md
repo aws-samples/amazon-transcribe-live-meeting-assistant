@@ -29,6 +29,8 @@ This directory contains the comprehensive threat model for the Live Meeting Assi
 | Partially mitigated | 16 (25%) |
 | Accepted | 7 (11%) |
 
+Percentages are rounded so that the three shares total 100%.
+
 ## Directory Structure
 
 ```

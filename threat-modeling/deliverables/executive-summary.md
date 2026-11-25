@@ -24,7 +24,6 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 | **AWS Services Used** | 15+ (Transcribe, Bedrock, ECS Fargate, Lambda, DynamoDB, AppSync, Cognito, S3, S3 Vectors, Kinesis, CloudFront, KMS, Translate, API Gateway, CloudWatch) |
 | **CloudFormation Stacks** | 11 nested stacks |
 | **Lambda Functions** | 19 |
-| **AppSync Resolvers** | 39 |
 | **ECS Fargate Services** | 2 (WebSocket server, Virtual Participant) |
 | **AI/ML Models** | Claude 4.x, Nova, Nova Sonic, Transcribe, Translate |
 | **Third-Party APIs** | 3 (ElevenLabs, Simli, Tavily) |
@@ -61,6 +60,8 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 | **Mitigated** | 42 | 64% |
 | **Partially Mitigated** | 16 | 25% |
 | **Accepted** | 7 | 11% |
+
+Percentages are rounded so that the three shares total 100%.
 
 ## 4. Key Risk Areas
 

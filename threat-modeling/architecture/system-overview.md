@@ -100,7 +100,7 @@ flowchart TD
 | **Audio Transcription** | Amazon Transcribe Streaming | Real-time speech-to-text with speaker diarization |
 | **Event Stream** | Amazon Kinesis Data Streams | Buffers transcription events for processing |
 | **Event Processing** | AWS Lambda (19 functions) | Strands agent processing, transcript handling |
-| **API Layer** | AWS AppSync (39 resolvers) | GraphQL API with real-time subscriptions |
+| **API Layer** | AWS AppSync | GraphQL API with real-time subscriptions |
 | **Data Store** | Amazon DynamoDB | Meeting metadata, transcripts, LLM templates, API keys |
 | **Audio Storage** | Amazon S3 | Stereo audio recordings, UI static assets |
 | **CDN** | Amazon CloudFront | Web UI delivery with geo restrictions |
