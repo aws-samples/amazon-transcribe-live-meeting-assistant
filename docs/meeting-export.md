@@ -93,7 +93,7 @@ The meeting page always offers its download as a link of this kind.
   ],
   "consent": {"meetingId": "...", "mode": "opt_in", "rule": "each_participant", "status": "granted", "captureAllowed": true,
               "noticePostedAt": "...", "notices": [{"channel": "chat", "postedAt": "..."}],
-              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null}],
+              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null, "matchBasis": null, "givenInAdvance": null}],
               "attestation": null, "hasEvidence": true, "startedAt": "...", "updatedAt": "..."},
   "agenda": {"text": "...", "source": "mcp"},
   "context": "...",
@@ -213,8 +213,15 @@ tool, which is built by the same code:
   consent was never started);
 - `notices` lists each posting of the notice with its `channel` and `postedAt`;
 - `events` has one entry per consent event, with `participantName`, `decision`
-  (`consent` or `objection`), `source` (`chat`, `voice`, `ui` or
-  `attestation`), `at`, `speakerId`, `speakerLinkBasis` and `speakerLinkedAt`.
+  (`consent` or `objection`), `source` (`chat`, `voice`, `ui`, `attestation` or
+  `pre_meeting`), `at`, `speakerId`, `speakerLinkBasis`, `speakerLinkedAt`,
+  `matchBasis` and `givenInAdvance`. A `pre_meeting` event is a
+  [consent given in advance](meeting-consent.md#in-the-meeting) counted for an
+  attendee, or the objection recorded when it was withdrawn during the meeting:
+  `matchBasis` says how the attendee was matched to the participant list
+  (`display_name`), and `givenInAdvance` gives the consent's `scope`,
+  `grantedAt`, `validUntil`, `noticeHash`, `noticeVersion` and `withdrawn`,
+  never the person's address. Both are null on every other event.
   `speakerLinkBasis` says how the event was linked to the speaker who gave it,
   and `speakerLinkedAt` when; both are null for an event that was never linked.
   The basis is `same_segment`, the reply is that speaker's own line of the
@@ -228,8 +235,9 @@ tool, which is built by the same code:
   another person's on the meeting page. See
   [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply).
   After the transcript was deleted the link is still given, with a null
-  `speakerId`. Every event has `speakerLinkBasis` and `speakerLinkedAt` (the
-  schema requires both), null when there is no link;
+  `speakerId`. Every event has `speakerLinkBasis`, `speakerLinkedAt`,
+  `matchBasis` and `givenInAdvance` (the schema requires them), null when they
+  do not apply;
 - `hasEvidence` says whether evidence images exist.
 
 The evidence images themselves are only in the Everything archive, for the

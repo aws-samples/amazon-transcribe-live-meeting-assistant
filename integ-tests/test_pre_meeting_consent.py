@@ -27,9 +27,18 @@ participant list sends, and given a label. Then:
     The unlisted Participant is told only that they are not listed, cannot
     give consent, and asks to be added: the owner gets an in-app notification
     on the meeting, and nothing is stored about the Participant's consent.
+``test_a_meeting_counts_a_consent_given_in_advance_and_a_withdrawal_as_an_objection``
+    What a Virtual Participant does, without one: the runner's assumed role
+    starts the meeting's consent (opt-in) and lists the attendee by a display
+    name matching the list; the consent given in advance is recorded for them
+    (source pre_meeting, basis display_name) and capture is allowed, an
+    unlisted attendee withholds it again, and withdrawing the consent records
+    an objection on the meeting within a minute. Skipped unless the runner's
+    credentials are an assumed role, which the consent API treats as a backend
+    role.
 
-The in-meeting use of a consent given in advance needs a live meeting with a
-Virtual Participant and is not part of this run.
+What the Virtual Participant posts in the chat, and its matching of a live
+roster, need a live meeting and are not part of this run.
 
 Teardown deletes the users, the consents and the request by their keys, and
 the meeting's record, list row and notifications. Needs pycognito and
@@ -417,3 +426,96 @@ def test_a_participant_not_on_the_list_learns_nothing_and_can_ask_to_be_added(
     )
     assert again["Requested"] is True
     assert _stored(deployment, unlisted.username) == []
+
+
+CONSENT_FIELDS_ON_RECORD = (
+    "Mode Status CaptureAllowed Participants "
+    "Events { ParticipantName Decision Source PreMeeting { ConsentId Scope MatchBasis Withdrawn } }"
+)
+START_CONSENT = (
+    "mutation Start($input: StartMeetingConsentInput!) { startMeetingConsent(input: $input) "
+    "{ Consent { %s } } }" % CONSENT_FIELDS_ON_RECORD
+)
+LIST_PRESENT = (
+    "mutation Present($input: SetMeetingConsentParticipantsInput!) "
+    "{ setMeetingConsentParticipants(input: $input) { Consent { %s } } }" % CONSENT_FIELDS_ON_RECORD
+)
+GET_CONSENT = "query Get($CallId: ID!) { getMeetingConsent(CallId: $CallId) { Consent { %s } } }" % (
+    CONSENT_FIELDS_ON_RECORD
+)
+WITHDRAWAL_TIMEOUT_S = 60.0
+
+
+def _backend(deployment, document: str, variables: dict) -> dict:
+    """A call signed as LMA's backend roles sign theirs (an assumed role's credentials)."""
+    from security_access_probe import sigv4_graphql  # pylint: disable=import-outside-toplevel
+
+    _status, body = sigv4_graphql(deployment.session, deployment.graphql_url, document, variables)
+    return body
+
+
+def test_a_meeting_counts_a_consent_given_in_advance_and_a_withdrawal_as_an_objection(
+    deployment, users, meeting
+) -> None:
+    """What a Virtual Participant does in the meeting, without one: the runner's
+    assumed role lists the attendees as the Virtual Participant's role does."""
+    arn = deployment.session.client("sts").get_caller_identity()["Arn"]
+    if ":assumed-role/" not in arn:
+        pytest.skip("the meeting consent API treats only an assumed role as a backend role")
+    listed = users["listed"]
+    page = _data(
+        probe.call(deployment, listed, INVITATION, {"CallId": meeting}),
+        "getAdvanceConsentInvitation",
+    )
+    if not page["Enabled"]:
+        pytest.skip("Meeting Consent › Allow consent given in advance is off on this stack")
+    given = _data(
+        probe.call(
+            deployment, listed, GIVE, {"input": {"CallId": meeting, "NoticeHash": page["NoticeHash"]}}
+        ),
+        "giveAdvanceConsent",
+    )
+    started = _backend(
+        deployment,
+        START_CONSENT,
+        {"input": {"CallId": meeting, "Mode": "opt_in", "Rule": "each_participant"}},
+    )
+    assert not started.get("errors"), started
+    present = _backend(
+        deployment, LIST_PRESENT, {"input": {"CallId": meeting, "Participants": ["integ  LISTED"]}}
+    )
+    assert not present.get("errors"), present
+    record = present["data"]["setMeetingConsentParticipants"]["Consent"]
+    [event] = [e for e in record["Events"] if e["Source"] == "pre_meeting"]
+    assert (event["ParticipantName"], event["Decision"]) == ("integ  LISTED", "consent")
+    assert event["PreMeeting"]["ConsentId"] == given["ConsentId"]
+    assert event["PreMeeting"]["MatchBasis"] == "display_name"
+    assert record["CaptureAllowed"] is True, "everyone present is covered"
+    # An attendee nobody listed is asked as usual.
+    present = _backend(
+        deployment,
+        LIST_PRESENT,
+        {"input": {"CallId": meeting, "Participants": ["integ  LISTED", "Somebody Else"]}},
+    )
+    assert present["data"]["setMeetingConsentParticipants"]["Consent"]["CaptureAllowed"] is False
+    _backend(deployment, LIST_PRESENT, {"input": {"CallId": meeting, "Participants": ["integ  LISTED"]}})
+    # Withdrawn on My consents: the meeting records the attendee's objection.
+    _data(
+        probe.call(deployment, listed, WITHDRAW, {"input": {"ConsentId": given["ConsentId"]}}),
+        "withdrawAdvanceConsent",
+    )
+
+    def objected():
+        body = _backend(deployment, GET_CONSENT, {"CallId": meeting})
+        consent = ((body.get("data") or {}).get("getMeetingConsent") or {}).get("Consent") or {}
+        return consent if consent.get("Status") == "objected" else None
+
+    consent = wait_for(objected, timeout=WITHDRAWAL_TIMEOUT_S, interval=3.0)
+    assert consent, "the withdrawal was not recorded on the meeting as an objection"
+    assert consent["CaptureAllowed"] is False
+    last = consent["Events"][-1]
+    assert (last["Decision"], last["Source"], last["PreMeeting"]["Withdrawn"]) == (
+        "objection",
+        "pre_meeting",
+        True,
+    )

@@ -39,6 +39,7 @@ export const SOURCE_LABELS = {
   voice: 'spoken',
   ui: 'entered on the meeting page',
   attestation: 'owner attestation',
+  pre_meeting: 'given in advance, matched to the participant list by display name',
 };
 
 export const ATTESTATION_METHOD_LABELS = {
@@ -89,17 +90,24 @@ export const normalizeName = (name) =>
 
 /**
  * Each participant's latest reply, keyed by normalised name, in the order the
- * replies were recorded; attestation entries are not a participant's reply.
- * The same rule the backend decides the status by.
+ * replies were recorded; attestation entries are not a participant's reply. A
+ * consent given in advance (source pre_meeting) counts only for a participant
+ * with no other reply, so anything they say in the meeting, an objection
+ * above all, decides instead. The same rule the backend decides the status by
+ * (lma_consent.rules.latest_replies).
  */
 export const latestDecisions = (events) => {
   const latest = new Map();
+  const advance = new Map();
   (events || []).forEach((event) => {
     if (!event || event.Source === 'attestation') return;
     const key = normalizeName(event.ParticipantName);
-    if (key && (event.Decision === 'consent' || event.Decision === 'objection')) {
-      latest.set(key, event.Decision);
-    }
+    if (!key || (event.Decision !== 'consent' && event.Decision !== 'objection')) return;
+    if (event.Source === 'pre_meeting' && event.Decision === 'consent') advance.set(key, event.Decision);
+    else latest.set(key, event.Decision);
+  });
+  advance.forEach((decision, key) => {
+    if (!latest.has(key)) latest.set(key, decision);
   });
   return latest;
 };
@@ -163,6 +171,9 @@ const describeEvent = (event) => {
   const where = SOURCE_LABELS[event.Source] || event.Source || '';
   if (event.Source === 'attestation') {
     return `${who} attested that everyone agreed${event.Text ? `: "${event.Text}"` : ''}`;
+  }
+  if (event.Source === 'pre_meeting' && event.Decision === 'objection') {
+    return `${who} withdrew the consent they gave in advance`;
   }
   const verb = event.Decision === 'objection' ? 'objected' : 'consented';
   const words = event.Text ? `: "${event.Text}"` : '';

@@ -69,6 +69,11 @@ Parameters:
       - WARN
       - ERROR
     Description: Logging level for Lambda functions.
+  MeetingConsentResolverFunctionArn:
+    Type: String
+    Description: >-
+      The meeting consent resolver. A withdrawn consent given in advance is
+      passed to it for each meeting in progress that counted the consent.
   MeetingRecordExpirationInDays:
     Type: Number
   PermissionsBoundaryArn:
@@ -2687,6 +2692,7 @@ Resources:
           USER_POOL_ID: !Ref UserPoolId
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
+          MEETING_CONSENT_FUNCTION: !Ref MeetingConsentResolverFunctionArn
       Layers:
         # lma_consent, lma_config and lma_notifications.
         - !Ref ConfigurationPythonLayer
@@ -2796,6 +2802,12 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/publishMeetingNotification"
+              # A withdrawn consent reaches the meetings in progress that
+              # counted it, through the meeting consent resolver.
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Ref MeetingConsentResolverFunctionArn
 
   AdvanceConsentLambdaDataSource:
     Type: AWS::AppSync::DataSource

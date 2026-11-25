@@ -59,12 +59,18 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
     final segments), when the transcript still confirms the link; null
     otherwise, and always null without ``speakers``. A name is never matched
     to a speaker.
+
+    ``matchBasis`` and ``givenInAdvance`` are set on an event of source
+    ``pre_meeting``: how the attendee was matched to the participant list
+    (``display_name``) and the consent given in advance it counted
+    (:func:`given_in_advance`); null on every other event.
     """
     out = []
     for event in consent.get("Events") or []:
         if not isinstance(event, Mapping):
             continue
         link = speaker_link(event)
+        pre = event.get("PreMeeting") if isinstance(event.get("PreMeeting"), Mapping) else None
         out.append(
             {
                 "participantName": event.get("ParticipantName"),
@@ -74,9 +80,30 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
                 "speakerId": speakers.linked_id(link) if link and speakers is not None else None,
                 "speakerLinkBasis": link.get("Basis") if link else None,
                 "speakerLinkedAt": link.get("LinkedAt") if link else None,
+                "matchBasis": pre.get("MatchBasis") if pre else None,
+                "givenInAdvance": given_in_advance(pre),
             }
         )
     return out
+
+
+def given_in_advance(pre: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The consent given in advance an event counted, as the export gives it, or None.
+
+    Its scope, when it was given and until when, and the SHA-256 and version of
+    the text agreed to; ``withdrawn`` on the objection recorded when it was
+    withdrawn during the meeting. Never the person's address or the consent's id.
+    """
+    if not pre:
+        return None
+    return {
+        "scope": pre.get("Scope"),
+        "grantedAt": pre.get("GrantedAt"),
+        "validUntil": pre.get("ValidUntil"),
+        "noticeHash": pre.get("NoticeHash"),
+        "noticeVersion": pre.get("NoticeVersion"),
+        "withdrawn": bool(pre.get("Withdrawn")),
+    }
 
 
 #: A participant's consent in the export, from their latest reply.

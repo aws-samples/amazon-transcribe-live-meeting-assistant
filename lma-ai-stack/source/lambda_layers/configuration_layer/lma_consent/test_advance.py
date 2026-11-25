@@ -164,3 +164,33 @@ def test_same_scope():
     standing = consent(Scope="organizer", CallId=None)
     assert advance.same_scope(standing, dict(standing))
     assert not advance.same_scope(standing, {**standing, "LabelKey": "engagement"})
+
+
+# ── matching attendees to the participant list ──────────────────────────────
+
+LISTED = [
+    {"name": "Ana Silva", "email": "ana@example.com"},
+    {"name": "Bo Chen", "email": "bo@example.com"},
+    {"name": "", "email": "nameless@example.com"},
+]
+
+
+def test_attendees_are_matched_by_display_name_ignoring_case_and_spacing():
+    matches = advance.match_listed(["ana  SILVA", "Bo Chen", "Cy Diaz"], LISTED)
+    assert matches == {
+        "ana  SILVA": {"name": "Ana Silva", "email": "ana@example.com"},
+        "Bo Chen": {"name": "Bo Chen", "email": "bo@example.com"},
+    }
+
+
+def test_a_name_two_listed_people_share_matches_nobody():
+    listed = LISTED + [{"name": "bo chen", "email": "other@example.com"}]
+    assert "Bo Chen" not in advance.match_listed(["Bo Chen"], listed)
+
+
+def test_a_name_two_attendees_show_matches_nobody():
+    assert advance.match_listed(["Bo Chen", "BO CHEN"], LISTED) == {}
+
+
+def test_an_empty_name_matches_nobody():
+    assert advance.match_listed(["", "  "], LISTED) == {}

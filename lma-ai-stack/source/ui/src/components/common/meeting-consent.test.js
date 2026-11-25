@@ -55,6 +55,27 @@ describe('meeting-consent', () => {
     expect(decisions.get('bo chen')).toBe('objection');
   });
 
+  it('counts a consent given in advance only while the participant has no other reply', () => {
+    const advance = {
+      ParticipantName: 'Cy Diaz',
+      Decision: 'consent',
+      Source: 'pre_meeting',
+      PreMeeting: { MatchBasis: 'display_name' },
+    };
+    expect(latestDecisions([advance]).get('cy diaz')).toBe('consent');
+    // An objection wins, whether it was recorded before the consent given in advance or after it.
+    const objection = { ParticipantName: 'Cy Diaz', Decision: 'objection', Source: 'chat' };
+    expect(latestDecisions([objection, advance]).get('cy diaz')).toBe('objection');
+    expect(latestDecisions([advance, objection]).get('cy diaz')).toBe('objection');
+    const withdrawn = { ParticipantName: 'Cy Diaz', Decision: 'objection', Source: 'pre_meeting' };
+    expect(latestDecisions([advance, withdrawn]).get('cy diaz')).toBe('objection');
+    const texts = buildTimeline({ Events: [advance, withdrawn] }).map((e) => e.text);
+    expect(texts).toEqual([
+      'Cy Diaz consented (given in advance, matched to the participant list by display name)',
+      'Cy Diaz withdrew the consent they gave in advance',
+    ]);
+  });
+
   it('lists the participants present first, then the others seen', () => {
     expect(participantRows(CONSENT)).toEqual([
       { name: 'Ana Silva', present: true, decision: 'consent' },

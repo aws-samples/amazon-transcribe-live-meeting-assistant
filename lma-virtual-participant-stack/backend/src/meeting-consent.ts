@@ -60,7 +60,7 @@ import {
     strictness,
 } from './consent-matcher.js';
 import { ConsentRoster, UNIDENTIFIED_PARTICIPANT, onParticipantSeen } from './consent-roster.js';
-import type { ConsentApi, ConsentRecord, RecordEventInput, ReplySource } from './consent-api.js';
+import type { ConsentApi, ConsentEvent, ConsentRecord, RecordEventInput, ReplySource } from './consent-api.js';
 import { ConsentApiError } from './consent-api.js';
 import { consentEvidenceKey, EvidenceShot } from './consent-evidence.js';
 import { consentHelpActive, consentHelpLineFor, setConsentHelpActive } from './consent-help.js';
@@ -420,6 +420,8 @@ export class MeetingConsentFlow {
     private leaving = false;
 
     private readonly posted = new Set<string>();
+    /** The attendees covered by a consent given in advance whom a posted line has named. */
+    private readonly announcedAdvance = new Set<string>();
 
     private readonly pendingEvents: RecordEventInput[] = [];
 
@@ -875,6 +877,14 @@ export class MeetingConsentFlow {
         // replies in different places; this VP reads the chat, and listens
         // where the deployment says to.
         messages.push(this.replyLine());
+        // The notice is always posted; it also names the attendees whose
+        // consent is on record, given in advance, so the others know who is
+        // still asked and anyone can object.
+        const covered = coveredInAdvance(this.record);
+        if (covered.length > 0) {
+            messages.push(advanceConsentLine(covered, this.firstPhrases()[1]));
+            for (const name of covered) this.announcedAdvance.add(normalizeParticipantName(name));
+        }
         if (this.held && this.noticePosted && this.eachParticipant) {
             messages.push('Recording and transcription are paused until everyone present has consented.');
         }
@@ -1023,6 +1033,7 @@ export class MeetingConsentFlow {
             this.localDecisions.set(normalizeParticipantName(event.ParticipantName), 'objection');
         }
 
+        await this.announceAdvanceConsents();
         await this.setGate(record.CaptureAllowed === true, record);
 
         for (const event of fresh) {
@@ -1030,11 +1041,36 @@ export class MeetingConsentFlow {
             // page's Consent section or through the API.
             const name = event.ParticipantName || 'A participant';
             log.always(`[consent] objection recorded for ${JSON.stringify(name)} (source ${event.Source})`);
-            await this.say([`An objection for ${name} was recorded in LMA. Live Meeting Assistant has stopped recording and transcribing.`]);
+            await this.say([
+                event.Source === 'pre_meeting'
+                    ? `${name} withdrew the consent they gave in advance. Live Meeting Assistant has stopped recording and transcribing.`
+                    : `An objection for ${name} was recorded in LMA. Live Meeting Assistant has stopped recording and transcribing.`,
+            ]);
             this.queueEvidence(`after an objection for ${name} was recorded in LMA`, false);
         }
         if (record.Status === 'granted' && previous?.Status !== 'granted' && this.noticePosted) {
             this.queueEvidence(grantEvidenceNote(record, this.plan.mode));
+        }
+    }
+
+    /**
+     * Posts, and records as a notice, the line naming the attendees newly
+     * covered by a consent given in advance, once the notice is in the chat. A
+     * notice posted later names every attendee covered then.
+     */
+    private async announceAdvanceConsents(): Promise<void> {
+        if (!this.noticePosted || this.noticeInFlight || this.stopped || this.chatOff) return;
+        const fresh = coveredInAdvance(this.record).filter(
+            (name) => !this.announcedAdvance.has(normalizeParticipantName(name)),
+        );
+        if (fresh.length === 0) return;
+        const line = advanceConsentLine(fresh, this.firstPhrases()[1]);
+        log.always(`[consent] ${fresh.length} attendee(s) covered by consent given in advance`);
+        // Named once the line is in the chat; a line that could not be posted
+        // is tried again with the next record, or carried by the next notice.
+        if (await this.say([line])) {
+            for (const name of fresh) this.announcedAdvance.add(normalizeParticipantName(name));
+            void this.callApi((api) => api.recordNotice(line));
         }
     }
 
@@ -1629,15 +1665,66 @@ function latestReason(record: ConsentRecord): string {
     return history.length ? history[history.length - 1].Reason || record.Status || '' : record.Status || '';
 }
 
-/** Each participant's latest reply on the record, attestations left out (lma_consent.latest_decisions). */
-export function latestDecisions(record: ConsentRecord): Map<string, string> {
-    const latest = new Map<string, string>();
+/**
+ * Each participant's deciding reply on the record, attestations left out
+ * (lma_consent.latest_replies): the latest one, except that a consent given in
+ * advance (source pre_meeting) decides only for a participant with no other
+ * reply, so whatever they say in the meeting, an objection above all, decides
+ * instead.
+ */
+export function decidingReplies(record: ConsentRecord): Map<string, ConsentEvent> {
+    const latest = new Map<string, ConsentEvent>();
+    const advance = new Map<string, ConsentEvent>();
     for (const event of record.Events ?? []) {
         if (event.Source === 'attestation') continue;
         const name = normalizeParticipantName(event.ParticipantName);
-        if (name && (event.Decision === 'consent' || event.Decision === 'objection')) latest.set(name, event.Decision);
+        if (!name || (event.Decision !== 'consent' && event.Decision !== 'objection')) continue;
+        if (event.Source === 'pre_meeting' && event.Decision === 'consent') advance.set(name, event);
+        else latest.set(name, event);
     }
+    for (const [name, event] of advance) if (!latest.has(name)) latest.set(name, event);
     return latest;
+}
+
+/** Each participant's deciding reply's decision (decidingReplies). */
+export function latestDecisions(record: ConsentRecord): Map<string, string> {
+    const latest = new Map<string, string>();
+    for (const [name, event] of decidingReplies(record)) latest.set(name, event.Decision as string);
+    return latest;
+}
+
+/**
+ * The participants present whose consent on record is one they gave in
+ * advance, by the names the record lists them under (display names).
+ */
+export function coveredInAdvance(record: ConsentRecord | null): string[] {
+    if (!record) return [];
+    const deciding = decidingReplies(record);
+    return (record.Participants ?? []).filter((name) => {
+        const event = deciding.get(normalizeParticipantName(name));
+        return event?.Source === 'pre_meeting' && event.Decision === 'consent';
+    });
+}
+
+/** How many attendees covered in advance the line names before it counts the rest. */
+const ADVANCE_LINE_NAMES = 10;
+
+/**
+ * The line posted with the notice that says which attendees already have
+ * consent on record, given in advance, by display name only, and that anyone
+ * can still object.
+ */
+export function advanceConsentLine(names: string[], objectionPhrase: string): string {
+    const cleaned = names
+        .map((name) => name.replace(/\s+/g, ' ').trim().slice(0, LEAD_IN_NAME_LENGTH).trim())
+        .filter((name) => name.length > 0);
+    const shown = cleaned.slice(0, ADVANCE_LINE_NAMES);
+    const others = cleaned.length - shown.length;
+    let who: string;
+    if (others > 0) who = `${shown.join(', ')} and ${others} other${others === 1 ? '' : 's'}`;
+    else if (shown.length === 1) who = shown[0];
+    else who = `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+    return `Consent given in advance is on record for ${who}. Anyone can still object: "LMA, ${objectionPhrase}".`;
 }
 
 /**
