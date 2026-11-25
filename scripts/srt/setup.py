@@ -182,10 +182,86 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
     return False
 
 
+PLACEHOLDER_CREDENTIALS = (
+    "[default]\n"
+    "aws_access_key_id = SRT-CI-PLACEHOLDER-NOT-A-REAL-KEY\n"
+    "aws_secret_access_key = SRT-CI-PLACEHOLDER-NOT-A-REAL-SECRET\n"
+)
+
+#: Environment variables that each name a credential source of their own.
+CREDENTIAL_ENV = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_PROFILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+)
+
+
+def on_ci_runner(env=None):
+    """True on a GitLab or GitHub Actions runner; a bare ``CI`` variable is not enough."""
+    env = os.environ if env is None else env
+    return bool(env.get("GITLAB_CI") or env.get("GITHUB_ACTIONS"))
+
+
+def instance_metadata_available(timeout=1.0):
+    """True when the EC2 instance metadata service answers (an instance profile may be there)."""
+    request = urllib.request.Request(
+        "http://169.254.169.254/latest/api/token",  # nosec B310 - fixed link-local address
+        method="PUT",
+        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):  # nosec B310
+            return True
+    except Exception:  # noqa: BLE001 - any failure means no metadata service
+        return False
+
+
+def other_credentials_available(env=None, home=None, imds=instance_metadata_available):
+    """True when anything but SRT's placeholder could supply AWS credentials."""
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else Path(home)
+    if any(env.get(name) for name in CREDENTIAL_ENV):
+        return True
+    config = home / ".aws" / "config"
+    if config.is_file():
+        text = config.read_text(encoding="utf-8", errors="replace")
+        if any(key in text for key in ("credential_process", "sso_", "role_arn", "source_profile")):
+            return True
+    return imds()
+
+
+def write_placeholder_credentials(env=None, home=None, imds=instance_metadata_available):
+    """Write SRT's placeholder AWS credentials, only on a CI runner with no other source.
+
+    Returns the file written, or None. ``srt config`` will not install its
+    scanners without ~/.aws/credentials; the scans themselves do not use it.
+    """
+    home = Path.home() if home is None else Path(home)
+    creds = home / ".aws" / "credentials"
+    if not on_ci_runner(env) or creds.exists():
+        return None
+    if other_credentials_available(env, home, imds):
+        return None
+    creds.parent.mkdir(exist_ok=True)
+    creds.write_text(PLACEHOLDER_CREDENTIALS, encoding="utf-8")
+    return creds
+
+
+def remove_placeholder_credentials(path):
+    """Delete the placeholder written by ``write_placeholder_credentials``, if it is still ours."""
+    if path is not None and path.is_file():
+        if path.read_text(encoding="utf-8", errors="replace") == PLACEHOLDER_CREDENTIALS:
+            path.unlink()
+
+
 def main():
     project_root = Path(__file__).parent.parent.parent
     srt_dir = project_root / ".srt"
-    is_ci = bool(os.getenv("CI") or os.getenv("GITLAB_CI") or os.getenv("GITHUB_ACTIONS"))
+    # Non-interactive configuration under any CI flag; the placeholder credentials
+    # only on a real CI runner (write_placeholder_credentials).
+    is_ci = bool(os.getenv("CI")) or on_ci_runner()
 
     pinned = os.getenv("SRT_VERSION", "").strip() or None
     if pinned and not pinned.startswith("v"):
@@ -225,29 +301,26 @@ def main():
         aws_config = aws_dir / "config"
         if not aws_config.exists():
             aws_config.write_text("[default]\nregion = us-east-1\noutput = json\n")
-        aws_creds = aws_dir / "credentials"
-        if not aws_creds.exists():
-            # SRT's `srt config` flow refuses to install scanner prerequisites
-            # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
-            # exists.  CI runners (GitLab/GitHub) don't ship one, so we write a
-            # placeholder that satisfies SRT's input parsing without ever
-            # holding real credentials.  The values below are deliberately NOT
-            # in AWS access-key format (no AKIA prefix, no 40-char secret) so
-            # they can't be mistaken for real credentials by humans or by
-            # secret-detection scanners.  SRT does not validate them — the
-            # actual scanner runs use AWS_PROFILE / AWS_REGION env vars.
-            aws_creds.write_text(
-                "[default]\n"
-                "aws_access_key_id = SRT-CI-PLACEHOLDER-NOT-A-REAL-KEY\n"
-                "aws_secret_access_key = SRT-CI-PLACEHOLDER-NOT-A-REAL-SECRET\n"
-            )
+        # SRT's `srt config` flow refuses to install scanner prerequisites
+        # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
+        # exists. A CI runner with no credential source gets a placeholder that
+        # satisfies SRT's input parsing without holding real credentials, and it
+        # is removed again once `srt config` ends: the scans do not read it. The
+        # values are deliberately NOT in AWS access-key format (no AKIA prefix,
+        # no 40-char secret). On any host with another credential source the
+        # placeholder is never written, since it would take precedence over it.
+        placeholder = write_placeholder_credentials()
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
             "AWS_REGION": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
             "TELEMETRY_ENABLED": False,
             "INSTALLATION_ID": os.getenv("CI_COMMIT_SHORT_SHA", "ci-build"),
         }, indent=2))
-        if not _run_srt_config_with_pexpect(srt_dir):
+        try:
+            configured = _run_srt_config_with_pexpect(srt_dir)
+        finally:
+            remove_placeholder_credentials(placeholder)
+        if not configured:
             print("❌ Failed to install SRT scanner prerequisites in CI")
             sys.exit(1)
         print("✅ SRT configured for CI")

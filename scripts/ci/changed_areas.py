@@ -400,6 +400,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The security tests' helper tests read the recording prefixes the access doc
     # names, the key-frame resolver's folder rule, and the ignore rule for scratch/.
     ("docs/user-based-access-control.md", "integ_plumbing"),
+    # The security tooling's tests hold SRT's setup to writing its placeholder AWS
+    # credentials only on CI runners (scripts/security/tests/test_srt_setup.py).
+    ("scripts/srt/setup.py", "security_tests"),
     (f"{FUNCTIONS}/video_keyframes_resolver/index.py", "integ_plumbing"),
     (".gitignore", "integ_plumbing"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.

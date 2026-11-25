@@ -894,6 +894,11 @@ def test_the_security_tooling_is_linted_and_tested_by_the_plumbing_step() -> Non
     assert "pytest scripts/security/tests" in makefile
 
 
+def test_a_change_to_srt_setup_runs_its_tests_in_the_security_tooling_suite() -> None:
+    assert "security_tests" in ca.areas_for("scripts/srt/setup.py")
+    assert "integ_plumbing" in ran(["scripts/srt/setup.py"])
+
+
 @pytest.mark.parametrize(
     "path",
     ["security/test-results/0.4.1/summary.md", "security/test-results/README.md"],
