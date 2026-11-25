@@ -1,0 +1,17 @@
+## Forwards the operations on consent given in advance (listMyAdvanceConsents,
+## getAdvanceConsentInvitation, giveAdvanceConsent, withdrawAdvanceConsent and
+## askToBeAddedToMeeting) to advance_consent_resolver: the arguments, the
+## verified identity, the field name and the request's user agent. The Lambda
+## reads who the caller is from the identity, never from an argument, and keeps
+## the source IP address and user agent only where the Meeting Consent section
+## says to.
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "arguments": $util.toJson($ctx.arguments),
+    "identity": $util.toJson($ctx.identity),
+    "info": { "fieldName": $util.toJson($ctx.info.fieldName) },
+    "request": { "userAgent": $util.toJson($ctx.request.headers.get("user-agent")) }
+  }
+}

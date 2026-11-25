@@ -122,6 +122,21 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # replies and objections said aloud and addressed to LMA, listening on the
     # meeting's transcription engine while consent is awaited.
     "readSpokenReplies": True,
+    # Consent given in advance (lma_consent.advance), read by the advance
+    # consent resolver: whether a signed-in person may consent before a
+    # meeting, the longest such a consent may count for, the text they agree
+    # to, and whether the sign-in device's IP address and user agent are kept
+    # with it.
+    "advanceConsentEnabled": True,
+    "advanceConsentMaxDays": 365,
+    "advanceConsentText": (
+        "I agree that {organizer} may record and transcribe {scope} with Live Meeting "
+        "Assistant, including what I say, what I type in the meeting chat and, where "
+        "the meeting's video is recorded, my camera feed and any screen I share. I can "
+        "withdraw this consent at any time on the My consents page, and I can still "
+        "object during any meeting."
+    ),
+    "keepAdvanceConsentDeviceDetails": False,
 }
 
 # Bounds on each part of one meeting's record. They bound each list; the record

@@ -36,6 +36,7 @@ title: "Virtual Participant"
 - [Meeting Scheduling](#meeting-scheduling)
   - [Changing a scheduled Virtual Participant](#changing-a-scheduled-virtual-participant)
 - [Participant list](#participant-list)
+  - [Inviting the people on the list to consent](#inviting-the-people-on-the-list-to-consent)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
   - [How a viewer is authorized](#how-a-viewer-is-authorized)
@@ -784,6 +785,10 @@ The **Participants** section of the meeting page, and of a Virtual Participant's
 The meeting's owner or an Admin can choose **Create accounts for participants without one**. LMA then creates an account with the **Participant** role for each person on the list who has none, and Cognito sends each of them its invitation email with a temporary password. The [Participant](user-based-access-control.md#roles) role signs in to a home page only and gives no access to meeting data. Accounts that already exist are left exactly as they are. See [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting) for the limits that apply, including the email domain restriction and Cognito's daily email limit.
 
 On a Virtual Participant's page, the list, the status and the button all use the list stored on the Virtual Participant, so for a scheduled one the accounts can be made ahead of the meeting. Once the Virtual Participant has created its meeting, the meeting has its own copy of the list; a change to it on the meeting page is shown on the meeting page, not on the Virtual Participant's.
+
+### Inviting the people on the list to consent
+
+The meeting's owner can choose **Invite participants to consent**, in the same **Participants** section of the meeting page or of the Virtual Participant's page. It builds one email to everyone on the list, with one link to the meeting's consent page, to send from the owner's own mail client (**Open in mail app**) or to copy (**Copy text**); LMA does not send it. From the link, each person signs in to LMA and can consent in advance to the meeting's being recorded and transcribed, for that meeting or for the owner's meetings until a date, and withdraw it later on **My consents**. A person who signs in with an address that is not on the list is told so and can ask to be added: for a Virtual Participant that has not created its meeting yet, the request is kept on the Virtual Participant, which the people who can see it can read, and shown to its owner and Admins in the **Participants** section of its page as *Asked to be added*, until the person is on the list; once the meeting exists, it arrives as a notification on the meeting, which everyone who can see the meeting in LMA receives. See [Consent given in advance](meeting-consent.md#consent-given-in-advance).
 
 ## Meeting Invitation Parsing
 

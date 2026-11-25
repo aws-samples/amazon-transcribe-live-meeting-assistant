@@ -138,6 +138,39 @@
       "type": "boolean",
       "title": "Read spoken replies",
       "description": "On: the Virtual Participant also reads consent replies and objections said aloud and addressed to LMA (\"LMA, I consent\", \"LMA, I object\"). While consent is awaited it sends the meeting audio to the meeting's transcription engine to hear them; nothing it hears is recorded or kept except the replies. Off: it reads replies in the meeting chat only, and sends no meeting audio anywhere until consent is given."
+    },
+    "advanceConsentEnabled": {
+      "order": 13,
+      "type": "boolean",
+      "title": "Allow consent given in advance",
+      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date, and manage or withdraw it on the My consents page. Off: no new consent can be given in advance; each person can still read and withdraw their own."
+    },
+    "advanceConsentMaxDays": {
+      "order": 14,
+      "type": "integer",
+      "title": "Longest consent given in advance, in days",
+      "description": "The latest date a consent for an organizer's meetings may run to, counted from the day it is given: 1 to 365 days. A consent for one meeting counts for at most this long too. A change applies to consents given after the save.",
+      "minimum": 1,
+      "maximum": 365,
+      "dependsOn": { "field": "advanceConsentEnabled", "value": true }
+    },
+    "advanceConsentText": {
+      "order": 15,
+      "type": "string",
+      "title": "Consent text (given in advance)",
+      "description": "What a person agrees to when they consent in advance, shown on the consent page and kept with the consent exactly as shown, with its SHA-256 hash and a version. {organizer} is the meeting's owner in LMA, {meeting} the meeting's name, and {scope} what the consent covers (the meeting, or every meeting the organizer holds until a date, with the label when one is chosen). A change applies to consents given after the save; those already given keep the text they were given with.",
+      "format": "textarea",
+      "rows": 4,
+      "minLength": 1,
+      "maxLength": 2000,
+      "dependsOn": { "field": "advanceConsentEnabled", "value": true }
+    },
+    "keepAdvanceConsentDeviceDetails": {
+      "order": 16,
+      "type": "boolean",
+      "title": "Keep sign-in device details with consents given in advance",
+      "description": "Off, the default: a consent given in advance holds the person's email address, account id, the time, the scope and the text they agreed to, and nothing about the device they used. On: it also holds the IP address and the browser's user agent the request came from, for consents given after the save. Decide this with whoever advises your organisation on consent records; the IP address is personal data.",
+      "dependsOn": { "field": "advanceConsentEnabled", "value": true }
     }
   },
   "additionalProperties": false

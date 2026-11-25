@@ -11,5 +11,9 @@
   "verifierModelId": "amazon.nova-lite-v1:0",
   "clientsWithoutConsent": "accept_with_warning",
   "leaveOnObjection": false,
-  "readSpokenReplies": true
+  "readSpokenReplies": true,
+  "advanceConsentEnabled": true,
+  "advanceConsentMaxDays": 365,
+  "advanceConsentText": "I agree that {organizer} may record and transcribe {scope} with Live Meeting Assistant, including what I say, what I type in the meeting chat and, where the meeting's video is recorded, my camera feed and any screen I share. I can withdraw this consent at any time on the My consents page, and I can still object during any meeting.",
+  "keepAdvanceConsentDeviceDetails": false
 }

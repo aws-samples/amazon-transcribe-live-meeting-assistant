@@ -2791,6 +2791,8 @@ export const CallPanel = ({
         participants={item.participants}
         callId={item.callId}
         canManage={!!isAdminUser || (!!user?.username && item.owner === user.username)}
+        isOwner={!!user?.username && item.owner === user.username}
+        owner={item.owner}
         onSave={
           savePreparation
             ? (participants) => savePreparation('participants', { Participants: participants })

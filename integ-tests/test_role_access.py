@@ -184,3 +184,38 @@ def test_the_participant_view_answers_only_meetings_shared_with_the_caller(deplo
         for role in ("Admin", "User"):
             refused = probe.call(deployment, users[role], document, variables)
             assert probe.refused_at_field(refused, operation), (operation, role, refused)
+
+
+LIST_MY_CONSENTS = "query Probe { listMyAdvanceConsents { Email Consents { ConsentId Email } } }"
+WITHDRAW_CONSENT = (
+    "mutation Probe($input: WithdrawAdvanceConsentInput!) "
+    "{ withdrawAdvanceConsent(input: $input) { ConsentId } }"
+)
+INVITATION = (
+    "query Probe($CallId: ID) { getAdvanceConsentInvitation(CallId: $CallId) "
+    "{ Listed MeetingName Organizer NoticeText } }"
+)
+
+
+def test_every_role_reaches_its_own_consents_given_in_advance_only(deployment, users) -> None:
+    """Each role lists the consents kept under its own address, withdraws none of anybody
+    else's, and is told only "not listed" for a meeting it is not on.
+    test_pre_meeting_consent.py gives, lists and withdraws consents for a real meeting."""
+    for role, user in users.items():
+        answer = probe.call(deployment, user, LIST_MY_CONSENTS, {})
+        assert not answer.get("errors"), (role, answer)
+        mine = answer["data"]["listMyAdvanceConsents"]
+        assert mine["Email"] == user.username.casefold(), (role, mine)
+        assert all(c["Email"] == mine["Email"] for c in mine["Consents"] or []), (role, mine)
+        withdrawn = probe.call(
+            deployment, user, WITHDRAW_CONSENT, {"input": {"ConsentId": "20260101000000-000000000000"}}
+        )
+        assert not probe.refused_at_field(withdrawn, "Mutation.withdrawAdvanceConsent"), (role, withdrawn)
+        assert "not one of your consents" in " ".join(
+            e.get("message", "") for e in withdrawn.get("errors") or []
+        ), (role, withdrawn)
+        page = probe.call(deployment, user, INVITATION, {"CallId": probe.PLACEHOLDER_ID})
+        assert not page.get("errors"), (role, page)
+        invitation = page["data"]["getAdvanceConsentInvitation"]
+        assert invitation["Listed"] is False, (role, invitation)
+        assert invitation["MeetingName"] is None and invitation["NoticeText"] is None, (role, invitation)

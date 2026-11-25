@@ -40,6 +40,8 @@ the meeting and withholds or stops recording and transcription accordingly (see
 The browser extension runs it as well (see [Meeting consent](browser-extension.md#meeting-consent)); how the
 transcriber treats a client that shows no consent step is a setting. See
 [Flows by capture method](#flows-by-capture-method).
+A person on a meeting's participant list can also consent before the meeting, signed in to LMA, and withdraw it on the **My consents** page (see
+[Consent given in advance](#consent-given-in-advance)).
 
 ## The three modes
 
@@ -166,6 +168,10 @@ the `ConfigurationPreset` stack parameter; see
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
 | Read spoken replies | Whether a Virtual Participant also reads consent replies and objections said aloud and addressed to LMA, sending the meeting audio to the transcription engine while consent is awaited, or reads the chat only; see [Spoken replies](#spoken-replies) | On |
+| Allow consent given in advance | Whether a person on a meeting's participant list can consent before the meeting from its consent link, and manage it on My consents. Off: no new one can be given; each person can still read and withdraw their own. See [Consent given in advance](#consent-given-in-advance) | On |
+| Longest consent given in advance, in days | How far ahead a consent for an organizer's meetings may run, and how long a consent for one meeting counts: 1 to 365 | 365 |
+| Consent text (given in advance) | The text a person agrees to, kept exactly with each consent; `{organizer}`, `{meeting}` and `{scope}` are filled in | "I agree that {organizer} may record and transcribe {scope} with Live Meeting Assistant, including what I say, what I type in the meeting chat and, where the meeting's video is recorded, my camera feed and any screen I share. I can withdraw this consent at any time on the My consents page, and I can still object during any meeting." |
+| Keep sign-in device details with consents given in advance | Whether a consent given in advance also keeps the request's IP address and the browser's user agent | Off |
 
 In the two texts, `{LMA_USER}` is the person using LMA in the meeting,
 `{meeting}` the meeting's name, and `{consent_phrase}` and `{objection_phrase}`
@@ -1158,6 +1164,131 @@ the setting **Streaming clients without a consent step**:
   only once every client in use shows the consent step, and not while the
   Stream Audio embed or an older browser extension build is in use.
 
+## Consent given in advance
+
+A person on a meeting's [participant list](virtual-participant.md#participant-list)
+can say, before the meeting, that they agree to its being recorded and
+transcribed. They do it signed in to LMA, from the meeting's **consent link**,
+and see and withdraw what they gave on the **My consents** page. Every role has
+the page: an Admin, a User and a Participant each see their own consents only.
+
+### The meeting's consent link and the invitation
+
+A meeting's consent link opens My consents with the meeting named:
+`<web UI address>/#/consents?meeting=<CallId>`, or, for a Virtual Participant
+that has not created its meeting yet, `…/#/consents?vp=<Virtual Participant id>`.
+Once that Virtual Participant has created its meeting, its link is read as the
+meeting's, with the meeting's own participant list.
+
+The meeting's owner sends it. In the **Participants** section of the meeting
+page, or of a Virtual Participant's page, the owner (and only the owner, not an
+Admin or someone the meeting is shared with) has **Invite participants to
+consent**. It shows one email to everyone on the list: the addresses, a subject
+and a text with the one link. **Open in mail app** opens it in the owner's own
+mail client (a `mailto:` link), and **Copy text** copies it. LMA does not send
+it. When the list is too long for a mail link, the mail app opens without the
+recipients and the page says so; copy the text instead.
+
+The **Create accounts for participants without one** button (see
+[Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting))
+sends each new account Cognito's invitation, which then also names the meeting
+and gives its consent link, so a new Participant can consent once they have
+signed in.
+
+The page needs sign-in, and checks that the email address the user pool holds
+for the signed-in account (it must be verified) is on that meeting's participant
+list, compared ignoring case. So one link serves everybody on the list, and
+somebody who is sent it but is not on the list cannot consent with it.
+
+**Someone not on the list** is told *"You are not on this meeting's list"*,
+with the address they signed in with. Nothing about the meeting is shown to
+them, not even its name, and nothing is recorded about their consent. They may
+choose **Ask to be added**, with their name if they like. That is shown in LMA,
+never sent by email, to the people who see the meeting's participant list: its
+owner, the users it is shared with and Admins. The page says so before they ask.
+
+- For a meeting that exists, it is a [meeting notification](meeting-notifications.md)
+  of category `meeting` and type `participant_list_request`, with the person's
+  name and address and a button that copies them. Like every meeting
+  notification, it reaches everyone who can see the meeting in LMA, not only
+  its owner. A Participant the meeting is shared with does not receive meeting
+  notifications.
+- For a Virtual Participant that has not created its meeting yet, it is kept on
+  the Virtual Participant, which the people who can see it can read (its owner,
+  the users it is shared with and Admins), and shown in the **Participants**
+  section of its page, as *Asked to be added*, to its owner and Admins, until
+  the person is on the list. The newest 20 are kept.
+
+The owner adds them to the list as usual. A person is asked for once per meeting
+in 30 days, however often they choose the button, and one person may ask at
+most 20 times a day.
+
+### What a consent covers
+
+The page offers two scopes:
+
+- **This meeting only.** It counts for the meeting the link names, by its
+  CallId or by the Virtual Participant that creates it, for at most the
+  deployment's longest period (365 days as shipped).
+- **Meetings organized by `<owner>`, until a date.** Every meeting owned in LMA
+  by the meeting's owner, until the end (23:59:59 UTC) of a date the person
+  chooses, at most **Longest consent given in advance, in days** ahead (365 as
+  shipped, never more). It can be limited to the meetings that carry one of the
+  meeting's [labels](meeting-context-and-checklist.md), key and value
+  compared exactly. A listed person therefore sees, on the consent page, the
+  meeting's name, its organizer and its labels; a Participant does not see the
+  labels anywhere else.
+
+A person cannot name another organizer: a standing consent is always given from
+a meeting they are on the list of, for that meeting's owner. A new consent for
+the same thing (the same meeting, or the same organizer and label) replaces the
+one before it, which is kept marked **Replaced**.
+
+### What is recorded
+
+The page shows the exact text the person agrees to, read from the server for
+the scope, date and label chosen, and the consent is stored only if that is
+still the text the server would store (by its hash); otherwise the page asks
+them to read it again. The text comes from **Consent text (given in advance)**,
+with `{organizer}`, `{meeting}` and `{scope}` filled in. Each consent is kept in
+the meetings table under the person's address and holds:
+
+| Field | Meaning |
+|---|---|
+| `Email`, `Subject`, `Username` | The address the user pool holds for the account, in lower case, the account's Cognito sub and its username |
+| `Scope` | `meeting` or `organizer` |
+| `CallId`, `VirtualParticipantId`, `MeetingName` | The meeting it was given from, as named then |
+| `Organizer`, `LabelKey`, `LabelValue` | The meeting's owner, and the label an `organizer` consent is limited to |
+| `GrantedAt`, `ValidUntil` | When it was given, and until when it counts |
+| `WithdrawnAt`, `WithdrawnReason` | When it stopped counting, and why: `withdrawn`, `replaced` or `account_deleted` |
+| `NoticeText`, `NoticeHash`, `NoticeVersion` | The exact text agreed to, its SHA-256, and the first 12 hex digits of the SHA-256 of the configured wording it came from |
+| `Source` | `pre_meeting` |
+| `DeviceDetails` | Only with **Keep sign-in device details with consents given in advance** on: the request's source IP address and the browser's user agent |
+
+By default nothing about the device is kept. The setting is off in the shipped
+defaults and in every preset; decide it with whoever advises your organisation
+on consent records, since an IP address is personal data. My consents and the
+API say whether device details were kept with a consent, and never return them.
+
+### Withdrawing
+
+**Withdraw** on My consents ends a consent at once: from then on it is no
+longer in force. The record stays, marked withdrawn with the time, so
+what the person agreed to and when they withdrew remain on record. Deleting an
+account in User Management withdraws the consents that account gave, with the
+reason `account_deleted`.
+
+A consent is kept until **`MeetingRecordExpirationInDays`** (the stack parameter)
+days after it stopped counting, at its end date or when it was withdrawn,
+whichever came first, and is then removed by the table's time to live. It is not
+part of any meeting, so deleting a meeting does not delete it.
+
+### In the meeting
+
+A consent given in advance is kept as a record of the person's agreement. A
+meeting's own consent flow runs as the rest of this page describes: the notice
+is posted and replies and objections are read in the meeting.
+
 ## What is stored
 
 The consent record is the `Consent` attribute of the meeting's row in the
@@ -1430,6 +1561,9 @@ result is seen on the next read of the record.
 | Attest (`attestMeetingConsent`) | The meeting's owner, or a backend role relaying the owner's attestation and naming them |
 | Add evidence (`addMeetingConsentEvidence`) | A backend role |
 | Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
+| Your own consents given in advance (`listMyAdvanceConsents`, `withdrawAdvanceConsent`) | Every signed-in role (Admin, User, Participant), each for the consents kept under the address the user pool holds for them only |
+| A meeting's consent page (`getAdvanceConsentInvitation`) and giving consent (`giveAdvanceConsent`) | Every signed-in role, for a meeting whose participant list has the caller's address. Anyone else is told only that they are not on the list |
+| Ask to be added (`askToBeAddedToMeeting`) | Every signed-in role, for a meeting whose list does not have the caller's address. It is shown in LMA to the people who see the meeting's participant list |
 
 The WebSocket transcriber's task role is one of LMA's backend roles. It is
 granted the six consent mutations it calls (`startMeetingConsent`,
@@ -1591,6 +1725,49 @@ The rules that decide the status and the gate are in one Python module,
 which the resolver uses and a Python capture client or script can import; it
 also holds the reply classifier described above.
 
+### The operations for consent given in advance
+
+```graphql
+# The caller's own consents; Email is the address they are kept under.
+query { listMyAdvanceConsents { Enabled MaxDays Email Consents {
+  ConsentId Scope CallId VirtualParticipantId MeetingName Organizer LabelKey LabelValue
+  GrantedAt ValidUntil WithdrawnAt WithdrawnReason NoticeText NoticeHash NoticeVersion
+  Source Email Status DeviceDetailsKept
+} } }
+
+# A meeting's consent page, with the text for the scope asked for. Someone not
+# on the list gets Listed: false and nothing about the meeting.
+query {
+  getAdvanceConsentInvitation(CallId: "<CallId>", Scope: "organizer",
+                              ValidUntil: "2027-06-30", LabelKey: "engagement") {
+    Listed Requested Enabled Email ListedName MeetingName Organizer Labels { Key Value }
+    Scope ValidUntil LabelKey LabelValue NoticeText NoticeHash MaxDays
+    ActiveConsents { ConsentId Scope }
+  }
+}
+
+# The same choice, with the NoticeHash the query returned for it.
+mutation {
+  giveAdvanceConsent(input: { CallId: "<CallId>", Scope: "organizer",
+    ValidUntil: "2027-06-30", LabelKey: "engagement", NoticeHash: "<NoticeHash>" }) {
+    ConsentId Status ValidUntil
+  }
+}
+
+mutation { withdrawAdvanceConsent(input: { ConsentId: "<ConsentId>" }) { ConsentId Status WithdrawnAt } }
+
+mutation { askToBeAddedToMeeting(input: { CallId: "<CallId>", Name: "Bo Chen" }) { Requested Listed } }
+```
+
+Each names the meeting with exactly one of `CallId` and `VirtualParticipantId`.
+`Scope` is `meeting` (the default) or `organizer`; `ValidUntil`, written
+`YYYY-MM-DD`, is required for `organizer`, and may be at most the deployment's
+longest period ahead; `LabelKey` must be one of the meeting's labels. A
+`giveAdvanceConsent` whose `NoticeHash` is not the hash of the text the server
+would store is refused, and nothing is stored. Withdrawing a consent that is not
+the caller's is refused as one that does not exist. A person may have at most
+100 consents in force at once.
+
 ## Limitations
 
 - **Display names are not verified identities.** Replies are matched to
@@ -1624,6 +1801,11 @@ also holds the reply classifier described above.
   and who sent a chat message or is speaking come from the meeting page, and not every
   platform shows all three; see
   [What each platform supports](#what-each-platform-supports).
+- **A consent given in advance is as good as the participant list and the
+  sign-in.** Anyone who can sign in to LMA with an address on a meeting's list
+  can consent for it: the list is what the meeting's owner or a calendar
+  invite gave, and the check is of the address the account holds, not of
+  who is at the keyboard.
 - **The record is meeting data.** It is kept and deleted with the meeting, and
   anyone the meeting is shared with can read it, including participants' names
   and replies.

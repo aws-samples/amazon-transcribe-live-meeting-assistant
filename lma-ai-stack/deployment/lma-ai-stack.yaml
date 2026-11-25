@@ -6746,6 +6746,7 @@ Resources:
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         RecordingsBucketName: !Ref S3BucketName
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        UserPoolId: !Ref UserPoolId
         VirtualParticipantTable: !Ref VirtualParticipantTable
         VirtualParticipantTableArn: !GetAtt VirtualParticipantTable.Arn
         VncEdgeTokenSigningSecret: !Ref VncEdgeTokenSigningSecret
@@ -8812,6 +8813,87 @@ Resources:
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
+
+  ##########################################################################
+  # Consent given in advance: each signed-in person's own consents, and a
+  # meeting's consent page as they see it. Answered by
+  # advance_consent_resolver (in lma-ai-lambda-resolvers.yaml). See
+  # docs/meeting-consent.md#consent-given-in-advance.
+  ##########################################################################
+  ListMyAdvanceConsentsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AdvanceConsentLambdaDataSourceName
+      TypeName: Query
+      FieldName: listMyAdvanceConsents
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetAdvanceConsentInvitationAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AdvanceConsentLambdaDataSourceName
+      TypeName: Query
+      FieldName: getAdvanceConsentInvitation
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GiveAdvanceConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AdvanceConsentLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: giveAdvanceConsent
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  WithdrawAdvanceConsentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AdvanceConsentLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: withdrawAdvanceConsent
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  AskToBeAddedToMeetingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.AdvanceConsentLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: askToBeAddedToMeeting
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   ##########################################################################
   # A Participant's read-only view of the meetings shared with them. The
@@ -11486,6 +11568,7 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
           USER_SIGN_IN_TABLE: !Ref UserSignInTableName
+          MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
     Metadata:
@@ -11555,6 +11638,17 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "usr#*"
+              # A deleted user's consents given in advance, read and marked
+              # withdrawn: only under the pmc# partitions.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Query"
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "pmc#*"
               # A meeting's owner and participant list, read to decide who may
               # see its attendees' account status or create their accounts:
               # GetItem only, and only meeting rows.

@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
+import PropTypes from 'prop-types';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import {
@@ -14,9 +15,17 @@ import {
 import ParticipantMeetingList from '../components/participant-meetings/ParticipantMeetingList';
 import ParticipantMeetingPage from '../components/participant-meetings/ParticipantMeetingPage';
 import VoiceEnrollmentPage from '../components/voice-enrollment/VoiceEnrollmentPage';
+import MyConsentsPage from '../components/my-consents/MyConsentsPage';
 import { PARTICIPANT, roleMayOpen } from '../components/common/roles';
 import SignOutRedirect from './SignOutRedirect';
-import { HOME_PATH, LOGIN_PATH, LOGOUT_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from './constants';
+import {
+  HOME_PATH,
+  LOGIN_PATH,
+  LOGOUT_PATH,
+  MY_CONSENTS_PATH,
+  SHARED_MEETINGS_PATH,
+  VOICE_ENROLLMENT_PATH,
+} from './constants';
 
 // A meeting id as the path holds it: encoded by the list's link, and decoded
 // once; a path that is not valid encoding is taken as it stands.
@@ -40,6 +49,7 @@ const pageFor = (pathname) => {
   if (pathname === VOICE_ENROLLMENT_PATH || pathname.startsWith(`${VOICE_ENROLLMENT_PATH}/`)) {
     return <VoiceEnrollmentPage />;
   }
+  if (pathname === MY_CONSENTS_PATH) return <MyConsentsPage />;
   return <ParticipantHome />;
 };
 
@@ -49,19 +59,32 @@ const ParticipantPage = () => {
 };
 
 /**
- * The routes of a signed-in Participant: their home page, the meetings shared
- * with them (read-only, through the Participant view operations only) and
- * their own voice enrollment. Nothing here reads the deployment settings, the
- * member meeting operations or any configuration; every other path says
- * Access denied.
+ * Where signing in leads: the page the sign-in link named (a meeting's consent
+ * link, say) when the Participant role may open it, otherwise the home page.
+ * Only a path within the app is followed.
  */
-const ParticipantRoutes = () => (
+export const afterSignIn = (redirectParam) => {
+  if (!redirectParam || !redirectParam.startsWith('/') || redirectParam.startsWith('//')) return HOME_PATH;
+  const pathname = redirectParam.split('?')[0];
+  return pathname !== LOGIN_PATH && roleMayOpen(PARTICIPANT, pathname) ? redirectParam : HOME_PATH;
+};
+
+/**
+ * The routes of a signed-in Participant: their home page, the meetings shared
+ * with them (read-only, through the Participant view operations only), their
+ * own consents given in advance (My consents) and their own voice enrollment.
+ * Nothing here reads the deployment settings, the member meeting operations or
+ * any configuration; every other path says Access denied.
+ */
+const ParticipantRoutes = ({ redirectParam = '' }) => (
   <Routes>
     <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
-    <Route path={LOGIN_PATH} element={<Navigate to={HOME_PATH} replace />} />
+    <Route path={LOGIN_PATH} element={<Navigate to={afterSignIn(redirectParam)} replace />} />
     <Route path={LOGOUT_PATH} element={<SignOutRedirect />} />
     <Route path="*" element={<ParticipantPage />} />
   </Routes>
 );
+
+ParticipantRoutes.propTypes = { redirectParam: PropTypes.string };
 
 export default ParticipantRoutes;

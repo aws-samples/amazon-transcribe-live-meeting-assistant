@@ -93,6 +93,11 @@ const getVirtualParticipant = `
         name
         email
       }
+      participantListRequests {
+        name
+        email
+        requestedAt
+      }
       consentMode
       consentRule
       scheduledTimeZone
@@ -1111,6 +1116,11 @@ const VirtualParticipantDetails = () => {
         callId=""
         virtualParticipantId={vpDetails.id}
         canManage={!!isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
+        isOwner={!!user?.username && vpDetails.Owner === user.username}
+        meetingName={vpDetails.meetingName || ''}
+        owner={vpDetails.Owner || ''}
+        scheduledFor={vpDetails.scheduledFor || ''}
+        requests={vpDetails.participantListRequests || []}
       />
       {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (
         <EditScheduledVirtualParticipant

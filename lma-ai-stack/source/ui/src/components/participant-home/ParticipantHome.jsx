@@ -21,7 +21,7 @@ import CallAnalyticsTopNavigation from '../call-analytics-top-navigation';
 import { appLayoutLabels } from '../common/labels';
 import { NAV_HEADER } from '../common/navigation-items';
 import useAppContext from '../../contexts/app';
-import { HOME_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
+import { HOME_PATH, MY_CONSENTS_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
 
 const PARTICIPANT_NAV_HEADER = { ...NAV_HEADER, href: `#${HOME_PATH}` };
 
@@ -29,6 +29,7 @@ const PARTICIPANT_NAV_HEADER = { ...NAV_HEADER, href: `#${HOME_PATH}` };
 export const participantNavigationItems = () => [
   { type: 'link', text: 'Home', href: `#${HOME_PATH}` },
   { type: 'link', text: 'Shared meetings', href: `#${SHARED_MEETINGS_PATH}` },
+  { type: 'link', text: 'My consents', href: `#${MY_CONSENTS_PATH}` },
   { type: 'link', text: 'Voice enrollment', href: `#${VOICE_ENROLLMENT_PATH}` },
   {
     type: 'section',
@@ -50,6 +51,7 @@ const activeHref = (pathname) => {
     return `#${SHARED_MEETINGS_PATH}`;
   }
   if (pathname.startsWith(VOICE_ENROLLMENT_PATH)) return `#${VOICE_ENROLLMENT_PATH}`;
+  if (pathname === MY_CONSENTS_PATH) return `#${MY_CONSENTS_PATH}`;
   return `#${HOME_PATH}`;
 };
 
@@ -90,6 +92,10 @@ export const ParticipantHome = () => (
         <Link href={`#${SHARED_MEETINGS_PATH}`}>Shared meetings</Link>: their transcript, live while a meeting is in
         progress, its summary, the meeting chat, the recordings and the consent record. You can read them and ask the
         meeting assistant about them; you cannot change them.
+      </Box>
+      <Box variant="p">
+        Under <Link href={`#${MY_CONSENTS_PATH}`}>My consents</Link> you can give consent before a meeting to its being
+        recorded and transcribed, from the consent link its organizer sends you, and withdraw it at any time.
       </Box>
       <Box variant="p">
         Under <Link href={`#${VOICE_ENROLLMENT_PATH}`}>Voice enrollment</Link> you can enroll your own voice, so the
