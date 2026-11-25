@@ -1528,7 +1528,13 @@ class ConfigurationStore:
             at=str(put["Item"]["UpdatedAt"]["S"]),
             previous=previous,
         )
-        self._write_logged({"Put": put}, event)
+        # The pointer's Put carries no condition, so only a conflict (raised)
+        # can stop it; a condition added later must not fail silently.
+        if not self._write_logged({"Put": put}, event):
+            raise ConcurrentModification(
+                f"the active configuration profile changed while {name!r} was being "
+                "activated; reload the page and try again"
+            )
 
     def write_managed_profile(self, name: str, body: Mapping[str, Any], *, description: str) -> str:
         """Write a profile the deployment manages, as the seeder does for each shipped preset.
