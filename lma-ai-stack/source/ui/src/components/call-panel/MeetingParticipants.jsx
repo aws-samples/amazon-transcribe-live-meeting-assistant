@@ -111,9 +111,22 @@ const MeetingParticipants = ({
     setCreating(true);
     setSummary(null);
     try {
-      const response = await client.graphql({ query: createParticipantAccounts, variables: { input: meetingRef } });
-      setSummary(accountCreationSummary(response?.data?.createParticipantAccounts));
-      await loadAccounts();
+      // Only the people the page knows have no account, and the answer updates
+      // their status, so the list is not looked up again.
+      const emails = withoutAccount.map((p) => p.email);
+      const response = await client.graphql({
+        query: createParticipantAccounts,
+        variables: { input: { ...meetingRef, emails } },
+      });
+      const answer = response?.data?.createParticipantAccounts;
+      setSummary(accountCreationSummary(answer));
+      setAccounts((current) => {
+        const next = new Map(current || []);
+        (answer?.results || []).forEach((r) => {
+          if (r.outcome === 'created') next.set(r.email.toLowerCase(), 'Participant');
+        });
+        return next;
+      });
     } catch (error) {
       logger.error('could not create participant accounts', error);
       setSummary({ type: 'error', text: errorText(error, 'The accounts could not be created.') });

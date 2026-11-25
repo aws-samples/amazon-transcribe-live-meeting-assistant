@@ -11270,7 +11270,7 @@ Resources:
   UserManagementFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: UserManagement Lambda execution role - admin-only Cognito operations
+      Description: UserManagement Lambda execution role - user management and participant accounts for a meeting
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:

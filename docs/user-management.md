@@ -176,7 +176,7 @@ Besides this page, there is one other way an account is created: from a meeting'
 - **Only people on that meeting's list.** Every address in the request must be on the meeting's participant list (compared ignoring case); a request naming anyone else is refused as a whole.
 - **Only the Participant role.** Each new account is added to the `Participant` group and nothing else. An address that already has an account is reported as existing and its account is not changed. Accounts with the User or Admin role, and changes of role, are made only on this page, by an Admin.
 - **Email domain restrictions apply.** When `AllowedSignUpEmailDomain` is set, an address outside those domains is reported as not allowed and no account is created for it, exactly as for **Create user** (see [Email domain restrictions](#email-domain-restrictions)).
-- **Limits.** One request creates at most 25 accounts; choose the button again for the rest. A User may create at most 25 accounts this way per day (UTC), counted across all their meetings; the answer says how many remain. A User may also look up the accounts of at most 1,000 addresses a day (UTC), counting every address on the list each time the meeting page or the button checks it, so that a list cannot be rewritten over and over to find out who has an account. Admins have neither daily limit.
+- **Limits.** One request creates at most 25 accounts; choose the button again for the rest. A User may create at most 25 accounts this way per day (UTC), counted across all their meetings; the answer says how many remain. A User may also look up the accounts of at most 1,000 different addresses a day (UTC); an address counts once a day however often its list is read, and the day's count keeps only a hash of each address. This is so that a list cannot be rewritten over and over to find out who has an account. Admins have neither daily limit.
 
 Cognito sends each new account the same invitation email as **Create user**. With the user pool's default email configuration (`COGNITO_DEFAULT`), Cognito sends only a small number of emails per day for the whole user pool (50 at the time of writing; see [Email settings for Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html)). Every invitation, password reset and verification email counts against it, so creating accounts for a large meeting can use it up. A deployment that needs to invite more people should configure the user pool to send email through Amazon SES.
 
@@ -198,6 +198,9 @@ To answer the meeting page's account status (`getMeetingParticipantAccounts`), t
 
 **"Create accounts for participants without one" reports "limit reached"**
 : Either one request reached its 25 accounts (choose the button again) or you have created 25 participant accounts today (an Admin can create the rest, or try again the next day, UTC).
+
+**"You have looked up the accounts of 1000 different addresses today"**
+: The account status, and the button, look up each address on a meeting's list. Each different address counts once a day (UTC), however often the list is read again; after 1,000 different addresses in a day, a User's further lookups of new addresses are refused until the next day. An Admin is not limited.
 
 **"Email domain 'X' is not allowed"**
 : The `AllowedSignUpEmailDomain` CloudFormation parameter restricts new user emails to specific domains. Update the parameter on your stack and redeploy, or choose an email in an allowed domain.

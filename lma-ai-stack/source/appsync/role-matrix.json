@@ -276,7 +276,7 @@
       "id": "meeting-participant-list",
       "title": "A meeting's participant list: changing it and reading whether each person on it has an LMA account",
       "roles": ["Admin", "User"],
-      "notes": "Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 account lookups a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it.",
+      "notes": "Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it.",
       "appsync": ["Mutation.updateCallParticipants", "Query.getMeetingParticipantAccounts"],
       "surfaces": [],
       "uiRoutes": []

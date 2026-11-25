@@ -41,6 +41,7 @@ Virtual Participant row. Needs pycognito and graphql-core (requirements.txt).
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -106,9 +107,16 @@ def stamp() -> str:
 def new_address(deployment, stamp) -> str:
     """The listed address with no account, for which the test creates one.
 
-    In the stack's allowed domain when it has one (AllowedSignUpEmailDomain),
-    else in the reserved example.invalid domain, which delivers nowhere.
+    Each run sends this address one Cognito invitation. LMA_TEST_PARTICIPANT_EMAIL
+    names a mailbox of the operator's choosing (a "+tag" is added per run), for
+    a stack whose AllowedSignUpEmailDomain refuses example.invalid. Otherwise it
+    is in the stack's allowed domain when it has one, else in the reserved
+    example.invalid domain, which delivers nowhere.
     """
+    chosen = os.environ.get("LMA_TEST_PARTICIPANT_EMAIL", "").strip()
+    if chosen:
+        local, _, domain = chosen.partition("@")
+        return f"{local}+integ-{stamp}@{domain}"
     domain = deployment.email_domain if deployment.email_domain != "example.com" else "example.invalid"
     return f"integ-participant-{stamp}@{domain}"
 

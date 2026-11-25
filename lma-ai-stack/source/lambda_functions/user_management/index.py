@@ -34,6 +34,7 @@ times are left null and `lastSignInAvailable` is false, so the page does not
 report "not recorded" for a time it could not read.
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -463,9 +464,10 @@ def _delete_notification_preferences(username):
 #      (counted in the event-sourcing table under usr#<username>); every caller
 #      at most PARTICIPANT_ACCOUNTS_PER_REQUEST in one request.
 #   6. AllowedSignUpEmailDomain applies as it does to createUser.
-#   7. A User looks up at most PARTICIPANT_LOOKUPS_PER_DAY addresses a UTC day,
-#      across both operations (counted the same way), so a list cannot be
-#      rewritten again and again to look up any address in the user pool.
+#   7. A User looks up at most PARTICIPANT_LOOKUPS_PER_DAY different addresses a
+#      UTC day, across both operations (each counted once, however often it is
+#      read), so a list cannot be rewritten again and again to look up any
+#      address in the user pool.
 # The owner is compared exactly, as the meeting preparation resolver's write
 # condition and the web UI compare it.
 
@@ -586,33 +588,58 @@ def _accounts_of(emails):
         return dict(zip(emails, pool.map(_account_of, emails)))
 
 
-def _reserve_lookups(caller, count, now):
-    """Count ``count`` address lookups against a User's day; refuse when they do not fit."""
-    if caller["is_admin"] or count == 0:
+def _address_key(email):
+    """An address as the daily lookup count records it: a hash, compared ignoring case."""
+    return hashlib.sha256(email.strip().casefold().encode("utf-8")).hexdigest()[:32]
+
+
+def _reserve_lookups(caller, emails, now):
+    """Count a User's lookups of addresses not already looked up today; refuse past the limit.
+
+    Each distinct address is counted once a UTC day, however often the same list
+    is read again, so ordinary use of one meeting does not use up the day. The
+    day's item keeps a hash of each address counted, never the address itself.
+    """
+    if caller["is_admin"] or not emails:
         return
-    room = PARTICIPANT_LOOKUPS_PER_DAY - count
-    if room < 0:
-        raise ValidationError(
-            f"At most {PARTICIPANT_LOOKUPS_PER_DAY} addresses can be looked up a day"
-        )
-    try:
-        boto3.client("dynamodb").update_item(
+    dynamodb = boto3.client("dynamodb")
+    key = _daily_count_key(caller["username"], now, "participant-lookups")
+    item = (
+        dynamodb.get_item(
             TableName=EVENT_SOURCING_TABLE,
-            Key=_daily_count_key(caller["username"], now, "participant-lookups"),
-            UpdateExpression="ADD LookupCount :count SET ExpiresAfter = :ttl",
+            Key=key,
+            ConsistentRead=True,
+            ProjectionExpression="Seen",
+        ).get("Item")
+        or {}
+    )
+    seen = set((item.get("Seen") or {}).get("SS") or [])
+    fresh = sorted({_address_key(email) for email in emails} - seen)
+    if not fresh:
+        return
+    room = PARTICIPANT_LOOKUPS_PER_DAY - len(fresh)
+    refused = (
+        f"You have looked up the accounts of {PARTICIPANT_LOOKUPS_PER_DAY} different addresses "
+        "today, the most a day; an Admin can look up the rest, or try again tomorrow (UTC)"
+    )
+    if room < 0:
+        raise ValidationError(refused)
+    try:
+        dynamodb.update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=key,
+            UpdateExpression="ADD LookupCount :count, Seen :fresh SET ExpiresAfter = :ttl",
             ConditionExpression="attribute_not_exists(LookupCount) OR LookupCount <= :room",
             ExpressionAttributeValues={
-                ":count": {"N": str(count)},
+                ":count": {"N": str(len(fresh))},
+                ":fresh": {"SS": fresh},
                 ":room": {"N": str(room)},
                 ":ttl": {"N": str(int(now) + DAILY_COUNT_TTL_SECONDS)},
             },
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-            raise ValidationError(
-                f"You have looked up the accounts of {PARTICIPANT_LOOKUPS_PER_DAY} addresses "
-                "today, the most a day; an Admin can look up the rest, or try again tomorrow (UTC)"
-            ) from exc
+            raise ValidationError(refused) from exc
         raise
 
 
@@ -621,7 +648,7 @@ def get_meeting_participant_accounts(event, args):
     caller = _get_caller_identity(event)
     meeting = _meeting_for_caller(caller, args)
     participants = meeting["participants"]
-    _reserve_lookups(caller, len(participants), time.time())
+    _reserve_lookups(caller, [p["email"] for p in participants], time.time())
     accounts = _accounts_of([p["email"] for p in participants])
     return [
         {"name": p["name"], "email": p["email"], "account": accounts[p["email"]]}
@@ -761,7 +788,7 @@ def create_participant_accounts(event, args):
         wanted = list(dict.fromkeys(listed[e.strip().casefold()] for e in requested))
 
     now = time.time()
-    _reserve_lookups(caller, len(wanted), now)
+    _reserve_lookups(caller, wanted, now)
     accounts = _accounts_of(wanted)
     limited = not caller["is_admin"]
     results = []

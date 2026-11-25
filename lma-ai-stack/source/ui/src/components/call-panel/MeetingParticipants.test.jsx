@@ -98,8 +98,13 @@ describe('MeetingParticipants', () => {
     fireEvent.click(screen.getByText('Create accounts'));
     expect(await screen.findByText(/Created 1 Participant account/)).toBeTruthy();
     expect(screen.getByText(/24 more today/)).toBeTruthy();
-    expect(calls('createParticipantAccounts')[0].variables).toEqual({ input: { VirtualParticipantId: 'vp-1' } });
-    await waitFor(() => expect(calls('getMeetingParticipantAccounts')).toHaveLength(2));
+    // Only the person without an account is sent, and the answer updates the
+    // status without reading the list again.
+    expect(calls('createParticipantAccounts')[0].variables).toEqual({
+      input: { VirtualParticipantId: 'vp-1', emails: ['bo@example.org'] },
+    });
+    await waitFor(() => expect(screen.queryByText('No account')).toBeNull());
+    expect(calls('getMeetingParticipantAccounts')).toHaveLength(1);
   });
 
   it('saves an edited list through onSave and refuses an invalid entry', async () => {

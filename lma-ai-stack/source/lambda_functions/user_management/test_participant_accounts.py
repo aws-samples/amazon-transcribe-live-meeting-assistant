@@ -159,14 +159,19 @@ class FakeDynamo:
         self.vps: dict[str, dict] = {}
         self.counts: dict[tuple, int] = {}
         self.updates: list[dict] = []
+        # The address hashes each day's lookup item holds.
+        self.seen: dict[tuple, set] = {}
 
     def get_item(self, **kwargs):
         key = kwargs["Key"]
         if kwargs["TableName"] == index.EVENT_SOURCING_TABLE and key["PK"]["S"].startswith("c#"):
             item = self.meetings.get(key["PK"]["S"][2:])
         elif kwargs["TableName"] == index.EVENT_SOURCING_TABLE:
-            count = self.counts.get((key["PK"]["S"], key["SK"]["S"]))
+            day = (key["PK"]["S"], key["SK"]["S"])
+            count = self.counts.get(day)
             item = None if count is None else {"CreatedCount": {"N": str(count)}}
+            if item is not None and day in self.seen:
+                item["Seen"] = {"SS": sorted(self.seen[day])}
         else:
             item = self.vps.get(key["id"]["S"])
         return {"Item": item} if item else {}
@@ -182,6 +187,7 @@ class FakeDynamo:
                     {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
                 )
             self.counts[key] = (current or 0) + int(values[":count"]["N"])
+            self.seen.setdefault(key, set()).update(values[":fresh"]["SS"])
         elif "ConditionExpression" in kwargs:
             limit = int(values[":limit"]["N"])
             if current is not None and current >= limit:
@@ -421,19 +427,33 @@ def test_the_remaining_daily_count_is_returned_to_a_user(pool, ddb):
     assert result["remainingToday"] == index.PARTICIPANT_ACCOUNTS_PER_DAY - 1
 
 
-def test_a_user_s_lookups_are_counted_and_bounded_a_day(pool, ddb, monkeypatch):
+def test_a_user_s_lookups_count_each_address_once_a_day(pool, ddb):
     accounts({"CallId": CALL_ID})
-    create({"CallId": CALL_ID, "emails": ["di@example.com"]})
-    assert ddb.lookups_counted() == len(LISTED) + 1
-    monkeypatch.setattr(index, "PARTICIPANT_LOOKUPS_PER_DAY", len(LISTED) + 2)
-    with pytest.raises(Exception, match="looked up"):
-        accounts({"CallId": CALL_ID})
-    with pytest.raises(Exception, match="looked up"):
-        create({"CallId": CALL_ID})
-    assert [n for n, _ in pool.calls].count("admin_get_user") == len(LISTED) + 1
+    accounts({"CallId": CALL_ID})
+    create({"CallId": CALL_ID, "emails": ["DI@example.com"]})
+    accounts({"VirtualParticipantId": VP_ID})
+    assert ddb.lookups_counted() == len(LISTED)
+    (seen,) = ddb.seen.values()
+    assert "ana@example.com" not in " ".join(seen), "only a hash of each address is kept"
+
+
+def test_a_user_s_lookups_of_new_addresses_are_refused_past_the_daily_limit(pool, ddb, monkeypatch):
     monkeypatch.setattr(index, "PARTICIPANT_LOOKUPS_PER_DAY", 2)
-    with pytest.raises(Exception, match="At most 2 addresses"):
+    with pytest.raises(Exception, match="2 different addresses"):
         accounts({"CallId": CALL_ID})
+    assert "admin_get_user" not in pool.names_called()
+    assert accounts({"VirtualParticipantId": VP_ID})  # two addresses fit
+    assert accounts({"VirtualParticipantId": VP_ID}), "the same two again cost nothing"
+    with pytest.raises(Exception, match="2 different addresses"):
+        create({"CallId": CALL_ID, "emails": ["cy@example.net"]})
+
+
+def test_an_empty_list_answers_nothing_after_the_owner_check(pool, ddb):
+    ddb.meetings[CALL_ID]["Participants"] = {"L": []}
+    assert accounts({"CallId": CALL_ID}) == []
+    with pytest.raises(Exception, match="Unauthorized"):
+        accounts({"CallId": CALL_ID}, username=OTHER)
+    assert pool.calls == [] and ddb.updates == []
 
 
 def test_an_admin_s_lookups_are_not_counted(pool, ddb, monkeypatch):
