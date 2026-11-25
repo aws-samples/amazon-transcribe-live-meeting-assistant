@@ -654,7 +654,7 @@ def test_the_created_user_is_registered_with_a_verified_email_and_an_invitation(
     """The email doubles as the username, and the invitation is what lets them in.
 
     The invitation carries the role, for the CustomMessage trigger; here the
-    configuration cannot be read, so it says nothing about consent given in advance.
+    setting is off, so it says nothing about consent given in advance.
     """
     cognito.get_user_result = cognito_user("new@example.com", email="new@example.com")
     monkeypatch.setattr(index, "_advance_consent_enabled", lambda: False)

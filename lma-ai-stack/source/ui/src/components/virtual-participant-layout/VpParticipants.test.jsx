@@ -14,7 +14,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import VpParticipants from './VpParticipants';
+import VpParticipants, { MEETING_LOOKUP_INTERVAL_MS } from './VpParticipants';
 
 const { graphqlMock } = vi.hoisted(() => ({ graphqlMock: vi.fn() }));
 vi.mock('aws-amplify/api', () => ({ generateClient: () => ({ graphql: graphqlMock }) }));
@@ -123,6 +123,31 @@ describe('VpParticipants', () => {
     await waitFor(() => expect(calls('getCall')).toHaveLength(1));
     expect(screen.getByText('ana@example.com')).toBeTruthy();
     expect(screen.getByText(/puts this list on the meeting when it creates it/)).toBeTruthy();
+  });
+
+  it('switches to the meeting’s list when the record appears after the CallId, with no status change', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let meeting = null;
+      graphqlMock.mockReset();
+      graphqlMock.mockImplementation(({ query }) => {
+        if (query.includes('getCall(')) return Promise.resolve({ data: { getCall: meeting } });
+        return Promise.resolve({ data: { getMeetingParticipantAccounts: [] } });
+      });
+      render(<VpParticipants vp={vpOf({ status: 'JOINED', CallId: 'Weekly sync-1' })} username={OWNER} />);
+      await waitFor(() => expect(calls('getCall')).toHaveLength(1));
+      expect(screen.queryByText('cy@example.net')).toBeNull();
+      meeting = { CallId: 'Weekly sync-1', Owner: OWNER, Participants: [ANA, CY] };
+      await vi.advanceTimersByTimeAsync(MEETING_LOOKUP_INTERVAL_MS);
+      expect(await screen.findByText('cy@example.net')).toBeTruthy();
+      expect(screen.getByText(/the same one its meeting page shows/)).toBeTruthy();
+      // Found: no more lookups.
+      const looked = calls('getCall').length;
+      await vi.advanceTimersByTimeAsync(MEETING_LOOKUP_INTERVAL_MS * 3);
+      expect(calls('getCall')).toHaveLength(looked);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers Add participants to a Virtual Participant with no list', () => {

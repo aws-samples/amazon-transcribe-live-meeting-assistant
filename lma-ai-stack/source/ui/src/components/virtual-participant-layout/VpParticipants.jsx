@@ -17,6 +17,10 @@ import {
 const client = generateClient();
 const logger = new ConsoleLogger('VpParticipants');
 
+/** How often, and how many times, the meeting record is looked for once the row names a CallId. */
+export const MEETING_LOOKUP_INTERVAL_MS = 5000;
+const MEETING_LOOKUPS = 120;
+
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;
 
 /**
@@ -38,27 +42,37 @@ const VpParticipants = ({ vp, username = '', isAdmin = false, onVpListSaved = ()
 
   useEffect(() => {
     let cancelled = false;
+    let timer = null;
     if (!callId) {
       setMeetingList(null);
       return undefined;
     }
-    (async () => {
+    // The CallId is on the row a few seconds (or, while the Virtual Participant
+    // waits to be admitted, minutes) before the meeting record exists, so the
+    // record is looked for again until it is found, for a bounded time.
+    let attempts = 0;
+    const look = async () => {
+      let found = null;
       try {
         const response = await client.graphql({ query: getCallParticipants, variables: { CallId: callId } });
         const meeting = response?.data?.getCall;
         // Followed only when the meeting has the Virtual Participant's owner, as the server follows it.
-        if (!cancelled) setMeetingList(meeting && meeting.Owner === owner ? meeting.Participants || [] : null);
+        found = meeting && meeting.Owner === owner ? meeting.Participants || [] : null;
       } catch (error) {
         // No meeting yet, or one this viewer cannot read: the Virtual Participant's list is shown.
         logger.debug('the meeting’s participant list was not read', error);
-        if (!cancelled) setMeetingList(null);
       }
-    })();
+      if (cancelled) return;
+      setMeetingList(found);
+      attempts += 1;
+      if (found === null && attempts < MEETING_LOOKUPS) timer = setTimeout(look, MEETING_LOOKUP_INTERVAL_MS);
+    };
+    look();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-    // The meeting record appears when the Virtual Participant is admitted, so
-    // it is looked for again as the status moves on.
+    // Looked for afresh as the status moves on, too.
   }, [callId, owner, vp?.status]);
 
   const isOwner = Boolean(username) && owner === username;
