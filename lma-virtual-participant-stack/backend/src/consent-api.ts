@@ -191,7 +191,16 @@ export function signedGraphqlSender(endpoint: string, region: string, timeoutMs 
     };
 }
 
-export function createConsentApi(callId: string, send: GraphqlSender): ConsentApi {
+export interface ConsentApiOptions {
+    /**
+     * The Virtual Participant's own id, sent when it lists who is present, so a
+     * consent given in advance through its consent link is counted for the
+     * meeting it created (docs/meeting-consent.md#consent-given-in-advance).
+     */
+    virtualParticipantId?: string;
+}
+
+export function createConsentApi(callId: string, send: GraphqlSender, options: ConsentApiOptions = {}): ConsentApi {
     const mutate = async (field: string, inputType: string, input: Record<string, unknown>): Promise<ConsentRecord | null> => {
         const query = `mutation Consent($input: ${inputType}!) { ${field}(input: $input) ${UPDATE_SELECTION} }`;
         const data = await send(query, { input: { CallId: callId, ...input } });
@@ -213,8 +222,21 @@ export function createConsentApi(callId: string, send: GraphqlSender): ConsentAp
             return { record: state.Consent ?? null, captureAllowed: state.CaptureAllowed === true, settings: state.Settings ?? null };
         },
         recordNotice: (text) => mutate('recordMeetingConsentNotice', 'RecordMeetingConsentNoticeInput', { Channel: 'chat', Text: text }),
-        setParticipants: (names) =>
-            mutate('setMeetingConsentParticipants', 'SetMeetingConsentParticipantsInput', { Participants: names }),
+        setParticipants: async (names) => {
+            const input: Record<string, unknown> = { Participants: names };
+            if (options.virtualParticipantId) input.VirtualParticipantId = options.virtualParticipantId;
+            try {
+                return await mutate('setMeetingConsentParticipants', 'SetMeetingConsentParticipantsInput', input);
+            } catch (error) {
+                // An API from before consent given in advance refuses the field;
+                // the list matters more than the id, so it is sent again without.
+                if (!input.VirtualParticipantId || !(error instanceof ConsentApiError) || !/VirtualParticipantId/.test(error.message)) {
+                    throw error;
+                }
+                log.warn('[consent] the consent API does not take the Virtual Participant id; the participants are listed without it');
+                return mutate('setMeetingConsentParticipants', 'SetMeetingConsentParticipantsInput', { Participants: names });
+            }
+        },
         recordEvent: async (input) => {
             const event = { ...input, Source: input.Source ?? 'chat' };
             try {

@@ -92,6 +92,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
             {
                 "participantName": "Ana Silva",
@@ -101,6 +103,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
             {
                 "participantName": "Bo Chen",
@@ -110,6 +114,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
             {
                 "participantName": "Owner",
@@ -119,6 +125,8 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
         ],
         "attestation": None,

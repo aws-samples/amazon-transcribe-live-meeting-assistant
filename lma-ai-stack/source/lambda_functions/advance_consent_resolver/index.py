@@ -42,6 +42,7 @@ docs/meeting-consent.md#consent-given-in-advance.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -77,6 +78,9 @@ CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
 USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
+#: The meeting consent resolver, invoked for each meeting in progress that
+#: counted a consent being withdrawn.
+MEETING_CONSENT_FUNCTION = os.environ.get("MEETING_CONSENT_FUNCTION", "")
 #: How long a consent stays stored after it stops counting (withdrawn or
 #: expired): as long as the meeting records it may have been used in.
 MEETING_RECORD_EXPIRATION_DAYS = float(os.environ.get("MEETING_RECORD_EXPIRATION_IN_DAYS", "90"))
@@ -92,9 +96,12 @@ MAX_REQUESTS_PER_VP = 20
 #: How long a request to be added is remembered, so asking again does not notify again.
 REQUEST_SECONDS = 30 * 24 * 3600
 MAX_ID_LENGTH = 512
+#: The most meetings a withdrawal is passed on to.
+MAX_WITHDRAWAL_MEETINGS = 50
 
 DYNAMODB = boto3.resource("dynamodb", config=CLIENT_CONFIG)
 COGNITO = boto3.client("cognito-idp", config=CLIENT_CONFIG)
+LAMBDA = boto3.client("lambda", config=CLIENT_CONFIG)
 
 _STORE: Optional[ConfigurationStore] = None
 _MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~])")
@@ -636,6 +643,8 @@ def withdraw_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any])
         raise BadRequest("ConsentId is not one of your consents")
     now = datetime.now(timezone.utc)
     updated = _withdraw(email, consent_id, now, "withdrawn")
+    if updated is not None:
+        pass_withdrawal_on(updated, now)
     if updated is None:
         item = (
             _table()
@@ -647,6 +656,41 @@ def withdraw_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any])
         updated = _plain(item)  # already withdrawn: answered as it is
     LOGGER.info("consent given in advance withdrawn")
     return consent_out(updated, now)
+
+
+def pass_withdrawal_on(consent: Mapping[str, Any], now: datetime) -> int:
+    """Tell each meeting that counted the consent that it was withdrawn.
+
+    The meeting consent resolver records an objection from the attendee in
+    each one still in progress (not ended), which stops capture there as an
+    objection in the meeting does; a meeting that has ended is left as it is.
+    The calls are asynchronous, so the withdrawal answers at once; the Virtual
+    Participant reads the record within about 10 seconds. Answers how many
+    meetings were told.
+    """
+    meetings = consent.get("AppliedCallIds") or []
+    if not MEETING_CONSENT_FUNCTION or not meetings:
+        return 0
+    told = 0
+    for call_id in sorted(meetings)[:MAX_WITHDRAWAL_MEETINGS]:
+        try:
+            LAMBDA.invoke(
+                FunctionName=MEETING_CONSENT_FUNCTION,
+                InvocationType="Event",
+                Payload=json.dumps(
+                    {
+                        "advanceConsentWithdrawn": {
+                            "CallId": call_id,
+                            "ConsentId": consent.get("ConsentId"),
+                            "WithdrawnAt": advance.iso(now),
+                        }
+                    }
+                ).encode(),
+            )
+            told += 1
+        except (ClientError, BotoCoreError):
+            LOGGER.exception("could not pass a withdrawal on to a meeting that counted it")
+    return told
 
 
 def _markdown_text(value: str) -> str:

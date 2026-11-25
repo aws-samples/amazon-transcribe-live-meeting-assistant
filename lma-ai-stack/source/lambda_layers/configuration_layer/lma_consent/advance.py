@@ -29,7 +29,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from .rules import DEFAULT_SETTINGS
+from .rules import DEFAULT_SETTINGS, normalize_name
 
 #: The source a consent given in advance is recorded with.
 SOURCE_PRE_MEETING = "pre_meeting"
@@ -251,3 +251,40 @@ def same_scope(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
         and (a.get("LabelKey") or "") == (b.get("LabelKey") or "")
         and (a.get("LabelValue") or "") == (b.get("LabelValue") or "")
     )
+
+
+def match_listed(
+    present: Iterable[Any], listed: Iterable[Mapping[str, Any]]
+) -> Dict[str, Dict[str, str]]:
+    """The attendees present matched to the participant list, by display name.
+
+    Answers each present display name that matches exactly one listed person,
+    with that person's ``name`` and ``email``. Names are compared as replies
+    are (:func:`lma_consent.rules.normalize_name`), so case and spacing do not
+    matter. Nobody is matched when the name is empty, when two listed people
+    have that name, or when two attendees present show it: a display name is
+    what the platform shows, and a name shared by two people says nothing about
+    which of them is which. The basis of every match is
+    :data:`lma_consent.rules.MATCH_DISPLAY_NAME`.
+    """
+    by_name: Dict[str, List[Dict[str, str]]] = {}
+    for person in listed or []:
+        if not isinstance(person, Mapping):
+            continue
+        email = person.get("email")
+        key = normalize_name(person.get("name"))
+        if key and isinstance(email, str) and email.strip():
+            by_name.setdefault(key, []).append(
+                {"name": str(person.get("name") or "").strip(), "email": email.strip()}
+            )
+    seen: Dict[str, List[str]] = {}
+    for name in present or []:
+        key = normalize_name(name)
+        if key:
+            seen.setdefault(key, []).append(str(name))
+    matches: Dict[str, Dict[str, str]] = {}
+    for key, names in seen.items():
+        people = by_name.get(key) or []
+        if len(people) == 1 and len(names) == 1:
+            matches[names[0]] = people[0]
+    return matches

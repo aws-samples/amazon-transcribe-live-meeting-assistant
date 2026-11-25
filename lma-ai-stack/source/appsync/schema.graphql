@@ -2178,7 +2178,10 @@ type MeetingConsentEvent @aws_cognito_user_pools
 	ParticipantName: String
 	# "consent" or "objection".
 	Decision: String
-	# "chat", "voice", "ui" (entered by a signed-in user) or "attestation".
+	# "chat", "voice", "ui" (entered by a signed-in user), "attestation", or
+	# "pre_meeting" (a consent given in advance, counted for an attendee matched
+	# to the participant list, or the objection recorded when it is withdrawn
+	# during the meeting).
 	Source: String
 	# What was said or typed, when the capture client sent it.
 	Text: String
@@ -2189,6 +2192,29 @@ type MeetingConsentEvent @aws_cognito_user_pools
 	# The transcript speaker who gave the reply, when it was linked to one
 	# as it was recorded. Null otherwise. See docs/meeting-consent.md.
 	SpeakerLink: MeetingConsentSpeakerLink
+	# For source "pre_meeting": the consent given in advance and how the
+	# attendee was matched to the participant list. Null otherwise.
+	PreMeeting: MeetingConsentPreMeeting
+}
+
+# A consent given in advance as a meeting counted it. See
+# docs/meeting-consent.md#consent-given-in-advance.
+type MeetingConsentPreMeeting @aws_cognito_user_pools
+@aws_iam {
+	ConsentId: String
+	# "meeting" or "organizer".
+	Scope: String
+	GrantedAt: AWSDateTime
+	ValidUntil: AWSDateTime
+	# The SHA-256 of the text the person agreed to, and its wording version.
+	NoticeHash: String
+	NoticeVersion: String
+	# How the attendee was matched to the participant list: "display_name".
+	MatchBasis: String
+	# The name the participant list gives the person matched.
+	ListedName: String
+	# True on the objection recorded when the consent was withdrawn.
+	Withdrawn: Boolean
 }
 
 type MeetingConsentSpeakerLink @aws_cognito_user_pools
@@ -2368,6 +2394,10 @@ input SetMeetingConsentParticipantsInput {
 	# Everyone present now, by display name, leaving out LMA's own participant.
 	# Replaces the previous list.
 	Participants: [String!]!
+	# For a backend role: the Virtual Participant listing them, so that a
+	# consent given in advance through its consent link is counted for the
+	# meeting it created.
+	VirtualParticipantId: ID
 }
 
 input RecordMeetingConsentEventInput {

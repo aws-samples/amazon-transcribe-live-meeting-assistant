@@ -381,8 +381,8 @@ export const MyConsentsList = ({ answer = null, error = '', onWithdrawn }) => {
         <SpaceBetween size="s">
           <Box>{confirming ? consentScopeLabel(confirming) : ''}</Box>
           <Box>
-            From now on it is no longer in force. A meeting&apos;s own notice and consent step are not affected. The
-            record of what you agreed to, and when you withdrew, is kept.
+            From now on it is no longer in force: later meetings ask you in the meeting, and a meeting in progress that
+            counted it treats this as your objection. The record of what you agreed to, and when you withdrew, is kept.
           </Box>
           {withdrawError && <Alert type="error">{withdrawError}</Alert>}
         </SpaceBetween>

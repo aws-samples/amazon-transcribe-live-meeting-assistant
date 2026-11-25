@@ -487,6 +487,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
             {
                 "participantName": "Priya Shah",
@@ -496,6 +498,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
             {
                 "participantName": "owner@example.com",
@@ -505,6 +509,8 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerId": None,
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
+                "matchBasis": None,
+                "givenInAdvance": None,
             },
         ],
         "attestation": {
@@ -582,6 +588,49 @@ def test_a_spoken_consent_is_given_as_its_speaker_s(fakes) -> None:
     plain = linked_export(fakes, [spoken("Bo Chen", "consent", segment_id=None)])
     assert plain["consent"]["events"][0]["speakerLinkBasis"] is None
     assert set(consent_of(plain).values()) == {"unknown"}
+
+
+def test_a_consent_given_in_advance_is_exported_with_its_basis_and_never_the_address():
+    """An attendee counted by a consent given in advance: the event says how they were
+    matched to the participant list and which consent it was, without the address."""
+    pre = {
+        "ConsentId": "20261125120000-aaaaaaaaaaaa",
+        "Scope": "organizer",
+        "GrantedAt": "2026-11-25T12:00:00Z",
+        "ValidUntil": "2027-05-25T23:59:59Z",
+        "NoticeHash": "a" * 64,
+        "NoticeVersion": "abcdefabcdef",
+        "MatchBasis": "display_name",
+        "ListedName": "Priya Shah",
+    }
+    from lma_consent import summary as consent_summary  # pylint: disable=import-outside-toplevel
+
+    events = consent_summary.consent_events(
+        {
+            "Events": [
+                {
+                    "ParticipantName": "Priya Shah",
+                    "Decision": "consent",
+                    "Source": "pre_meeting",
+                    "OccurredAt": "2026-11-25T12:00:00Z",
+                    "PreMeeting": pre,
+                },
+                {"ParticipantName": "Bo Chen", "Decision": "consent", "Source": "chat"},
+            ]
+        }
+    )
+    assert events[0]["source"] == "pre_meeting"
+    assert events[0]["matchBasis"] == "display_name"
+    assert events[0]["givenInAdvance"] == {
+        "scope": "organizer",
+        "grantedAt": "2026-11-25T12:00:00Z",
+        "validUntil": "2027-05-25T23:59:59Z",
+        "noticeHash": "a" * 64,
+        "noticeVersion": "abcdefabcdef",
+        "withdrawn": False,
+    }
+    assert "20261125120000" not in str(events) and "@" not in str(events)
+    assert (events[1]["matchBasis"], events[1]["givenInAdvance"]) == (None, None)
 
 
 @pytest.mark.parametrize("key", ["speakerLinkBasis", "speakerLinkedAt"])

@@ -36,6 +36,9 @@ import {
     repostLeadIn,
     speakerLinkFor,
     UNKNOWN_SENDER,
+    advanceConsentLine,
+    coveredInAdvance,
+    latestDecisions,
 } from './meeting-consent.js';
 import { notePlatformSpeaker, resetPlatformSpeakers } from './platform-speakers.js';
 import { normalizeParticipantName, renderNotice } from './consent-matcher.js';
@@ -2085,4 +2088,130 @@ test("the notice rendered without the API ends with the deployment's video sente
     const settings = effectiveConsentSettings({ mode: 'notify', videoNoticeText: 'Video too.' });
     assert.equal(settings.videoNoticeText, 'Video too.');
     assert.equal(effectiveConsentSettings({ videoNoticeText: '  ' }).videoNoticeText, DEFAULT_CONSENT_SETTINGS.videoNoticeText);
+});
+
+// ─── Consent given in advance ───────────────────────────────────────────────
+
+/**
+ * The resolver's part, as the meeting consent resolver plays it: when the VP
+ * lists who is present, an attendee with no reply whose name is covered by a
+ * consent given in advance gets a consent of source pre_meeting.
+ */
+class AdvanceApi extends FakeApi {
+    covered = new Set<string>();
+    private seq = 0;
+
+    async setParticipants(names: string[]): Promise<ConsentRecord | null> {
+        const replied = new Set((this.record?.Events ?? []).map((e) => normalizeParticipantName(e.ParticipantName)));
+        const fresh = names.filter((name) => this.covered.has(name) && !replied.has(normalizeParticipantName(name)));
+        if (this.record && fresh.length) {
+            this.record.Events = [
+                ...(this.record.Events ?? []),
+                ...fresh.map((name) => ({ EventId: `pre${++this.seq}`, ParticipantName: name, Decision: 'consent', Source: 'pre_meeting' })),
+            ];
+        }
+        return super.setParticipants(names);
+    }
+
+    /** The person withdrew it on My consents, and the resolver recorded it for this meeting. */
+    withdraw(name: string): void {
+        (this.record as ConsentRecord).Events = [
+            ...((this.record as ConsentRecord).Events ?? []),
+            { EventId: `w${++this.seq}`, ParticipantName: name, Decision: 'objection', Source: 'pre_meeting' },
+        ];
+    }
+}
+
+const ADVANCE_LINE_TWO = 'Consent given in advance is on record for Bo Chen and Cy Diaz. Anyone can still object: "LMA, I object".';
+
+test('the line naming attendees covered in advance lists display names and says anyone can object', () => {
+    assert.equal(
+        advanceConsentLine(['Bo Chen'], 'I object'),
+        'Consent given in advance is on record for Bo Chen. Anyone can still object: "LMA, I object".',
+    );
+    assert.equal(advanceConsentLine(['Bo Chen', 'Cy Diaz'], 'I object'), ADVANCE_LINE_TWO);
+    const many = Array.from({ length: 12 }, (_, i) => `P${i + 1}`);
+    assert.match(advanceConsentLine(many, 'I object'), /for P1, P2, P3, P4, P5, P6, P7, P8, P9, P10 and 2 others\./);
+});
+
+test('a consent given in advance counts only while the attendee has no other reply', () => {
+    const record: ConsentRecord = {
+        Participants: ['Bo Chen', 'Cy Diaz'],
+        Events: [
+            { ParticipantName: 'Bo Chen', Decision: 'objection', Source: 'chat' },
+            { ParticipantName: 'Bo Chen', Decision: 'consent', Source: 'pre_meeting' },
+            { ParticipantName: 'Cy Diaz', Decision: 'consent', Source: 'pre_meeting' },
+        ],
+    };
+    assert.equal(latestDecisions(record).get('bo chen'), 'objection');
+    assert.deepEqual(coveredInAdvance(record), ['Cy Diaz']);
+});
+
+test('opt-in: capture starts once everyone present is covered, after the notice, which names them', async () => {
+    const api = new AdvanceApi({ mode: 'opt_in', rule: 'each_participant' });
+    api.covered = new Set(['Bo Chen', 'Cy Diaz']);
+    const names = ['Bo Chen', 'Cy Diaz'];
+    const h = await harness({ deployment: OPT_IN_EACH, api, readRoster: async () => names });
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.on, true, 'everyone present is covered');
+    const noticeAt = h.chat.findIndex((m) => m.includes('would like to record and transcribe'));
+    const lineAt = h.chat.indexOf(ADVANCE_LINE_TWO);
+    assert.ok(noticeAt >= 0, 'the notice is posted');
+    assert.ok(lineAt > noticeAt, h.chat.join('\n'));
+    assert.ok(api.noticeTexts.includes(ADVANCE_LINE_TWO), 'the line is recorded with the notices');
+    h.flow.stop();
+});
+
+test('opt-in: an attendee not covered is still asked, and the line names only those covered', async () => {
+    const api = new AdvanceApi({ mode: 'opt_in', rule: 'each_participant' });
+    api.covered = new Set(['Bo Chen']);
+    const names = ['Bo Chen', 'Cy Diaz'];
+    const h = await harness({ deployment: OPT_IN_EACH, api, readRoster: async () => names });
+    h.flow.noteAttendeeCount(3);
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.on, false);
+    assert.ok(h.chat.includes('Consent given in advance is on record for Bo Chen. Anyone can still object: "LMA, I object".'));
+    await h.flow.handleChat('Cy Diaz', 'I consent');
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    h.flow.stop();
+});
+
+test('an objection wins over a consent given in advance', async () => {
+    const api = new AdvanceApi({ mode: 'opt_in', rule: 'each_participant' });
+    api.covered = new Set(['Bo Chen']);
+    const names = ['Bo Chen'];
+    const h = await harness({ deployment: OPT_IN_EACH, api, readRoster: async () => names });
+    h.flow.noteAttendeeCount(2);
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    await h.flow.handleChat('Bo Chen', 'I object');
+    await h.settle();
+    assert.equal(h.capture.on, false);
+    assert.equal(api.record?.Status, 'objected');
+    h.flow.stop();
+});
+
+test('a consent given in advance withdrawn during the meeting stops capture as an objection', async () => {
+    const api = new AdvanceApi({ mode: 'notify', rule: 'each_participant' });
+    api.covered = new Set(['Bo Chen']);
+    const names = ['Bo Chen'];
+    const h = await harness({ deployment: { mode: 'notify' }, api, readRoster: async () => names });
+    h.flow.noteAttendeeCount(2);
+    await h.flow.syncRoster();
+    await h.settle();
+    assert.equal(h.capture.on, true);
+    api.withdraw('Bo Chen');
+    await h.flow.pollOnce();
+    await h.settle();
+    assert.equal(h.capture.on, false);
+    assert.ok(
+        h.chat.some((m) => m.startsWith('Bo Chen withdrew the consent they gave in advance.')),
+        h.chat.join('\n'),
+    );
+    h.flow.stop();
 });

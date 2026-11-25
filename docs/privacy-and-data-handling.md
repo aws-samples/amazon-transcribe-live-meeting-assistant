@@ -214,7 +214,10 @@ they agreed to with its hash. It keeps nothing about their device unless
 advance** is on (off by default and in every preset), and then the request's
 IP address and the browser's user agent. A consent is kept for
 `MeetingRecordExpirationInDays` days after it stops counting, and is not
-deleted with a meeting. See
+deleted with a meeting. A meeting a Virtual Participant joins counts it for an
+attendee whose display name matches the person on the participant list; the
+meeting's consent record then keeps, on that attendee's event, the consent's
+scope, times and text hash and the match's basis, never the address. See
 [Consent given in advance](meeting-consent.md#consent-given-in-advance).
 
 ### Choosing a mode

@@ -173,7 +173,9 @@
               "at",
               "speakerId",
               "speakerLinkBasis",
-              "speakerLinkedAt"
+              "speakerLinkedAt",
+              "matchBasis",
+              "givenInAdvance"
             ],
             "properties": {
               "participantName": {
@@ -192,8 +194,10 @@
                   "voice",
                   "ui",
                   "attestation",
+                  "pre_meeting",
                   null
-                ]
+                ],
+                "description": "Where the reply was read: chat, voice, ui (entered by a signed-in user), attestation, or pre_meeting (a consent given in advance, counted for an attendee matched to the participant list, or the objection recorded when it was withdrawn during the meeting)."
               },
               "at": {
                 "type": [
@@ -216,6 +220,28 @@
               "speakerLinkedAt": {
                 "type": ["string", "null"],
                 "description": "When the event was linked to its speaker; null for an event that was never linked."
+              },
+              "matchBasis": {
+                "enum": ["display_name", null],
+                "description": "For a pre_meeting event, how the attendee was matched to the meeting's participant list: display_name, their display name in the meeting was that of one listed person. Null for every other event."
+              },
+              "givenInAdvance": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": ["scope", "grantedAt", "validUntil", "noticeHash", "noticeVersion", "withdrawn"],
+                    "properties": {
+                      "scope": { "enum": ["meeting", "organizer", null] },
+                      "grantedAt": { "type": ["string", "null"] },
+                      "validUntil": { "type": ["string", "null"] },
+                      "noticeHash": { "type": ["string", "null"], "description": "The SHA-256, in hex, of the text the person agreed to." },
+                      "noticeVersion": { "type": ["string", "null"] },
+                      "withdrawn": { "type": "boolean", "description": "True on the objection recorded when the consent was withdrawn during the meeting." }
+                    }
+                  }
+                ],
+                "description": "For a pre_meeting event, the consent given in advance it counted: its scope, when it was given, until when it counts, and the hash and version of its text. Never the person's address. Null for every other event."
               }
             }
           }

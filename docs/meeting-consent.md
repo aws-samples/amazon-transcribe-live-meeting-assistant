@@ -113,7 +113,9 @@ addressed to LMA. See
 [Spoken replies](#spoken-replies).
 
 Each participant's **latest** reply is the one that counts: somebody who
-objected and then consented has consented, and the other way round. Replies are
+objected and then consented has consented, and the other way round. A consent
+given in advance counts only while the participant has no other reply (see
+[In the meeting](#in-the-meeting)). Replies are
 matched to participants by their display name in the meeting, compared without
 regard to case or extra spacing.
 
@@ -168,7 +170,7 @@ the `ConfigurationPreset` stack parameter; see
 | Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
 | Read spoken replies | Whether a Virtual Participant also reads consent replies and objections said aloud and addressed to LMA, sending the meeting audio to the transcription engine while consent is awaited, or reads the chat only; see [Spoken replies](#spoken-replies) | On |
-| Allow consent given in advance | Whether a person on a meeting's participant list can consent before the meeting from its consent link, and manage it on My consents. Off: no new one can be given; each person can still read and withdraw their own. See [Consent given in advance](#consent-given-in-advance) | On |
+| Allow consent given in advance | Whether a person on a meeting's participant list can consent before the meeting from its consent link, and manage it on My consents, and whether a Virtual Participant's meeting counts it for an attendee matched to the list. Off: no new one can be given and none is counted in a meeting; each person can still read and withdraw their own. See [Consent given in advance](#consent-given-in-advance) | On |
 | Longest consent given in advance, in days | How far ahead a consent for an organizer's meetings may run, and how long a consent for one meeting counts: 1 to 365 | 365 |
 | Consent text (given in advance) | The text a person agrees to, kept exactly with each consent; `{organizer}`, `{meeting}` and `{scope}` are filled in | "I agree that {organizer} may record and transcribe {scope} with Live Meeting Assistant, including what I say, what I type in the meeting chat and, where the meeting's video is recorded, my camera feed and any screen I share. I can withdraw this consent at any time on the My consents page, and I can still object during any meeting." |
 | Keep sign-in device details with consents given in advance | Whether a consent given in advance also keeps the request's IP address and the browser's user agent | Off |
@@ -316,7 +318,7 @@ replies are read.
 
 | Capture method | Notice | Replies | Status |
 |---|---|---|---|
-| **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
+| **Virtual Participant** | Posted in the meeting chat when the Virtual Participant is admitted, and again when somebody joins; it names the attendees covered by a consent given in advance | Read from the meeting chat by display name, and from what is said, under the name of the participant shown speaking; an attestation or an objection made in the meeting page's Consent section (or through the API); a [consent given in advance](#in-the-meeting) for an attendee matched to the participant list; screenshots of the chat and the participant list kept as evidence | Available. See [Virtual Participant](#virtual-participant) for what each platform supports. |
 | **Stream Audio/Video** | Shown to the LMA user, with a copy button, to read out or post in their meeting | Attested by the LMA user, who owns the meeting (opt-in is met by the rule **The meeting owner attests**); an objection is reported with **Participant objected** | Available. See [Stream Audio/Video and the Desktop Capture App](#stream-audiovideo-and-the-desktop-capture-app). |
 | **Desktop Capture App** (macOS and Windows) | As for Stream Audio/Video, with a copy button | As for Stream Audio/Video; evidence is a frame of the screen-video source selected in the app | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [The Desktop Capture App](#the-desktop-capture-app). |
 | **Browser extension** | As for Stream Audio/Video, with a copy button and **Post in meeting chat**, which counts as posted only once the user confirms the notice appeared | As for Stream Audio/Video | Available in builds that include it. Earlier builds show no consent step and are treated as [clients without a consent step](#clients-without-a-consent-step). See [Meeting consent](browser-extension.md#meeting-consent). |
@@ -337,7 +339,10 @@ A capture client follows the same steps whichever method it is:
 3. **Post the notice** where participants will see it, and record that it was
    posted with `recordMeetingConsentNotice`.
 4. **Keep the participant list current** with `setMeetingConsentParticipants`
-   as people join and leave, leaving out LMA's own participant.
+   as people join and leave, leaving out LMA's own participant. A backend role's
+   list is also matched against consents given in advance (see
+   [In the meeting](#in-the-meeting)); a Virtual Participant sends its own
+   `VirtualParticipantId` with it.
 5. **Record each reply** that reads as consent or an objection (see
    [How a reply is read](#how-a-reply-is-read)) with
    `recordMeetingConsentEvent`, and any attestation the owner makes with
@@ -1198,7 +1203,11 @@ signed in.
 The page needs sign-in, and checks that the email address the user pool holds
 for the signed-in account (it must be verified) is on that meeting's participant
 list, compared ignoring case. So one link serves everybody on the list, and
-somebody who is sent it but is not on the list cannot consent with it.
+somebody who is sent it but is not on the list cannot consent with it. The
+accounts User Management and **Create accounts for participants without one**
+create have a verified address; an account without one (the stack's first
+Admin, for example, unless its address was verified) is told on My consents
+that it has no verified email address, and cannot give consent in advance.
 
 **Someone not on the list** is told *"You are not on this meeting's list"*,
 with the address they signed in with. Nothing about the meeting is shown to
@@ -1273,7 +1282,8 @@ API say whether device details were kept with a consent, and never return them.
 ### Withdrawing
 
 **Withdraw** on My consents ends a consent at once: from then on it is no
-longer in force. The record stays, marked withdrawn with the time, so
+longer in force, and a meeting in progress that counted it records an objection
+from that attendee (see [In the meeting](#in-the-meeting)). The record stays, marked withdrawn with the time, so
 what the person agreed to and when they withdrew remain on record. Deleting an
 account in User Management withdraws the consents that account gave, with the
 reason `account_deleted`.
@@ -1285,9 +1295,69 @@ part of any meeting, so deleting a meeting does not delete it.
 
 ### In the meeting
 
-A consent given in advance is kept as a record of the person's agreement. A
-meeting's own consent flow runs as the rest of this page describes: the notice
-is posted and replies and objections are read in the meeting.
+A meeting a **Virtual Participant** joins counts consents given in advance,
+when **Allow consent given in advance** is on and the meeting runs in Notify or
+Opt-in:
+
+1. **The notice is always posted**, as in any meeting (see
+   [How the Virtual Participant asks for replies](#how-the-virtual-participant-asks-for-replies)).
+2. **The attendees are matched to the participant list.** Each time the
+   Virtual Participant lists who is present (`setMeetingConsentParticipants`),
+   the meeting consent resolver takes each attendee with no reply on the record
+   yet and compares their display name with the names on the meeting's
+   participant list, ignoring case and spacing, as replies are matched. An
+   attendee matches only when exactly one listed person has that name and only
+   one attendee shows it.
+3. **A matched attendee with a consent that covers the meeting is recorded as
+   consented**, source `pre_meeting`, with the basis of the match
+   (`MatchBasis: display_name`), the consent's scope, when it was given and
+   until when, and the hash and version of its text (`PreMeeting` on the
+   event). The person's address is not copied to the meeting's record. In
+   Opt-in under the each-participant rule, capture starts once everyone present
+   is covered, by a consent given in advance or a reply in the meeting.
+4. **The Virtual Participant says who is covered.** Once the notice is in the
+   chat it posts *"Consent given in advance is on record for Bo Chen and Cy
+   Diaz. Anyone can still object: "LMA, I object"."*, by display name only, and
+   records that line with the notices. A notice posted again for newcomers ends
+   with the same line for everyone covered then.
+5. **Everyone else is asked as usual.** An attendee who does not match, or whose
+   listed address has no consent covering the meeting, goes through the
+   in-meeting flow: the notice, the reply line and the each-participant rule.
+
+**An objection wins.** A consent given in advance counts for an attendee only
+while they have no other reply on the record. Anything they say or type in the
+meeting decides instead, whenever it was recorded, so an objection always stops
+capture, as it does without consent given in advance; a consent in the meeting
+after an objection resumes it, as usual.
+
+**Withdrawing during a meeting.** When a person withdraws a consent on My
+consents, each meeting that counted it and has not ended records an objection
+from that attendee (source `pre_meeting`, *Withdrew the consent given in
+advance*). The Virtual Participant reads it within about 10 seconds, stops
+capture, and posts *"Bo Chen withdrew the consent they gave in advance. Live
+Meeting Assistant has stopped recording and transcribing."* A meeting that has
+ended is not changed. Deleting an account withdraws its consents for later
+meetings only.
+
+**When it is looked up.** An attendee is looked up when the Virtual Participant
+lists them as present, which it does whenever the list changes. A consent given
+while the person is already in the meeting is counted the next time the list
+changes; until then they can reply in the meeting.
+
+**Meeting scope and the consent link.** A consent for one meeting given from a
+Virtual Participant's link (`?vp=<id>`) counts for the meeting that Virtual
+Participant creates: it sends its own id with the participants it lists.
+
+**Streaming clients do not count them.** Stream Audio/Video, the browser
+extension and the Desktop Capture App have no participant roster to match, so
+their meetings are decided by the LMA user's attestation or notice as before;
+consents given in advance are not looked up for them.
+
+**The match is by display name.** It is the weak link that remains: someone
+showing a listed person's name in the meeting would be counted under that
+person's consent. The record says so (`MatchBasis: display_name`), the notice is
+still posted with the names it counted, evidence screenshots are kept as usual,
+and anyone, including the person whose name is shown, can object at any time.
 
 ## What is stored
 
@@ -1302,7 +1372,7 @@ holds:
 | `NoticeText` | The notice or request for this meeting, placeholders filled |
 | `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 9 are kept |
 | `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
-| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, or `attestation`), the words when sent, when it happened, when it was recorded and by whom, and, for a reply linked to the transcript speaker who gave it, that speaker: the transcript line a reply said aloud was read from, or, for a chat reply on a join whose platform gives participant ids, the sender's platform participant id and the speaker last written with it (`SpeakerLink`; see [Which speaker gave a reply](#which-speaker-gave-a-reply)) |
+| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, `attestation`, or `pre_meeting` for a consent given in advance and the objection recorded when it is withdrawn, with the consent's scope, times, text hash and version and the match's basis in `PreMeeting`), the words when sent, when it happened, when it was recorded and by whom, and, for a reply linked to the transcript speaker who gave it, that speaker: the transcript line a reply said aloud was read from, or, for a chat reply on a join whose platform gives participant ids, the sender's platform participant id and the speaker last written with it (`SpeakerLink`; see [Which speaker gave a reply](#which-speaker-gave-a-reply)) |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
 | `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken, a note, the vision model's check of it (`Verification`) when one ran, and when the image was deleted after its check (`ImageDeletedAt`) when screenshots are not kept |
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |
@@ -1801,6 +1871,9 @@ the caller's is refused as one that does not exist. A person may have at most
   and who sent a chat message or is speaking come from the meeting page, and not every
   platform shows all three; see
   [What each platform supports](#what-each-platform-supports).
+- **An attendee is matched to a consent given in advance by display name.**
+  See [In the meeting](#in-the-meeting) for how the notice, the evidence and
+  an objection cover it.
 - **A consent given in advance is as good as the participant list and the
   sign-in.** Anyone who can sign in to LMA with an address on a meeting's list
   can consent for it: the list is what the meeting's owner or a calendar

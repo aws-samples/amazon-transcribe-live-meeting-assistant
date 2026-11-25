@@ -6223,6 +6223,18 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "c#*"
+              # Consent given in advance (pmc# partitions): read for the
+              # attendees a Virtual Participant lists, and noted with the
+              # meetings that counted each one (AppliedCallIds).
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "pmc#*"
               # Read-only, on the shared configuration table: the Meeting
               # Consent section.
               - Effect: Allow
@@ -6742,6 +6754,7 @@ Resources:
         EventSourcingTable: !Ref EventSourcingTable
         EventSourcingTableArn: !GetAtt EventSourcingTable.Arn
         LogLevel: !Ref LogLevel
+        MeetingConsentResolverFunctionArn: !GetAtt MeetingConsentResolverFunction.Arn
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         RecordingsBucketName: !Ref S3BucketName

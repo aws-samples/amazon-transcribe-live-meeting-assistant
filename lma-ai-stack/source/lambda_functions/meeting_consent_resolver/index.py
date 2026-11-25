@@ -36,6 +36,16 @@ Who may do what:
                                 Lambda on one image and stores its result.
 =============================== ==================================================
 
+Consent given in advance (lma_consent.advance) reaches a meeting here. When a
+backend role -- the Virtual Participant -- lists who is present, each attendee
+with no reply on the record whose display name matches one person on the
+meeting's participant list is looked up among that person's consents given in
+advance, and one that covers the meeting is recorded as their consent, source
+``pre_meeting``, with the match's basis (``display_name``). When such a consent
+is withdrawn, the advance consent resolver invokes this function directly
+(``advanceConsentWithdrawn``), and a meeting in progress that counted it records
+an objection from that attendee.
+
 Every write is a read of the meeting row followed by an update conditional on
 the version of the consent record that was read, retried a few times, so two
 replies arriving together are both kept.
@@ -66,6 +76,7 @@ from lma_config import (  # configuration layer
     ConfigurationTableNotConfigured,
     offered_settings,
 )
+from lma_consent import advance  # configuration layer
 from lma_consent import rules as consent  # configuration layer
 
 # pylint: enable=import-error
@@ -330,13 +341,16 @@ def _meeting_key(call_id: str) -> Dict[str, Any]:
 
 
 def read_meeting(call_id: str) -> Optional[Dict[str, Any]]:
-    """The meeting row's owner, sharing, consent and TranscriptDeletedAt, read consistently."""
+    """The meeting row's owner, sharing, consent, TranscriptDeletedAt, participant
+    list, labels and status, read consistently."""
     item = DYNAMODB.get_item(
         TableName=EVENT_SOURCING_TABLE,
         Key=_meeting_key(call_id),
         ConsistentRead=True,
-        ProjectionExpression="CallId, #o, SharedWith, #c, TranscriptDeletedAt",
-        ExpressionAttributeNames={"#o": "Owner", "#c": "Consent"},
+        ProjectionExpression=(
+            "CallId, #o, SharedWith, #c, TranscriptDeletedAt, Participants, Labels, #s"
+        ),
+        ExpressionAttributeNames={"#o": "Owner", "#c": "Consent", "#s": "Status"},
     ).get("Item")
     if not item:
         return None
@@ -713,8 +727,11 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
             present.append(clipped)
     if len(present) > consent.MAX_PARTICIPANTS:
         raise BadRequestError(f"at most {consent.MAX_PARTICIPANTS} participants can be listed")
+    vp_id = consent.clip(data.get("VirtualParticipantId"), 512) or ""
+    reconciles = caller["is_backend"] and advance_consent_enabled()
+    applied: Dict[str, List[str]] = {}
 
-    def change(record, _meeting, access, _now):
+    def change(record, meeting, access, now):
         if not (access["owner"] or access["admin"] or access["backend"]):
             raise refuse(caller, call_id, "list participants")
         record = require_started(record)
@@ -723,9 +740,214 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
         seen_keys = {consent.normalize_name(name) for name in seen}
         seen += [name for name in present if consent.normalize_name(name) not in seen_keys]
         record["ParticipantsSeen"] = seen[: consent.MAX_PARTICIPANTS_SEEN]
+        applied.clear()
+        if reconciles and record.get("Mode") in (consent.MODE_NOTIFY, consent.MODE_OPT_IN):
+            events = reconcile_advance_consents(record, meeting, present, vp_id, now, applied)
+            if events:
+                record["Events"] = consent.compact_events(list(record.get("Events") or []) + events)
         return record
 
-    return write_consent(caller, call_id, change)
+    answer = write_consent(caller, call_id, change)
+    for consent_key, ids in applied.items():
+        note_applied(consent_key, ids, call_id)
+    return answer
+
+
+# ── consent given in advance ────────────────────────────────────────────────
+
+#: The most attendees looked up among consents given in advance in one write.
+MAX_ADVANCE_LOOKUPS = 50
+
+
+def advance_consent_enabled() -> bool:
+    """Whether consent given in advance counts in meetings (Meeting Consent setting).
+
+    Settings that cannot be read count as off here: the participants are still
+    listed, and the attendees are asked in the meeting as without it.
+    """
+    try:
+        return bool(consent_settings().get("advanceConsentEnabled"))
+    except ConfigurationUnavailableError:
+        LOGGER.warning("consent given in advance is not counted: the settings could not be read")
+        return False
+
+
+def consents_of(email: str) -> List[Dict[str, Any]]:
+    """The consents given in advance kept under one address (PK pmc#<address>)."""
+    response = DYNAMODB.query(
+        TableName=EVENT_SOURCING_TABLE,
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :ac)",
+        ExpressionAttributeValues={":pk": {"S": f"pmc#{email.casefold()}"}, ":ac": {"S": "ac#"}},
+        ScanIndexForward=False,
+        Limit=200,
+    )
+    return [
+        {key: _plain(DESERIALIZER.deserialize(value)) for key, value in item.items()}
+        for item in response.get("Items") or []
+    ]
+
+
+def reconcile_advance_consents(
+    record: Mapping[str, Any],
+    meeting: Mapping[str, Any],
+    present: List[str],
+    vp_id: str,
+    now: str,
+    applied: Dict[str, List[str]],
+) -> List[Dict[str, Any]]:
+    """The consent events to add for attendees covered by a consent given in advance.
+
+    Only attendees with no event at all on the record are looked up, so a reply
+    made in the meeting is never followed by one from before it, and an
+    attendee is recorded once. Each is matched to the participant list by
+    display name (lma_consent.advance.match_listed); a match whose listed
+    address has a consent that covers this meeting now is recorded as that
+    person's consent, with the consent's scope, times and text hash, and the
+    basis of the match. ``applied`` gets each consent's key, so the consent can
+    note this meeting, for a withdrawal to reach it.
+    """
+    replied = {
+        consent.normalize_name(event.get("ParticipantName"))
+        for event in record.get("Events") or []
+        if isinstance(event, Mapping)
+    }
+    candidates = [name for name in present if consent.normalize_name(name) not in replied]
+    matches = advance.match_listed(candidates, meeting.get("Participants") or [])
+    covering_meeting = {
+        "CallId": meeting.get("CallId"),
+        "VirtualParticipantId": vp_id,
+        "Owner": meeting.get("Owner"),
+        "Labels": meeting.get("Labels"),
+    }
+    at = advance.parse_time(now) or datetime.now(timezone.utc)
+    events: List[Dict[str, Any]] = []
+    for name, person in list(matches.items())[:MAX_ADVANCE_LOOKUPS]:
+        try:
+            found = advance.covering(consents_of(person["email"]), covering_meeting, at)
+        except (ClientError, BotoCoreError):
+            LOGGER.exception("could not read consents given in advance; the attendee is asked")
+            continue
+        if not found:
+            continue
+        events.append(
+            {
+                "EventId": uuid.uuid4().hex[:16],
+                "ParticipantName": name,
+                "Decision": consent.DECISION_CONSENT,
+                "Source": consent.SOURCE_PRE_MEETING,
+                "Text": None,
+                "OccurredAt": found.get("GrantedAt") or now,
+                "RecordedAt": now,
+                "RecordedBy": BACKEND_ATTRIBUTION,
+                "PreMeeting": {
+                    "ConsentId": found.get("ConsentId"),
+                    "Scope": found.get("Scope"),
+                    "GrantedAt": found.get("GrantedAt"),
+                    "ValidUntil": found.get("ValidUntil"),
+                    "NoticeHash": found.get("NoticeHash"),
+                    "NoticeVersion": found.get("NoticeVersion"),
+                    "MatchBasis": consent.MATCH_DISPLAY_NAME,
+                    "ListedName": consent.clip(person.get("name"), consent.MAX_NAME_LENGTH),
+                },
+            }
+        )
+        applied.setdefault(f"{found.get('PK')}|{found.get('SK')}", []).append(
+            str(found.get("ConsentId"))
+        )
+    if events:
+        LOGGER.info("%d attendee(s) covered by consent given in advance", len(events))
+    return events
+
+
+def note_applied(consent_key: str, _ids: List[str], call_id: str) -> None:
+    """Note on a consent given in advance that this meeting counted it.
+
+    A withdrawal reads the meetings back (AppliedCallIds) to record an
+    objection in any of them still in progress. Best effort: a meeting that is
+    not noted keeps counting the consent until it ends.
+    """
+    pk, _, sk = consent_key.partition("|")
+    if not pk.startswith("pmc#") or not sk:
+        return
+    try:
+        DYNAMODB.update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key={"PK": {"S": pk}, "SK": {"S": sk}},
+            UpdateExpression="ADD AppliedCallIds :c",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeValues={":c": {"SS": [call_id]}},
+        )
+    except (ClientError, BotoCoreError):
+        LOGGER.warning("could not note the meeting on a consent given in advance", exc_info=True)
+
+
+def advance_consent_withdrawn(data: Mapping[str, Any]) -> Dict[str, Any]:
+    """Record an objection for each attendee whose consent given in advance was withdrawn.
+
+    Invoked by the advance consent resolver, directly rather than through
+    AppSync, with the CallId of a meeting that counted the consent and the
+    consent's id. Only a meeting in progress (not ENDED) is changed, and only
+    for an attendee whose deciding reply is still that consent: one who has
+    replied in the meeting since is decided by that reply.
+    """
+    call_id = data.get("CallId")
+    consent_id = data.get("ConsentId")
+    if not isinstance(call_id, str) or not call_id or not isinstance(consent_id, str):
+        raise BadRequestError("CallId and ConsentId are required")
+    caller = {"username": "", "subject": "", "is_admin": False, "is_backend": True}
+    meeting = read_meeting(call_id)
+    if not meeting or meeting.get("Status") == "ENDED" or not meeting.get("Consent"):
+        return {"CallId": call_id, "Recorded": 0}
+    recorded = {"count": 0}
+
+    def change(record, _meeting, _access, now):
+        record = require_started(record)
+        deciding = consent.latest_replies(record.get("Events") or [])
+        events = []
+        for event in deciding.values():
+            pre = event.get("PreMeeting") if isinstance(event.get("PreMeeting"), Mapping) else {}
+            if (
+                event.get("Source") != consent.SOURCE_PRE_MEETING
+                or pre.get("ConsentId") != consent_id
+            ):
+                continue
+            if event.get("Decision") != consent.DECISION_CONSENT:
+                continue
+            events.append(
+                {
+                    "EventId": uuid.uuid4().hex[:16],
+                    "ParticipantName": event.get("ParticipantName"),
+                    "Decision": consent.DECISION_OBJECTION,
+                    "Source": consent.SOURCE_PRE_MEETING,
+                    "Text": "Withdrew the consent given in advance",
+                    "OccurredAt": data.get("WithdrawnAt") or now,
+                    "RecordedAt": now,
+                    "RecordedBy": BACKEND_ATTRIBUTION,
+                    "PreMeeting": {
+                        "ConsentId": consent_id,
+                        "Withdrawn": True,
+                        "MatchBasis": pre.get("MatchBasis"),
+                    },
+                }
+            )
+        recorded["count"] = len(events)
+        if not events:
+            raise NothingToRecord()
+        record["Events"] = consent.compact_events(list(record.get("Events") or []) + events)
+        return record
+
+    try:
+        write_consent(caller, call_id, change)
+    except NothingToRecord:
+        return {"CallId": call_id, "Recorded": 0}
+    LOGGER.info(
+        "consent given in advance withdrawn during %s: %d objection(s)", call_id, recorded["count"]
+    )
+    return {"CallId": call_id, "Recorded": recorded["count"]}
+
+
+class NothingToRecord(Exception):
+    """The meeting's record holds nothing the change applies to; nothing is written."""
 
 
 def reply_speaker_link(
@@ -979,7 +1201,14 @@ MUTATIONS = {
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
-    """AppSync Lambda resolver entry point (meetingConsent.request.vtl payload)."""
+    """AppSync Lambda resolver entry point (meetingConsent.request.vtl payload).
+
+    Also invoked directly by the advance consent resolver, with
+    ``advanceConsentWithdrawn`` and no AppSync identity; only a role allowed to
+    invoke this function can send that.
+    """
+    if "advanceConsentWithdrawn" in event and "info" not in event:
+        return advance_consent_withdrawn(event.get("advanceConsentWithdrawn") or {})
     field = ((event.get("info") or {}).get("fieldName")) or ""
     arguments = event.get("arguments") or {}
     caller = caller_of(event)

@@ -143,7 +143,7 @@
       "order": 13,
       "type": "boolean",
       "title": "Allow consent given in advance",
-      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date, and manage or withdraw it on the My consents page. Off: no new consent can be given in advance; each person can still read and withdraw their own."
+      "description": "On, the default: a signed-in person on a meeting's participant list can consent before the meeting, from the meeting's consent link, for that meeting or for the meetings its organizer holds until a date, and manage or withdraw it on the My consents page. In a meeting a Virtual Participant joins, an attendee whose display name matches one listed person with such a consent is counted as having consented; the notice is still posted, naming them, and anyone can still object. Off: no new consent can be given in advance and none is counted in a meeting; each person can still read and withdraw their own."
     },
     "advanceConsentMaxDays": {
       "order": 14,

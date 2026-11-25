@@ -90,7 +90,10 @@ export const meetingConsent = new MeetingConsentFlow({
     api: () => {
         const callId = kinesisStreamManager.currentCallId;
         if (!graphqlEndpoint() || !callId) return null;
-        return createConsentApi(callId, signedGraphqlSender(graphqlEndpoint(), REGION));
+        // The row's own id, as the backend set it; never one made up here.
+        return createConsentApi(callId, signedGraphqlSender(graphqlEndpoint(), REGION), {
+            virtualParticipantId: process.env.VIRTUAL_PARTICIPANT_ID || undefined,
+        });
     },
     setStatusDetail: async (detail) => {
         const vpId = details.invite.virtualParticipantId;

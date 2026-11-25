@@ -642,3 +642,34 @@ def test_asking_is_limited_per_day(aws, monkeypatch):
         call("askToBeAddedToMeeting", BO, {"input": {"CallId": "other"}})
     # The refused request is not kept, so it can be asked again tomorrow.
     assert ("pmr#c#other", BO) not in aws["dynamo"].events.items
+
+
+def test_a_withdrawal_reaches_each_meeting_that_counted_the_consent(aws, monkeypatch):
+    given = give(ANA)
+    [key] = [k for k in aws["dynamo"].events.items if k[0] == f"pmc#{ANA}"]
+    aws["dynamo"].events.items[key]["AppliedCallIds"] = {CALL_ID, "Earlier meeting"}
+    invoked = []
+
+    class FakeLambda:
+        def invoke(self, **kwargs):
+            invoked.append(kwargs)
+            return {}
+
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda())
+    monkeypatch.setattr(
+        index, "MEETING_CONSENT_FUNCTION", "arn:aws:lambda:us-east-1:123456789012:function:consent"
+    )
+    call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
+    assert {json.loads(i["Payload"])["advanceConsentWithdrawn"]["CallId"] for i in invoked} == {
+        CALL_ID,
+        "Earlier meeting",
+    }
+    assert all(i["InvocationType"] == "Event" for i in invoked)
+    assert all(
+        json.loads(i["Payload"])["advanceConsentWithdrawn"]["ConsentId"] == given["ConsentId"]
+        for i in invoked
+    )
+    # Withdrawing again passes nothing on.
+    invoked.clear()
+    call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
+    assert invoked == []

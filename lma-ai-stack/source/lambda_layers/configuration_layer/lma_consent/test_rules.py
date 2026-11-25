@@ -615,3 +615,47 @@ def test_a_record_at_every_cap_with_every_reply_linked_by_platform_id_fits_the_b
     assert latest.get("Basis") == "platform_identity"
     assert latest.get("PlatformParticipantId") == "i" * 256
     assert "LinkedBy" not in latest and "SegmentId" not in latest
+
+
+# ── consent given in advance ───────────────────────────────────────────────
+
+
+def advance_consent(name):
+    return {"ParticipantName": name, "Decision": "consent", "Source": "pre_meeting"}
+
+
+def test_a_consent_given_in_advance_counts_for_an_attendee_with_no_other_reply() -> None:
+    meeting = record("opt_in", "each_participant", Participants=["Bo"])
+    meeting["Events"] = [advance_consent("Bo")]
+    assert rules.evaluate(meeting)[:2] == ("granted", True)
+
+
+def test_an_objection_wins_over_a_consent_given_in_advance_whatever_the_order() -> None:
+    for events in (
+        [reply("Bo", "objection"), advance_consent("Bo")],
+        [advance_consent("Bo"), reply("Bo", "objection")],
+        [advance_consent("Bo"), reply("Bo", "objection", source="pre_meeting")],
+    ):
+        meeting = record("opt_in", "each_participant", Participants=["Bo"], Events=events)
+        assert rules.evaluate(meeting)[:2] == ("objected", False), events
+
+
+def test_a_reply_in_the_meeting_decides_over_a_consent_given_in_advance() -> None:
+    events = [advance_consent("Bo"), reply("Bo", "objection"), reply("Bo", "consent")]
+    assert rules.latest_decisions(events) == {"bo": "consent"}
+    assert rules.latest_replies(events)["bo"]["Source"] == "chat"
+
+
+def test_compaction_keeps_the_reply_that_decides_beside_a_consent_given_in_advance() -> None:
+    events = [reply("Bo", "objection")] + [reply(f"P{i}", "consent") for i in range(20)]
+    events.append(advance_consent("Bo"))
+    kept = rules.compact_events(events, limit=5)
+    assert reply("Bo", "objection") in kept and advance_consent("Bo") in kept
+    assert rules.latest_decisions(kept)["bo"] == "objection"
+
+
+def test_a_consent_given_in_advance_is_one_given_outside_the_chat() -> None:
+    meeting = record(
+        "opt_in", "each_participant", Participants=["Bo"], Events=[advance_consent("Bo")]
+    )
+    assert rules.consented_outside_chat(meeting) == ["Bo"]

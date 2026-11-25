@@ -76,6 +76,18 @@ EVENT_SOURCES: Tuple[str, ...] = ("chat", "voice", "ui")
 #: The source of the timeline entry an attestation adds. Not a participant's
 #: reply, so it never counts towards ``each_participant``.
 SOURCE_ATTESTATION = "attestation"
+#: The source of an event that records a consent given in advance, for an
+#: attendee matched to the meeting's participant list (lma_consent.advance), and
+#: of the objection recorded when that consent is withdrawn during the meeting.
+#: A consent from this source counts only while the participant has no other
+#: reply on the record: any reply they give in the meeting, and above all an
+#: objection, is the one that counts (see :func:`latest_replies`).
+SOURCE_PRE_MEETING = "pre_meeting"
+#: How an attendee was matched to the participant list, for a consent given in
+#: advance: their display name in the meeting, compared as replies are
+#: (:func:`normalize_name`), with one listed person of that name. A display
+#: name is what the platform shows, not a verified identity.
+MATCH_DISPLAY_NAME = "display_name"
 
 NOTICE_CHANNELS: Tuple[str, ...] = ("chat", "voice", "banner", "invite")
 ATTESTATION_METHODS: Tuple[str, ...] = ("verbal", "chat", "invite_terms")
@@ -438,24 +450,48 @@ def override_permitted(
     )
 
 
-def latest_decisions(events: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
-    """Each participant's latest reply, keyed by normalised name.
+def _is_advance_consent(event: Mapping[str, Any]) -> bool:
+    """A consent given in advance, recorded for a matched attendee."""
+    return event.get("Source") == SOURCE_PRE_MEETING and event.get("Decision") == DECISION_CONSENT
 
-    Attestation entries are not a participant's reply and are left out. Events
-    are taken in the order they were recorded, which the resolver serialises
-    with a version check, rather than by the ``OccurredAt`` a client reports:
+
+def latest_replies(events: Sequence[Mapping[str, Any]]) -> Dict[str, Mapping[str, Any]]:
+    """Each participant's deciding reply, keyed by normalised name.
+
+    The latest reply in the order recorded, which the resolver serialises with
+    a version check, rather than by the ``OccurredAt`` a client reports:
     clients' clocks and timestamp formats differ, and the order of recording is
-    the one every reader of the record sees.
+    the one every reader of the record sees. Attestation entries are not a
+    participant's reply and are left out.
+
+    A consent given in advance (source ``pre_meeting``) is the deciding reply
+    only for a participant with no other reply: whatever they say in the
+    meeting, before or after it was recorded, counts instead, so an objection
+    always wins over a consent given in advance.
     """
-    latest: Dict[str, str] = {}
+    latest: Dict[str, Mapping[str, Any]] = {}
+    advance: Dict[str, Mapping[str, Any]] = {}
     for event in events or []:
         if event.get("Source") == SOURCE_ATTESTATION:
             continue
         name = normalize_name(event.get("ParticipantName"))
-        decision = event.get("Decision")
-        if name and decision in DECISIONS:
-            latest[name] = decision
+        if not name or event.get("Decision") not in DECISIONS:
+            continue
+        if _is_advance_consent(event):
+            advance[name] = event
+        else:
+            latest[name] = event
+    for name, event in advance.items():
+        latest.setdefault(name, event)
     return latest
+
+
+def latest_decisions(events: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
+    """Each participant's deciding reply's decision, keyed by normalised name.
+
+    See :func:`latest_replies` for which reply decides.
+    """
+    return {name: str(event["Decision"]) for name, event in latest_replies(events).items()}
 
 
 def consented_outside_chat(record: Optional[Mapping[str, Any]]) -> List[str]:
@@ -468,14 +504,10 @@ def consented_outside_chat(record: Optional[Mapping[str, Any]]) -> List[str]:
     """
     if not record:
         return []
-    latest: Dict[str, Tuple[str, Any]] = {}
-    for event in record.get("Events") or []:
-        if event.get("Source") == SOURCE_ATTESTATION:
-            continue
-        name = normalize_name(event.get("ParticipantName"))
-        decision = event.get("Decision")
-        if name and decision in DECISIONS:
-            latest[name] = (decision, event.get("Source"))
+    latest = {
+        name: (event.get("Decision"), event.get("Source"))
+        for name, event in latest_replies(record.get("Events") or []).items()
+    }
     listed: List[str] = []
     for name in record.get("Participants") or []:
         decision, source = latest.get(normalize_name(name), (None, None))
@@ -485,8 +517,8 @@ def consented_outside_chat(record: Optional[Mapping[str, Any]]) -> List[str]:
 
 
 def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
-    """Each participant's latest reply, each linked speaker's latest reply, and
-    the latest attestation entry.
+    """Each participant's latest reply and latest consent given in advance, each
+    linked speaker's latest reply, and the latest attestation entry.
 
     A linked speaker's latest reply is what the meeting export gives as that
     speaker's consent, so it is kept although a later reply under the same name
@@ -499,7 +531,10 @@ def _deciding_positions(events: Sequence[Mapping[str, Any]]) -> set:
         if event.get("Source") == SOURCE_ATTESTATION:
             keys.append(("attestation",))
         else:
-            keys.append(("reply", normalize_name(event.get("ParticipantName"))))
+            # A consent given in advance decides only without another reply,
+            # so the latest of each kind is kept (latest_replies).
+            kind = "advance" if _is_advance_consent(event) else "reply"
+            keys.append((kind, normalize_name(event.get("ParticipantName"))))
             link = _link_key(event)
             if link is not None:
                 keys.append(("speaker",) + link)
