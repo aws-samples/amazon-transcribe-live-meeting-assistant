@@ -8,6 +8,7 @@ Pin a version with ``SRT_VERSION=v1.0.2``.
 import json
 import os
 import platform
+import shutil
 import subprocess  # nosec B404 - hardcoded commands only
 import sys
 import urllib.request
@@ -111,7 +112,60 @@ def get_installed_version(srt_dir):
     return None
 
 
-def _run_srt_config_with_pexpect(srt_dir, timeout=900):
+# The scanners (Bandit in particular) report different findings, and some on
+# different lines, under different Python versions. CI runs SRT in the
+# python:3.13 image (.gitlab-ci.yml), so the scanner venv is built with the same
+# minor version everywhere; review decisions recorded against one scan then match
+# the other.
+SCANNER_PYTHON_VERSION = "3.13"
+
+
+def scanner_python(env=None):
+    """The interpreter `srt config` should build .srt/.venv with, or None.
+
+    $SRT_PYTHON if set, else ``python3.<minor>`` on PATH.
+    """
+    env = os.environ if env is None else env
+    explicit = env.get("SRT_PYTHON", "").strip()
+    if explicit:
+        return explicit
+    return shutil.which(f"python{SCANNER_PYTHON_VERSION}", path=env.get("PATH"))
+
+
+def venv_version(srt_dir):
+    """The ``major.minor`` Python version .srt/.venv was built with, or None."""
+    cfg = srt_dir / ".venv" / "pyvenv.cfg"
+    if not cfg.exists():
+        return None
+    for line in cfg.read_text().splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() in ("version", "version_info"):
+            return ".".join(value.strip().split(".")[:2])
+    return None
+
+
+def srt_env(srt_dir, python, env=None):
+    """The environment `srt config` runs in, with ``python3`` resolving to *python*.
+
+    SRT builds its scanner venv with whichever ``python3`` is first on PATH, so a
+    shim directory holding ``python3`` and ``python`` links to the chosen
+    interpreter is put first.
+    """
+    env = dict(os.environ if env is None else env)
+    if not python:
+        return env
+    shim = srt_dir / ".python-shim"
+    shim.mkdir(exist_ok=True)
+    for name in ("python3", "python"):
+        link = shim / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(python)
+    env["PATH"] = f"{shim}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+def _run_srt_config_with_pexpect(srt_dir, timeout=900, env=None):
     """Run ``srt config`` under a pty and answer its inquirer prompts.
 
     SRT's config flow uses interactive prompts that ignore plain stdin pipes.
@@ -130,7 +184,7 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
     binary = srt_dir / "srt"
     captured = []
     child = pexpect.spawn(
-        str(binary), ["config"], cwd=str(srt_dir), timeout=timeout, encoding="utf-8"
+        str(binary), ["config"], cwd=str(srt_dir), timeout=timeout, encoding="utf-8", env=env
     )
 
     try:
@@ -286,6 +340,21 @@ def main():
         binary.chmod(0o755)
 
     config_file = srt_dir / "srtconfig.json"
+    python = scanner_python()
+    if python is None:
+        print(
+            f"⚠️  python{SCANNER_PYTHON_VERSION} not found: the scanners will use the default "
+            f"python3, and their findings can differ from CI's. Install Python "
+            f"{SCANNER_PYTHON_VERSION} (for example `uv python install {SCANNER_PYTHON_VERSION}`) "
+            "or set SRT_PYTHON."
+        )
+    rebuild = False
+    built_with = venv_version(srt_dir)
+    if python and built_with and built_with != SCANNER_PYTHON_VERSION:
+        print(f"Rebuilding the scanner venv: built with Python {built_with}, CI uses {SCANNER_PYTHON_VERSION}")
+        shutil.rmtree(srt_dir / ".venv")
+        rebuild = True
+    env = srt_env(srt_dir, python)
     if is_ci:
         # SRT requires an AWS profile before it will install scanner prerequisites.
         # CI runners typically have no ~/.aws/config; write a placeholder default.
@@ -315,16 +384,16 @@ def main():
             "INSTALLATION_ID": os.getenv("CI_COMMIT_SHORT_SHA", "ci-build"),
         }, indent=2))
         try:
-            configured = _run_srt_config_with_pexpect(srt_dir)
+            configured = _run_srt_config_with_pexpect(srt_dir, env=env)
         finally:
             remove_placeholder_credentials(placeholder)
         if not configured:
             print("❌ Failed to install SRT scanner prerequisites in CI")
             sys.exit(1)
         print("✅ SRT configured for CI")
-    elif not config_file.exists():
+    elif rebuild or not config_file.exists():
         print("Configuring SRT (follow the prompts)...")
-        subprocess.run(["./srt", "config"], cwd=srt_dir, check=False)  # nosec B603 B607
+        subprocess.run(["./srt", "config"], cwd=srt_dir, check=False, env=env)  # nosec B603 B607
 
     issues_file = srt_dir / "issues.json"
     legacy_dsr = project_root / ".dsr" / "issues.json"

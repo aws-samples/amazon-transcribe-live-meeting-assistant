@@ -78,3 +78,38 @@ def test_setup_removes_the_placeholder_even_when_srt_config_fails() -> None:
     text = SETUP.read_text()
     body = text.split("placeholder = write_placeholder_credentials()", 1)[1]
     assert "finally:\n            remove_placeholder_credentials(placeholder)" in body
+
+
+def test_the_scanner_venv_uses_the_python_version_ci_runs() -> None:
+    ci = (Path(__file__).resolve().parents[3] / ".gitlab-ci.yml").read_text()
+    assert f"library/python:{srt_setup.SCANNER_PYTHON_VERSION}-" in ci
+
+
+def test_srt_python_overrides_the_path_lookup() -> None:
+    assert srt_setup.scanner_python({"SRT_PYTHON": "/opt/py/bin/python3.13", "PATH": ""}) == "/opt/py/bin/python3.13"
+
+
+def test_the_scanner_python_is_found_on_path(tmp_path: Path) -> None:
+    exe = tmp_path / f"python{srt_setup.SCANNER_PYTHON_VERSION}"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    assert srt_setup.scanner_python({"PATH": str(tmp_path)}) == str(exe)
+    assert srt_setup.scanner_python({"PATH": str(tmp_path / "none")}) is None
+
+
+def test_the_venv_version_is_read_from_pyvenv_cfg(tmp_path: Path) -> None:
+    assert srt_setup.venv_version(tmp_path) is None
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\nversion = 3.9.25\n")
+    assert srt_setup.venv_version(tmp_path) == "3.9"
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /x\nversion_info = 3.13.18.final.0\n")
+    assert srt_setup.venv_version(tmp_path) == "3.13"
+
+
+def test_srt_config_sees_the_chosen_interpreter_as_python3(tmp_path: Path) -> None:
+    env = srt_setup.srt_env(tmp_path, "/opt/py/bin/python3.13", {"PATH": "/usr/bin"})
+    shim = tmp_path / ".python-shim"
+    assert env["PATH"].split(":")[0] == str(shim)
+    assert (shim / "python3").readlink() == Path("/opt/py/bin/python3.13")
+    assert (shim / "python").readlink() == Path("/opt/py/bin/python3.13")
+    assert srt_setup.srt_env(tmp_path, None, {"PATH": "/usr/bin"})["PATH"] == "/usr/bin"
