@@ -133,8 +133,8 @@ The extension can also record the shared tab as video, stored with the
 meeting: the meeting page plays it, and its key frames become the meeting's
 shared-screen slides (see [Meeting Video and Key Frames](meeting-video.md)).
 It is offered only where **Meeting Recording › Record screen video from
-streaming clients** is on (on by default; off in the Team-hosted, Regulated and
-Regulated notify presets) and the deployment records video
+streaming clients** is on (on by default; off in the Team-hosted, Regulated,
+Regulated notify and Minimised content presets) and the deployment records video
 (`EnableVideoRecording=true`). One setting controls screen video from every
 streaming client: the extension, the Stream Audio/Video page and the Desktop
 Capture App.

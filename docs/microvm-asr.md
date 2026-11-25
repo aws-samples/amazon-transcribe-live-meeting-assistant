@@ -110,7 +110,7 @@ these Transcribe features are not available on it:
 
 **These options keep a meeting on Amazon Transcribe.** When the effective
 **Amazon Transcribe** section of the Configuration page turns on content redaction
-(the Regulated presets do), names a custom vocabulary or a custom language model,
+(the Regulated and Minimised content presets do), names a custom vocabulary or a custom language model,
 sets the language to identify-language or identify-multiple-languages, or sets a
 language the deployed model bundle does not support (see
 [Languages](#languages) below; with the default bundle, for example, `ja-JP` or

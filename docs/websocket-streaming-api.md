@@ -610,7 +610,7 @@ whatever `clientType` it sends: the deployment must record video (the
 screen video from streaming clients** must be on, as it was when the meeting's
 `START` was handled. The setting is on by default and in the Standard,
 Internal meetings and Customer account presets, and off in the Team-hosted,
-Regulated and Regulated notify presets. To find out before offering video,
+Regulated, Regulated notify and Minimised content presets. To find out before offering video,
 send `CONSENT_SETTINGS` and read `videoAllowed` in the answer:
 
 ```json

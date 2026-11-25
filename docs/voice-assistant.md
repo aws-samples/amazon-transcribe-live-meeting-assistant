@@ -35,7 +35,6 @@ title: "Voice Assistant"
   - [inject](#inject)
   - [replace](#replace)
 - [Voice ID](#voice-id)
-- [CloudFormation Parameters](#cloudformation-parameters)
 - [See Also](#see-also)
 
 ## Overview

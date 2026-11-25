@@ -1628,7 +1628,7 @@ result is seen on the next read of the record.
 
 | Operation | Who |
 |---|---|
-| Read the record (`getMeetingConsent`, `Call.Consent`, `onUpdateMeetingConsent`) | The meeting's owner, the people it is shared with, Admins, and LMA's backend roles |
+| Read the record (`getMeetingConsent`, `Call.Consent`, `onUpdateMeetingConsent`) | The meeting's owner, the Users and Admins it is shared with, Admins, and LMA's backend roles. A Participant it is shared with reads the mode, rule, status, notice and replies through `getParticipantMeeting`, without the attestation statement, the evidence or the status history (see [What a Participant sees of a shared meeting](user-based-access-control.md#what-a-participant-sees-of-a-shared-meeting)) |
 | Read the deployment's mode, rule and **Allow a different choice per meeting** (`getMeetingConsentDefaults`) | Any signed-in user (Cognito user pool); it returns those three values only |
 | Start consent (`startMeetingConsent`) | The owner, an Admin, or a backend role |
 | Record that the notice was posted (`recordMeetingConsentNotice`) | The owner, an Admin, or a backend role |

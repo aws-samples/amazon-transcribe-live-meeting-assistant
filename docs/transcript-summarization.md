@@ -23,7 +23,6 @@ title: "Transcript Summarization"
   - [Chat and Shared Links](#chat-and-shared-links)
   - [Meeting Content Is Quoted Data](#meeting-content-is-quoted-data)
   - [Prompt Caching](#prompt-caching)
-  - [Admin UI](#admin-ui)
 - [LAMBDA Option](#lambda-option)
   - [Lambda Function Requirements](#lambda-function-requirements)
   - [Multi-Section Summaries](#multi-section-summaries)

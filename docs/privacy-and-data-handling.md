@@ -307,7 +307,7 @@ are rewritten or expire (see
 | **Transcript and summary files**: the transcript as text (speech only, without chat lines, followed by the shared screen's text), the formatted summary, a metadata file for each, and for an uploaded meeting the Amazon Transcribe output | The recordings bucket, `lma-transcripts/`. The summary step writes the transcript file for every meeting (the MCP server's transcript tool reads it), and the summary file only when the transcript knowledge base is deployed, because nothing else reads it | 90 days | The `lma-transcripts/` lifecycle rule, from `TranscriptionExpirationInDays`, for the summary file as for the transcript files: see [The knowledge base's copy of the summary](#the-knowledge-bases-copy-of-the-summary). **Delete the transcript after the summary** deletes the transcript files (every version) and keeps the summary file | Deleted, every version |
 | **Transcript knowledge base entries** | The transcript knowledge base the stack creates (`TranscriptKnowledgeBase`, on by default): an Amazon Bedrock knowledge base over `lma-transcripts/`, with its vectors in an Amazon S3 Vectors index, which uses the service's default encryption (the template names no customer-managed key). Synced every 15 minutes | As long as the files they were built from | Set `TranscriptKnowledgeBase` to `DISABLED` to deploy no transcript knowledge base | Removed at the next sync, within about 15 minutes, once the files are gone |
 | **Audio recording** | The recordings bucket, `lma-audio-recordings/` | 90 days | `AudioRecordingExpirationInDays`; **Meeting Recording › Record meeting audio** (default On) decides whether it is recorded; **Delete the recordings after the summary** deletes it, every version, once the meeting is summarized | Deleted, every version |
-| **Meeting video** (screen recording) from a Virtual Participant or the Desktop Capture App | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`); for a Virtual Participant, **Meeting Recording › Record Virtual Participant meeting video** (default On), which overrides the **Record meeting video** toggle per Virtual Participant when it is off; for the streaming clients, **Meeting Recording › Record screen video from streaming clients** and the Desktop Capture App's own setting per machine; **Delete the recordings after the summary** deletes it, and any segments left, once the meeting is summarized. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
+| **Meeting video** (screen recording) from a Virtual Participant or a streaming client (the Stream Audio/Video page, the browser extension or the Desktop Capture App) | The recordings bucket, `lma-video-recordings/`; a Virtual Participant's in-progress segments under `lma-video-chunks/` | 90 days; segments are deleted when the video is assembled, or after 1 day | `AudioRecordingExpirationInDays`; `EnableVideoRecording` (default `true`); for a Virtual Participant, **Meeting Recording › Record Virtual Participant meeting video** (default On), which overrides the **Record meeting video** toggle per Virtual Participant when it is off; for the streaming clients, **Meeting Recording › Record screen video from streaming clients** and the Desktop Capture App's own setting per machine; **Delete the recordings after the summary** deletes it, and any segments left, once the meeting is summarized. See [Meeting Video Recording](virtual-participant.md#meeting-video-recording) | Deleted, every version |
 | **Key frames** of the shared screen, and the text read from them | Images in the recordings bucket, `lma-video-keyframes/<meeting>/`; items in the meetings table. Taken only when the meeting's video is recorded | 90 days | Items: as the transcript, including the page setting. Images: the lifecycle rule, from `TranscriptionExpirationInDays` only. Not removed by **Delete the transcript after the summary** or **Delete the recordings after the summary**. See [Retention, access and deletion](meeting-video.md#retention-access-and-deletion) | Deleted; the images, every version |
 | **Agenda** | On the meeting record; an agenda given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row | Deleted, from the meeting and from its Virtual Participant records |
 | **Participant list**: the name and email address of each person expected at the meeting, as the organizer, the Virtual Participant form or an MCP client gave them. These are personal data of people who may have no LMA account | On the meeting record (`Participants`); a list given when a Virtual Participant is started or scheduled is also on that Virtual Participant's record | As the record it is on | As the meeting record; see the Virtual Participant records row. The owner or an Admin can change or clear it on the meeting page. With **Meeting Sharing › Share meetings with their listed participants** on (the default), listing someone shares the meeting with their address, read-only, from the time the meeting record exists, and the addresses it shared with are kept on the meeting record (`AutoSharedWith`) so that taking someone off the list removes that share; a listed person who signs in sees the names on the list, not the addresses (see [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list)). Listing someone does not create an account; an account the owner creates for them with **Create accounts for participants without one** is a user pool account, kept until it is deleted on the User Management page. See [Participant list](virtual-participant.md#participant-list) | Deleted, from the meeting and from its Virtual Participant records |
@@ -321,6 +321,7 @@ are rewritten or expire (see
 | **Pending uploads**: a file uploaded for batch transcription, before it is processed | The recordings bucket, `lma-uploads-pending/` | 7 days | Fixed lifecycle rule | Not applicable |
 | **Voice enrollment** voiceprint (only with `EnableVoiceEnrollment=true`) | The voice enrollment DynamoDB table. The sample audio is discarded once the voiceprint is computed | Until the person withdraws, or until their consent is older than `VoiceEnrollmentRetentionDays` (default 365), when a nightly pass deletes it | The enrollee, from **Enroll My Voice**; an Admin can revoke on their behalf. See [Voice Enrollment](voice-enrollment.md#retention) | Not affected: a voiceprint belongs to a person, not a meeting |
 | **Voice consent log** (only with `EnableVoiceEnrollment=true`) | The voice consent log DynamoDB table, append-only, with no biometric data | No expiry | None; it is the audit trail of consent given and withdrawn | Not affected |
+| **Participant account and lookup counts**: for each User, per UTC day, how many Participant accounts they created from their meetings' participant lists, and a hash of each address whose account status they looked up (never the address itself), so that the daily limits can be applied | The meetings table, under the user (`usr#<username>`), one item per kind per day | 2 days, by the table's time to live | None; Admins are not counted. See [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting) | Not affected |
 | **Last sign-in times**: when each user last signed in with their password, for user access reviews | The Cognito stack's sign-in table, one item per user keyed by Cognito sub | Until the user is deleted on the User Management page; each sign-in replaces the time | None. Deleting a user on the User Management page deletes their item; a user deleted directly in Cognito (the console or `admin-delete-user`) leaves it until the table is deleted. The table is kept with the user pool when `EnableDataRetentionOnDelete` is `true`. See [Last sign-in](user-management.md#last-sign-in) | Not affected |
 | **Last active times**: when each user was last active (their latest sign-in, token renewal or MCP API key use, to within 15 minutes), for user access reviews, and when each MCP API key was last used | The Cognito stack's sign-in table (the user's time, in the same item as the last sign-in) and the MCP API key table (the key's time, on the key's item) | The user's time as for the last sign-in; the key's time until the key is revoked. Each time is overwritten, at most once every 15 minutes, by the next activity; no history is kept | None. Deleting a user on the User Management page deletes their sign-in item; revoking a key deletes its item. See [Last active](user-management.md#last-active) | Not affected |
 | **CloudWatch logs** of the Lambda functions, containers, MicroVMs and the GraphQL API | CloudWatch Logs log groups | 90 days (7 for the scheduler state machine) | `CloudWatchLogsExpirationInDays`; `LogLevel` and `AppSyncFieldLogLevel` decide whether meeting content is logged (see [Logging](#logging)) | Not affected |
@@ -331,10 +332,18 @@ are rewritten or expire (see
 
 Who can read each item is described in
 [User-Based Access Control](user-based-access-control.md): the meeting's owner,
-the people it is shared with, and Admins read the meeting, its transcript, its key
-frames and its consent record. Key-frame and evidence images are reached through
-links signed for one hour after the same check, and recordings through
-short-lived links the web UI signs when playback starts (see
+the Users and Admins it is shared with, and every Admin read the meeting, its
+transcript, its key frames and its consent record. A
+[Participant](user-based-access-control.md#participant) it is shared with reads
+a read-only subset: the transcript, the summary, the meeting chat, the
+recordings, the consent record without its evidence, and the names (not the
+addresses) on the participant list; not the key frames, chat attachment files,
+meeting context, checklist or the assistant's answers (see
+[What a Participant sees of a shared meeting](user-based-access-control.md#what-a-participant-sees-of-a-shared-meeting)).
+Key-frame and evidence images are reached through links signed for one hour
+after the same check. Recordings are reached through short-lived links the web
+UI signs when playback starts, and for a Participant through links the server
+signs for an hour after checking that the meeting is shared with them (see
 [Recording Playback](user-based-access-control.md#recording-playback)).
 
 ### Copies that follow their own lifetime
@@ -402,8 +411,8 @@ set it keeps the 35-day window earlier versions had.
 
 | Table | What it holds |
 |---|---|
-| The meetings table | Meeting records, transcript segments, summaries, consent records, chat lines and chat attachment items, key-frame items, meeting assistant answers, notifications, whiteboards and usage records |
-| The Virtual Participant table | Meeting names, platforms, meeting IDs and passwords, schedules and agendas |
+| The meetings table | Meeting records (with their participant lists), transcript segments, summaries, consent records, consents given in advance and requests to be added to a participant list, chat lines and chat attachment items, key-frame items, meeting assistant answers, notifications, whiteboards and usage records |
+| The Virtual Participant table | Meeting names, platforms, meeting IDs and passwords, schedules, agendas and participant lists |
 | The Virtual Participant task registry | Each launched Virtual Participant's launch configuration, with the meeting's ID, name and time; each item expires about nine hours after the launch |
 | The troubleshooting jobs table | The troubleshooting agent's answers, which can name a meeting and quote its logs; each job expires after seven days |
 | The voice enrollment table (only with `EnableVoiceEnrollment=true`) | Voiceprints |
@@ -535,8 +544,9 @@ other. It ships set to Off.
 - **What users see.** The meeting page says when the recordings will be, or
   were, deleted; once they are, it offers no player and no recording download.
 
-The two Regulated presets set it to **Immediately**; the other presets leave it
-Off. See [Transcript and Recording Deletion After the Summary](transcript-deletion.md).
+The two Regulated presets and the Minimised content preset set it to
+**Immediately**; the other presets leave it Off. See
+[Transcript and Recording Deletion After the Summary](transcript-deletion.md).
 
 ### Deleting a meeting
 
@@ -582,7 +592,10 @@ recovery for `MeetingDataPointInTimeRecoveryDays` days, 35 by default, and not
 at all when it is 0 (see
 [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables)).
 Deleting a user from [User Management](user-management.md)
-does not delete the meetings they own.
+does not delete the meetings they own. It withdraws the consents they gave in
+advance, which are then kept until they expire (see
+[Withdrawing](meeting-consent.md#withdrawing)), and deletes their last sign-in
+and last active times.
 
 ### Deleting a stack
 
@@ -713,7 +726,8 @@ No preset sets **Read spoken replies** or **Capture chat attachments**, which
 is off by default. Under the consent-required preset, Stream
 Audio/Video and the Desktop Capture App cannot be used to start a meeting, the Webex
 join cannot be granted, and the Teams browser join is granted only by consent
-said aloud. Under the notify preset, every capture method that shows a consent
+said aloud; the Team-hosted and Minimised content presets use the same consent
+settings, with the same consequences. Under the notify preset, every capture method that shows a consent
 step works, and clients without one are refused.
 
 ### Controls no preset can set
@@ -729,7 +743,7 @@ regulated posture sets them when it deploys or updates the stack:
 | `TranscriptionExpirationInDays` | 90 | The longest transcript segments are kept, and how long transcript and summary files, key-frame images and consent evidence images stay in the recordings bucket |
 | `AudioRecordingExpirationInDays` | 90 | How long audio and video recordings are kept, unless **Delete the recordings after the summary** deletes them sooner |
 | `CloudWatchLogsExpirationInDays` | 90 | How long logs are kept |
-| `EnableVideoRecording` | `true` | Set `false` if no meeting video, and so no key frames, may be kept from any source; no setting can turn it back on. With `true`, the Regulated presets turn off both video settings (**Record screen video from streaming clients** and **Record Virtual Participant meeting video**), and an Admin may turn them on again |
+| `EnableVideoRecording` | `true` | Set `false` if no meeting video, and so no key frames, may be kept from any source; no setting can turn it back on. With `true`, the two Regulated presets, the Team-hosted preset and the Minimised content preset turn off both video settings (**Record screen video from streaming clients** and **Record Virtual Participant meeting video**), and an Admin may turn them on again |
 | `TranscriptKnowledgeBase` | `BEDROCK_KNOWLEDGE_BASE (Create)` | `DISABLED` if transcripts and summaries must not be indexed for search across meetings |
 | `EnableDataRetentionOnDelete` | `true` | Decide whether data must outlive the stack |
 
@@ -763,13 +777,16 @@ they expire.
 8. Check that the chosen **Model inference geography** offers a profile for every
    model in use; the Amazon Bedrock Models section shows which features have
    none.
-9. Decide how the day or two for which the recordings bucket keeps noncurrent
+9. Decide **Meeting Sharing › Share meetings with their listed participants**
+   (on in every preset): on, each person on a meeting's participant list who
+   has, or is given, an LMA account reads that meeting read-only.
+10. Decide how the day or two for which the recordings bucket keeps noncurrent
    object versions and Amazon Bedrock model invocation logging in the account fit
    your policy, and set `MeetingDataPointInTimeRecoveryDays`: 0 if a deletion must
    leave no restorable copy, or the shortest window your recovery needs allow.
    Check that no AWS Backup plan in the account covers the stack's tables (see
    [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables)).
-10. Set `EnableDataRetentionOnDelete` to match what must happen to the data when
+11. Set `EnableDataRetentionOnDelete` to match what must happen to the data when
     the deployment is removed.
 
 ## Minimised content
@@ -794,7 +811,7 @@ other content is still kept; see
   Immediately, so the transcript, the meeting assistant's answers stored with it,
   and the transcript file in the recordings bucket are deleted as soon as the
   summary is written (see
-  [Transcript Deletion After the Summary](transcript-deletion.md)). The meeting
+  [Transcript and Recording Deletion After the Summary](transcript-deletion.md)). The meeting
   chat is not added to the transcript, and personal information is redacted from
   it while it exists (in en-US, en-AU, en-GB and es-US).
 - **No recordings.** **Record meeting audio**, **Record screen video from
@@ -809,6 +826,14 @@ other content is still kept; see
   this one that turns video back on still records none.
 - **Same geography.** Amazon Bedrock models run within this deployment's
   geography.
+- **Consent given in advance.** Allowed, for at most 365 days, and kept without
+  the sign-in device's details (see
+  [Consent given in advance](#consent-given-in-advance)).
+- **Shared with the participant list.** **Meeting Sharing › Share meetings with
+  their listed participants** is on, as in every preset, so each person on a
+  meeting's participant list who signs in to LMA reads the meeting read-only,
+  and sees the names of the others on the list (see
+  [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list)).
 - **Summary and assistant rule.** New meetings are summarized with the
   shipped `minimised-content` summary profile, and **Meeting Assistant › Leave
   out sensitive personal information** is on, which appends a rule to the
@@ -883,8 +908,11 @@ With the preset active, these can still hold such information:
   screenshot taken as consent evidence stays with the meeting; it can show
   participants' names, faces and anything else on screen. Turn the setting off to
   keep only each check's result.
-- **The meeting record**: its title, participants, speaker names, agenda, meeting
-  context and checklist, which are kept with the meeting.
+- **The meeting record**: its title, participant list, speaker names, agenda,
+  meeting context and checklist, which are kept with the meeting.
+- **Consents given in advance**, which name the person and the organizer and
+  are kept under the person's address, not with the meeting, until
+  `MeetingRecordExpirationInDays` days after they stop counting.
 - **Copies outside the meeting**: logs at `LogLevel` `DEBUG` or
   `AppSyncFieldLogLevel` `DEBUG`/`ALL`, Amazon Bedrock model invocation logging
   if the account has it on, the meetings table's point-in-time recovery window,
