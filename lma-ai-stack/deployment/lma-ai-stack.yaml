@@ -6149,6 +6149,7 @@ Resources:
       Environment:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           CONSENT_EVIDENCE_PREFIX: "lma-consent-evidence/"
@@ -6225,7 +6226,7 @@ Resources:
                       - "c#*"
               # Consent given in advance (pmc# partitions): read for the
               # attendees a Virtual Participant lists, and noted with the
-              # meetings that counted each one (AppliedCallIds).
+              # meetings that counted each one (AppliedAt).
               - Effect: Allow
                 Action:
                   - dynamodb:Query
@@ -6235,6 +6236,12 @@ Resources:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "pmc#*"
+              # Which meeting a Virtual Participant created, before its id is
+              # used to count a consent given through its link.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt VirtualParticipantTable.Arn
               # Read-only, on the shared configuration table: the Meeting
               # Consent section.
               - Effect: Allow

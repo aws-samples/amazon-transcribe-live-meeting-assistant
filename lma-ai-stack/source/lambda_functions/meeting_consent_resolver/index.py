@@ -89,6 +89,9 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
+# Read for the meeting a Virtual Participant created, before its id is used to
+# count a consent given in advance through its link.
+VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 EVIDENCE_PREFIX = os.environ.get("CONSENT_EVIDENCE_PREFIX", "lma-consent-evidence/")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
@@ -727,8 +730,8 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
             present.append(clipped)
     if len(present) > consent.MAX_PARTICIPANTS:
         raise BadRequestError(f"at most {consent.MAX_PARTICIPANTS} participants can be listed")
-    vp_id = consent.clip(data.get("VirtualParticipantId"), 512) or ""
     reconciles = caller["is_backend"] and advance_consent_enabled()
+    vp_id = created_by(data.get("VirtualParticipantId"), call_id) if reconciles else ""
     applied: Dict[str, List[str]] = {}
 
     def change(record, meeting, access, now):
@@ -770,6 +773,29 @@ def advance_consent_enabled() -> bool:
     except ConfigurationUnavailableError:
         LOGGER.warning("consent given in advance is not counted: the settings could not be read")
         return False
+
+
+def created_by(vp_id: Any, call_id: str) -> str:
+    """The Virtual Participant id, when its row says it created this meeting; else "".
+
+    A consent for one meeting given through a Virtual Participant's link counts
+    only for the meeting that Virtual Participant created, so the id sent with
+    the participants is used only when the row links it to this CallId.
+    """
+    vp_id = consent.clip(vp_id, 512)
+    if not vp_id or not VIRTUAL_PARTICIPANT_TABLE:
+        return ""
+    try:
+        item = DYNAMODB.get_item(
+            TableName=VIRTUAL_PARTICIPANT_TABLE,
+            Key={"id": {"S": vp_id}},
+            ProjectionExpression="CallId",
+        ).get("Item")
+    except (ClientError, BotoCoreError):
+        LOGGER.warning("could not read the Virtual Participant; its id is not used", exc_info=True)
+        return ""
+    linked = ((item or {}).get("CallId") or {}).get("S")
+    return vp_id if linked == call_id else ""
 
 
 def consents_of(email: str) -> List[Dict[str, Any]]:
@@ -860,23 +886,39 @@ def reconcile_advance_consents(
 
 
 def note_applied(consent_key: str, _ids: List[str], call_id: str) -> None:
-    """Note on a consent given in advance that this meeting counted it.
+    """Note on a consent given in advance that this meeting counted it, and when.
 
-    A withdrawal reads the meetings back (AppliedCallIds) to record an
-    objection in any of them still in progress. Best effort: a meeting that is
-    not noted keeps counting the consent until it ends.
+    A withdrawal reads the meetings back (AppliedAt, CallId to time), the most
+    recently noted first, to record an objection in any of them still in
+    progress. Best effort: a meeting that is not noted keeps counting the
+    consent until it ends.
     """
     pk, _, sk = consent_key.partition("|")
     if not pk.startswith("pmc#") or not sk:
         return
+    key = {"PK": {"S": pk}, "SK": {"S": sk}}
+    at = {"S": now_iso()}
     try:
-        DYNAMODB.update_item(
-            TableName=EVENT_SOURCING_TABLE,
-            Key={"PK": {"S": pk}, "SK": {"S": sk}},
-            UpdateExpression="ADD AppliedCallIds :c",
-            ConditionExpression="attribute_exists(PK)",
-            ExpressionAttributeValues={":c": {"SS": [call_id]}},
-        )
+        try:
+            DYNAMODB.update_item(
+                TableName=EVENT_SOURCING_TABLE,
+                Key=key,
+                UpdateExpression="SET AppliedAt.#c = :t",
+                ConditionExpression="attribute_exists(PK) AND attribute_exists(AppliedAt)",
+                ExpressionAttributeNames={"#c": call_id},
+                ExpressionAttributeValues={":t": at},
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+            # The first meeting to count it.
+            DYNAMODB.update_item(
+                TableName=EVENT_SOURCING_TABLE,
+                Key=key,
+                UpdateExpression="SET AppliedAt = :m",
+                ConditionExpression="attribute_exists(PK) AND attribute_not_exists(AppliedAt)",
+                ExpressionAttributeValues={":m": {"M": {call_id: at}}},
+            )
     except (ClientError, BotoCoreError):
         LOGGER.warning("could not note the meeting on a consent given in advance", exc_info=True)
 
@@ -894,6 +936,11 @@ def advance_consent_withdrawn(data: Mapping[str, Any]) -> Dict[str, Any]:
     consent_id = data.get("ConsentId")
     if not isinstance(call_id, str) or not call_id or not isinstance(consent_id, str):
         raise BadRequestError("CallId and ConsentId are required")
+    # The consent withdrawn and the earlier ones it replaced: the meeting may
+    # have counted any of them.
+    withdrawn_ids = {consent_id} | {
+        str(i) for i in data.get("ConsentIds") or [] if isinstance(i, str)
+    }
     caller = {"username": "", "subject": "", "is_admin": False, "is_backend": True}
     meeting = read_meeting(call_id)
     if not meeting or meeting.get("Status") == "ENDED" or not meeting.get("Consent"):
@@ -908,7 +955,7 @@ def advance_consent_withdrawn(data: Mapping[str, Any]) -> Dict[str, Any]:
             pre = event.get("PreMeeting") if isinstance(event.get("PreMeeting"), Mapping) else {}
             if (
                 event.get("Source") != consent.SOURCE_PRE_MEETING
-                or pre.get("ConsentId") != consent_id
+                or pre.get("ConsentId") not in withdrawn_ids
             ):
                 continue
             if event.get("Decision") != consent.DECISION_CONSENT:

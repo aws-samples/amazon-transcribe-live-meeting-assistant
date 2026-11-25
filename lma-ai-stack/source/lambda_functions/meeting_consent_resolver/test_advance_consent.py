@@ -44,6 +44,7 @@ class AdvanceDynamo(base.FakeDynamo):
         super().__init__()
         self.consents: Dict[str, List[Dict[str, Any]]] = {}
         self.applied: Dict[tuple, set] = {}
+        self.vps: Dict[str, str] = {}
         self.queries: List[str] = []
 
     def give(self, email: str, **fields: Any) -> Dict[str, Any]:
@@ -75,12 +76,25 @@ class AdvanceDynamo(base.FakeDynamo):
             ]
         }
 
+    def get_item(self, TableName, Key, **kwargs):  # noqa: N803
+        if TableName == "lma-vps":
+            call_id = self.vps.get(Key["id"]["S"])
+            return {"Item": {"CallId": {"S": call_id}}} if call_id else {}
+        return super().get_item(TableName, Key, **kwargs)
+
     def update_item(self, TableName, Key, UpdateExpression, ConditionExpression, **kwargs):  # noqa: N803
         if Key["PK"]["S"].startswith("pmc#"):
             key = (Key["PK"]["S"], Key["SK"]["S"])
-            self.applied.setdefault(key, set()).update(
-                kwargs["ExpressionAttributeValues"][":c"]["SS"]
-            )
+            values = kwargs["ExpressionAttributeValues"]
+            if "attribute_exists(AppliedAt)" in ConditionExpression and key not in self.applied:
+                raise base.ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
+                    "UpdateItem",
+                )
+            if ":t" in values:
+                self.applied[key].add(kwargs["ExpressionAttributeNames"]["#c"])
+            else:
+                self.applied[key] = set(values[":m"]["M"])
             return {}
         return super().update_item(TableName, Key, UpdateExpression, ConditionExpression, **kwargs)
 
@@ -98,6 +112,7 @@ def dynamo(monkeypatch):
         Status="TRANSCRIBING",
     )
     monkeypatch.setattr(index, "DYNAMODB", fake)
+    monkeypatch.setattr(index, "VIRTUAL_PARTICIPANT_TABLE", "lma-vps")
     monkeypatch.setattr(index, "S3", base.FakeS3())
     monkeypatch.setattr(index, "_STORE", base.FakeStore())
     return fake
@@ -207,6 +222,10 @@ def test_a_consent_given_through_the_vp_link_counts_for_the_meeting_it_created(d
     dynamo.give("bo@example.com", CallId=None, VirtualParticipantId="vp-1")
     start()
     assert present("Bo Chen")["Events"] == []
+    # An id the Virtual Participant's row does not link to this meeting counts nothing.
+    dynamo.vps["vp-1"] = "another meeting"
+    assert present("Bo Chen", "Ana Silva", vp_id="vp-1")["Events"] == []
+    dynamo.vps["vp-1"] = CALL_ID
     assert present("Bo Chen", "Cy Diaz", vp_id="vp-1")["Events"][0]["Source"] == "pre_meeting"
 
 
@@ -261,6 +280,21 @@ def test_a_withdrawal_during_the_meeting_is_recorded_as_an_objection(dynamo) -> 
         "pre_meeting",
     )
     assert last["PreMeeting"]["Withdrawn"] is True
+
+
+def test_a_withdrawal_reaches_an_attendee_counted_under_a_consent_it_replaced(dynamo) -> None:
+    earlier = dynamo.give("bo@example.com")
+    start(mode="notify")
+    present("Bo Chen")
+    event = {
+        "advanceConsentWithdrawn": {
+            "CallId": CALL_ID,
+            "ConsentId": "20261125130000-bbbbbbbbbbbb",
+            "ConsentIds": ["20261125130000-bbbbbbbbbbbb", earlier["ConsentId"]],
+        }
+    }
+    assert index.handler(event, None)["Recorded"] == 1
+    assert dynamo.consent()["Status"] == "objected"
 
 
 def test_a_withdrawal_leaves_an_attendee_who_replied_since_and_an_ended_meeting(dynamo) -> None:

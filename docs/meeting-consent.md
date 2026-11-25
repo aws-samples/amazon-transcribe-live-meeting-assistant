@@ -1346,7 +1346,13 @@ changes; until then they can reply in the meeting.
 
 **Meeting scope and the consent link.** A consent for one meeting given from a
 Virtual Participant's link (`?vp=<id>`) counts for the meeting that Virtual
-Participant creates: it sends its own id with the participants it lists.
+Participant creates: it sends its own id with the participants it lists, which
+is used only when the Virtual Participant's record names this meeting.
+
+**A consent that replaced another.** Giving a new consent for the same thing
+replaces the earlier one; the new one takes over the meetings that counted the
+earlier one, so withdrawing it reaches them too. A withdrawal is passed to the
+50 meetings that most recently counted the consent.
 
 **Streaming clients do not count them.** Stream Audio/Video, the browser
 extension and the Desktop Capture App have no participant roster to match, so

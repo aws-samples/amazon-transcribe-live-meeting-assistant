@@ -1064,10 +1064,12 @@ export class MeetingConsentFlow {
             (name) => !this.announcedAdvance.has(normalizeParticipantName(name)),
         );
         if (fresh.length === 0) return;
-        for (const name of fresh) this.announcedAdvance.add(normalizeParticipantName(name));
         const line = advanceConsentLine(fresh, this.firstPhrases()[1]);
         log.always(`[consent] ${fresh.length} attendee(s) covered by consent given in advance`);
+        // Named once the line is in the chat; a line that could not be posted
+        // is tried again with the next record, or carried by the next notice.
         if (await this.say([line])) {
+            for (const name of fresh) this.announcedAdvance.add(normalizeParticipantName(name));
             void this.callApi((api) => api.recordNotice(line));
         }
     }

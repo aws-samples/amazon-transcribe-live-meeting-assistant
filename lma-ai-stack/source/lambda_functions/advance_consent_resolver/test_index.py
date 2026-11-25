@@ -473,6 +473,28 @@ def test_nobody_can_withdraw_another_persons_consent(aws):
         call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": "../pmc#bo@example.com"}})
 
 
+def test_a_replacing_consent_takes_over_the_meetings_that_counted_the_one_it_replaced(
+    aws, monkeypatch
+):
+    first = give(ANA)
+    key = (f"pmc#{ANA}", f"ac#{first['ConsentId']}")
+    aws["dynamo"].events.items[key]["AppliedAt"] = {CALL_ID: "2026-11-25T10:00:00Z"}
+    second = give(ANA)
+    invoked = []
+
+    class FakeLambda:
+        def invoke(self, **kwargs):
+            invoked.append(json.loads(kwargs["Payload"])["advanceConsentWithdrawn"])
+            return {}
+
+    monkeypatch.setattr(index, "LAMBDA", FakeLambda())
+    monkeypatch.setattr(index, "MEETING_CONSENT_FUNCTION", "consent-function")
+    call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": second["ConsentId"]}})
+    [told] = invoked
+    assert told["CallId"] == CALL_ID
+    assert told["ConsentIds"] == [second["ConsentId"], first["ConsentId"]]
+
+
 def test_an_old_consent_in_force_is_found_past_newer_withdrawn_ones(aws):
     first = give(ANA)
     for _ in range(4):
@@ -647,7 +669,10 @@ def test_asking_is_limited_per_day(aws, monkeypatch):
 def test_a_withdrawal_reaches_each_meeting_that_counted_the_consent(aws, monkeypatch):
     given = give(ANA)
     [key] = [k for k in aws["dynamo"].events.items if k[0] == f"pmc#{ANA}"]
-    aws["dynamo"].events.items[key]["AppliedCallIds"] = {CALL_ID, "Earlier meeting"}
+    aws["dynamo"].events.items[key]["AppliedAt"] = {
+        CALL_ID: "2026-11-25T10:00:00Z",
+        "Earlier meeting": "2026-11-20T10:00:00Z",
+    }
     invoked = []
 
     class FakeLambda:
@@ -669,6 +694,10 @@ def test_a_withdrawal_reaches_each_meeting_that_counted_the_consent(aws, monkeyp
         json.loads(i["Payload"])["advanceConsentWithdrawn"]["ConsentId"] == given["ConsentId"]
         for i in invoked
     )
+    assert [json.loads(i["Payload"])["advanceConsentWithdrawn"]["CallId"] for i in invoked] == [
+        CALL_ID,
+        "Earlier meeting",
+    ], "the most recently noted first"
     # Withdrawing again passes nothing on.
     invoked.clear()
     call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
