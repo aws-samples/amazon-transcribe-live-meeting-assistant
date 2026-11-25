@@ -38,6 +38,7 @@ import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import { toStreamingFrame } from '../common/streaming-frame';
 import useTranscriberSocket from '../../hooks/use-transcriber-socket';
+import { isAcceptedEmbedMessage } from '../../hooks/embed-message-origin';
 import { CONNECTION_LOST_MESSAGE } from '../stream-audio/transcriber-stream';
 
 const logger = new ConsoleLogger('EmbedStreamAudio');
@@ -305,6 +306,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
   // Listen for parent control messages
   useEffect(() => {
     const handleMessage = (event) => {
+      if (!isAcceptedEmbedMessage(event, params.allowedOrigins)) return;
       const { data } = event;
       if (!data || !data.type) return;
 
@@ -317,7 +319,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [recording]);
+  }, [recording, params.allowedOrigins]);
 
   const toggleMicrophoneEnabled = () => {
     micStream.current.getAudioTracks()[0].enabled = !micStream.current.getAudioTracks()[0].enabled;
@@ -445,6 +447,7 @@ EmbedStreamAudio.propTypes = {
     autoStart: PropTypes.bool,
     diarizeSystem: PropTypes.bool,
     diarizeMic: PropTypes.bool,
+    allowedOrigins: PropTypes.arrayOf(PropTypes.string),
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

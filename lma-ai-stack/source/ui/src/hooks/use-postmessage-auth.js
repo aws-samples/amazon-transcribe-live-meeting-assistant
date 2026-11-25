@@ -5,6 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { embedMessageOrigins, isAcceptedEmbedMessage } from './embed-message-origin';
 
 const logger = new ConsoleLogger('usePostMessageAuth');
 
@@ -20,7 +21,7 @@ const logger = new ConsoleLogger('usePostMessageAuth');
  *
  * @param {Object} options
  * @param {boolean} options.enabled - Whether to listen for postMessage auth
- * @param {string[]} options.allowedOrigins - List of allowed parent origins (empty = allow all)
+ * @param {string[]} options.allowedOrigins - List of allowed parent origins (empty = this page's own origin)
  * @returns {{ isAuthenticated, isWaiting, error, tokens }}
  */
 const usePostMessageAuth = ({ enabled = false, allowedOrigins = [] } = {}) => {
@@ -30,12 +31,7 @@ const usePostMessageAuth = ({ enabled = false, allowedOrigins = [] } = {}) => {
   const [tokens, setTokens] = useState(null);
   const tokensRef = useRef(null);
 
-  const getTargetOrigin = useCallback(() => {
-    if (allowedOrigins.length > 0) {
-      return allowedOrigins[0];
-    }
-    return window.location.origin;
-  }, [allowedOrigins]);
+  const getTargetOrigin = useCallback(() => embedMessageOrigins(allowedOrigins)[0], [allowedOrigins]);
 
   const sendToParent = useCallback(
     (message) => {
@@ -89,8 +85,8 @@ const usePostMessageAuth = ({ enabled = false, allowedOrigins = [] } = {}) => {
     if (!enabled) return undefined;
 
     const handleMessage = (event) => {
-      // Validate origin if allowedOrigins is specified
-      if (allowedOrigins.length > 0 && !allowedOrigins.includes(event.origin)) {
+      // Accept tokens only from allowedOrigins, or from this page's own origin when it is empty.
+      if (!isAcceptedEmbedMessage(event, allowedOrigins)) {
         logger.warn(`Rejected postMessage from unauthorized origin: ${event.origin}`);
         return;
       }

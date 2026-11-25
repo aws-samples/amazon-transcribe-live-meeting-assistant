@@ -439,7 +439,8 @@ so only the web UI's own origin may frame its pages. To show the
 [embeddable components](embeddable-components.md#allowing-your-application-to-frame-lma)
 in your own application, set `AllowedEmbedOrigins` to a comma-separated list of
 `https://` origins (a host, an optional port, no path; a host may start with `*.`
-to match its subdomains). The directive then becomes `frame-ancestors 'self'`
+to match its subdomains; prefer exact hosts where other sites are served under
+the same domain). The directive then becomes `frame-ancestors 'self'`
 followed by those origins, and `X-Frame-Options` is not sent, because it cannot
 name a list of origins and a browser that understands `frame-ancestors` ignores
 it. The parameter is limited to 600 characters, which keeps the whole policy

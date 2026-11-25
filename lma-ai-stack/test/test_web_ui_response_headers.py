@@ -85,11 +85,13 @@ PERMISSIONS_POLICY = (
 )
 FRAME_OPTIONS = {"Override": True, "FrameOption": "DENY"}
 
+NO_VALUE = object()
+
 
 def evaluate(node, parameters: dict[str, str]):
     """Evaluate the intrinsics the headers policy uses, for the given AllowedEmbedOrigins value."""
     if isinstance(node, dict) and len(node) == 1:
-        (name, args), = node.items()
+        [(name, args)] = node.items()
         allowed = parameters["AllowedEmbedOrigins"] != ""
         if name == "Fn::If":
             condition, when_true, when_false = args
@@ -110,9 +112,6 @@ def evaluate(node, parameters: dict[str, str]):
     if isinstance(node, dict):
         return {key: value for key, value in ((k, evaluate(v, parameters)) for k, v in node.items()) if value is not NO_VALUE}
     return node
-
-
-NO_VALUE = object()
 
 
 def render_csp(csp_sub: list, origins: str) -> str:

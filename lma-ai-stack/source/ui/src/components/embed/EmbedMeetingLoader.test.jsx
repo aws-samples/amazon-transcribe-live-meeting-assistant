@@ -59,6 +59,8 @@ const openSocket = () => {
 };
 const closeSocket = (target) => act(() => socket.options.onClose({ target, code: 1006 }));
 
+const OWN_ORIGIN = window.location.origin;
+
 describe('EmbedMeetingLoader', () => {
   let sendToParent;
 
@@ -85,7 +87,9 @@ describe('EmbedMeetingLoader', () => {
     render(<EmbedMeetingLoader params={{ meetingTopic: 'Weekly' }} sendToParent={sendToParent} />);
     const first = openSocket();
     // Started by the parent page, which calls startMeeting once.
-    act(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'LMA_START_MEETING' } })));
+    act(() =>
+      window.dispatchEvent(new MessageEvent('message', { origin: OWN_ORIGIN, data: { type: 'LMA_START_MEETING' } })),
+    );
     await screen.findByText('Meeting In Progress');
     return first;
   };

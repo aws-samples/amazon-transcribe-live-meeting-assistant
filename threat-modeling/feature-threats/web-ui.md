@@ -100,9 +100,9 @@ flowchart TD
 | **Severity** | Medium (2) |
 | **Risk Score** | **4 (Medium)** |
 | **Affected Components** | Embeddable iframe components, CloudFront response headers, React UI |
-| **Existing Mitigations** | X-Frame-Options / Content-Security-Policy frame-ancestors configuration, origin validation for postMessage communication |
-| **Status** | Partially Mitigated |
-| **Recommendations** | Implement strict frame-ancestors CSP directive with allowlisted domains, validate all postMessage origins, minimize data exposed through iframe API, add iframe sandbox attributes |
+| **Existing Mitigations** | Content-Security-Policy `frame-ancestors` of `'self'` plus the origins in the `AllowedEmbedOrigins` stack parameter (empty by default), with `X-Frame-Options: DENY` while that list is empty; embed `postMessage` listeners accept messages only from the `allowedOrigins` query parameter's origins, or the embed's own origin when it is empty, and send events only to the first of them |
+| **Status** | Mitigated |
+| **Recommendations** | Keep `AllowedEmbedOrigins` to the exact origins that embed LMA, preferring exact hosts to a `*.` wildcard where the parent domain also serves sites the operator does not control; minimize data exposed through the iframe API |
 
 ### UI.T04: GraphQL API Abuse / Introspection
 
@@ -146,7 +146,7 @@ flowchart TD
 | **CSP headers** | Content-Security-Policy via CloudFront response headers | UI.T01, UI.T03 |
 | **Subscription authorization** | AppSync resolver auth on subscriptions | UI.T02 |
 | **Cognito authentication** | Required for all API operations | UI.T02, UI.T04, UI.T05 |
-| **X-Frame-Options** | Framing restrictions via response headers | UI.T03 |
+| **frame-ancestors** | CSP `frame-ancestors 'self'` plus `AllowedEmbedOrigins`; `X-Frame-Options: DENY` while that list is empty | UI.T03 |
 | **Rate limiting** | AppSync built-in throttling | UI.T04 |
 | **CloudFront OAC** | Origin Access Control for S3 | UI.T05 |
 | **Geo restrictions** | CloudFront geographic access control | UI.T01, UI.T04 |

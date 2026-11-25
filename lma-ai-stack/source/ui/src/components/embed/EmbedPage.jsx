@@ -30,6 +30,7 @@ import { useLocation } from 'react-router-dom';
 import { Box, Spinner } from '@cloudscape-design/components';
 
 import usePostMessageAuth from '../../hooks/use-postmessage-auth';
+import { embedMessageOrigins, isAcceptedEmbedMessage } from '../../hooks/embed-message-origin';
 import useAppContext from '../../contexts/app';
 import ComponentSelector from './ComponentSelector';
 
@@ -101,7 +102,7 @@ const useParentMessaging = (allowedOrigins = []) => {
   const sendToParent = useCallback(
     (message) => {
       try {
-        const targetOrigin = allowedOrigins.length > 0 ? allowedOrigins[0] : window.location.origin;
+        const [targetOrigin] = embedMessageOrigins(allowedOrigins);
         if (window.parent && window.parent !== window) {
           window.parent.postMessage(message, targetOrigin);
         }
@@ -180,6 +181,7 @@ const EmbedPage = () => {
   // Listen for control messages from parent
   useEffect(() => {
     const handleMessage = (event) => {
+      if (!isAcceptedEmbedMessage(event, params.allowedOrigins)) return;
       const { data } = event;
       if (!data || !data.type) return;
 
@@ -198,7 +200,7 @@ const EmbedPage = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [params.allowedOrigins]);
 
   // Notify parent that embed page is loaded
   useEffect(() => {

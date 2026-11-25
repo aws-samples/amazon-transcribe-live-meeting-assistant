@@ -68,7 +68,9 @@ https://crm.example.com,https://portal.example.org:8443
 - A host may start with `*.` to match every subdomain of the rest of the host:
   `https://*.intranet.example.com` matches `https://app.intranet.example.com` but not
   `https://intranet.example.com` itself, so list that separately if you need it. At least two labels
-  must follow the `*.`. `http://` origins and other schemes are not accepted.
+  must follow the `*.`. Prefer exact hosts: a wildcard also admits every other site served under
+  that domain, including any the deployment's operator does not control. `http://` origins and
+  other schemes are not accepted.
 - Every page of the web UI is sent with the same policy, so the setting applies to `#/embed` and to
   the rest of the application alike.
 
@@ -105,11 +107,11 @@ To try the hosted [demo pages](#interactive-demo-page) against your stack, add t
 
 2. **Pass `allowedOrigins`.** The embed addresses every `postMessage` event it sends (`LMA_AUTH_READY`,
    `LMA_EMBED_LOADED`, `LMA_MEETING_STARTED` and the rest) to the first origin in the `allowedOrigins`
-   query parameter, and to LMA's own origin when the parameter is absent, so a page on another origin
-   receives no events unless it passes its own origin there. In `authMode=token`, a non-empty list
-   also limits which origins the embed accepts tokens from. Use the exact origin of the embedding
-   page, for example `allowedOrigins=https://crm.example.com` (URL-encode it if you build the URL by
-   hand).
+   query parameter, and accepts messages (`LMA_AUTH` tokens, `LMA_START_MEETING`, `LMA_CREATE_VP` and
+   the rest) only from the origins in it. When the parameter is absent, both are LMA's own origin.
+   So a page on another origin that sends the embed messages, uses `authMode=token`, or listens for
+   its events must pass its own origin there. Use the exact origin of the embedding page, for example
+   `allowedOrigins=https://crm.example.com` (URL-encode it if you build the URL by hand).
 
 3. **Address messages to LMA's origin and check `event.origin`**, as in
    [Security Best Practices](#security-best-practices).
@@ -303,7 +305,7 @@ Show the VNC live view and transcript for a virtual participant session:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `authMode` | string | `cognito` | Authentication mode: `cognito` (standard login) or `token` (postMessage token passing) |
-| `allowedOrigins` | string | (LMA's own origin) | Comma-separated origins of the embedding page. Events are sent to the first; in `token` mode, tokens are accepted only from the listed origins. A page on another origin receives events only if it passes its own origin here; see [What the embedding page must do](#what-the-embedding-page-must-do) |
+| `allowedOrigins` | string | (LMA's own origin) | Comma-separated origins of the embedding page. Events are sent to the first; messages from the parent (tokens, meeting and Virtual Participant control) are accepted only from the listed origins. A page on another origin must pass its own origin here to send messages or receive events; see [What the embedding page must do](#what-the-embedding-page-must-do) |
 
 ## Authentication Options
 
@@ -351,7 +353,7 @@ For maximum control, your application can obtain Cognito tokens directly (by cal
 ```html
 <iframe
   id="lma-embed"
-  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=stream-audio&authMode=token"
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=stream-audio&authMode=token&allowedOrigins=https://YOUR_APP_ORIGIN"
   width="100%"
   height="400px"
   style="border: none;"
@@ -1028,7 +1030,7 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 
 **Meeting Loader (with token auth):**
 ```
-/#/embed?component=meeting-loader&authMode=token
+/#/embed?component=meeting-loader&authMode=token&allowedOrigins=https://YOUR_APP_ORIGIN
 ```
 
 **VP Loader (waiting for postMessage):**
