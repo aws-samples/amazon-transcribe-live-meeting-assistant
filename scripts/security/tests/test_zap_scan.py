@@ -150,7 +150,7 @@ def test_every_rule_line_is_an_id_a_tab_an_action_and_a_tab() -> None:
         assert (
             len(parts) == 3
             and parts[0].isdigit()
-            and parts[1] in ("IGNORE", "WARN", "FAIL", "INFO")
+            and parts[1] in ("IGNORE", "WARN", "FAIL", "INFO", "OUTOFSCOPE")
         ), line
 
 
@@ -159,6 +159,78 @@ def test_ignored_plugins_are_read_from_the_rules_file() -> None:
     assert {"10096", "10027"} <= ignored
     assert "10038" not in ignored
     assert zap_scan.ignored_plugins("# 1\tIGNORE\n2\tWARN\t(x)\n3\tignore\t(y)\n") == {"3"}
+
+
+APPSYNC = "https://abc123.appsync-api.us-east-1.amazonaws.com"
+WEB_UI = "https://d111111abcdef8.cloudfront.net"
+MCP = "https://abc123.execute-api.us-east-1.amazonaws.com"
+
+
+def _header_report(*sites: str, plugin: str = "10035") -> dict:
+    return {
+        "site": [
+            {
+                "@name": site,
+                "alerts": [
+                    {
+                        "pluginid": plugin,
+                        "alert": "Header",
+                        "riskcode": "1",
+                        "instances": [{"uri": f"{site}/graphql"}, {"uri": f"{site}/"}],
+                    }
+                ],
+            }
+            for site in sites
+        ]
+    }
+
+
+def test_the_appsync_host_is_out_of_scope_for_the_transport_header_rule_only() -> None:
+    rules = zap_scan.out_of_scope_rules(zap_scan.RULES_PATH.read_text())
+    assert set(rules) == {"10035"}
+    assert any(p.match(f"{APPSYNC}/graphql") for p in rules["10035"])
+    for url in (f"{WEB_UI}/", f"{MCP}/prod/mcp", "https://appsync-api.example.com/graphql"):
+        assert not any(p.match(url) for p in rules["10035"]), url
+
+
+def test_an_out_of_scope_rule_drops_the_appsync_alert_and_keeps_the_web_ui_one() -> None:
+    rules = zap_scan.out_of_scope_rules(zap_scan.RULES_PATH.read_text())
+    counts, alerts = zap_scan.parse_report(_header_report(APPSYNC, WEB_UI, MCP), set(), rules)
+    assert counts["Low"] == 2
+    assert sorted(a["sampleUrls"][0] for a in alerts) == [f"{MCP}/graphql", f"{WEB_UI}/graphql"]
+    assert all(a["instances"] == 2 for a in alerts)
+    # Another plugin on the AppSync host is still reported.
+    counts, _ = zap_scan.parse_report(_header_report(APPSYNC, plugin="10021"), set(), rules)
+    assert counts["Low"] == 1
+    # Without the rules nothing is dropped.
+    counts, _ = zap_scan.parse_report(_header_report(APPSYNC, WEB_UI))
+    assert counts["Low"] == 2
+
+
+def test_out_of_scope_lines_are_read_by_plugin_and_for_every_plugin() -> None:
+    rules = zap_scan.out_of_scope_rules(
+        "# 1\tOUTOFSCOPE\thttps://a/\n2,3\tOUTOFSCOPE\thttps://b/\n*\tOUTOFSCOPE\thttps://c/\n4\tWARN\t(x)\n"
+    )
+    assert set(rules) == {"2", "3", "*"}
+    report = {
+        "site": [
+            {"@name": "https://b", "alerts": [{"pluginid": "2", "riskcode": "1", "instances": []}]},
+            {
+                "@name": "https://c",
+                "alerts": [
+                    {
+                        "pluginid": "9",
+                        "riskcode": "1",
+                        "instances": [{"uri": "https://c/x"}, {"uri": "https://d/x"}],
+                    }
+                ],
+            },
+        ]
+    }
+    counts, alerts = zap_scan.parse_report(report, set(), rules)
+    # "https://b" has no trailing slash, so the site URL is kept; one instance of 9 is left.
+    assert counts["Low"] == 2
+    assert [a["instances"] for a in alerts if a["pluginid"] == "9"] == [1]
 
 
 # ── reading what ZAP wrote ─────────────────────────────────────────────────
