@@ -320,7 +320,12 @@ class FakeConsentTable:
     def query(self, **kwargs):
         self.queries.append(kwargs)
         pk = kwargs["ExpressionAttributeValues"][":pk"]
-        matching = [dict(i) for i in self.items if i["PK"] == pk and "WithdrawnAt" not in i]
+        now = kwargs["ExpressionAttributeValues"][":now"]
+        matching = [
+            dict(i)
+            for i in self.items
+            if i["PK"] == pk and "WithdrawnAt" not in i and i.get("ValidUntil", "9999") > now
+        ]
         # Two pages, as DynamoDB answers a long partition.
         if "ExclusiveStartKey" not in kwargs:
             return {"Items": matching[:1], "LastEvaluatedKey": {"PK": pk, "SK": "next"}}
@@ -345,6 +350,13 @@ def test_deleting_a_user_withdraws_the_consents_they_gave_in_advance(env, monkey
             {"PK": "pmc#new@example.com", "SK": "ac#3", "Subject": "sub-earlier"},
             # On the second page.
             {"PK": "pmc#new@example.com", "SK": "ac#4", "Subject": "sub-new"},
+            # Expired: keeps its expiry.
+            {
+                "PK": "pmc#new@example.com",
+                "SK": "ac#5",
+                "Subject": "sub-new",
+                "ValidUntil": "2026-01-01T00:00:00Z",
+            },
         ]
     )
     monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")

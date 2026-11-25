@@ -141,6 +141,11 @@ class FakeTable:
         if UpdateExpression.startswith("SET WithdrawnAt"):
             if not current or current.get("WithdrawnAt"):
                 raise _failed()
+            if (
+                "ValidUntil > :w" in ConditionExpression
+                and not current["ValidUntil"] > values[":w"]
+            ):
+                raise _failed()
             current.update(
                 WithdrawnAt=values[":w"], WithdrawnReason=values[":r"], ExpiresAfter=values[":e"]
             )
@@ -561,6 +566,58 @@ def test_a_request_that_reached_nobody_can_be_made_again(aws, monkeypatch):
     assert invitation(BO)["Requested"] is False
     monkeypatch.setattr(lma_notifications, "publish_meeting_notification", lambda *a, **k: {})
     assert call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})["Requested"] is True
+
+
+def test_a_link_to_no_meeting_is_answered_as_one_the_caller_is_not_listed_on(aws, monkeypatch):
+    monkeypatch.setattr(index, "ASKS_PER_DAY", 1)
+    missing = {"CallId": "no such meeting"}
+    assert call("getAdvanceConsentInvitation", BO, missing)["Requested"] is False
+    assert call("askToBeAddedToMeeting", BO, {"input": missing}) == {
+        "Requested": True,
+        "Listed": False,
+    }
+    assert call("getAdvanceConsentInvitation", BO, missing)["Requested"] is True
+    assert aws["published"] == []
+    # Counted the same, so the next request is refused either way.
+    with pytest.raises(index.BadRequest, match="at most 1"):
+        call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})
+
+
+def test_a_consent_from_the_vp_link_covers_the_meeting_it_created(aws):
+    aws["dynamo"].vps.items[(VP_ID, None)] = {
+        "id": VP_ID,
+        "Owner": OWNER,
+        "meetingName": "Weekly sync",
+        "participants": [{"name": "Ana Silva", "email": ANA}],
+    }
+    page = call("getAdvanceConsentInvitation", ANA, {"VirtualParticipantId": VP_ID})
+    given = call(
+        "giveAdvanceConsent",
+        ANA,
+        {"input": {"VirtualParticipantId": VP_ID, "NoticeHash": page["NoticeHash"]}},
+    )
+    assert given["CallId"] is None and given["VirtualParticipantId"] == VP_ID
+    # The VP creates its meeting; the meeting's own link is used from then on.
+    aws["dynamo"].vps.items[(VP_ID, None)]["CallId"] = CALL_ID
+    assert [c["ConsentId"] for c in invitation(ANA)["ActiveConsents"]] == [given["ConsentId"]]
+    again = give(ANA)
+    statuses = {
+        c["ConsentId"]: (c["Status"], c["WithdrawnReason"])
+        for c in call("listMyAdvanceConsents", ANA)["Consents"]
+    }
+    assert statuses[given["ConsentId"]] == ("withdrawn", "replaced")
+    assert statuses[again["ConsentId"]] == ("active", None)
+
+
+def test_an_expired_consent_is_not_withdrawn_and_keeps_its_expiry(aws):
+    given = give(ANA)
+    [key] = [k for k in aws["dynamo"].events.items if k[0] == f"pmc#{ANA}"]
+    item = aws["dynamo"].events.items[key]
+    item["ValidUntil"] = "2026-01-01T00:00:00Z"
+    item["ExpiresAfter"] = 1
+    answer = call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
+    assert answer["Status"] == "expired" and answer["WithdrawnAt"] is None
+    assert item["ExpiresAfter"] == 1
 
 
 def test_asking_is_limited_per_day(aws, monkeypatch):

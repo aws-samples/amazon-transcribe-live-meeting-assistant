@@ -1213,9 +1213,11 @@ owner, the users it is shared with and Admins. The page says so before they ask.
   notification, it reaches everyone who can see the meeting in LMA, not only
   its owner. A Participant the meeting is shared with does not receive meeting
   notifications.
-- For a Virtual Participant that has not created its meeting yet, it is shown in
-  the **Participants** section of its page, as *Asked to be added*, to its owner
-  and Admins, until the person is on the list. The page keeps at most 20.
+- For a Virtual Participant that has not created its meeting yet, it is kept on
+  the Virtual Participant, which the people who can see it can read (its owner,
+  the users it is shared with and Admins), and shown in the **Participants**
+  section of its page, as *Asked to be added*, to its owner and Admins, until
+  the person is on the list. The newest 20 are kept.
 
 The owner adds them to the list as usual. A person is asked for once per meeting
 in 30 days, however often they choose the button, and one person may ask at

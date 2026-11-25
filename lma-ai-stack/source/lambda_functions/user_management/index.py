@@ -435,12 +435,16 @@ def _sub_and_email_of(username):
     return _attr(user, "sub") or "", (_attr(user, "email") or "").strip()
 
 
-def _consents_in_force(table, partition):
-    """Every consent under one address not yet withdrawn, a page at a time."""
+def _consents_in_force(table, partition, now):
+    """Every consent under one address neither withdrawn nor expired, a page at a time.
+
+    An expired one stopped counting at its end date and keeps the expiry
+    counted from then.
+    """
     arguments = {
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :ac)",
-        "FilterExpression": "attribute_not_exists(WithdrawnAt)",
-        "ExpressionAttributeValues": {":pk": partition, ":ac": "ac#"},
+        "FilterExpression": "attribute_not_exists(WithdrawnAt) AND ValidUntil > :now",
+        "ExpressionAttributeValues": {":pk": partition, ":ac": "ac#", ":now": now},
     }
     while True:
         page = table.query(**arguments)
@@ -468,7 +472,7 @@ def _withdraw_advance_consents(email, sub):
     # person withdraws themselves is.
     expires = int(moment + MEETING_RECORD_EXPIRATION_DAYS * 86400)
     try:
-        for item in _consents_in_force(table, f"pmc#{email.casefold()}"):
+        for item in _consents_in_force(table, f"pmc#{email.casefold()}", now):
             if item.get("Subject") != sub:
                 continue
             try:

@@ -379,12 +379,17 @@ def _new_consent_id(now: datetime) -> str:
 
 
 def _withdraw(email: str, consent_id: str, now: datetime, reason: str) -> Optional[Dict]:
-    """Mark one consent withdrawn; None when it is not the caller's or already withdrawn."""
+    """Mark one consent withdrawn; None when it is not the caller's, already
+    withdrawn, or expired."""
     try:
         response = _table().update_item(
             Key={"PK": _partition(email), "SK": f"ac#{consent_id}"},
             UpdateExpression="SET WithdrawnAt = :w, WithdrawnReason = :r, ExpiresAfter = :e",
-            ConditionExpression="attribute_exists(PK) AND attribute_not_exists(WithdrawnAt)",
+            # Only one still in force: an expired consent stopped counting at
+            # its end date, and keeps the expiry counted from then.
+            ConditionExpression=(
+                "attribute_exists(PK) AND attribute_not_exists(WithdrawnAt) AND ValidUntil > :w"
+            ),
             ExpressionAttributeValues={
                 ":w": advance.iso(now),
                 ":r": reason,
@@ -473,15 +478,47 @@ def list_my_advance_consents(caller: Mapping[str, Any], _arguments: Mapping[str,
     }
 
 
-def _request_key(meeting: Mapping[str, Any]) -> str:
+def _request_key(meeting: Optional[Mapping[str, Any]], arguments: Mapping[str, Any]) -> str:
+    """Where a request to be added is remembered: under the meeting, or, for a
+    link to no meeting, under the id the link names, so that both are answered
+    alike."""
+    if meeting is None:
+        call_id = _ref_id(arguments.get("CallId"), "CallId")
+        if call_id:
+            return f"pmr#c#{call_id}"
+        return f"pmr#vp#{_ref_id(arguments.get('VirtualParticipantId'), 'VirtualParticipantId')}"
     if meeting["Kind"] == "call":
         return f"pmr#c#{meeting['CallId']}"
     return f"pmr#vp#{meeting['VirtualParticipantId']}"
 
 
-def _already_requested(meeting: Mapping[str, Any], email: str) -> bool:
-    item = _table().get_item(Key={"PK": _request_key(meeting), "SK": email}).get("Item")
+def _already_requested(key: str, email: str) -> bool:
+    item = _table().get_item(Key={"PK": key, "SK": email}).get("Item")
     return bool(item) and int(item.get("ExpiresAfter") or 0) > time.time()
+
+
+def _with_created_meetings(consents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The consents, each one for a Virtual Participant's meeting also naming that meeting.
+
+    A consent for one meeting given from a Virtual Participant's link before
+    it created its meeting names only the Virtual Participant. Once it has
+    created the meeting, the meeting's own link names it by CallId; the
+    Virtual Participant's row says which, so such a consent is read as one for
+    that CallId too (in memory only), and covers and is replaced as one given
+    from the meeting's link.
+    """
+    created: Dict[str, str] = {}
+    out = []
+    for item in consents:
+        vp_id = item.get("VirtualParticipantId")
+        if item.get("Scope") == advance.SCOPE_MEETING and vp_id and not item.get("CallId"):
+            if vp_id not in created:
+                row = _vp_row(str(vp_id)) or {}
+                created[vp_id] = str(row.get("CallId") or "")
+            if created[vp_id]:
+                item = {**item, "CallId": created[vp_id]}
+        out.append(item)
+    return out
 
 
 def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict:
@@ -493,14 +530,14 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     if meeting is None or entry is None:
         # Someone not on the list, or a link to no meeting, learns nothing
         # about the meeting: not its name, its owner nor who is listed.
-        requested = meeting is not None and _already_requested(meeting, email)
+        requested = _already_requested(_request_key(meeting, arguments), email)
         LOGGER.info("consent page opened by someone not on the meeting's list")
         return {"Listed": False, "Requested": requested, "Enabled": enabled, "Email": email}
     now = datetime.now(timezone.utc)
     offer = proposed(meeting, arguments, settings, now) if enabled else {}
     covering = [
         consent_out(item, now)
-        for item in my_consents(email, not_withdrawn=True)
+        for item in _with_created_meetings(my_consents(email, not_withdrawn=True))
         if advance.covers(item, _covering_meeting(meeting), now)
     ]
     return {
@@ -544,7 +581,7 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         raise BadRequest("the consent text has changed since the page showed it; read it again")
     active = [
         item
-        for item in my_consents(email, not_withdrawn=True)
+        for item in _with_created_meetings(my_consents(email, not_withdrawn=True))
         if advance.status_of(item, now) == advance.STATUS_ACTIVE
     ]
     if len(active) >= MAX_ACTIVE_PER_PERSON:
@@ -724,18 +761,19 @@ def ask_to_be_added_to_meeting(caller: Mapping[str, Any], data: Mapping[str, Any
     if not settings.get("advanceConsentEnabled"):
         raise Refused("this deployment does not take consent given in advance")
     meeting = meeting_of(data)
-    if not meeting:
-        # Answered as a request made, so a link to no meeting tells nothing.
-        return {"Requested": True, "Listed": False}
-    if listed_entry(meeting, email) is not None:
+    # A link to no meeting is answered as one to a meeting the caller is not
+    # listed on, in this answer and the ones after it: the request is kept and
+    # counted the same, and only nobody is told.
+    if meeting is not None and listed_entry(meeting, email) is not None:
         return {"Requested": False, "Listed": True}
+    key = _request_key(meeting, data)
     name = consent.clip(data.get("Name"), advance.MAX_NAME_LENGTH) or ""
     name = re.sub(r"[\r\n<>]", " ", name).strip()
     now = time.time()
     try:
         _table().put_item(
             Item={
-                "PK": _request_key(meeting),
+                "PK": key,
                 "SK": email,
                 "Name": name or None,
                 "RequestedAt": advance.iso(datetime.now(timezone.utc)),
@@ -749,13 +787,13 @@ def ask_to_be_added_to_meeting(caller: Mapping[str, Any], data: Mapping[str, Any
             return {"Requested": True, "Listed": False}
         raise
     if not _reserve_ask(caller["username"], now):
-        _table().delete_item(Key={"PK": _request_key(meeting), "SK": email})
+        _table().delete_item(Key={"PK": key, "SK": email})
         raise BadRequest(f"you can ask to be added at most {ASKS_PER_DAY} times a day")
-    if not _notify_owner(meeting, email, name):
+    if meeting is not None and not _notify_owner(meeting, email, name):
         # Nobody was told, so the request is not remembered either: asking
         # again tries again.
         LOGGER.warning("a request to be added could not be shown; it can be made again")
-        _table().delete_item(Key={"PK": _request_key(meeting), "SK": email})
+        _table().delete_item(Key={"PK": key, "SK": email})
         raise BadRequest("your request could not be passed on; try again in a few minutes")
     LOGGER.info("asked to be added to a meeting's participant list")
     return {"Requested": True, "Listed": False}
