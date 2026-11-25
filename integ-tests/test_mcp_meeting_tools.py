@@ -188,6 +188,9 @@ def test_the_consent_record_is_given_in_lma_s_own_values(observed) -> None:
             # A reply made on the page is not linked to a transcript speaker.
             "speakerLinkBasis": None,
             "speakerLinkedAt": None,
+            # A reply made on the page is not a consent given in advance.
+            "matchBasis": None,
+            "givenInAdvance": None,
         }
     ], consent["events"]
     assert replies[0]["at"], replies
