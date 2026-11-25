@@ -702,3 +702,190 @@ def test_a_withdrawal_reaches_each_meeting_that_counted_the_consent(aws, monkeyp
     invoked.clear()
     call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
     assert invoked == []
+
+
+# ── standing consents given with no meeting named ───────────────────────────
+
+PRESETS = HERE.parents[1] / "lambda_layers" / "configuration_layer" / "lma_config" / "presets"
+
+
+def _day(days: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def standing_offer(username, **arguments):
+    return call("getAdvanceConsentInvitation", username, arguments)
+
+
+def give_standing(username, **data):
+    offer = standing_offer(username, **{k: v for k, v in data.items() if k != "NoticeHash"})
+    data.setdefault("NoticeHash", offer["NoticeHash"])
+    return call("giveAdvanceConsent", username, {"input": data})
+
+
+def test_a_consent_for_every_meeting_needs_no_link_and_names_no_meeting(aws):
+    # Bo is on no meeting's participant list.
+    until = _day(30)
+    offer = standing_offer(BO, Scope="deployment", ValidUntil=until)
+    assert offer["Listed"] is False and "MeetingName" not in offer
+    assert offer["Scope"] == "deployment" and offer["Organizer"] is None
+    assert "every meeting on this Live Meeting Assistant deployment" in offer["NoticeText"]
+    assert f"until the end of {until} (UTC)" in offer["NoticeText"]
+    assert offer["NoticeText"].startswith("I agree that the organizer of each meeting may")
+    assert offer["NoticeHash"] == advance.text_hash(offer["NoticeText"])
+    answer = give_standing(BO, Scope="deployment", ValidUntil=until)
+    [item] = stored(aws, BO)
+    assert item["Scope"] == "deployment" and item["Email"] == BO
+    assert item["NoticeText"] == offer["NoticeText"] and item["NoticeHash"] == offer["NoticeHash"]
+    assert item["NoticeVersion"] == advance.text_version(None)
+    for absent in ("CallId", "VirtualParticipantId", "MeetingName", "Organizer", "LabelKey"):
+        assert absent not in item
+    assert answer["ValidUntil"] == f"{until}T23:59:59Z" and answer["Status"] == "active"
+    meeting = {"CallId": CALL_ID, "Owner": OWNER, "Labels": []}
+    assert advance.covers(item, meeting, datetime.now(timezone.utc))
+
+
+def test_a_consent_for_an_organizer_names_the_address_typed(aws):
+    until = _day(10)
+    answer = give_standing(
+        BO,
+        Scope="organizer",
+        Organizer=" Owner@Example.com ",
+        ValidUntil=until,
+        LabelKey="engagement",
+        LabelValue="acme",
+    )
+    assert answer["Organizer"] == OWNER and answer["MeetingName"] is None
+    assert (answer["LabelKey"], answer["LabelValue"]) == ("engagement", "acme")
+    assert (
+        f"I agree that {OWNER} may record and transcribe every meeting they organize"
+        in answer["NoticeText"]
+    )
+    assert "labelled engagement: acme" in answer["NoticeText"]
+    [item] = stored(aws, BO)
+    meeting = {
+        "CallId": CALL_ID,
+        "Owner": OWNER,
+        "Labels": [{"Key": "engagement", "Value": "acme"}],
+    }
+    assert advance.covers(item, meeting, datetime.now(timezone.utc))
+
+
+def test_the_organizer_typed_is_not_looked_up(aws):
+    looked_up = []
+    real = aws["cognito"].admin_get_user
+
+    def admin_get_user(UserPoolId, Username):  # noqa: N803
+        looked_up.append(Username)
+        return real(UserPoolId=UserPoolId, Username=Username)
+
+    aws["cognito"].admin_get_user = admin_get_user
+    until = _day(10)
+    known = standing_offer(BO, Scope="organizer", Organizer=OWNER, ValidUntil=until)
+    unknown = standing_offer(
+        BO, Scope="organizer", Organizer="nobody@example.com", ValidUntil=until
+    )
+    assert looked_up == [BO, BO]
+    assert set(known) == set(unknown)
+    assert known["NoticeText"].replace(OWNER, "nobody@example.com") == unknown["NoticeText"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"Scope": "organizer", "ValidUntil": "2099-01-01", "Organizer": "not an address"},
+        {"Scope": "organizer", "Organizer": OWNER},
+        {"Scope": "deployment"},
+        {"Scope": "organizer", "Organizer": OWNER, "LabelKey": "engagement"},
+    ],
+)
+def test_a_standing_consent_needs_a_valid_organizer_date_and_label(aws, arguments):
+    with pytest.raises(index.BadRequest):
+        standing_offer(BO, **arguments)
+    with pytest.raises(index.BadRequest):
+        call("giveAdvanceConsent", BO, {"input": {**arguments, "NoticeHash": "0" * 64}})
+    assert stored(aws, BO) == []
+
+
+def test_a_consent_for_one_meeting_or_the_deployment_from_a_link_is_refused(aws):
+    with pytest.raises(index.BadRequest):
+        call("giveAdvanceConsent", BO, {"input": {"Scope": "meeting", "NoticeHash": "0" * 64}})
+    with pytest.raises(index.BadRequest):
+        invitation(ANA, Scope="deployment", ValidUntil=_day(10))
+    assert stored(aws, BO) == [] and stored(aws, ANA) == []
+
+
+def test_a_standing_consent_is_given_only_for_the_text_the_page_showed(aws):
+    shown = standing_offer(BO, Scope="deployment", ValidUntil=_day(10))["NoticeHash"]
+    with pytest.raises(index.BadRequest, match="changed"):
+        give_standing(BO, Scope="deployment", ValidUntil=_day(11), NoticeHash=shown)
+    aws["settings"]["advanceConsentText"] = "{organizer} may record {scope}."
+    with pytest.raises(index.BadRequest, match="changed"):
+        give_standing(BO, Scope="deployment", ValidUntil=_day(10), NoticeHash=shown)
+    assert stored(aws, BO) == []
+    # The deployment's configured text is the one shown and kept.
+    answer = give_standing(BO, Scope="deployment", ValidUntil=_day(10))
+    assert answer["NoticeText"].startswith("the organizer of each meeting may record every meeting")
+    assert answer["NoticeVersion"] == advance.text_version("{organizer} may record {scope}.")
+
+
+@pytest.mark.parametrize(
+    "preset", ["standard", "regulated-notify", "regulated-consent-required", "team-hosted-external"]
+)
+@pytest.mark.parametrize("scope", ["deployment", "organizer"])
+def test_a_standing_consent_is_capped_by_the_presets_longest_period(aws, preset, scope):
+    values = json.loads((PRESETS / f"{preset}.json").read_text())["sections"]["meeting_consent"][
+        "values"
+    ]
+    days = values["advanceConsentMaxDays"]
+    aws["settings"]["advanceConsentMaxDays"] = days
+    extra = {"Organizer": OWNER} if scope == "organizer" else {}
+    with pytest.raises(index.BadRequest, match=f"{days} days"):
+        standing_offer(BO, Scope=scope, ValidUntil=_day(days + 1), **extra)
+    answer = give_standing(BO, Scope=scope, ValidUntil=_day(days), **extra)
+    assert answer["Status"] == "active"
+    assert standing_offer(BO, Scope=scope, ValidUntil=_day(1), **extra)["MaxDays"] == days
+
+
+def test_the_regulated_and_team_hosted_presets_hold_standing_consents_to_180_days():
+    for preset in ("regulated-notify", "regulated-consent-required", "team-hosted-external"):
+        values = json.loads((PRESETS / f"{preset}.json").read_text())["sections"][
+            "meeting_consent"
+        ]["values"]
+        assert values["advanceConsentMaxDays"] == 180
+
+
+def test_a_new_consent_for_every_meeting_replaces_the_earlier_one_only(aws):
+    first = give_standing(BO, Scope="deployment", ValidUntil=_day(10))
+    organizer = give_standing(BO, Scope="organizer", Organizer=OWNER, ValidUntil=_day(10))
+    offer = standing_offer(BO, Scope="deployment", ValidUntil=_day(20))
+    assert [c["ConsentId"] for c in offer["ActiveConsents"]] == [first["ConsentId"]]
+    second = give_standing(BO, Scope="deployment", ValidUntil=_day(20))
+    consents = {c["ConsentId"]: c for c in call("listMyAdvanceConsents", BO)["Consents"]}
+    assert consents[first["ConsentId"]]["WithdrawnReason"] == "replaced"
+    assert consents[second["ConsentId"]]["Status"] == "active"
+    assert consents[organizer["ConsentId"]]["Status"] == "active"
+
+
+def test_standing_consents_are_listed_and_withdrawn_by_their_owner_only(aws):
+    given = give_standing(BO, Scope="deployment", ValidUntil=_day(10))
+    assert [c["ConsentId"] for c in call("listMyAdvanceConsents", ANA)["Consents"]] == []
+    with pytest.raises(index.BadRequest):
+        call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
+    [listed] = call("listMyAdvanceConsents", BO)["Consents"]
+    assert listed["Scope"] == "deployment" and listed["Status"] == "active"
+    answer = call("withdrawAdvanceConsent", BO, {"input": {"ConsentId": given["ConsentId"]}})
+    assert answer["Status"] == "withdrawn"
+
+
+def test_no_standing_consent_is_taken_when_the_deployment_turns_it_off(aws):
+    aws["settings"]["advanceConsentEnabled"] = False
+    offer = standing_offer(BO, Scope="deployment", ValidUntil=_day(10))
+    assert offer["Enabled"] is False and "NoticeText" not in offer
+    with pytest.raises(index.Refused):
+        call(
+            "giveAdvanceConsent",
+            BO,
+            {"input": {"Scope": "deployment", "ValidUntil": _day(10), "NoticeHash": "x"}},
+        )
+    assert stored(aws, BO) == []

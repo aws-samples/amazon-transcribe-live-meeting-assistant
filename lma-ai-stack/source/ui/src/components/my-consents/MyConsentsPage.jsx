@@ -3,13 +3,14 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
   Alert,
+  Autosuggest,
   Box,
   Button,
   Checkbox,
@@ -42,6 +43,8 @@ import {
   dateAhead,
   localDay,
 } from '../common/advance-consent';
+import { CONSENT_PROMPT_TEXT, dismissPrompt, sessionSub, shouldPrompt } from './consent-prompt';
+import useAppContext from '../../contexts/app';
 
 const client = generateClient();
 const logger = new ConsoleLogger('MyConsentsPage');
@@ -277,6 +280,259 @@ MeetingConsentInvitation.propTypes = {
   onGiven: PropTypes.func.isRequired,
 };
 
+/** A typed address that is worth asking the server about. */
+const looksLikeAddress = (value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
+
+/**
+ * A standing consent, given on My consents with no meeting link: for the
+ * meetings one organizer holds (by the address the person types, never looked
+ * up), optionally only those with one label, or for every meeting on the
+ * deployment, until a date. The exact text is read from the server for each
+ * choice, as on a meeting's consent page.
+ */
+export const StandingConsentForm = ({ answer = null, onGiven }) => {
+  const maxDays = answer?.MaxDays || 365;
+  const [scope, setScope] = useState('');
+  const [until, setUntil] = useState(() => dateAhead(Math.min(DEFAULT_STANDING_DAYS, maxDays)));
+  const [organizer, setOrganizer] = useState('');
+  const [labelKey, setLabelKey] = useState('');
+  const [labelValue, setLabelValue] = useState('');
+  const [offer, setOffer] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [agreed, setAgreed] = useState(false);
+  const [giving, setGiving] = useState(false);
+  const [result, setResult] = useState(null);
+  const latest = useRef(0);
+
+  // The longest period arrives with the person's consents: a default date
+  // beyond it is brought within it.
+  useEffect(() => {
+    setUntil((day) => (day > dateAhead(maxDays) ? dateAhead(Math.min(DEFAULT_STANDING_DAYS, maxDays)) : day));
+  }, [maxDays]);
+
+  // The organizers named on the person's own consents, to pick from again.
+  const known = useMemo(
+    () =>
+      [...new Set((answer?.Consents || []).map((c) => c.Organizer).filter(Boolean))].map((value) => ({
+        value,
+      })),
+    [answer],
+  );
+
+  const choice = useMemo(() => {
+    if (scope === 'deployment') return { Scope: scope, ValidUntil: until };
+    if (scope !== 'organizer' || !looksLikeAddress(organizer)) return null;
+    const out = { Scope: scope, ValidUntil: until, Organizer: organizer.trim() };
+    if (labelKey.trim() && labelValue.trim()) {
+      out.LabelKey = labelKey.trim();
+      out.LabelValue = labelValue.trim();
+    }
+    return out;
+  }, [scope, until, organizer, labelKey, labelValue]);
+
+  const load = useCallback(async () => {
+    // A new choice: the earlier text is not shown under it, and an answer
+    // still in flight for an earlier one is ignored.
+    setAgreed(false);
+    setOffer(null);
+    setLoadError('');
+    latest.current += 1;
+    const asked = latest.current;
+    if (!choice || !until) return;
+    try {
+      const response = await client.graphql({ query: getAdvanceConsentInvitation, variables: choice });
+      if (asked !== latest.current) return;
+      setOffer(response?.data?.getAdvanceConsentInvitation || null);
+      setLoadError('');
+    } catch (error) {
+      if (asked !== latest.current) return;
+      logger.error('could not read the consent text', error);
+      setOffer(null);
+      setLoadError(errorText(error, 'The consent text could not be read.'));
+    }
+  }, [JSON.stringify(choice)]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (answer && answer.Enabled === false) {
+    return <Alert type="info">This deployment does not take consent given in advance.</Alert>;
+  }
+
+  const give = async () => {
+    setGiving(true);
+    setResult(null);
+    try {
+      await client.graphql({
+        query: giveAdvanceConsent,
+        variables: { input: { ...choice, NoticeHash: offer.NoticeHash } },
+      });
+      setResult({ type: 'success', text: 'Your consent is recorded. You can withdraw it at any time below.' });
+      onGiven();
+      load();
+    } catch (error) {
+      logger.error('could not give consent', error);
+      setResult({ type: 'error', text: errorText(error, 'Your consent could not be recorded.') });
+      load();
+    } finally {
+      setGiving(false);
+    }
+  };
+
+  const shown = choice && offer?.NoticeHash ? offer : null;
+  const active = shown?.ActiveConsents || [];
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          description="Without a meeting's consent link, you can give a consent that runs until a date you choose."
+        >
+          Give a standing consent
+        </Header>
+      }
+    >
+      <SpaceBetween size="m">
+        {result && (
+          <Alert type={result.type} dismissible onDismiss={() => setResult(null)}>
+            {result.text}
+          </Alert>
+        )}
+        {loadError && <Alert type="error">{loadError}</Alert>}
+        <FormField label="What your consent covers">
+          <RadioGroup
+            value={scope || null}
+            onChange={({ detail }) => setScope(detail.value)}
+            items={[
+              {
+                value: 'organizer',
+                label: 'Meetings organized by one person, until a date',
+                description: 'Their meetings on this deployment, named by their email address.',
+              },
+              {
+                value: 'deployment',
+                label: 'All meetings on this deployment, until a date',
+                description: 'Every meeting whose participant list includes you.',
+              },
+            ]}
+          />
+        </FormField>
+        {scope === 'organizer' && (
+          <SpaceBetween size="s">
+            <FormField
+              label="Organizer's email address"
+              description="The address they sign in to Live Meeting Assistant with."
+            >
+              <Autosuggest
+                value={organizer}
+                onChange={({ detail }) => setOrganizer(detail.value)}
+                options={known}
+                enteredTextLabel={(value) => `Use: ${value}`}
+                placeholder="organizer@example.com"
+                ariaLabel="Organizer's email address"
+                empty="Type the organizer's email address"
+              />
+            </FormField>
+            <SpaceBetween size="s" direction="horizontal">
+              <FormField label="Only meetings with this label (optional)" description="Label name">
+                <Input value={labelKey} onChange={({ detail }) => setLabelKey(detail.value)} ariaLabel="Label name" />
+              </FormField>
+              <FormField label="&nbsp;" description="Label value">
+                <Input
+                  value={labelValue}
+                  onChange={({ detail }) => setLabelValue(detail.value)}
+                  ariaLabel="Label value"
+                />
+              </FormField>
+            </SpaceBetween>
+          </SpaceBetween>
+        )}
+        {scope && (
+          <FormField label="Until (UTC)" constraintText={`YYYY/MM/DD, at most ${maxDays} days ahead.`}>
+            <DatePicker
+              value={until}
+              onChange={({ detail }) => setUntil(detail.value)}
+              isDateEnabled={(date) => {
+                const day = localDay(date);
+                return day >= dateAhead(0) && day <= dateAhead(maxDays);
+              }}
+              placeholder="YYYY/MM/DD"
+              openCalendarAriaLabel={(selected) => `Choose the date${selected ? `, ${selected}` : ''}`}
+            />
+          </FormField>
+        )}
+        {active.length > 0 && (
+          <Alert type="info">
+            {`You already have this consent in force: ${active.map(consentScopeLabel).join('; ')}. ` +
+              'Giving it again replaces it.'}
+          </Alert>
+        )}
+        {shown && (
+          <>
+            <FormField label="You agree to">
+              <Box variant="p" data-testid="standing-consent-text">
+                {shown.NoticeText}
+              </Box>
+            </FormField>
+            <Checkbox checked={agreed} onChange={({ detail }) => setAgreed(detail.checked)}>
+              I have read this text and agree to it
+            </Checkbox>
+            <Box color="text-body-secondary" fontSize="body-s">
+              The record keeps your email address, your account, the time and this text. It counts in a meeting only
+              when you are on its participant list. You can still object during any meeting, and withdraw this consent
+              at any time on this page.
+            </Box>
+            <Button variant="primary" onClick={give} loading={giving} disabled={!agreed}>
+              Give consent
+            </Button>
+          </>
+        )}
+      </SpaceBetween>
+    </Container>
+  );
+};
+
+StandingConsentForm.propTypes = {
+  answer: PropTypes.shape({
+    Enabled: PropTypes.bool,
+    MaxDays: PropTypes.number,
+    Consents: PropTypes.arrayOf(PropTypes.shape({ Organizer: PropTypes.string })),
+  }),
+  onGiven: PropTypes.func.isRequired,
+};
+
+/**
+ * The banner a Participant lands on after signing in, while they have no
+ * consent on record and have not dismissed it. "Not now" only dismisses it.
+ */
+export const ConsentPromptBanner = ({ answer = null, sub = '' }) => {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed || !shouldPrompt(answer, sub)) return null;
+  return (
+    <Alert
+      type="info"
+      action={
+        <Button
+          onClick={() => {
+            dismissPrompt(sub);
+            setDismissed(true);
+          }}
+        >
+          Not now
+        </Button>
+      }
+    >
+      {CONSENT_PROMPT_TEXT}
+    </Alert>
+  );
+};
+
+ConsentPromptBanner.propTypes = {
+  answer: PropTypes.shape({ Enabled: PropTypes.bool, Consents: PropTypes.arrayOf(PropTypes.shape({})) }),
+  sub: PropTypes.string,
+};
+
 const statusCell = (c) => (
   <StatusIndicator type={c.Status === 'active' ? 'success' : 'stopped'}>
     {`${consentStatusLabel(c)}${c.WithdrawnAt ? ` ${when(c.WithdrawnAt)}` : ''}`}
@@ -357,7 +613,8 @@ export const MyConsentsList = ({ answer = null, error = '', onWithdrawn }) => {
         empty={
           <Box color="text-body-secondary">
             {error ||
-              'You have not given consent in advance. Open a meeting’s consent link from its organizer to give it.'}
+              'You have not given consent in advance. Give a standing consent above, or open the consent link a ' +
+                'meeting’s organizer sends you.'}
           </Box>
         }
       />
@@ -402,10 +659,13 @@ MyConsentsList.propTypes = {
 
 /**
  * My consents: the signed-in person's consents given in advance, whatever
- * their role, and, opened from a meeting's consent link, that meeting's
- * consent page above them.
+ * their role, with a standing consent they can give without a link; opened
+ * from a meeting's consent link, that meeting's consent page instead.
+ * `offerPrompt` (a Participant's pages) shows, without a link, the banner a
+ * person with no consent on record sees until they dismiss it.
  */
-const MyConsentsPage = () => {
+const MyConsentsPage = ({ offerPrompt = false }) => {
+  const sub = sessionSub(useAppContext());
   const { search } = useLocation();
   const meetingRef = useMemo(() => consentLinkMeeting(search), [search]);
   const [answer, setAnswer] = useState(null);
@@ -441,11 +701,18 @@ const MyConsentsPage = () => {
       }
     >
       <SpaceBetween size="l">
-        {meetingRef && <MeetingConsentInvitation meetingRef={meetingRef} onGiven={loadConsents} />}
+        {offerPrompt && !meetingRef && <ConsentPromptBanner answer={answer} sub={sub} />}
+        {meetingRef ? (
+          <MeetingConsentInvitation meetingRef={meetingRef} onGiven={loadConsents} />
+        ) : (
+          <StandingConsentForm answer={answer} onGiven={loadConsents} />
+        )}
         <MyConsentsList answer={answer} error={error} onWithdrawn={loadConsents} />
       </SpaceBetween>
     </ContentLayout>
   );
 };
+
+MyConsentsPage.propTypes = { offerPrompt: PropTypes.bool };
 
 export default MyConsentsPage;
