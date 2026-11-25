@@ -2007,6 +2007,12 @@ describe('the Participant mode', () => {
     expect(tabLabels()).toEqual(['Summary', 'Transcript', 'Whiteboards', 'Details']);
     expect(screen.getByRole('button', { name: 'Share' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+    // Each header action is its own item of the actions row, so they line up in one row.
+    const rowItem = (name) => screen.getByRole('button', { name }).closest('[class*="awsui_child_"]');
+    const items = ['Assistant', 'Share', 'Download', 'More actions']
+      .filter((name) => screen.queryByRole('button', { name }))
+      .map(rowItem);
+    expect(new Set(items).size).toBe(items.length);
     expect(screen.getByRole('checkbox', { name: 'Translate' })).toBeTruthy();
     expect(screen.getByTestId('meeting-cost-chip')).toBeTruthy();
     expect(screen.getByTestId('meeting-context-panel')).toBeTruthy();

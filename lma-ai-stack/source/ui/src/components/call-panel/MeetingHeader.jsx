@@ -173,29 +173,33 @@ const MeetingHeader = ({
                   )}
                 </ToggleButton>
               )}
-              {!participantMode && (
-                <>
-                  {shareModal({ ...controls, triggerText: 'Share' })}
-                  <MeetingDownloadMenu
-                    item={item}
-                    consent={consent}
-                    speakers={speakers}
-                    callTranscriptPerCallId={callTranscriptPerCallId}
-                    keyframeCount={keyframeCount}
-                    chapters={chapters}
-                  />
-                  <DiagnoseButton callId={item.callId} resourceLabel={title} />
-                  <ButtonDropdown
-                    variant="icon"
-                    ariaLabel="More actions"
-                    items={[{ id: 'delete', text: 'Delete meeting', iconName: 'remove' }]}
-                    onItemClick={({ detail }) => {
-                      if (detail.id === 'delete') setDeleteRequest(Date.now());
-                    }}
-                  />
+              {/* An array, not a fragment: the row spaces and wraps each of its
+                  own items, and a fragment would make these one item. */}
+              {!participantMode && [
+                <React.Fragment key="share">{shareModal({ ...controls, triggerText: 'Share' })}</React.Fragment>,
+                <MeetingDownloadMenu
+                  key="download"
+                  item={item}
+                  consent={consent}
+                  speakers={speakers}
+                  callTranscriptPerCallId={callTranscriptPerCallId}
+                  keyframeCount={keyframeCount}
+                  chapters={chapters}
+                />,
+                <DiagnoseButton key="diagnose" callId={item.callId} resourceLabel={title} />,
+                <ButtonDropdown
+                  key="more"
+                  variant="icon"
+                  ariaLabel="More actions"
+                  items={[{ id: 'delete', text: 'Delete meeting', iconName: 'remove' }]}
+                  onItemClick={({ detail }) => {
+                    if (detail.id === 'delete') setDeleteRequest(Date.now());
+                  }}
+                />,
+                <React.Fragment key="delete">
                   {deleteModal({ ...controls, hideTrigger: true, openRequest: deleteRequest })}
-                </>
-              )}
+                </React.Fragment>,
+              ]}
             </SpaceBetween>
           }
         >
