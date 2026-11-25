@@ -5,17 +5,16 @@
  */
 
 /**
- * The transcript of a meeting shared with a Participant, as their page shows it.
+ * The transcript of a meeting shared with a Participant, as their page reads it.
  *
  * Pure: the page reads the stored lines a page at a time
  * (getParticipantMeetingTranscript) and receives the live ones
- * (onAddParticipantTranscriptSegment); these helpers merge the two, order them
- * and name each line's speaker through the same name map the meeting page uses
- * (speaker-identities.js), so a Participant sees the names the owner gave.
- * The server sends only what was said and what was typed in the meeting chat.
+ * (onAddParticipantTranscriptSegment); these helpers merge the two and order
+ * them. The meeting page then names each line's speaker through the meeting's
+ * name map, as it does for anyone (participant-meeting.js). The server sends
+ * only what was said and what was typed in the meeting chat.
  */
 import { isChatChannel, isSpeechChannel } from '../common/channels';
-import { parseSpeakerIdentities, resolveSpeakerName, speakerGroups } from '../common/speaker-identities';
 
 const seconds = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
@@ -47,32 +46,3 @@ export const formatOffset = (value) => {
 
 /** A meeting's length from its TotalConversationDurationMillis, or '' when it has none. */
 export const formatDuration = (millis) => (typeof millis === 'number' && millis > 0 ? formatOffset(millis / 1000) : '');
-
-/**
- * Each line as shown: { key, time, speaker, text, chat, partial }. A chat line
- * keeps the sender the meeting showed; a spoken line's speaker is resolved
- * through the meeting's name map.
- */
-export const displayLines = (lines, rawIdentities, fallbackName) => {
-  const identities = parseSpeakerIdentities(rawIdentities);
-  const asSegments = lines.map((line) => ({
-    channel: line.Channel,
-    speaker: line.Speaker,
-    segmentId: line.SegmentId,
-    startTime: line.StartTime,
-    endTime: line.EndTime,
-    isPartial: line.IsPartial,
-  }));
-  const groups = speakerGroups(asSegments, identities);
-  return lines.map((line, index) => {
-    const chat = isChatChannel(line.Channel);
-    return {
-      key: line.SegmentId,
-      time: formatOffset(line.StartTime),
-      speaker: chat ? line.Speaker || 'Chat' : resolveSpeakerName(asSegments[index], identities, fallbackName, groups),
-      text: line.Transcript || '',
-      chat,
-      partial: line.IsPartial === true,
-    };
-  });
-};

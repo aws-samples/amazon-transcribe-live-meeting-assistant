@@ -40,8 +40,10 @@ The left sidebar organizes the application into the following sections:
 ### A Participant's navigation
 A [Participant](user-based-access-control.md#participant) sees none of the sections above. Their navigation has three entries:
 - **Home** — What the Participant's account is for
-- **Shared meetings** — The meetings shared with them, each opening a read-only page with its transcript (live while the meeting is in progress), summary, meeting chat, recordings, consent record and a meeting assistant panel
+- **Shared meetings** — The meetings shared with them, each opening the [Meeting Detail Page](#meeting-detail-page) read-only: the header, the Summary, Transcript (with Auto-scroll and, once the meeting has ended, the player) and Details tabs, and the meeting assistant panel beside them, without the owner's panels and controls (see [The shared meeting's page](user-based-access-control.md#the-shared-meetings-page))
 - **Voice enrollment** — Enrolling their own voice, and deleting it (see [Voice Enrollment](voice-enrollment.md))
+
+Their pages have the same frame as every other page: this navigation, the breadcrumbs, the notifications and the help panel at the right.
 
 ### Troubleshooting (admin only)
 - **Troubleshooting** — Ask the AI troubleshooting agent why something in the deployment failed; it reads the deployment's logs, Virtual Participant records and stack parameters and answers with a root cause and its evidence (see [AI Troubleshooting Agent](troubleshooting-agent.md#the-troubleshooting-page))

@@ -161,6 +161,7 @@ import { ChatAttachmentsContext } from '../chat-segment/ChatAttachments';
 import useChatAttachments, { ATTACHMENT_NOTE } from '../../hooks/use-chat-attachments';
 import useSummaryProfiles from '../../hooks/use-summary-profiles';
 import ActionItemsTable from './ActionItemsTable';
+import { participantConsentState } from '../participant-meetings/participant-meeting';
 import { RegenerateDialog, SummaryProfileSetting } from './SummaryProfileControls';
 
 const client = generateClient();
@@ -202,6 +203,10 @@ const REGENERATE_HANDOVER_MS = 30000;
 
 // Where the consent record is on the Details tab, for the links that open it.
 const CONSENT_RECORD_ID = 'meeting-consent-record';
+
+// The chat frame's key frames on a Participant's page: none are read, as the
+// key frames are the owner's (see participantMode on CallPanel).
+const NO_KEYFRAMES = async () => ({});
 
 const EDIT_AFTER_MEETING_REASON =
   'Available once the meeting has ended, so the end-of-meeting summary cannot replace your text.';
@@ -1159,6 +1164,7 @@ const CallInProgressTranscript = ({
   playback = null,
   onSeek = null,
   onSaveSpeakerIdentities = undefined,
+  participantMode = false,
 }) => {
   const containerRef = useRef();
   // The speaker whose chip opened the speaker modal, or null.
@@ -1194,7 +1200,8 @@ const CallInProgressTranscript = ({
         .map((s) => s.segmentId),
     [chatSegments],
   );
-  const chatAttachments = useChatAttachments(callId, segmentIdsWithAttachments);
+  // Not read on a Participant's page: the chat attachments are the owner's.
+  const chatAttachments = useChatAttachments(participantMode ? null : callId, segmentIdsWithAttachments);
 
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
@@ -1697,6 +1704,7 @@ const CallTranscriptContainer = ({
   playback = null,
   onSeek = null,
   onSaveSpeakerIdentities = undefined,
+  participantMode = false,
 }) => {
   // Auto-scroll follows the newest line while the meeting runs, and the line
   // being heard once it has ended and there is a recording to play; it is on
@@ -1742,10 +1750,14 @@ const CallTranscriptContainer = ({
                 >
                   Auto-scroll
                 </Toggle>
-                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
-                  Translate
-                </Toggle>
-                {translateOn && (
+                {/* Translation reads Amazon Translate with the viewer's own
+                    credentials, which a Participant's role does not have. */}
+                {!participantMode && (
+                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                    Translate
+                  </Toggle>
+                )}
+                {translateOn && !participantMode && (
                   <Select
                     selectedOption={selectedLanguage}
                     onChange={handleLanguageSelect}
@@ -1790,6 +1802,7 @@ const CallTranscriptContainer = ({
           playback={playback}
           onSeek={onSeek}
           onSaveSpeakerIdentities={onSaveSpeakerIdentities}
+          participantMode={participantMode}
         />
       </Container>
     </div>
@@ -1901,15 +1914,34 @@ export const CallPanel = ({
   // Where the page has no Notifications drawer (an embedded meeting page), the
   // meeting's notifications are shown above the tabs instead.
   notificationsInline = false,
+  // A Participant's read-only page of a meeting shared with them
+  // (participant-meetings/ParticipantMeetingPage.jsx). The page is this one,
+  // with the meeting, its transcript and its recordings read by the
+  // Participant operations and passed in, and with nothing that reads or
+  // changes the owner's material: no other query or subscription is made, and
+  // the owner's panels and controls are not rendered. See
+  // docs/user-based-access-control.md#participant.
+  participantMode = false,
+  // With participantMode: { consent, participantNames, signRecording } --
+  // the consent record as the Participant view returns it, the names on the
+  // meeting's participant list, and the function that gives the player a
+  // playable link for a recording (the server signs them).
+  participantMeeting = null,
 }) => {
   const { currentCredentials, user } = useAppContext();
   const { isAdmin: isAdminUser } = useUserGroups();
+  // The meeting as the owner's queries and subscriptions name it; null on a
+  // Participant's page, which turns each of them off.
+  const ownerCallId = participantMode ? null : item.callId;
 
-  const { settings } = useSettingsContext();
+  // Neither context is provided on a Participant's page.
+  const { settings } = useSettingsContext() || {};
   const [collapseSentiment, setCollapseSentiment] = useState(false);
 
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
+  // None of the writers is offered on a Participant's page.
+  const callsContext = useCallsContext();
   const {
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
@@ -1919,7 +1951,7 @@ export const CallPanel = ({
     sendDeriveCallAgenda,
     sendUpdateMeetingPreparation,
     sendRequestMeetingDigest,
-  } = useCallsContext();
+  } = (participantMode ? null : callsContext) || {};
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
   // rebuilds the entire transcript element list.
@@ -1945,7 +1977,9 @@ export const CallPanel = ({
     [item.callId, sendRegenerateCallSummary],
   );
   // The summary profiles the meeting's summary panel offers.
-  const summaryProfiles = useSummaryProfiles(Boolean(sendRegenerateCallSummary || sendUpdateMeetingPreparation));
+  const summaryProfiles = useSummaryProfiles(
+    !participantMode && Boolean(sendRegenerateCallSummary || sendUpdateMeetingPreparation),
+  );
 
   // Presentation only -- it greys out controls the write would reject anyway.
   // The rule itself is enforced as a condition on the mutation (and, for the
@@ -1953,12 +1987,19 @@ export const CallPanel = ({
   // transcript's inline rename, the summary controls and the Agenda panel so
   // all four agree.
   const speakerNamesReadOnly =
-    !isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username);
+    participantMode ||
+    (!isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username));
 
   // The consent record, for the Consent panel and the summary downloads. Read
   // with its own query, which signs the evidence links, and kept current by
   // its own subscription.
-  const meetingConsent = useMeetingConsent(item.callId);
+  // On a Participant's page, the record the Participant view returned.
+  const ownerConsent = useMeetingConsent(ownerCallId);
+  const participantConsent = participantMeeting?.consent;
+  const meetingConsent = useMemo(
+    () => (participantMode ? participantConsentState(participantConsent) : ownerConsent),
+    [participantMode, participantConsent, ownerConsent],
+  );
 
   /**
    * Apply a rename made from a transcript segment.
@@ -2080,7 +2121,7 @@ export const CallPanel = ({
   // Answers the meeting assistant chat frame, and its requests for frames of
   // the shared screen; the embeddable chat panel uses the same two hooks.
   useStrandsChatBridge(item.callId, { onAnswerComplete });
-  useChatKeyframeLinks(item.callId);
+  useChatKeyframeLinks(item.callId, participantMode ? NO_KEYFRAMES : undefined);
 
   // Whether the Virtual Participant's live view is shown, at the top of the
   // Transcript tab. Opened and closed from the assistant's settings menu and
@@ -2096,7 +2137,7 @@ export const CallPanel = ({
   const hasKeyframes = keyframes.count > 0;
   // The meeting's whiteboards, kept current by their own subscription; held
   // here so the tab's label can count them. See docs/meeting-whiteboards.md.
-  const whiteboards = useMeetingWhiteboards(item.callId);
+  const whiteboards = useMeetingWhiteboards(ownerCallId);
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
   // Opening the live view also opens the tab it is on, wherever it was asked for.
   const setVncPreview = useCallback(
@@ -2421,7 +2462,7 @@ export const CallPanel = ({
   // Fetch Virtual Participant data for this call
   useEffect(() => {
     const fetchVPData = async () => {
-      if (!item.callId) return;
+      if (!ownerCallId) return;
 
       try {
         setLoadingVP(true);
@@ -2440,7 +2481,7 @@ export const CallPanel = ({
     };
 
     fetchVPData();
-  }, [item.callId]);
+  }, [ownerCallId]);
 
   // Subscribe to VP updates
   useEffect(() => {
@@ -2465,7 +2506,7 @@ export const CallPanel = ({
 
   // Subscribe to VNC preview control from agent
   useEffect(() => {
-    if (!item.callId) return undefined;
+    if (!ownerCallId) return undefined;
 
     const subscription = client
       .graphql({
@@ -2479,7 +2520,7 @@ export const CallPanel = ({
           }
         }
       `,
-        variables: { callId: item.callId },
+        variables: { callId: ownerCallId },
       })
       .subscribe({
         next: (message) => {
@@ -2500,7 +2541,7 @@ export const CallPanel = ({
     return () => {
       subscription.unsubscribe();
     };
-  }, [item.callId]);
+  }, [ownerCallId]);
 
   // The header's figures. The length is read from the transcript as well as
   // from the stored value (see meetingDurationMillis), and the downloads carry
@@ -2542,7 +2583,9 @@ export const CallPanel = ({
   // The consent record is shown on the Details tab when consent was enforced
   // for the meeting (or could not be read); the header's indicator and the
   // paused-transcription alert open it, or the consent setting when it was off.
-  const showConsentRecordPanel = Boolean(meetingConsent.error) || consentEnforced(meetingConsent.consent?.Mode);
+  const showConsentRecordPanel = participantMode
+    ? Boolean(meetingConsent.consent)
+    : Boolean(meetingConsent.error) || consentEnforced(meetingConsent.consent?.Mode);
   const [consentScrollRequest, setConsentScrollRequest] = useState(null);
   const showConsent = useCallback(() => {
     setActiveTab(TAB_DETAILS);
@@ -2557,7 +2600,7 @@ export const CallPanel = ({
     setConsentScrollRequest(null);
   }, [consentScrollRequest, activeTab, showConsentRecordPanel]);
   const cost = useCallCost(
-    item.callId,
+    ownerCallId,
     `${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${item.callSummaryState || ''}`,
   );
 
@@ -2653,9 +2696,11 @@ export const CallPanel = ({
       <ChecklistPanel {...checklistProps} collapsible defaultExpanded={isLive} />
     ) : null;
 
+  // The owner's preparation panels: not on a Participant's page.
+  const ownerPanels = !participantMode;
   const summaryTab = (
     <SpaceBetween size="l">
-      {meetingLabels}
+      {ownerPanels && meetingLabels}
       {!agendaItems.length && agendaPanel}
       <Grid
         gridDefinition={
@@ -2675,9 +2720,10 @@ export const CallPanel = ({
           // The slides the summary names are shown as their thumbnails, read
           // once their section is opened; a click shows one on the Screen
           // share tab when the meeting has one, and otherwise opens it full size.
-          keyframes="image"
+          // A Participant reads no key frames: the slides are named as text.
+          keyframes={participantMode ? 'text' : 'image'}
           onKeyframeSelect={hasKeyframes ? showKeyframe : undefined}
-          summaryProfiles={summaryProfiles}
+          summaryProfiles={participantMode ? undefined : summaryProfiles}
           onSummaryProfileChange={
             savePreparation
               ? (name) => savePreparation('summaryProfile', { SummaryProfile: name === 'default' ? null : name })
@@ -2691,9 +2737,9 @@ export const CallPanel = ({
           </SpaceBetween>
         )}
       </Grid>
-      {contextPanel}
-      {liveGuidancePanel}
-      {checklistPanel}
+      {ownerPanels && contextPanel}
+      {ownerPanels && liveGuidancePanel}
+      {ownerPanels && checklistPanel}
       {enableSentimentAnalysis && (
         <Grid gridDefinition={[{ colspan: 12 }]}>
           <CallStatsContainer
@@ -2725,8 +2771,8 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
-      {isLive && liveGuidancePanel}
-      {transcriptChecklist}
+      {ownerPanels && isLive && liveGuidancePanel}
+      {ownerPanels && transcriptChecklist}
       <CallTranscriptContainer
         item={item}
         player={
@@ -2746,6 +2792,8 @@ export const CallPanel = ({
               sessionId={session ? String(session.number) : null}
               onSessionChange={selectSession}
               onEnded={playNextSession}
+              // A Participant's recordings are links the server signs.
+              sign={participantMeeting?.signRecording}
             />
           ) : null
         }
@@ -2761,11 +2809,42 @@ export const CallPanel = ({
         readOnly={speakerNamesReadOnly}
         scrollRequest={transcriptScrollRequest}
         active={activeTab === TAB_TRANSCRIPT}
+        participantMode={participantMode}
       />
     </SpaceBetween>
   );
 
-  const details = (
+  // A Participant's Details tab: the names on the participant list and the
+  // consent record, which is all of the meeting's details they are sent.
+  const participantNames = participantMeeting?.participantNames || [];
+  const participantDetails = (
+    <SpaceBetween size="l">
+      <Container header={<Header variant="h4">Participants</Header>}>
+        {participantNames.length > 0 ? (
+          <ul aria-label="Participants">
+            {participantNames.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+        ) : (
+          <Box color="text-status-inactive">The meeting has no participant list.</Box>
+        )}
+      </Container>
+      {showConsentRecordPanel ? (
+        <div id={CONSENT_RECORD_ID}>
+          <ConsentPanel state={meetingConsent} />
+        </div>
+      ) : (
+        <Container header={<Header variant="h4">Consent</Header>}>
+          <Box color="text-status-inactive">No consent was asked for in this meeting.</Box>
+        </Container>
+      )}
+    </SpaceBetween>
+  );
+
+  const details = participantMode ? (
+    participantDetails
+  ) : (
     <SpaceBetween size="l">
       <MeetingAttributes
         item={item}
@@ -2828,21 +2907,28 @@ export const CallPanel = ({
   // Every tab stays mounted while another is shown ('eager'): switching tabs
   // keeps the transcript's translations and scroll position, a summary or
   // agenda being edited, and the assistant's conversation.
+  // No Whiteboards tab on a Participant's page; no Screen share tab either, as
+  // no key frames are read there (hasKeyframes stays false).
+  const whiteboardsTab = participantMode
+    ? []
+    : [
+        {
+          id: TAB_WHITEBOARDS,
+          label: whiteboardsTabLabel(whiteboards.items.length),
+          content: (
+            <WhiteboardsTab
+              whiteboards={whiteboards}
+              readOnly={speakerNamesReadOnly}
+              assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
+            />
+          ),
+          contentRenderStrategy: 'eager',
+        },
+      ];
   const tabs = [
     { id: TAB_SUMMARY, label: 'Summary', content: summaryTab, contentRenderStrategy: 'eager' },
     { id: TAB_TRANSCRIPT, label: 'Transcript', content: transcript, contentRenderStrategy: 'eager' },
-    {
-      id: TAB_WHITEBOARDS,
-      label: whiteboardsTabLabel(whiteboards.items.length),
-      content: (
-        <WhiteboardsTab
-          whiteboards={whiteboards}
-          readOnly={speakerNamesReadOnly}
-          assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
-        />
-      ),
-      contentRenderStrategy: 'eager',
-    },
+    ...whiteboardsTab,
     ...(hasKeyframes
       ? [
           {
@@ -2922,7 +3008,9 @@ export const CallPanel = ({
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             setToolsOpen={setToolsOpen}
             onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}
-            onSelectSpeaker={showSpeaker}
+            // The Speakers panel is not on a Participant's page.
+            onSelectSpeaker={participantMode ? undefined : showSpeaker}
+            participantMode={participantMode}
             assistant={
               assistantEnabled
                 ? {
@@ -2964,10 +3052,12 @@ export const CallPanel = ({
               setShowVNCPreview={setVncPreview}
               vpData={vpData}
               loadingVP={loadingVP}
+              participantMode={participantMode}
             />
           )}
         </div>
         {timelineNode &&
+          !participantMode &&
           createPortal(
             <VideoTimeline
               key={item.callId}

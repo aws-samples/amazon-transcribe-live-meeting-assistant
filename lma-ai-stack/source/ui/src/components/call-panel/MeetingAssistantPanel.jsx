@@ -73,6 +73,7 @@ const MeetingAssistantPanel = ({
   setShowVNCPreview,
   vpData = null,
   loadingVP = false,
+  participantMode = false,
 }) => {
   const regionRef = useRef(null);
   const frameRef = useRef(null);
@@ -446,7 +447,7 @@ const MeetingAssistantPanel = ({
             }
             actions={
               <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
-                {isAdmin && import.meta.env.VITE_AGENT_ASSIST_MODE === 'LAMBDA' ? (
+                {!participantMode && isAdmin && import.meta.env.VITE_AGENT_ASSIST_MODE === 'LAMBDA' ? (
                   <ButtonDropdown
                     items={[
                       { text: 'Edit Chat Buttons', id: 'edit-buttons' },
@@ -593,8 +594,10 @@ const MeetingAssistantPanel = ({
         </SpaceBetween>
       </Modal>
 
-      {/* MCP Servers Modal */}
-      <MCPServersModal visible={showMCPModal} onDismiss={() => setShowMCPModal(false)} vpData={vpData} />
+      {/* MCP Servers Modal: an administrator's, which reads the installed servers when it is created. */}
+      {!participantMode && (
+        <MCPServersModal visible={showMCPModal} onDismiss={() => setShowMCPModal(false)} vpData={vpData} />
+      )}
     </section>
   );
 };
@@ -613,6 +616,8 @@ MeetingAssistantPanel.propTypes = {
   // eslint-disable-next-line react/forbid-prop-types
   vpData: PropTypes.object,
   loadingVP: PropTypes.bool,
+  /** A Participant's page: the chat alone, without the administrator's settings menu and dialogs. */
+  participantMode: PropTypes.bool,
 };
 
 export default MeetingAssistantPanel;

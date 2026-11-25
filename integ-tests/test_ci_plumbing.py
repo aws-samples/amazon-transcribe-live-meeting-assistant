@@ -1973,3 +1973,41 @@ def test_the_role_probe_recognises_only_the_field_refusal_as_a_refusal() -> None
         "Mutation.createUser",
     )
     assert not role_probe.refused_at_field(None, "Query.getCall")
+
+
+def test_the_participant_page_probe_opens_the_route_the_web_ui_serves_shared_meetings_on() -> None:
+    import participant_page_probe  # imports playwright only when a run starts
+
+    constants = (
+        Path(__file__).resolve().parents[1] / "lma-ai-stack" / "source" / "ui" / "src" / "routes" / "constants.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"export const SHARED_MEETINGS_PATH = '([^']+)';", constants)
+    assert match, "SHARED_MEETINGS_PATH is not defined in the UI's routes/constants.js"
+    assert participant_page_probe.SHARED_MEETINGS_PATH == match.group(1)
+    assert (
+        participant_page_probe.shared_meeting_url("https://d.example/", "Weekly sync+1")
+        == "https://d.example/#/shared-meetings/Weekly%20sync%2B1"
+    )
+
+
+def test_the_participant_page_probe_names_each_graphql_operation_the_page_sent() -> None:
+    from participant_page_probe import operation_name
+
+    def body(query: str) -> str:
+        return json.dumps({"query": query, "variables": {}})
+
+    assert (
+        operation_name(body("query GetParticipantMeeting($CallId: ID!) {\n getParticipantMeeting(CallId: $CallId) { CallId } }"))
+        == "getParticipantMeeting"
+    )
+    assert (
+        operation_name(body("mutation SendChatMessage($input: SendChatMessageInput!) { sendChatMessage(input: $input) { MessageId } }"))
+        == "sendChatMessage"
+    )
+    assert (
+        operation_name(body("query Q($d: ID!) { default: getChatButtonConfig(ChatButtonConfigId: $d) { ChatButtonConfigId } }"))
+        == "getChatButtonConfig"
+    )
+    assert operation_name(body("\n  query ListInstalledMCPServers {\n    listInstalledMCPServers { ServerId }\n  }")) == "listInstalledMCPServers"
+    assert operation_name("not json") is None
+    assert operation_name(None) is None

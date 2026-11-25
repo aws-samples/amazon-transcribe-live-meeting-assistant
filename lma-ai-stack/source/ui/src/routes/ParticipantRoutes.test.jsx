@@ -7,8 +7,9 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
 vi.mock('../components/call-analytics-top-navigation', () => ({ default: () => null }));
 vi.mock('../contexts/app', () => ({
@@ -24,7 +25,15 @@ vi.mock('../components/participant-meetings/ParticipantMeetingList', () => ({
   default: () => <div>participant: shared meetings</div>,
 }));
 vi.mock('../components/participant-meetings/ParticipantMeetingPage', () => ({
-  default: ({ callId }) => <div>participant: meeting {callId}</div>,
+  // The meeting page's Info link opens the layout's help panel.
+  default: ({ callId, setToolsOpen }) => (
+    <div>
+      participant: meeting {callId}
+      <button type="button" onClick={() => setToolsOpen(true)}>
+        meeting info
+      </button>
+    </div>
+  ),
 }));
 vi.mock('../components/voice-enrollment/VoiceEnrollmentPage', () => ({
   default: () => <div>participant: voice enrollment</div>,
@@ -110,6 +119,57 @@ describe('a Participant', () => {
       expect(screen.queryByText('Access denied')).toBeNull();
       cleanup();
     });
+  });
+});
+
+describe("a Participant page's frame", () => {
+  const PAGES = {
+    '/home': ['Home'],
+    '/shared-meetings': ['Home', 'Shared meetings'],
+    [`/shared-meetings/${encodeURIComponent('Weekly sync-2026-11-03-14-05-09-123')}`]: [
+      'Home',
+      'Shared meetings',
+      'Weekly sync',
+    ],
+    '/consents': ['Home', 'My consents'],
+    '/voice-enrollment': ['Home', 'Voice enrollment'],
+  };
+
+  it.each(Object.keys(PAGES))(
+    'is the app layout on %s: side navigation, breadcrumbs, notifications and the help panel',
+    (route) => {
+      const { container } = renderAt(route);
+      const layout = createWrapper(container).findAppLayout();
+      expect(layout).toBeTruthy();
+      expect(layout.findNavigation().findSideNavigation()).toBeTruthy();
+      expect(
+        layout
+          .findBreadcrumbs()
+          .findBreadcrumbGroup()
+          .findBreadcrumbLinks()
+          .map((link) => link.getElement().textContent),
+      ).toEqual(PAGES[route]);
+      expect(layout.findNotifications()).toBeTruthy();
+      expect(layout.findToolsToggle()).toBeTruthy();
+    },
+  );
+
+  it("opens the page's help from the (i) button", () => {
+    const { container } = renderAt('/shared-meetings');
+    const layout = createWrapper(container).findAppLayout();
+    expect(layout.findOpenToolsPanel()).toBeNull();
+    layout.findToolsToggle().click();
+    expect(layout.findOpenToolsPanel()).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Shared meetings', level: 2 })).toBeTruthy();
+  });
+
+  it("opens a meeting's help from the meeting page's Info link", () => {
+    const { container } = renderAt(`/shared-meetings/${encodeURIComponent('Weekly sync')}`);
+    const layout = createWrapper(container).findAppLayout();
+    expect(layout.findOpenToolsPanel()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'meeting info' }));
+    expect(layout.findOpenToolsPanel()).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Shared meeting', level: 2 })).toBeTruthy();
   });
 });
 

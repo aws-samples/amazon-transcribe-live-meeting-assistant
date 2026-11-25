@@ -153,9 +153,11 @@ A Participant signs in to a home page with four pages beside it:
   is shared with a Participant when its owner shares it by hand, or, with
   [Meeting Sharing](#sharing-with-the-participant-list) on (the default), when
   the Participant's address is on the meeting's participant list.
-- **A meeting's page**, read-only: its transcript (live while the meeting is in
-  progress), summary, meeting chat, recordings and consent record, and a
-  meeting assistant panel for questions about that meeting.
+- **A meeting's page**, read-only: the meeting page every role sees, in a
+  Participant mode (see [The shared meeting's page](#the-shared-meetings-page)),
+  with its transcript (live while the meeting is in progress), summary, meeting
+  chat, recordings and consent record, and the meeting assistant panel for
+  questions about that meeting.
 - **My consents**: the consents they gave before meetings, a meeting's
   consent page opened from its consent link, and withdrawal, as every role
   has; see [Consent given in advance](meeting-consent.md#consent-given-in-advance).
@@ -169,6 +171,11 @@ Audio, Virtual Participant, browser extension, Desktop Capture App), no
 Meetings Query Tool, MCP access or configuration. Opening any other page shows
 **Access denied**. The browser extension and the Desktop Capture App accept a
 Participant's sign-in, and the transcriber then refuses their connection.
+
+Every Participant page has the application's usual frame: the side navigation
+with the four pages, the breadcrumbs (Home, then the page, and on a meeting's
+page the meeting's name), the notifications above the page, and the help panel
+at the right, opened from its (i) button or from an Info link on the page.
 
 ### What a Participant sees of a shared meeting
 
@@ -215,6 +222,45 @@ references, and a Participant has nothing to filter by. The page offers no
 control that changes the meeting: no editing, deleting, sharing, regenerating,
 speaker naming or reopening.
 
+### The shared meeting's page
+
+A shared meeting opens on the same page an owner sees
+([Meeting Detail Page](web-ui-guide.md#meeting-detail-page)), with the same header,
+tabs and meeting assistant panel, in a Participant mode. Everything on it comes
+from the Participant operations above, and the page makes no other request.
+
+- **Header**: the meeting's name, status, start, length, owner and the consent
+  that applied, the speakers' names, and the **Assistant** button. Not the
+  Share, Download, Diagnose or Delete actions, nor the cost estimate.
+- **Transcript** tab (the tab it opens on): the transcript with the meeting
+  chat lines among it, its search and speaker filter, and **Auto-scroll**,
+  which follows the newest line while the meeting is live. Once the meeting
+  has ended, the player above it plays the recordings through the links the
+  server signs (a link that lapses during a long listen is replaced), and a
+  line's time plays the recording from there. There is no **Translate**
+  switch: translation uses the viewer's own AWS credentials, which the
+  Participant role does not have. Speakers are shown by the names the owner
+  gave them, without the controls that name them.
+- **Summary** tab: the summary, its action items and chapters, and the agenda,
+  read-only. The slides the summary names are named in words, without their
+  images.
+- **Details** tab: the names on the participant list and the consent record,
+  without the controls that record an objection or an attestation.
+- **Meeting assistant** panel, beside the tabs as on the owner's page (over
+  them on a narrow window), with the chat buttons for questions the current
+  meeting can answer: **SUMMARIZE**, **ACTIONS**, **TOPICS**, **AGENDA CHECK**,
+  **CLARITY CHECK** and **MISSING ACTION OWNER or ETA**, with the prompts the
+  deployment ships for them. The buttons that ask about past meetings,
+  documents or the web, or ask the assistant to act in the meeting, are not
+  offered, and the deployment's own button set (which Admins edit) is read by
+  Admins and Users only, so a Participant always sees these six.
+
+Not on the page, as the owner's: the Whiteboards and Screen share tabs, the
+labels and audience, the meeting context, the checklist, live guidance, the
+summary profile, the Speakers panel, the capture details, the meeting's
+attributes and cost, the participant list's addresses and accounts, and every
+control that edits, regenerates, shares, deletes or reopens the meeting.
+
 A Participant's live transcript is admitted, when it is opened, only while the
 meeting is shared with them, and only for the fields a
 `ParticipantTranscriptSegment` has; each message is then checked against the
@@ -234,7 +280,8 @@ alone. Whatever the settings say, a Participant's question is never offered the
 meeting context or checklist, nor the Virtual Participant controls, and the
 transcript it is given leaves out the meeting assistant's earlier answers. The
 question and its answer are shown to the Participant only: they are not added
-to the meeting's transcript.
+to the meeting's transcript. The panel's chat buttons are the six listed under
+[The shared meeting's page](#the-shared-meetings-page).
 
 ## Authorized Account Email Domain
 

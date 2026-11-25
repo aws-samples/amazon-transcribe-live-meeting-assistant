@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { displayLines, formatDuration, formatOffset, mergeSegment, mergeSegments } from './participant-transcript';
+import { formatDuration, formatOffset, mergeSegment, mergeSegments } from './participant-transcript';
 
 const line = (id, start, extra = {}) => ({
   SegmentId: id,
@@ -45,19 +45,6 @@ describe('the Participant transcript', () => {
       ],
     );
     expect(lines.map((l) => l.SegmentId)).toEqual(['a', 'c']);
-  });
-
-  it('names speakers through the meeting name map and chat lines by their sender', () => {
-    const identities = JSON.stringify({ identities: { 'REMOTE#Other Participant (spk_0)': { name: 'Olga' } } });
-    const shown = displayLines(
-      [line('a', 61), line('c', 62, { Channel: 'MEETING_CHAT', Speaker: 'Ben', Transcript: 'hi' })],
-      identities,
-      'Others',
-    );
-    expect(shown).toEqual([
-      { key: 'a', time: '1:01', speaker: 'Olga', text: 'line a', chat: false, partial: false },
-      { key: 'c', time: '1:02', speaker: 'Ben', text: 'hi', chat: true, partial: false },
-    ]);
   });
 
   it('formats times from the start of the meeting', () => {

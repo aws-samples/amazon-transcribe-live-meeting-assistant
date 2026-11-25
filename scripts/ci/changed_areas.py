@@ -367,6 +367,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{UI}/src/components/configuration/inference-geography-cases.json", "vp"),
     ("lma-ai-stack/deployment/lma-ai-stack.yaml", ("vp", "lambdas", "vp_template")),
     ("lma-llm-template-setup-stack/**", "vp"),
+    # The UI's chat bridge tests hold the Participant chat buttons to the shipped
+    # button prompts (use-strands-chat-bridge-participant.test.jsx).
+    ("lma-chat-button-config-stack/source/lambda_functions/ChatButtonConfig.json", "ui"),
     # The summary Lambda's tests check that no shipped summary prompt uses the
     # meeting context and checklist placeholders.
     (

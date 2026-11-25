@@ -19,7 +19,15 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import createWrapper from '@cloudscape-design/components/test-utils/dom';
 
-const responses = vi.hoisted(() => ({ frames: [], cost: null, vps: [], vncToggle: null, attachments: [] }));
+const responses = vi.hoisted(() => ({
+  frames: [],
+  cost: null,
+  vps: [],
+  vncToggle: null,
+  attachments: [],
+  // Every query and subscription the page made, in order.
+  requests: [],
+}));
 // The calls context, which a test can give the writers the page offers controls for.
 const callsContext = vi.hoisted(() => ({ value: { calls: [] } }));
 // What useMeetingConsent answers; nothing read yet unless a test says otherwise.
@@ -40,6 +48,7 @@ vi.mock('aws-amplify/api', () => {
     return { data: {} };
   };
   const graphql = (options) => {
+    responses.requests.push(options.query);
     const result = Promise.resolve(answer(options));
     result.subscribe = (observer) => {
       // The assistant opening and closing the live view.
@@ -168,6 +177,7 @@ beforeEach(() => {
   responses.cost = null;
   responses.vps = [];
   responses.attachments = [];
+  responses.requests = [];
   callsContext.value = { calls: [] };
   consentState.value = { consent: null };
   // Which summary sections a viewer opened is remembered between visits.
@@ -1940,5 +1950,98 @@ describe('the language of each line', () => {
     expect(screen.getByText('Identified by Amazon Transcribe (several languages)')).toBeTruthy();
     expect(screen.getByText('Detected languages')).toBeTruthy();
     expect(screen.getByText('English (US), Spanish (US)')).toBeTruthy();
+  });
+});
+
+describe('the Participant mode', () => {
+  // A meeting with the owner's own material on it, viewed with every writer
+  // the calls context can supply: the mode, not missing data, is what keeps
+  // the owner's panels and controls off a Participant's page.
+  const OWNED = {
+    ...ITEM,
+    labels: [{ Key: 'project', Value: 'website-relaunch' }],
+    audience: 'external',
+    meetingContext: '**Goal**: agree the budget',
+    checklist: [{ ItemId: 'q1', Text: 'Who owns the budget?', Kind: 'question', Priority: 'must', Status: 'open' }],
+    guidanceEnabled: true,
+    whiteboardsEnabled: true,
+    agenda: 'Intro',
+  };
+  const WRITERS = {
+    calls: [],
+    sendUpdateSpeakerIdentities: vi.fn(),
+    sendResolveSpeakerNames: vi.fn(),
+    sendUpdateCallSummary: vi.fn(),
+    sendRegenerateCallSummary: vi.fn(),
+    sendUpdateCallAgenda: vi.fn(),
+    sendDeriveCallAgenda: vi.fn(),
+    sendUpdateMeetingPreparation: vi.fn(),
+    sendRequestMeetingDigest: vi.fn(),
+  };
+  const PARTICIPANT_MEETING = {
+    consent: { Mode: 'notify', Status: 'not_required', CaptureAllowed: true, Replies: [] },
+    participantNames: ['Pat'],
+    signRecording: vi.fn(async () => 'https://signed.example/participant'),
+  };
+  const renderMode = (participantMode) =>
+    render(
+      <MemoryRouter initialEntries={['/calls/m']}>
+        <CallPanel
+          item={OWNED}
+          callTranscriptPerCallId={TRANSCRIPT}
+          setToolsOpen={vi.fn()}
+          getCallDetailsFromCallIds={vi.fn()}
+          participantMode={participantMode}
+          participantMeeting={participantMode ? PARTICIPANT_MEETING : null}
+        />
+      </MemoryRouter>,
+    );
+  const tabLabels = () => screen.getAllByRole('tab').map((tab) => tab.textContent);
+
+  beforeEach(() => {
+    callsContext.value = WRITERS;
+  });
+
+  it("leaves the owner's page as it was", async () => {
+    renderMode(false);
+    expect(tabLabels()).toEqual(['Summary', 'Transcript', 'Whiteboards', 'Details']);
+    expect(screen.getByRole('button', { name: 'Share' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Translate' })).toBeTruthy();
+    expect(screen.getByTestId('meeting-cost-chip')).toBeTruthy();
+    expect(screen.getByTestId('meeting-context-panel')).toBeTruthy();
+    expect(screen.getAllByTestId('checklist-panel').length).toBeGreaterThan(0);
+    await waitFor(() => expect(responses.requests.some((q) => q.includes('listVirtualParticipants'))).toBe(true));
+  });
+
+  it("renders the meeting page without the owner's panels and controls, and makes no request", async () => {
+    renderMode(true);
+    expect(tabLabels()).toEqual(['Summary', 'Transcript', 'Details']);
+    expect(screen.getByText('Hello everyone.')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Auto-scroll' })).toBeTruthy();
+    ['Share', 'Download', 'More actions', 'Name speakers'].forEach((name) =>
+      expect(screen.queryByRole('button', { name })).toBeNull(),
+    );
+    expect(screen.queryByRole('checkbox', { name: 'Translate' })).toBeNull();
+    expect(screen.queryByTestId('meeting-cost-chip')).toBeNull();
+    expect(screen.queryByTestId('meeting-context-panel')).toBeNull();
+    expect(screen.queryByTestId('checklist-panel')).toBeNull();
+    expect(screen.queryByText('project=website-relaunch')).toBeNull();
+    expect(screen.queryByText('Live guidance')).toBeNull();
+    // The summary and agenda are read-only.
+    expect(screen.queryByRole('button', { name: /^Edit/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Regenerate/ })).toBeNull();
+    // The speaker is a name, not a rename control.
+    expect(screen.queryByRole('button', { name: 'Sarah Lee' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    expect(screen.getByText('Pat')).toBeTruthy();
+    expect(screen.queryByText('Meeting attributes')).toBeNull();
+    expect(screen.queryByText('Capture and processing')).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    });
+    expect(responses.requests).toEqual([]);
   });
 });
