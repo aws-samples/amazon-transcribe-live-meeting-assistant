@@ -88,11 +88,18 @@ export const participantBreadcrumbs = (pathname) => {
 /**
  * The page frame of every Participant page, as every other page has: the top
  * navigation, the side navigation, the breadcrumbs, the notifications
- * (Flashbar), the page's help panel at the right, and the content. The help
- * panel is opened from its (i) button or from an Info link on the page, which
- * calls `setToolsOpen` (given by the caller, or kept here).
+ * (Flashbar), the page's help panel at the right, and the content. A page may
+ * give its own `breadcrumbs` and help panel (`tools`); otherwise they follow
+ * the path. The help panel is opened from its (i) button or from an Info link
+ * on the page, which calls `setToolsOpen` (given by the caller, or kept here).
  */
-export const ParticipantLayout = ({ children, toolsOpen = undefined, setToolsOpen = undefined }) => {
+export const ParticipantLayout = ({
+  children,
+  breadcrumbs = undefined,
+  tools = undefined,
+  toolsOpen = undefined,
+  setToolsOpen = undefined,
+}) => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { pathname } = useLocation();
   const notifications = useNotifications();
@@ -113,9 +120,11 @@ export const ParticipantLayout = ({ children, toolsOpen = undefined, setToolsOpe
         }
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
-        breadcrumbs={<BreadcrumbGroup ariaLabel="Breadcrumbs" items={participantBreadcrumbs(pathname)} />}
+        breadcrumbs={
+          breadcrumbs || <BreadcrumbGroup ariaLabel="Breadcrumbs" items={participantBreadcrumbs(pathname)} />
+        }
         notifications={<Flashbar items={notifications} />}
-        tools={<ParticipantToolsPanel pathname={pathname} />}
+        tools={tools || <ParticipantToolsPanel pathname={pathname} />}
         toolsOpen={open}
         onToolsChange={({ detail }) => setOpen(detail.open)}
         content={children}
@@ -127,6 +136,8 @@ export const ParticipantLayout = ({ children, toolsOpen = undefined, setToolsOpe
 
 ParticipantLayout.propTypes = {
   children: PropTypes.node.isRequired,
+  breadcrumbs: PropTypes.node,
+  tools: PropTypes.node,
   toolsOpen: PropTypes.bool,
   setToolsOpen: PropTypes.func,
 };
@@ -143,7 +154,8 @@ export const ParticipantHome = () => (
       </Box>
       <Box variant="p">
         Under <Link href={`#${MY_CONSENTS_PATH}`}>My consents</Link> you can give consent before a meeting to its being
-        recorded and transcribed, from the consent link its organizer sends you, and withdraw it at any time.
+        recorded and transcribed, for one meeting from the consent link its organizer sends you, or for the meetings one
+        organizer holds or every meeting on this deployment until a date, and withdraw it at any time.
       </Box>
       <Box variant="p">
         Under <Link href={`#${VOICE_ENROLLMENT_PATH}`}>Voice enrollment</Link> you can enroll your own voice, so the

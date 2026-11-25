@@ -15,11 +15,16 @@ Participant) and each acting on the caller's own records only:
                                     and, when they are, the meeting, the text they
                                     would agree to for the scope asked for, and
                                     their consents that cover it. Someone not on
-                                    the list is told only that.
+                                    the list is told only that. With no meeting
+                                    named: the text of a standing consent (for an
+                                    organizer's meetings, or for every meeting on
+                                    the deployment, until a date).
 ``giveAdvanceConsent``              A consent for the meeting, or for the meetings
                                     its organizer holds until a date. Only for a
                                     person on the meeting's list, and only for the
-                                    text the page showed (by its hash).
+                                    text the page showed (by its hash). With no
+                                    meeting named, a standing consent, for the
+                                    text the page showed.
 ``withdrawAdvanceConsent``          Withdraws one of the caller's consents.
 ``askToBeAddedToMeeting``           For a signed-in person not on the list: shows,
                                     in LMA, the people who see the meeting's
@@ -33,6 +38,12 @@ that username, which must be verified. No argument names a person. A
 consent is stored under the caller's email address (``PK = pmc#<address>``,
 compared ignoring case), so reading or withdrawing one names only the caller's
 own partition: another person's consent id is not found there.
+
+A standing consent given with no meeting named names its organizer by the
+address the person types. It is never looked up: the answer is the same
+whether or not an account has that address, so the page tells nobody who uses
+LMA. It names no meeting and gives no access to one; it counts in a meeting
+only for an attendee matched to the person on that meeting's participant list.
 
 The rules -- scopes, periods, text, what a consent covers -- are in
 ``lma_consent.advance`` in the configuration layer. See
@@ -431,8 +442,8 @@ def proposed(
 ) -> Dict[str, Any]:
     """The consent the arguments describe, with the exact text it would be given with."""
     scope = arguments.get("Scope") or advance.SCOPE_MEETING
-    if scope not in advance.SCOPES:
-        raise BadRequest(f"Scope must be one of {', '.join(advance.SCOPES)}")
+    if scope not in advance.LINK_SCOPES:
+        raise BadRequest(f"Scope must be one of {', '.join(advance.LINK_SCOPES)}")
     days = advance.max_days(settings.get("advanceConsentMaxDays"))
     try:
         until = advance.valid_until(scope, arguments.get("ValidUntil"), now, days)
@@ -461,6 +472,56 @@ def proposed(
         "NoticeVersion": advance.text_version(template),
         "MaxDays": days,
     }
+
+
+def proposed_standing(arguments: Mapping[str, Any], settings: Mapping[str, Any], now) -> Dict:
+    """The standing consent the arguments describe, given with no meeting named.
+
+    ``organizer`` names the organizer by the address typed (``Organizer``) and
+    may be limited to one label, typed as ``LabelKey`` and ``LabelValue``;
+    ``deployment`` covers every meeting. Both run to a date (``ValidUntil``)
+    within the Meeting Consent setting's longest period, and are given with the
+    deployment's consent text (``advanceConsentText``), as from a meeting's link.
+    """
+    scope = arguments.get("Scope")
+    if scope not in advance.STANDING_SCOPES:
+        raise BadRequest(
+            "With no meeting named, Scope must be one of " + ", ".join(advance.STANDING_SCOPES)
+        )
+    days = advance.max_days(settings.get("advanceConsentMaxDays"))
+    try:
+        until = advance.valid_until(scope, arguments.get("ValidUntil"), now, days)
+        if scope == advance.SCOPE_ORGANIZER:
+            organizer = advance.organizer_address(arguments.get("Organizer"))
+            label = advance.typed_label(arguments.get("LabelKey"), arguments.get("LabelValue"))
+        else:
+            organizer, label = "", None
+    except advance.InvalidConsent as error:
+        raise BadRequest(str(error)) from error
+    template = settings.get("advanceConsentText")
+    text = advance.render_text(
+        template,
+        organizer=organizer or advance.EACH_ORGANIZER,
+        meeting_name="",
+        scope=advance.scope_phrase(scope, until=until, label=label),
+        standing=True,
+    )
+    return {
+        "Scope": scope,
+        "Organizer": organizer or None,
+        "ValidUntil": advance.iso(until),
+        "LabelKey": label[0] if label else None,
+        "LabelValue": label[1] if label else None,
+        "NoticeText": text,
+        "NoticeHash": advance.text_hash(text),
+        "NoticeVersion": advance.text_version(template),
+        "MaxDays": days,
+    }
+
+
+def names_a_meeting(arguments: Mapping[str, Any]) -> bool:
+    """Whether the arguments name a meeting (CallId or VirtualParticipantId)."""
+    return bool(arguments.get("CallId") or arguments.get("VirtualParticipantId"))
 
 
 def _covering_meeting(meeting: Mapping[str, Any]) -> Dict[str, Any]:
@@ -534,6 +595,8 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     email = account_email(caller)
     settings = consent_settings()
     enabled = bool(settings.get("advanceConsentEnabled"))
+    if not names_a_meeting(arguments) and arguments.get("Scope") in advance.STANDING_SCOPES:
+        return standing_invitation(email, arguments, settings, enabled)
     meeting = meeting_of(arguments)
     entry = listed_entry(meeting, email) if meeting else None
     if meeting is None or entry is None:
@@ -572,18 +635,68 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     }
 
 
+def standing_invitation(
+    email: str, arguments: Mapping[str, Any], settings: Mapping[str, Any], enabled: bool
+) -> Dict:
+    """The My consents page with no meeting named: the standing consent the
+    arguments describe and its exact text, and the caller's consents in force
+    for the same thing. Nothing about any meeting or any other person."""
+    now = datetime.now(timezone.utc)
+    answer: Dict[str, Any] = {
+        "Listed": False,
+        "Requested": False,
+        "Enabled": enabled,
+        "Email": email,
+        "ActiveConsents": [],
+    }
+    if not enabled:
+        return answer
+    offer = proposed_standing(arguments, settings, now)
+    answer.update(
+        {
+            key: offer[key]
+            for key in (
+                "Scope",
+                "Organizer",
+                "ValidUntil",
+                "LabelKey",
+                "LabelValue",
+                "NoticeText",
+                "NoticeHash",
+                "MaxDays",
+            )
+        }
+    )
+    answer["ActiveConsents"] = [
+        consent_out(item, now)
+        for item in my_consents(email, not_withdrawn=True)
+        if advance.status_of(item, now) == advance.STATUS_ACTIVE and advance.same_scope(item, offer)
+    ]
+    return answer
+
+
 def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     email = account_email(caller)
     settings = consent_settings()
     if not settings.get("advanceConsentEnabled"):
         raise Refused("this deployment does not take consent given in advance")
-    meeting = meeting_of(data)
-    if not meeting or listed_entry(meeting, email) is None:
-        raise Refused("you are not on this meeting's participant list")
-    if not meeting["Owner"]:
-        raise BadRequest("the meeting has no owner")
     now = datetime.now(timezone.utc)
-    offer = proposed(meeting, data, settings, now)
+    if names_a_meeting(data):
+        meeting = meeting_of(data)
+        if not meeting or listed_entry(meeting, email) is None:
+            raise Refused("you are not on this meeting's participant list")
+        if not meeting["Owner"]:
+            raise BadRequest("the meeting has no owner")
+        offer = proposed(meeting, data, settings, now)
+    else:
+        # A standing consent, given with no meeting named: it names no meeting.
+        offer = proposed_standing(data, settings, now)
+        meeting = {
+            "Owner": offer["Organizer"],
+            "Name": None,
+            "CallId": "",
+            "VirtualParticipantId": "",
+        }
     if data.get("NoticeHash") != offer["NoticeHash"]:
         # What the page showed is not what would be stored: the settings, the
         # meeting or the date changed since. Nothing is recorded.
@@ -606,8 +719,6 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         "Username": caller["username"],
         "Source": advance.SOURCE_PRE_MEETING,
         "Scope": offer["Scope"],
-        "Organizer": meeting["Owner"],
-        "MeetingName": meeting["Name"],
         "GrantedAt": advance.iso(now),
         "ValidUntil": offer["ValidUntil"],
         "NoticeText": offer["NoticeText"],
@@ -615,6 +726,10 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         "NoticeVersion": offer["NoticeVersion"],
         "ExpiresAfter": _expires_after(until),
     }
+    if meeting["Owner"]:
+        item["Organizer"] = meeting["Owner"]
+    if meeting["Name"]:
+        item["MeetingName"] = meeting["Name"]
     if offer["Scope"] == advance.SCOPE_MEETING:
         if meeting["CallId"]:
             item["CallId"] = meeting["CallId"]
@@ -629,7 +744,8 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
             "UserAgent": caller["user_agent"] or None,
         }
     # A new consent for the same thing replaces the one before it, so the
-    # person has one current consent for each meeting and each organizer. It
+    # person has one current consent for each meeting, each organizer (and
+    # label) and the whole deployment. It
     # takes over the meetings that counted the earlier one and names it, so
     # withdrawing the new one reaches them too (pass_withdrawal_on).
     replaced = [earlier for earlier in active if advance.same_scope(earlier, item)]

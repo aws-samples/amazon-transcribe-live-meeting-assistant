@@ -232,7 +232,7 @@
                     "type": "object",
                     "required": ["scope", "grantedAt", "validUntil", "noticeHash", "noticeVersion", "withdrawn"],
                     "properties": {
-                      "scope": { "enum": ["meeting", "organizer", null] },
+                      "scope": { "enum": ["meeting", "organizer", "deployment", null] },
                       "grantedAt": { "type": ["string", "null"] },
                       "validUntil": { "type": ["string", "null"] },
                       "noticeHash": { "type": ["string", "null"], "description": "The SHA-256, in hex, of the text the person agreed to." },

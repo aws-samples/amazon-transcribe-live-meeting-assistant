@@ -159,9 +159,14 @@ A Participant signs in to a home page with four pages beside it:
   chat, recordings and consent record, and the meeting assistant panel for
   questions about that meeting.
 - **My consents**: the consents they gave before meetings, a meeting's
-  consent page opened from its consent link, and withdrawal, as every role
-  has; see [Consent given in advance](meeting-consent.md#consent-given-in-advance).
-  Signing in from a consent link opens that page.
+  consent page opened from its consent link, a standing consent given without
+  a link (for an organizer they name by email address, or for every meeting on
+  the deployment, until a date), and withdrawal, as every role has; see
+  [Consent given in advance](meeting-consent.md#consent-given-in-advance).
+  Signing in from a consent link opens that page. Signing in without one opens
+  My consents, with a banner they can dismiss with **Not now**, while the
+  deployment takes consent given in advance and they have no consent on
+  record and have not dismissed it; otherwise the home page.
 - **Voice enrollment**: enrolling their own voice and deleting it again, as
   every role can; see [Voice Enrollment](voice-enrollment.md).
 

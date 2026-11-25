@@ -150,11 +150,45 @@ describe('WhiteboardsTab', () => {
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
     fireEvent.click(screen.getByText(/Assistant keeps whiteboards updated/));
     await waitFor(() => expect(state.setAssistantEnabled).toHaveBeenCalledWith(true));
-
-    const on = stateWith();
-    render(<WhiteboardsTab whiteboards={on} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
     expect(await screen.findByText('Updated 1 whiteboard.')).toBeTruthy();
+  });
+
+  it('shows the switch as stored even while the page still holds the earlier value', async () => {
+    const state = stateWith({ whiteboardsEnabled: false });
+    const { rerender } = render(<WhiteboardsTab whiteboards={state} assistantEnabled={false} meetingEnded />);
+    const toggle = () => screen.getByRole('checkbox', { name: /Assistant keeps whiteboards updated/ });
+    expect(toggle().checked).toBe(false);
+    expect(toggle().disabled).toBe(false);
+    fireEvent.click(toggle());
+    await waitFor(() => expect(state.setAssistantEnabled).toHaveBeenCalledWith(true));
+    // The page's copy of the meeting has not moved yet.
+    rerender(
+      <WhiteboardsTab whiteboards={{ ...state, whiteboardsEnabled: true }} assistantEnabled={false} meetingEnded />,
+    );
+    await waitFor(() => expect(toggle().checked).toBe(true));
+    expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy();
+    // Then another page turns it off, and this page's copy follows.
+    rerender(<WhiteboardsTab whiteboards={{ ...state, whiteboardsEnabled: true }} assistantEnabled meetingEnded />);
+    rerender(
+      <WhiteboardsTab whiteboards={{ ...state, whiteboardsEnabled: true }} assistantEnabled={false} meetingEnded />,
+    );
+    await waitFor(() => expect(toggle().checked).toBe(false));
+  });
+
+  it('keeps the switch as it was when the change is refused', async () => {
+    const state = stateWith({ setAssistantEnabled: vi.fn().mockResolvedValue('Not allowed.') });
+    render(<WhiteboardsTab whiteboards={state} assistantEnabled={false} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Assistant keeps whiteboards updated/ }));
+    expect(await screen.findByText('Not allowed.')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /Assistant keeps whiteboards updated/ }).checked).toBe(false);
+  });
+
+  it('says what the switch does once the meeting has ended', () => {
+    const { rerender } = render(<WhiteboardsTab whiteboards={stateWith()} />);
+    expect(screen.queryByText(/no longer updates its whiteboards by itself/)).toBeNull();
+    rerender(<WhiteboardsTab whiteboards={stateWith()} meetingEnded />);
+    expect(screen.getByText(/no longer updates its whiteboards by itself/)).toBeTruthy();
   });
 
   it('says an update that outlasts the request is still on its way, not that it failed', async () => {

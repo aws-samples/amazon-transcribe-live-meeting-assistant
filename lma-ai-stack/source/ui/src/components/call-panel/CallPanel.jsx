@@ -136,7 +136,7 @@ import {
 } from '../common/transcript-search';
 import useSettingsContext from '../../contexts/settings';
 
-import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
+import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { InfoLink } from '../common/info-link';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
@@ -2920,6 +2920,7 @@ export const CallPanel = ({
               whiteboards={whiteboards}
               readOnly={speakerNamesReadOnly}
               assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
+              meetingEnded={item.recordingStatusLabel === DONE_STATUS}
             />
           ),
           contentRenderStrategy: 'eager',

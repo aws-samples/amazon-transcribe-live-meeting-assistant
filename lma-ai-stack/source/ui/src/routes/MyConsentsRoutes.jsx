@@ -5,28 +5,45 @@
  */
 /**
  * My consents for an Admin or a User: their own consents given in advance,
- * and a meeting's consent page opened from its link. Its own layout, without
- * the meetings navigation, as the voice enrollment portal: what it shows and
- * does is the person's own.
+ * and a meeting's consent page opened from its link, in the app's standard
+ * layout (top navigation, side navigation, notifications, breadcrumbs and the
+ * help panel). A Participant's My consents is in ParticipantRoutes, in the
+ * same layout with the Participant's navigation.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
+import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
+import Navigation from '../components/call-analytics-layout/navigation';
 import MyConsentsPage from '../components/my-consents/MyConsentsPage';
+import Breadcrumbs from '../components/my-consents/breadcrumbs';
+import ToolsPanel from '../components/my-consents/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
 import useNotifications from '../hooks/use-notifications';
+import useAppContext from '../contexts/app';
 
 const MyConsentsRoutes = () => {
+  const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
-    <AppLayout
-      navigationHide
-      toolsHide
-      notifications={<Flashbar items={notifications} />}
-      content={<MyConsentsPage />}
-      ariaLabels={appLayoutLabels}
-    />
+    <div>
+      <CallAnalyticsTopNavigation />
+      <AppLayout
+        headerSelector="#top-navigation"
+        navigation={<Navigation />}
+        navigationOpen={navigationOpen}
+        onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+        breadcrumbs={<Breadcrumbs />}
+        notifications={<Flashbar items={notifications} />}
+        tools={<ToolsPanel />}
+        toolsOpen={toolsOpen}
+        onToolsChange={({ detail }) => setToolsOpen(detail.open)}
+        content={<MyConsentsPage />}
+        ariaLabels={appLayoutLabels}
+      />
+    </div>
   );
 };
 
