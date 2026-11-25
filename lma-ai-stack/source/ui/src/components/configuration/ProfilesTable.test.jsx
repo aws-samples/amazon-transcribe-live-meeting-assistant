@@ -12,7 +12,8 @@ import React, { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import ProfilesTable, { deleteProblem } from './ProfilesTable';
+import ProfilesTable, { deleteProblem, profileEventText } from './ProfilesTable';
+import { parseProfileEvents, parseProfiles } from './configuration-api';
 
 const PROFILES = [
   { name: 'default', managed: true, active: false, description: 'Deployment default', updatedAt: null },
@@ -93,6 +94,75 @@ describe('ProfilesTable', () => {
     expect(
       within(screen.getByRole('button', { name: 'Open default' }).closest('tr')).getByText('Managed'),
     ).toBeTruthy();
+  });
+
+  it('says who activated the active profile, and when', () => {
+    const activated = PROFILES.map((entry) =>
+      entry.active ? { ...entry, activatedBy: 'admin@example.com', activatedAt: '2026-11-02T00:00:00Z' } : entry,
+    );
+    render(<Harness profiles={activated} />);
+    const row = screen.getByRole('button', { name: 'Open custom' }).closest('tr');
+    expect(within(row).getByText(/^Activated .* by admin@example\.com$/)).toBeTruthy();
+    const other = screen.getByRole('button', { name: 'Open trial' }).closest('tr');
+    expect(within(other).queryByText(/^Activated /)).toBeNull();
+  });
+
+  it('lists the activation and deletion history, newest first', () => {
+    const events = [
+      { action: 'delete', profile: 'old', by: 'second@example.com', at: '2026-11-03T00:00:00Z', previous: null },
+      { action: 'activate', profile: 'custom', by: 'first@example.com', at: '2026-11-02T00:00:00Z', previous: 'old' },
+    ];
+    render(<Harness events={events} />);
+    fireEvent.click(screen.getByText('Activation and deletion history (2)'));
+    const items = within(screen.getByRole('list', { name: 'Activation and deletion history' })).getAllByRole(
+      'listitem',
+    );
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringMatching(/: second@example\.com deleted old$/),
+      expect.stringMatching(/: first@example\.com activated custom \(replacing old\)$/),
+    ]);
+  });
+
+  it('says so when no profile has been activated or deleted', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByText('Activation and deletion history (0)'));
+    expect(screen.getByText(/No profile has been activated or deleted/)).toBeTruthy();
+  });
+});
+
+describe('the profile log', () => {
+  it('is read from the list answer, with who activated the active profile', () => {
+    const answer = {
+      Profiles: [
+        { Name: 'custom', Active: true, ActivatedBy: 'admin@example.com', ActivatedAt: '2026-11-02T00:00:00Z' },
+      ],
+      Events: [
+        {
+          Action: 'activate',
+          Profile: 'custom',
+          By: 'admin@example.com',
+          At: '2026-11-02T00:00:00Z',
+          Previous: 'default',
+        },
+        { Action: 'delete', Profile: null },
+      ],
+    };
+    const [profile] = parseProfiles(answer);
+    expect([profile.activatedBy, profile.activatedAt]).toEqual(['admin@example.com', '2026-11-02T00:00:00Z']);
+    expect(parseProfileEvents(answer)).toEqual([
+      {
+        action: 'activate',
+        profile: 'custom',
+        by: 'admin@example.com',
+        at: '2026-11-02T00:00:00Z',
+        previous: 'default',
+      },
+    ]);
+    expect(parseProfileEvents({ Profiles: [] })).toEqual([]);
+  });
+
+  it('names an entry with no author as someone', () => {
+    expect(profileEventText({ action: 'delete', profile: 'old', by: null, at: null })).toBe('—: Someone deleted old');
   });
 });
 

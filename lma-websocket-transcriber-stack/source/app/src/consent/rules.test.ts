@@ -166,7 +166,7 @@ test('a client without a consent step is captured with a warning by default, and
     assert.equal(refused.kind === 'reject' && refused.code, 'CONSENT_REQUIRED');
 });
 
-test('unreadable settings record the step in the mode it was shown for, and capture a client without one', () => {
+test('unreadable settings record the step in the mode it was shown for', () => {
     assert.deepEqual(decideAtStart(undefined, confirmedOptIn), {
         kind: 'consent',
         mode: 'opt_in',
@@ -182,7 +182,25 @@ test('unreadable settings record the step in the mode it was shown for, and capt
         gateOpen: false,
         requireRecord: true,
     });
-    assert.equal(decideAtStart(undefined, undefined).kind, 'capture');
+    // A step shown while consent was off is captured as before.
+    const offStep = decideAtStart(undefined, parseClientConsent({ mode: 'off' }));
+    assert.equal(offStep.kind, 'capture');
+    assert.match(offStep.kind === 'capture' ? offStep.warning ?? '' : '', /could not be read/);
+});
+
+test('unreadable settings refuse a client without a consent step, as the Refuse choice does', () => {
+    const refused = decideAtStart(undefined, undefined);
+    assert.equal(refused.kind, 'reject');
+    assert.equal(refused.kind === 'reject' && refused.code, 'CONSENT_REQUIRED');
+    assert.match(refused.kind === 'reject' ? refused.message : '', /consent settings could not be read/);
+});
+
+test('readable settings still accept a client without a consent step unless Refuse is chosen', () => {
+    assert.deepEqual(decideAtStart(effectiveSettings({}), undefined), { kind: 'capture' });
+    const accepted = decideAtStart(effectiveSettings({ mode: 'notify' }), undefined);
+    assert.equal(accepted.kind, 'capture');
+    const refused = decideAtStart(effectiveSettings({ mode: 'notify', clientsWithoutConsent: CLIENTS_REJECT }), undefined);
+    assert.equal(refused.kind === 'reject' && refused.code, 'CONSENT_REQUIRED');
 });
 
 test('the notice channel and the default statement follow the method', () => {

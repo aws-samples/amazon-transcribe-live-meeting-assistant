@@ -33,6 +33,7 @@ import {
   invalidMessage,
   listProfilesQuery,
   parseConfiguration,
+  parseProfileEvents,
   parseProfiles,
   profileNameProblem,
   refusedMessage,
@@ -73,6 +74,7 @@ export const ConfigurationWorkspaceContent = () => {
   const query = new URLSearchParams(location.search);
 
   const [profiles, setProfiles] = useState([]);
+  const [profileEvents, setProfileEvents] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [profilesError, setProfilesError] = useState(null);
   // The profile open in the editor: the one the address names, else the active one.
@@ -101,6 +103,7 @@ export const ConfigurationWorkspaceContent = () => {
       const result = await client.graphql({ query: listProfilesQuery });
       const listed = parseProfiles(result.data?.listConfigurationProfiles);
       setProfiles(listed);
+      setProfileEvents(parseProfileEvents(result.data?.listConfigurationProfiles));
       setProfilesError(null);
       setSelected((current) => current.filter((name) => listed.some((entry) => entry.name === name)));
       setProfile((current) => current || (listed.find((entry) => entry.active) || { name: DEFAULT_PROFILE }).name);
@@ -376,6 +379,7 @@ export const ConfigurationWorkspaceContent = () => {
       >
         <ProfilesTable
           profiles={profiles}
+          events={profileEvents}
           loading={profilesLoading}
           busy={busy}
           openProfile={profile}

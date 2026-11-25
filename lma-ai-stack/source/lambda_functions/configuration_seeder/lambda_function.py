@@ -191,6 +191,10 @@ SUMMARY_PROFILES_DEFAULTS_FILE = "SummaryProfiles.json"
 #: layout holds as many as wanted.
 OPERATOR_PROFILE = "custom"
 
+#: Who the profile log and the active-profile pointer name for what the seeder
+#: activates or deletes: the author its revisions record.
+SEEDER_ACTOR = "cloudformation"
+
 #: The item the old per-store table holds an operator's edits in.
 LEGACY_CUSTOM_KEY = "CustomSummaryPromptTemplates"
 LEGACY_KEY_ATTRIBUTE = "LLMPromptTemplateId"
@@ -924,14 +928,14 @@ def settle_profiles(store: ConfigurationStore, adoption: Mapping[str, str]) -> s
         if not _holds_settings(current.body):
             was_active = store.active_profile_name(consistent_read=True) == OPERATOR_PROFILE
             if was_active:
-                store.activate_profile("default")
+                store.activate_profile("default", updated_by=SEEDER_ACTOR)
             try:
-                store.delete_profile(OPERATOR_PROFILE)
+                store.delete_profile(OPERATOR_PROFILE, updated_by=SEEDER_ACTOR)
             except ConcurrentModification:
                 # An Admin saved into it meanwhile: it is theirs now, so it goes
                 # back in force, and the next deployment converts it.
                 if was_active:
-                    store.activate_profile(OPERATOR_PROFILE)
+                    store.activate_profile(OPERATOR_PROFILE, updated_by=SEEDER_ACTOR)
                 raise
             return "removed-empty"
         converted = store.convert_to_full_copy(

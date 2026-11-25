@@ -22,6 +22,11 @@ key:
                        by the schema-driven editor.
 ``ConfigRevIndex#...`` A profile's revision index; see
                        :mod:`lma_config.revisions`.
+``ConfigRevIndex#__profiles``
+                       The profile log: who activated or deleted a profile,
+                       and when. Under the revision-index prefix because it is
+                       history too; no profile's index can take the key, since
+                       a profile name may not start with ``__``.
 ====================== =======================================================
 
 The ``ConfigRevIndex#`` prefix is deliberately *not* under ``Config#``: profile
@@ -47,6 +52,7 @@ ACTIVE_POINTER_NAME = "__active"
 
 DEFAULT_KEY = f"{CONFIG_PREFIX}{DEFAULT_PROFILE_NAME}"
 ACTIVE_POINTER_KEY = f"{CONFIG_PREFIX}{ACTIVE_POINTER_NAME}"
+PROFILE_LOG_KEY = f"{REVISION_INDEX_PREFIX}__profiles"
 
 # Names the store owns. Compared case-insensitively: DynamoDB keys are
 # case-sensitive, so `Config#__ACTIVE` would not literally overwrite the

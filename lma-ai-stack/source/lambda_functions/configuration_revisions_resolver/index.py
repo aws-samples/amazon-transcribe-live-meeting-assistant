@@ -42,7 +42,9 @@ the five that read and act on the history every save records (see
 
 ``Query.listConfigurationProfiles``
     Every profile and the baseline, without bodies: name, Managed or Custom,
-    description, whether it is active, who saved it last and when.
+    description, whether it is active, who saved it last and when, and who
+    activated the active one and when; and the profile log, newest first: who
+    activated or deleted which profile, and when.
 
 ``Mutation.createConfigurationProfile(input)``
     Create a Custom profile as a full copy of another profile (the baseline by
@@ -50,9 +52,11 @@ the five that read and act on the history every save records (see
 
 ``Mutation.deleteConfigurationProfile(input)``
     Delete a Custom profile that is not the active one. Its history stays.
+    The caller and the time are entered in the profile log.
 
 ``Mutation.activateConfigurationProfile(input)``
-    Make a profile, or the baseline itself, the one in force.
+    Make a profile, or the baseline itself, the one in force. The caller and
+    the time are recorded on the active-profile pointer and in the profile log.
 
 All are for the **Admin** group: on the AppSync field, and re-checked here.
 The profile defaults to ``custom``, the profile earlier releases created on
@@ -404,11 +408,26 @@ def _profile_shape(summary: Any) -> Dict[str, Any]:
         "Origin": summary.origin or None,
         "PublishedRevision": summary.published_revision,
         "FullCopy": summary.full_copy,
+        "ActivatedBy": summary.activated_by or None,
+        "ActivatedAt": summary.activated_at or None,
+    }
+
+
+def _event_shape(event: Any) -> Dict[str, Any]:
+    return {
+        "Action": event.action,
+        "Profile": event.profile,
+        "By": event.by or None,
+        "At": event.at or None,
+        "Previous": event.previous or None,
     }
 
 
 def list_profiles() -> Dict[str, Any]:
-    return {"Profiles": [_profile_shape(p) for p in CONFIG_STORE.list_profiles()]}
+    return {
+        "Profiles": [_profile_shape(p) for p in CONFIG_STORE.list_profiles()],
+        "Events": [_event_shape(e) for e in CONFIG_STORE.profile_events()],
+    }
 
 
 def create_profile(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> Dict[str, Any]:
@@ -445,16 +464,16 @@ def create_profile(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> 
     }
 
 
-def delete_profile(input_data: Mapping[str, Any]) -> Dict[str, Any]:
+def delete_profile(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> Dict[str, Any]:
     name = validate_profile_name(str(input_data.get("Name") or ""))
-    CONFIG_STORE.delete_profile(name)
+    CONFIG_STORE.delete_profile(name, updated_by=caller["actor"])
     LOGGER.info("deleted the configuration profile %s", name)
     return {"Success": True, "Profile": name}
 
 
-def activate_profile(input_data: Mapping[str, Any]) -> Dict[str, Any]:
+def activate_profile(input_data: Mapping[str, Any], caller: Mapping[str, Any]) -> Dict[str, Any]:
     name = _profile({"Profile": input_data.get("Name") or ""}, allow_baseline=True)
-    CONFIG_STORE.activate_profile(name)
+    CONFIG_STORE.activate_profile(name, updated_by=caller["actor"])
     LOGGER.info("activated the configuration profile %s", name)
     return {"Success": True, "Profile": name}
 
@@ -485,9 +504,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if field == CREATE_PROFILE_FIELD:
             return create_profile(arguments.get("input") or {}, caller)
         if field == DELETE_PROFILE_FIELD:
-            return delete_profile(arguments.get("input") or {})
+            return delete_profile(arguments.get("input") or {}, caller)
         if field == ACTIVATE_PROFILE_FIELD:
-            return activate_profile(arguments.get("input") or {})
+            return activate_profile(arguments.get("input") or {}, caller)
         return label_revision(arguments.get("input") or {})
     except ConcurrentModification as error:
         # The prefix the configuration pages match on to tell the admin to

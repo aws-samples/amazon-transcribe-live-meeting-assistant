@@ -15,13 +15,16 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from test_store import TABLE, FakeDynamo  # noqa: E402
 
 from lma_config import codec  # noqa: E402
+from lma_config import store as store_module  # noqa: E402
 from lma_config.errors import (  # noqa: E402
+    ConcurrentModification,
     InvalidConfiguration,
     ProfileExists,
     ProfileInUse,
@@ -58,6 +61,16 @@ class ProfileDynamo(FakeDynamo):
             if self.items.get(key, {}).get("Version", {}).get("N") != expected:
                 raise self._refused()
         self.items.pop(key, None)
+        return {}
+
+    def update_item(self, **request: Any) -> Dict[str, Any]:
+        # Only the profile log's trim: the newest entries, if its length is unchanged.
+        assert request["UpdateExpression"] == "SET #events = :kept", request
+        key = request["Key"][codec.KEY_ATTRIBUTE]["S"]
+        held = self.items[key]["ProfileEvents"]["L"]
+        if str(len(held)) != request["ExpressionAttributeValues"][":count"]["N"]:
+            raise self._refused()
+        self.items[key]["ProfileEvents"] = request["ExpressionAttributeValues"][":kept"]
         return {}
 
 
@@ -159,14 +172,14 @@ def test_the_list_leaves_out_the_pointer(store):
 
 def test_activating_a_profile_changes_what_readers_resolve(store):
     store.create_profile("trial", updated_by="a")
-    store.activate_profile("trial")
+    store.activate_profile("trial", updated_by="a")
     store.invalidate()
     assert store.get_section("language_models").values["summaryModelId"] == "amazon.nova-lite-v1:0"
     assert store.active_profile_name() == "trial"
 
 
 def test_the_baseline_itself_can_be_activated(store):
-    store.activate_profile("default")
+    store.activate_profile("default", updated_by="a")
     store.invalidate()
     assert store.active_profile_name() is None
     assert store.get_section("language_models").values == BASELINE["language_models"]
@@ -175,7 +188,7 @@ def test_the_baseline_itself_can_be_activated(store):
 
 def test_a_profile_that_is_not_there_cannot_be_activated(store):
     with pytest.raises(ProfileNotFound):
-        store.activate_profile("missing")
+        store.activate_profile("missing", updated_by="a")
 
 
 # ── deleting ────────────────────────────────────────────────────────────────
@@ -183,23 +196,130 @@ def test_a_profile_that_is_not_there_cannot_be_activated(store):
 
 def test_a_custom_profile_that_is_not_active_is_deleted(store):
     store.create_profile("trial", updated_by="a")
-    store.delete_profile("trial")
+    store.delete_profile("trial", updated_by="a")
     assert "Config#trial" not in store.dynamo.items
 
 
 def test_the_active_profile_is_not_deleted(store):
     with pytest.raises(ProfileInUse):
-        store.delete_profile("custom")
+        store.delete_profile("custom", updated_by="a")
 
 
 def test_a_profile_that_is_not_there_is_not_deleted(store):
     with pytest.raises(ProfileNotFound):
-        store.delete_profile("missing")
+        store.delete_profile("missing", updated_by="a")
 
 
 def test_the_baseline_is_not_deleted(store):
     with pytest.raises(ReservedProfileName):
-        store.delete_profile("default")
+        store.delete_profile("default", updated_by="a")
+
+
+# ── who activated or deleted a profile ──────────────────────────────────────
+
+
+def test_an_activation_is_recorded_on_the_pointer_and_in_the_profile_log(store):
+    store.create_profile("trial", updated_by="a")
+    store.activate_profile("trial", updated_by="admin@example.com")
+    pointer = _metadata(store, "__active")
+    assert pointer["UpdatedBy"] == "admin@example.com"
+    assert pointer["UpdatedAt"] == "2026-11-02T00:00:00Z"
+    assert [e.to_plain() for e in store.profile_events()] == [
+        {
+            "Action": "activate",
+            "Profile": "trial",
+            "By": "admin@example.com",
+            "At": "2026-11-02T00:00:00Z",
+            "Previous": "custom",
+        }
+    ]
+    listed = {p.name: p for p in store.list_profiles()}
+    assert listed["trial"].activated_by == "admin@example.com"
+    assert listed["trial"].activated_at == "2026-11-02T00:00:00Z"
+    assert listed["custom"].activated_by == ""
+
+
+def test_a_deletion_is_recorded_in_the_profile_log(store):
+    store.create_profile("trial", updated_by="a")
+    store.delete_profile("trial", updated_by="admin@example.com")
+    assert [e.to_plain() for e in store.profile_events()] == [
+        {
+            "Action": "delete",
+            "Profile": "trial",
+            "By": "admin@example.com",
+            "At": "2026-11-02T00:00:00Z",
+        }
+    ]
+
+
+def test_the_profile_log_lists_the_newest_entry_first(store):
+    store.create_profile("trial", updated_by="a")
+    store.activate_profile("trial", updated_by="first@example.com")
+    store.delete_profile("custom", updated_by="second@example.com")
+    assert [(e.action, e.profile, e.by) for e in store.profile_events()] == [
+        ("delete", "custom", "second@example.com"),
+        ("activate", "trial", "first@example.com"),
+    ]
+
+
+def test_a_refused_deletion_logs_nothing(store):
+    with pytest.raises(ProfileInUse):
+        store.delete_profile("custom", updated_by="a")
+    assert store.profile_events() == []
+
+
+def test_a_deletion_that_loses_a_race_writes_neither_the_deletion_nor_its_entry(store):
+    store.create_profile("trial", updated_by="a")
+    real_read = store.read_record
+
+    def read_then_save_meanwhile(key, **kwargs):
+        record = real_read(key, **kwargs)
+        if key == "Config#trial":
+            # Another admin's save lands between the read and the delete.
+            store.dynamo.items[key]["Version"] = codec.marshal_value(record.version + 1)
+        return record
+
+    store.read_record = read_then_save_meanwhile
+    with pytest.raises(ConcurrentModification):
+        store.delete_profile("trial", updated_by="a")
+    assert "Config#trial" in store.dynamo.items
+    assert store.profile_events() == []
+
+
+def test_the_seeders_first_pointer_names_the_deployment_and_is_not_logged(store):
+    pointer = _metadata(store, "__active")
+    assert pointer["UpdatedBy"] == "cloudformation"
+    assert store.profile_events() == []
+
+
+def test_the_profile_log_keeps_its_newest_entries(store, monkeypatch):
+    monkeypatch.setattr(store_module, "MAX_PROFILE_EVENTS", 3)
+    for who in ("one", "two", "three", "four", "five"):
+        store.activate_profile("default", updated_by=who)
+    assert [e.by for e in store.profile_events()] == ["five", "four", "three"]
+
+
+def test_a_transaction_conflict_on_the_log_asks_for_a_reload(store, monkeypatch):
+    def conflicting(**_request):
+        raise ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException", "Message": "canceled"},
+                "CancellationReasons": [{"Code": "None"}, {"Code": "TransactionConflict"}],
+            },
+            "TransactWriteItems",
+        )
+
+    store.create_profile("trial", updated_by="a")
+    monkeypatch.setattr(store.dynamo, "transact_write_items", conflicting)
+    with pytest.raises(ConcurrentModification, match="reload"):
+        store.activate_profile("trial", updated_by="a")
+    assert store.active_profile_name(consistent_read=True) == "custom"
+
+
+def test_the_profile_log_is_not_listed_as_a_profile(store):
+    store.activate_profile("default", updated_by="a")
+    assert "__profiles" not in [p.name for p in store.list_profiles()]
+    assert all(not p.name.startswith("ConfigRevIndex") for p in store.list_profiles())
 
 
 # ── Managed profiles are read-only ──────────────────────────────────────────
@@ -229,7 +349,7 @@ def test_a_managed_profile_is_refused_a_save(store):
 def test_a_managed_profile_is_not_deleted(store):
     name = _managed(store)
     with pytest.raises(ProfileReadOnly):
-        store.delete_profile(name)
+        store.delete_profile(name, updated_by="a")
 
 
 def test_a_copy_of_a_managed_profile_is_custom(store):

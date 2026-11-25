@@ -272,8 +272,9 @@ export type StartDecision =
  * them a moment ago for its consent step, so its step is recorded in the mode
  * it was shown for, and the resolver -- which reads the settings itself --
  * decides: capture waits for the record whatever the mode, and does not start
- * if it cannot be written. A client with no step is captured as before,
- * because nothing says a step is needed.
+ * if it cannot be written. A client with no step is refused, as the Refuse
+ * choice of "Streaming clients without a consent step" refuses it: without the
+ * settings nothing says a meeting may be captured without a consent record.
  */
 export const decideAtStart = (
     settings: ConsentSettings | undefined,
@@ -284,9 +285,19 @@ export const decideAtStart = (
             const decided = decideWith(consent.mode, RULE_OWNER_ATTESTS, consent);
             return decided.kind === 'consent' ? { ...decided, gateOpen: false, requireRecord: true } : decided;
         }
+        if (consent) {
+            // The client's step was shown while consent was off.
+            return {
+                kind: 'capture',
+                warning: 'the meeting consent settings could not be read; capturing without a consent record',
+            };
+        }
         return {
-            kind: 'capture',
-            warning: 'the meeting consent settings could not be read; capturing without a consent record',
+            kind: 'reject',
+            code: 'CONSENT_REQUIRED',
+            message:
+                'The meeting consent settings could not be read, and this client did not send a consent step, ' +
+                'so the meeting was not recorded or transcribed. Try again in a moment.',
         };
     }
     if (settings.mode === MODE_OFF) {

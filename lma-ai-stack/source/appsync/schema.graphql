@@ -2938,10 +2938,27 @@ type ConfigurationProfileSummary @aws_cognito_user_pools {
 	Origin: String
 	PublishedRevision: Int
 	FullCopy: Boolean
+	# For the active profile: who made it the active one, and when, from the
+	# active-profile pointer.
+	ActivatedBy: String
+	ActivatedAt: String
+}
+
+# One entry of the profile log: a profile activated or deleted.
+type ConfigurationProfileEvent @aws_cognito_user_pools {
+	# "activate" or "delete".
+	Action: String!
+	Profile: String!
+	By: String
+	At: String
+	# For an activation, the profile that was active before it.
+	Previous: String
 }
 
 type ConfigurationProfileList @aws_cognito_user_pools {
 	Profiles: [ConfigurationProfileSummary]
+	# The profile log, newest first: who activated or deleted which profile.
+	Events: [ConfigurationProfileEvent]
 }
 
 # An estimate of what one meeting cost, built from metering records written

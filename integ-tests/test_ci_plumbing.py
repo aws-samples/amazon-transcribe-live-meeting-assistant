@@ -1753,8 +1753,8 @@ def test_an_override_on_a_deployment_running_on_its_default_uses_a_temporary_pro
     )
     calls: list = []
     store.create_profile = lambda name, **_: calls.append(("create", name)) or created.add(name)
-    store.activate_profile = lambda name: calls.append(("activate", name)) or setattr(store, "active", name)
-    store.delete_profile = lambda name: calls.append(("delete", name))
+    store.activate_profile = lambda name, updated_by: calls.append(("activate", name)) or setattr(store, "active", name)
+    store.delete_profile = lambda name, updated_by: calls.append(("delete", name))
     override = _override(store)
     override.save()
     assert calls == [("create", "integ-tests"), ("activate", "integ-tests")]
@@ -1786,11 +1786,11 @@ def _profiles_store(active: str, profiles: dict) -> tuple:
         calls.append(("create", name))
         stored[name] = {"ProfileOrigin": f"copied-from-{copy_from or 'default'}"}
 
-    def activate_profile(name):
+    def activate_profile(name, updated_by):
         calls.append(("activate", name))
         store.active = name
 
-    def delete_profile(name):
+    def delete_profile(name, updated_by):
         calls.append(("delete", name))
         stored.pop(name, None)
 
