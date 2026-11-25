@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
 | **System** | Live Meeting Assistant (LMA) |
 
@@ -29,7 +29,7 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 | **AI/ML Models** | Claude 4.x, Nova, Nova Sonic, Transcribe, Translate |
 | **Third-Party APIs** | 3 (ElevenLabs, Simli, Tavily) |
 | **Meeting Platforms** | 5 via Virtual Participant (Zoom, Teams, Chime, WebEx, Google Meet); all five via the browser extension |
-| **Auth Model** | Cognito (User Pool + Identity Pool, admin group) |
+| **Auth Model** | Cognito (User Pool + Identity Pool), three roles (Admin, User, Participant) named on every operation |
 
 ## 3. Threat Model Results
 
@@ -37,30 +37,30 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 
 | Category | Count |
 |----------|-------|
-| **Total threats identified** | **54** |
+| **Total threats identified** | **65** |
 | Very High risk (score 8-9) | 6 |
 | High risk (score 6) | 15 |
-| Medium risk (score 3-4) | 26 |
-| Low risk (score 1-2) | 7 |
+| Medium risk (score 3-4) | 34 |
+| Low risk (score 1-2) | 10 |
 
 ### 3.2 STRIDE Distribution
 
 | STRIDE Category | Count | Key Concern |
 |----------------|-------|-------------|
-| **Information Disclosure** | 19 | Cross-meeting data leakage, audio/transcript exfiltration, vocalized secrets |
-| **Tampering** | 16 | Prompt injection via transcripts, KB poisoning, template manipulation |
-| **Spoofing** | 9 | Wake phrase abuse, voice synthesis impersonation, credential theft |
-| **Elevation of Privilege** | 9 | Agent tool abuse, meeting access bypass, hook privilege escalation |
+| **Information Disclosure** | 28 | Cross-meeting data leakage, audio/transcript exfiltration, vocalized secrets, sharing with listed participants |
+| **Tampering** | 18 | Prompt injection via transcripts, KB poisoning, template manipulation |
+| **Spoofing** | 13 | Wake phrase abuse, voice synthesis impersonation, credential theft, display-name consent match |
+| **Elevation of Privilege** | 12 | Agent tool abuse, meeting access bypass, hook privilege escalation, role boundaries |
 | **Denial of Service** | 8 | Resource exhaustion, platform API abuse, processing overload |
-| **Repudiation** | 5 | Recording without consent, speaker attribution manipulation |
+| **Repudiation** | 7 | Recording without consent, speaker attribution manipulation, consent records, access reviews |
 
 ### 3.3 Mitigation Status
 
 | Status | Count | Percentage |
 |--------|-------|------------|
-| **Mitigated** | 33 | 61% |
-| **Partially Mitigated** | 14 | 26% |
-| **Accepted** | 7 | 13% |
+| **Mitigated** | 42 | 64% |
+| **Partially Mitigated** | 16 | 25% |
+| **Accepted** | 7 | 11% |
 
 ## 4. Key Risk Areas
 
@@ -93,6 +93,18 @@ MCP integrations (MCP.T01) and Lambda hooks (HOOK.T01) can send meeting transcri
 The voice assistant responds audibly in meetings (VOICE.T05). If it retrieves sensitive information from the KB or MCP tools and vocalizes it, that information is disclosed to ALL meeting participants — a unique risk not present in text-only systems.
 
 **Mitigations**: Bedrock Guardrails, scope defaults to current meeting. **Gap**: Sensitivity classification for voice responses not yet implemented.
+
+### 4.6 Participant Access, Sharing and Consent Given in Advance
+
+**Threats**: AUTH.T07, AUTH.T08, UI.T06, REC.T06, REC.T07, REC.T09, VP.T07
+
+People outside the deploying organization can now hold a Participant account, be shared a meeting automatically from its participant list, and consent before a meeting. **Mitigations**: one role per token and roles named on every operation, tested against the role matrix; Participant-only operations returning allowlisted types, with the live transcript filtered on each line's sharing list and recording links signed by the server for an hour; automatic shares recorded on the meeting and removed when a person leaves the list; consent given in advance only from a verified address on the list, with the exact text kept, a longest period, and withdrawal at any time. **Documented design limit**: a Virtual Participant matches an attendee to a consent given in advance by display name; the notice is always posted, the people counted are named in the meeting, and an objection always wins.
+
+### 4.7 Retention and Access Review Controls
+
+**Threats**: REC.T02, REC.T08, AUTH.T09, UI.T07
+
+**Mitigations**: deletion of a meeting's transcript and recordings after the summary; the `MeetingDataPointInTimeRecoveryDays` stack parameter for how long deleted meeting content stays restorable; last sign-in, last activity and MCP API key last use recorded for access reviews and exported by `lma users list`; a Content-Security-Policy and cross-origin and transport headers on the web UI.
 
 ## 5. Unique Risk Factors for LMA
 
@@ -149,4 +161,4 @@ The threat model has been developed using:
 | [STRIDE Analysis](../threat-analysis/stride-analysis.md) | Full STRIDE analysis across all components |
 | [Risk Matrix](../risk-assessment/risk-matrix.md) | Complete risk register with scoring |
 | [Implementation Guide](implementation-guide.md) | Security controls implementation details |
-| [Threat ID Glossary](../threat-id-glossary.md) | All 54 threat IDs with cross-references |
+| [Threat ID Glossary](../threat-id-glossary.md) | All 65 threat IDs with cross-references |

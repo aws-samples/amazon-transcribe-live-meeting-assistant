@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
 
 ## 1. Overview
@@ -30,17 +30,20 @@ This guide details the security controls implemented in the Live Meeting Assista
 
 ### 2.2 Access Control Model
 
-**Threats mitigated**: AUTH.T03, AUTH.T04, VP.T04, ASST.T02
+**Threats mitigated**: AUTH.T03, AUTH.T04, AUTH.T07, VP.T04, ASST.T02
 
 | Level | Mechanism | Scope |
 |-------|-----------|-------|
-| **Admin group** | Cognito group membership | VP launch, LLM templates, MCP config, user management |
-| **Authenticated user** | Valid Cognito JWT | Meeting creation, transcription, assistant use |
+| **Admin** | `Admin` Cognito group, written into every token as the role | Every meeting, configuration, LLM templates, MCP server installation, user management |
+| **User** | Neither group | Their own meetings and those shared with them, meeting sources, VP launch, the assistant, MCP API keys |
+| **Participant** | `Participant` Cognito group | Read-only view of the meetings shared with them, their own consents given in advance, their own voice enrollment; no identity pool permissions |
 | **Meeting owner** | DynamoDB meeting record creator | Full meeting access, sharing, deletion |
 | **Shared user** | DynamoDB access grant | Read access to specific meetings |
 
+**Role matrix**: `lma-ai-stack/source/appsync/role-matrix.json` names the roles of every GraphQL operation and entry point; the schema and services are tested against it.
+
 **Enforcement layers**:
-1. **AppSync resolver authorization**: All 39 resolvers check JWT and group claims
+1. **AppSync resolver authorization**: Every operation names the roles that may call it, and resolvers apply their per-meeting rules on top
 2. **Lambda authorization**: Business logic verifies meeting access from DynamoDB
 3. **WebSocket authentication**: Meeting-specific connection tokens validated
 4. **MCP API Gateway**: Custom Lambda Authorizer with API key validation
@@ -55,6 +58,8 @@ This guide details the security controls implemented in the Live Meeting Assista
 | **Custom Lambda Authorizer** | Validates key hash, extracts permissions, generates IAM policy |
 | **Rate limiting** | Per-key throttling (default 100 req/sec) |
 | **Access logging** | CloudWatch access logs for all API calls |
+| **Owner check** | A key works only while its owner exists and holds a role with MCP access |
+| **Last use** | Key last use and owner last activity recorded at most every 15 minutes (AUTH.T09) |
 | **Request validation** | API Gateway request validation enabled |
 
 ## 3. Network Security
@@ -131,10 +136,15 @@ This guide details the security controls implemented in the Live Meeting Assista
 | Audio recordings | S3 lifecycle policy | Configurable |
 | CloudWatch Logs | Log group retention | Configurable |
 | KB vectors | Manual sync management | Persistent |
+| Transcript after the summary | Retention › Delete the transcript after the summary | Off (on in the Regulated and Minimised content presets) |
+| Recordings after the summary | Retention › Delete the recordings after the summary | Off (on in the Regulated and Minimised content presets) |
+| Restorable copies of deleted meeting content | `MeetingDataPointInTimeRecoveryDays` (0-35) | 35 days (REC.T08) |
+| Consents given in advance | Time to live, `MeetingRecordExpirationInDays` after the consent stops counting | Stack parameter |
+| Last sign-in and last active times | Until the user is deleted on the User Management page | — |
 
 ### 4.4 Data Isolation
 
-**Threats mitigated**: KB.T01, AUTH.T03, UI.T02
+**Threats mitigated**: KB.T01, AUTH.T03, UI.T02, UI.T06, REC.T06, REC.T09
 
 | Mechanism | Implementation |
 |-----------|---------------|
@@ -142,6 +152,9 @@ This guide details the security controls implemented in the Live Meeting Assista
 | **Meeting-scoped access** | DynamoDB access records per meeting |
 | **User-scoped subscriptions** | AppSync subscription filters by user |
 | **UUID meeting IDs** | Non-predictable meeting identifiers |
+| **Participant view** | Participant-only operations returning allowlisted types; live transcript filtered on each line's sharing list |
+| **Automatic sharing record** | `AutoSharedWith` on the meeting; a share made for a listed person is removed when they leave the list |
+| **Participant recording links** | Signed by the server for one hour, for a shared meeting, under the playback prefixes only |
 
 ## 5. AI/ML Security
 
@@ -210,18 +223,23 @@ This guide details the security controls implemented in the Live Meeting Assista
 
 ### 6.3 Consent Management
 
-**Threats mitigated**: REC.T03, VP.T04
+**Threats mitigated**: REC.T03, REC.T07, VP.T04, VP.T07, VP.T08
 
 | Control | Implementation |
 |---------|---------------|
+| **Meeting Consent** | Off, Notify or Opt-in per deployment and per meeting, with a consent record, objections and evidence screenshots |
+| **Consent given in advance** | From a verified address on the participant list; exact text and hash kept; longest period; withdrawal on My consents |
+| **Display-name match limits** | Unique match only; notice always posted; covered names posted; objection always wins |
+| **Chat sent to everyone** | The VP reads commands and consent replies only from messages sent to everyone |
+| **Video ceiling** | `EnableVideoRecording`, the VP video setting and the launch toggle; the first that says no wins |
 | **VP display name** | Clear bot identification in meetings |
 | **Recording configuration** | Admin-configurable recording behavior |
 | **Documentation** | Consent requirements documented in deployment guide |
 | **Audit trail** | VP launch and recording start events logged |
 
 **Recommended enhancements**:
-- Mandatory consent notification before recording
-- Configurable consent acknowledgment workflow
+- Choose a Meeting Consent preset that matches the deployment's legal advice
+- Turn **Allow consent given in advance** off where a display-name match is not acceptable
 - Meeting host approval for VP join
 - Audio announcement of recording status
 
@@ -249,7 +267,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 | **Encrypted parameters** | Meeting URLs/credentials encrypted in task config |
 | **KMS log encryption** | CloudWatch Logs encrypted with customer key |
 | **No persistent storage** | Credentials exist only in task memory |
-| **Admin-only launch** | Only admin group can start VP sessions |
+| **Role-limited launch** | Only the Admin and User roles can start VP sessions; a User only their own |
 
 ## 8. Extensibility Security
 
@@ -323,6 +341,8 @@ This guide details the security controls implemented in the Live Meeting Assista
 | **ALB Access Logs** | WebSocket connections, source IPs |
 | **API Gateway Logs** | MCP API requests, authorizer decisions |
 | **X-Ray Tracing** | End-to-end request flow |
+| **UserSignInTable** | Last sign-in and last active time per user, for access reviews |
+| **Consent records** | Meeting consent record and consents given in advance, with replaced and withdrawn consents kept |
 
 ## 11. Implementation Checklist
 
@@ -339,6 +359,9 @@ This guide details the security controls implemented in the Live Meeting Assista
 ### Post-Deployment
 
 - [ ] Verify all 39 AppSync resolvers enforce authorization
+- [ ] Check the web UI's response headers (`integ-tests/test_response_headers.py`)
+- [ ] Choose `MeetingDataPointInTimeRecoveryDays` and the Retention deletion settings for the deployment's retention policy
+- [ ] Decide **Meeting Sharing › Share meetings with their listed participants** and **Allow consent given in advance**
 - [ ] Test meeting-level access control (owner, shared, unauthorized)
 - [ ] Verify WebSocket authentication token validation
 - [ ] Configure CloudWatch alarm notifications
@@ -360,3 +383,4 @@ This guide details the security controls implemented in the Live Meeting Assista
 - [ ] Monitor agent tool invocation patterns
 - [ ] Verify data retention compliance (TTL, lifecycle)
 - [ ] Periodic IAM role permission review
+- [ ] Periodic user access review with `lma users list` (last sign-in, last active, role); revoke unused MCP API keys

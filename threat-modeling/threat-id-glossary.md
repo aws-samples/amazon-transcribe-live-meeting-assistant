@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
-| **Total Threat IDs** | 54 |
+| **Total Threat IDs** | 65 |
 
 ## 1. Threat ID Naming Convention
 
@@ -21,9 +21,9 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | **VOICE** | Voice Assistant | Nova Sonic, ElevenLabs, Simli, wake phrase, vocalization | [voice-assistant.md](feature-threats/voice-assistant.md) |
 | **MCP** | MCP Integration | API Gateway, external tools, data exfiltration | [mcp-integration.md](feature-threats/mcp-integration.md) |
 | **KB** | Knowledge Base | Bedrock KB, RAG, cross-meeting search, S3 Vectors | [knowledge-base.md](feature-threats/knowledge-base.md) |
-| **AUTH** | Authentication | Cognito, JWT, RBAC, meeting access control, WAF | [authentication-access.md](feature-threats/authentication-access.md) |
-| **UI** | Web UI | React, CloudFront, AppSync, iframe, subscriptions | [web-ui.md](feature-threats/web-ui.md) |
-| **REC** | Recording/Storage | S3 audio, DynamoDB, retention, consent, sharing | [recording-storage.md](feature-threats/recording-storage.md) |
+| **AUTH** | Authentication | Cognito, JWT, roles (Admin, User, Participant), meeting access control, Participant accounts, access reviews, WAF | [authentication-access.md](feature-threats/authentication-access.md) |
+| **UI** | Web UI | React, CloudFront, AppSync, iframe, subscriptions, Participant pages, response headers | [web-ui.md](feature-threats/web-ui.md) |
+| **REC** | Recording/Storage | S3 audio, DynamoDB, retention, deletion after the summary, recovery window, consent, consent given in advance, sharing | [recording-storage.md](feature-threats/recording-storage.md) |
 | **HOOK** | Lambda Hooks | Customer extensibility, data exfiltration, tampering | [lambda-hooks.md](feature-threats/lambda-hooks.md) |
 
 ## 2. Complete Threat ID Reference
@@ -49,7 +49,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | ASST.T04 | Model hallucination in meeting summaries | Tampering | 4 (Medium) |
 | ASST.T05 | Automatic processing resource exhaustion | DoS | 4 (Medium) |
 
-### VP — Virtual Participant (6 threats)
+### VP — Virtual Participant (8 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -59,6 +59,8 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | VP.T04 | Unauthorized meeting recording via VP | ID, Repudiation | 9 (Very High) |
 | VP.T05 | Voice assistant impersonation | Spoofing, Tampering | 3 (Medium) |
 | VP.T06 | Container resource exhaustion | DoS | 2 (Low) |
+| VP.T07 | Consent given in advance matched by display name | Spoofing | 3 (Medium) |
+| VP.T08 | Instructions sent to the VP as private chat messages | Tampering, Repudiation | 2 (Low) |
 
 ### VOICE — Voice Assistant (5 threats)
 
@@ -91,7 +93,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | KB.T04 | S3 Vectors data exposure | ID | 3 (Medium) |
 | KB.T05 | Knowledge Base denial of service | DoS | 1 (Low) |
 
-### AUTH — Authentication & Access Control (6 threats)
+### AUTH — Authentication & Access Control (9 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -101,8 +103,11 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | AUTH.T04 | Admin group privilege escalation | EoP | 4 (Medium) |
 | AUTH.T05 | WebSocket authentication weakness | Spoofing | 3 (Medium) |
 | AUTH.T06 | WAF bypass / IP restriction evasion | Spoofing | 2 (Low) |
+| AUTH.T07 | Participant role privilege boundary | EoP | 3 (Medium) |
+| AUTH.T08 | Participant account creation and account lookup from a participant list | EoP, ID | 2 (Low) |
+| AUTH.T09 | Dormant accounts and unused API keys undetected in access reviews | Repudiation | 4 (Medium) |
 
-### UI — Web UI (5 threats)
+### UI — Web UI (7 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -111,8 +116,10 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | UI.T03 | Iframe embedding security | ID, Tampering | 4 (Medium) |
 | UI.T04 | GraphQL API abuse / introspection | ID, DoS | 4 (Medium) |
 | UI.T05 | CloudFront configuration exposure | ID | 2 (Low) |
+| UI.T06 | Participant read-only view and live transcript subscription | ID | 3 (Medium) |
+| UI.T07 | Browser-side script loading, framing and transport downgrade | Tampering, ID | 3 (Medium) |
 
-### REC — Recording & Storage (5 threats)
+### REC — Recording & Storage (9 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -121,6 +128,10 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | REC.T03 | Recording without consent | ID, Repudiation | 9 (Very High) |
 | REC.T04 | Meeting sharing over-permission | ID | 4 (Medium) |
 | REC.T05 | DynamoDB data exposure via IAM | ID | 3 (Medium) |
+| REC.T06 | Automatic sharing with a meeting's listed participants | ID | 4 (Medium) |
+| REC.T07 | Consent given in advance recorded for the wrong person or beyond its terms | Spoofing, Repudiation | 3 (Medium) |
+| REC.T08 | Deleted meeting content restorable from point-in-time recovery | ID | 3 (Medium) |
+| REC.T09 | Recording links issued to Participants | ID | 2 (Low) |
 
 ### HOOK — Lambda Hooks (5 threats)
 

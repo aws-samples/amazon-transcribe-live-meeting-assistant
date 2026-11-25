@@ -4,12 +4,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **System** | Live Meeting Assistant (LMA) |
 | **Architecture** | Real-time audio transcription + AI meeting assistance |
 | **Methodology** | STRIDE |
-| **Total Threats** | 54 |
+| **Total Threats** | 65 |
 | **Classification** | Internal |
 
 ## Overview
@@ -20,21 +20,21 @@ This directory contains the comprehensive threat model for the Live Meeting Assi
 
 | Metric | Value |
 |--------|-------|
-| Threats identified | **54** |
+| Threats identified | **65** |
 | Very High risk (8-9) | 6 |
 | High risk (6) | 15 |
-| Medium risk (3-4) | 26 |
-| Low risk (1-2) | 7 |
-| Mitigated | 33 (61%) |
-| Partially mitigated | 14 (26%) |
-| Accepted | 7 (13%) |
+| Medium risk (3-4) | 34 |
+| Low risk (1-2) | 10 |
+| Mitigated | 42 (64%) |
+| Partially mitigated | 16 (25%) |
+| Accepted | 7 (11%) |
 
 ## Directory Structure
 
 ```
 threat-modeling/
 ├── README.md                                    ← You are here
-├── threat-id-glossary.md                        ← All 54 threat IDs with cross-references
+├── threat-id-glossary.md                        ← All 65 threat IDs with cross-references
 │
 ├── architecture/                                ← System architecture & data flows
 │   ├── system-overview.md                       ← Architecture, components, trust boundaries
@@ -47,9 +47,9 @@ threat-modeling/
 │   ├── voice-assistant.md                       ← Nova Sonic, ElevenLabs, Simli, avatar (VOICE)
 │   ├── mcp-integration.md                       ← MCP server, API Gateway, external tools (MCP)
 │   ├── knowledge-base.md                        ← Bedrock KB, RAG, semantic search (KB)
-│   ├── authentication-access.md                 ← Cognito, JWT, RBAC, meeting access (AUTH)
-│   ├── web-ui.md                                ← React UI, CloudFront, AppSync, iframe (UI)
-│   ├── recording-storage.md                     ← S3 audio, data retention, consent (REC)
+│   ├── authentication-access.md                 ← Cognito, JWT, roles, Participant accounts, access reviews (AUTH)
+│   ├── web-ui.md                                ← React UI, CloudFront, AppSync, iframe, Participant pages, headers (UI)
+│   ├── recording-storage.md                     ← S3 audio, data retention, consent, sharing (REC)
 │   └── lambda-hooks.md                          ← Customer extensibility threats (HOOK)
 │
 ├── threat-analysis/                             ← Cross-cutting analysis
@@ -76,19 +76,19 @@ threat-modeling/
 ### Feature-Specific Threats
 - **[Audio Streaming](feature-threats/transcription-audio.md)** — WebSocket hijacking, stream interception, Kinesis injection
 - **[Meeting Assistant](feature-threats/meeting-assistant.md)** — Prompt injection via transcripts, template tampering, tool abuse
-- **[Virtual Participant](feature-threats/virtual-participant.md)** — Credential exposure, Chrome escape, unauthorized recording
+- **[Virtual Participant](feature-threats/virtual-participant.md)** — Credential exposure, Chrome escape, unauthorized recording, display-name consent match, private chat
 - **[Voice Assistant](feature-threats/voice-assistant.md)** — Wake phrase spoofing, deepfake, vocalized secrets
 - **[MCP Integration](feature-threats/mcp-integration.md)** — Data exfiltration, API key compromise, response injection
 - **[Knowledge Base](feature-threats/knowledge-base.md)** — Cross-meeting leakage, KB poisoning, RAG injection
-- **[Authentication](feature-threats/authentication-access.md)** — Self-registration abuse, JWT theft, access bypass
-- **[Web UI](feature-threats/web-ui.md)** — XSS, subscription eavesdropping, iframe security
-- **[Recording & Storage](feature-threats/recording-storage.md)** — Unauthorized access, consent, retention compliance
+- **[Authentication](feature-threats/authentication-access.md)** — Self-registration abuse, JWT theft, access bypass, Participant role, access reviews
+- **[Web UI](feature-threats/web-ui.md)** — XSS, subscription eavesdropping, iframe security, Participant view, response headers
+- **[Recording & Storage](feature-threats/recording-storage.md)** — Unauthorized access, consent, consent given in advance, automatic sharing, retention compliance, recovery window
 - **[Lambda Hooks](feature-threats/lambda-hooks.md)** — Hook exfiltration, tampering, IAM escalation
 
 ### Cross-Cutting Analysis
 - **[STRIDE Analysis](threat-analysis/stride-analysis.md)** — Full STRIDE across all components
 - **[Risk Matrix](risk-assessment/risk-matrix.md)** — Complete risk register with scoring and recommendations
-- **[Threat ID Glossary](threat-id-glossary.md)** — All 54 threat IDs with quick reference
+- **[Threat ID Glossary](threat-id-glossary.md)** — All 65 threat IDs with quick reference
 
 ### Implementation
 - **[Implementation Guide](deliverables/implementation-guide.md)** — Security controls, configuration, and checklists
@@ -99,13 +99,13 @@ threat-modeling/
 |--------|----------|-------|-------------|----------|
 | AUDIO | Audio Streaming | 6 | High (6) | [transcription-audio.md](feature-threats/transcription-audio.md) |
 | ASST | Meeting Assistant | 5 | Very High (9) | [meeting-assistant.md](feature-threats/meeting-assistant.md) |
-| VP | Virtual Participant | 6 | Very High (9) | [virtual-participant.md](feature-threats/virtual-participant.md) |
+| VP | Virtual Participant | 8 | Very High (9) | [virtual-participant.md](feature-threats/virtual-participant.md) |
 | VOICE | Voice Assistant | 5 | High (6) | [voice-assistant.md](feature-threats/voice-assistant.md) |
 | MCP | MCP Integration | 6 | Critical (8) | [mcp-integration.md](feature-threats/mcp-integration.md) |
 | KB | Knowledge Base | 5 | Very High (9) | [knowledge-base.md](feature-threats/knowledge-base.md) |
-| AUTH | Authentication | 6 | High (6) | [authentication-access.md](feature-threats/authentication-access.md) |
-| UI | Web UI | 5 | High (6) | [web-ui.md](feature-threats/web-ui.md) |
-| REC | Recording/Storage | 5 | Very High (9) | [recording-storage.md](feature-threats/recording-storage.md) |
+| AUTH | Authentication | 9 | High (6) | [authentication-access.md](feature-threats/authentication-access.md) |
+| UI | Web UI | 7 | High (6) | [web-ui.md](feature-threats/web-ui.md) |
+| REC | Recording/Storage | 9 | Very High (9) | [recording-storage.md](feature-threats/recording-storage.md) |
 | HOOK | Lambda Hooks | 5 | Critical (8) | [lambda-hooks.md](feature-threats/lambda-hooks.md) |
 
 ## Top 5 Priority Threats
@@ -136,3 +136,4 @@ LMA has several risk characteristics not common in typical SaaS applications:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2025-05-18 | Initial threat model: 10 feature areas, 54 threats, STRIDE analysis, risk matrix |
+| 1.1 | 2026-11-25 | 11 threats added for the Participant role and role matrix, participant lists and Participant accounts, automatic sharing and the Participant read-only view, consent given in advance, access review records, deletion of recordings after the summary, the point-in-time recovery window, the web UI's response headers, and Virtual Participant chat addressing (AUTH.T07-T09, UI.T06-T07, REC.T06-T09, VP.T07-T08); STRIDE category counts recomputed from the glossary; mitigations updated for AUTH.T02, AUTH.T03, MCP.T02, REC.T02-T04, UI.T02, UI.T03, UI.T05 and VP.T04 |
