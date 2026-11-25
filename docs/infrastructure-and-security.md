@@ -428,7 +428,7 @@ The Content-Security-Policy allows:
 | `img-src`, `media-src` | `'self'`, `blob:` (and `data:` for pictures), and the deployment's regional S3 endpoint in both URL forms, `https://*.s3.<region>.<suffix>` and `https://s3.<region>.<suffix>`, for presigned links to recordings, video and pictures |
 | `font-src` | `'self' data:` |
 | `worker-src` | `'self' blob:` |
-| `connect-src` | `'self'`; the stack's AppSync GraphQL host (`https://`) and real-time host (`wss://`); `cognito-idp`, `cognito-identity`, `ssm`, `states` and `translate` in the stack's Region; the regional S3 endpoint as above; `https://registry.modelcontextprotocol.io` for the MCP Servers page; `wss://*.cloudfront.net` for the WebSocket transcriber, which has its own CloudFront distribution; and `wss://*.lambda-microvm.<region>.on.aws` for the Virtual Participant's live view when `VPLaunchType=MICROVM` |
+| `connect-src` | `'self'`; the stack's AppSync GraphQL host (`https://`) and real-time host (`wss://`); `cognito-idp`, `cognito-identity`, `ssm`, `sync-states` (Step Functions' `StartSyncExecution`, which Virtual Participant launches use) and `translate` in the stack's Region; the regional S3 endpoint as above; `https://registry.modelcontextprotocol.io` for the MCP Servers page; `wss://*.cloudfront.net` for the WebSocket transcriber, which has its own CloudFront distribution; and `wss://*.lambda-microvm.<region>.on.aws` for the Virtual Participant's live view when `VPLaunchType=MICROVM` |
 | `object-src`, `base-uri` | `'none'` |
 
 `frame-ancestors 'self'` lets only the web UI's own origin frame its pages.

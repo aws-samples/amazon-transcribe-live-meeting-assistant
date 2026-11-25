@@ -44,7 +44,7 @@ EXPECTED_CSP = {
             "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}",
             "https://cognito-identity.${AWS::Region}.${AWS::URLSuffix}",
             "https://ssm.${AWS::Region}.${AWS::URLSuffix}",
-            "https://states.${AWS::Region}.${AWS::URLSuffix}",
+            "https://sync-states.${AWS::Region}.${AWS::URLSuffix}",
             "https://translate.${AWS::Region}.${AWS::URLSuffix}",
             S3,
             "https://registry.modelcontextprotocol.io",
@@ -61,7 +61,9 @@ EXPECTED_CSP = {
 # The AWS SDK clients the UI constructs, and the service host each one calls.
 SDK_CLIENT_HOSTS = {
     "SSMClient": "https://ssm.${AWS::Region}.${AWS::URLSuffix}",
-    "SFNClient": "https://states.${AWS::Region}.${AWS::URLSuffix}",
+    # StartSyncExecution, the only Step Functions operation the UI sends, has the
+    # endpoint host prefix "sync-" (test_the_ui_sends_step_functions_only_sync_executions).
+    "SFNClient": "https://sync-states.${AWS::Region}.${AWS::URLSuffix}",
     "TranslateClient": "https://translate.${AWS::Region}.${AWS::URLSuffix}",
 }
 
@@ -157,6 +159,20 @@ def test_connect_src_names_every_sdk_client_the_ui_constructs(csp) -> None:
     )
     for client, host in SDK_CLIENT_HOSTS.items():
         assert host in sources, f"{client} calls {host}, which connect-src does not allow"
+
+
+def test_the_ui_sends_step_functions_only_sync_executions() -> None:
+    # The SDK sends StartSyncExecution to sync-states.<region>, the host the
+    # policy names. Any other Step Functions command goes to states.<region>,
+    # which would need adding to connect-src.
+    commands = set()
+    for path in (UI / "src").rglob("*.js*"):
+        if ".test." in path.name:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "@aws-sdk/client-sfn" in text:
+            commands.update(re.findall(r"new\s+([A-Z][A-Za-z0-9]*Command)\s*\(", text))
+    assert commands == {"StartSyncExecutionCommand"}
 
 
 def test_content_security_policy_fits_cloudfront_limit(csp_template) -> None:

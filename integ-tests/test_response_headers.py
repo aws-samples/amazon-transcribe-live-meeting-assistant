@@ -128,7 +128,7 @@ def test_connect_src_admits_appsync(csp, ui_env) -> None:
     assert _allows(csp["connect-src"], realtime), f"connect-src does not admit {realtime}"
 
 
-@pytest.mark.parametrize("service", ["cognito-idp", "cognito-identity", "ssm", "states", "translate"])
+@pytest.mark.parametrize("service", ["cognito-idp", "cognito-identity", "ssm", "sync-states", "translate"])
 def test_connect_src_admits_the_regional_services_the_ui_calls(csp, ui_env, service) -> None:
     url = f"https://{service}.{ui_env['VITE_AWS_REGION']}.amazonaws.com/"
     assert _allows(csp["connect-src"], url), f"connect-src does not admit {url}"

@@ -9196,7 +9196,7 @@ Resources:
   # A change to the API's methods or gateway responses reaches the stage only
   # in a new deployment, and CloudFormation creates one only for a new logical
   # id. Rename this resource whenever those change.
-  MCPApiKeyDeploymentWithResponseHeaders:
+  MCPApiKeyDeploymentV2:
     Type: AWS::ApiGateway::Deployment
     Condition: ShouldEnableMCPServer
     DependsOn:
@@ -9217,7 +9217,7 @@ Resources:
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
-      DeploymentId: !Ref MCPApiKeyDeploymentWithResponseHeaders
+      DeploymentId: !Ref MCPApiKeyDeploymentV2
       StageName: mcp
       # NOTE: AccessLogSetting and MethodSettings.LoggingLevel are intentionally
       # omitted — see the CKV2_AWS_4 skip comment above for the full rationale.
@@ -13289,10 +13289,14 @@ Resources:
             #       AppSync: its own GraphQL and real-time hosts.
             #       cognito-idp / cognito-identity: Amplify sign-in and the
             #         identity pool's credentials.
-            #       ssm (settings), states (Virtual Participant launches) and
-            #         translate (transcript translation): the SDK clients the
-            #         UI constructs. test_web_ui_response_headers.py fails when
-            #         the UI constructs a client this list does not name.
+            #       ssm (settings), sync-states (Virtual Participant launches)
+            #         and translate (transcript translation): the SDK clients
+            #         the UI constructs. The UI sends Step Functions only
+            #         StartSyncExecution, whose endpoint carries the "sync-"
+            #         host prefix; another Step Functions operation would call
+            #         states.<region>. test_web_ui_response_headers.py fails
+            #         when the UI constructs a client, or sends a Step
+            #         Functions command, this list does not name.
             #       S3 (both URL forms above): uploads, keyframe fetches and
             #         downloads through presigned URLs.
             #       registry.modelcontextprotocol.io: the MCP Servers page
@@ -13305,7 +13309,7 @@ Resources:
             #         noVNC endpoint used when VPLaunchType=MICROVM.
             #   - object-src 'none', base-uri 'none', form-action 'self'.
             #   - frame-ancestors 'self': only this origin may frame the app.
-            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; media-src 'self' blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self'; connect-src 'self' https://${AppSyncApiEncrypted.GraphQLDns} wss://${AppSyncApiEncrypted.RealtimeDns} https://cognito-idp.${AWS::Region}.${AWS::URLSuffix} https://cognito-identity.${AWS::Region}.${AWS::URLSuffix} https://ssm.${AWS::Region}.${AWS::URLSuffix} https://states.${AWS::Region}.${AWS::URLSuffix} https://translate.${AWS::Region}.${AWS::URLSuffix} https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix} https://registry.modelcontextprotocol.io wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; media-src 'self' blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self'; connect-src 'self' https://${AppSyncApiEncrypted.GraphQLDns} wss://${AppSyncApiEncrypted.RealtimeDns} https://cognito-idp.${AWS::Region}.${AWS::URLSuffix} https://cognito-identity.${AWS::Region}.${AWS::URLSuffix} https://ssm.${AWS::Region}.${AWS::URLSuffix} https://sync-states.${AWS::Region}.${AWS::URLSuffix} https://translate.${AWS::Region}.${AWS::URLSuffix} https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix} https://registry.modelcontextprotocol.io wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
