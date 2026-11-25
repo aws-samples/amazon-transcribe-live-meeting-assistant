@@ -155,10 +155,12 @@ class FakeTable:
         if "participantListRequests" in UpdateExpression:
             if not current:
                 raise _failed()
-            requests = current.setdefault("participantListRequests", [])
-            if len(requests) >= values[":max"]:
+            if "attribute_not_exists(participantListRequests)" in ConditionExpression:
+                if "participantListRequests" in current:
+                    raise _failed()
+            elif current.get("participantListRequests") != values[":old"]:
                 raise _failed()
-            requests.extend(values[":r"])
+            current["participantListRequests"] = copy.deepcopy(values[":r"])
             return {}
         raise AssertionError(f"unexpected update {UpdateExpression}")
 
@@ -522,6 +524,43 @@ def test_asking_for_a_scheduled_vp_is_kept_on_its_row_for_the_owner(aws):
     [request] = aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"]
     assert request["email"] == BO and request["name"] == "Bo" and request["requestedAt"]
     assert aws["published"] == []
+
+
+def test_a_full_vp_row_drops_answered_and_oldest_requests_rather_than_refusing(aws, monkeypatch):
+    monkeypatch.setattr(index, "MAX_REQUESTS_PER_VP", 3)
+    aws["dynamo"].vps.items[(VP_ID, None)] = {
+        "id": VP_ID,
+        "Owner": OWNER,
+        "participants": [
+            {"name": "Ana", "email": ANA},
+            {"name": "Old", "email": "old@example.com"},
+        ],
+        "participantListRequests": [
+            {"name": "Old", "email": "old@example.com", "requestedAt": "2026-11-01T00:00:00Z"},
+            {"name": "P1", "email": "p1@example.com", "requestedAt": "2026-11-02T00:00:00Z"},
+            {"name": "P2", "email": "p2@example.com", "requestedAt": "2026-11-03T00:00:00Z"},
+        ],
+    }
+    for person in ("p3@example.com", BO):
+        aws["cognito"].add(person)
+        call("askToBeAddedToMeeting", person, {"input": {"VirtualParticipantId": VP_ID}})
+    kept = [r["email"] for r in aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"]]
+    # Old was added to the list since; P1 is the oldest still waiting.
+    assert kept == ["p2@example.com", "p3@example.com", BO]
+
+
+def test_a_request_that_reached_nobody_can_be_made_again(aws, monkeypatch):
+    import lma_notifications  # pylint: disable=import-outside-toplevel
+
+    def failing(*_args, **_kwargs):
+        raise lma_notifications.NotificationRateLimited("too many")
+
+    monkeypatch.setattr(lma_notifications, "publish_meeting_notification", failing)
+    with pytest.raises(index.BadRequest, match="try again"):
+        call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})
+    assert invitation(BO)["Requested"] is False
+    monkeypatch.setattr(lma_notifications, "publish_meeting_notification", lambda *a, **k: {})
+    assert call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})["Requested"] is True
 
 
 def test_asking_is_limited_per_day(aws, monkeypatch):

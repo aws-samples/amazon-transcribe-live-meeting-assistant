@@ -123,8 +123,8 @@ export const MeetingConsentInvitation = ({ meetingRef, onGiven }) => {
           {loadError && <Alert type="error">{loadError}</Alert>}
           {requested ? (
             <Alert type="success">
-              You asked to be added. The organizer is told in LMA; once they add you to the list, open this link again
-              to give your consent.
+              You asked to be added. The organizer sees your request in LMA; once you are added to the list, open this
+              link again to give your consent.
             </Alert>
           ) : (
             invitation.Enabled && (

@@ -59,13 +59,6 @@ const ParticipantPage = () => {
 };
 
 /**
- * The routes of a signed-in Participant: their home page, the meetings shared
- * with them (read-only, through the Participant view operations only) and
- * their own voice enrollment. Nothing here reads the deployment settings, the
- * member meeting operations or any configuration; every other path says
- * Access denied.
- */
-/**
  * Where signing in leads: the page the sign-in link named (a meeting's consent
  * link, say) when the Participant role may open it, otherwise the home page.
  * Only a path within the app is followed.
@@ -76,6 +69,13 @@ export const afterSignIn = (redirectParam) => {
   return pathname !== LOGIN_PATH && roleMayOpen(PARTICIPANT, pathname) ? redirectParam : HOME_PATH;
 };
 
+/**
+ * The routes of a signed-in Participant: their home page, the meetings shared
+ * with them (read-only, through the Participant view operations only), their
+ * own consents given in advance (My consents) and their own voice enrollment.
+ * Nothing here reads the deployment settings, the member meeting operations or
+ * any configuration; every other path says Access denied.
+ */
 const ParticipantRoutes = ({ redirectParam = '' }) => (
   <Routes>
     <Route path="/" element={<Navigate to={HOME_PATH} replace />} />

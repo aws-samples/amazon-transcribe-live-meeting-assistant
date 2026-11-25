@@ -663,31 +663,59 @@ def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
             LOGGER.exception("could not notify the meeting's owner")
             return False
         return True
-    try:
-        DYNAMODB.Table(VIRTUAL_PARTICIPANT_TABLE).update_item(
-            Key={"id": meeting["VirtualParticipantId"]},
-            UpdateExpression="SET participantListRequests = list_append("
-            "if_not_exists(participantListRequests, :empty), :r)",
-            ConditionExpression="attribute_exists(id) AND (attribute_not_exists("
-            "participantListRequests) OR size(participantListRequests) < :max)",
-            ExpressionAttributeValues={
-                ":empty": [],
-                ":r": [
-                    {
-                        "name": name or None,
-                        "email": email,
-                        "requestedAt": advance.iso(datetime.now(timezone.utc)),
-                    }
-                ],
-                ":max": MAX_REQUESTS_PER_VP,
-            },
-        )
-    except ClientError as error:
-        if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-            LOGGER.info("the Virtual Participant holds as many requests as it keeps")
+    return _keep_request_on_vp(meeting, email, name)
+
+
+def _keep_request_on_vp(meeting: Mapping[str, Any], email: str, name: str) -> bool:
+    """Add the request to the Virtual Participant's row, which its page shows its owner.
+
+    The row keeps the newest MAX_REQUESTS_PER_VP requests from people still not
+    on its list: a request from someone added since, or an earlier one from the
+    same address, is dropped as this one is added, so a full row never refuses
+    a new request. Written on condition that the requests are as read, and read
+    again on a conflict.
+    """
+    table = DYNAMODB.Table(VIRTUAL_PARTICIPANT_TABLE)
+    for _attempt in range(3):
+        vp = _vp_row(meeting["VirtualParticipantId"])
+        if not vp:
             return False
-        raise
-    return True
+        current = vp.get("participantListRequests")
+        listed = {p["email"].casefold() for p in _participants(vp.get("participants"))}
+        kept = [
+            r
+            for r in current or []
+            if isinstance(r, Mapping)
+            and isinstance(r.get("email"), str)
+            and r["email"].casefold() not in listed
+            and r["email"].casefold() != email
+        ]
+        kept.append(
+            {
+                "name": name or None,
+                "email": email,
+                "requestedAt": advance.iso(datetime.now(timezone.utc)),
+            }
+        )
+        values: Dict[str, Any] = {":r": kept[-MAX_REQUESTS_PER_VP:]}
+        if current is None:
+            condition = "attribute_exists(id) AND attribute_not_exists(participantListRequests)"
+        else:
+            condition = "attribute_exists(id) AND participantListRequests = :old"
+            values[":old"] = current
+        try:
+            table.update_item(
+                Key={"id": meeting["VirtualParticipantId"]},
+                UpdateExpression="SET participantListRequests = :r",
+                ConditionExpression=condition,
+                ExpressionAttributeValues=values,
+            )
+            return True
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+    LOGGER.warning("the Virtual Participant's requests kept changing; this one was not kept")
+    return False
 
 
 def ask_to_be_added_to_meeting(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
@@ -724,8 +752,11 @@ def ask_to_be_added_to_meeting(caller: Mapping[str, Any], data: Mapping[str, Any
         _table().delete_item(Key={"PK": _request_key(meeting), "SK": email})
         raise BadRequest(f"you can ask to be added at most {ASKS_PER_DAY} times a day")
     if not _notify_owner(meeting, email, name):
-        # Kept so asking again does not repeat, but say so in the log.
-        LOGGER.warning("a request to be added was stored but the owner was not notified")
+        # Nobody was told, so the request is not remembered either: asking
+        # again tries again.
+        LOGGER.warning("a request to be added could not be shown; it can be made again")
+        _table().delete_item(Key={"PK": _request_key(meeting), "SK": email})
+        raise BadRequest("your request could not be passed on; try again in a few minutes")
     LOGGER.info("asked to be added to a meeting's participant list")
     return {"Requested": True, "Listed": False}
 

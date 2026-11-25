@@ -1233,7 +1233,9 @@ The page offers two scopes:
   chooses, at most **Longest consent given in advance, in days** ahead (365 as
   shipped, never more). It can be limited to the meetings that carry one of the
   meeting's [labels](meeting-context-and-checklist.md), key and value
-  compared exactly.
+  compared exactly. A listed person therefore sees, on the consent page, the
+  meeting's name, its organizer and its labels; a Participant does not see the
+  labels anywhere else.
 
 A person cannot name another organizer: a standing consent is always given from
 a meeting they are on the list of, for that meeting's owner. A new consent for

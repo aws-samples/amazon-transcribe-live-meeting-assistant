@@ -67,8 +67,7 @@ export const consentInvitation = ({ meetingName = '', organizer = '', scheduledF
     link,
     '',
     'You can give consent for this meeting only, or for the meetings I organize up to a date you choose, and ' +
-      'you can withdraw it at any time on the same page. Giving consent in advance is optional: the meeting will ' +
-      'still show a notice, and anyone can object during the meeting.',
+      'you can withdraw it at any time on the same page. Giving consent in advance is optional.',
     '',
     'If you do not have an account yet, reply to this message and I will create one for you.',
     '',

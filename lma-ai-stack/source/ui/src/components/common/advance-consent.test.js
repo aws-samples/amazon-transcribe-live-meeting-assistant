@@ -61,7 +61,9 @@ describe('the invitation to consent', () => {
     expect(invitation.subject).toBe('Consent to recording: Weekly sync');
     expect(invitation.body.split(link)).toHaveLength(2);
     expect(invitation.body).toContain('Mon, 30 Nov 2026 15:00:00 UTC');
-    expect(invitation.body).toContain('anyone can object during the meeting');
+    expect(invitation.body).toContain('withdraw it at any time on the same page');
+    // True in every consent mode, including Off, where no notice is posted.
+    expect(invitation.body).not.toMatch(/notice|object/);
     expect(invitation.body).toContain('owner@example.com');
     expect(invitation.mailto.startsWith('mailto:ana%40example.com,bo%40example.org?subject=')).toBe(true);
     expect(decodeURIComponent(invitation.mailto.split('&body=')[1])).toBe(invitation.body);
