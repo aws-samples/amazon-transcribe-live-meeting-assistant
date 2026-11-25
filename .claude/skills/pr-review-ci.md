@@ -207,7 +207,7 @@ them on the one thing the reader can get for free:
 | `make test-vp`, `test-vp-template` | VP backend + CloudFormation invariants |
 | `make test-ai-stack` | AppSync schema/resolver/UI-operation contract, template invariants |
 | `make test-asr` | ASR MicroVM runtime tests + ruff |
-| `make test-integ-plumbing` | scheduled-integration machinery |
+| `make test-integ-plumbing` | scheduled-integration machinery, the security test helpers (`integ-tests/test_security_helpers.py`) and the security tooling tests in `scripts/security/tests` |
 | `make test-ux-recorder` | demo recorder, its stack-session helper and the storyboard file (render tests skip: no Pillow or ffmpeg) |
 | transcriber `npm test` + `npm run smoke` | tsc, eslint, node:test, Fastify boot |
 | browser extension `npm test` + `npm run build` | CRA tests and production build |

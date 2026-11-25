@@ -262,19 +262,64 @@ def ignored_plugins(rules_text: str) -> set[str]:
     return ids
 
 
-def parse_report(report: dict, ignore: set[str] | None = None) -> tuple[dict[str, int], list[dict]]:
-    """Alert counts by risk and one entry per alert from a ZAP JSON report, the ignored plugins left out."""
+def out_of_scope_rules(rules_text: str) -> dict[str, list[re.Pattern]]:
+    """URL patterns per plugin id from a zap-rules.conf's OUTOFSCOPE lines (``<id>\\tOUTOFSCOPE\\t<regex>``).
+
+    ZAP reads the same lines: it leaves an alert out of its own pass/warn tally
+    when the alert's URL matches the pattern (``re.match``, so from the start of
+    the URL), and ``*`` stands for every plugin. Its JSON report keeps the alert,
+    so ``parse_report`` applies the patterns too.
+    """
+    rules: dict[str, list[re.Pattern]] = {}
+    for line in rules_text.splitlines():
+        if line.startswith("#") or line.count("\t") < 2:
+            continue
+        key, action, pattern = line.rstrip().split("\t", 2)
+        if action == "OUTOFSCOPE":
+            for plugin in key.split(","):
+                rules.setdefault(plugin.strip(), []).append(re.compile(pattern))
+    return rules
+
+
+def _out_of_scope(plugin: str, url: str, rules: dict[str, list[re.Pattern]]) -> bool:
+    return any(p.match(url) for p in rules.get(plugin, []) + rules.get("*", []))
+
+
+def parse_report(
+    report: dict,
+    ignore: set[str] | None = None,
+    out_of_scope: dict[str, list[re.Pattern]] | None = None,
+) -> tuple[dict[str, int], list[dict]]:
+    """Alert counts by risk and one entry per alert from a ZAP JSON report.
+
+    The ignored plugins are left out, and so is each instance whose URL an
+    OUTOFSCOPE pattern for its plugin matches; an alert with no instance left is
+    dropped. An alert listed without instances is judged by its site's URL.
+    """
     ignore = ignore or set()
+    out_of_scope = out_of_scope or {}
     counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
     alerts = []
     for site in report.get("site") or []:
+        site_url = str(site.get("@name") or "")
         for alert in site.get("alerts") or []:
             plugin = str(alert.get("pluginid", ""))
             if plugin in ignore:
                 continue
+            instances = alert.get("instances") or []
+            if out_of_scope:
+                if instances:
+                    instances = [
+                        i
+                        for i in instances
+                        if not _out_of_scope(plugin, str(i.get("uri") or site_url), out_of_scope)
+                    ]
+                    if not instances:
+                        continue
+                elif _out_of_scope(plugin, site_url, out_of_scope):
+                    continue
             risk = RISKS.get(str(alert.get("riskcode", "0")), "Informational")
             counts[risk] += 1
-            instances = alert.get("instances") or []
             urls: list[str] = []
             for instance in instances:
                 uri = instance.get("uri")
@@ -402,6 +447,7 @@ def scan(
     runner: str,
     result: ScanResult,
     ignore: set[str],
+    out_of_scope: dict[str, list[re.Pattern]] | None = None,
 ) -> None:
     status, output = run_zap(script, args, workdir, runner, SCAN_MINUTES)
     (workdir / f"{target}-zap.log").write_text(output, encoding="utf-8")
@@ -412,7 +458,7 @@ def scan(
     result.ran = True
     result.tally = rule_tally(output)
     result.counts, result.alerts = parse_report(
-        json.loads(report.read_text(encoding="utf-8")), ignore
+        json.loads(report.read_text(encoding="utf-8")), ignore, out_of_scope
     )
     result.reports = sorted(str(p) for p in workdir.glob(f"{target}-report.*"))
 
@@ -623,7 +669,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
     # The ZAP image runs as its own non-root user, which must write the reports here.
     os.chmod(workdir, 0o777)  # nosec B103 - a per-run report folder in an ignored scratch directory
     shutil.copy(RULES_PATH, workdir / "zap-rules.conf")
-    ignore = ignored_plugins(RULES_PATH.read_text(encoding="utf-8"))
+    rules_text = RULES_PATH.read_text(encoding="utf-8")
+    ignore = ignored_plugins(rules_text)
+    out_of_scope = out_of_scope_rules(rules_text)
 
     results = {t: ScanResult(t, "", mode) for t in targets}
     secrets_written: list[Path] = []
@@ -662,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
                 runner,
                 result,
                 ignore,
+                out_of_scope,
             )
 
         if "web" in results:
@@ -684,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
                 runner,
                 result,
                 ignore,
+                out_of_scope,
             )
 
         if "mcp" in results:
@@ -717,6 +767,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
                         runner,
                         result,
                         ignore,
+                        out_of_scope,
                     )
     finally:
         for path in secrets_written:

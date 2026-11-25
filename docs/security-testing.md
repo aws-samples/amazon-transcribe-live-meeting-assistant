@@ -197,6 +197,16 @@ not apply to LMA's code, or leave it `WARN`. Write the reason as a statement
 about the code as it stands. Once a rule's results are clean it can be set to
 `FAIL`, and the run made to gate on it; today nothing gates.
 
+`IGNORE` applies to every target. Where a rule does not apply to one host only,
+use an `OUTOFSCOPE` line instead: plugin id, `OUTOFSCOPE`, and a URL regex
+(matched from the start of the URL) in place of the comment, with the reason on
+a `#` line above it. ZAP leaves that rule's alerts on matching URLs out of its
+own tally, and `zap_scan.py` leaves them out of the counts; the rule still
+reports on the other targets. The AppSync GraphQL host is out of scope for the
+`Strict-Transport-Security` rule (10035), because AppSync is an AWS-managed
+endpoint that sets its own response headers; the web UI and the MCP endpoint are
+still checked for it.
+
 ## Running everything
 
 ```bash
