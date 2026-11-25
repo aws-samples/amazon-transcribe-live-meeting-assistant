@@ -257,9 +257,15 @@ def test_each_segment_query_keeps_both_names_of_the_speech_channels(field_name: 
 def test_the_queries_returning_stored_segments_are_the_two_transcript_reads(schema) -> None:
     """Guards the discovery the next test relies on."""
     assert _queries_returning_channels(schema) == [
+        "getParticipantMeetingTranscript",
         "getTranscriptSegments",
         "getTranscriptSegmentsWithSentiment",
     ]
+
+
+#: The Participant's transcript query, which a Lambda answers: it reads only the
+#: channels it names, so a retired channel is never among them.
+PARTICIPANT_TRANSCRIPT = AI_STACK / "source" / "lambda_functions" / "participant_meeting_resolver"
 
 
 @pytest.mark.parametrize(
@@ -282,6 +288,14 @@ def test_each_segment_query_filters_out_the_retired_channels(field_name: str) ->
 
 def test_every_query_returning_stored_segments_is_filtered(schema) -> None:
     for field_name in _queries_returning_channels(schema):
+        if field_name == "getParticipantMeetingTranscript":
+            source = (PARTICIPANT_TRANSCRIPT / "index.py").read_text()
+            assert 'Attr("Channel").is_in(list(participant_view.TRANSCRIPT_CHANNELS))' in source
+            view = (PARTICIPANT_TRANSCRIPT / "participant_view.py").read_text()
+            assert "TRANSCRIPT_CHANNELS = tuple(STORED_TRANSCRIPT_CHANNELS)" in view
+            for retired in RETIRED_CHANNELS:
+                assert retired not in view, retired
+            continue
         text = _request_template(field_name).read_text()
         for placeholder in RETIRED_PLACEHOLDERS:
             assert placeholder in text, (field_name, placeholder)

@@ -19,6 +19,16 @@ vi.mock('../contexts/app', () => ({
 vi.mock('./CallsRoutes', () => ({ default: () => <div>member: meetings</div> }));
 vi.mock('../hooks/use-parameter-store', () => ({ default: () => ({}) }));
 vi.mock('../components/virtual-participant-layout/ManualActionAlerts', () => ({ default: () => null }));
+// The Participant's own pages, which read the API.
+vi.mock('../components/participant-meetings/ParticipantMeetingList', () => ({
+  default: () => <div>participant: shared meetings</div>,
+}));
+vi.mock('../components/participant-meetings/ParticipantMeetingPage', () => ({
+  default: ({ callId }) => <div>participant: meeting {callId}</div>,
+}));
+vi.mock('../components/voice-enrollment/VoiceEnrollmentPage', () => ({
+  default: () => <div>participant: voice enrollment</div>,
+}));
 
 /* eslint-disable import/first */
 import ParticipantRoutes from './ParticipantRoutes';
@@ -37,16 +47,18 @@ const renderAt = (pathname, element = <ParticipantRoutes />) =>
 
 afterEach(cleanup);
 
+const HOME_TEXT = /The meetings their owners have shared with you are under/;
+
 describe('a Participant', () => {
   it('opens their home page', () => {
     renderAt('/home');
-    expect(screen.getByText('Your meetings and consents will appear here.')).toBeTruthy();
+    expect(screen.getByText(HOME_TEXT)).toBeTruthy();
   });
 
   it('is taken to their home page from the root and from sign-in', () => {
     ['/', '/login'].forEach((start) => {
       renderAt(start);
-      expect(screen.getByText('Your meetings and consents will appear here.')).toBeTruthy();
+      expect(screen.getByText(HOME_TEXT)).toBeTruthy();
       cleanup();
     });
   });
@@ -54,7 +66,18 @@ describe('a Participant', () => {
   it.each(routesFor(false).flatMap((route) => [route, `${route}/some-id`]))('is denied %s', (route) => {
     renderAt(route);
     expect(screen.getByText('Access denied')).toBeTruthy();
-    expect(screen.queryByText('Your meetings and consents will appear here.')).toBeNull();
+    expect(screen.queryByText(HOME_TEXT)).toBeNull();
+  });
+
+  it('opens the meetings shared with them, a meeting by its id, and their voice enrollment', () => {
+    renderAt('/shared-meetings');
+    expect(screen.getByText('participant: shared meetings')).toBeTruthy();
+    cleanup();
+    renderAt(`/shared-meetings/${encodeURIComponent('Weekly sync - 2026+11 #1')}`);
+    expect(screen.getByText('participant: meeting Weekly sync - 2026+11 #1')).toBeTruthy();
+    cleanup();
+    renderAt('/voice-enrollment');
+    expect(screen.getByText('participant: voice enrollment')).toBeTruthy();
   });
 
   it('is denied a path no route names', () => {

@@ -184,17 +184,26 @@ def _attached_roles(policy_name: str) -> set[str]:
 
 
 def _inline_covered(via) -> set[str]:
-    """SAM functions whose own Policies grant the key through `via` (or unscoped)."""
+    """Roles whose own policies grant the key through `via` (or unscoped).
+
+    A SAM function's Policies (its generated role), and the inline policies of
+    an IAM role in a nested template, which the parent's
+    RecordingsBucketEncryptionKeyPolicy cannot name.
+    """
     covered = set()
     for name, resource in _resources(AI_STACK).items():
-        if resource["Type"] != "AWS::Serverless::Function":
+        if resource["Type"] == "AWS::Serverless::Function":
+            statements, role = _statements(resource["Properties"].get("Policies", [])), f"{name}Role"
+        elif resource["Type"] == "AWS::IAM::Role":
+            statements, role = _statements(resource["Properties"].get("Policies", [])), name
+        else:
             continue
-        for statement in _statements(resource["Properties"].get("Policies", [])):
+        for statement in statements:
             if statement.get("Resource") != NESTED_CMK:
                 continue
             uses_key = _actions(statement) & {"kms:Decrypt", "kms:GenerateDataKey"}
             if _via(statement) in (via, None) and uses_key:
-                covered.add(f"{name}Role")
+                covered.add(role)
     return covered
 
 

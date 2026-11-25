@@ -61,7 +61,7 @@ PUBLISHING_TEMPLATES = [
     "updateVirtualParticipant.response.vtl",
 ]
 PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js", "notificationPublishWrite.js"]
-ENTRIES_JS = [*PUBLISHING_JS, "meetingAccess.js"]
+ENTRIES_JS = [*PUBLISHING_JS, "meetingAccess.js", "participantTranscriptSubscription.js"]
 WRITE_TEMPLATES = [
     "updateSpeakerIdentities.request.vtl",
     "updateCallSummaryText.request.vtl",
@@ -709,7 +709,9 @@ PYTHON_READERS = [
     "meeting_whiteboards/index.py",
     "meeting_controls_resolver/index.py",
     "microvm_vnc_token/vp_access.py",
+    "participant_meeting_resolver/index.py",
     "speaker_name_resolver/index.py",
+    "strands_chat_interface/lambda_function.py",
     "summary_regenerator/index.py",
     "troubleshooting_resolver/index.py",
     "video_keyframes_resolver/index.py",

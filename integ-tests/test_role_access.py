@@ -151,3 +151,36 @@ def test_the_participant_list_operations_refuse_a_participant_and_a_user_who_doe
         assert not probe.refused_at_field(user, operation), (operation, user)
         assert "Unauthorized" in messages, (operation, user)
         assert not (user.get("data") or {}).get(operation.split(".", 1)[1]), (operation, user)
+
+
+#: A Participant's read-only view, each naming a placeholder meeting shared with nobody.
+PARTICIPANT_VIEW_CALLS = (
+    (
+        "Query.getParticipantMeeting",
+        "query Probe($CallId: ID!) { getParticipantMeeting(CallId: $CallId) { CallId } }",
+    ),
+    (
+        "Query.getParticipantMeetingTranscript",
+        "query Probe($CallId: ID!) { getParticipantMeetingTranscript(CallId: $CallId) { nextToken } }",
+    ),
+    (
+        "Query.getParticipantMeetingRecordings",
+        "query Probe($CallId: ID!) { getParticipantMeetingRecordings(CallId: $CallId) { Kind } }",
+    ),
+)
+
+
+def test_the_participant_view_answers_only_meetings_shared_with_the_caller(deployment, users) -> None:
+    """A Participant reaches the view's resolvers, which refuse a meeting not shared with them;
+    an Admin and a User are refused the view at the field. test_participant_access.py reads a
+    meeting that is shared with the Participant, and checks the fields it is given."""
+    for operation, document in PARTICIPANT_VIEW_CALLS:
+        variables = {"CallId": probe.PLACEHOLDER_ID}
+        participant = probe.call(deployment, users["Participant"], document, variables)
+        assert not probe.refused_at_field(participant, operation), (operation, participant)
+        messages = " ".join(e.get("message", "") for e in participant.get("errors") or [])
+        assert "Unauthorized" in messages, (operation, participant)
+        assert not (participant.get("data") or {}).get(operation.split(".", 1)[1]), (operation, participant)
+        for role in ("Admin", "User"):
+            refused = probe.call(deployment, users[role], document, variables)
+            assert probe.refused_at_field(refused, operation), (operation, role, refused)

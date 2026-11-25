@@ -239,7 +239,8 @@ const VirtualParticipantFormFields = ({
           description={
             'The people expected at the meeting, one per line as Name <email> or an email address; a list ' +
             `pasted from a calendar invite works too. At most ${MAX_PARTICIPANTS}. Stored on the meeting, where ` +
-            'you can see who has an LMA account. Listing someone does not share the meeting with them.'
+            "you can see who has an LMA account. With the deployment's Meeting Sharing setting on (the default), " +
+            'the meeting is shared, read-only, with each person listed, from when it starts.'
           }
           errorText={participantErrors.length ? participantErrors.join('; ') : undefined}
           stretch

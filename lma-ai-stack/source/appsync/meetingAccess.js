@@ -21,7 +21,9 @@ import { util } from '@aws-appsync/utils';
  * meeting as input.CallId: the write that follows runs only for a caller
  * accepted here.
  *
- * A signed-in caller who is not an Admin has to name the meeting.
+ * A signed-in caller who is not an Admin has to name the meeting. A
+ * Participant (who may subscribe to onAddChatToken only) is answered as an
+ * entry of SharedWith alone, not as the meeting's owner.
  */
 
 // A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
@@ -92,6 +94,12 @@ export function response(ctx) {
         typeof username === 'string' &&
         username.length > 0 &&
         (meeting.Owner === username || sharedWithEntries(meeting.SharedWith).includes(username));
+    // A Participant reads the meetings shared with them only: owning one, as
+    // an account whose role changed may, is not enough (as for sendChatMessage).
+    const participant = Array.isArray(ctx.identity.groups) && ctx.identity.groups.includes('Participant');
+    if (allowed && participant && !sharedWithEntries(meeting.SharedWith).includes(username)) {
+        util.unauthorized();
+    }
     if (!allowed) {
         util.unauthorized();
     }

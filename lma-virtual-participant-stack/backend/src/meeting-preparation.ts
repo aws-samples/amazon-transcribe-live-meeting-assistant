@@ -221,7 +221,8 @@ export function preparationStartFields(
   // Only a VP started or scheduled with meetingSharedWith creates its meeting
   // shared; sharing the VP itself (its SharedWith) does not share the meeting.
   if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');
-  // Listing someone does not share the meeting with them.
+  // The list does not set SharedWith here: the meeting controls function
+  // shares the meeting with it (Meeting Sharing) once the record exists.
   if (preparation.participants?.length) {
     fields.Participants = preparation.participants;
     fields.ParticipantsUpdatedBy = by;

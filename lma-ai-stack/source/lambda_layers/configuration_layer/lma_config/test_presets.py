@@ -62,6 +62,10 @@ ASSISTANT_DEFAULTS = {
     "meeting_processing": {"defaultSummaryProfile": "default"},
 }
 
+#: Meeting Sharing, which every preset turns on: a Participant sees only the
+#: meetings they are listed on, read-only and without the owner's own material.
+SHARING_DEFAULTS = {"meeting_sharing": {"shareWithListedParticipants": True}}
+
 #: The sentence every preset gives the consent notice when video is recorded.
 VIDEO_NOTICE_TEXT = (
     "Video of the meeting, including shared screens and any visible camera feeds, is also recorded."
@@ -90,6 +94,7 @@ PRESET_VALUES = {
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
         **ASSISTANT_DEFAULTS,
+        **SHARING_DEFAULTS,
     },
     "internal-meetings-notify": {
         "meeting_consent": {
@@ -110,6 +115,7 @@ PRESET_VALUES = {
         "transcription": {"contentRedactionEnabled": False},
         "language_models": {"inferenceGeography": "global"},
         **ASSISTANT_DEFAULTS,
+        **SHARING_DEFAULTS,
     },
     "regulated-consent-required": {
         "meeting_consent": {
@@ -134,6 +140,7 @@ PRESET_VALUES = {
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
         **ASSISTANT_DEFAULTS,
+        **SHARING_DEFAULTS,
     },
     "regulated-notify": {
         "meeting_consent": {
@@ -158,6 +165,7 @@ PRESET_VALUES = {
         "transcription": {"contentRedactionEnabled": True},
         "language_models": {"inferenceGeography": "geography"},
         **ASSISTANT_DEFAULTS,
+        **SHARING_DEFAULTS,
     },
     "team-hosted-external": {
         "meeting_consent": {
@@ -192,6 +200,7 @@ PRESET_VALUES = {
             "omitSensitivePersonalInformation": False,
         },
         "meeting_processing": {"defaultSummaryProfile": "discovery-session"},
+        **SHARING_DEFAULTS,
     },
     "customer-account": {
         "meeting_consent": {
@@ -226,6 +235,7 @@ PRESET_VALUES = {
             "omitSensitivePersonalInformation": False,
         },
         "meeting_processing": {"defaultSummaryProfile": "default"},
+        **SHARING_DEFAULTS,
     },
     "minimised-content": {
         "meeting_consent": {
@@ -254,6 +264,7 @@ PRESET_VALUES = {
             "omitSensitivePersonalInformation": True,
         },
         "meeting_processing": {"defaultSummaryProfile": "minimised-content"},
+        **SHARING_DEFAULTS,
     },
 }
 

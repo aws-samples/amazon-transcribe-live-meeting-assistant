@@ -1,0 +1,2 @@
+# No third-party dependencies: boto3 ships with the python3.12 runtime, and
+# lma_channels and lma_speakers come from the configuration layer.

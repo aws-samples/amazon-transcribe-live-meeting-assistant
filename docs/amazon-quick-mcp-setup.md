@@ -443,7 +443,8 @@ more than one applies. `truncated` and `note` are absent otherwise.
   [MCP Tools Reference › schedule_meeting](mcp-tools-reference.md#schedule_meeting)
 - `participants` (optional) — the invite's attendees, each `{name, email}`, put
   on the meeting as its [participant list](virtual-participant.md#participant-list)
-  (listing someone does not share the meeting with them)
+  (with the deployment's Meeting Sharing setting on, the default, the meeting
+  is shared, read-only, with each person listed)
 - The answer's `meetingId` is the LMA meeting, `null` until the Virtual
   Participant has started it; the meeting ID or link given here is
   `platformMeetingId`

@@ -80,8 +80,17 @@ describe('navigation by role', () => {
     expect(refused).toEqual([]);
   });
 
-  it('links a Participant to their home page only', () => {
-    expect(internalLinks(participantNavigationItems())).toEqual(['/home']);
+  it('links a Participant to their home page, their shared meetings and their voice enrollment only', () => {
+    const links = internalLinks(participantNavigationItems());
+    expect(links).toEqual(['/home', '/shared-meetings', '/voice-enrollment']);
+    expect(links.filter((route) => !roleMayOpen(PARTICIPANT, route))).toEqual([]);
+  });
+
+  it('opens a shared meeting page to a Participant and to no other role', () => {
+    expect(roleMayOpen(PARTICIPANT, '/shared-meetings/m-1')).toBe(true);
+    expect(roleMayOpen(USER, '/shared-meetings/m-1')).toBe(false);
+    expect(roleMayOpen(ADMIN, '/shared-meetings')).toBe(false);
+    expect(roleMayOpen(PARTICIPANT, '/voice-enrollment')).toBe(true);
   });
 
   it('links a User to no Admin-only page', () => {

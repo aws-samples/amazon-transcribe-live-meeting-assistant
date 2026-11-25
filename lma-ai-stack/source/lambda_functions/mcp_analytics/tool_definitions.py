@@ -122,7 +122,8 @@ PARTICIPANTS = {
         "The participant list: the people expected at the meeting, for example a calendar "
         "invite's attendees, each {name, email} or an email address on its own (at most 100; "
         "an address is listed once). "
-        "Listing someone does not share the meeting with them"
+        "With the deployment's Meeting Sharing setting on (the default), the meeting is "
+        "shared, read-only, with each person listed, from when it starts"
     ),
 }
 AGENDA = {

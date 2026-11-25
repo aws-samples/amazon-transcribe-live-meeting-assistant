@@ -14,7 +14,7 @@ title: "Meeting Assistant"
   - [Chat Shortcut Buttons](#chat-shortcut-buttons)
   - [Live Guidance](#live-guidance)
 - [Built-in Tools](#built-in-tools)
-  - [In-meeting requests](#in-meeting-requests)
+  - [Participant use](#participant-use)
   - [Who may ask](#who-may-ask)
   - [Web search and MCP servers](#web-search-and-mcp-servers)
   - [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one)
@@ -51,7 +51,7 @@ LMA supports three service modes for the Meeting Assistant, configured during st
 
 ### Wake Phrase
 
-Say **"OK Assistant"** during a meeting to activate the assistant by voice. The assistant detects the wake phrase in the transcript, processes your spoken question, and inserts its response inline in the transcript. Anyone in the meeting can say it, so it is answered as an [in-meeting request](#in-meeting-requests): from the current meeting only, unless the In-meeting requests setting is Unrestricted or Selected tools.
+Say **"OK Assistant"** during a meeting to activate the assistant by voice. The assistant detects the wake phrase in the transcript, processes your spoken question, and inserts its response inline in the transcript. Anyone in the meeting can say it, so it is answered as an [in-meeting request](#participant-use): from the current meeting only, unless the Participant use setting is Unrestricted or Selected tools.
 
 The wake phrase pattern is **Wake phrase (regular expression)** in the Meeting Assistant section of the [Configuration page](configuration-guide.md), where an Admin can change it while the stack runs, with no stack update. The default regex matches "OK Assistant" and common variations. A pattern saved on the page that is not a valid regular expression is logged by the call event processor, which uses the shipped pattern until it is corrected.
 
@@ -71,14 +71,14 @@ The assistant can also offer guidance without being asked. With [live guidance](
 
 ## Built-in Tools
 
-The Meeting Assistant has access to the following tools. A request made in the meeting — the meeting chat, the voice assistant or the wake phrase — is offered only `current_meeting_transcript`, `get_meeting_agenda`, `get_meeting_frames` and `get_chat_attachments` unless **Meeting Assistant › In-meeting requests** offers more; see [In-meeting requests](#in-meeting-requests).
+The Meeting Assistant has access to the following tools. A request made in the meeting — the meeting chat, the voice assistant or the wake phrase — is offered only `current_meeting_transcript`, `get_meeting_agenda`, `get_meeting_frames` and `get_chat_attachments` unless **Meeting Assistant › Participant use** offers more; see [Participant use](#participant-use).
 
 | Tool | Description |
 |---|---|
 | `current_meeting_transcript` | Retrieves and summarizes the current meeting transcript. Use this to answer questions about what has been discussed in the ongoing meeting. The messages typed in the meeting chat are among the lines, each as `[chat] <sender>: <message>` in time order with the speech. It can prefix each line with its time from the start of the meeting (`[MM:SS]`), which the assistant uses when an answer should say when something was discussed. |
 | `get_meeting_agenda` | Reads the current meeting's agenda, numbered as the meeting page lists it, with where it came from. The assistant uses it for questions about the agenda and for progress checks — each item reported as covered, in progress or remaining, with the transcript times where it was discussed — and says so plainly when the meeting has no agenda rather than inventing one. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Agenda](meeting-agenda.md#asking-the-assistant-about-the-agenda). |
 | `get_meeting_frames` | Reads the key frames of the meeting's shared screen — the last few, those in a time range, or the one on screen at a moment — each with what was said while it was on screen, and passes the pictures themselves to the model when it reads images (every model the stack offers except Amazon Nova Micro, which gets the times and transcript only). It answers "summarize that slide", "translate the last slide into French" or "show me the last two slides"; in the meeting page's chat the answer can show the frames, while in the meeting chat and by voice it describes them. Offered in every tool scope, including questions typed in the meeting chat. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
-| `get_meeting_context` | Reads the current meeting's [meeting context](meeting-context-and-checklist.md): the briefing written by the people preparing it (goals, background, terms, what a good outcome is). Offered to the meeting page's chat, and to a request made in the meeting only when **In-meeting requests: meeting context and checklist** is Allowed; see [Requests made in the meeting](meeting-context-and-checklist.md#requests-made-in-the-meeting). |
+| `get_meeting_context` | Reads the current meeting's [meeting context](meeting-context-and-checklist.md): the briefing written by the people preparing it (goals, background, terms, what a good outcome is). Offered to the meeting page's chat, and to a request made in the meeting only when **Participant use: meeting context and checklist** is Allowed; see [Requests made in the meeting](meeting-context-and-checklist.md#requests-made-in-the-meeting). |
 | `get_meeting_checklist` | Reads the current meeting's [checklist](meeting-context-and-checklist.md): one line per item with its status, priority, kind and the transcript times of its evidence, for questions such as "what haven't we covered?". Offered as `get_meeting_context` is. |
 | `get_chat_attachments` | Lists the images and files shared in the meeting chat that the Virtual Participant stored, each with when it was shared, its file name, and its AI title and summary, or why it was recorded by name only. It answers "what was the picture Alice posted?" or "which documents were shared in the chat?". It lists them; it does not pass the files themselves to the model. Offered in every tool scope, as `get_meeting_frames` is. See [Chat Attachments](virtual-participant.md#chat-attachments). |
 | `document_search` | Searches the Bedrock Knowledge Base for relevant documents. Available only when a Knowledge Base is configured (STRANDS_BEDROCK_WITH_KB modes). |
@@ -88,17 +88,45 @@ The Meeting Assistant has access to the following tools. A request made in the m
 | `control_vnc_preview` | Shows or hides the Virtual Participant (VP) browser screen on the meeting page, allowing users to see what the VP browser is displaying. |
 | `control_vp_browser` | Controls the VP browser to navigate web pages and perform web research during meetings, enabling the assistant to look up information in real time. |
 
-### In-meeting requests
+### Participant use
 
-The meeting assistant is asked for things in two ways. The **meeting page's chat** is used by the signed-in LMA user, and is offered every tool above, acting for that user, except a tool turned off for every request (see [Web search and MCP servers](#web-search-and-mcp-servers)). An **in-meeting request** is made in the meeting by whoever is in it, and its answer reaches the meeting:
+The tools the meeting assistant may use are approved for two kinds of use.
 
-| In-meeting request | Where the answer goes |
+**Owner use** is the meeting page's own chat for the meeting's owner, the users
+it is shared with and Admins. It is offered every tool above, acting for the
+signed-in user, except a tool turned off for every request (see
+[Web search and MCP servers](#web-search-and-mcp-servers)) or turned off one by
+one in **Tool selection** (its **Owner use** switch).
+
+**Participant use** is every other request: one made in the meeting by whoever
+is in it, whose answer reaches the meeting, and a question a
+[Participant](user-based-access-control.md#participant) asks on the page of a
+meeting shared with them, whose answer only they see:
+
+| Participant use request | Where the answer goes |
 |---|---|
 | A question typed in the meeting chat (the Virtual Participant's `LMA ask`; see [Asking the Meeting Assistant from Chat](virtual-participant.md#asking-the-meeting-assistant-from-chat)) | Posted in the meeting chat |
 | A request spoken to the Virtual Participant's [voice assistant](voice-assistant.md#what-the-voice-assistant-can-look-up) that needs a lookup | Spoken in the meeting |
 | A request spoken with the [wake phrase](#wake-phrase) | Added to the meeting's transcript |
+| A question a Participant asks in the assistant panel of a meeting shared with them | Shown on their page only. It is not added to the meeting's transcript, so the owner and the others it is shared with do not see it. |
 
-None of these can tell who in the meeting asked: a chat sender is known only by the display name the meeting shows, and a spoken request only by the voice that said it. So all three are answered as **Meeting Assistant › In-meeting requests** on the [Configuration page](configuration-guide.md) (`meeting_assist.inMeetingRequestTools`) allows, and a change applies within about five minutes to requests made after that:
+One approval covers all four: the Participant use settings below decide what
+each is answered with and who may ask. The stored keys are unchanged by
+the rename (`inMeetingRequestTools`, `inMeetingWebSearch` and the other
+`inMeeting*` keys, and `inMeetingRequests` in Tool selection), so stored
+profiles and presets need no change.
+
+A Participant's question is also held to what their page shows, whatever the
+settings say: it is never offered the meeting context or checklist, nor the
+Virtual Participant controls (`control_vnc_preview`, `control_vp_browser`),
+which act on the owner's live session; the transcript it is given leaves out
+the meeting assistant's earlier answers; and a frame of the shared screen is
+described in words rather than shown, since a Participant's browser has no
+credentials to load it. The tools that act for a user (the owner's past
+meetings) act for the meeting's owner, as they do for a request made in the
+meeting.
+
+None of the requests made in the meeting can tell who asked: a chat sender is known only by the display name the meeting shows, and a spoken request only by the voice that said it. So all of them are answered as **Meeting Assistant › Participant use** on the [Configuration page](configuration-guide.md) (`meeting_assist.inMeetingRequestTools`) allows, and a change applies within about five minutes to requests made after that:
 
 - **Current meeting only** (`current_meeting_only`, the default). The answer comes from the current meeting alone, through four tools: `current_meeting_transcript` (what was said, and the messages typed in the meeting chat, each as a line `[chat] <sender>: <message>`), `get_meeting_agenda`, `get_meeting_frames` (what was shown on the shared screen: each frame's title, its text, when it was on screen and what was said meanwhile), and `get_chat_attachments` (the images and files shared in the meeting chat, with their AI titles and summaries). No other tool is offered, and no user is acted for, so past meetings are not searched.
 - **Unrestricted** (`unrestricted`). Every tool above, acting for the meeting's LMA user (the Virtual Participant's user for the chat and the voice assistant; the user the transcript was streamed for, for the wake phrase). This is how in-meeting requests were answered before the setting existed. Choose it only where everyone who can join a meeting may read or hear what those tools return.
@@ -106,19 +134,19 @@ None of these can tell who in the meeting asked: a chat sender is known only by 
 
   | Switch | Tools it offers |
   |---|---|
-  | **In-meeting requests: web search** (`inMeetingWebSearch`) | `web_search` (Tavily). The query is written by the assistant from the request and the meeting, and is sent to Tavily. |
-  | **In-meeting requests: document knowledge base** (`inMeetingDocumentSearch`) | `document_search` |
-  | **In-meeting requests: the owner's past meetings** (`inMeetingMeetingHistory`) | `recent_meetings_list` and `meeting_history`, acting for the meeting's LMA user as **Unrestricted** does. With this switch off, no user is acted for. |
-  | **In-meeting requests: MCP servers** (`inMeetingMcpServers`) | Every installed MCP server, except one whose own setting says otherwise; see [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one) |
-  | **In-meeting requests: Virtual Participant controls** (`inMeetingVpControls`) | `control_vnc_preview` and `control_vp_browser` |
-  | **In-meeting requests: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise; see [Skills](#skills) |
+  | **Participant use: web search** (`inMeetingWebSearch`) | `web_search` (Tavily). The query is written by the assistant from the request and the meeting, and is sent to Tavily. |
+  | **Participant use: document knowledge base** (`inMeetingDocumentSearch`) | `document_search` |
+  | **Participant use: the owner's past meetings** (`inMeetingMeetingHistory`) | `recent_meetings_list` and `meeting_history`, acting for the meeting's LMA user as **Unrestricted** does. With this switch off, no user is acted for. |
+  | **Participant use: MCP servers** (`inMeetingMcpServers`) | Every installed MCP server, except one whose own setting says otherwise; see [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one) |
+  | **Participant use: Virtual Participant controls** (`inMeetingVpControls`) | `control_vnc_preview` and `control_vp_browser` |
+  | **Participant use: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise; see [Skills](#skills) |
 
   A tool that is switched on but that the deployment cannot offer (web search with no Tavily API key, a knowledge base that is not deployed, MCP servers when none is installed or none could be loaded) is named to the assistant as not available, so that it says so when a request needs it. The meeting assistant function's log records, for every in-meeting request, the tool groups allowed, offered and unavailable.
 
 **The meeting context and checklist** are not offered to any request made in
 the meeting under any of the three choices: the context can hold the owner's
 preparation notes, and a meeting's guests are often outside the owner's
-organization. **Meeting Assistant › In-meeting requests: meeting context and
+organization. **Meeting Assistant › Participant use: meeting context and
 checklist** (`meeting_assist.inMeetingContextAccess`) is `none` by default; an
 Admin who sets it to `allowed` offers `get_meeting_context` and
 `get_meeting_checklist` to requests made in the meeting too, whose answers are
@@ -127,13 +155,16 @@ then posted or spoken for everyone there. See
 
 ### Who may ask
 
-**Meeting Assistant › In-meeting requests: who may ask**
-(`meeting_assist.inMeetingRequesters`) decides whether a request made in the
-meeting is answered at all. The meeting page's own chat is never affected.
+**Meeting Assistant › Participant use: who may ask**
+(`meeting_assist.inMeetingRequesters`) decides whether a Participant use
+request is answered at all. The meeting page's own chat for its owner, the
+users it is shared with and Admins is never affected. A Participant asking on
+the page of a meeting shared with them is answered under **Anyone** and
+refused under **Owner only** and **Off**.
 
 | Value | What is answered |
 |---|---|
-| **Anyone** (`anyone`, the default) | Every in-meeting request, as **In-meeting requests** above allows. |
+| **Anyone** (`anyone`, the default) | Every in-meeting request, as **Participant use** above allows. |
 | **Owner only** (`owner_only`) | Only a request spoken with the wake phrase on the LMA user's own microphone, in a meeting streamed from Stream Audio/Video, the Desktop Capture App or the browser extension, which capture that microphone as a channel of its own (`LOCAL`). Nothing else is answered: no question typed in the meeting chat, no request spoken in a meeting a Virtual Participant captures, and no wake phrase on the meeting audio. A Virtual Participant does not start its voice assistant. |
 | **Off** (`off`) | No request made in the meeting, on any capture method. A Virtual Participant does not start its voice assistant. |
 
@@ -161,7 +192,7 @@ Two switches in the Meeting Assistant section turn a kind of tool off for every
 request, the meeting page's chat included. Both are on by default.
 
 - **Web search** (`meeting_assist.webSearchEnabled`): off, `web_search` is
-  offered to no request, whatever **In-meeting requests** says and whether or
+  offered to no request, whatever **Participant use** says and whether or
   not the stack has a Tavily API key.
 - **MCP servers** (`meeting_assist.mcpServersEnabled`): off, none of the
   servers installed on the [MCP Servers](mcp-servers.md) page is connected to
@@ -179,20 +210,20 @@ turned off on this deployment, so that the assistant says so rather than trying.
 
 | Setting | Stored as | Effect |
 |---|---|---|
-| **Enabled** | `enabled` | Off: the assistant does not use the server at all, for the owner's requests or for in-meeting ones. On, or not set, is the default. |
-| **In-meeting requests** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for in-meeting requests. Not set: the In-meeting requests setting decides, as for every server — under **Selected tools**, the **In-meeting requests: MCP servers** switch; under **Unrestricted**, allowed. |
+| **Owner use** | `enabled` | Off: the assistant does not use the server at all, for Owner use or for Participant use. On, or not set, is the default. |
+| **Participant use** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for Participant use. Not set: the Participant use setting decides, as for every server — under **Selected tools**, the **Participant use: MCP servers** switch; under **Unrestricted**, allowed. |
 | **Always on** | `alwaysOn` | Reserved for a later always-on mode. It is stored and validated, and nothing reads it yet. |
 
 How a request is answered:
 
 - **The meeting page's chat** (the owner's own requests) is offered every installed server that is not turned off.
 - **Current meeting only** offers no server, whatever a server's own setting.
-- **Selected tools** offers a server when its own **In-meeting requests** is Allowed, or when it is not set and the MCP servers switch is on. A server set to Allowed is offered with the switch off; one set to Not allowed is not offered with the switch on.
+- **Selected tools** offers a server when its own **Participant use** is Allowed, or when it is not set and the MCP servers switch is on. A server set to Allowed is offered with the switch off; one set to Not allowed is not offered with the switch on.
 - **Unrestricted** offers every server not turned off, except one set to Not allowed.
 
 A server the profile does not name behaves as it did before this setting existed, so a profile with no entries offers exactly what it did. The assistant is told, by name, which installed servers are not available for the request — those turned off or not allowed, and those the profile names that could not be started or are waiting for their credentials after an import — so that it says so when a request needs one, as it does for the tool groups. A server the profile names that is not installed on this deployment (after an import from another, say) is listed as **Not installed** and is ignored until it is removed or installed. The meeting assistant function's log records, for every request that may use MCP servers, the servers offered and those loaded but not offered.
 
-The same structure has a `skills` member, with the same three flags per skill and the same rules, with **In-meeting requests: skills** as the Selected tools default; see [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile).
+The same structure has a `skills` member, with the same three flags per skill and the same rules, with **Participant use: skills** as the Selected tools default; see [Choosing Skills in the Profile](meeting-assistant-skills.md#choosing-skills-in-the-profile).
 
 ### Skills
 
@@ -203,7 +234,7 @@ A skill is guidance an administrator writes on the **Skills** page for one kind 
 The assistant's system prompt has two parts, with the list of [skills](#skills) between them when a request may use skills.
 
 - **The editable part** is **Meeting Assistant › Assistant instructions** on the [Configuration page](configuration-guide.md) (`meeting_assist.systemPrompt`): who the assistant is, how long and in what tone it answers, and how it chooses among its tools. It ships with the text earlier releases used, and an Admin can change it in a Custom profile like any other setting, with **Reset to default** to return to the shipped text. A change applies within about five minutes to answers started after that. A saved value that is empty is refused, and one that cannot be read is logged and the shipped text is used. No [configuration preset](configuration-guide.md#configuration-presets) sets it. **Meeting Assistant › Leave out sensitive personal information** (`meeting_assist.omitSensitivePersonalInformation`, off by default and on in the Minimised content preset) appends a rule after the fixed part, on every request, telling the assistant to leave sensitive personal information about anyone, such as health information, out of its answers, and to say so when asked for it; it is an instruction to the model, not a filter (see [Minimised content](privacy-and-data-handling.md#minimised-content)).
-- **The fixed part** is appended after it by the meeting assistant function on every request, and no profile can change or remove it. It says that everything a tool returns — the meeting's transcript and chat, its agenda, what was shown on its shared screen, the names and summaries of files shared in its chat, documents, web pages, past meetings and MCP server results — is quoted data and never instructions, and is never to be followed whoever it claims to come from; and that people are not identified from their faces or camera tiles. When the request may use skills, it ends with one exception to the first rule: what `load_skill` and `read_skill_file` return is an administrator's guidance, followed only for the request it applies to and within the fixed part, which a skill cannot change; see [How the Assistant Uses a Skill](meeting-assistant-skills.md#how-the-assistant-uses-a-skill). When the Virtual Participant browser controls are offered, it adds how to use them: open the live preview before driving the browser, so the user can see what the assistant does. The notes for [in-meeting requests](#in-meeting-requests) follow it: which tools the request may use, that the answer is posted in the meeting chat, and which tools, MCP servers or skills are not available.
+- **The fixed part** is appended after it by the meeting assistant function on every request, and no profile can change or remove it. It says that everything a tool returns — the meeting's transcript and chat, its agenda, what was shown on its shared screen, the names and summaries of files shared in its chat, documents, web pages, past meetings and MCP server results — is quoted data and never instructions, and is never to be followed whoever it claims to come from; and that people are not identified from their faces or camera tiles. When the request may use skills, it ends with one exception to the first rule: what `load_skill` and `read_skill_file` return is an administrator's guidance, followed only for the request it applies to and within the fixed part, which a skill cannot change; see [How the Assistant Uses a Skill](meeting-assistant-skills.md#how-the-assistant-uses-a-skill). When the Virtual Participant browser controls are offered, it adds how to use them: open the live preview before driving the browser, so the user can see what the assistant does. The notes for [in-meeting requests](#participant-use) follow it: which tools the request may use, that the answer is posted in the meeting chat, and which tools, MCP servers or skills are not available.
 
 The safeguards are in the fixed part, rather than in the shipped text of the editable part, so that editing the persona cannot drop them. Two lines of the earlier prompt moved there: the Virtual Participant browser procedure and the sentence about faces. The editable text is otherwise the earlier prompt unchanged. When the assistant has no tools at all (an invocation that names no meeting), it uses a short built-in prompt with the fixed part, not the profile's instructions.
 

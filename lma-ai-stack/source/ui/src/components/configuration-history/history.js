@@ -96,6 +96,7 @@ const SECTION_LABELS = {
   retention: 'Retention',
   meeting_consent: 'Meeting consent',
   meeting_agenda: 'Meeting agenda',
+  meeting_sharing: 'Meeting sharing',
   virtual_participant: 'Virtual Participant',
 };
 

@@ -184,6 +184,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "virtual_participant",
         "retention",
         "meeting_agenda",
+        "meeting_sharing",
     }
     # The settings that used to be stack parameters ship at their defaults.
     assert body["language_models"]["summaryModelId"] == "global.anthropic.claude-sonnet-5-5"

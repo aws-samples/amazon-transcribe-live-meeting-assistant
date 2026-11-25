@@ -81,13 +81,13 @@ describe('Tool selection', () => {
     renderField();
     expect(await screen.findByText('Alpha')).toBeTruthy();
     expect(screen.getByText('Needs credentials')).toBeTruthy();
-    expect(screen.getByLabelText('Enabled: Alpha').checked).toBe(true);
+    expect(screen.getByLabelText('Owner use: Alpha').checked).toBe(true);
     expect(screen.getByLabelText('Always on: Alpha').checked).toBe(false);
   });
 
   it('turning a server off stores only enabled false for it', async () => {
     const { onChange } = renderField();
-    fireEvent.click(await screen.findByLabelText('Enabled: Beta'));
+    fireEvent.click(await screen.findByLabelText('Owner use: Beta'));
     expect(stored(onChange)).toEqual({ beta: { enabled: false } });
   });
 
@@ -95,7 +95,7 @@ describe('Tool selection', () => {
     const { onChange } = renderField({
       values: { toolSelection: { mcpServers: { alpha: { enabled: false } }, skills: {} } },
     });
-    fireEvent.click(await screen.findByLabelText('Enabled: Alpha'));
+    fireEvent.click(await screen.findByLabelText('Owner use: Alpha'));
     expect(stored(onChange)).toEqual({});
   });
 
@@ -111,7 +111,7 @@ describe('Tool selection', () => {
   it('a read-only profile offers no change', async () => {
     renderField({ readOnly: true });
     await screen.findByText('Alpha');
-    expect(screen.getByLabelText('Enabled: Alpha').disabled).toBe(true);
+    expect(screen.getByLabelText('Owner use: Alpha').disabled).toBe(true);
   });
 
   it('says so when no server is installed', async () => {
@@ -131,12 +131,12 @@ describe('Tool selection for skills', () => {
     renderField();
     expect(await screen.findByText('Launch review (launch-review)')).toBeTruthy();
     expect(screen.getByText('incident-notes')).toBeTruthy();
-    expect(screen.getByLabelText('Enabled: incident-notes').checked).toBe(true);
+    expect(screen.getByLabelText('Owner use: incident-notes').checked).toBe(true);
   });
 
   it('turning a skill off stores only enabled false for it, by skill id', async () => {
     const { onChange } = renderField();
-    fireEvent.click(await screen.findByLabelText('Enabled: incident-notes'));
+    fireEvent.click(await screen.findByLabelText('Owner use: incident-notes'));
     expect(stored(onChange, 'skills')).toEqual({ 'incident-notes': { enabled: false } });
   });
 
@@ -160,7 +160,7 @@ describe('Tool selection for skills', () => {
   it('says so when no skill is defined, and a read-only profile offers no change', async () => {
     renderField({ skills: [], readOnly: true });
     await waitFor(() => expect(screen.getByText(/No skills are defined/)).toBeTruthy());
-    expect((await screen.findByLabelText('Enabled: Alpha')).disabled).toBe(true);
+    expect((await screen.findByLabelText('Owner use: Alpha')).disabled).toBe(true);
   });
 });
 

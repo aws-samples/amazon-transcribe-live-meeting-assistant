@@ -44,7 +44,7 @@ LMA uses three roles:
 |-----------------|---------------|--------------------------------------------------------------------------------------------------------------|
 | **Admin**       | `Admin`       | Full access: all meeting features **and** admin-only pages (User Management, MCP Servers, View / Edit Configuration). |
 | **User**        | *(none)*      | Standard access: Meetings List, Meetings Query, Stream Audio/Video, Virtual Participant, MCP API Keys. No admin pages. |
-| **Participant** | `Participant` | Signs in to a home page only. No meetings, meeting sources, MCP access or configuration. |
+| **Participant** | `Participant` | Reads the meetings shared with them, read-only, asks the meeting assistant about them, and enrolls their own voice. No other meetings, no meeting sources, MCP access or configuration. See [Participant](user-based-access-control.md#participant). |
 
 > The `Admin` and `Participant` Cognito groups are created by `lma-cognito-stack`. Membership determines the role: `Admin` first, then `Participant`; a user that is in neither group is a regular `User`. Every token the user pool issues names that role, so the role applies everywhere a token is accepted. [User-Based Access Control](user-based-access-control.md#roles) lists what each role can use.
 
@@ -198,6 +198,13 @@ Besides this page, there is one other way an account is created: from a meeting'
 - **Limits.** One request creates at most 25 accounts; choose the button again for the rest. A User may create at most 25 accounts this way per day (UTC), counted across all their meetings; the answer says how many remain. A User may also look up the accounts of at most 1,000 different addresses a day (UTC); an address counts once a day however often its list is read, and the day's count keeps only a hash of each address. This is so that a list cannot be rewritten over and over to find out who has an account. Admins have neither daily limit.
 
 Cognito sends each new account the same invitation email as **Create user**. With the user pool's default email configuration (`COGNITO_DEFAULT`), Cognito sends only a small number of emails per day for the whole user pool (50 at the time of writing; see [Email settings for Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html)). Every invitation, password reset and verification email counts against it, so creating accounts for a large meeting can use it up. A deployment that needs to invite more people should configure the user pool to send email through Amazon SES.
+
+A Participant account created this way reads the meetings shared with it. With
+**Meeting Sharing › Share meetings with their listed participants** on (the
+default), a meeting is shared with the people on its participant list as soon
+as it starts and whenever the list changes, so a listed person who signs in
+finds it under **Shared meetings**; see
+[Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list).
 
 To answer the meeting page's account status (`getMeetingParticipantAccounts`), the same Lambda function reads the meeting's owner and participant list (`dynamodb:GetItem` on the meeting records and the Virtual Participant table) and looks up each address in the user pool. The two daily counts are items in the meeting table under the user's `usr#` key, which expire after two days.
 

@@ -168,7 +168,7 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
     monkeypatch.setattr(handler_module, "ENABLE_STREAMING", False)
 
     # Stand-ins for everything that would reach AWS.
-    monkeypatch.setattr(handler_module, "fetch_meeting_transcript", lambda *_args: "")
+    monkeypatch.setattr(handler_module, "fetch_meeting_transcript", lambda *_args, **_kw: "")
     monkeypatch.setattr(handler_module, "send_thinking_step_async", lambda *_args, **_kw: None)
     monkeypatch.setattr(handler_module.call_metering, "record", lambda *_args, **_kw: False)
     for factory, name in (

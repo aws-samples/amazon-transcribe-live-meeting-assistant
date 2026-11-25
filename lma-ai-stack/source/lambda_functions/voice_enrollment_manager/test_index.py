@@ -325,6 +325,46 @@ def test_a_stranger_cannot_withdraw_somebody_elses_enrollment(
     assert ddb.puts == []
 
 
+def test_a_participant_enrols_and_deletes_their_own_voice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Participant role, as every role, may consent, enroll and withdraw for themselves."""
+    ddb = install(monkeypatch, enrollment=None)
+    assert (
+        index.handler(event("grantVoiceConsent", groups=["Participant"]), None)["Success"] is True
+    )
+    ddb = install(monkeypatch, enrollment=consented())
+    enrolled = index.handler(
+        event(
+            "enrolMyVoice",
+            groups=["Participant"],
+            DisplayName="Sarah Lee",
+            Samples=SAMPLES,
+            TotalSeconds=30,
+        ),
+        None,
+    )
+    assert enrolled["Success"] is True
+    ddb = install(monkeypatch, enrollment=consented(status="active"))
+    withdrawn = index.handler(event("revokeVoiceConsent", groups=["Participant"]), None)
+    assert withdrawn["Success"] is True
+    assert "Centroid" not in ddb.enrollment_rows()[0]
+
+
+def test_a_participant_cannot_withdraw_somebody_elses_enrollment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddb = install(monkeypatch, enrollment=consented(status="active"))
+    result = index.handler(
+        {
+            "info": {"fieldName": "revokeVoiceConsent"},
+            "identity": {"sub": "sub-participant", "groups": ["Participant"], "claims": {}},
+            "arguments": {"input": {"SubjectId": ENROLLEE}},
+        },
+        None,
+    )
+    assert result["Success"] is False
+    assert ddb.puts == []
+
+
 def test_withdrawing_with_nothing_enrolled_still_records_the_withdrawal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

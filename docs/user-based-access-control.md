@@ -46,15 +46,17 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Capability | Admin | User | Participant | Notes |
 |---|---|---|---|---|
 | Participant home page | No | No | Yes | Admins and Users open the meetings list instead. |
+| A Participant's read-only view of the meetings shared with them: the list, and each meeting's transcript (live while it is in progress), summary, meeting chat, recordings and consent record | No | No | Yes | Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant no permissions. |
 | Meetings list and meeting pages: transcripts, summaries, recordings, key frames, notifications, whiteboards, archives and cost | Yes | Yes | No | Admin: every meeting. User: their own meetings and those shared with them. |
 | Editing, sharing, deleting and reopening meetings: speakers, summaries, agendas, preparation, labels, guidance and whiteboards | Yes | Yes | No | Admin: every meeting. User: the meetings each operation's own rule allows (sharing and deleting: their own). |
 | Meeting consent records | Yes | Yes | No | Admin: every meeting. User: the meetings they own or that are shared with them. |
-| Meeting assistant chat, the Meetings Query Tool, the knowledge base, and reading the installed MCP servers and skills | Yes | Yes | No |  |
+| The meeting assistant chat on a meeting's page | Yes | Yes | Yes | Admin: every meeting. User: their own meetings and those shared with them. Participant: the meetings shared with them, answered with the tools approved for Participant use and from that meeting only, and not added to its transcript. |
+| The Meetings Query Tool, the knowledge base, the chat buttons, the meeting page's chat notifications, and reading the installed MCP servers and skills | Yes | Yes | No |  |
 | Meeting sources: Stream Audio/Video, Upload Audio, the browser extension and the Desktop Capture App | Yes | Yes | No |  |
 | Virtual Participant: launch, schedule, view, share, end and rejoin | Yes | Yes | No | Admin: every Virtual Participant. User: their own and those shared with them. |
 | AWS credentials the web UI signs its own requests with: recording playback and file links, transcript translation, the deployment settings, and Virtual Participant launch | Yes | Yes | No |  |
 | MCP API keys and the hosted MCP server (API key and OAuth endpoints) | Yes | Yes | No | Admin: every meeting through MCP. User: their own meetings and those shared with them. |
-| Enrolling your own voice | Yes | Yes | No |  |
+| Enrolling your own voice | Yes | Yes | Yes | Each person their own voice only: enrolling it, and deleting it. |
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
 | A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
@@ -88,7 +90,9 @@ Each entry point then admits only the roles the role matrix lists for it:
   the deployment settings and Virtual Participant launch. The identity pool
   chooses the IAM role from the `lma_role` claim: Admins and Users receive the
   web UI's role, Participants a role with no permissions, and a token naming no
-  role receives no credentials.
+  role receives no credentials. A Participant's recording playback uses links
+  the server signs for a meeting shared with them instead; see
+  [Recording Playback](#recording-playback).
 - **Hosted MCP server, API key endpoint.** The API key authorizer reads the key
   owner's current groups from the user pool on every request. A key works only
   while its owner's role includes MCP access, and only while the owner exists;
@@ -138,15 +142,94 @@ to the users the meeting is shared with.
 A Participant account is for someone who takes part in meetings without using
 LMA to capture them, for example a guest from another organization. An Admin
 creates it, or changes an existing account to it, on the
-[User Management](user-management.md) page.
+[User Management](user-management.md) page, and a meeting's owner can create
+one for a person on their meeting's participant list (see
+[Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting)).
 
-A Participant signs in to a home page that says their meetings and consents will
-appear there, and nothing else: no meetings list or meeting pages, no meeting
-sources (Stream Audio/Video, Upload Audio, Virtual Participant, browser
-extension, Desktop Capture App), no meeting assistant, MCP access or voice
-enrollment, and no configuration. Opening any other page shows **Access
-denied**. The browser extension and the Desktop Capture App accept a
+A Participant signs in to a home page with three pages beside it:
+
+- **Shared meetings**: the meetings shared with them, newest first. A meeting
+  is shared with a Participant when its owner shares it by hand, or, with
+  [Meeting Sharing](#sharing-with-the-participant-list) on (the default), when
+  the Participant's address is on the meeting's participant list.
+- **A meeting's page**, read-only: its transcript (live while the meeting is in
+  progress), summary, meeting chat, recordings and consent record, and a
+  meeting assistant panel for questions about that meeting.
+- **Voice enrollment**: enrolling their own voice and deleting it again, as
+  every role can; see [Voice Enrollment](voice-enrollment.md).
+
+Nothing else: no meeting they are not on the sharing list of (owning a meeting
+is not enough for this role), no meeting sources (Stream Audio/Video, Upload
+Audio, Virtual Participant, browser extension, Desktop Capture App), no
+Meetings Query Tool, MCP access or configuration. Opening any other page shows
+**Access denied**. The browser extension and the Desktop Capture App accept a
 Participant's sign-in, and the transcriber then refuses their connection.
+
+### What a Participant sees of a shared meeting
+
+A Participant reads a meeting through operations of their own
+(`listParticipantMeetings`, `getParticipantMeeting`,
+`getParticipantMeetingTranscript`, `getParticipantMeetingRecordings` and the
+subscription `onAddParticipantTranscriptSegment`), which only the Participant
+role may call and which answer a meeting only when its sharing list names the
+caller. The queries return types of their own (`ParticipantMeeting`,
+`ParticipantTranscriptSegment` and the types inside them), built from an
+allowlist, rather than the meeting record with fields removed; the
+subscription returns the transcript's own type, as AppSync requires of a
+subscription to `addTranscriptSegment`, and is refused any selection beyond the
+fields `ParticipantTranscriptSegment` has: a field the meeting record gains in a later
+release reaches a Participant only when it is added to the allowlist and to the
+type. The member operations (`getCall`, `getTranscriptSegments`,
+`onAddTranscriptSegment` and every other) refuse a Participant at the field.
+
+| Shown | What it holds |
+|---|---|
+| The meeting | Its name (`CallId`), when it started and was last updated, its status, its length, its platform, and who shared it (`Owner`, the meeting's owner) |
+| `Agenda` | The meeting's agenda, as a request made in the meeting can already read it |
+| `CallSummaryText`, `SummaryStatus`, `ActionItems` | The summary, whether one is being written, and its action items |
+| Transcript | What was said and what was typed in the meeting chat, line by line, with the speaker names the owner gave (`SpeakerIdentities`, without the attendee candidates, the rejected names or the naming pass's bookkeeping, and `OtherParticipantsName`) |
+| `ParticipantNames` | The names on the meeting's participant list; the people listed see each other's names. Never their email addresses |
+| `Consent` | The consent record's mode, rule, status, whether capture is allowed, the notice, and each reply: who replied, consent or objection, how and when |
+| Recordings | Whether the meeting has audio and video recordings (`HasAudioRecording`, `HasVideoRecording`), the capture sessions they are placed by (`Sessions`), and, from `getParticipantMeetingRecordings`, links to them signed for an hour |
+| Deletions | When the transcript or the recordings were deleted under the Retention settings (`TranscriptDeletedAt`, `RecordingsDeletedAt`) |
+
+Not shown, as the owner's own material: the meeting context and its editor,
+the checklist and its evidence, the labels, the audience, the summary profile,
+the live guidance notifications and switch, the whiteboards and the whiteboard
+switch, the meeting assistant's answers (the wake phrase's and those in the
+meeting page's chat), the sharing list, the participant list's addresses, the
+recording links themselves, the consent record's attestation statement,
+evidence images, verification and status history, the per-line and overall
+sentiment, the cost estimate, the key frames of the shared screen and the chat
+attachments themselves (the meeting assistant panel can describe a key frame in
+words and list the chat attachments with their AI titles and summaries, as it
+does for a request made in the meeting), the capture and transcription details,
+and the metadata. The
+labels are treated as the owner's: they name engagements and internal
+references, and a Participant has nothing to filter by. The page offers no
+control that changes the meeting: no editing, deleting, sharing, regenerating,
+speaker naming or reopening.
+
+A Participant's live transcript is admitted, when it is opened, only while the
+meeting is shared with them, and only for the fields a
+`ParticipantTranscriptSegment` has; each message is then checked against the
+sharing list it is published with, so a meeting unshared while the page is open
+stops reaching it with the next line. The page reads the meeting again every 30
+seconds while it is in progress, and says **Access denied** once it is no
+longer shared.
+
+### The meeting assistant for a Participant
+
+The meeting assistant panel on a shared meeting's page answers a Participant's
+questions under the meeting assistant's
+[Participant use](meeting-assistant.md#participant-use) settings, the same ones
+that decide what a request made in the meeting is answered with and who may
+ask. Under the shipped **Current meeting only** it answers from that meeting
+alone. Whatever the settings say, a Participant's question is never offered the
+meeting context or checklist, nor the Virtual Participant controls, and the
+transcript it is given leaves out the meeting assistant's earlier answers. The
+question and its answer are shown to the Participant only: they are not added
+to the meeting's transcript.
 
 ## Authorized Account Email Domain
 
@@ -191,6 +274,51 @@ Meeting sharing allows owners to grant read-only access to other users.
 - Sharing does **not** validate recipient email addresses against the Authorized Email Domain setting
 - Recipients do **not** receive an email notification when a meeting is shared with them
 
+### Sharing with the participant list
+
+With **Meeting Sharing › Share meetings with their listed participants** on the
+Configuration page (`meeting_sharing.shareWithListedParticipants`, on by
+default and in every configuration preset), a meeting is shared with each
+address on its [participant list](virtual-participant.md#participant-list) as
+soon as the meeting record exists, so a listed person who signs in can follow
+the transcript while the meeting is in progress, and again whenever the list
+changes. It is done by the meeting controls function, reading each write of a
+meeting record from the meetings table's stream, through the same sharing the
+share dialog uses (the transcript, key frames and chat attachments are given
+the new sharing list too). The meeting record keeps the addresses it shared
+with (`AutoSharedWith`), so that:
+
+- someone taken off the list loses the share that was made for them;
+- a share the owner made by hand, to an address not already shared with this
+  way, is never removed this way, on the list or off it;
+- someone the owner unshares by hand stays unshared while they are on the list,
+  and is shared with again only if they are taken off and put back;
+- the meeting's owner is never added.
+
+Addresses are compared ignoring case. A listed address that has an LMA
+account is shared with under that account's own username, as the user pool
+finds it ignoring case, so a list entry `Jane.Doe@Example.com` reaches the
+account `jane.doe@example.com`; an address with no account yet is shared with
+as the list writes it, and reaches an account made later from the list, whose
+username is that address. Turned off, no meeting is shared this way from
+then on; the shares already made stay until the owner removes them. The
+setting is read for every change, and if it cannot be read the change is
+retried rather than made.
+
+A share or removal is written on condition that the meeting's sharing list is
+still the one it was planned from, so a change the owner saves in the share
+dialog just before it is kept and the plan is made again. The dialog's own save
+is not conditional: a dialog opened before an automatic share and saved after it
+removes that share, which then counts as the owner unsharing by hand. A record whose
+sharing still fails after three retries, or an hour, is described in the queue
+the AI stack names in its `MeetingSharingFailuresQueueName` output. A meeting
+still in progress is planned again with its next write, but an ended meeting is
+not, so an Admin applies such a change by hand with **Share** on the meeting. The owner
+can share and unshare by hand either way. The share applies to anyone signing
+in with that address, whatever their role: a User or Admin it is shared with
+sees it in their meetings list as any shared meeting, and a Participant on
+their **Shared meetings** page.
+
 ### Viewing Shared Meetings
 
 Different users see different meeting lists based on ownership and sharing:
@@ -219,9 +347,15 @@ the audio recordings prefix (`lma-audio-recordings/`) and the video recordings p
 the backend roles that own them. If a future release adds another prefix that the players
 read, that prefix has to be added to the same grant.
 
-If your organisation requires recording playback to be governed by the same per-meeting
-decision as the metadata, plan for that decision to be applied where the playback link is
-produced, which today is the web UI.
+A Participant's identity-pool role has no permissions, because a grant by key prefix
+cannot follow each meeting's sharing list. A Participant plays a recording through
+`getParticipantMeetingRecordings` instead: the server checks that the meeting is shared
+with them, and signs a link, valid for an hour, to each recording the meeting record names
+under the two playback prefixes of this deployment's recordings bucket.
+
+If your organisation requires recording playback for Admins and Users to be governed by the
+same per-meeting decision as the metadata, plan for that decision to be applied where the
+playback link is produced, which for those roles today is the web UI.
 
 ## Meeting Deletion
 
@@ -288,8 +422,9 @@ Every search of it is filtered on that owner, except an Admin's:
 
 - The meeting assistant's `meeting_history` tool searches only the meetings
   owned by the user it acts for: the signed-in user on the meeting page, or,
-  for a request made in the meeting that is allowed past meetings, the meeting's
-  owner.
+  for a Participant use request that is allowed past meetings (one made in the
+  meeting, or a Participant's question on a shared meeting's page), the
+  meeting's owner.
 - The **Meetings Query** page searches only the signed-in user's own meetings,
   and every meeting for a member of the Admin group, who can read every meeting
   anyway.
@@ -298,9 +433,9 @@ Every search of it is filtered on that owner, except an Admin's:
 
 A meeting shared with a user is not found by that user's search; only its owner's
 and an Admin's searches find it. So one user's assistant never reaches another
-user's meetings. An in-meeting request that is allowed past meetings reaches all
+user's meetings. A Participant use request that is allowed past meetings reaches all
 of the owner's meetings, including meetings with other organizations, which is
-why **In-meeting requests** is **Current meeting only** by default and in every
+why **Participant use** is **Current meeting only** by default and in every
 configuration preset.
 
 ## Upgrading from v0.1.9 or Earlier

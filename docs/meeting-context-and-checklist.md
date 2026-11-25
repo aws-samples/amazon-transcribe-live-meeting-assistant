@@ -191,10 +191,10 @@ Any request made in the meeting — a question typed in the meeting chat
 wake phrase — cannot read either tool by default. LMA cannot tell who in the
 meeting asked, a meeting's guests are often outside the owner's organization,
 and the meeting context can hold the owner's preparation notes. This holds
-whatever **Meeting Assistant › In-meeting requests** is set to: **Unrestricted**
+whatever **Meeting Assistant › Participant use** is set to: **Unrestricted**
 and **Selected tools** do not offer the two tools.
 
-An Admin can allow it with **Meeting Assistant › In-meeting requests: meeting
+An Admin can allow it with **Meeting Assistant › Participant use: meeting
 context and checklist** (`meeting_assist.inMeetingContextAccess`) on the
 [Configuration page](configuration-guide.md):
 

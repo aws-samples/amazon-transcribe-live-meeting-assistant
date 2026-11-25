@@ -1,0 +1,14 @@
+## Forwards a Participant's read-only view queries (listParticipantMeetings,
+## getParticipantMeeting, getParticipantMeetingTranscript and
+## getParticipantMeetingRecordings) to participant_meeting_resolver: the
+## arguments, the verified identity and the field name. The Lambda reads the
+## caller's username and groups from the identity, never from an argument.
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "arguments": $util.toJson($ctx.arguments),
+    "identity": $util.toJson($ctx.identity),
+    "info": { "fieldName": $util.toJson($ctx.info.fieldName) }
+  }
+}

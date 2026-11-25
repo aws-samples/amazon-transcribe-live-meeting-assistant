@@ -567,7 +567,7 @@ MCP_TOOLS = [
                             {"type": "string", "description": "An email address on its own"},
                         ]
                     },
-                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. With the deployment's Meeting Sharing setting on (the default), the meeting is shared, read-only, with each person listed, from when it starts",
                 },
                 "summaryProfile": {
                     "type": "string",
@@ -718,7 +718,7 @@ MCP_TOOLS = [
                             {"type": "string", "description": "An email address on its own"},
                         ]
                     },
-                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. With the deployment's Meeting Sharing setting on (the default), the meeting is shared, read-only, with each person listed, from when it starts",
                 },
                 "summaryProfile": {
                     "type": "string",

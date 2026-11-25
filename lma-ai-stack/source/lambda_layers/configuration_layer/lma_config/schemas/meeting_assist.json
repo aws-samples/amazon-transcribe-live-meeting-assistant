@@ -42,19 +42,19 @@
       "order": 3,
       "type": "boolean",
       "title": "Web search",
-      "description": "Offer web search (Tavily) to the meeting assistant. On, the default, offers it wherever a request is allowed it: always to the meeting page's own chat, and to a request made in the meeting as In-meeting requests allows. Off offers it to no request, the meeting page's chat included. Either way web search needs a Tavily API key on the stack."
+      "description": "Offer web search (Tavily) to the meeting assistant. On, the default, offers it wherever a request is allowed it: always to the meeting page's own chat (Owner use), and to other requests as Participant use allows. Off offers it to no request, the meeting page's chat included. Either way web search needs a Tavily API key on the stack."
     },
     "mcpServersEnabled": {
       "order": 4,
       "type": "boolean",
       "title": "MCP servers",
-      "description": "Let the meeting assistant use the MCP servers installed on the MCP Servers page. On, the default, uses them as Tool selection and In-meeting requests allow. Off loads none of them for any request, the meeting page's chat included; the servers stay installed. LMA's own MCP server, which other applications use to reach LMA, is not affected."
+      "description": "Let the meeting assistant use the MCP servers installed on the MCP Servers page. On, the default, uses them as Tool selection and Participant use allow. Off loads none of them for any request, the meeting page's chat included; the servers stay installed. LMA's own MCP server, which other applications use to reach LMA, is not affected."
     },
     "inMeetingRequestTools": {
       "order": 5,
       "type": "string",
-      "title": "In-meeting requests",
-      "description": "What the meeting assistant may use to answer a request made in the meeting by whoever is in it: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant, and a request spoken with the wake phrase. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers, skills and the Virtual Participant browser controls. Selected tools answers from the current meeting plus the tools switched on in the In-meeting requests settings below, each of which is off until it is switched on; the switches apply only with Selected tools. The meeting page's own assistant chat is offered every tool, except one that Web search or MCP servers turns off for every request.",
+      "title": "Participant use",
+      "description": "What the meeting assistant may use to answer a request from anyone other than the meeting's owner and the users it is shared with: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant or with the wake phrase, and a question a Participant asks on the page of a meeting shared with them. Current meeting only answers from the current meeting alone: its transcript, the messages typed in its chat, its agenda and what was shown on its shared screen, with no other tool. Unrestricted also offers every tool the meeting page's assistant has, acting for the meeting's owner: web search, the document knowledge base, the owner's past meetings, MCP servers, skills and the Virtual Participant browser controls. Selected tools answers from the current meeting plus the tools switched on in the Participant use settings below, each of which is off until it is switched on; the switches apply only with Selected tools. A Participant's question on a shared meeting's page is never offered the Virtual Participant browser controls, nor the meeting context and checklist, and is not given the assistant's earlier answers. The meeting page's own assistant chat for the owner, the users the meeting is shared with and Admins (Owner use) is offered every tool, except one that Web search or MCP servers turns off for every request.",
       "enum": ["current_meeting_only", "unrestricted", "selected"],
       "enumLabels": {
         "current_meeting_only": "Current meeting only (default)",
@@ -66,49 +66,49 @@
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 6,
       "type": "boolean",
-      "title": "In-meeting requests: web search",
-      "description": "With In-meeting requests set to Selected tools, offer web search (Tavily) to requests made in the meeting. The search query is written by the assistant from the request and the meeting, and is sent to Tavily. Needs a Tavily API key on the stack (TavilyApiKey or TavilyApiKeySecretArn); without one, the assistant says that web search is not available."
+      "title": "Participant use: web search",
+      "description": "With Participant use set to Selected tools, offer web search (Tavily) for Participant use. The search query is written by the assistant from the request and the meeting, and is sent to Tavily. Needs a Tavily API key on the stack (TavilyApiKey or TavilyApiKeySecretArn); without one, the assistant says that web search is not available."
     },
     "inMeetingDocumentSearch": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 7,
       "type": "boolean",
-      "title": "In-meeting requests: document knowledge base",
-      "description": "With In-meeting requests set to Selected tools, offer the document knowledge base to requests made in the meeting, so anyone in the meeting can hear or read what it returns. Needs a document knowledge base on the stack."
+      "title": "Participant use: document knowledge base",
+      "description": "With Participant use set to Selected tools, offer the document knowledge base for Participant use, so anyone in the meeting, and a Participant on a shared meeting's page, can hear or read what it returns. Needs a document knowledge base on the stack."
     },
     "inMeetingMeetingHistory": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 8,
       "type": "boolean",
-      "title": "In-meeting requests: the owner's past meetings",
-      "description": "With In-meeting requests set to Selected tools, offer the meeting owner's past meetings (their list, and search of their transcripts) to requests made in the meeting, acting for the owner whoever asked. Needs the transcript knowledge base on the stack."
+      "title": "Participant use: the owner's past meetings",
+      "description": "With Participant use set to Selected tools, offer the meeting owner's past meetings (their list, and search of their transcripts) for Participant use, acting for the owner whoever asked. Needs the transcript knowledge base on the stack."
     },
     "inMeetingMcpServers": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 9,
       "type": "boolean",
-      "title": "In-meeting requests: MCP servers",
-      "description": "With In-meeting requests set to Selected tools, offer every installed MCP server to requests made in the meeting, using each server's own connection whoever asked."
+      "title": "Participant use: MCP servers",
+      "description": "With Participant use set to Selected tools, offer every installed MCP server for Participant use, using each server's own connection whoever asked."
     },
     "inMeetingVpControls": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 10,
       "type": "boolean",
-      "title": "In-meeting requests: Virtual Participant controls",
-      "description": "With In-meeting requests set to Selected tools, offer the Virtual Participant's VNC preview and browser controls to requests made in the meeting."
+      "title": "Participant use: Virtual Participant controls",
+      "description": "With Participant use set to Selected tools, offer the Virtual Participant's VNC preview and browser controls for Participant use. Never offered to a Participant's question on a shared meeting's page."
     },
     "inMeetingSkills": {
       "dependsOn": { "field": "inMeetingRequestTools", "value": "selected" },
       "order": 11,
       "type": "boolean",
-      "title": "In-meeting requests: skills",
-      "description": "With In-meeting requests set to Selected tools, offer every skill on the Skills page to requests made in the meeting, except one whose own setting under Tool selection says otherwise. A skill is guidance an administrator wrote; it gives the assistant no tool it is not otherwise offered."
+      "title": "Participant use: skills",
+      "description": "With Participant use set to Selected tools, offer every skill on the Skills page for Participant use, except one whose own setting under Tool selection says otherwise. A skill is guidance an administrator wrote; it gives the assistant no tool it is not otherwise offered."
     },
     "inMeetingContextAccess": {
       "order": 12,
       "type": "string",
-      "title": "In-meeting requests: meeting context and checklist",
-      "description": "Whether any request made in the meeting (a question typed in the meeting chat, a request spoken to the voice assistant, or one spoken with the wake phrase) may read the meeting's context and checklist. None, the default, offers them only to the meeting page's own assistant chat, whatever In-meeting requests is set to: the context can hold the owner's preparation notes, and a meeting's guests are often outside the owner's organization. Allowed offers them to requests made in the meeting too, and an answer drawn from them is then posted in the meeting chat or spoken for everyone in the meeting; LMA never posts or speaks them on its own.",
+      "title": "Participant use: meeting context and checklist",
+      "description": "Whether any request made in the meeting (a question typed in the meeting chat, a request spoken to the voice assistant, or one spoken with the wake phrase) may read the meeting's context and checklist. None, the default, offers them only to the meeting page's own assistant chat, whatever Participant use is set to: the context can hold the owner's preparation notes, and a meeting's guests are often outside the owner's organization. Allowed offers them to requests made in the meeting too, and an answer drawn from them is then posted in the meeting chat or spoken for everyone in the meeting; LMA never posts or speaks them on its own. A Participant's question on a shared meeting's page is never offered them, whatever this says: the page does not show them either.",
       "enum": ["none", "allowed"],
       "enumLabels": {
         "none": "None: only the meeting page's assistant (default)",
@@ -118,8 +118,8 @@
     "inMeetingRequesters": {
       "order": 13,
       "type": "string",
-      "title": "In-meeting requests: who may ask",
-      "description": "Who in the meeting may make a request to the meeting assistant: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a conversation with the voice assistant, or a request spoken with the wake phrase. Anyone, the default, answers every participant. Owner only answers only a request spoken with the wake phrase on the LMA user's own microphone, which Stream Audio/Video, the Desktop Capture App and the browser extension capture as a channel of its own. A Virtual Participant knows a chat sender only by the display name the meeting shows, and a speaker only by a diarization label, so it cannot tell the owner from a guest: under Owner only it answers no question typed in the chat and does not start its voice assistant. Off answers no request made in the meeting, on any capture method, and a Virtual Participant does not start its voice assistant. The meeting page's own assistant chat is never affected.",
+      "title": "Participant use: who may ask",
+      "description": "Who in the meeting may make a request to the meeting assistant: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a conversation with the voice assistant, or a request spoken with the wake phrase. Anyone, the default, answers every participant. Owner only answers only a request spoken with the wake phrase on the LMA user's own microphone, which Stream Audio/Video, the Desktop Capture App and the browser extension capture as a channel of its own. A Virtual Participant knows a chat sender only by the display name the meeting shows, and a speaker only by a diarization label, so it cannot tell the owner from a guest: under Owner only it answers no question typed in the chat and does not start its voice assistant. Off answers no request made in the meeting, on any capture method, and a Virtual Participant does not start its voice assistant. The meeting page's own assistant chat is never affected. A Participant asking on the page of a meeting shared with them is answered under Anyone and refused under Owner only and Off.",
       "enum": ["anyone", "owner_only", "off"],
       "enumLabels": {
         "anyone": "Anyone in the meeting (default)",
@@ -147,22 +147,22 @@
       "order": 15,
       "type": "object",
       "title": "Tool selection",
-      "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one. A server or skill not listed here follows the defaults: it is used for the meeting owner's own requests, and for requests made in the meeting as In-meeting requests (and, under Selected tools, its kind's switch) allows; for an MCP server that is how it behaved before this setting existed. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",
+      "description": "Which installed MCP servers and which skills the meeting assistant may use, one by one: for Owner use (the meeting page's own chat, for the owner, the users the meeting is shared with and Admins) and for Participant use (a request from anyone other than the meeting's owner and the users it is shared with: a question typed in the meeting chat (\"LMA ask ...\" to the Virtual Participant), a request spoken to the voice assistant or with the wake phrase, and a question a Participant asks on the page of a meeting shared with them). A server or skill not listed here follows the defaults: it is used for Owner use, and for Participant use as the Participant use setting (and, under Selected tools, its kind's switch) allows; for an MCP server that is how it behaved before this setting existed. Installing, configuring and removing servers, and their credentials, stay on the MCP Servers page; writing skills, on the Skills page.",
       "widget": "toolSelection",
       "properties": {
         "mcpServers": {
           "order": 0,
           "type": "object",
           "title": "MCP servers",
-          "description": "Per installed MCP server, by its server id. Enabled: the assistant may use the server at all. In-meeting requests: the server may be used for requests made in the meeting (the meeting chat, the voice assistant, the wake phrase); when it is not set, the In-meeting requests setting decides, as for every server. Always on: reserved for a later always-on mode, stored and not yet used.",
+          "description": "Per installed MCP server, by its server id. Owner use (stored as enabled): the assistant may use the server at all; off, it is used for no request. Participant use (stored as inMeetingRequests): the server may be used for Participant use; when it is not set, the Participant use setting decides, as for every server. Always on: reserved for a later always-on mode, stored and not yet used.",
           "keyLabel": "Server id",
           "propertyNames": { "pattern": "^[^\\u0000-\\u001f\\u007f]{1,256}$" },
           "maxProperties": 200,
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "enabled": { "order": 0, "type": "boolean", "title": "Enabled" },
-              "inMeetingRequests": { "order": 1, "type": "boolean", "title": "In-meeting requests" },
+              "enabled": { "order": 0, "type": "boolean", "title": "Owner use" },
+              "inMeetingRequests": { "order": 1, "type": "boolean", "title": "Participant use" },
               "alwaysOn": { "order": 2, "type": "boolean", "title": "Always on (not yet used)" }
             },
             "additionalProperties": false
@@ -172,15 +172,15 @@
           "order": 1,
           "type": "object",
           "title": "Skills",
-          "description": "Per skill, by its skill id. Enabled: the assistant may use the skill at all. In-meeting requests: the skill may be used for requests made in the meeting; when it is not set, the In-meeting requests setting decides, as for every skill. Always on: reserved for a later always-on mode, stored and not yet used.",
+          "description": "Per skill, by its skill id. Owner use (stored as enabled): the assistant may use the skill at all; off, it is used for no request. Participant use (stored as inMeetingRequests): the skill may be used for Participant use; when it is not set, the Participant use setting decides, as for every skill. Always on: reserved for a later always-on mode, stored and not yet used.",
           "keyLabel": "Skill id",
           "propertyNames": { "pattern": "^[^\\u0000-\\u001f\\u007f]{1,256}$" },
           "maxProperties": 200,
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "enabled": { "order": 0, "type": "boolean", "title": "Enabled" },
-              "inMeetingRequests": { "order": 1, "type": "boolean", "title": "In-meeting requests" },
+              "enabled": { "order": 0, "type": "boolean", "title": "Owner use" },
+              "inMeetingRequests": { "order": 1, "type": "boolean", "title": "Participant use" },
               "alwaysOn": { "order": 2, "type": "boolean", "title": "Always on (not yet used)" }
             },
             "additionalProperties": false

@@ -62,6 +62,22 @@ ASSISTANT_SPEAKER = "Meeting Assistant"
 #: (strands_meeting_assist_function.IN_MEETING_TOOL_SCOPES).
 WAKE_PHRASE_TOOL_SCOPE = "wake_phrase"
 
+#: The tool scope of a Participant's question on the page of a meeting shared
+#: with them (strands_meeting_assist_function.PARTICIPANT_PAGE_SCOPE): answered
+#: under the Participant use settings, as a request made in the meeting is.
+PARTICIPANT_PAGE_TOOL_SCOPE = "participant_page"
+
+#: strands_chat_interface's RequesterRole for a Participant's question.
+PARTICIPANT_ROLE = "Participant"
+
+
+def is_participant_question(message: Dict[str, Any]) -> bool:
+    """A Participant asked on the page of a shared meeting (strands_chat_interface)."""
+    return (
+        message.get("Channel") == CHAT_ASSISTANT_CHANNEL
+        and message.get("RequesterRole") == PARTICIPANT_ROLE
+    )
+
 
 def meeting_time_seconds(call_id: str) -> float:
     """How far the meeting's transcript has reached, in seconds from its start.
@@ -201,16 +217,29 @@ def publish_lambda_agent_assist_transcript_segment(
         transcript_segment_args=transcript_segment_args,
     )
 
+    # A Participant's question and its answer are theirs: streamed to their page
+    # (addChatToken, by the meeting assistant) and not added to the meeting's
+    # transcript, which its owner and everyone it is shared with read.
+    participant = is_participant_question(message)
+    if participant:
+        lambda_agent_assist_input["participant_for_owner"] = message.get("MeetingOwner", "")
+
     # write initial message to indicate that wake word was detected and request submitted.
-    checking_segment = {**transcript_segment_args, "Transcript": "Checking...", "IsPartial": True}
-    write_agent_assist_to_kds(checking_segment)
+    if not participant:
+        checking_segment = {
+            **transcript_segment_args,
+            "Transcript": "Checking...",
+            "IsPartial": True,
+        }
+        write_agent_assist_to_kds(checking_segment)
 
     transcript_segment = get_lambda_agent_assist_transcript(
         **lambda_agent_assist_input,
         request_channel=channel,
     )
 
-    write_agent_assist_to_kds(transcript_segment)
+    if not participant:
+        write_agent_assist_to_kds(transcript_segment)
 
     # Return the transcript segment for synchronous callers
     return transcript_segment
@@ -220,8 +249,15 @@ def get_lambda_agent_assist_transcript(
     transcript_segment_args: Dict[str, Any],
     content: str,
     request_channel: str = "",
+    participant_for_owner: Any = None,
 ):
-    """Sends Lambda Agent Assist Requests"""
+    """Sends Lambda Agent Assist Requests.
+
+    ``participant_for_owner`` is set, to the meeting's owner, for a
+    Participant's question: it is sent with the Participant page tool scope,
+    and the tools that act for a user act for the owner, as for a request made
+    in the meeting.
+    """
     call_id = transcript_segment_args["CallId"]
 
     # Extract Owner (user email) from transcript_segment_args if available
@@ -242,7 +278,10 @@ def get_lambda_agent_assist_transcript(
     # in-meeting request: the meeting assistant answers it as the Meeting
     # Assistant section's In-meeting requests setting allows. A question from
     # the meeting page's chat is the signed-in user's, and carries no scope.
-    if transcript_segment_args.get("Channel") != CHAT_ASSISTANT_CHANNEL:
+    if participant_for_owner is not None:
+        payload["toolScope"] = PARTICIPANT_PAGE_TOOL_SCOPE
+        payload["userEmail"] = participant_for_owner
+    elif transcript_segment_args.get("Channel") != CHAT_ASSISTANT_CHANNEL:
         payload["toolScope"] = WAKE_PHRASE_TOOL_SCOPE
         # The channel it was spoken on and how the meeting is captured, from
         # which the meeting assistant tells the owner's own microphone apart

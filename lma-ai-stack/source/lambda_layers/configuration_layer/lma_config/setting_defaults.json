@@ -269,5 +269,11 @@
       "type": "integer",
       "default": 300
     }
+  },
+  "meeting_sharing": {
+    "shareWithListedParticipants": {
+      "type": "boolean",
+      "default": true
+    }
   }
 }

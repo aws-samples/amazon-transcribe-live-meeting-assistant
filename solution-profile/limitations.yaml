@@ -310,7 +310,7 @@ limitations:
       meeting only; widening them exposes what those tools return to everyone who can
       join.
     evidence:
-      - docs/meeting-assistant.md#in-meeting-requests
+      - docs/meeting-assistant.md#participant-use
       - docs/meeting-assistant.md#who-may-ask
     impact: medium
     detect_with: [question:transcript-visibility, question:hosting-model]
