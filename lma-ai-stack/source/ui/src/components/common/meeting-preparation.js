@@ -13,6 +13,8 @@
  * docs/meeting-context-and-checklist.md.
  */
 
+import { parseParticipantsText, participantsToText, sameParticipants } from './participant-list';
+
 export const MAX_LABELS = 20;
 export const LABEL_KEY = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 export const MAX_LABEL_VALUE_CHARS = 256;
@@ -247,6 +249,8 @@ export const EMPTY_VP_PREPARATION = {
   meetingContext: '',
   checklist: [],
   summaryProfile: '',
+  // The participant list, one "Name <email>" per line (participant-list.js).
+  participantsText: '',
 };
 
 /** A summary profile as a form holds it: '' for the default. */
@@ -258,6 +262,7 @@ export const vpPreparationForm = (vp) => ({
   audience: vp?.audience || '',
   meetingContext: vp?.meetingContext || '',
   summaryProfile: formProfile(vp?.summaryProfile),
+  participantsText: participantsToText(vp?.participants),
   checklist: (vp?.checklist || []).map(({ ItemId, Text, Kind, Priority, Source }) => ({
     ItemId,
     Text,
@@ -271,6 +276,8 @@ export const vpPreparationForm = (vp) => ({
 export const vpPreparationProblem = (form) => {
   const { error } = parseLabelsText(form?.labelsText);
   if (error) return error;
+  const { errors: participantErrors } = parseParticipantsText(form?.participantsText);
+  if (participantErrors.length) return participantErrors[0];
   if ((form?.meetingContext || '').length > MAX_CONTEXT_CHARS) {
     return `The meeting context is longer than ${MAX_CONTEXT_CHARS} characters`;
   }
@@ -289,6 +296,8 @@ export const vpPreparationInput = (form) => {
   if ((form?.meetingContext || '').trim()) input.meetingContext = form.meetingContext;
   if ((form?.checklist || []).length) input.checklist = checklistDefinitions(form.checklist);
   if (formProfile(form?.summaryProfile)) input.summaryProfile = form.summaryProfile;
+  const { participants } = parseParticipantsText(form?.participantsText);
+  if (participants.length) input.participants = participants;
   return input;
 };
 
@@ -312,6 +321,8 @@ export const vpPreparationChanges = (form, original) => {
   if (formProfile(form?.summaryProfile) !== before.summaryProfile) {
     changes.summaryProfile = formProfile(form?.summaryProfile);
   }
+  const { participants } = parseParticipantsText(form?.participantsText);
+  if (!sameParticipants(participants, original?.participants)) changes.participants = participants;
   return changes;
 };
 

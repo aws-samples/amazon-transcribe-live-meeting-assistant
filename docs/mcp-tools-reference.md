@@ -45,8 +45,8 @@ client connects, and the API key scopes, are in
   and `start_meeting_now`), without the meeting preparation arguments.
 - **Legacy keys** keep `schedule_meeting` and `start_meeting_now` with their
   original arguments: their `labels`, `audience`, `context`, `checklist`,
-  `shareWith`, `summaryProfile` and `guidance` arguments need a **Read and
-  write** key. The answers are the
+  `shareWith`, `summaryProfile`, `guidance` and `participants` arguments need a
+  **Read and write** key. The answers are the
   current ones on every endpoint and for every key.
 - **Annotations.** Every tool declares `readOnlyHint`, `destructiveHint` and
   `idempotentHint`. A key with the **Read only** scope is offered, and answered
@@ -116,9 +116,16 @@ optionally `priority` and `source`; each starts `open`), `summaryProfile` (the
 [summary profile](transcript-summarization.md#summary-profiles) the meeting is
 summarized with, from `list_summary_profiles`), `guidance` (true or false:
 [live guidance](live-guidance.md) for the meeting; omitted, the deployment's
-setting decides) and `shareWith` (email addresses). The Virtual Participant stores them and puts them on the meeting
-when it creates it; the meeting is then shared with the `shareWith` addresses.
-The Virtual Participant itself is not shared. Calling it again for a meeting
+setting decides), `shareWith` (email addresses) and `participants` (the
+[participant list](virtual-participant.md#participant-list): the people expected
+at the meeting, such as a calendar invite's attendees, each `{"name", "email"}`
+or an email address on its own; at most 100, an address listed once). The
+Virtual Participant stores them and puts them on the meeting when it creates
+it; the meeting is then shared with the `shareWith` addresses. The
+`participants` are listed on the meeting, not shared with: the meeting's owner
+sees on the meeting page whether each has an LMA account, and can create
+Participant accounts for those who have none. The Virtual Participant itself is
+not shared. Calling it again for a meeting
 already scheduled updates that Virtual Participant
 ([Scheduling a Meeting Again](mcp-api-key-auth.md#scheduling-a-meeting-again)).
 
@@ -133,7 +140,8 @@ already scheduled updates that Virtual Participant
   "audience": "external",
   "context": "Goal: agree the launch budget.",
   "checklist": [{"itemId": "q1", "text": "Who owns the budget?", "kind": "question", "priority": "must"}],
-  "shareWith": ["colleague@example.com"]
+  "shareWith": ["colleague@example.com"],
+  "participants": [{"name": "Ana Lima", "email": "ana@example.com"}, "bo@example.org"]
 }
 ```
 
@@ -170,7 +178,7 @@ joined; its answer then carries the LMA `meetingId` the meeting tools take.
 
 Changes a Virtual Participant that waits for its scheduled launch: any of
 `scheduledTime`, `meetingName`, `agenda`, `labels`, `audience`, `context`,
-`checklist`, `summaryProfile`, `guidance` and `shareWith`. Each one given replaces that
+`checklist`, `summaryProfile`, `guidance`, `shareWith` and `participants`. Each one given replaces that
 setting, and an empty value removes it. It is refused within 5 minutes of the start ("starts in less
 than 5 minutes, so it can no longer be changed"), and a new time must be at least
 5 minutes away. Once the Virtual Participant has started, change the meeting

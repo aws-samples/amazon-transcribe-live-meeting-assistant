@@ -287,6 +287,16 @@ describe('joinAgainInputFrom', () => {
     expect(input).not.toHaveProperty('isScheduled');
     expect(input).not.toHaveProperty('useStoredZoomAccount');
   });
+
+  it('sends the participant list, which the form copies from the source', () => {
+    const participants = [{ name: 'Ana', email: 'ana@example.com' }];
+    expect(joinAgainFormFrom({ ...ENDED, participants }).form.preparation.participantsText).toBe(
+      'Ana <ana@example.com>',
+    );
+    expect(
+      joinAgainInputFrom('vp-1', { meetingName: 'n', meetingPlatform: 'TEAMS', meetingId: '1', participants }),
+    ).toMatchObject({ participants });
+  });
 });
 
 describe('joinAgainFromState', () => {
@@ -449,6 +459,30 @@ describe('VirtualParticipantList with Join again values', () => {
     expect(input).not.toHaveProperty('meetingPassword');
     expect(mutationCalls('createVirtualParticipant')).toHaveLength(0);
     expect(mutationCalls('rejoinVirtualParticipant')).toHaveLength(0);
+  });
+
+  it('sends the participant list typed in the form, and blocks one with an invalid entry', async () => {
+    renderListWith(
+      { [JOIN_AGAIN_STATE_KEY]: joinAgainFormFrom(ENDED, AVAILABLE) },
+      {
+        joinAgainVirtualParticipant: () =>
+          Promise.resolve({ data: { joinAgainVirtualParticipant: { id: 'vp-2', Owner: 'owner@example.com' } } }),
+      },
+    );
+    await screen.findByDisplayValue('Weekly sync');
+    fireEvent.click(screen.getByText('Start a new meeting'));
+    acknowledge();
+    const field = screen.getByLabelText('Participants, one Name <email> per line');
+    fireEvent.change(field, { target: { value: 'Ana Lima <ana@example>' } });
+    expect(await screen.findByText(/no valid email address/)).toBeTruthy();
+    expect(screen.getByText('Join Now').closest('button').disabled).toBe(true);
+    fireEvent.change(field, { target: { value: 'Ana Lima <ana@example.com>\nbo@example.org' } });
+    fireEvent.click(screen.getByText('Join Now'));
+    await waitFor(() => expect(mutationCalls('joinAgainVirtualParticipant')).toHaveLength(1));
+    expect(mutationCalls('joinAgainVirtualParticipant')[0].variables.input.participants).toEqual([
+      { name: 'Ana Lima', email: 'ana@example.com' },
+      { name: '', email: 'bo@example.org' },
+    ]);
   });
 
   it('opens on a new meeting, saying why, when the meeting cannot be continued', async () => {

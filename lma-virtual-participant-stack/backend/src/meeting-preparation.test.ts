@@ -136,3 +136,33 @@ test('the meeting platform is named as the meeting record names it', () => {
   assert.equal(meetingPlatformName('other'), null);
   assert.equal(meetingPlatformName(undefined), null);
 });
+
+test('a VP with a participant list creates its meeting with it, unshared', () => {
+  const now = new Date('2026-11-25T10:00:00.000Z');
+  const preparation = preparationFromVpRow({
+    participants: [
+      { name: 'Ana Lima', email: 'ana@example.com' },
+      { name: '', email: 'ANA@example.com' },
+      { email: 'bo@example.org' },
+      { name: 'No address' },
+    ],
+  });
+  assert.deepEqual(preparation?.participants, [
+    { name: 'Ana Lima', email: 'ana@example.com' },
+    { name: '', email: 'bo@example.org' },
+  ]);
+  assert.deepEqual(preparationStartFields(preparation, 'alice@example.com', now), {
+    Participants: [
+      { name: 'Ana Lima', email: 'ana@example.com' },
+      { name: '', email: 'bo@example.org' },
+    ],
+    ParticipantsUpdatedBy: 'alice@example.com',
+    ParticipantsUpdatedAt: '2026-11-25T10:00:00.000Z',
+  });
+});
+
+test('a VP without a participant list adds none to its meeting', () => {
+  assert.equal(preparationFromVpRow({ participants: [] }), null);
+  assert.equal(preparationFromVpRow({ participants: 'ana@example.com' }), null);
+  assert.equal('Participants' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+});

@@ -187,4 +187,18 @@ describe('the meeting preparation in an edit', () => {
     expect(input).toEqual({ id: 'vp-1', audience: 'external', meetingContext: '', checklist: [] });
     expect(movesLaunchSchedule(input)).toBe(false);
   });
+
+  it('sends the participant list only when it changed, and [] to clear it', () => {
+    const listed = { ...PREPARED, participants: [{ name: 'Ana', email: 'ana@example.com' }] };
+    const state = editFormFrom(listed);
+    expect(state.form.preparation.participantsText).toBe('Ana <ana@example.com>');
+    expect(scheduledEditInput(listed, state, OFFERED)).toBeNull();
+    const cleared = {
+      ...state,
+      form: { ...state.form, preparation: { ...state.form.preparation, participantsText: '' } },
+    };
+    const input = scheduledEditInput(listed, cleared, OFFERED);
+    expect(input).toEqual({ id: 'vp-1', participants: [] });
+    expect(movesLaunchSchedule(input)).toBe(false);
+  });
 });

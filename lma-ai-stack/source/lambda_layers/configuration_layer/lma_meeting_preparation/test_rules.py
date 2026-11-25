@@ -535,3 +535,81 @@ def test_no_checklist_renders_as_nothing():
 
 def test_notes_can_be_left_out():
     assert "Note" not in rules.render_checklist(progressed(), with_notes=False)
+
+
+# ── the participant list ─────────────────────────────────────────────────────
+
+
+def test_participants_are_trimmed_and_kept_in_order():
+    given = [
+        {"name": "  Ana   Lima\n", "email": " ana@example.com "},
+        {"email": "bo@example.org"},
+        {"name": None, "email": "cy@example.net"},
+    ]
+    assert rules.normalize_participants(given) == [
+        {"name": "Ana Lima", "email": "ana@example.com"},
+        {"name": "", "email": "bo@example.org"},
+        {"name": "", "email": "cy@example.net"},
+    ]
+
+
+def test_no_participants_is_an_empty_list():
+    assert rules.normalize_participants(None) == []
+    assert rules.normalize_participants([]) == []
+
+
+def test_an_address_given_twice_is_kept_once_ignoring_case():
+    given = [
+        {"name": "", "email": "Ana@Example.com"},
+        {"name": "Ana Lima", "email": "ana@example.com"},
+        {"name": "Someone Else", "email": "ANA@EXAMPLE.COM"},
+        {"name": "Bo", "email": "bo@example.com"},
+    ]
+    assert rules.normalize_participants(given) == [
+        {"name": "Ana Lima", "email": "Ana@Example.com"},
+        {"name": "Bo", "email": "bo@example.com"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "email",
+    [
+        "",
+        "   ",
+        "ana",
+        "ana@",
+        "@example.com",
+        "ana@example",
+        "ana example@x.com",
+        "a@b.c",
+        None,
+        5,
+    ],
+)
+def test_a_participant_without_a_valid_address_is_refused(email):
+    with pytest.raises(PreparationError, match="Participant 1"):
+        rules.normalize_participants([{"name": "Ana", "email": email}])
+
+
+def test_an_overlong_address_or_name_is_refused():
+    with pytest.raises(PreparationError, match="not an email address"):
+        rules.normalize_participants([{"email": "a" * 250 + "@example.com"}])
+    with pytest.raises(PreparationError, match="longer than 200"):
+        rules.normalize_participants([{"name": "n" * 201, "email": "ana@example.com"}])
+
+
+def test_a_malformed_participant_list_is_refused():
+    with pytest.raises(PreparationError, match="must be a list"):
+        rules.normalize_participants("ana@example.com")
+    with pytest.raises(PreparationError, match="Participant 2 must have"):
+        rules.normalize_participants([{"email": "ana@example.com"}, "bo@example.com"])
+    with pytest.raises(PreparationError, match="name must be a string"):
+        rules.normalize_participants([{"name": 7, "email": "ana@example.com"}])
+
+
+def test_at_most_the_participant_limit_is_accepted_and_repeats_do_not_count():
+    full = [{"email": f"p{i}@example.com"} for i in range(rules.MAX_PARTICIPANTS)]
+    kept = rules.normalize_participants(full + [{"email": "P0@example.com"}])
+    assert len(kept) == rules.MAX_PARTICIPANTS
+    with pytest.raises(PreparationError, match=f"at most {rules.MAX_PARTICIPANTS}"):
+        rules.normalize_participants(full + [{"email": "one-more@example.com"}])

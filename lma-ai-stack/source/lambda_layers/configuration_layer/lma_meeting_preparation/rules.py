@@ -17,6 +17,9 @@ A meeting carries four inputs beside its agenda, stored on the meeting row
 ``Checklist``
     Up to 100 items the meeting should cover, each with a status and evidence.
 
+and, beside them, its participant list (``Participants``): the names and email
+addresses of the people expected to attend, up to 100.
+
 Everything that decides something about them lives here -- every limit, the
 merge when a checklist is replaced, the rule that a status a user set is never
 overwritten by the assistant, the removal of quotes when the transcript is
@@ -43,6 +46,15 @@ MAX_LABEL_VALUE_CHARS = 256
 AUDIENCES = ("internal", "external")
 
 MAX_CONTEXT_CHARS = 20000
+
+# The meeting's participant list (Participants on the meeting row, participants
+# on a Virtual Participant's row). The address pattern is the user management
+# resolver's (user_management/index.py EMAIL_PATTERN), so every listed address
+# is one an account can be created for.
+MAX_PARTICIPANTS = 100
+MAX_PARTICIPANT_NAME_CHARS = 200
+MAX_PARTICIPANT_EMAIL_CHARS = 254
+PARTICIPANT_EMAIL = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
 MAX_CHECKLIST_ITEMS = 100
 ITEM_ID = re.compile(r"[A-Za-z0-9._:-]{1,64}")
@@ -169,6 +181,59 @@ def normalize_context(value: Any) -> str:
     """The meeting context as stored; ``""`` clears it."""
     text = _text(value, "MeetingContext", MAX_CONTEXT_CHARS)
     return text or ""
+
+
+# ── the participant list ─────────────────────────────────────────────────────
+
+
+def normalize_participants(value: Any) -> List[Dict[str, str]]:
+    """The meeting's participant list as stored: ``[{"name", "email"}]``, ``[]`` for none.
+
+    Each entry needs an email address of the form a user account can be made
+    for (PARTICIPANT_EMAIL). Names are trimmed, with any run of white space,
+    line breaks included, made one space; a name may be empty. An address given
+    more than once, compared ignoring case, is kept once, at its first place,
+    with the first non-empty name given for it. More than MAX_PARTICIPANTS
+    distinct addresses is refused rather than cut short, so nobody is dropped
+    from the list silently.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PreparationError("Participants must be a list of name and email pairs")
+    participants: List[Dict[str, str]] = []
+    by_email: Dict[str, Dict[str, str]] = {}
+    for position, entry in enumerate(value, start=1):
+        if not isinstance(entry, Mapping):
+            raise PreparationError(f"Participant {position} must have a name and an email")
+        email = entry.get("email")
+        if not isinstance(email, str) or not email.strip():
+            raise PreparationError(f"Participant {position} has no email address")
+        email = email.strip()
+        if len(email) > MAX_PARTICIPANT_EMAIL_CHARS or not PARTICIPANT_EMAIL.fullmatch(email):
+            raise PreparationError(f"Participant {position}: {email[:80]} is not an email address")
+        name = entry.get("name")
+        if name is None:
+            name = ""
+        if not isinstance(name, str):
+            raise PreparationError(f"Participant {position}: the name must be a string")
+        name = " ".join(name.split())
+        if len(name) > MAX_PARTICIPANT_NAME_CHARS:
+            raise PreparationError(
+                f"Participant {position}: the name is longer than "
+                f"{MAX_PARTICIPANT_NAME_CHARS} characters"
+            )
+        known = by_email.get(email.casefold())
+        if known is not None:
+            if not known["name"] and name:
+                known["name"] = name
+            continue
+        if len(participants) >= MAX_PARTICIPANTS:
+            raise PreparationError(f"A meeting lists at most {MAX_PARTICIPANTS} participants")
+        participant = {"name": name, "email": email}
+        by_email[email.casefold()] = participant
+        participants.append(participant)
+    return participants
 
 
 # ── the checklist ────────────────────────────────────────────────────────────

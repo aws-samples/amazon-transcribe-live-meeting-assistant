@@ -441,6 +441,9 @@ more than one applies. `truncated` and `note` are absent otherwise.
 - `labels`, `audience`, `context`, `checklist`, `shareWith` (optional) — the
   meeting's preparation and the people to share it with once it starts; see
   [MCP Tools Reference › schedule_meeting](mcp-tools-reference.md#schedule_meeting)
+- `participants` (optional) — the invite's attendees, each `{name, email}`, put
+  on the meeting as its [participant list](virtual-participant.md#participant-list)
+  (listing someone does not share the meeting with them)
 - The answer's `meetingId` is the LMA meeting, `null` until the Virtual
   Participant has started it; the meeting ID or link given here is
   `platformMeetingId`
@@ -451,8 +454,8 @@ more than one applies. `truncated` and `note` are absent otherwise.
   `schedule_meeting`
 - `useStoredZoomCredentials` — default `true`; when the user has stored Zoom
   credentials in LMA, the VP signs in with them rather than joining as a guest
-- `agenda`, `labels`, `audience`, `context`, `checklist`, `shareWith`
-  (optional) — as for `schedule_meeting`
+- `agenda`, `labels`, `audience`, `context`, `checklist`, `shareWith`,
+  `participants` (optional) — as for `schedule_meeting`
 
 ### `get_virtual_participant_status`
 

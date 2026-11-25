@@ -51,6 +51,10 @@ export const updateScheduledVirtualParticipantMutation = /* GraphQL */ `
         Priority
         Source
       }
+      participants {
+        name
+        email
+      }
       consentMode
       consentRule
       scheduledTimeZone

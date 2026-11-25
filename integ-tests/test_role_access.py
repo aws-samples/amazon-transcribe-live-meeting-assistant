@@ -95,3 +95,45 @@ def test_the_mcp_server_refuses_a_key_whose_owner_is_a_participant(deployment, u
         pytest.skip("the stack has no MCP API key endpoint (EnableMCP=false)")
     assert status == 403
     assert probe.mcp_status_with_key(deployment, users["User"]) == 200
+
+
+#: The participant list operations, which a User may call for their own meetings only,
+#: each naming a placeholder meeting that nobody owns.
+PARTICIPANT_LIST_CALLS = (
+    (
+        "Query.getMeetingParticipantAccounts",
+        "query Probe($CallId: ID) { getMeetingParticipantAccounts(CallId: $CallId) { email account } }",
+        {"CallId": probe.PLACEHOLDER_ID},
+    ),
+    (
+        "Mutation.createParticipantAccounts",
+        (
+            "mutation Probe($input: CreateParticipantAccountsInput!) "
+            "{ createParticipantAccounts(input: $input) { created } }"
+        ),
+        {"input": {"CallId": probe.PLACEHOLDER_ID}},
+    ),
+    (
+        "Mutation.updateCallParticipants",
+        (
+            "mutation Probe($input: UpdateCallParticipantsInput!) "
+            "{ updateCallParticipants(input: $input) { CallId } }"
+        ),
+        {"input": {"CallId": probe.PLACEHOLDER_ID, "Participants": []}},
+    ),
+)
+
+
+def test_the_participant_list_operations_refuse_a_participant_and_a_user_who_does_not_own_the_meeting(
+    deployment, users
+) -> None:
+    """A Participant is refused at the field. A User reaches the resolver, which refuses a
+    meeting they do not own; test_meeting_participants.py covers the owner's own meeting."""
+    for operation, document, variables in PARTICIPANT_LIST_CALLS:
+        participant = probe.call(deployment, users["Participant"], document, variables)
+        assert probe.refused_at_field(participant, operation), (operation, participant)
+        user = probe.call(deployment, users["User"], document, variables)
+        messages = " ".join(e.get("message", "") for e in user.get("errors") or [])
+        assert not probe.refused_at_field(user, operation), (operation, user)
+        assert "Unauthorized" in messages, (operation, user)
+        assert not (user.get("data") or {}).get(operation.split(".", 1)[1]), (operation, user)

@@ -32,6 +32,7 @@ import updateCallAudience from '../graphql/queries/updateCallAudience';
 import updateCallSummaryProfile from '../graphql/queries/updateCallSummaryProfile';
 import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 import updateCallGuidance from '../graphql/queries/updateCallGuidance';
+import updateCallParticipants from '../graphql/queries/updateCallParticipants';
 import requestMeetingDigest from '../graphql/queries/requestMeetingDigest';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
@@ -56,6 +57,8 @@ export const PREPARATION_MUTATIONS = {
   summaryProfile: ['updateCallSummaryProfile', updateCallSummaryProfile],
   // Live guidance on or off for the meeting (docs/live-guidance.md).
   guidance: ['updateCallGuidance', updateCallGuidance],
+  // The participant list (docs/virtual-participant.md#participant-list).
+  participants: ['updateCallParticipants', updateCallParticipants],
 };
 
 /** The server's own words for a refused write, which name the limit that was broken. */
@@ -133,6 +136,10 @@ export const mergeCallUpdate = (existing, call) => ({
   // Selected by getCall, onUpdateCall and updateCallWhiteboards; every other
   // write published to onUpdateCall arrives with it null, which is not a change.
   WhiteboardsEnabled: call.WhiteboardsEnabled ?? existing?.WhiteboardsEnabled,
+  // Only getCall and updateCallParticipants select the participant list.
+  Participants: call.Participants ?? existing?.Participants,
+  ParticipantsUpdatedBy: call.ParticipantsUpdatedBy ?? existing?.ParticipantsUpdatedBy,
+  ParticipantsUpdatedAt: call.ParticipantsUpdatedAt ?? existing?.ParticipantsUpdatedAt,
   ...(call.AgendaUpdatedAt
     ? {}
     : {
