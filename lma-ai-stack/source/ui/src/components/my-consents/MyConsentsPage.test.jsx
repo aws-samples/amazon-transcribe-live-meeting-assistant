@@ -388,6 +388,22 @@ describe('the prompt a Participant lands on', () => {
     expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
   });
 
+  it('is not shown on a meeting’s consent page opened from its link', async () => {
+    answer({
+      listMyAdvanceConsents: () => ({ Enabled: true, Consents: [] }),
+      getAdvanceConsentInvitation: () => listed(),
+    });
+    render(
+      <MemoryRouter initialEntries={['/consents?meeting=Weekly%20sync']}>
+        <MyConsentsPage offerPrompt />
+      </MemoryRouter>,
+    );
+    await screen.findByText('Consent for Weekly sync');
+    // The person's consents have been read (none), as for the banner.
+    await screen.findByText(/You have not given consent in advance/);
+    expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+  });
+
   it('is not shown with a consent on record, with it turned off, or outside a Participant’s pages', async () => {
     answer({ listMyAdvanceConsents: () => ({ Enabled: true, Consents: [consent()] }) });
     renderPrompt();

@@ -1196,7 +1196,8 @@ choice here to avoid being asked in every meeting — for one meeting, for
 meetings with an organizer, or for all meetings on this deployment. You can
 change or withdraw it at any time, and you can still object in any meeting."*
 **Not now** dismisses the banner and does nothing else; nothing is recorded,
-and from then on signing in opens the home page. The dismissal is kept in that
+and from then on signing in opens the home page. The banner is shown on My
+consents opened without a link, not on a meeting's consent page. The dismissal is kept in that
 browser's local storage, under the person's Cognito sub, so it is per person
 and per browser: it is a display preference, not a consent decision, so it is
 not stored on the server. Admins and Users are never redirected.

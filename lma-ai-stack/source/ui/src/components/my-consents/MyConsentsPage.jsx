@@ -335,6 +335,7 @@ export const StandingConsentForm = ({ answer = null, onGiven }) => {
     // still in flight for an earlier one is ignored.
     setAgreed(false);
     setOffer(null);
+    setLoadError('');
     latest.current += 1;
     const asked = latest.current;
     if (!choice || !until) return;
@@ -660,8 +661,8 @@ MyConsentsList.propTypes = {
  * My consents: the signed-in person's consents given in advance, whatever
  * their role, with a standing consent they can give without a link; opened
  * from a meeting's consent link, that meeting's consent page instead.
- * `offerPrompt` (a Participant's pages) shows the banner a person with no
- * consent on record sees until they dismiss it.
+ * `offerPrompt` (a Participant's pages) shows, without a link, the banner a
+ * person with no consent on record sees until they dismiss it.
  */
 const MyConsentsPage = ({ offerPrompt = false }) => {
   const sub = sessionSub(useAppContext());
@@ -700,7 +701,7 @@ const MyConsentsPage = ({ offerPrompt = false }) => {
       }
     >
       <SpaceBetween size="l">
-        {offerPrompt && <ConsentPromptBanner answer={answer} sub={sub} />}
+        {offerPrompt && !meetingRef && <ConsentPromptBanner answer={answer} sub={sub} />}
         {meetingRef ? (
           <MeetingConsentInvitation meetingRef={meetingRef} onGiven={loadConsents} />
         ) : (
