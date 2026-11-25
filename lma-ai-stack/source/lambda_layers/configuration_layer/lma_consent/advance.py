@@ -259,8 +259,8 @@ def covers(consent: Mapping[str, Any], meeting: Mapping[str, Any], now: datetime
     consent never counts; one given after ``now`` does not either. A
     ``meeting`` consent counts for the meeting it names, by CallId or by the
     Virtual Participant that created it. An ``organizer`` consent counts for any
-    meeting whose owner is that organizer, compared exactly, as LMA compares
-    owners (ignoring case, as the user pool compares usernames), and, when it
+    meeting whose owner is that organizer, compared ignoring case, as the user
+    pool compares usernames, and, when it
     names a label, that carries that label (key and value compared exactly). A
     ``deployment`` consent counts for every meeting.
     """

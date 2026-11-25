@@ -304,6 +304,12 @@ export const StandingConsentForm = ({ answer = null, onGiven }) => {
   const [result, setResult] = useState(null);
   const latest = useRef(0);
 
+  // The longest period arrives with the person's consents: a default date
+  // beyond it is brought within it.
+  useEffect(() => {
+    setUntil((day) => (day > dateAhead(maxDays) ? dateAhead(Math.min(DEFAULT_STANDING_DAYS, maxDays)) : day));
+  }, [maxDays]);
+
   // The organizers named on the person's own consents, to pick from again.
   const known = useMemo(
     () =>
@@ -325,13 +331,13 @@ export const StandingConsentForm = ({ answer = null, onGiven }) => {
   }, [scope, until, organizer, labelKey, labelValue]);
 
   const load = useCallback(async () => {
+    // A new choice: the earlier text is not shown under it, and an answer
+    // still in flight for an earlier one is ignored.
     setAgreed(false);
-    if (!choice || !until) {
-      setOffer(null);
-      return;
-    }
+    setOffer(null);
     latest.current += 1;
     const asked = latest.current;
+    if (!choice || !until) return;
     try {
       const response = await client.graphql({ query: getAdvanceConsentInvitation, variables: choice });
       if (asked !== latest.current) return;

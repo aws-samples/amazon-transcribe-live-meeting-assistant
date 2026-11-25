@@ -324,6 +324,18 @@ describe('My consents with no link', () => {
     });
   });
 
+  it('starts on a date within a longest period shorter than the default', async () => {
+    answer({
+      listMyAdvanceConsents: () => ({ Enabled: true, MaxDays: 30, Consents: [] }),
+      getAdvanceConsentInvitation: standing,
+    });
+    renderAt('/consents');
+    fireEvent.click(await screen.findByLabelText(/All meetings on this deployment/));
+    await waitFor(() => expect(calls('getAdvanceConsentInvitation').length).toBeGreaterThan(0));
+    const limit = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    calls('getAdvanceConsentInvitation').forEach(({ variables }) => expect(variables.ValidUntil <= limit).toBe(true));
+  });
+
   it('says when the deployment takes no consent given in advance', async () => {
     answer({ listMyAdvanceConsents: () => ({ Enabled: false, Consents: [] }) });
     renderAt('/consents');

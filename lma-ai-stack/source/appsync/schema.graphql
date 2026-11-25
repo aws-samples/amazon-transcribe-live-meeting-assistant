@@ -2206,7 +2206,7 @@ type MeetingConsentEvent @aws_cognito_user_pools
 type MeetingConsentPreMeeting @aws_cognito_user_pools
 @aws_iam {
 	ConsentId: String
-	# "meeting" or "organizer".
+	# "meeting", "organizer" or "deployment".
 	Scope: String
 	GrantedAt: AWSDateTime
 	ValidUntil: AWSDateTime

@@ -540,10 +540,11 @@ query Standing($Scope: String, $ValidUntil: String, $Organizer: String, $LabelKe
 
 
 def test_a_participant_with_no_link_gives_standing_consents_and_withdraws_one(
-    deployment, users
+    deployment, users, meeting  # noqa: ARG001 - its teardown removes the consents
 ) -> None:
     """Runs last: it gives the unlisted Participant consents, which the test
-    above asserts they do not have."""
+    above asserts they do not have. Takes ``meeting`` for its teardown, which
+    deletes each user's consents."""
     person = users["unlisted"]
     until = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
     everywhere = {"Scope": "deployment", "ValidUntil": until}
