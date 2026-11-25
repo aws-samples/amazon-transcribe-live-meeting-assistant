@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -319,7 +320,11 @@ class FakeConsentTable:
     def query(self, **kwargs):
         self.queries.append(kwargs)
         pk = kwargs["ExpressionAttributeValues"][":pk"]
-        return {"Items": [dict(i) for i in self.items if i["PK"] == pk]}
+        matching = [dict(i) for i in self.items if i["PK"] == pk and "WithdrawnAt" not in i]
+        # Two pages, as DynamoDB answers a long partition.
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": matching[:1], "LastEvaluatedKey": {"PK": pk, "SK": "next"}}
+        return {"Items": matching[1:]}
 
     def update_item(self, **kwargs):
         self.updated.append(kwargs)
@@ -327,6 +332,7 @@ class FakeConsentTable:
             if (item["PK"], item["SK"]) == (kwargs["Key"]["PK"], kwargs["Key"]["SK"]):
                 item["WithdrawnAt"] = kwargs["ExpressionAttributeValues"][":w"]
                 item["WithdrawnReason"] = kwargs["ExpressionAttributeValues"][":r"]
+                item["ExpiresAfter"] = kwargs["ExpressionAttributeValues"][":e"]
         return {}
 
 
@@ -337,6 +343,8 @@ def test_deleting_a_user_withdraws_the_consents_they_gave_in_advance(env, monkey
             {"PK": "pmc#new@example.com", "SK": "ac#2", "Subject": "sub-new", "WithdrawnAt": "x"},
             # Given by an earlier account with the same address: not this user's.
             {"PK": "pmc#new@example.com", "SK": "ac#3", "Subject": "sub-earlier"},
+            # On the second page.
+            {"PK": "pmc#new@example.com", "SK": "ac#4", "Subject": "sub-new"},
         ]
     )
     monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")
@@ -349,8 +357,10 @@ def test_deleting_a_user_withdraws_the_consents_they_gave_in_advance(env, monkey
     )
 
     assert result["success"] is True
-    assert [u["Key"]["SK"] for u in table.updated] == ["ac#1"]
+    assert [u["Key"]["SK"] for u in table.updated] == ["ac#1", "ac#4"]
     assert table.items[0]["WithdrawnReason"] == "account_deleted"
+    # Kept for the meeting records' retention from the deletion, not to its end date.
+    assert abs(table.items[0]["ExpiresAfter"] - (time.time() + 90 * 86400)) < 60
     assert table.items[1]["WithdrawnAt"] == "x"
     assert "WithdrawnAt" not in table.items[2]
 

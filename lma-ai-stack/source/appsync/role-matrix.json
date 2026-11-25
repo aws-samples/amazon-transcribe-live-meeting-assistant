@@ -298,7 +298,7 @@
       "id": "advance-consent",
       "title": "Consent given in advance: your own consents, a meeting's consent page, and asking to be added to its participant list",
       "roles": ["Admin", "User", "Participant"],
-      "notes": "Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list; someone not on it is told only that, and may ask to be added, which notifies the meeting's owner in LMA.",
+      "notes": "Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list.",
       "appsync": [
         "Query.listMyAdvanceConsents",
         "Query.getAdvanceConsentInvitation",

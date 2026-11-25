@@ -107,7 +107,10 @@ class FakeTable:
     def delete_item(self, Key):  # noqa: N803
         self.items.pop(self._key(Key), None)
 
-    def query(self, KeyConditionExpression, ScanIndexForward=True, Limit=None, **_kwargs):  # noqa: N803
+    #: Items per page, as DynamoDB pages a long partition.
+    page_size = 2
+
+    def query(self, KeyConditionExpression, ScanIndexForward=True, Limit=None, **kwargs):  # noqa: N803
         wanted = _key_values(KeyConditionExpression)
         out = []
         for (hash_value, range_value), item in self.items.items():
@@ -118,7 +121,18 @@ class FakeTable:
                 continue
             out.append(copy.deepcopy(item))
         out.sort(key=lambda i: i[self.range_key], reverse=not ScanIndexForward)
-        return {"Items": out[:Limit] if Limit else out}
+        if Limit:
+            return {"Items": out[:Limit]}
+        start = int((kwargs.get("ExclusiveStartKey") or {}).get("n", 0))
+        page = out[start : start + self.page_size]
+        if kwargs.get("FilterExpression") is not None:
+            # The one filter the resolver uses: not withdrawn.
+            page = [item for item in page if "WithdrawnAt" not in item]
+        more = start + self.page_size < len(out)
+        return {
+            "Items": page,
+            **({"LastEvaluatedKey": {"n": start + self.page_size}} if more else {}),
+        }
 
     def update_item(self, Key, UpdateExpression, ConditionExpression="", **kwargs):  # noqa: N803
         values = kwargs.get("ExpressionAttributeValues") or {}
@@ -449,6 +463,22 @@ def test_nobody_can_withdraw_another_persons_consent(aws):
     assert stored(aws, ANA)[0].get("WithdrawnAt") is None
     with pytest.raises(index.BadRequest):
         call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": "../pmc#bo@example.com"}})
+
+
+def test_an_old_consent_in_force_is_found_past_newer_withdrawn_ones(aws):
+    first = give(ANA)
+    for _ in range(4):
+        given = give(
+            ANA,
+            Scope="organizer",
+            ValidUntil=(datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d"),
+        )
+        call("withdrawAdvanceConsent", ANA, {"input": {"ConsentId": given["ConsentId"]}})
+    assert [c["ConsentId"] for c in invitation(ANA)["ActiveConsents"]] == [first["ConsentId"]]
+    # A new consent for the same meeting still replaces it.
+    second = give(ANA)
+    statuses = {c["ConsentId"]: c["Status"] for c in call("listMyAdvanceConsents", ANA)["Consents"]}
+    assert (statuses[first["ConsentId"]], statuses[second["ConsentId"]]) == ("withdrawn", "active")
 
 
 def test_the_consent_page_lists_the_consents_that_cover_the_meeting(aws):

@@ -172,9 +172,15 @@ describe('the invitation to consent', () => {
         participants={PEOPLE}
         virtualParticipantId="vp-1"
         canManage
-        requests={[{ name: 'Cy Diaz', email: 'cy@example.net', requestedAt: '2026-11-25T10:00:00Z' }]}
+        requests={[
+          { name: 'Cy Diaz', email: 'cy@example.net', requestedAt: '2026-11-25T10:00:00Z' },
+          // Added to the list since: no longer shown.
+          { name: 'Bo', email: 'BO@example.org', requestedAt: '2026-11-25T10:00:00Z' },
+        ]}
       />,
     );
-    expect(await screen.findByText(/Cy Diaz <cy@example.net>/)).toBeTruthy();
+    const alert = await screen.findByText(/Cy Diaz <cy@example.net>/);
+    expect(alert.textContent).not.toContain('BO@example.org');
+    expect(alert.textContent).toMatch(/^This person/);
   });
 });

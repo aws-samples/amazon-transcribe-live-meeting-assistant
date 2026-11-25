@@ -14,6 +14,7 @@ import {
   consentScopeLabel,
   consentStatusLabel,
   dateAhead,
+  localDay,
 } from './advance-consent';
 
 const BASE = 'https://d111111abcdef8.cloudfront.net/';
@@ -94,6 +95,11 @@ describe('a stored consent', () => {
     expect(consentStatusLabel({ Status: 'expired' })).toBe('Expired');
     expect(consentStatusLabel({ Status: 'withdrawn', WithdrawnReason: 'replaced' })).toBe('Replaced');
     expect(consentStatusLabel({ Status: 'withdrawn', WithdrawnReason: 'withdrawn' })).toBe('Withdrawn');
+  });
+
+  it('reads a date picker day as the local day it shows', () => {
+    expect(localDay(new Date(2026, 10, 25))).toBe('2026-11-25');
+    expect(localDay(new Date(2026, 0, 1, 23, 59))).toBe('2026-01-01');
   });
 
   it('dates a period in UTC days', () => {

@@ -9,9 +9,8 @@ A signed-in person can consent before a meeting to its being recorded and
 transcribed, from the meeting's consent page. The consent is kept under the
 person's email address, with the scope it was given for, when it was given,
 until when it counts, when it was withdrawn, and the exact text they agreed to.
-Everything here is free of AWS, so the resolver that stores consents and the
-meeting consent resolver that reads them in a meeting decide alike. See
-docs/meeting-consent.md#consent-given-in-advance.
+Everything here is free of AWS, so every reader of these consents decides what
+one covers by the same rules. See docs/meeting-consent.md#consent-given-in-advance.
 
 Scopes:
 

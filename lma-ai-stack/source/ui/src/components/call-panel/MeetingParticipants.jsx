@@ -186,6 +186,9 @@ const MeetingParticipants = ({
 
   const canEdit = canManage && Boolean(onSave);
   if (!people.length && !canEdit) return null;
+  // Requests from people who have been added since are answered.
+  const listedAddresses = new Set(people.map((p) => p.email.toLowerCase()));
+  const openRequests = (requests || []).filter((r) => r?.email && !listedAddresses.has(r.email.toLowerCase()));
 
   const accountOf = (email) => accounts?.get(email.toLowerCase());
   const withoutAccount = accounts ? people.filter((p) => accountOf(p.email) === 'none') : [];
@@ -304,11 +307,11 @@ const MeetingParticipants = ({
           </Alert>
         )}
         {accountsError && <Alert type="warning">{accountsError}</Alert>}
-        {canManage && requests.length > 0 && (
+        {canManage && openRequests.length > 0 && (
           <Alert type="info" header="Asked to be added">
-            {`${requests.length === 1 ? 'This person' : 'These people'} opened the meeting's consent link and ` +
-              `${requests.length === 1 ? 'is' : 'are'} not on the list: ` +
-              `${requests.map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join(', ')}. ` +
+            {`${openRequests.length === 1 ? 'This person' : 'These people'} opened the meeting's consent link and ` +
+              `${openRequests.length === 1 ? 'is' : 'are'} not on the list: ` +
+              `${openRequests.map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join(', ')}. ` +
               'Add them to the list to let them give consent in advance.'}
           </Alert>
         )}

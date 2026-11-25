@@ -1203,14 +1203,19 @@ somebody who is sent it but is not on the list cannot consent with it.
 **Someone not on the list** is told *"You are not on this meeting's list"*,
 with the address they signed in with. Nothing about the meeting is shown to
 them, not even its name, and nothing is recorded about their consent. They may
-choose **Ask to be added**, with their name if they like, which tells the
-meeting's owner in LMA, never by email:
+choose **Ask to be added**, with their name if they like. That is shown in LMA,
+never sent by email, to the people who see the meeting's participant list: its
+owner, the users it is shared with and Admins. The page says so before they ask.
 
-- for a meeting that exists, as a [meeting notification](meeting-notifications.md)
+- For a meeting that exists, it is a [meeting notification](meeting-notifications.md)
   of category `meeting` and type `participant_list_request`, with the person's
-  name and address and a button that copies them;
-- for a Virtual Participant that has not created its meeting yet, in the
-  **Participants** section of its page, as *Asked to be added* (at most 20).
+  name and address and a button that copies them. Like every meeting
+  notification, it reaches everyone who can see the meeting in LMA, not only
+  its owner. A Participant the meeting is shared with does not receive meeting
+  notifications.
+- For a Virtual Participant that has not created its meeting yet, it is shown in
+  the **Participants** section of its page, as *Asked to be added*, to its owner
+  and Admins, until the person is on the list. The page keeps at most 20.
 
 The owner adds them to the list as usual. A person is asked for once per meeting
 in 30 days, however often they choose the button, and one person may ask at
@@ -1263,8 +1268,8 @@ API say whether device details were kept with a consent, and never return them.
 
 ### Withdrawing
 
-**Withdraw** on My consents ends a consent at once: from then on it is not
-counted for any meeting. The record stays, marked withdrawn with the time, so
+**Withdraw** on My consents ends a consent at once: from then on it is no
+longer in force. The record stays, marked withdrawn with the time, so
 what the person agreed to and when they withdrew remain on record. Deleting an
 account in User Management withdraws the consents that account gave, with the
 reason `account_deleted`.
@@ -1554,7 +1559,7 @@ result is seen on the next read of the record.
 | Check evidence with the vision model (`verifyMeetingConsentEvidence`) | The owner, an Admin, or a backend role. Where evidence screenshots are not kept, the check is what deletes the image |
 | Your own consents given in advance (`listMyAdvanceConsents`, `withdrawAdvanceConsent`) | Every signed-in role (Admin, User, Participant), each for the consents kept under the address the user pool holds for them only |
 | A meeting's consent page (`getAdvanceConsentInvitation`) and giving consent (`giveAdvanceConsent`) | Every signed-in role, for a meeting whose participant list has the caller's address. Anyone else is told only that they are not on the list |
-| Ask to be added (`askToBeAddedToMeeting`) | Every signed-in role, for a meeting whose list does not have the caller's address. It tells the meeting's owner in LMA |
+| Ask to be added (`askToBeAddedToMeeting`) | Every signed-in role, for a meeting whose list does not have the caller's address. It is shown in LMA to the people who see the meeting's participant list |
 
 The WebSocket transcriber's task role is one of LMA's backend roles. It is
 granted the six consent mutations it calls (`startMeetingConsent`,

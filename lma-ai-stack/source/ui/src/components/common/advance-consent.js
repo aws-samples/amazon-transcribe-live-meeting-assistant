@@ -101,6 +101,10 @@ export const consentStatusLabel = (consent) => {
   return 'Withdrawn';
 };
 
+/** A local calendar day as YYYY-MM-DD: a date picker's days are the browser's own. */
+export const localDay = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 /** A date `days` ahead, written YYYY-MM-DD in UTC, as the API takes ValidUntil. */
 export const dateAhead = (days, now = new Date()) => {
   const date = new Date(now.getTime() + days * 86400000);

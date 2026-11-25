@@ -70,6 +70,8 @@ EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 # The Virtual Participant table, read for the owner and participant list of a
 # Virtual Participant that has not created its meeting yet.
 VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
+# How long a withdrawn consent given in advance is kept, from its withdrawal.
+MEETING_RECORD_EXPIRATION_DAYS = float(os.environ.get("MEETING_RECORD_EXPIRATION_IN_DAYS", "90"))
 # The Cognito stack's table of last sign-in times (key "UserSub"); empty when the
 # Cognito stack has none.
 USER_SIGN_IN_TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
@@ -433,6 +435,21 @@ def _sub_and_email_of(username):
     return _attr(user, "sub") or "", (_attr(user, "email") or "").strip()
 
 
+def _consents_in_force(table, partition):
+    """Every consent under one address not yet withdrawn, a page at a time."""
+    arguments = {
+        "KeyConditionExpression": "PK = :pk AND begins_with(SK, :ac)",
+        "FilterExpression": "attribute_not_exists(WithdrawnAt)",
+        "ExpressionAttributeValues": {":pk": partition, ":ac": "ac#"},
+    }
+    while True:
+        page = table.query(**arguments)
+        yield from page.get("Items", [])
+        if not page.get("LastEvaluatedKey"):
+            return
+        arguments["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
 def _withdraw_advance_consents(email, sub):
     """Withdraw the consents a deleted user gave in advance. Best effort: the user is gone.
 
@@ -445,21 +462,21 @@ def _withdraw_advance_consents(email, sub):
     if not EVENT_SOURCING_TABLE or not email or not sub:
         return
     table = boto3.resource("dynamodb").Table(EVENT_SOURCING_TABLE)
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    moment = time.time()
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(moment))
+    # Kept for the meeting records' retention from now, as a consent the
+    # person withdraws themselves is.
+    expires = int(moment + MEETING_RECORD_EXPIRATION_DAYS * 86400)
     try:
-        items = table.query(
-            KeyConditionExpression="PK = :pk AND begins_with(SK, :ac)",
-            ExpressionAttributeValues={":pk": f"pmc#{email.casefold()}", ":ac": "ac#"},
-        ).get("Items", [])
-        for item in items:
-            if item.get("WithdrawnAt") or item.get("Subject") != sub:
+        for item in _consents_in_force(table, f"pmc#{email.casefold()}"):
+            if item.get("Subject") != sub:
                 continue
             try:
                 table.update_item(
                     Key={"PK": item["PK"], "SK": item["SK"]},
-                    UpdateExpression="SET WithdrawnAt = :w, WithdrawnReason = :r",
+                    UpdateExpression="SET WithdrawnAt = :w, WithdrawnReason = :r, ExpiresAfter = :e",
                     ConditionExpression="attribute_not_exists(WithdrawnAt)",
-                    ExpressionAttributeValues={":w": now, ":r": "account_deleted"},
+                    ExpressionAttributeValues={":w": now, ":r": "account_deleted", ":e": expires},
                 )
             except ClientError as exc:
                 if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":

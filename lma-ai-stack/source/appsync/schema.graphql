@@ -528,8 +528,8 @@ type Mutation @aws_iam {
 	# Consent given in advance, by the signed-in person for themselves
 	# (advance_consent_resolver). Giving needs the caller on the meeting's
 	# participant list and the NoticeHash getAdvanceConsentInvitation returned
-	# for the same choice; asking to be added is for someone not on it, and
-	# tells the meeting's owner in LMA. See
+	# for the same choice; asking to be added is for someone not on it, and is
+	# shown in LMA to the people who see the meeting's participant list. See
 	# docs/meeting-consent.md#consent-given-in-advance.
 	giveAdvanceConsent(input: GiveAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	withdrawAdvanceConsent(input: WithdrawAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])

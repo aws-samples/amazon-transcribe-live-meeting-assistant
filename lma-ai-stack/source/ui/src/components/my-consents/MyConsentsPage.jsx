@@ -35,7 +35,13 @@ import {
   listMyAdvanceConsents,
   withdrawAdvanceConsent,
 } from '../../graphql/queries/advanceConsent';
-import { consentLinkMeeting, consentScopeLabel, consentStatusLabel, dateAhead } from '../common/advance-consent';
+import {
+  consentLinkMeeting,
+  consentScopeLabel,
+  consentStatusLabel,
+  dateAhead,
+  localDay,
+} from '../common/advance-consent';
 
 const client = generateClient();
 const logger = new ConsoleLogger('MyConsentsPage');
@@ -123,7 +129,13 @@ export const MeetingConsentInvitation = ({ meetingRef, onGiven }) => {
           ) : (
             invitation.Enabled && (
               <SpaceBetween size="s">
-                <FormField label="Your name (optional)" description="Shown to the organizer with your email address.">
+                <FormField
+                  label="Your name (optional)"
+                  description={
+                    'Your name and email address are shown to the people who can see the meeting in LMA: its ' +
+                    'organizer, the people it is shared with, and administrators.'
+                  }
+                >
                   <Input value={requestName} onChange={({ detail }) => setRequestName(detail.value)} />
                 </FormField>
                 <Button onClick={ask} loading={asking}>
@@ -222,7 +234,7 @@ export const MeetingConsentInvitation = ({ meetingRef, onGiven }) => {
                 value={until}
                 onChange={({ detail }) => setUntil(detail.value)}
                 isDateEnabled={(date) => {
-                  const day = date.toISOString().slice(0, 10);
+                  const day = localDay(date);
                   return day >= dateAhead(0) && day <= dateAhead(invitation.MaxDays || 365);
                 }}
                 placeholder="YYYY/MM/DD"
@@ -369,7 +381,7 @@ export const MyConsentsList = ({ answer = null, error = '', onWithdrawn }) => {
         <SpaceBetween size="s">
           <Box>{confirming ? consentScopeLabel(confirming) : ''}</Box>
           <Box>
-            Meetings that start after you withdraw no longer count it; you will be asked in the meeting instead. The
+            From now on it is no longer in force. A meeting&apos;s own notice and consent step are not affected. The
             record of what you agreed to, and when you withdrew, is kept.
           </Box>
           {withdrawError && <Alert type="error">{withdrawError}</Alert>}

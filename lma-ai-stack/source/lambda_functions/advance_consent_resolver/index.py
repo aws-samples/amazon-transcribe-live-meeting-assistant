@@ -21,9 +21,10 @@ Participant) and each acting on the caller's own records only:
                                     person on the meeting's list, and only for the
                                     text the page showed (by its hash).
 ``withdrawAdvanceConsent``          Withdraws one of the caller's consents.
-``askToBeAddedToMeeting``           For a signed-in person not on the list: tells
-                                    the meeting's owner, in LMA, that they asked to
-                                    be added. Nothing about consent is recorded.
+``askToBeAddedToMeeting``           For a signed-in person not on the list: shows,
+                                    in LMA, the people who see the meeting's
+                                    participant list that they asked to be added.
+                                    Nothing about consent is recorded.
 =================================== ==============================================
 
 Who the caller is comes from the verified AppSync identity only: the username
@@ -51,7 +52,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.config import Config as BotoCoreConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -319,15 +320,26 @@ def _table():
     return DYNAMODB.Table(EVENT_SOURCING_TABLE)
 
 
-def my_consents(email: str) -> List[Dict[str, Any]]:
-    """The caller's consents, newest first (at most MAX_CONSENTS_PER_PERSON)."""
-    response = _table().query(
-        KeyConditionExpression=Key("PK").eq(_partition(email)) & Key("SK").begins_with("ac#"),
-        ScanIndexForward=False,
-        Limit=MAX_CONSENTS_PER_PERSON,
-        ConsistentRead=True,
-    )
-    return [_plain(item) for item in response.get("Items") or []]
+def my_consents(email: str, not_withdrawn: bool = False) -> List[Dict[str, Any]]:
+    """The caller's consents, newest first: the newest MAX_CONSENTS_PER_PERSON,
+    or with ``not_withdrawn`` every one not withdrawn, however old, read a page
+    at a time (each person has at most MAX_ACTIVE_PER_PERSON in force)."""
+    arguments: Dict[str, Any] = {
+        "KeyConditionExpression": Key("PK").eq(_partition(email)) & Key("SK").begins_with("ac#"),
+        "ScanIndexForward": False,
+        "ConsistentRead": True,
+    }
+    if not_withdrawn:
+        arguments["FilterExpression"] = Attr("WithdrawnAt").not_exists()
+    else:
+        arguments["Limit"] = MAX_CONSENTS_PER_PERSON
+    items: List[Dict[str, Any]] = []
+    while True:
+        response = _table().query(**arguments)
+        items.extend(_plain(item) for item in response.get("Items") or [])
+        if not not_withdrawn or not response.get("LastEvaluatedKey"):
+            return items
+        arguments["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
 def _expires_after(stops_counting: datetime) -> int:
@@ -488,7 +500,7 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     offer = proposed(meeting, arguments, settings, now) if enabled else {}
     covering = [
         consent_out(item, now)
-        for item in my_consents(email)
+        for item in my_consents(email, not_withdrawn=True)
         if advance.covers(item, _covering_meeting(meeting), now)
     ]
     return {
@@ -530,8 +542,11 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         # What the page showed is not what would be stored: the settings, the
         # meeting or the date changed since. Nothing is recorded.
         raise BadRequest("the consent text has changed since the page showed it; read it again")
-    existing = my_consents(email)
-    active = [item for item in existing if advance.status_of(item, now) == advance.STATUS_ACTIVE]
+    active = [
+        item
+        for item in my_consents(email, not_withdrawn=True)
+        if advance.status_of(item, now) == advance.STATUS_ACTIVE
+    ]
     if len(active) >= MAX_ACTIVE_PER_PERSON:
         raise BadRequest(f"you have {MAX_ACTIVE_PER_PERSON} consents in force; withdraw one first")
     until = advance.parse_time(offer["ValidUntil"]) or now
@@ -619,7 +634,9 @@ def _reserve_ask(username: str, now: float) -> bool:
 
 
 def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
-    """Tell the meeting's owner in LMA: a meeting notification, or the Virtual Participant's row."""
+    """Show the request in LMA: a meeting notification, which reaches everyone who can
+    see the meeting, or the Virtual Participant's row, which its page shows to its
+    owner and Admins."""
     who = f"{name} <{email}>" if name else email
     if meeting["Kind"] == "call":
         # pylint: disable-next=import-outside-toplevel
