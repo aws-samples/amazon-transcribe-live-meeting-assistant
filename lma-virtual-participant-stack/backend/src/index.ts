@@ -403,6 +403,10 @@ const main = async (): Promise<void> => {
             const meetingInputs = await statusManager.getMeetingInputs();
             agendaStream.setAgenda(meetingInputs.agenda);
             agendaStream.setPreparation(meetingInputs.preparation);
+            // The participant list again just before START, for a change made
+            // from the VP's page while it was joining.
+            const startupStatusManager = statusManager;
+            agendaStream.setParticipantReader(() => startupStatusManager.getParticipantList());
 
             // Start with INITIALIZING status
             await statusManager.setInitializing();

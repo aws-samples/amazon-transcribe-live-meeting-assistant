@@ -649,10 +649,15 @@ def test_creating_a_plain_user_joins_no_group(cognito: FakeCognito) -> None:
 
 
 def test_the_created_user_is_registered_with_a_verified_email_and_an_invitation(
-    cognito: FakeCognito,
+    cognito: FakeCognito, monkeypatch
 ) -> None:
-    """The email doubles as the username, and the invitation is what lets them in."""
+    """The email doubles as the username, and the invitation is what lets them in.
+
+    The invitation carries the role, for the CustomMessage trigger; here the
+    configuration cannot be read, so it says nothing about consent given in advance.
+    """
     cognito.get_user_result = cognito_user("new@example.com", email="new@example.com")
+    monkeypatch.setattr(index, "_advance_consent_enabled", lambda: False)
 
     index.handler(admin_event("createUser", create_input("  new@example.com  ", "User")), None)
 
@@ -665,8 +670,50 @@ def test_the_created_user_is_registered_with_a_verified_email_and_an_invitation(
                 {"Name": "email_verified", "Value": "true"},
             ],
             "DesiredDeliveryMediums": ["EMAIL"],
+            "ClientMetadata": {"lmaRole": "User"},
         }
     ]
+
+
+CONFIGURATION_LAYER = Path(__file__).resolve().parents[2] / "lambda_layers" / "configuration_layer"
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ({"advanceConsentEnabled": False}, False),
+        ({"advanceConsentEnabled": True}, True),
+        # Nothing set: the shipped default, which is on.
+        ({}, True),
+    ],
+)
+def test_consent_given_in_advance_is_read_from_the_meeting_consent_section(
+    monkeypatch, values, expected
+) -> None:
+    monkeypatch.syspath_prepend(str(CONFIGURATION_LAYER))
+    import lma_config  # pylint: disable=import-outside-toplevel,import-error
+
+    class Store:
+        def get_section(self, name):
+            assert name == lma_config.MEETING_CONSENT.name
+            return SimpleNamespace(values=values)
+
+    monkeypatch.setattr(lma_config, "ConfigurationStore", Store)
+    assert index._advance_consent_enabled() is expected
+
+
+def test_consent_given_in_advance_reads_as_off_when_the_configuration_cannot_be_read(
+    monkeypatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(CONFIGURATION_LAYER))
+    import lma_config  # pylint: disable=import-outside-toplevel,import-error
+
+    class Store:
+        def get_section(self, _name):
+            raise ClientError({"Error": {"Code": "AccessDeniedException"}}, "GetItem")
+
+    monkeypatch.setattr(lma_config, "ConfigurationStore", Store)
+    assert index._advance_consent_enabled() is False
 
 
 def test_creating_a_user_that_already_exists_reports_a_readable_message(

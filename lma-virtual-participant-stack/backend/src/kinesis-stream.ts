@@ -4,7 +4,13 @@ import { details } from './details.js';
 import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
-import { meetingPlatformName, preparationStartFields, type VpPreparation } from './meeting-preparation.js';
+import {
+  meetingPlatformName,
+  preparationStartFields,
+  withParticipants,
+  type MeetingParticipant,
+  type VpPreparation,
+} from './meeting-preparation.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
@@ -141,6 +147,43 @@ class KinesisStreamManager {
   }
 
   /**
+   * Reads the participant list from the VP's row again, just before START:
+   * its owner can change the list from the VP's page while the VP is joining,
+   * after the startup read, and the meeting record does not exist yet to take
+   * the change. Answers null when the list cannot be read. Unset (local runs),
+   * the list read at startup is sent.
+   */
+  private participantReader: (() => Promise<MeetingParticipant[] | null>) | null = null;
+
+  setParticipantReader(reader: (() => Promise<MeetingParticipant[] | null>) | null): void {
+    this.participantReader = reader;
+  }
+
+  /** The longest START waits for that read before it keeps the list read at startup. */
+  static readonly PARTICIPANT_READ_TIMEOUT_MS = 5000;
+
+  private async refreshParticipants(): Promise<void> {
+    if (!this.participantReader) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const latest = await Promise.race([
+        this.participantReader(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), KinesisStreamManager.PARTICIPANT_READ_TIMEOUT_MS);
+        }),
+      ]);
+      if (latest === null) return;
+      const before = this.preparation?.participants?.length ?? 0;
+      this.preparation = withParticipants(this.preparation, latest);
+      log.info(`Participant list read again before START: ${before} -> ${latest.length} people`);
+    } catch (error) {
+      log.warn(`Could not read the participant list again; keeping the one read at startup: ${error}`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * The engine, language and speaker separation the meeting is expected to be
    * transcribed with, stored on its record by the START event. Null leaves them
    * off the record.
@@ -265,6 +308,7 @@ class KinesisStreamManager {
   }
 
   async sendStartMeeting(): Promise<void> {
+    await this.refreshParticipants();
     // Match Python kds.py format exactly
     const record: any = {
       EventType: 'START',

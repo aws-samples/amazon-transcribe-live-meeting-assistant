@@ -19,7 +19,16 @@ meeting: ``lmaInvitation`` ``meeting_participant``, ``meetingName`` and
 URL-encoded). Its invitation then also names the meeting and links to the
 meeting's consent page, where the person can give consent in advance once
 signed in. The link is built here from the web UI's address and the checked
-query, never taken whole from the metadata.
+query, never taken whole from the metadata. ``createUser`` sends the same
+metadata when the Admin names a meeting to invite the person to.
+
+Both send ``lmaRole`` (``Admin``, ``User`` or ``Participant``), and
+``lmaAdvanceConsent`` ``on`` when Meeting Consent › Allow consent given in
+advance is on, as the sender read it from the configuration. With it on, a
+Participant's invitation explains what the My consents page is for in a short
+paragraph, and a User's or Admin's says in one line where it is; without it
+(the setting off or unreadable, or an invitation sent another way, such as the
+first Admin's), the invitation says nothing about it.
 """
 
 from __future__ import annotations
@@ -83,6 +92,35 @@ def _meeting_paragraph(metadata, url):
     )
 
 
+#: What a Participant's invitation says about consent given in advance, around
+#: the link to the My consents page. Neutral: it says what the page is for and
+#: never asks for consent, which has to be freely given.
+PARTICIPANT_CONSENT_TEXT = (
+    "Meetings recorded with Live Meeting Assistant ask everyone for consent. To avoid being "
+    "asked in every meeting, you can record your choice after you sign in, from a meeting's "
+    "consent link: for that meeting, or for the meetings its organizer holds, for a period "
+    "you choose. Your choices are on the {link} page, where you can change or withdraw them "
+    "at any time, and you can still object in any meeting."
+)
+#: What a User's or Admin's invitation says about it: one line.
+USER_CONSENT_TEXT = "You can manage your meeting consents on the {link} page."
+
+
+def _consent_paragraph(metadata, url):
+    """The invitation's paragraph about the My consents page, or "" when it has none."""
+    if not url or not isinstance(metadata, dict) or metadata.get("lmaAdvanceConsent") != "on":
+        return ""
+    role = metadata.get("lmaRole")
+    if role == "Participant":
+        text = PARTICIPANT_CONSENT_TEXT
+    elif role in ("User", "Admin"):
+        text = USER_CONSENT_TEXT
+    else:
+        return ""
+    link = html.escape(f"{url.rstrip('/')}{CONSENT_ROUTE}", quote=True)
+    return "<p>" + text.format(link=f'<a href="{link}">My consents</a>') + "</p>"
+
+
 def lambda_handler(event, _context):
     trigger = event.get("triggerSource", "")
     logger.info("CustomMessage trigger %s", trigger)
@@ -95,6 +133,7 @@ def lambda_handler(event, _context):
     username = html.escape(req.get("usernameParameter", "") or "")
     url = _get_cloudfront_url()
     meeting = _meeting_paragraph(req.get("clientMetadata"), url)
+    consents = _consent_paragraph(req.get("clientMetadata"), url)
 
     event.setdefault("response", {})
     event["response"]["emailSubject"] = "Welcome to Live Meeting Assistant!"
@@ -113,7 +152,7 @@ def lambda_handler(event, _context):
             f"<strong>{code}</strong></p>"
             f'<p>Sign in to LMA at <a href="{safe_url}">{safe_url}</a>. '
             "You'll be prompted to set a permanent password on first sign-in.</p>"
-            f"{meeting}{footer}"
+            f"{meeting}{consents}{footer}"
         )
     else:
         # AISTACK hasn't populated CloudFrontEndpoint yet (e.g. initial stack creation).

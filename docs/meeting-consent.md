@@ -1188,7 +1188,11 @@ meeting's, with the meeting's own participant list.
 The meeting's owner sends it. In the **Participants** section of the meeting
 page, or of a Virtual Participant's page, the owner (and only the owner, not an
 Admin or someone the meeting is shared with) has **Invite participants to
-consent**. It shows one email to everyone on the list: the addresses, a subject
+consent** whenever the list has people on it: before, during and after the
+meeting. The list itself can be changed at any time, on either page (see
+[One list at a time](virtual-participant.md#one-list-at-a-time)), so people
+added once the meeting has started can be sent the link too. It shows one
+email to everyone on the list: the addresses, a subject
 and a text with the one link. **Open in mail app** opens it in the owner's own
 mail client (a `mailto:` link), and **Copy text** copies it. LMA does not send
 it. When the list is too long for a mail link, the mail app opens without the
@@ -1198,7 +1202,22 @@ The **Create accounts for participants without one** button (see
 [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting))
 sends each new account Cognito's invitation, which then also names the meeting
 and gives its consent link, so a new Participant can consent once they have
-signed in.
+signed in. An Admin can do the same for one new account of any role from
+User Management, with **Create user**'s optional **Meeting to invite them to**,
+which also adds the address to the meeting's list (see
+[Inviting a new user to a meeting](user-management.md#inviting-a-new-user-to-a-meeting)).
+
+While **Allow consent given in advance** is on, every invitation LMA has
+Cognito send also mentions the **My consents** page, with a link to it: a
+Participant's has a short, neutral paragraph saying that meetings recorded with
+LMA ask everyone for consent, that the person can record a choice from a
+meeting's consent link for that meeting or for the meetings its organizer
+holds, for a period they choose, that they can change or withdraw it on My
+consents at any time, and that they can still object in any meeting; a User's
+or an Admin's has one line saying where the page is. It never asks for
+consent. With the setting off, or when it cannot be read, nothing is said
+about it. See
+[What the invitation says about consent](user-management.md#what-the-invitation-says-about-consent).
 
 The page needs sign-in, and checks that the email address the user pool holds
 for the signed-in account (it must be verified) is on that meeting's participant

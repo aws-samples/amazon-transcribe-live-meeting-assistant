@@ -36,6 +36,28 @@ export const createUser = /* GraphQL */ `
   }
 `;
 
+// The meetings the Create user form offers to invite the person to: the
+// Virtual Participants the Admin can see, and the meetings of the last days.
+export const listInvitableMeetings = /* GraphQL */ `
+  query ListInvitableMeetings($startDateTime: AWSDateTime!, $endDateTime: AWSDateTime!) {
+    listVirtualParticipants {
+      id
+      CallId
+      meetingName
+      status
+      scheduledFor
+      createdAt
+    }
+    listCallsDateRange(startDateTime: $startDateTime, endDateTime: $endDateTime, limit: 50) {
+      Calls {
+        CallId
+        CreatedAt
+        Status
+      }
+    }
+  }
+`;
+
 export const setUserRole = /* GraphQL */ `
   mutation SetUserRole($input: SetUserRoleInput!) {
     setUserRole(input: $input) {
