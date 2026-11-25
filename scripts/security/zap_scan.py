@@ -461,6 +461,106 @@ def _deployment(stack: str, region: str | None):
     return rbac, rbac.Deployment.find(stack, region)
 
 
+@dataclass(frozen=True)
+class Endpoints:
+    """The URLs the scans target, read from the stack before any credential exists."""
+
+    graphql: str
+    web: str
+    mcp: str  # "" when the stack has no MCP server
+
+
+def endpoints_of(graphql_url: str, outputs: dict) -> Endpoints:
+    return Endpoints(
+        graphql=str(graphql_url),
+        web=str(outputs.get("ApplicationCloudfrontEndpoint") or ""),
+        mcp=str(outputs.get("MCPServerApiKeyEndpoint") or ""),
+    )
+
+
+def host_of(url: str) -> str:
+    return urlsplit(url).netloc
+
+
+class ScanCredentials:
+    """The throwaway Admin, its ID token and its MCP API key, for one run.
+
+    Kept apart from everything the run writes or prints: only
+    ``write_secret_options`` receives a value from it, and ``close`` revokes the
+    key and deletes the user.
+    """
+
+    def __init__(self, rbac, deployment, stamp: str):
+        self._rbac = rbac
+        self._deployment = deployment
+        self._users = rbac.create_role_users(deployment, stamp, (("zap", "Admin"),))
+        self._key_prefix = ""
+        rbac.sign_in(deployment, self._users[0])
+
+    @property
+    def id_token(self) -> str:
+        return self._users[0].tokens["id"]
+
+    def mcp_key(self) -> str:
+        """A read-scope MCP API key of the Admin's (revoked by ``close``); "" when none was issued."""
+        sys.path.insert(0, str(INTEG_TESTS))
+        import security_access_probe as sap  # pylint: disable=import-outside-toplevel
+
+        _, body = sap.as_user(self._deployment, self._users[0], sap.GENERATE_KEY, {"s": "read"})
+        generated = (body.get("data") or {}).get("generateMCPApiKey") or {}
+        self._key_prefix = generated.get("keyPrefix") or ""
+        return generated.get("keyValue") or ""
+
+    def close(self) -> list[str]:
+        """Revoke the key and delete the user; the usernames that could not be deleted."""
+        if self._key_prefix:
+            sys.path.insert(0, str(INTEG_TESTS))
+            import security_access_probe as sap  # pylint: disable=import-outside-toplevel
+
+            sap.as_user(self._deployment, self._users[0], sap.REVOKE_KEY, {"p": self._key_prefix})
+        return self._rbac.delete_role_users(self._deployment, self._users)
+
+
+def write_graphql_seed(workdir: Path, include_mutations: bool) -> None:
+    text = zap_sdl(SCHEMA_PATH.read_text(encoding="utf-8"), include_mutations=include_mutations)
+    (workdir / "schema.graphql").write_text(text, encoding="utf-8")
+
+
+def write_mcp_seed(workdir: Path, endpoint: str) -> None:
+    (workdir / "mcp-openapi.json").write_text(json.dumps(mcp_openapi(endpoint)), encoding="utf-8")
+
+
+def write_secret_options(path: Path, header: str, value: str, extra: dict | None = None) -> Path:
+    """The ZAP config file that carries a credential; the caller deletes it when the scans end."""
+    path.write_text(options_file(header, value, extra), encoding="utf-8")
+    return path
+
+
+def announce(target: str, mode: str) -> None:
+    print(f"ZAP {target} ({mode})", flush=True)
+
+
+def summary_json(
+    stack: str, when: str, mode: str, results: list[ScanResult], counts_only: bool
+) -> dict:
+    """The run's summary; with ``counts_only`` no alert names and no URLs."""
+    rows = []
+    for r in results:
+        row = dict(r.__dict__)
+        if counts_only:
+            row.pop("alerts", None)
+            row.pop("url", None)
+            row.pop("reports", None)
+        rows.append(row)
+    return {
+        "stack": stack,
+        "generatedAt": when,
+        "mode": mode,
+        "countsOnly": counts_only,
+        "results": rows,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear procedure
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--stack-name", required=True)
@@ -482,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
     parser.add_argument(
         "--counts-only",
         action="store_true",
-        help="print counts, not alert names (for a CI job log)",
+        help="counts only, in the output and in summary.md and summary.json (for a CI job)",
     )
     args = parser.parse_args(argv)
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]
@@ -506,8 +606,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
 
     try:
         rbac, deployment = _deployment(args.stack_name, args.region)
+        endpoints = endpoints_of(deployment.graphql_url, deployment.outputs)
     except Exception as error:  # noqa: BLE001 - reported, exit 1
-        print(f"could not read stack {args.stack_name}: {error}", file=sys.stderr)
+        print(f"could not read stack {args.stack_name}: {type(error).__name__}", file=sys.stderr)
         return 1
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%S")
@@ -521,33 +622,29 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
 
     results = {t: ScanResult(t, "", mode) for t in targets}
     secrets_written: list[Path] = []
-    users = []
-    key_prefix = ""
+    credentials: ScanCredentials | None = None
     try:
-        users = rbac.create_role_users(deployment, stamp, (("zap", "Admin"),))
-        rbac.sign_in(deployment, users[0])
-        admin = users[0]
+        credentials = ScanCredentials(rbac, deployment, stamp)
 
         if "graphql" in results:
             result = results["graphql"]
-            result.url = deployment.graphql_url
-            include = args.active
-            (workdir / "schema.graphql").write_text(
-                zap_sdl(SCHEMA_PATH.read_text(encoding="utf-8"), include_mutations=include),
-                encoding="utf-8",
+            result.url = host_of(endpoints.graphql)
+            write_graphql_seed(workdir, include_mutations=args.active)
+            secrets_written.append(
+                write_secret_options(
+                    workdir / "graphql-options.prop",
+                    "Authorization",
+                    credentials.id_token,
+                    GRAPHQL_OPTIONS,
+                )
             )
-            prop = workdir / "graphql-options.prop"
-            prop.write_text(
-                options_file("Authorization", admin.tokens["id"], GRAPHQL_OPTIONS), encoding="utf-8"
-            )
-            secrets_written.append(prop)
-            print(f"ZAP graphql ({mode}): {deployment.graphql_url}")
+            announce("graphql", mode)
             scan(
                 "graphql",
                 "zap-api-scan.py",
                 [
                     "-t",
-                    deployment.graphql_url,
+                    endpoints.graphql,
                     "-f",
                     "graphql",
                     "--schema",
@@ -565,14 +662,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
         if "web" in results:
             result = results["web"]
             result.mode = "passive"
-            result.url = deployment.outputs["ApplicationCloudfrontEndpoint"]
-            print(f"ZAP web (passive baseline): {result.url}")
+            result.url = host_of(endpoints.web)
+            announce("web", "passive baseline")
             scan(
                 "web",
                 "zap-baseline.py",
                 [
                     "-t",
-                    result.url,
+                    endpoints.web,
                     "-m",
                     "2",
                     *(["-z", zap_options(runner, "web")] if runner == "local" else []),
@@ -586,29 +683,19 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
 
         if "mcp" in results:
             result = results["mcp"]
-            endpoint = deployment.outputs.get("MCPServerApiKeyEndpoint")
-            if not endpoint:
+            if not endpoints.mcp:
                 result.skipped = "the stack has no MCP server (EnableMCP=false)"
             else:
-                result.url = endpoint
-                sys.path.insert(0, str(INTEG_TESTS))
-                import security_access_probe as sap  # pylint: disable=import-outside-toplevel
-
-                status, body = sap.as_user(deployment, admin, sap.GENERATE_KEY, {"s": "read"})
-                generated = (body.get("data") or {}).get("generateMCPApiKey") or {}
-                if not generated:
-                    result.error = f"could not generate an MCP API key (HTTP {status})"
+                result.url = host_of(endpoints.mcp)
+                key = credentials.mcp_key()
+                if not key:
+                    result.error = "could not generate an MCP API key"
                 else:
-                    key_prefix = generated["keyPrefix"]
-                    (workdir / "mcp-openapi.json").write_text(
-                        json.dumps(mcp_openapi(endpoint)), encoding="utf-8"
+                    write_mcp_seed(workdir, endpoints.mcp)
+                    secrets_written.append(
+                        write_secret_options(workdir / "mcp-options.prop", "x-api-key", key)
                     )
-                    prop = workdir / "mcp-options.prop"
-                    prop.write_text(
-                        options_file("x-api-key", generated["keyValue"]), encoding="utf-8"
-                    )
-                    secrets_written.append(prop)
-                    print(f"ZAP mcp ({mode}): {endpoint}")
+                    announce("mcp", mode)
                     scan(
                         "mcp",
                         "zap-api-scan.py",
@@ -631,39 +718,22 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
             path.unlink(missing_ok=True)
             if runner == "local":
                 Path("/zap/wrk", path.name).unlink(missing_ok=True)
-        if key_prefix and users:
-            sys.path.insert(0, str(INTEG_TESTS))
-            import security_access_probe as sap  # pylint: disable=import-outside-toplevel
-
-            sap.as_user(deployment, users[0], sap.REVOKE_KEY, {"p": key_prefix})
-        left = rbac.delete_role_users(deployment, users) if users else []
+        left = credentials.close() if credentials is not None else []
         if left:
-            print(f"could not delete the temporary users {left}", file=sys.stderr)
+            print(f"could not delete {len(left)} temporary user(s)", file=sys.stderr)
 
     when = datetime.now(timezone.utc).isoformat(timespec="seconds")
     ordered = [results[t] for t in targets]
-    (workdir / "summary.json").write_text(
-        json.dumps(
-            {
-                "stack": args.stack_name,
-                "generatedAt": when,
-                "mode": mode,
-                "results": [r.__dict__ for r in ordered],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (workdir / "summary.md").write_text(
-        summary_markdown(args.stack_name, ordered, when), encoding="utf-8"
-    )
+    summary = summary_json(args.stack_name, when, mode, ordered, args.counts_only)
+    (workdir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    markdown = summary_markdown(args.stack_name, ordered, when, show_alerts=not args.counts_only)
+    (workdir / "summary.md").write_text(markdown, encoding="utf-8")
     latest = report_dir / "latest"
     if latest.is_symlink() or latest.exists():
         latest.unlink()
     latest.symlink_to(workdir.name)
 
-    print(summary_markdown(args.stack_name, ordered, when, show_alerts=not args.counts_only))
+    print(markdown)
     print(f"Reports: {workdir}")
     missing = [r.target for r in ordered if not r.ran and not r.skipped]
     if missing:

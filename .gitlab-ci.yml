@@ -988,8 +988,10 @@ nightly_integ_tests:
 # PASSIVE only: zap_scan.py without --active, so ZAP sends no attack payloads
 # and no mutation. Never pass --active here: lma-integtest1 is shared by the
 # nightly run. WARN-only: findings do not fail the job, and allow_failure keeps a
-# scan that could not run from failing the pipeline. The job log prints counts
-# only (--counts-only); the reports are the job's artifacts.
+# scan that could not run from failing the pipeline. Job logs and artifacts are
+# treated as public: with --counts-only the log and the summary files carry
+# counts only, and they are the only artifacts. ZAP's own reports stay on the
+# runner; read them by running `make stacktest-zap` locally.
 #
 # The ZAP image is the job image, because these runners have no Docker daemon
 # (see nightly_publish). Its Python takes the script's dependencies with --user.
@@ -1032,5 +1034,6 @@ zap_dast:
   artifacts:
     when: always
     paths:
-      - zap-reports/
+      - zap-reports/*/summary.md
+      - zap-reports/*/summary.json
     expire_in: 1 month

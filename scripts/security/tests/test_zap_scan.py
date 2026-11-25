@@ -300,3 +300,48 @@ def test_each_scan_in_the_image_gets_its_own_zap_home() -> None:
     local = {t: zap_scan.zap_options("local", t) for t in zap_scan.TARGETS}
     assert all(v.startswith("-dir ") for v in local.values())
     assert len(set(local.values())) == len(zap_scan.TARGETS)
+
+
+def test_the_targets_are_plain_strings_read_before_any_credential() -> None:
+    outputs = {
+        "ApplicationCloudfrontEndpoint": "https://d.example.invalid/",
+        "MCPServerApiKeyEndpoint": None,
+    }
+    endpoints = zap_scan.endpoints_of("https://api.example.invalid/graphql", outputs)
+    assert endpoints == zap_scan.Endpoints(
+        "https://api.example.invalid/graphql", "https://d.example.invalid/", ""
+    )
+    assert zap_scan.host_of(endpoints.graphql) == "api.example.invalid"
+
+
+def test_the_seed_writers_take_only_the_endpoint(tmp_path) -> None:
+    import inspect
+
+    assert list(inspect.signature(zap_scan.write_mcp_seed).parameters) == ["workdir", "endpoint"]
+    assert list(inspect.signature(zap_scan.announce).parameters) == ["target", "mode"]
+    zap_scan.write_mcp_seed(tmp_path, "https://abc.example.invalid/prod/mcp")
+    assert json.loads((tmp_path / "mcp-openapi.json").read_text())["paths"].keys() == {"/prod/mcp"}
+
+
+def test_a_counts_only_summary_names_no_alert_and_no_url() -> None:
+    ran = zap_scan.ScanResult("web", "d.example.invalid", "passive", ran=True, counts={"Medium": 1})
+    ran.alerts = [{"risk": "Medium", "name": "Header A", "pluginid": "1", "instances": 1}]
+    ran.reports = ["/x/web-report.html"]
+    data = zap_scan.summary_json("LMA-x", "now", "passive", [ran], counts_only=True)
+    text = json.dumps(data)
+    assert "Header A" not in text and "d.example.invalid" not in text and "web-report" not in text
+    assert data["results"][0]["counts"] == {"Medium": 1}
+    assert "Header A" in json.dumps(
+        zap_scan.summary_json("LMA-x", "now", "passive", [ran], counts_only=False)
+    )
+
+
+def test_the_ci_job_uploads_the_counts_only_summaries_and_nothing_else() -> None:
+    import yaml
+
+    job = yaml.safe_load((zap_scan.REPO_ROOT / ".gitlab-ci.yml").read_text())["zap_dast"]
+    assert sorted(job["artifacts"]["paths"]) == [
+        "zap-reports/*/summary.json",
+        "zap-reports/*/summary.md",
+    ]
+    assert "--counts-only" in " ".join(job["script"])

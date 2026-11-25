@@ -183,7 +183,7 @@ newest:
 
 - `summary.md` and `summary.json`: per target, the alert counts by risk (High,
   Medium, Low, Informational), how many rules passed, and each alert's name and
-  plugin id.
+  plugin id; with `--counts-only` (the CI job) the counts alone.
 - `<target>-report.html`, `.json` and `.md`: ZAP's own reports, with the
   requests and responses of each alert.
 
@@ -235,7 +235,10 @@ as the nightly jobs ([Scheduled Integration Tests](scheduled-integration-tests.m
 To run it by hand (on `develop` only), start a pipeline on `develop` from **Build › Pipelines › Run
 pipeline** and play the `zap_dast` job. It runs the ZAP image as the job image
 (these runners have no Docker daemon), scans passively, prints counts only, and
-keeps the reports as the job's artifacts for a month. It never runs an active
+keeps only the counts (`summary.md` and `summary.json`, written with
+`--counts-only`) as the job's artifacts for a month: job logs and artifacts are
+treated as public, so ZAP's own reports stay on the runner. Run
+`make stacktest-zap` locally to read the alerts. It never runs an active
 scan: `lma-integtest1` is shared with the nightly run.
 
 ## What these tests do not exercise
