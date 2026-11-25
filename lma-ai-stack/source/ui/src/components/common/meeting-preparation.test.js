@@ -285,4 +285,15 @@ describe('live updates', () => {
     expect(preparationChanged(current, { checklistUpdatedAt: '2' })).toBe(true);
     expect(preparationChanged(current, { meetingMetadataUpdatedAt: '5' })).toBe(true);
   });
+
+  it('treat a saved participant list as a change, so the meeting page shows it at once', () => {
+    const current = { participantsUpdatedAt: '1', participants: [{ name: '', email: 'a@example.com' }] };
+    expect(preparationChanged(current, { participantsUpdatedAt: '1' })).toBe(false);
+    expect(preparationChanged(current, { participantsUpdatedAt: '2' })).toBe(true);
+    const shown = adoptMeetingCopy(current, {
+      participantsUpdatedAt: '2',
+      participants: [{ name: '', email: 'b@example.com' }],
+    });
+    expect(shown.participants).toEqual([{ name: '', email: 'b@example.com' }]);
+  });
 });

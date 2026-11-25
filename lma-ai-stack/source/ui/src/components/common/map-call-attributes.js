@@ -305,11 +305,11 @@ export const agendaChanged = (current, incoming) =>
 
 /**
  * Whether a newer copy of a meeting carries different preparation (labels,
- * audience, meeting context or checklist) from the copy on screen. Those
- * writes leave UpdatedAt alone, as an agenda write does.
+ * audience, meeting context, checklist or participant list) from the copy on
+ * screen. Those writes leave UpdatedAt alone, as an agenda write does.
  */
 export const preparationChanged = (current, incoming) =>
-  ['meetingMetadataUpdatedAt', 'meetingContextUpdatedAt', 'checklistUpdatedAt'].some(
+  ['meetingMetadataUpdatedAt', 'meetingContextUpdatedAt', 'checklistUpdatedAt', 'participantsUpdatedAt'].some(
     (field) => Boolean(incoming?.[field]) && incoming[field] !== current?.[field],
   );
 
