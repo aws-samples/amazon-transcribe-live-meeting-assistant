@@ -151,7 +151,7 @@ is one to **decide with the customer**.
 
 | Setting | Value | Decide with the customer |
 |---|---|---|
-| Meeting Consent › Consent mode, rule | Opt-in, each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
+| Meeting Consent › Consent mode; Meeting Consent › Consent rule (opt-in) | Opt-in; Each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
 | Meeting Consent › Allow a different choice per meeting | On | Whether the owner of a meeting may choose another mode or rule for it, such as owner attestation for an internal meeting. |
 | Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the Stream Audio embed and older clients may capture without asking. |
 | Meeting Consent › Longest consent given in advance, in days; Keep sign-in device details with consents given in advance | 365; Off | How long a participant's consent given before a meeting may run, and whether the IP address and browser of the person giving it are kept with it. |

@@ -247,23 +247,34 @@ def test_the_configuration_guide_lists_every_setting_the_presets_set() -> None:
 @pytest.mark.parametrize("preset_id", ["team-hosted-external", "customer-account"])
 def test_each_hosting_preset_table_matches_the_shipped_preset(preset_id: str) -> None:
     title = _norm(PRESETS[preset_id]["title"]).split(" (")[0]
-    checked, wrong = 0, []
+    checked, wrong, unknown = 0, [], []
     for heading, header, rows in _tables(DOCS / "hosting-models.md"):
         if title not in _norm(heading) or "value" not in [_norm(h) for h in header]:
             continue
         value_column = [_norm(h) for h in header].index("value")
         for number, cells in rows:
             for label_cell in cells[:value_column]:
-                found = _setting_for(label_cell) if "›" in label_cell else None
-                if not found:
+                if "›" not in label_cell:
                     continue
-                setting, prop = found
-                value = _value(preset_id, setting)
-                checked += 1
-                if not _cell_matches(cells[value_column], setting, prop, value):
-                    wrong.append(
-                        f"hosting-models.md:{number} {label_cell}: says {cells[value_column]!r}, preset has {value!r}"
-                    )
+                # A cell may name several settings, "A › x; B › y", with their
+                # values in the same order in the Value cell: "Off; Global".
+                labels = [part.strip() for part in label_cell.split(";")]
+                values = [part.strip() for part in cells[value_column].split(";")]
+                if len(values) != len(labels):
+                    values = [cells[value_column]] * len(labels)
+                for label, cell in zip(labels, values):
+                    found = _setting_for(label)
+                    if not found:
+                        unknown.append(f"hosting-models.md:{number} {label!r}")
+                        continue
+                    setting, prop = found
+                    value = _value(preset_id, setting)
+                    checked += 1
+                    if not _cell_matches(cell, setting, prop, value):
+                        wrong.append(
+                            f"hosting-models.md:{number} {label}: says {cell!r}, preset has {value!r}"
+                        )
+    assert not unknown, f"setting labels in docs/hosting-models.md that name no setting: {unknown}"
     assert checked >= 10, (
         f"found only {checked} settings in docs/hosting-models.md's table for {preset_id}"
     )

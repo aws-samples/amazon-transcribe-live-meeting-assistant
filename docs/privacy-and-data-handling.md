@@ -336,8 +336,9 @@ the Users and Admins it is shared with, and every Admin read the meeting, its
 transcript, its key frames and its consent record. A
 [Participant](user-based-access-control.md#participant) it is shared with reads
 a read-only subset: the transcript, the summary, the meeting chat, the
-recordings, the consent record without its evidence, and the names (not the
-addresses) on the participant list; not the key frames, chat attachment files,
+recordings, the consent record without its attestation statement, evidence,
+verification or status history, and the names (not the addresses) on the
+participant list; not the key frames, chat attachment files,
 meeting context, checklist or the assistant's answers (see
 [What a Participant sees of a shared meeting](user-based-access-control.md#what-a-participant-sees-of-a-shared-meeting)).
 Key-frame and evidence images are reached through links signed for one hour
