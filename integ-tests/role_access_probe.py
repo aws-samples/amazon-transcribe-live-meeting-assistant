@@ -204,6 +204,7 @@ class Deployment:
     identity_pool_id: str
     ai_resources: dict
     email_domain: str
+    recordings_bucket: str = ""
 
     @classmethod
     def find(cls, stack_name: str, region: str | None) -> "Deployment":
@@ -223,6 +224,11 @@ class Deployment:
             "",
         )
         domains = [d.strip() for d in allowed.split(",") if d.strip()]
+        cognito_parameters = cfn.describe_stacks(StackName=nested["COGNITOSTACK"])["Stacks"][0].get("Parameters", [])
+        bucket = next(
+            (p.get("ParameterValue", "") for p in cognito_parameters if p["ParameterKey"] == "S3BucketName"),
+            "",
+        )
         return cls(
             session=session,
             outputs=outputs,
@@ -236,6 +242,7 @@ class Deployment:
             # administrator, so the first of those is used there; MessageAction
             # SUPPRESS sends no invitation either way.
             email_domain=domains[0] if domains else "example.invalid",
+            recordings_bucket=bucket,
         )
 
 
@@ -361,6 +368,57 @@ def settings_readable(deployment: Deployment, session) -> bool:
         if error.response.get("Error", {}).get("Code") == "AccessDeniedException":
             return False
         raise
+
+
+def translated(session, text: str, language: str = "es") -> str:
+    """The text translated with the credentials, as the web UI's Translate switch asks for it."""
+    response = session.client("translate").translate_text(
+        Text=text, SourceLanguageCode="auto", TargetLanguageCode=language
+    )
+    return response["TranslatedText"]
+
+
+def refused(call) -> bool:
+    """Whether the call is refused for lack of permission; any other error is raised."""
+    from botocore.exceptions import ClientError  # pylint: disable=import-outside-toplevel
+
+    try:
+        call()
+        return False
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code", "")
+        status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if code in ("AccessDenied", "AccessDeniedException") or (code == "403" and status == 403):
+            return True
+        raise
+
+
+def participant_refusals(deployment: Deployment, session) -> dict[str, bool]:
+    """Whether each action the Participant role does not have is refused to the credentials.
+
+    The recording key need not exist: without s3:ListBucket a refused GET is a
+    403 either way, and with s3:GetObject a missing key would be a 404 instead.
+    """
+    from botocore.config import Config  # pylint: disable=import-outside-toplevel
+
+    no_retry = Config(retries={"max_attempts": 1})
+    s3 = session.client("s3", config=no_retry)
+    calls = {
+        "s3:GetObject": lambda: s3.get_object(
+            Bucket=deployment.recordings_bucket, Key="lma-audio-recordings/role-access-probe.wav"
+        ),
+        "ssm:GetParameter": lambda: session.client("ssm", config=no_retry).get_parameter(
+            Name=deployment.outputs["LMASettingsParameterName"]
+        ),
+        "translate:ListLanguages": lambda: session.client("translate", config=no_retry).list_languages(),
+        "comprehend:DetectSentiment": lambda: session.client("comprehend", config=no_retry).detect_sentiment(
+            Text="Good morning", LanguageCode="en"
+        ),
+        "states:ListStateMachines": lambda: session.client("stepfunctions", config=no_retry).list_state_machines(
+            maxResults=1
+        ),
+    }
+    return {action: refused(call) for action, call in calls.items()}
 
 
 def mcp_status_with_key(deployment: Deployment, user: RoleUser) -> int | None:

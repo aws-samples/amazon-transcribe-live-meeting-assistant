@@ -20,7 +20,7 @@ them; being its owner is not enough, since a Participant sees shared meetings
 only.
 
 Recordings are played through links this function signs, not through the
-identity pool: the pool's Participant role has no permissions, because S3 has
+identity pool: the pool's Participant role has no S3 permissions, because S3 has
 no grant that follows each meeting's sharing list.
 """
 

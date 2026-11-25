@@ -11,7 +11,8 @@ What this run establishes about an upgrade: an existing account in no group
 signs in as a User and keeps every operation a User had, and an Admin keeps
 every operation an Admin had, because the "allowed" calls fail on any field
 refusal; and a Participant is refused every operation and every other entry
-point. Mutations are only called as roles that are refused them.
+point but transcript translation through the identity pool. Mutations are
+only called as roles that are refused them.
 """
 
 from __future__ import annotations
@@ -98,6 +99,15 @@ def test_the_identity_pool_gives_each_role_its_iam_role(deployment, users) -> No
     arn, session = probe.identity_pool_role(deployment, users["Participant"])
     assert "CognitoParticipantRole" in arn, arn
     assert not probe.settings_readable(deployment, session)
+
+
+def test_the_participant_identity_pool_role_translates_and_is_refused_everything_else(deployment, users) -> None:
+    """The Translate switch on a shared meeting's page works; nothing else the web UI's role allows does."""
+    assert deployment.recordings_bucket, "the Cognito stack names no S3BucketName"
+    _, session = probe.identity_pool_role(deployment, users["Participant"])
+    assert probe.translated(session, "Good morning, everyone.").strip()
+    refusals = probe.participant_refusals(deployment, session)
+    assert all(refusals.values()), {action: r for action, r in refusals.items() if not r}
 
 
 def test_the_mcp_server_refuses_a_key_whose_owner_is_a_participant(deployment, users, request) -> None:

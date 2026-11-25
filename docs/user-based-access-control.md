@@ -46,7 +46,7 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Capability | Admin | User | Participant | Notes |
 |---|---|---|---|---|
 | Participant home page | No | No | Yes | Admins and Users open the meetings list instead. |
-| A Participant's read-only view of the meetings shared with them: the list, and each meeting's transcript (live while it is in progress), summary, meeting chat, recordings and consent record | No | No | Yes | Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant no permissions. |
+| A Participant's read-only view of the meetings shared with them: the list, and each meeting's transcript (live while it is in progress), summary, meeting chat, recordings and consent record | No | No | Yes | Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant transcript translation only. |
 | Meetings list and meeting pages: transcripts, summaries, recordings, key frames, notifications, whiteboards, archives and cost | Yes | Yes | No | Admin: every meeting. User: their own meetings and those shared with them. |
 | Editing, sharing, deleting and reopening meetings: speakers, summaries, agendas, preparation, labels, guidance and whiteboards | Yes | Yes | No | Admin: every meeting. User: the meetings each operation's own rule allows (sharing and deleting: their own). |
 | Meeting consent records | Yes | Yes | No | Admin: every meeting. User: the meetings they own or that are shared with them. |
@@ -54,7 +54,8 @@ below are tested against it, so the table and the deployed behaviour agree.
 | The Meetings Query Tool, the knowledge base, the chat buttons, the meeting page's chat notifications, and reading the installed MCP servers and skills | Yes | Yes | No |  |
 | Meeting sources: Stream Audio/Video, Upload Audio, the browser extension and the Desktop Capture App | Yes | Yes | No |  |
 | Virtual Participant: launch, schedule, view, share, end and rejoin | Yes | Yes | No | Admin: every Virtual Participant. User: their own and those shared with them. |
-| AWS credentials the web UI signs its own requests with: recording playback and file links, transcript translation, the deployment settings, and Virtual Participant launch | Yes | Yes | No |  |
+| AWS credentials the web UI signs its own requests with: recording playback and file links, the deployment settings, and Virtual Participant launch | Yes | Yes | No |  |
+| Translating a meeting's transcript (the Translate switch), with the web UI's identity pool credentials | Yes | Yes | Yes | Participant: on the meetings shared with them. Their identity pool role allows Amazon Translate's TranslateText and the Amazon Comprehend language detection it uses, and nothing else. Translation is billed per character to the deployment's AWS account, for every role alike. |
 | MCP API keys and the hosted MCP server (API key and OAuth endpoints) | Yes | Yes | No | Admin: every meeting through MCP. User: their own meetings and those shared with them. |
 | Enrolling your own voice | Yes | Yes | Yes | Each person their own voice only: enrolling it, and deleting it. |
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
@@ -90,10 +91,18 @@ Each entry point then admits only the roles the role matrix lists for it:
   requests itself: recording playback and file links, transcript translation,
   the deployment settings and Virtual Participant launch. The identity pool
   chooses the IAM role from the `lma_role` claim: Admins and Users receive the
-  web UI's role, Participants a role with no permissions, and a token naming no
-  role receives no credentials. A Participant's recording playback uses links
-  the server signs for a meeting shared with them instead; see
-  [Recording Playback](#recording-playback).
+  web UI's role, Participants a role that allows transcript translation and
+  nothing else, and a token naming no role receives no credentials. A
+  Participant's recording playback uses links the server signs for a meeting
+  shared with them instead; see [Recording Playback](#recording-playback).
+- **Amazon Translate from the web UI.** The **Translate** switch on a
+  meeting's transcript calls Amazon Translate's `TranslateText` with the
+  viewer's identity pool credentials, detecting each line's language
+  automatically, which uses Amazon Comprehend's `DetectDominantLanguage`. Both
+  identity pool roles allow exactly those two actions, so a Participant can
+  translate the transcript of a meeting shared with them. Translation is billed
+  per character to the deployment's AWS account, for a Participant as for a
+  User.
 - **Hosted MCP server, API key endpoint.** The API key authorizer reads the key
   owner's current groups from the user pool on every request. A key works only
   while its owner's role includes MCP access, and only while the owner exists;
@@ -232,7 +241,8 @@ speaker naming or reopening.
 A shared meeting opens on the same page an owner sees
 ([Meeting Detail Page](web-ui-guide.md#meeting-detail-page)), with the same header,
 tabs and meeting assistant panel, in a Participant mode. Everything on it comes
-from the Participant operations above, and the page makes no other request.
+from the Participant operations above, and the page makes no other request apart
+from Amazon Translate while the transcript's **Translate** switch is on.
 
 - **Header**: the meeting's name, status, start, length, owner and the consent
   that applied, the speakers' names, and the **Assistant** button. Not the
@@ -242,10 +252,13 @@ from the Participant operations above, and the page makes no other request.
   which follows the newest line while the meeting is live. Once the meeting
   has ended, the player above it plays the recordings through the links the
   server signs (a link that lapses during a long listen is replaced), and a
-  line's time plays the recording from there. There is no **Translate**
-  switch: translation uses the viewer's own AWS credentials, which the
-  Participant role does not have. Speakers are shown by the names the owner
-  gave them, without the controls that name them.
+  line's time plays the recording from there. The **Translate** switch and
+  its language list translate the transcript as they do for an owner, with
+  the Participant's own identity pool credentials, whose role allows
+  translation and nothing else (see
+  [How the roles are applied](#how-the-roles-are-applied)); translation is
+  billed per character to the deployment, as for Users. Speakers are shown by
+  the names the owner gave them, without the controls that name them.
 - **Summary** tab: the summary, its action items and chapters, and the agenda,
   read-only. The slides the summary names are named in words, without their
   images.
@@ -430,8 +443,8 @@ the audio recordings prefix (`lma-audio-recordings/`) and the video recordings p
 the backend roles that own them. If a future release adds another prefix that the players
 read, that prefix has to be added to the same grant.
 
-A Participant's identity-pool role has no permissions, because a grant by key prefix
-cannot follow each meeting's sharing list. A Participant plays a recording through
+A Participant's identity-pool role has no S3 permissions (it allows transcript translation
+only), because a grant by key prefix cannot follow each meeting's sharing list. A Participant plays a recording through
 `getParticipantMeetingRecordings` instead: the server checks that the meeting is shared
 with them, and signs a link, valid for an hour, to each recording the meeting record names
 under the two playback prefixes of this deployment's recordings bucket.

@@ -1750,14 +1750,13 @@ const CallTranscriptContainer = ({
                 >
                   Auto-scroll
                 </Toggle>
-                {/* Translation reads Amazon Translate with the viewer's own
-                    credentials, which a Participant's role does not have. */}
-                {!participantMode && (
-                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
-                    Translate
-                  </Toggle>
-                )}
-                {translateOn && !participantMode && (
+                {/* Translation calls Amazon Translate with the viewer's own
+                    identity pool credentials, for a Participant too: their
+                    role allows translation and nothing else. */}
+                <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn}>
+                  Translate
+                </Toggle>
+                {translateOn && (
                   <Select
                     selectedOption={selectedLanguage}
                     onChange={handleLanguageSelect}

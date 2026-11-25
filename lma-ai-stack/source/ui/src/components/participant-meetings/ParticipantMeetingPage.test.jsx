@@ -33,6 +33,19 @@ vi.mock('aws-amplify/api', () => ({
     },
   }),
 }));
+// Amazon Translate, called with the viewer's identity pool credentials.
+const translateRequests = vi.hoisted(() => []);
+vi.mock('@aws-sdk/client-translate', () => ({
+  TranslateClient: vi.fn(function TranslateClient() {
+    this.send = async ({ input }) => {
+      translateRequests.push(input);
+      return { TranslatedText: `[${input.TargetLanguageCode}] ${input.Text}` };
+    };
+  }),
+  TranslateTextCommand: vi.fn(function TranslateTextCommand(input) {
+    this.input = input;
+  }),
+}));
 vi.mock('../../contexts/app', () => ({
   default: () => ({ currentCredentials: {}, user: { username: 'pat@example.com' }, setErrorMessage: vi.fn() }),
 }));
@@ -275,7 +288,6 @@ describe('the Participant meeting page', () => {
     ['Record an objection', 'Attest that everyone agreed'].forEach((name) =>
       expect(screen.queryByRole('button', { name })).toBeNull(),
     );
-    expect(screen.queryByRole('checkbox', { name: 'Translate' })).toBeNull();
     expect(screen.queryByRole('tab', { name: /Whiteboards|Screen share/ })).toBeNull();
     expect(screen.queryByTestId('meeting-cost-chip')).toBeNull();
     ['Meeting context', 'Checklist', 'Live guidance', 'Meeting attributes', 'Capture and processing'].forEach(
@@ -283,6 +295,22 @@ describe('the Participant meeting page', () => {
     );
     // Let every effect run, then: not one request through any other client.
     await waitFor(() => expect(document.querySelector('audio, video')).toBeTruthy());
+    expect(ownerRequests).toEqual([]);
+  });
+
+  it('translates the transcript with Translate, and makes no owner request for it', async () => {
+    window.localStorage.setItem('targetLanguage', 'es');
+    translateRequests.length = 0;
+    renderPage(fakeClient({ meeting: ENDED }));
+    await screen.findByText('Hello everyone');
+    expect(translateRequests).toEqual([]);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Translate' }));
+    expect(await screen.findByText('[es] Hello everyone')).toBeTruthy();
+    expect(translateRequests).toContainEqual({
+      Text: 'Hello everyone',
+      SourceLanguageCode: 'auto',
+      TargetLanguageCode: 'es',
+    });
     expect(ownerRequests).toEqual([]);
   });
 

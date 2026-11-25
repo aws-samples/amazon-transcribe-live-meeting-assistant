@@ -2014,7 +2014,7 @@ describe('the Participant mode', () => {
     await waitFor(() => expect(responses.requests.some((q) => q.includes('listVirtualParticipants'))).toBe(true));
   });
 
-  it("renders the meeting page without the owner's panels and controls, and makes no request", async () => {
+  it("renders the meeting page without the owner's controls but with Translate, and makes no request", async () => {
     renderMode(true);
     expect(tabLabels()).toEqual(['Summary', 'Transcript', 'Details']);
     expect(screen.getByText('Hello everyone.')).toBeTruthy();
@@ -2022,7 +2022,8 @@ describe('the Participant mode', () => {
     ['Share', 'Download', 'More actions', 'Name speakers'].forEach((name) =>
       expect(screen.queryByRole('button', { name })).toBeNull(),
     );
-    expect(screen.queryByRole('checkbox', { name: 'Translate' })).toBeNull();
+    // Translation is the viewer's own, with their identity pool credentials.
+    expect(screen.getByRole('checkbox', { name: 'Translate' })).toBeTruthy();
     expect(screen.queryByTestId('meeting-cost-chip')).toBeNull();
     expect(screen.queryByTestId('meeting-context-panel')).toBeNull();
     expect(screen.queryByTestId('checklist-panel')).toBeNull();

@@ -221,10 +221,21 @@ def test_the_identity_pool_gives_each_role_its_iam_role_and_refuses_any_other() 
     }
 
 
-def test_the_participant_identity_pool_role_grants_nothing() -> None:
+def test_the_participant_identity_pool_role_grants_transcript_translation_only() -> None:
     role = COGNITO_RESOURCES["CognitoParticipantRole"]["Properties"]
-    assert "Policies" not in role
     assert "ManagedPolicyArns" not in role
+    statements = [
+        statement for policy in role["Policies"] for statement in policy["PolicyDocument"]["Statement"]
+    ]
+    # The Translate switch translates with SourceLanguageCode auto, which also
+    # needs comprehend:DetectDominantLanguage; neither action takes a resource.
+    assert statements == [
+        {
+            "Effect": "Allow",
+            "Action": ["translate:TranslateText", "comprehend:DetectDominantLanguage"],
+            "Resource": "*",
+        }
+    ]
     # Assumable only through this identity pool, by an authenticated identity.
     statement = role["AssumeRolePolicyDocument"]["Statement"][0]
     assert statement["Condition"]["StringEquals"] == {

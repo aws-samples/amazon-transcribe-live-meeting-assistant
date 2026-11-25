@@ -342,7 +342,7 @@ Resources:
         authenticated: !GetAtt CognitoAuthorizedRole.Arn
       # The role comes from the ID token's lma_role claim, which the pre token
       # generation trigger sets on every token: Admin and User get the web UI's
-      # role, Participant a role with no permissions. A token naming no role
+      # role, Participant a role that may only translate. A token naming no role
       # gets no credentials.
       RoleMappings:
         WebUiClient:
@@ -366,12 +366,14 @@ Resources:
 
   # The identity pool role of the Participant role. The web UI needs identity
   # pool credentials to start, so a Participant is given credentials, from a
-  # role that grants nothing: no recordings, settings parameter, translation or
-  # Virtual Participant launch.
+  # role that grants transcript translation only (the Translate switch on a
+  # shared meeting's transcript, which translates with SourceLanguageCode auto
+  # and so also needs comprehend:DetectDominantLanguage). No recordings,
+  # settings parameter or Virtual Participant launch.
   CognitoParticipantRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: Identity pool role for the Participant role; grants no permissions
+      Description: Identity pool role for the Participant role; grants transcript translation only
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -389,6 +391,23 @@ Resources:
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: accessTranslateAPI
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - translate:TranslateText
+                  - comprehend:DetectDominantLanguage
+                Resource: "*"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason:
+              translate:TranslateText and comprehend:DetectDominantLanguage do
+              not support resource-level permissions
 
   CognitoAuthorizedRole:
     Type: AWS::IAM::Role

@@ -37,7 +37,7 @@
       "id": "participant-meetings",
       "title": "A Participant's read-only view of the meetings shared with them: the list, and each meeting's transcript (live while it is in progress), summary, meeting chat, recordings and consent record",
       "roles": ["Participant"],
-      "notes": "Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant no permissions.",
+      "notes": "Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant transcript translation only.",
       "appsync": [
         "Query.listParticipantMeetings",
         "Query.getParticipantMeeting",
@@ -211,11 +211,20 @@
     },
     {
       "id": "web-credentials",
-      "title": "AWS credentials the web UI signs its own requests with: recording playback and file links, transcript translation, the deployment settings, and Virtual Participant launch",
+      "title": "AWS credentials the web UI signs its own requests with: recording playback and file links, the deployment settings, and Virtual Participant launch",
       "roles": ["Admin", "User"],
       "notes": "",
       "appsync": [],
       "surfaces": ["identity-pool-credentials"],
+      "uiRoutes": []
+    },
+    {
+      "id": "transcript-translation",
+      "title": "Translating a meeting's transcript (the Translate switch), with the web UI's identity pool credentials",
+      "roles": ["Admin", "User", "Participant"],
+      "notes": "Participant: on the meetings shared with them. Their identity pool role allows Amazon Translate's TranslateText and the Amazon Comprehend language detection it uses, and nothing else. Translation is billed per character to the deployment's AWS account, for every role alike.",
+      "appsync": [],
+      "surfaces": ["identity-pool-translation"],
       "uiRoutes": []
     },
     {
@@ -458,7 +467,13 @@
     },
     "identity-pool-credentials": {
       "title": "Cognito identity pool credentials for the web UI",
-      "control": "The identity pool chooses the IAM role from the ID token's lma_role claim: Admin and User receive the web UI's authenticated role; Participant receives a role with no permissions; a token without a recognised role receives no credentials.",
+      "control": "The identity pool chooses the IAM role from the ID token's lma_role claim: Admin and User receive the web UI's authenticated role; Participant receives a role that grants transcript translation only; a token without a recognised role receives no credentials.",
+      "enforcedIn": "lma-cognito-stack/deployment/lma-cognito-stack.yaml",
+      "tests": ["lma-ai-stack/test/test_role_matrix.py", "integ-tests/test_role_access.py"]
+    },
+    "identity-pool-translation": {
+      "title": "Amazon Translate from the web UI",
+      "control": "Both identity pool roles allow translate:TranslateText and comprehend:DetectDominantLanguage, which TranslateText uses to detect the source language; the Participant role allows nothing else.",
       "enforcedIn": "lma-cognito-stack/deployment/lma-cognito-stack.yaml",
       "tests": ["lma-ai-stack/test/test_role_matrix.py", "integ-tests/test_role_access.py"]
     },

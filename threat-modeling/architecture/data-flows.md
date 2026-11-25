@@ -245,7 +245,7 @@ sequenceDiagram
 
 **Trust boundary crossings**: TB1→TB2 (browser to CloudFront/WAF/Cognito), TB2→TB3 (JWT to AppSync).
 
-At every sign-in and token refresh, Cognito's pre token generation trigger writes the account's one role into the token and records the user's last activity in the Cognito stack's `UserSignInTable`; the PostAuthentication trigger records the last sign-in there. The identity pool gives a Participant a role with no permissions.
+At every sign-in and token refresh, Cognito's pre token generation trigger writes the account's one role into the token and records the user's last activity in the Cognito stack's `UserSignInTable`; the PostAuthentication trigger records the last sign-in there. The identity pool gives a Participant a role that allows transcript translation (`translate:TranslateText` and `comprehend:DetectDominantLanguage`) and nothing else.
 
 ### 5.1a Participant Read-Only Access
 
