@@ -204,22 +204,13 @@ def on_ci_runner(env=None):
     return bool(env.get("GITLAB_CI") or env.get("GITHUB_ACTIONS"))
 
 
-def instance_metadata_available(timeout=1.0):
-    """True when the EC2 instance metadata service answers (an instance profile may be there)."""
-    request = urllib.request.Request(
-        "http://169.254.169.254/latest/api/token",  # nosec B310 - fixed link-local address
-        method="PUT",
-        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout):  # nosec B310
-            return True
-    except Exception:  # noqa: BLE001 - any failure means no metadata service
-        return False
+def other_credentials_available(env=None, home=None):
+    """True when the environment or ~/.aws/config names a credential source of its own.
 
-
-def other_credentials_available(env=None, home=None, imds=instance_metadata_available):
-    """True when anything but SRT's placeholder could supply AWS credentials."""
+    The instance metadata service is not consulted: the placeholder is only ever
+    written on a CI runner, whose job container is discarded when the job ends,
+    and a runner's host can answer metadata requests from inside that container.
+    """
     env = os.environ if env is None else env
     home = Path.home() if home is None else Path(home)
     if any(env.get(name) for name in CREDENTIAL_ENV):
@@ -229,10 +220,10 @@ def other_credentials_available(env=None, home=None, imds=instance_metadata_avai
         text = config.read_text(encoding="utf-8", errors="replace")
         if any(key in text for key in ("credential_process", "sso_", "role_arn", "source_profile")):
             return True
-    return imds()
+    return False
 
 
-def write_placeholder_credentials(env=None, home=None, imds=instance_metadata_available):
+def write_placeholder_credentials(env=None, home=None):
     """Write SRT's placeholder AWS credentials, only on a CI runner with no other source.
 
     Returns the file written, or None. ``srt config`` will not install its
@@ -242,7 +233,7 @@ def write_placeholder_credentials(env=None, home=None, imds=instance_metadata_av
     creds = home / ".aws" / "credentials"
     if not on_ci_runner(env) or creds.exists():
         return None
-    if other_credentials_available(env, home, imds):
+    if other_credentials_available(env, home):
         return None
     creds.parent.mkdir(exist_ok=True)
     creds.write_text(PLACEHOLDER_CREDENTIALS, encoding="utf-8")
@@ -303,12 +294,13 @@ def main():
             aws_config.write_text("[default]\nregion = us-east-1\noutput = json\n")
         # SRT's `srt config` flow refuses to install scanner prerequisites
         # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
-        # exists. A CI runner with no credential source gets a placeholder that
+        # exists. A CI runner (GITLAB_CI or GITHUB_ACTIONS) whose environment and
+        # ~/.aws/config name no credential source gets a placeholder that
         # satisfies SRT's input parsing without holding real credentials, and it
         # is removed again once `srt config` ends: the scans do not read it. The
         # values are deliberately NOT in AWS access-key format (no AKIA prefix,
-        # no 40-char secret). On any host with another credential source the
-        # placeholder is never written, since it would take precedence over it.
+        # no 40-char secret). Outside a CI runner the placeholder is never
+        # written, since it would take precedence over the host's own credentials.
         placeholder = write_placeholder_credentials()
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
