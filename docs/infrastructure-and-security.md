@@ -412,7 +412,7 @@ response headers policy `SecurityHeadersPolicy` in
 | `Content-Security-Policy` | The sources the web UI uses, by name (below) |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
 | `X-Content-Type-Options` | `nosniff` |
-| `X-Frame-Options` | `DENY` |
+| `X-Frame-Options` | `DENY`, when `AllowedEmbedOrigins` is empty (the default); not sent when it lists origins |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Permissions-Policy` | `camera`, `microphone` and `display-capture` for the web UI's own origin, for Stream Audio/Video; `geolocation`, `payment`, `usb`, `serial`, `hid`, `bluetooth` and `midi` for no origin |
 | `Cross-Origin-Resource-Policy` | `same-origin` |
@@ -422,7 +422,8 @@ The Content-Security-Policy allows:
 
 | Directive | Sources |
 |-----------|---------|
-| `default-src`, `frame-src`, `form-action`, `frame-ancestors` | `'self'` |
+| `default-src`, `frame-src`, `form-action` | `'self'` |
+| `frame-ancestors` | `'self'`, followed by the origins in the stack parameter `AllowedEmbedOrigins`, if any |
 | `script-src` | `'self'`. Every script is a file on the distribution, and none needs `eval`. |
 | `style-src` | `'self' 'unsafe-inline'`. The stylesheets are files on the distribution; the diagram, math and PDF libraries add style elements and attributes as they render. |
 | `img-src`, `media-src` | `'self'`, `blob:` (and `data:` for pictures), and the deployment's regional S3 endpoint in both URL forms, `https://*.s3.<region>.<suffix>` and `https://s3.<region>.<suffix>`, for presigned links to recordings, video and pictures |
@@ -431,7 +432,24 @@ The Content-Security-Policy allows:
 | `connect-src` | `'self'`; the stack's AppSync GraphQL host (`https://`) and real-time host (`wss://`); `cognito-idp`, `cognito-identity`, `ssm`, `sync-states` (Step Functions' `StartSyncExecution`, which Virtual Participant launches use) and `translate` in the stack's Region; the regional S3 endpoint as above; `https://registry.modelcontextprotocol.io` for the MCP Servers page; `wss://*.cloudfront.net` for the WebSocket transcriber, which has its own CloudFront distribution; and `wss://*.lambda-microvm.<region>.on.aws` for the Virtual Participant's live view when `VPLaunchType=MICROVM` |
 | `object-src`, `base-uri` | `'none'` |
 
-`frame-ancestors 'self'` lets only the web UI's own origin frame its pages.
+`frame-ancestors` names the origins whose pages may show the web UI in a frame.
+With the stack parameter `AllowedEmbedOrigins` empty, the default, it is
+`frame-ancestors 'self'` and the distribution also sends `X-Frame-Options: DENY`,
+so only the web UI's own origin may frame its pages. To show the
+[embeddable components](embeddable-components.md#allowing-your-application-to-frame-lma)
+in your own application, set `AllowedEmbedOrigins` to a comma-separated list of
+`https://` origins (a host, an optional port, no path; a host may start with `*.`
+to match its subdomains). The directive then becomes `frame-ancestors 'self'`
+followed by those origins, and `X-Frame-Options` is not sent, because it cannot
+name a list of origins and a browser that understands `frame-ancestors` ignores
+it. The parameter is limited to 600 characters, which keeps the whole policy
+within CloudFront's limit on the header's length.
+
+`Permissions-Policy` is the same whatever `AllowedEmbedOrigins` says. Its
+allowlist names the origins of the web UI's page and of the frames the web UI
+embeds; inside another origin's iframe the web UI's page is still `self`, and
+the embedding page grants the microphone, camera and screen capture through the
+iframe's `allow` attribute.
 
 `Cross-Origin-Opener-Policy` is not sent. The MCP server OAuth sign-in and an
 embedded component opened as a popup (see

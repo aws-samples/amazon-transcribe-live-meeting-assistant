@@ -301,6 +301,10 @@ CLASSIFICATION: Dict[str, Classification] = {
     "CloudFrontAllowedGeos": _c(
         RESOURCE, "Sets the geographic restriction of the web app's CloudFront distribution."
     ),
+    "AllowedEmbedOrigins": _c(
+        RESOURCE,
+        "Sets the frame-ancestors directive and whether X-Frame-Options is sent, in the web app's CloudFront response headers policy.",
+    ),
     # Retention Settings
     "EnableVideoRecording": _c(
         RESOURCE,

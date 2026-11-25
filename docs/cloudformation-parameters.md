@@ -61,11 +61,11 @@ disagree. The description under each parameter is the one the console shows.
 
 <!-- BEGIN GENERATED PARAMETER REFERENCE: edit lma-main.yaml or scripts/cloudformation_parameters_doc.py, then run that script -->
 
-The template declares 70 parameters.
+The template declares 71 parameters.
 
 | Kind | Parameters | What changing one does |
 |---|---|---|
-| Resource | 51 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
+| Resource | 52 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
 | Configuration page limit | 1 | The default and the upper limit of a setting an Admin can lower, and not raise, on the web UI's Configuration page while the stack runs; see [Retention: settings the stack limits](configuration-guide.md#retention-settings-the-stack-limits). Every reader uses the smaller of the saved value and the parameter's, so a stack update that lowers the parameter applies at once. |
 | Read at run time | 5 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
@@ -627,6 +627,7 @@ Create the LMA meeting event bus (named &lt;stack name&gt;-meeting-events) and p
 |---|---|---|
 | [`CloudFrontPriceClass`](#cloudfrontpriceclass) | `PriceClass_100` | Resource |
 | [`CloudFrontAllowedGeos`](#cloudfrontallowedgeos) | (empty) | Resource |
+| [`AllowedEmbedOrigins`](#allowedembedorigins) | (empty) | Resource |
 
 ### `CloudFrontPriceClass`
 
@@ -647,6 +648,16 @@ Console label: *CloudFront Allowed Geographies*
 - **Kind:** Resource. Sets the geographic restriction of the web app's CloudFront distribution.
 
 Specify a comma separated list of two letter country codes (uppercase ISO 3166-1) that are allowed to access the web user interface via CloudFront. For example: US,CA. Leave empty if you do not want geo restrictions to be applied.
+
+### `AllowedEmbedOrigins`
+
+Console label: *Origins Allowed to Embed the Web UI*
+
+- **Default:** (empty)
+- **Allowed values:** Empty, or a comma separated list (no spaces) of lowercase https://host or https://host:port origins, where the host may start with *. followed by at least two labels; no paths, trailing slashes or other schemes
+- **Kind:** Resource. Sets the frame-ancestors directive and whether X-Frame-Options is sent, in the web app's CloudFront response headers policy.
+
+Comma separated list of https:// origins (no spaces, no paths) whose pages may show the web UI and its embeddable components in an iframe, for example https://crm.example.com,https://portal.example.org:8443. A host that starts with *. matches every subdomain of the rest of the host. Leave empty to allow only the web UI's own origin to frame its pages. See docs/embeddable-components.md.
 
 ## Configuration
 
