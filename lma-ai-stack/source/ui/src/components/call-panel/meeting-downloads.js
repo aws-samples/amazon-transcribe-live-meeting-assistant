@@ -59,7 +59,7 @@ const COPY_ITEM = { text: 'Copy to clipboard (Markdown)', id: 'copy', iconName: 
 export const SUMMARY_ACTION_ITEMS = [
   ...FORMAT_ITEMS,
   COPY_ITEM,
-  { text: 'Email summary (beta)', id: 'email', iconName: 'envelope' },
+  { text: 'Email summary', id: 'email', iconName: 'envelope' },
 ];
 
 export const TRANSCRIPT_DOWNLOAD_ITEMS = [

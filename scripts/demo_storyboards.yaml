@@ -320,7 +320,7 @@ storyboards:
       - 'Summaries can be edited by hand, and hand edits are protected'
       - 'AGENDA CHECK reports what was covered and what is still open'
     not_shown:
-      - 'Email summary (beta); the Video recording player; editing the agenda'
+      - 'Email summary; the Video recording player; editing the agenda'
     docs: docs/web-ui-guide.md#meeting-detail-page
     category: 'What''s new in LMA 0.4.0'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}

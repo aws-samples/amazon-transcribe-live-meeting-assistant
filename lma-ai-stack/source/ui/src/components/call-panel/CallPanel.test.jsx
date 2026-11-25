@@ -1367,7 +1367,7 @@ describe('the Download menu', () => {
       'Summary',
       ...FORMATS,
       'Copy to clipboard (Markdown)',
-      'Email summary (beta)',
+      'Email summary',
       ...GROUPS.slice(1),
     ]);
     expandGroup('Transcript');
