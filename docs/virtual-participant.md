@@ -783,7 +783,7 @@ The **Participants** section of the meeting page, and of a Virtual Participant's
 
 The meeting's owner or an Admin can choose **Create accounts for participants without one**. LMA then creates an account with the **Participant** role for each person on the list who has none, and Cognito sends each of them its invitation email with a temporary password. The [Participant](user-based-access-control.md#roles) role signs in to a home page only and gives no access to meeting data. Accounts that already exist are left exactly as they are. See [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting) for the limits that apply, including the email domain restriction and Cognito's daily email limit.
 
-On a scheduled Virtual Participant's page, both the status and the button work from the Virtual Participant's own list before it has created its meeting, so the accounts can be made ahead of the meeting.
+On a Virtual Participant's page, the list, the status and the button all use the list stored on the Virtual Participant, so for a scheduled one the accounts can be made ahead of the meeting. Once the Virtual Participant has created its meeting, the meeting has its own copy of the list; a change to it on the meeting page is shown on the meeting page, not on the Virtual Participant's.
 
 ## Meeting Invitation Parsing
 

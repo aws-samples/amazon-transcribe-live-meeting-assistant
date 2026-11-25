@@ -102,22 +102,26 @@ SHARE_WITH = {
         "Participant creates it (at most 50); the Virtual Participant itself is not shared"
     ),
 }
+PARTICIPANT = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "The person's name, at most 200 characters (optional)",
+        },
+        "email": {"type": "string", "description": "The person's email address"},
+    },
+    "required": ["email"],
+}
 PARTICIPANTS = {
     "type": "array",
     "items": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "The person's name, at most 200 characters (optional)",
-            },
-            "email": {"type": "string", "description": "The person's email address"},
-        },
-        "required": ["email"],
+        "anyOf": [PARTICIPANT, {"type": "string", "description": "An email address on its own"}]
     },
     "description": (
         "The participant list: the people expected at the meeting, for example a calendar "
-        "invite's attendees, each {name, email} (at most 100; an address is listed once). "
+        "invite's attendees, each {name, email} or an email address on its own (at most 100; "
+        "an address is listed once). "
         "Listing someone does not share the meeting with them"
     ),
 }

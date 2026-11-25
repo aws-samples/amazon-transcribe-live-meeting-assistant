@@ -539,20 +539,25 @@ MCP_TOOLS = [
                 "participants": {
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The person's name, at most 200 characters (optional)",
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "The person's name, at most 200 characters (optional)",
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "description": "The person's email address",
+                                    },
+                                },
+                                "required": ["email"],
                             },
-                            "email": {
-                                "type": "string",
-                                "description": "The person's email address",
-                            },
-                        },
-                        "required": ["email"],
+                            {"type": "string", "description": "An email address on its own"},
+                        ]
                     },
-                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
                 },
                 "summaryProfile": {
                     "type": "string",
@@ -685,20 +690,25 @@ MCP_TOOLS = [
                 "participants": {
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The person's name, at most 200 characters (optional)",
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "The person's name, at most 200 characters (optional)",
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "description": "The person's email address",
+                                    },
+                                },
+                                "required": ["email"],
                             },
-                            "email": {
-                                "type": "string",
-                                "description": "The person's email address",
-                            },
-                        },
-                        "required": ["email"],
+                            {"type": "string", "description": "An email address on its own"},
+                        ]
                     },
-                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
                 },
                 "summaryProfile": {
                     "type": "string",

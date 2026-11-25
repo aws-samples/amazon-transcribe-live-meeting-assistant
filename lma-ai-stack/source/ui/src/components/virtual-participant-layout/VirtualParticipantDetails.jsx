@@ -1102,13 +1102,14 @@ const VirtualParticipantDetails = () => {
           ) : null
         }
       />
-      {/* The participant list it was started or scheduled with, named by the
-          Virtual Participant until it has created its meeting. The meeting
-          page changes the list once there is one; before that, Edit does. */}
+      {/* The participant list this Virtual Participant was started or
+          scheduled with, read and acted on as its own row holds it: the
+          account statuses and new accounts are for the same list shown here.
+          The meeting it creates has its own copy, changed on the meeting page. */}
       <MeetingParticipants
         participants={vpDetails.participants}
-        callId={vpDetails.CallId || ''}
-        virtualParticipantId={vpDetails.CallId ? '' : vpDetails.id}
+        callId=""
+        virtualParticipantId={vpDetails.id}
         canManage={!!isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
       />
       {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (

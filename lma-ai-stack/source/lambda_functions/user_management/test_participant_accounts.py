@@ -78,6 +78,9 @@ class FakeCognito:
         self.users: dict[str, dict] = {}
         self.calls: list[tuple[str, dict]] = []
         self.add_to_group_error: ClientError | None = None
+        self.resend_error: ClientError | None = None
+        # Addresses sent an invitation, in order.
+        self.invited: list[str] = []
         self.exceptions = SimpleNamespace(
             UsernameExistsException=UsernameExistsException,
             UserNotFoundException=UserNotFoundException,
@@ -111,9 +114,16 @@ class FakeCognito:
 
     def admin_create_user(self, **kwargs):
         self.calls.append(("admin_create_user", kwargs))
+        if kwargs.get("MessageAction") == "RESEND":
+            if self.resend_error is not None:
+                raise self.resend_error
+            self.invited.append(kwargs["Username"])
+            return {}
         if self._key(kwargs["Username"]) is not None:
             raise UsernameExistsException("UsernameExistsException")
         self.add(kwargs["Username"])
+        if kwargs.get("MessageAction") != "SUPPRESS":
+            self.invited.append(kwargs["Username"])
         return {}
 
     def admin_add_user_to_group(self, **kwargs):
@@ -293,8 +303,24 @@ def test_accounts_are_created_in_the_participant_group_only_for_those_without_on
     assert pool.users["ana@example.com"]["groups"] == ["Admin"]
     assert pool.users["cy@example.net"]["groups"] == []
     created = [kw for name, kw in pool.calls if name == "admin_create_user"]
-    assert created[0]["DesiredDeliveryMediums"] == ["EMAIL"]
     assert {"Name": "email", "Value": "Bo@Example.org"} in created[0]["UserAttributes"]
+    assert pool.invited == ["Bo@Example.org", "di@example.com"]
+
+
+def test_the_invitation_is_sent_only_once_the_account_is_in_the_participant_group(pool, ddb):
+    create({"CallId": CALL_ID, "emails": ["di@example.com"]})
+    steps = [
+        (name, kw.get("MessageAction"))
+        for name, kw in pool.calls
+        if name in ("admin_create_user", "admin_add_user_to_group")
+    ]
+    assert steps == [
+        ("admin_create_user", "SUPPRESS"),
+        ("admin_add_user_to_group", None),
+        ("admin_create_user", "RESEND"),
+    ]
+    resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
+    assert resend["DesiredDeliveryMediums"] == ["EMAIL"]
 
 
 def test_only_listed_addresses_may_be_named(pool, ddb):
@@ -321,12 +347,15 @@ def test_an_account_made_between_the_lookup_and_the_create_is_reported_as_existi
     assert sum(ddb.counts.values()) == 0, "the slot reserved for it is given back"
 
 
-def test_a_new_account_whose_group_cannot_be_set_is_removed(pool, ddb):
-    pool.add_to_group_error = _CognitoError()
+@pytest.mark.parametrize("failing", ["add_to_group_error", "resend_error"])
+def test_a_failure_after_the_create_leaves_no_account_and_sends_no_invitation(pool, ddb, failing):
+    setattr(pool, failing, _CognitoError())
     result = create({"CallId": CALL_ID, "emails": ["di@example.com"]})
     assert result["results"][0]["outcome"] == "failed"
     assert "di@example.com" not in pool.users
+    assert pool.invited == []
     assert result["created"] == 0
+    assert sum(ddb.counts.values()) == 0, "the daily slot is given back"
 
 
 def test_addresses_outside_the_allowed_domains_are_not_created(pool, ddb, monkeypatch):

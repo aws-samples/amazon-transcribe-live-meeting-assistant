@@ -661,8 +661,12 @@ def _remaining_today(username, now):
 def _create_participant_account(email):
     """Create the account in the Participant group; "created" or "exists".
 
-    The account is removed again if the group cannot be set, so an address is
-    never left with an account in another role.
+    The account is created with its invitation suppressed, added to the
+    Participant group, and only then sent its invitation (a resend of the
+    message the suppressed create would have sent). Until the invitation is
+    sent nobody holds its temporary password, and an account in that state
+    cannot reset one, so no account outside the Participant group is ever
+    usable. A failure after the create removes the account again.
     """
     try:
         cognito.admin_create_user(
@@ -672,7 +676,7 @@ def _create_participant_account(email):
                 {"Name": "email", "Value": email},
                 {"Name": "email_verified", "Value": "true"},
             ],
-            DesiredDeliveryMediums=["EMAIL"],
+            MessageAction="SUPPRESS",
         )
     except cognito.exceptions.UsernameExistsException:
         return "exists"
@@ -680,8 +684,14 @@ def _create_participant_account(email):
         cognito.admin_add_user_to_group(
             UserPoolId=USER_POOL_ID, Username=email, GroupName=PARTICIPANT_GROUP
         )
+        cognito.admin_create_user(
+            UserPoolId=USER_POOL_ID,
+            Username=email,
+            MessageAction="RESEND",
+            DesiredDeliveryMediums=["EMAIL"],
+        )
     except ClientError:
-        logger.exception("Could not add a new participant account to its group; removing it")
+        logger.exception("Could not finish a new participant account; removing it")
         try:
             cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=email)
         except ClientError:

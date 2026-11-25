@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import re
 from pathlib import Path
 
@@ -185,3 +186,31 @@ def test_the_server_selects_what_the_meeting_page_subscribes_to() -> None:
     source = (MCP_LAMBDA / "tools" / "call_fields.py").read_text(encoding="utf-8")
     server = re.search(r'SUBSCRIBED_CALL_FIELDS = """(.*?)"""', source, re.S).group(1)
     assert _text(server) == _text(ui_selection)
+
+
+def _accepts(schema: dict, value) -> bool:
+    """The subset of JSON Schema the participants argument uses: anyOf, object, string."""
+    if "anyOf" in schema:
+        return any(_accepts(option, value) for option in schema["anyOf"])
+    if schema.get("type") == "string":
+        return isinstance(value, str)
+    if schema.get("type") == "object":
+        return isinstance(value, dict) and all(key in value for key in schema.get("required", []))
+    if schema.get("type") == "array":
+        return isinstance(value, list) and all(_accepts(schema["items"], item) for item in value)
+    raise AssertionError(f"unexpected schema {schema}")
+
+
+@pytest.mark.parametrize(
+    "name", ["schedule_meeting", "start_meeting_now", "update_scheduled_meeting"]
+)
+def test_the_participants_argument_accepts_the_documented_forms(name: str) -> None:
+    """An entry is {name, email} or an email address on its own, as the docs show and
+    tools/preparation.participants_input takes; an entry without an email is refused."""
+    tool = next(t for t in _api_key_tools() if t["name"] == name)
+    schema = tool["inputSchema"]["properties"]["participants"]
+    docs = (AI_STACK.parent / "docs" / "mcp-tools-reference.md").read_text(encoding="utf-8")
+    example = re.search(r'"participants": (\[.*?\])\n', docs).group(1)
+    assert _accepts(schema, json.loads(example))
+    assert _accepts(schema, [{"email": "ana@example.com"}, "bo@example.org"])
+    assert not _accepts(schema, [{"name": "No address"}])
