@@ -427,6 +427,7 @@ export const listMCPApiKeys = /* GraphQL */ `
       createdAt
       enabled
       scope
+      lastUsedAt
     }
   }
 `;

@@ -491,9 +491,10 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      The Cognito stack's table of each user's last sign-in time (keyed by Cognito
-      sub), read by the user management resolver. Empty when the Cognito stack
-      has none, in which case the last sign-in is reported as unavailable.
+      The Cognito stack's table of each user's last sign-in and last active times
+      (keyed by Cognito sub), read by the user management resolver and updated by
+      the MCP API key authorizer. Empty when the Cognito stack has none, in which
+      case the times are reported as unavailable.
 
   AllowedSignUpEmailDomain:
     Type: String
@@ -8978,7 +8979,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive DynamoDB table name, user pool id and log level; AWS-owned key encryption is sufficient"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive DynamoDB table names, user pool id and log level; AWS-owned key encryption is sufficient"
     Properties:
       FunctionName: !Sub "${LMAStackName}-MCPApiKeyAuthorizer"
       Handler: index.handler
@@ -8990,21 +8991,46 @@ Resources:
         Variables:
           MCP_API_KEYS_TABLE: !Ref MCPApiKeysTable
           USER_POOL_ID: !Ref UserPoolId
+          USER_SIGN_IN_TABLE: !Ref UserSignInTableName
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref MCPApiKeysTable
-        # The key owner's current groups, which decide their role on each request.
+        # The key owner's current groups, which decide their role on each request,
+        # and the owner's sub, for recording their last activity.
         - Statement:
             - Effect: Allow
               Action:
                 - cognito-idp:AdminListGroupsForUser
+                - cognito-idp:AdminGetUser
               Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+        # A key's last use, and its owner's last activity in the Cognito stack's
+        # sign-in table: conditional updates only.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt MCPApiKeysTable.Arn
+            - !If
+              - HasUserSignInTable
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserSignInTableName}"
+              - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
                 - kms:Decrypt
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:GenerateDataKey*
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
       LoggingConfig:
         LogGroup: !Ref MCPApiKeyAuthorizerLogGroup
     DependsOn:

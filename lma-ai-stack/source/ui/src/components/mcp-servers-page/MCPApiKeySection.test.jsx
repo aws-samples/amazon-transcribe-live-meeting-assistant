@@ -12,7 +12,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import MCPApiKeySection, { LEGACY_HINT, scopeLabel } from './MCPApiKeySection';
+import MCPApiKeySection, { LEGACY_HINT, lastUsedText, scopeLabel } from './MCPApiKeySection';
 
 const { graphqlMock, state } = vi.hoisted(() => ({ graphqlMock: vi.fn(), state: { keys: [] } }));
 vi.mock('aws-amplify/api', () => ({
@@ -78,6 +78,29 @@ describe('MCPApiKeySection key scope', () => {
       expect(screen.getByText(LEGACY_HINT)).toBeInTheDocument();
     },
   );
+
+  it('shows when an existing key was last used', async () => {
+    const usedAt = '2026-11-24T16:45:00.000Z';
+    state.keys = [
+      {
+        keyPrefix: 'lma_existing',
+        createdAt: '2026-11-01T10:00:00Z',
+        enabled: true,
+        scope: 'read',
+        lastUsedAt: usedAt,
+      },
+    ];
+    render(<MCPApiKeySection />);
+    expect(await screen.findByText(`Last used ${new Date(usedAt).toLocaleString()}`)).toBeInTheDocument();
+    expect(graphqlMock.mock.calls[0][0].query).toContain('lastUsedAt');
+  });
+
+  it('says "Not recorded" for a key with no recorded use', async () => {
+    state.keys = [{ keyPrefix: 'lma_existing', createdAt: '2026-11-01T10:00:00Z', enabled: true, scope: 'read' }];
+    render(<MCPApiKeySection />);
+    expect(await screen.findByText('Last used: Not recorded')).toBeInTheDocument();
+    expect(lastUsedText(null)).toBe('Last used: Not recorded');
+  });
 
   it('labels each scope', () => {
     expect(scopeLabel('read-write')).toBe('Read and write');

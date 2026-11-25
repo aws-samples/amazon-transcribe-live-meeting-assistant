@@ -24,6 +24,10 @@ class UserRecord(BaseModel):
     #: The user's last interactive sign-in (ISO 8601, UTC), or None when none is
     #: recorded or the times could not be read (see ``UserList.last_sign_in_available``).
     last_sign_in_at: Optional[str] = None
+    #: The user's last activity (ISO 8601, UTC): the latest sign-in or token renewal,
+    #: or use of their MCP API key, each recorded at most once per 15 minutes. None
+    #: as for ``last_sign_in_at``.
+    last_active_at: Optional[str] = None
 
 
 class UserList(BaseModel):
@@ -36,8 +40,9 @@ class UserList(BaseModel):
     user_pool_id: str = ""
     #: When the list was read (ISO 8601, UTC).
     generated_at: str = ""
-    #: False when the last sign-in times could not be read, so every
-    #: ``last_sign_in_at`` is None for that reason and not because none is recorded.
+    #: False when the last sign-in and last active times could not be read, so every
+    #: ``last_sign_in_at`` and ``last_active_at`` is None for that reason and not
+    #: because none is recorded.
     last_sign_in_available: bool = True
     #: Why the times could not be read, when they could not.
     last_sign_in_unavailable_reason: str = ""

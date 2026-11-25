@@ -70,6 +70,8 @@ MCP client connects to REST API Gateway endpoint
     → Looks up hash in MCPApiKeysTable (DynamoDB)
     → Reads the key owner's current Cognito groups (AdminListGroupsForUser)
       and denies unless the owner exists and their role is Admin or User
+    → Records the key's last use and the owner's last activity (at most once
+      every 15 minutes per key; see Last used below)
     → Returns IAM Allow policy + { userId, username, isAdmin, role, scope } in context
   → MCPServerAnalyticsFunction receives API Gateway proxy event
     → Detects JSON-RPC 2.0 message (jsonrpc + method fields in body)
@@ -92,7 +94,7 @@ User chooses a scope and clicks "Generate API Key" on the MCP Servers Configurat
     → Verifies user doesn't already have a key (queries UserIdIndex GSI)
     → Generates key: "lma_" + uuid4
     → SHA-256 hashes the key
-    → Stores in DynamoDB: { KeyHash (PK), UserId, Username, IsAdmin, CreatedAt, KeyPrefix, Enabled, Scope }
+    → Stores in DynamoDB: { KeyHash (PK), UserId, Username, UserSub, IsAdmin, CreatedAt, KeyPrefix, Enabled, Scope }
     → Returns plaintext key and its scope to user (shown once in modal with copy-to-clipboard)
 ```
 
@@ -235,6 +237,8 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 | `CreatedAt` | S | ISO 8601 timestamp |
 | `Enabled` | S | `"true"` or `"false"` |
 | `Scope` | S | `"read"` or `"read-write"`; absent on a key created before keys had scopes, which is listed and authorized as `"legacy"` |
+| `UserSub` | S | The owner's Cognito `sub`, stored on keys generated from this version on; the authorizer uses it to record the owner's last activity. Absent on older keys, for which the authorizer reads it from the user pool (`AdminGetUser`) |
+| `LastUsedAt` | S | When the key last authorized a request (ISO 8601, UTC), written at most once every 15 minutes; absent until the key is first used after this was deployed |
 
 **GSI: `UserIdIndex`** — Partition key: `UserId`, projects all attributes. Used for listing a user's keys and enforcing one-key-per-user.
 
@@ -244,15 +248,24 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 - **TTL**: 0 (no caching — since the identity source varies between headers)
 - **Token extraction order**: `authorizationToken` (TOKEN mode compat) → `headers.x-api-key` → `headers.Authorization` (strips `Bearer ` prefix)
 - **Owner's role**: read from the user pool on every request, with one `AdminListGroupsForUser` call, which counts against the account's Amazon Cognito user-read request quota; a call still throttled after three attempts denies that request. A key is refused while its owner is a Participant or once the owner is deleted, and `isAdmin` is `"true"` only while the owner is in the **Admin** group. See [User-Based Access Control](user-based-access-control.md#roles).
-- **On success**: returns IAM Allow policy with `context: { userId, username, isAdmin, role, scope }`
+- **On success**: records the key's last use (see [Last used](#last-used)), then returns IAM Allow policy with `context: { userId, username, isAdmin, role, scope }`
 - **On failure**: returns IAM Deny policy
+
+### Last used
+
+When the authorizer admits a request it records two times, for access reviews:
+
+- the key's **last use**, as `LastUsedAt` on the key's item, which the MCP API Key container shows as **Last used** (or **Last used: Not recorded** for a key not used since this was deployed); and
+- the owner's **last activity**, as `LastActiveAt` on their item in the Cognito stack's `UserSignInTable`, which the User Management page shows as **Last active** (see [User Management › Last active](user-management.md#last-active)).
+
+Both are conditional DynamoDB updates that write only when the recorded time is more than 15 minutes old, so a busy key costs at most one pair of writes every 15 minutes (plus, for a key generated before keys stored their owner's `sub`, one `AdminGetUser` read, which counts against the same Cognito user-read quota as the role lookup), and the times are accurate to within 15 minutes. An execution environment also remembers the keys it recorded in the last 15 minutes and makes no call for them. Each call is one attempt that gives up after at most 1.5 seconds, so the first request of a window can take up to about 4.5 seconds longer when DynamoDB or Cognito are slow (the authorizer's timeout is 10 seconds). If the key's write succeeds and the owner's then fails, the owner's write is not tried again for that key until the next window. A failed write is logged (by key prefix and error type only) and never changes the policy. A refused request records nothing.
 
 ## UI
 
 Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`):
 
 - **MCP API Key** container at the top of the page
-- Shows key prefix with masked suffix, its scope (**Read only**, **Read and write**, or **Legacy (original tools)** with a note that a new key gives the new scopes) and creation date if a key exists
+- Shows key prefix with masked suffix, its scope (**Read only**, **Read and write**, or **Legacy (original tools)** with a note that a new key gives the new scopes), creation date and when the key was last used if a key exists
 - Before a key exists, a **Scope** choice (**Read only** by default, or **Read and write**) and the "Generate API Key" button (disabled when a key already exists)
 - Generated key shown in a modal with its scope, CopyToClipboard and a warning it won't be shown again
 - "Revoke" button with confirmation modal

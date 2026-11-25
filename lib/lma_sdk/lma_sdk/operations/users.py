@@ -7,7 +7,8 @@ Available as ``client.users``::
 
     review = client.users.list()
     for user in review.users:
-        print(user.email, user.role, user.status, user.enabled, user.last_sign_in_at)
+        print(user.email, user.role, user.status, user.enabled, user.last_sign_in_at,
+              user.last_active_at)
 
 Each user is read from the stack's Cognito user pool; the role is ``Admin`` for a
 member of the Admin group, otherwise ``Participant`` for a member of the Participant
@@ -20,6 +21,12 @@ time. A user with no item has not signed in since the trigger was deployed
 stack deployed before it existed or for want of a permission, every
 ``last_sign_in_at`` is None, ``last_sign_in_available`` is False and
 ``last_sign_in_unavailable_reason`` says why; the users are still listed.
+
+The last active time is ``LastActiveAt`` in the same table: the Cognito stack's
+pre token generation trigger sets it on every sign-in and token renewal (about
+hourly while a client is open), and the MCP API key authorizer on each use of the
+user's API key, each at most once per 15 minutes. It is None, and unavailable, in
+the same cases as the last sign-in.
 
 Every call uses the caller's AWS credentials: ``cloudformation:DescribeStacks``
 and ``cloudformation:DescribeStackResource`` on the stack and its Cognito stack,
@@ -183,15 +190,30 @@ class UserOperations:
         Raises:
             SignInTimesUnavailable: the table could not be found or read.
         """
+        return {
+            sub: times["last_sign_in_at"]
+            for sub, times in self.sign_in_times(subs).items()
+            if times.get("last_sign_in_at")
+        }
+
+    def sign_in_times(self, subs: Iterable[str]) -> Dict[str, Dict[str, Optional[str]]]:
+        """The recorded times of each Cognito sub in ``subs`` that has any.
+
+        Each value has ``last_sign_in_at`` and ``last_active_at``, either of which
+        may be None.
+
+        Raises:
+            SignInTimesUnavailable: the table could not be found or read.
+        """
         table = self.sign_in_table()
         dynamodb = self._client.session.client("dynamodb")
         unique = sorted({sub for sub in subs if sub})
-        found: Dict[str, str] = {}
+        found: Dict[str, Dict[str, Optional[str]]] = {}
         for start in range(0, len(unique), BATCH_GET_MAX):
             request: Dict[str, Any] = {
                 table: {
                     "Keys": [{"UserSub": {"S": s}} for s in unique[start : start + BATCH_GET_MAX]],
-                    "ProjectionExpression": "UserSub, LastSignInAt",
+                    "ProjectionExpression": "UserSub, LastSignInAt, LastActiveAt",
                 }
             }
             attempt = 0
@@ -210,9 +232,12 @@ class UserOperations:
                         )
                     ) from err
                 for item in response.get("Responses", {}).get(table, []):
-                    at = (item.get("LastSignInAt") or {}).get("S")
-                    if at:
-                        found[item["UserSub"]["S"]] = at
+                    times = {
+                        "last_sign_in_at": (item.get("LastSignInAt") or {}).get("S") or None,
+                        "last_active_at": (item.get("LastActiveAt") or {}).get("S") or None,
+                    }
+                    if times["last_sign_in_at"] or times["last_active_at"]:
+                        found[item["UserSub"]["S"]] = times
                 request = response.get("UnprocessedKeys") or {}
                 if request:
                     attempt += 1
@@ -224,7 +249,7 @@ class UserOperations:
         return found
 
     def list(self) -> UserList:
-        """Every user of the deployment, by email, with role, status and last sign-in."""
+        """Every user of the deployment, by email, with role, status, last sign-in and last active."""
         stack = self._client._require_stack()  # noqa: SLF001
         pool_id = self._client.vp.user_pool_id
         cognito_users = self._cognito_users(pool_id)
@@ -232,9 +257,10 @@ class UserOperations:
         participants = self._group_members(pool_id, PARTICIPANT_GROUP)
         subs = [_attribute(user, "sub") for user in cognito_users]
 
-        available, reason, times = True, "", {}
+        available, reason = True, ""
+        times: Dict[str, Dict[str, Optional[str]]] = {}
         try:
-            times = self.last_sign_ins(subs)
+            times = self.sign_in_times(subs)
         except SignInTimesUnavailable as err:
             available, reason = False, str(err)
 
@@ -246,7 +272,8 @@ class UserOperations:
                 status=str(user.get("UserStatus") or ""),
                 enabled=bool(user.get("Enabled", True)),
                 created_at=iso_utc(user.get("UserCreateDate")),
-                last_sign_in_at=times.get(sub) if available else None,
+                last_sign_in_at=(times.get(sub) or {}).get("last_sign_in_at"),
+                last_active_at=(times.get(sub) or {}).get("last_active_at"),
             )
             for user, sub in zip(cognito_users, subs)
         ]

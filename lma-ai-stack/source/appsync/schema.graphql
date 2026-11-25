@@ -3175,6 +3175,9 @@ type MCPApiKey @aws_cognito_user_pools {
 	# keys had a scope, answered for the server's original tools and the tools
 	# that change nothing.
 	scope: String
+	# When the key last authorized a request, recorded by the MCP API key
+	# authorizer at most once per 15 minutes. Null when no use is recorded.
+	lastUsedAt: AWSDateTime
 }
 
 type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
@@ -3198,12 +3201,17 @@ type User @aws_cognito_user_pools {
 	# has not signed in since the trigger was deployed) or the time could not
 	# be read; UserList.lastSignInAvailable tells the two apart.
 	lastSignInAt: AWSDateTime
+	# The user's last activity: the latest sign-in or token renewal (recorded
+	# by the pre token generation trigger) or MCP API key use (recorded by the
+	# key authorizer), each written at most once per 15 minutes. Null as for
+	# lastSignInAt.
+	lastActiveAt: AWSDateTime
 }
 
 type UserList @aws_cognito_user_pools {
 	users: [User]
 	# False when the sign-in times could not be read, so a null lastSignInAt
-	# does not mean "not recorded".
+	# or lastActiveAt does not mean "not recorded".
 	lastSignInAvailable: Boolean
 }
 
