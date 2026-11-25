@@ -19,6 +19,10 @@ import { util, extensions } from '@aws-appsync/utils';
  * on the sharing list it is published with, so a meeting unshared while the
  * page is open stops reaching it with the next line. AppSync applies a filter
  * to the published message whatever the subscriber selected.
+ *
+ * AppSync accepts a filter of at most 10 filters, counting each value of an
+ * `in` list as a filter of its own, and at most 5 fields to a filter (see
+ * segmentFilter).
  */
 
 // The fields a subscriber may select: ParticipantTranscriptSegment's.
@@ -36,9 +40,11 @@ const ALLOWED_FIELDS = [
   '__typename',
 ];
 
-// What was said (the speech channels, under either spelling) and typed in the
-// meeting chat: lma_channels.STORED_TRANSCRIPT_CHANNELS.
-const TRANSCRIPT_CHANNELS = ['REMOTE', 'LOCAL', 'CALLER', 'AGENT', 'MEETING_CHAT'];
+// The meeting assistant's channels: every value of the Channel enum other than
+// what was said (the speech channels, under either spelling) and typed in the
+// meeting chat, lma_channels.STORED_TRANSCRIPT_CHANNELS.
+// test_participant_subscription_filter.py holds this list to the two.
+const ASSISTANT_CHANNELS = ['AGENT_ASSISTANT', 'CHAT_ASSISTANT'];
 
 /**
  * @param {import('@aws-appsync/utils').Context} ctx the context
@@ -79,6 +85,37 @@ function sharedWithEntries(value) {
 // END sharedWithEntries
 
 /**
+ * The filter on each published segment: the meeting, a transcript channel,
+ * and the caller an entry of the segment's SharedWith.
+ *
+ * Every segment is published with SharedWith as "[a, b]" (the "SharedWith
+ * published" block of dDbPutCondition.response.vtl), so the caller is an entry
+ * exactly when it is "[caller]", starts "[caller, ", or holds ", caller, " or
+ * ", caller]", as subscription.js matches it. Those are four filters, each
+ * with the meeting and the channel. The channel is held to the transcript's
+ * as `notIn` the assistant's channels: Channel is an enum, so the two say the
+ * same, and `notIn` is one filter where `in` would count each of its five
+ * values, making 4 x 5 = 20. Four filters of three fields each, whatever the
+ * caller and however long the sharing list.
+ *
+ * @param {string} callId the meeting
+ * @param {string} username the caller
+ * @returns {*} the filter, for util.transform.toSubscriptionFilter
+ */
+function segmentFilter(callId, username) {
+  return {
+    CallId: { eq: callId },
+    Channel: { notIn: ASSISTANT_CHANNELS },
+    or: [
+      { SharedWith: { eq: `[${username}]` } },
+      { SharedWith: { beginsWith: `[${username}, ` } },
+      { SharedWith: { contains: `, ${username}, ` } },
+      { SharedWith: { contains: `, ${username}]` } },
+    ],
+  };
+}
+
+/**
  * @param {import('@aws-appsync/utils').Context} ctx the context
  * @returns {*} null, as every subscription resolver returns
  */
@@ -110,20 +147,7 @@ export function response(ctx) {
   if (selected.length > 0) {
     util.error(`Not a field of a Participant's transcript: ${selected.join(', ')}`, 'Unauthorized');
   }
-  // Every segment is published with SharedWith as "[a, b]" (the "SharedWith
-  // published" block of dDbPutCondition.response.vtl), so the caller is an
-  // entry exactly when it is "[caller]", starts "[caller, ", or holds
-  // ", caller, " or ", caller]", as subscription.js matches it.
-  const filter = {
-    CallId: { eq: ctx.args.CallId },
-    Channel: { in: TRANSCRIPT_CHANNELS },
-    or: [
-      { SharedWith: { eq: `[${username}]` } },
-      { SharedWith: { beginsWith: `[${username}, ` } },
-      { SharedWith: { contains: `, ${username}, ` } },
-      { SharedWith: { contains: `, ${username}]` } },
-    ],
-  };
+  const filter = segmentFilter(ctx.args.CallId, username);
   extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
   return null;
 }
