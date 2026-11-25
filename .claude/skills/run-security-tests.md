@@ -8,6 +8,7 @@ and its schedule is `docs/security-testing.md`; read it before changing a test.
 | Ask | Command |
 |---|---|
 | Live access tests on a stack | `AWS_PROFILE=default make stacktest-rbac STACK=<name> REGION=<region>` |
+| ...on a stack others are testing at the same time | add `SHARED=1`: the web UI app client is not changed (the expiry check is not run) |
 | ZAP scan, passive | `AWS_PROFILE=default make stacktest-zap STACK=<name> REGION=<region>` |
 | ZAP scan, one target | `... make stacktest-zap STACK=<name> TARGETS=graphql` (`graphql`, `web`, `mcp`) |
 | ZAP scan, active | `... make stacktest-zap STACK=<name> ZAP_ACTIVE=1`: **only on a throwaway stack the user names for it** |

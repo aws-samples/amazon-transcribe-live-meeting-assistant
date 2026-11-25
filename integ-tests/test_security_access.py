@@ -32,6 +32,7 @@ See docs/security-testing.md.
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 
@@ -54,6 +55,10 @@ ACCOUNTS = (
     ("sec-participant", "Participant"),
 )
 READERS = ("sec-owner", "sec-shared", "sec-admin")
+# Leaves the web UI app client alone, for a stack shared with other runs.
+NO_CLIENT_CHANGE = "LMA_SECTEST_NO_CLIENT_CHANGE"
+FRESH_CONTROL = "Query.getCallCount with a fresh five-minute ID token (control)"
+EXPIRED_CHECK = "Query.getCallCount with an expired genuine ID token"
 
 
 @pytest.fixture
@@ -98,7 +103,18 @@ def short_lived(deployment: rbac.Deployment, accounts):
     overlaps the tests in between. The web UI app client's ID token lifetime is
     shortened for that one sign-in and restored at once (see
     sign_in_with_short_id_token); the restore is a check of its own.
+
+    With LMA_SECTEST_NO_CLIENT_CHANGE set, for a stack other runs are using at
+    the same time, the client is left alone and this yields None: the expiry
+    check and its control are recorded as not run.
     """
+    if os.environ.get(NO_CLIENT_CHANGE, "") not in ("", "0", "false"):
+        for subject in (FRESH_CONTROL, EXPIRED_CHECK):
+            REPORT.not_run(
+                probe.SUITE_AUTH, subject, "sec-other (User)", "", f"{NO_CLIENT_CHANGE} is set: the web UI app client is not changed"
+            )
+        yield None
+        return
     tokens, restored, error = probe.sign_in_with_short_id_token(deployment, accounts["sec-other"])
     REPORT.record(
         probe.SUITE_AUTH,
@@ -209,16 +225,17 @@ def test_appsync_refuses_altered_unsigned_and_foreign_id_tokens(deployment, acco
             )
     # The short-lived token, while it is fresh: the control for the expiry check
     # at the end of this module.
-    fresh, _ = short_lived
-    status, body = probe.graphql_raw(deployment.graphql_url, {"Authorization": fresh["id"]}, probe.PROBE_QUERY)
-    REPORT.record(
-        probe.SUITE_AUTH,
-        "Query.getCallCount with a fresh five-minute ID token (control)",
-        "sec-other (User)",
-        "answered",
-        probe.outcome_of(status, body, "Query.getCallCount"),
-        f"HTTP {status} {probe.error_text(body)}",
-    )
+    if short_lived is not None:
+        fresh, _ = short_lived
+        status, body = probe.graphql_raw(deployment.graphql_url, {"Authorization": fresh["id"]}, probe.PROBE_QUERY)
+        REPORT.record(
+            probe.SUITE_AUTH,
+            FRESH_CONTROL,
+            "sec-other (User)",
+            "answered",
+            probe.outcome_of(status, body, "Query.getCallCount"),
+            f"HTTP {status} {probe.error_text(body)}",
+        )
     # A genuine token of the same user, issued to another app client of the pool.
     with probe.TemporaryAppClient(deployment) as other_client:
         foreign = other_client.sign_in(accounts["sec-other"])
@@ -552,7 +569,11 @@ def test_the_stack_has_no_function_url_and_no_rest_method_without_an_authorizer(
 # ── last, so the wait overlaps the tests above ─────────────────────────────
 
 
-def test_appsync_refuses_a_genuine_id_token_after_it_expires(deployment, short_lived, recorded) -> None:
+def test_appsync_refuses_a_genuine_id_token_after_it_expires(deployment, short_lived, recorded, request) -> None:
+    if short_lived is None:
+        # Not run on request (recorded as such in the report), which --no-skips allows.
+        request.node.add_marker(pytest.mark.optional_feature)
+        pytest.skip(f"{NO_CLIENT_CHANGE} is set: the web UI app client is not changed")
     tokens, expires_at = short_lived
     wait = expires_at + 20 - time.time()
     if wait > 0:
@@ -560,7 +581,7 @@ def test_appsync_refuses_a_genuine_id_token_after_it_expires(deployment, short_l
     status, body = probe.graphql_raw(deployment.graphql_url, {"Authorization": tokens["id"]}, probe.PROBE_QUERY)
     REPORT.record(
         probe.SUITE_AUTH,
-        "Query.getCallCount with an expired genuine ID token",
+        EXPIRED_CHECK,
         "sec-other (User)",
         "refused",
         "refused" if probe.refused_at_request(status, body) else "answered",

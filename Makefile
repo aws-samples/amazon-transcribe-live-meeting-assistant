@@ -798,7 +798,8 @@ SECTEST_REGION_ENV = $(if $(REGION),LMA_REGION=$(REGION) AWS_DEFAULT_REGION=$(RE
 # Throwaway users, one throwaway meeting and a temporary app client, all deleted
 # afterwards; the web UI app client's ID token lifetime is shortened for one
 # sign-in and restored at once. --no-skips: a missing dependency fails the run
-# rather than reporting green having checked nothing.
+# rather than reporting green having checked nothing. SHARED=1 leaves the web UI
+# app client alone (the expiry check is then not run), for a stack other runs use.
 stacktest-rbac: ## Live access tests: roles, tokens, meeting access, other entry points (Usage: make stacktest-rbac STACK=<name> [REGION=<region>])
 ifeq ($(SECTEST_STACK),)
 	$(error Set STACK to the deployed stack to test. Usage: make stacktest-rbac STACK=<name> [REGION=<region>])
@@ -808,7 +809,8 @@ endif
 		exit 1; \
 	fi
 	@echo -e "$(CYAN)Running the live access tests against '$(SECTEST_STACK)'...$(NC)"
-	$(SECTEST_REGION_ENV) $(PYTHON) -m pytest integ-tests/test_role_access.py integ-tests/test_security_access.py \
+	$(SECTEST_REGION_ENV) $(if $(filter 1 true yes,$(SHARED)),LMA_SECTEST_NO_CLIENT_CHANGE=1) \
+		$(PYTHON) -m pytest integ-tests/test_role_access.py integ-tests/test_security_access.py \
 		--stack-name "$(SECTEST_STACK)" --no-skips
 	@echo -e "$(GREEN)✅ Live access tests passed against '$(SECTEST_STACK)'. Report: scratch/api-test-results/report.md$(NC)"
 
