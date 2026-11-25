@@ -363,29 +363,166 @@ def test_only_the_record_of_auto_shares_is_written_when_sharing_does_not_change(
     assert stream["items"] == [] and stream["unshared"] == []
 
 
-def test_the_transaction_is_sent_in_the_low_level_form(monkeypatch) -> None:
+def _real_record(**attributes):
+    """A meeting record as the boto3 resource returns it from the table: Decimal, bool, maps."""
+    from decimal import Decimal
+
+    return {
+        **_meeting(
+            Participants=[
+                {"name": "Integ Owner", "email": OWNER},
+                {"name": "Integ Listed", "email": ANA},
+            ],
+            ParticipantsUpdatedBy=OWNER,
+            ParticipantsUpdatedAt="2026-11-24T17:05:00.000Z",
+            AgentId=OWNER,
+            Status="STARTED",
+            ExpiresAfter=Decimal("1900000000"),
+            GuidanceEnabled=False,
+            WhiteboardsEnabled=False,
+            Labels=[{"Key": "engagement", "Value": "integ"}],
+            Sentiment={"OverallSentiment": {"REMOTE": Decimal("0")}},
+            TotalConversationDurationMillis=Decimal("1000"),
+        ),
+        **attributes,
+    }
+
+
+def _stubbed_client(monkeypatch):
+    """The function's own resource client, answering from a Stubber (no AWS)."""
+    from botocore.stub import Stubber
+
+    stubber = Stubber(index.ddb.meta.client)
+    stubber.activate()
+    monkeypatch.setattr(index, "account_username", lambda address: address)
+    return stubber
+
+
+class _Sent(Exception):
+    pass
+
+
+def test_the_transaction_reaches_dynamodb_in_its_typed_form(monkeypatch) -> None:
+    """Through the function's own resource client, which types the values itself.
+
+    The request is read as it is sent, after the client's conversion, and stopped
+    there: each value is typed once. A meeting record with the types the resource
+    returns (Decimal, bool, lists of maps) is planned and written.
+    """
+    import json
+
+    monkeypatch.setattr(index, "account_username", lambda address: address)
+    monkeypatch.setattr(index.uuid, "uuid4", lambda: type("U", (), {"hex": "tok1"})())
     sent = []
 
-    class Client:
-        def transact_write_items(self, TransactItems):  # noqa: N803
-            sent.append(TransactItems)
+    def capture(request, **_kwargs):
+        sent.append(json.loads(request.body))
+        raise _Sent()
 
-    class Meta:
-        client = Client()
-
-    monkeypatch.setattr(index.ddb, "meta", Meta(), raising=False)
-    plan = plan_auto_share(OWNER, [], _people(ANA), None)
-    item = _meeting(Participants=_people(ANA))
-    writes = index._sharing_write("m1", item, plan, [ANA], {"PK": "cls#x", "SK": "ts#y"})
-    index._transact(writes)
-    meeting = sent[0][0]["Update"]
+    events = index.ddb.meta.client.meta.events
+    events.register_first("before-send.dynamodb.TransactWriteItems", capture)
+    item = _real_record()
+    try:
+        with pytest.raises(_Sent):
+            index.apply_auto_share("m1", item, index._auto_share_plan(item))
+    finally:
+        events.unregister("before-send.dynamodb.TransactWriteItems", capture)
+    meeting, list_row = (entry["Update"] for entry in sent[0]["TransactItems"])
     assert meeting["Key"] == {"PK": {"S": "c#m1"}, "SK": {"S": "c#m1"}}
-    assert meeting["ExpressionAttributeValues"][":sw"] == {"L": [{"S": ANA}]}
-    fanout = index._new_fanout(item, [ANA], [BEN])
-    writes = index._sharing_write("m1", item, plan, [ANA], {"PK": "cls#x", "SK": "ts#y"}, fanout)
-    index._transact(writes)
-    marker = sent[1][0]["Update"]["ExpressionAttributeValues"][":fan"]
-    assert marker["M"]["Unshared"] == {"L": [{"S": BEN}]}
+    assert meeting["ExpressionAttributeValues"] == {
+        ":sw": {"L": [{"S": ANA}]},
+        ":auto": {"L": [{"S": ANA}]},
+        ":fan": {"M": {"Token": {"S": "tok1"}}},
+    }
+    assert meeting["ConditionExpression"] == (
+        "attribute_exists(PK) AND attribute_not_exists(#sw) AND attribute_not_exists(#fan)"
+    )
+    assert list_row["Key"] == {
+        "PK": {"S": "cls#2026-11-24#s#04"},
+        "SK": {"S": "ts#2026-11-24T17:05:00.000Z#id#m1"},
+    }
+    assert list_row["ExpressionAttributeValues"] == {":sw": {"L": [{"S": ANA}]}}
+
+    # And a share of a meeting already shared, whose SharedWith the condition repeats.
+    sent.clear()
+    shared = _real_record(SharedWith=[CARL], AutoSharedWith=[], SharingFanout={"Token": "t0"})
+    events.register_first("before-send.dynamodb.TransactWriteItems", capture)
+    try:
+        with pytest.raises(_Sent):
+            index.apply_auto_share("m1", shared, index._auto_share_plan(shared))
+    finally:
+        events.unregister("before-send.dynamodb.TransactWriteItems", capture)
+    values = sent[0]["TransactItems"][0]["Update"]["ExpressionAttributeValues"]
+    assert values[":seen"] == {"L": [{"S": CARL}]}
+    assert values[":seentok"] == {"S": "t0"}
+    assert values[":sw"] == {"L": [{"S": CARL}, {"S": ANA}]}
+
+
+def test_a_refused_write_that_is_not_a_change_is_raised_not_retried_as_one(monkeypatch) -> None:
+    """A ValidationError cancellation is an error of the request, so it is raised as itself."""
+    from botocore.exceptions import ClientError
+
+    stubber = _stubbed_client(monkeypatch)
+    item = _real_record()
+    stubber.add_client_error(
+        "transact_write_items",
+        service_error_code="TransactionCanceledException",
+        service_message="Transaction cancelled",
+        modeled_fields={
+            "CancellationReasons": [
+                {"Code": "ValidationError", "Message": "The provided key element does not match"},
+                {"Code": "None"},
+            ]
+        },
+    )
+    try:
+        with pytest.raises(ClientError) as raised:
+            index.apply_auto_share("m1", item, index._auto_share_plan(item))
+    finally:
+        stubber.deactivate()
+    assert not isinstance(raised.value, index.SharingChanged)
+    reasons = raised.value.response["CancellationReasons"]
+    assert reasons[0]["Code"] == "ValidationError"
+
+
+def test_only_a_failed_condition_or_a_conflict_counts_as_a_change() -> None:
+    from botocore.exceptions import ClientError
+
+    def cancelled(*codes):
+        return ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException"},
+                "CancellationReasons": [{"Code": c} for c in codes],
+            },
+            "TransactWriteItems",
+        )
+
+    assert index._cancelled_by_a_change(cancelled("ConditionalCheckFailed", "None"))
+    assert index._cancelled_by_a_change(cancelled("None", "TransactionConflict"))
+    assert not index._cancelled_by_a_change(cancelled("ValidationError", "None"))
+    assert not index._cancelled_by_a_change(cancelled("ConditionalCheckFailed", "ValidationError"))
+    assert not index._cancelled_by_a_change(cancelled("None", "None"))
+    assert not index._cancelled_by_a_change(
+        ClientError({"Error": {"Code": "ValidationException"}}, "TransactWriteItems")
+    )
+
+
+@pytest.mark.parametrize("arguments", [{"input": {}}, {"input": {"Calls": []}}, {"input": None}])
+def test_a_request_that_names_no_meeting_is_answered(monkeypatch, arguments) -> None:
+    def no_read(_event):
+        raise AssertionError("nothing to check")
+
+    monkeypatch.setattr(index, "verify_permissions", no_read)
+    for field in ("shareMeetings", "deleteMeetings"):
+        event = {
+            "identity": {"username": OWNER},
+            "info": {"fieldName": field},
+            "arguments": arguments,
+        }
+        assert index.lambda_handler(event, None) == {
+            "Calls": [],
+            "Result": "No meetings were given",
+        }
 
 
 # ── the account a listed address belongs to ─────────────────────────────────

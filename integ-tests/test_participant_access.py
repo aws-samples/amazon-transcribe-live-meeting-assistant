@@ -34,7 +34,9 @@ preparation are written to the meeting directly. Then:
     then the owner shares the meeting with one more address through
     shareMeetings, on condition of the list read (ExpectedSharedWith): every
     line of the transcript ends with the new list, and the meeting record's
-    SharingFanout marker is removed once they do.
+    SharingFanout marker is removed once they do. Forty lines fit in the
+    share dialog's own time, so the stream continuing from a saved cursor is
+    covered by the unit tests (test_sharing_fanout.py), not here.
 ``test_a_share_saved_on_a_list_that_has_since_changed_is_refused``
     A shareMeetings save whose ExpectedSharedWith is not the meeting's list is
     refused with errorType SharingListChanged, and the sharing is unchanged.

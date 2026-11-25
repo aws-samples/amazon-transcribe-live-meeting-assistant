@@ -26,7 +26,7 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { shareModal, SHARING_LIST_CHANGED_MESSAGE } from './meeting-controls';
+import { shareModal, SHARING_LIST_CHANGED_MESSAGE, sharingListChangedMessage } from './meeting-controls';
 
 const CALL = {
   CallId: 'm1',
@@ -114,5 +114,16 @@ describe('the share dialog saves on condition of the list it read', () => {
     await addAndSubmit('ben@example.com');
     await screen.findByText('Request failed');
     expect(screen.queryByText(SHARING_LIST_CHANGED_MESSAGE)).toBeNull();
+  });
+});
+
+describe('the message for a changed sharing list', () => {
+  it('says nothing was saved, or how many meetings were shared before the change was found', () => {
+    const changed = (message) => ({ errors: [{ errorType: 'SharingListChanged', message }] });
+    const base = 'The sharing list changed; reopen to see the current list';
+    expect(sharingListChangedMessage(changed(base))).toBe(SHARING_LIST_CHANGED_MESSAGE);
+    expect(sharingListChangedMessage(changed(`${base} (50 of 60 meetings were shared before it)`))).toContain(
+      '50 of the 60 meetings were shared and the rest were not',
+    );
   });
 });

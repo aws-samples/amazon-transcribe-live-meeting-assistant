@@ -67,7 +67,7 @@ class Clock:
 
 
 class MeetingsTable:
-    """The meetings table: items by key, and the updates complete_sharing and record_share send.
+    """The meetings table: items by key, and the updates complete_sharing and record_shares send.
 
     Each update is applied as DynamoDB would apply it, condition included, for
     the expressions the function writes; any other expression fails the test.
@@ -173,33 +173,42 @@ class MeetingsTable:
         return {}
 
     def transact(self, writes):
-        """index._transact: the sharing transaction, all or nothing."""
-        meeting = writes[0]["Update"]
-        row = self.items.get((meeting["Key"]["PK"], meeting["Key"]["SK"]))
-        values = meeting.get("ExpressionAttributeValues", {})
-        condition = meeting["ConditionExpression"]
-        ok = row is not None
-        if ok and "#sw = :seen" in condition:
-            ok = row.get("SharedWith") == values[":seen"]
-        elif ok:
-            ok = "SharedWith" not in row
-        if ok and "#fan.#tok = :seentok" in condition:
-            ok = (row.get(index.FANOUT_ATTRIBUTE) or {}).get("Token") == values[":seentok"]
-        elif ok and "attribute_not_exists(#fan)" in condition:
-            ok = index.FANOUT_ATTRIBUTE not in row
-        if not ok:
-            raise _cancelled()
-        names = meeting["ExpressionAttributeNames"]
-        sets, _, removes = meeting["UpdateExpression"].partition("REMOVE")
-        for assignment in sets.replace("SET", "").split(","):
-            if "=" in assignment:
-                name, value = (part.strip() for part in assignment.split("="))
-                row[names[name]] = copy.deepcopy(values[value])
-        for name in removes.split(","):
-            if name.strip():
-                row.pop(names[name.strip()], None)
-        for write in writes[1:]:
-            update = write["Update"]
+        """index._transact: the sharing transaction, all or nothing.
+
+        A meeting record's update (PK c#) is checked against its condition; a
+        list row's is applied as given. Nothing is applied unless every
+        condition holds.
+        """
+        meetings = [w["Update"] for w in writes if w["Update"]["Key"]["PK"].startswith("c#")]
+        rows = [w["Update"] for w in writes if not w["Update"]["Key"]["PK"].startswith("c#")]
+        for meeting in meetings:
+            row = self.items.get((meeting["Key"]["PK"], meeting["Key"]["SK"]))
+            values = meeting.get("ExpressionAttributeValues", {})
+            condition = meeting["ConditionExpression"]
+            ok = row is not None
+            if ok and "#sw = :seen" in condition:
+                ok = row.get("SharedWith") == values[":seen"]
+            elif ok:
+                ok = "SharedWith" not in row
+            if ok and "#fan.#tok = :seentok" in condition:
+                ok = (row.get(index.FANOUT_ATTRIBUTE) or {}).get("Token") == values[":seentok"]
+            elif ok and "attribute_not_exists(#fan)" in condition:
+                ok = index.FANOUT_ATTRIBUTE not in row
+            if not ok:
+                raise _cancelled()
+        for meeting in meetings:
+            row = self.items[(meeting["Key"]["PK"], meeting["Key"]["SK"])]
+            values = meeting.get("ExpressionAttributeValues", {})
+            names = meeting["ExpressionAttributeNames"]
+            sets, _, removes = meeting["UpdateExpression"].partition("REMOVE")
+            for assignment in sets.replace("SET", "").split(","):
+                if "=" in assignment:
+                    name, value = (part.strip() for part in assignment.split("="))
+                    row[names[name]] = copy.deepcopy(values[value])
+            for name in removes.split(","):
+                if name.strip():
+                    row.pop(names[name.strip()], None)
+        for update in rows:
             key = (update["Key"]["PK"], update["Key"]["SK"])
             target = self.items.setdefault(key, dict(update["Key"]))
             if update["UpdateExpression"].startswith("SET"):
@@ -549,7 +558,43 @@ def test_a_conflict_on_any_meeting_changes_none_of_them(world) -> None:
     calls = [_dialog_call("m1", expected=[CARL]), _dialog_call("m2", expected=[])]
     result = index.share_meetings(calls, OWNER, BEN)
     assert result["ErrorType"] == "SharingListChanged"
+    assert result["Calls"] == []
     assert table.transactions == []
+
+
+def test_meetings_shared_together_are_written_in_one_transaction(world, monkeypatch) -> None:
+    """A change to the second meeting landing as the first is written refuses both."""
+    first = meeting("m1", SharedWith=[CARL])
+    second = meeting("m2", SharedWith=[CARL])
+    table = world["use"](MeetingsTable([first, second]))
+    original = table.transact
+
+    def second_changes_first(writes):
+        assert len(writes) == 4  # both meetings and both list rows, together
+        table.meeting("m2")["SharedWith"] = [CARL, ANA]
+        monkeypatch.setattr(index, "_transact", original)
+        return original(writes)
+
+    monkeypatch.setattr(index, "_transact", second_changes_first)
+    calls = [_dialog_call("m1", expected=[CARL]), _dialog_call("m2", expected=[CARL])]
+    result = index.share_meetings(calls, OWNER, f"{CARL},{BEN}")
+    assert result["ErrorType"] == "SharingListChanged" and result["Calls"] == []
+    assert table.meeting("m1")["SharedWith"] == [CARL]
+    assert index.FANOUT_ATTRIBUTE not in table.meeting("m1")
+
+
+def test_groups_saved_before_a_conflict_are_named(world, monkeypatch) -> None:
+    monkeypatch.setattr(index, "SHARE_GROUP", 1)
+    first = meeting("m1", SharedWith=[CARL])
+    second = meeting("m2", SharedWith=[ANA])
+    table = world["use"](MeetingsTable([first, second]))
+    calls = [_dialog_call("m1", expected=[CARL]), _dialog_call("m2", expected=[CARL])]
+    result = index.share_meetings(calls, OWNER, f"{CARL},{BEN}")
+    assert result["ErrorType"] == "SharingListChanged"
+    assert result["Calls"] == ["m1"]
+    assert "1 of 2 meetings were shared before it" in result["Result"]
+    assert table.meeting("m1")["SharedWith"] == [CARL, BEN]
+    assert table.meeting("m2")["SharedWith"] == [ANA]
 
 
 def test_a_share_landing_between_the_dialogs_read_and_write_is_refused(world, monkeypatch) -> None:

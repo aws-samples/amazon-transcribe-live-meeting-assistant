@@ -41,7 +41,7 @@ def test_a_recipient_that_is_not_a_plain_address_is_refused(monkeypatch, recipie
     def no_appsync(*_args, **_kwargs):
         raise AssertionError("a refused share is written")
 
-    monkeypatch.setattr(index, "record_share", no_appsync)
+    monkeypatch.setattr(index, "record_shares", no_appsync)
     result = index.share_meetings([{"CallId": "c1", "ListPK": "l", "ListSK": "s"}], "o", recipients)
     assert result == {"Result": "Invalid email address provided"}
 

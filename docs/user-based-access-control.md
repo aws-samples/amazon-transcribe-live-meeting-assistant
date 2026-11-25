@@ -314,6 +314,8 @@ condition that the meeting's sharing list is still the one it was made from:
 - A share dialog save that finds the list changed after the dialog was opened
   (for example, Meeting Sharing has just shared the meeting with someone added
   to the participant list) changes nothing, for any of the selected meetings.
+  More than 50 selected meetings are saved 50 at a time; if a later group is
+  refused, the dialog says how many meetings were shared before it.
   The dialog says that the sharing list changed and shows the current list,
   keeping the addresses you were adding, so you can make your change again on
   top of it. The MCP `share_meeting` tool saves the same way, and answers

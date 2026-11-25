@@ -405,8 +405,20 @@ SHARING_LIST_CHANGED_MESSAGE = "The sharing list changed; reopen to see the curr
 DIALOG_FANOUT_SECONDS = float(environ.get("SHARE_DIALOG_FANOUT_SECONDS", "20"))
 
 
+#: Meetings saved in one transaction: two items each (the meeting and its list
+#: row), of TransactWriteItems' 100.
+SHARE_GROUP = 50
+
+
 class SharingListChanged(Exception):
-    """A meeting's sharing list is not the one the share dialog read."""
+    """A meeting's sharing list is not the one the share dialog read.
+
+    ``saved`` names the meetings of earlier groups (SHARE_GROUP), already saved.
+    """
+
+    def __init__(self, call_id, saved=()):
+        super().__init__(call_id)
+        self.saved = list(saved)
 
 
 def _recipient_list(recipients: str) -> list:
@@ -447,14 +459,15 @@ def share_meetings(calls, owner, recipients, context=None):
     """The share dialog's save: give each meeting the recipients as its sharing list.
 
     Each meeting's SharedWith, its list row's SharedWith and the SharingFanout
-    marker are written in one transaction (record_share); then, within
+    marker are written in one transaction (record_shares); then, within
     DIALOG_FANOUT_SECONDS, complete_sharing gives the meetings' transcripts, key
     frames and chat attachments the list and tells anyone unshared. What that
     time does not cover is completed from the meetings table's stream.
 
     A call that sends ExpectedSharedWith (the share dialog does) is saved only if
-    the meeting's sharing list is still that one: otherwise nothing is written,
-    for any of the meetings, and the answer carries ErrorType SharingListChanged.
+    the meeting's sharing list is still that one: otherwise the answer carries
+    ErrorType SharingListChanged and nothing is written, for any of the meetings
+    (for any of a group of SHARE_GROUP; groups saved before it are named in Calls).
     """
     if recipients and not all(
         RECIPIENT_PATTERN.fullmatch(email.strip()) for email in recipients.split(",")
@@ -471,26 +484,15 @@ def share_meetings(calls, owner, recipients, context=None):
     deadline = started + max(0.0, budget)
 
     try:
-        # Every meeting is checked before any is written, so a conflict changes nothing.
-        for call in calls:
-            expected = _expected_entries(call)
-            if expected is None:
-                continue
-            item = _read_meeting(call["CallId"]) or {}
-            if sorted(set(shared_with_entries(item.get("SharedWith")))) != expected:
-                raise SharingListChanged(call["CallId"])
-        for call in calls:
-            record_share(
-                call["CallId"],
-                {"PK": call["ListPK"], "SK": call["ListSK"]},
-                new_recipients,
-                _expected_entries(call),
-            )
+        record_shares(calls, new_recipients)
     except SharingListChanged as changed:
         logger.info("The sharing list of %s changed since it was read", changed)
+        message = SHARING_LIST_CHANGED_MESSAGE
+        if changed.saved:
+            message += f" ({len(changed.saved)} of {len(calls)} meetings were shared before it)"
         return {
-            "Calls": [],
-            "Result": SHARING_LIST_CHANGED_MESSAGE,
+            "Calls": changed.saved,
+            "Result": message,
             "ErrorType": SHARING_LIST_CHANGED,
             "Owner": owner,
         }
@@ -512,34 +514,50 @@ def share_meetings(calls, owner, recipients, context=None):
     }
 
 
-def record_share(call_id: str, list_key: Mapping[str, str], recipients: list, expected) -> None:
-    """Write the share dialog's sharing list on the meeting and its list row, with the marker.
+def record_shares(calls, recipients: list) -> None:
+    """Write the share dialog's sharing list on the meetings and their list rows, with markers.
 
-    On condition that the meeting's SharedWith, and its marker, are still as read;
-    a marker changed meanwhile by a fan-out's progress is read again and the write
-    retried, while a SharedWith that is no longer ``expected`` (when given) raises
-    SharingListChanged.
+    The meetings are written SHARE_GROUP at a time, each group in one
+    transaction on condition that every meeting's SharedWith, and its marker,
+    are still as read. A group refused because a marker changed meanwhile (a
+    fan-out's progress) is read again and retried; one whose SharedWith is no
+    longer a call's ExpectedSharedWith (when given) raises SharingListChanged,
+    naming the meetings of the groups written before it.
     """
-    for _attempt in range(3):
-        item = _read_meeting(call_id)
-        if not item:
-            raise ValueError(f"meeting {call_id} not found")
-        current = shared_with_entries(item.get("SharedWith"))
-        if expected is not None and sorted(set(current)) != expected:
-            raise SharingListChanged(call_id)
-        removed = [entry for entry in current if entry not in recipients]
-        fanout = _new_fanout(item, recipients, removed)
-        writes = _sharing_write(
-            call_id, item, None, list(recipients), list_key, fanout, list_row_must_exist=False
-        )
-        try:
-            _transact(writes)
-            return
-        except ClientError as err:
-            if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
-                raise
-            logger.info("The record of %s changed while it was shared; reading it again", call_id)
-    raise SharingListChanged(call_id)
+    saved: list = []
+    for first in range(0, len(calls), SHARE_GROUP):
+        group = calls[first : first + SHARE_GROUP]
+        for _attempt in range(3):
+            writes = []
+            for call in group:
+                call_id = call["CallId"]
+                item = _read_meeting(call_id)
+                if not item:
+                    raise ValueError(f"meeting {call_id} not found")
+                current = shared_with_entries(item.get("SharedWith"))
+                expected = _expected_entries(call)
+                if expected is not None and sorted(set(current)) != expected:
+                    raise SharingListChanged(call_id, saved)
+                removed = [entry for entry in current if entry not in recipients]
+                writes += _sharing_write(
+                    call_id,
+                    item,
+                    None,
+                    list(recipients),
+                    {"PK": call["ListPK"], "SK": call["ListSK"]},
+                    _new_fanout(item, recipients, removed),
+                    list_row_must_exist=False,
+                )
+            try:
+                _transact(writes)
+                break
+            except ClientError as err:
+                if not _cancelled_by_a_change(err):
+                    raise
+                logger.info("A meeting changed while it was shared; reading the group again")
+        else:
+            raise SharingListChanged(group[0]["CallId"], saved)
+        saved += [call["CallId"] for call in group]
 
 
 def _keyframe_keys(callid):
@@ -1292,21 +1310,30 @@ def _sharing_write(
 
 
 def _transact(writes: list) -> None:
-    from boto3.dynamodb.types import TypeSerializer
+    """TransactWriteItems with Python values.
 
-    serializer = TypeSerializer()
-
-    def typed(update: dict) -> dict:
-        out = dict(update)
-        out["Key"] = {k: serializer.serialize(v) for k, v in update["Key"].items()}
-        if "ExpressionAttributeValues" in update:
-            out["ExpressionAttributeValues"] = {
-                k: serializer.serialize(v) for k, v in update["ExpressionAttributeValues"].items()
-            }
-        return out
-
+    ``ddb.meta.client`` is the resource's client, which converts Key and
+    ExpressionAttributeValues to DynamoDB's typed form itself, in every
+    operation; values given to it already typed would be converted a second
+    time, and the request refused (test_the_transaction_reaches_dynamodb_in_its_typed_form).
+    """
     ddb.meta.client.transact_write_items(
-        TransactItems=[{"Update": typed(write["Update"])} for write in writes]
+        TransactItems=[{"Update": dict(write["Update"])} for write in writes]
+    )
+
+
+#: Cancellation reasons that mean the record changed since it was read, so the
+#: write is planned again; any other (ValidationError, for one) is an error.
+_CHANGED_REASONS = {"ConditionalCheckFailed", "TransactionConflict"}
+
+
+def _cancelled_by_a_change(err: ClientError) -> bool:
+    """Whether a refused transaction was refused because an item changed, and only for that."""
+    if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
+        return False
+    codes = [r.get("Code") for r in err.response.get("CancellationReasons") or []]
+    return any(code in _CHANGED_REASONS for code in codes) and all(
+        code in _CHANGED_REASONS or code in (None, "None") for code in codes
     )
 
 
@@ -1336,7 +1363,7 @@ def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.Aut
     try:
         _transact(_sharing_write(call_id, item, plan, recipients, list_key, fanout))
     except ClientError as err:
-        if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
+        if not _cancelled_by_a_change(err):
             raise
         reasons = [r.get("Code") for r in err.response.get("CancellationReasons") or []]
         if not _read_meeting(call_id):
@@ -1663,6 +1690,8 @@ def lambda_handler(event, context):
     if "Records" in event:
         return handle_meeting_stream(event, context)
     owner = event["identity"]["username"]
+    if not ((event.get("arguments") or {}).get("input") or {}).get("Calls"):
+        return {"Calls": [], "Result": "No meetings were given"}
     if not verify_permissions(event):
         return {
             "Result": "You don't have permission to share or delete one or more of the requested "

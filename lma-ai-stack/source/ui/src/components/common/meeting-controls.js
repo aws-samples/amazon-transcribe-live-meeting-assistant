@@ -65,7 +65,7 @@ const callsWithKeys = (props) => {
 };
 
 // The errorType shareMeetings fails with when a meeting's sharing list is no
-// longer the one the dialog read: nothing was changed.
+// longer the one the dialog read.
 export const SHARING_LIST_CHANGED = 'SharingListChanged';
 export const SHARING_LIST_CHANGED_MESSAGE =
   'The sharing list changed while this dialog was open, so nothing was saved. ' +
@@ -73,6 +73,19 @@ export const SHARING_LIST_CHANGED_MESSAGE =
 
 export const isSharingListChanged = (err) =>
   Array.isArray(err?.errors) && err.errors.some((e) => e?.errorType === SHARING_LIST_CHANGED);
+
+// The message the dialog shows for that error. More than 50 meetings are saved
+// 50 at a time, so the server may say that some were shared before the change
+// was found; the dialog then says so instead of "nothing was saved".
+export const sharingListChangedMessage = (err) => {
+  const server = (err?.errors || []).find((e) => e?.errorType === SHARING_LIST_CHANGED)?.message || '';
+  const partial = server.match(/\((\d+) of (\d+) meetings were shared before it\)/);
+  if (!partial) return SHARING_LIST_CHANGED_MESSAGE;
+  return (
+    `The sharing list changed while this dialog was open: ${partial[1]} of the ${partial[2]} meetings ` +
+    'were shared and the rest were not. The current list is shown: make your change again and submit.'
+  );
+};
 
 // readSharedWith: each meeting's sharing list as the dialog read it, by CallId. A
 // meeting with one is shared only if its list is still that one.
@@ -188,7 +201,7 @@ export const shareModal = (props) => {
       if (isSharingListChanged(err)) {
         // Saved by someone else, or by Meeting Sharing, since the dialog opened:
         // show the list as it is now. The users being added are kept.
-        setShareError(SHARING_LIST_CHANGED_MESSAGE);
+        setShareError(sharingListChangedMessage(err));
         await openShareSettings();
         setChanged(newRecipients.length > 0);
       } else {

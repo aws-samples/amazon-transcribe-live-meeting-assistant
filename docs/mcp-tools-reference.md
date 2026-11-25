@@ -210,6 +210,11 @@ with the meeting tools instead.
 Adds people to, or with `action: "remove"` removes them from, those the meeting
 is shared with, through the meeting page's sharing code. Only the meeting's
 owner or an Admin may change it. Returns the meeting's `sharedWith`.
+The change is saved only if the meeting's sharing list is still the one the
+tool read; if it changed meanwhile (on the meeting page, or by Meeting
+Sharing), nothing is changed and the tool answers "The sharing list changed;
+reopen to see the current list". Call it again to apply the change on top
+of the current list.
 
 ```json
 {"meetingId": "e3b9…", "users": ["colleague@example.com"], "action": "add"}
