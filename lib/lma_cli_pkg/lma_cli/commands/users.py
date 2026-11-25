@@ -8,7 +8,7 @@ Usage::
     lma users list --format csv --output lma-users.csv
     lma users list --format json
 
-Each user is listed with email, role (Admin or User), Cognito status, whether the
+Each user is listed with email, role (Admin, User or Participant), Cognito status, whether the
 account is enabled, when it was created and when the user last signed in. The
 last sign-in is the last interactive sign-in the Cognito stack recorded; a user
 who has not signed in since that was deployed shows "Not recorded". When the

@@ -4,8 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { signOut } from 'aws-amplify/auth';
-import React, { useEffect } from 'react';
+import React from 'react';
 import PropTypes from 'prop-types';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
@@ -28,6 +27,9 @@ import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
 import TroubleshootingRoutes from './TroubleshootingRoutes';
+import ParticipantRoutes from './ParticipantRoutes';
+import SignOutRedirect from './SignOutRedirect';
+import { PARTICIPANT, effectiveRole } from '../components/common/roles';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
 
 import {
@@ -52,18 +54,8 @@ import {
 
 const logger = new ConsoleLogger('AuthRoutes');
 
-const SignOutRedirect = () => {
-  useEffect(() => {
-    signOut()
-      .catch((err) => logger.error('signOut error', err))
-      .finally(() => {
-        window.location.reload();
-      });
-  }, []);
-  return null;
-};
-
-const AuthRoutes = ({ redirectParam }) => {
+// The routes of an Admin or a User.
+const MemberRoutes = ({ redirectParam }) => {
   const { currentCredentials } = useAppContext();
   const settings = useParameterStore(currentCredentials);
 
@@ -104,6 +96,25 @@ const AuthRoutes = ({ redirectParam }) => {
       </Routes>
     </SettingsContext.Provider>
   );
+};
+
+MemberRoutes.propTypes = {
+  redirectParam: PropTypes.string.isRequired,
+};
+
+/**
+ * The signed-in routes, by role. A Participant gets their own minimal set of
+ * routes (ParticipantRoutes), which mounts none of the pages, subscriptions or
+ * settings reads below. The role is read from the session the app already
+ * holds, so choosing the set costs no wait.
+ */
+const AuthRoutes = ({ redirectParam }) => {
+  const { currentSession } = useAppContext();
+  const groups = currentSession?.tokens?.idToken?.payload?.['cognito:groups'] || [];
+  if (effectiveRole(groups) === PARTICIPANT) {
+    return <ParticipantRoutes />;
+  }
+  return <MemberRoutes redirectParam={redirectParam} />;
 };
 
 AuthRoutes.propTypes = {

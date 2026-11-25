@@ -320,7 +320,8 @@ def test_the_write_condition_restates_each_finding() -> None:
 
 def _subscriptions(schema: str) -> dict:
     """Subscription field -> the mutations it is subscribed to."""
-    body = schema[schema.index("type Subscription {") :]
+    # The header may carry type-level directives (type Subscription @aws_iam {).
+    body = schema[re.search(r"type Subscription\b[^{]*\{", schema).start() :]
     body = body[: body.index("\n}")]
     out = {}
     for match in re.finditer(

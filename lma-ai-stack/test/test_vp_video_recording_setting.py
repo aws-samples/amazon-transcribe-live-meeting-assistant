@@ -62,7 +62,8 @@ def test_the_schema_declares_the_reason_and_the_read() -> None:
     # Never a create input: the resolver decides it.
     assert "videoRecordingOffReason" not in _block("input CreateVirtualParticipantInput")
     assert re.search(
-        r"^\tgetVirtualParticipantVideoRecording: Boolean @aws_cognito_user_pools @aws_iam$",
+        r'^\tgetVirtualParticipantVideoRecording: Boolean '
+        r'@aws_cognito_user_pools\(cognito_groups: \["Admin", "User"\]\) @aws_iam$',
         _block("type Query"),
         re.M,
     )

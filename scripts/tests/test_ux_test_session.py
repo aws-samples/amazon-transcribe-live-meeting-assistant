@@ -95,10 +95,18 @@ class TestTheStackOutputsItReads:
 @pytest.mark.unit
 class TestRoles:
     def test_the_groups_are_read_from_the_cognito_template(self):
-        assert uts.template_group_names() == ["Admin"]
+        assert uts.template_group_names() == ["Admin", "Participant"]
 
     def test_the_groupless_user_role_is_offered(self):
-        assert uts.role_names() == ["Admin", "User"]
+        assert uts.role_names() == ["Admin", "Participant", "User"]
+
+    def test_a_participant_persona_is_created_in_the_participant_group(self):
+        with (
+            patch.object(uts, "_resolve_or_explain", return_value=CTX),
+            patch.object(uts, "create_cognito_user") as create,
+        ):
+            uts.cmd_setup(SimpleNamespace(stack="s", group="Participant", region="us-east-1"))
+        assert create.call_args.args[2] == "Participant"
 
     def test_a_user_persona_is_created_in_no_group(self):
         with (

@@ -285,6 +285,8 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     # --- templates and configuration stacks ----------------------------------
     ("lma-main.yaml", "templates"),
     ("lma-vpc-stack/**", "templates"),
+    # The Cognito triggers' code, tested with the Lambda functions.
+    ("lma-cognito-stack/source/**", ("lambdas", "templates")),
     ("lma-cognito-stack/**", "templates"),
     ("lma-bedrockagent-stack/**", "templates"),
     ("lma-bedrockkb-stack/**", "templates"),
@@ -400,6 +402,14 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{FUNCTIONS}/vnc_edge_token/**", "vp_template"),
     (f"{FUNCTIONS}/edge_auth_deployer/**", "vp_template"),
     ("lma-ai-stack/source/appsync/schema.graphql", "vp_template"),
+    # The role matrix: the UI, transcriber and Lambda tests hold their copies of the
+    # role rule and their admitted roles to it, and the integration plumbing tests
+    # build the role access probe's calls from it and from the schema.
+    (
+        "lma-ai-stack/source/appsync/role-matrix.json",
+        ("ui", "transcriber", "lambdas", "integ_plumbing"),
+    ),
+    ("lma-ai-stack/source/appsync/schema.graphql", "integ_plumbing"),
     ("README.md", "vp_template"),
     # ...and read the AI stack through the AI stack tests' helper, which inlines its
     # nested templates.

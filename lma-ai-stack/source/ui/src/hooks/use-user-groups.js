@@ -7,6 +7,8 @@ import { useState, useEffect } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
+import { effectiveRole } from '../components/common/roles';
+
 const logger = new ConsoleLogger('useUserGroups');
 
 /**
@@ -24,7 +26,11 @@ const logger = new ConsoleLogger('useUserGroups');
  * rather than acting on the placeholder. It starts `true` and becomes `false`
  * once the session has been read, successfully or not.
  *
- * @returns {{ userGroups: string[], isAdmin: boolean, isLoading: boolean }}
+ * `role` is the caller's LMA role (components/common/roles.js); it reads User
+ * until the session resolves, so a caller that renders by role waits on
+ * `isLoading` as well.
+ *
+ * @returns {{ userGroups: string[], isAdmin: boolean, role: string, isLoading: boolean }}
  */
 const useUserGroups = () => {
   const [userGroups, setUserGroups] = useState([]);
@@ -49,8 +55,9 @@ const useUserGroups = () => {
   }, []);
 
   const isAdmin = userGroups.includes('Admin');
+  const role = effectiveRole(userGroups);
 
-  return { userGroups, isAdmin, isLoading };
+  return { userGroups, isAdmin, role, isLoading };
 };
 
 export default useUserGroups;

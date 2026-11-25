@@ -369,7 +369,7 @@ It is not offered as an MCP tool.
 ### `lma users list` — List Users for an Access Review
 
 Lists every user of the stack's Cognito user pool with their email, role
-(`Admin` or `User`), Cognito status, whether the account is enabled, when it was
+(`Admin`, `User` or `Participant`), Cognito status, whether the account is enabled, when it was
 created, and when the user last signed in, for a periodic user access review.
 
 ```bash

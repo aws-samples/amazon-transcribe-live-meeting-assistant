@@ -1,19 +1,61 @@
 """
 Unit tests for MCP API Key Authorizer Lambda.
 Tests token extraction from various header formats, SHA-256 hashing,
-DynamoDB lookup, and IAM policy generation.
+DynamoDB lookup, the key owner's current role, and IAM policy generation.
 """
 
 import hashlib
+import json
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
 
 # Set env vars before importing
 os.environ["MCP_API_KEYS_TABLE"] = "test-mcp-api-keys"  # pragma: allowlist secret
+os.environ["USER_POOL_ID"] = "us-east-1_testpool"
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 import index
+
+ROLE_MATRIX = Path(__file__).resolve().parents[2] / "appsync" / "role-matrix.json"
+
+
+class FakeCognito:
+    """The user pool, as admin_list_groups_for_user answers for each key owner."""
+
+    def __init__(self):
+        self.groups = {}
+        self.missing = set()
+        self.error = None
+        self.page_size = 60
+        self.calls = []
+
+    def admin_list_groups_for_user(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        username = kwargs["Username"]
+        if username in self.missing:
+            raise ClientError(
+                {"Error": {"Code": "UserNotFoundException", "Message": "gone"}},
+                "AdminListGroupsForUser",
+            )
+        names = self.groups.get(username, [])
+        start = int(kwargs.get("NextToken") or 0)
+        page = {"Groups": [{"GroupName": n} for n in names[start : start + self.page_size]]}
+        if start + self.page_size < len(names):
+            page["NextToken"] = str(start + self.page_size)
+        return page
+
+
+# Every test reads the owner's role through this double; by default an owner is
+# in no group, which is a User.
+COGNITO = FakeCognito()
+index.cognito = COGNITO
 
 METHOD_ARN = "arn:aws:execute-api:us-east-1:123456789012:abc123def/prod/POST/mcp"
 
@@ -184,7 +226,8 @@ class TestAllowPolicy(unittest.TestCase):
         """Verify Allow policy has correct ARN pattern and user context."""
         token = "lma_policy-test"
         item = make_valid_item(token)
-        item["IsAdmin"] = "true"
+        COGNITO.groups["testuser@example.com"] = ["Admin"]
+        self.addCleanup(COGNITO.groups.clear)
         mock_table = MagicMock()
         mock_table.get_item.return_value = {"Item": item}
         mock_dynamo.Table.return_value = mock_table
@@ -340,6 +383,113 @@ class TestLogOutputOmitsKey(unittest.TestCase):
         event["headers"] = None
         result = index.handler(event, None)
         self.assertEqual(result["policyDocument"]["Statement"][0]["Effect"], "Deny")
+
+
+class TestOwnerRole(unittest.TestCase):
+    """The key owner's role is read from the user pool on every request."""
+
+    @staticmethod
+    def reset():
+        COGNITO.groups.clear()
+        COGNITO.missing.clear()
+        COGNITO.error = None
+        COGNITO.page_size = 60
+        COGNITO.calls.clear()
+
+    def setUp(self):
+        self.reset()
+        self.addCleanup(self.reset)
+
+    def authorize(self, item=None):
+        token = "lma_role-test-key"
+        with patch.object(index, "dynamodb") as mock_dynamo:
+            mock_table = MagicMock()
+            mock_table.get_item.return_value = {"Item": item or make_valid_item(token)}
+            mock_dynamo.Table.return_value = mock_table
+            return index.handler({"methodArn": METHOD_ARN, "authorizationToken": token}, None)
+
+    def effect(self, result):
+        return result["policyDocument"]["Statement"][0]["Effect"]
+
+    def test_the_role_rule_matches_the_role_matrix(self):
+        for vector in json.loads(ROLE_MATRIX.read_text())["effectiveRole"]["vectors"]:
+            with self.subTest(groups=vector["groups"]):
+                self.assertEqual(index.effective_role(vector["groups"]), vector["role"])
+
+    def test_the_admitted_roles_are_those_the_matrix_lists_for_this_endpoint(self):
+        capabilities = json.loads(ROLE_MATRIX.read_text())["capabilities"]
+        listed = next(c for c in capabilities if "mcp-api-key-endpoint" in c["surfaces"])
+        self.assertEqual(sorted(index.MCP_ROLES), sorted(listed["roles"]))
+
+    def test_a_participant_owners_key_is_refused(self):
+        COGNITO.groups["testuser@example.com"] = ["Participant"]
+
+        self.assertEqual(self.effect(self.authorize()), "Deny")
+
+    def test_a_key_stored_for_an_admin_is_refused_once_its_owner_is_a_participant(self):
+        """The stored IsAdmin is not consulted: the role is the owner's now."""
+        item = make_valid_item("lma_role-test-key")
+        item["IsAdmin"] = "true"
+        COGNITO.groups["testuser@example.com"] = ["Participant"]
+
+        self.assertEqual(self.effect(self.authorize(item)), "Deny")
+
+    def test_a_user_owners_key_is_allowed_without_admin(self):
+        result = self.authorize()
+
+        self.assertEqual(self.effect(result), "Allow")
+        self.assertEqual(result["context"]["isAdmin"], "false")
+        self.assertEqual(result["context"]["role"], "User")
+
+    def test_an_admin_flag_follows_the_owners_current_groups(self):
+        item = make_valid_item("lma_role-test-key")
+        item["IsAdmin"] = "true"
+
+        result = self.authorize(item)
+
+        self.assertEqual(result["context"]["isAdmin"], "false")
+
+    def test_an_admin_owner_is_an_admin(self):
+        COGNITO.groups["testuser@example.com"] = ["Sales", "Admin"]
+
+        result = self.authorize()
+
+        self.assertEqual(result["context"]["isAdmin"], "true")
+        self.assertEqual(result["context"]["role"], "Admin")
+
+    def test_groups_on_a_later_page_are_read(self):
+        COGNITO.page_size = 1
+        COGNITO.groups["testuser@example.com"] = ["Sales", "Emea", "Participant"]
+
+        self.assertEqual(self.effect(self.authorize()), "Deny")
+        self.assertEqual(len(COGNITO.calls), 3)
+
+    def test_a_key_whose_owner_no_longer_exists_is_refused(self):
+        COGNITO.missing.add("testuser@example.com")
+
+        self.assertEqual(self.effect(self.authorize()), "Deny")
+
+    def test_a_failed_role_lookup_is_refused(self):
+        COGNITO.error = ClientError(
+            {"Error": {"Code": "TooManyRequestsException", "Message": "slow down"}},
+            "AdminListGroupsForUser",
+        )
+
+        self.assertEqual(self.effect(self.authorize()), "Deny")
+
+    def test_the_lookup_names_the_configured_pool_and_the_keys_owner(self):
+        self.authorize()
+
+        self.assertEqual(COGNITO.calls[0]["UserPoolId"], "us-east-1_testpool")
+        self.assertEqual(COGNITO.calls[0]["Username"], "testuser@example.com")
+
+    def test_without_a_user_pool_every_key_is_refused(self):
+        original = index.USER_POOL_ID
+        index.USER_POOL_ID = ""
+        try:
+            self.assertEqual(self.effect(self.authorize()), "Deny")
+        finally:
+            index.USER_POOL_ID = original
 
 
 if __name__ == "__main__":

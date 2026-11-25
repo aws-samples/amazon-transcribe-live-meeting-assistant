@@ -68,7 +68,9 @@ MCP client connects to REST API Gateway endpoint
     → Extracts token from Authorization header (strips "Bearer ") or x-api-key header
     → SHA-256 hashes the token
     → Looks up hash in MCPApiKeysTable (DynamoDB)
-    → Returns IAM Allow policy + { userId, username, isAdmin, scope } in context
+    → Reads the key owner's current Cognito groups (AdminListGroupsForUser)
+      and denies unless the owner exists and their role is Admin or User
+    → Returns IAM Allow policy + { userId, username, isAdmin, role, scope } in context
   → MCPServerAnalyticsFunction receives API Gateway proxy event
     → Detects JSON-RPC 2.0 message (jsonrpc + method fields in body)
     → Routes to MCP protocol handler:
@@ -228,7 +230,7 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 | `KeyHash` | S (PK) | SHA-256 hash of the API key |
 | `UserId` | S | Cognito username |
 | `Username` | S | Cognito username/email |
-| `IsAdmin` | S | `"true"` or `"false"` |
+| `IsAdmin` | S | `"true"` or `"false"`, as the owner was when the key was generated. Not used to authorize: the authorizer reads the owner's current groups |
 | `KeyPrefix` | S | First 12 chars of key (e.g. `lma_a1b2c3d4`) for UI display |
 | `CreatedAt` | S | ISO 8601 timestamp |
 | `Enabled` | S | `"true"` or `"false"` |
@@ -241,7 +243,8 @@ Every link `get_meeting_record` returns is a pre-signed S3 URL that works for an
 - **Type**: `REQUEST` (not TOKEN) — receives all headers, no IdentitySource filter
 - **TTL**: 0 (no caching — since the identity source varies between headers)
 - **Token extraction order**: `authorizationToken` (TOKEN mode compat) → `headers.x-api-key` → `headers.Authorization` (strips `Bearer ` prefix)
-- **On success**: returns IAM Allow policy with `context: { userId, username, isAdmin, scope }`
+- **Owner's role**: read from the user pool on every request, with one `AdminListGroupsForUser` call, which counts against the account's Amazon Cognito user-read request quota; a call still throttled after three attempts denies that request. A key is refused while its owner is a Participant or once the owner is deleted, and `isAdmin` is `"true"` only while the owner is in the **Admin** group. See [User-Based Access Control](user-based-access-control.md#roles).
+- **On success**: returns IAM Allow policy with `context: { userId, username, isAdmin, role, scope }`
 - **On failure**: returns IAM Deny policy
 
 ## UI

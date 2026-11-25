@@ -46,6 +46,7 @@ class FakeCognito:
             [_user("new@example.com", "sub-new", status="FORCE_CHANGE_PASSWORD", enabled=False)],
         ]
         self.admins = ["admin@example.com"]
+        self.participants: List[str] = []
         self.list_error: Exception | None = None
 
     def list_users(self, **kwargs):
@@ -58,8 +59,8 @@ class FakeCognito:
         return response
 
     def list_users_in_group(self, **kwargs):
-        assert kwargs["GroupName"] == "Admin"
-        return {"Users": [{"Username": name} for name in self.admins]}
+        members = {"Admin": self.admins, "Participant": self.participants}[kwargs["GroupName"]]
+        return {"Users": [{"Username": name} for name in members]}
 
 
 class FakeDynamo:
@@ -209,3 +210,15 @@ def test_cognito_timestamps_are_given_in_utc():
     naive = datetime(2026, 5, 6, 7, 8, 9)
     assert user_ops.iso_utc(naive) == "2026-05-06T07:08:09.000Z"
     assert user_ops.iso_utc(None) is None
+
+
+def test_a_participant_is_listed_as_a_participant_unless_also_an_admin(client, aws):
+    aws.cognito.participants = ["zed@example.com", "admin@example.com"]
+
+    roles = {user.email: user.role for user in client.users.list().users}
+
+    assert roles == {
+        "admin@example.com": "Admin",
+        "new@example.com": "User",
+        "zed@example.com": "Participant",
+    }
