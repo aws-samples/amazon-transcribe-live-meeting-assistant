@@ -413,6 +413,19 @@ def scan(
     result.reports = sorted(str(p) for p in workdir.glob(f"{target}-report.*"))
 
 
+def zap_options(runner: str, target: str, config_file: str | None = None) -> str:
+    """ZAP's own command-line options (``-z``): the scan's config file, and in the image its own home.
+
+    Run inside the ZAP image, the scans share one user's home, and a second ZAP
+    does not start while the first one's home is in use; each Docker run has a
+    fresh one.
+    """
+    parts = [f"-configfile /zap/wrk/{config_file}"] if config_file else []
+    if runner == "local":
+        parts.append(f"-dir {Path.home() / f'.ZAP-{target}'}")
+    return " ".join(parts)
+
+
 def common_args(target: str, active: bool, safe_flag: bool = True) -> list[str]:
     """Report, rules and time flags; ``-S`` (skip the active scan) unless ``active``.
 
@@ -536,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
                     "--schema",
                     "/zap/wrk/schema.graphql",
                     "-z",
-                    "-configfile /zap/wrk/graphql-options.prop",
+                    zap_options(runner, "graphql", "graphql-options.prop"),
                     *common_args("graphql", args.active),
                 ],
                 workdir,
@@ -553,7 +566,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
             scan(
                 "web",
                 "zap-baseline.py",
-                ["-t", result.url, "-m", "2", *common_args("web", False, safe_flag=False)],
+                [
+                    "-t",
+                    result.url,
+                    "-m",
+                    "2",
+                    *(["-z", zap_options(runner, "web")] if runner == "local" else []),
+                    *common_args("web", False, safe_flag=False),
+                ],
                 workdir,
                 runner,
                 result,
@@ -594,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 - one linear proce
                             "-f",
                             "openapi",
                             "-z",
-                            "-configfile /zap/wrk/mcp-options.prop",
+                            zap_options(runner, "mcp", "mcp-options.prop"),
                             *common_args("mcp", args.active),
                         ],
                         workdir,

@@ -264,3 +264,11 @@ def test_unknown_targets_are_refused(capsys) -> None:
     with pytest.raises(SystemExit):
         zap_scan.main(["--stack-name", "x", "--targets", "graphql,nope"])
     assert "unknown targets" in capsys.readouterr().err
+
+
+def test_each_scan_in_the_image_gets_its_own_zap_home() -> None:
+    docker = zap_scan.zap_options("docker", "mcp", "mcp-options.prop")
+    assert docker == "-configfile /zap/wrk/mcp-options.prop"
+    local = {t: zap_scan.zap_options("local", t) for t in zap_scan.TARGETS}
+    assert all(v.startswith("-dir ") for v in local.values())
+    assert len(set(local.values())) == len(zap_scan.TARGETS)
