@@ -74,6 +74,7 @@ mutation UpdateScheduledVirtualParticipant($input: UpdateScheduledVirtualPartici
     meetingContext
     checklist { ItemId Text Kind Priority Source }
     meetingSharedWith
+    participants { name email }
     status
     Owner
     SharedWith

@@ -33,6 +33,14 @@ const content = (
       the user has not signed in since LMA began recording sign-in times; <em>Unavailable</em> means the times could not
       be read. To export the list for an access review, run <code>lma users list --format csv</code>.
     </p>
+    <h3>Last active</h3>
+    <p>
+      The last time the user used LMA: a sign-in, a session renewal (about hourly while the web UI, the browser
+      extension or another client is open) or a request with their MCP API key. It is recorded at most once every 15
+      minutes, so it is accurate to within about an hour for a signed-in client and 15 minutes for an API key. Use
+      between two renewals is not recorded separately. <em>Not recorded</em> and <em>Unavailable</em> mean the same as
+      for Last sign-in.
+    </p>
     <h3>Guard rails</h3>
     <ul>
       <li>You cannot delete your own account.</li>

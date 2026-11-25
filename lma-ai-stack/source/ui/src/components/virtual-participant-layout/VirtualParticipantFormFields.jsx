@@ -27,6 +27,7 @@ import {
   optionFor,
   parseLabelsText,
 } from '../common/meeting-preparation';
+import { MAX_PARTICIPANTS, parseParticipantsText } from '../common/participant-list';
 import { ChecklistEditor } from '../call-panel/ChecklistPanel';
 import { MEETING_CONSENT_OPTIONS, meetingConsentOptionsFor } from './meeting-consent-options';
 import { GUIDANCE_OPTIONS } from './guidance-options';
@@ -101,6 +102,7 @@ const VirtualParticipantFormFields = ({
   const labelsError = parseLabelsText(preparation.labelsText).error;
   const contextTooLong = (preparation.meetingContext || '').length > MAX_CONTEXT_CHARS;
   const checklistError = checklistProblem(preparation.checklist);
+  const participantErrors = parseParticipantsText(preparation.participantsText).errors;
   const preparationGiven = Boolean(
     preparation.labelsText ||
       preparation.audience ||
@@ -229,6 +231,29 @@ const VirtualParticipantFormFields = ({
           disabled={settingsLocked}
         />
       </FormField>
+
+      {/* The people expected at the meeting; Join again's Continue keeps the meeting's own list. */}
+      {!settingsLocked && (
+        <FormField
+          label="Participants (Optional)"
+          description={
+            'The people expected at the meeting, one per line as Name <email> or an email address; a list ' +
+            `pasted from a calendar invite works too. At most ${MAX_PARTICIPANTS}. Stored on the meeting, where ` +
+            'you can see who has an LMA account. Listing someone does not share the meeting with them.'
+          }
+          errorText={participantErrors.length ? participantErrors.join('; ') : undefined}
+          stretch
+        >
+          <Textarea
+            value={preparation.participantsText || ''}
+            onChange={({ detail }) => setPreparation({ participantsText: detail.value })}
+            placeholder={'Ana Lima <ana@example.com>\nbo@example.org'}
+            rows={3}
+            ariaLabel="Participants, one Name <email> per line"
+            invalid={participantErrors.length > 0}
+          />
+        </FormField>
+      )}
 
       {/* A continued meeting keeps the preparation it has; Join again's Continue locks the settings. */}
       {!settingsLocked && (
@@ -387,6 +412,7 @@ VirtualParticipantFormFields.propTypes = {
       audience: PropTypes.string,
       meetingContext: PropTypes.string,
       summaryProfile: PropTypes.string,
+      participantsText: PropTypes.string,
       checklist: PropTypes.arrayOf(PropTypes.shape({ ItemId: PropTypes.string })),
     }),
   }).isRequired,

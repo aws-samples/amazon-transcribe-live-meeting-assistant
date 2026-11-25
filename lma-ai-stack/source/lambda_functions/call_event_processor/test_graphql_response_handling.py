@@ -959,10 +959,15 @@ def test_a_start_event_creates_the_meeting_with_the_preparation_it_carries(
                 }
             ],
             "ChecklistUpdatedAt": at,
+            "Participants": [{"name": "Ana Lima", "email": "ana@example.com"}],
+            "ParticipantsUpdatedBy": "someone@example.com",
+            "ParticipantsUpdatedAt": at,
         },
         monkeypatch,
     )
     sent = print_ast(session.queries[0])
+    assert 'Participants: [{name: "Ana Lima", email: "ana@example.com"}]' in sent
+    assert 'ParticipantsUpdatedBy: "someone@example.com"' in sent
     assert 'Labels: [{Key: "project", Value: "website-relaunch"}]' in sent
     assert 'Audience: "external"' in sent
     assert 'MeetingContext: "# Goals"' in sent

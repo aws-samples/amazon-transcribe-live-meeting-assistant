@@ -141,7 +141,7 @@ export const meetingFromRead = ({ data = undefined, error = undefined } = {}) =>
  * The values Join again opens the create form with.
  *
  * Copied: platform, meeting ID or link, meeting name, agenda, meeting
- * preparation (labels, audience, meeting context, checklist), consent choice
+ * preparation (labels, audience, meeting context, checklist), participant list, consent choice
  * and video recording. Left as for a new Virtual Participant: the date and
  * time, the password (the API never returns it; the server uses the saved one
  * for the same meeting), the Zoom account choice and the browser profile (both
@@ -243,6 +243,7 @@ export const joinAgainInputFrom = (sourceVpId, vpInput, { useStoredZoomAccount =
     'guidanceEnabled',
     'consentMode',
     'consentRule',
+    'participants',
   ].forEach((field) => {
     if (vpInput[field] !== undefined && vpInput[field] !== null) input[field] = vpInput[field];
   });

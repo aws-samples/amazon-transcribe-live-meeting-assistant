@@ -1171,8 +1171,8 @@ def test_the_own_account_guards_ignore_letter_case(cognito: FakeCognito) -> None
 def _no_sign_in(result: dict) -> dict:
     """``result`` without its last sign-in fields, which must say nothing was read.
 
-    These tests configure no sign-in table, so every user's ``lastSignInAt`` is
-    null and a listing reports the times unavailable. The times themselves are
+    These tests configure no sign-in table, so every user's ``lastSignInAt`` and
+    ``lastActiveAt`` are null and a listing reports the times unavailable. The times themselves are
     tested in test_last_sign_in.py.
     """
     result = dict(result)
@@ -1181,4 +1181,5 @@ def _no_sign_in(result: dict) -> dict:
         result["users"] = [_no_sign_in(user) for user in result["users"]]
         return result
     assert result.pop("lastSignInAt") is None
+    assert result.pop("lastActiveAt") is None
     return result

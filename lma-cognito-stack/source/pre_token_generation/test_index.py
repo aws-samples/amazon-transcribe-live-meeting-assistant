@@ -15,9 +15,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 HERE = Path(__file__).resolve().parent
 ROLE_MATRIX = HERE.parents[2] / "lma-ai-stack" / "source" / "appsync" / "role-matrix.json"
@@ -146,3 +148,158 @@ def test_an_event_without_a_group_configuration_is_a_user() -> None:
 
     assert details["groupOverrideDetails"]["groupsToOverride"] == ["User"]
     assert details["claimsToAddOrOverride"] == {"lma_role": "User"}
+
+
+# ---------------------------------------------------------------------------
+# Last activity: one conditional write per user per 15 minutes, never in the way
+# ---------------------------------------------------------------------------
+
+
+class _FakeDynamoDB:
+    """Records update_item calls; raises ``error`` from each when one is set."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.error: Exception | None = None
+
+    def update_item(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return {}
+
+
+def _client_error(code: str) -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": code}}, "UpdateItem")
+
+
+@pytest.fixture
+def table(monkeypatch):
+    """A sign-in table name and a fake client."""
+    fake = _FakeDynamoDB()
+    monkeypatch.setattr(index, "TABLE", "lma-UserSignInTable")
+    monkeypatch.setattr(index, "_dynamodb", fake)
+    return fake
+
+
+def _role_response(groups):
+    return index.lambda_handler(_event(list(groups)), None)["response"]
+
+
+def test_a_token_issue_records_the_last_activity_with_a_15_minute_condition(
+    table,
+) -> None:
+    now = datetime(2026, 11, 25, 10, 0, 0, tzinfo=timezone.utc)
+    index.record_last_active(_event([], "TokenGeneration_RefreshTokens"), now=now)
+
+    (call,) = table.calls
+    assert call["TableName"] == "lma-UserSignInTable"
+    assert call["Key"] == {"UserSub": {"S": "a1b2"}}
+    assert call["UpdateExpression"] == "SET LastActiveAt = :at"
+    assert call["ConditionExpression"] == (
+        "attribute_not_exists(LastActiveAt) OR LastActiveAt < :cutoff"
+    )
+    assert call["ExpressionAttributeValues"] == {
+        ":at": {"S": "2026-11-25T10:00:00.000Z"},
+        ":cutoff": {"S": "2026-11-25T09:45:00.000Z"},
+    }
+
+
+def test_the_handler_records_the_last_activity_on_a_token_refresh(table) -> None:
+    index.lambda_handler(_event(["Admin"], "TokenGeneration_RefreshTokens"), None)
+
+    assert len(table.calls) == 1
+
+
+class _ConditionalTable:
+    """One item's LastActiveAt, updated only when the trigger's condition holds."""
+
+    def __init__(self) -> None:
+        self.value: str | None = None
+        self.writes: list[str] = []
+
+    def update_item(self, **kwargs):
+        values = kwargs["ExpressionAttributeValues"]
+        if self.value is not None and not self.value < values[":cutoff"]["S"]:
+            raise _client_error("ConditionalCheckFailedException")
+        self.value = values[":at"]["S"]
+        self.writes.append(self.value)
+        return {}
+
+
+def test_tokens_within_15_minutes_write_the_time_once(monkeypatch) -> None:
+    fake = _ConditionalTable()
+    monkeypatch.setattr(index, "TABLE", "lma-UserSignInTable")
+    monkeypatch.setattr(index, "_dynamodb", fake)
+    start = datetime(2026, 11, 25, 10, 0, 0, tzinfo=timezone.utc)
+
+    for minutes in (0, 5, 14, 16, 30, 32):
+        index.record_last_active(_event([]), now=start + timedelta(minutes=minutes))
+
+    assert fake.writes == [
+        "2026-11-25T10:00:00.000Z",
+        "2026-11-25T10:16:00.000Z",
+        "2026-11-25T10:32:00.000Z",
+    ]
+
+
+def test_a_time_recorded_within_the_interval_is_left_quietly(table, caplog) -> None:
+    table.error = _client_error("ConditionalCheckFailedException")
+
+    response = _role_response(["Admin"])
+
+    assert len(table.calls) == 1
+    assert response["claimsOverrideDetails"]["claimsToAddOrOverride"] == {"lma_role": "Admin"}
+    assert "Could not record" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _client_error("AccessDeniedException"),
+        _client_error("ResourceNotFoundException"),
+        RuntimeError("connect timeout"),
+    ],
+    ids=["denied", "no-table", "timeout"],
+)
+def test_a_failed_write_leaves_the_role_response_unchanged(table, error) -> None:
+    for groups in (["Admin"], ["Participant"], [], ["Sales", "User"]):
+        table.error = None
+        expected = _role_response(groups)
+        table.error = error
+
+        assert _role_response(groups) == expected
+
+
+def test_a_client_that_cannot_be_created_leaves_the_response_unchanged(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(index, "TABLE", "lma-UserSignInTable")
+    monkeypatch.setattr(index, "_dynamodb", None)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no region")
+
+    monkeypatch.setattr(index.boto3, "client", broken)
+
+    response = index.lambda_handler(_event(["Participant"]), None)["response"]
+
+    assert response["claimsOverrideDetails"]["claimsToAddOrOverride"] == {"lma_role": "Participant"}
+
+
+def test_no_table_or_no_sub_makes_no_call(table, monkeypatch) -> None:
+    event = _event([])
+    event["request"]["userAttributes"] = {}
+    index.lambda_handler(event, None)
+    monkeypatch.setattr(index, "TABLE", "")
+    index.lambda_handler(_event([]), None)
+
+    assert table.calls == []
+
+
+def test_the_write_is_a_single_bounded_attempt() -> None:
+    """One attempt of at most 1.5 seconds, well inside the five Cognito waits."""
+    config = index.DYNAMODB_CONFIG
+
+    assert config.retries["total_max_attempts"] == 1
+    assert config.connect_timeout + config.read_timeout <= 1.5

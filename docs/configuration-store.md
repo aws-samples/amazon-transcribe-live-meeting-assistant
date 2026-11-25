@@ -861,7 +861,8 @@ Two stack parameters decide what `Config#default` holds, as IDP's
 - **`ConfigurationPreset`** — the id of a preset, applied over the shipped
   defaults: `standard` (the default, which is the shipped defaults),
   `internal-meetings-notify`, `regulated-consent-required`,
-  `regulated-notify`, `team-hosted-external` or `customer-account`; see
+  `regulated-notify`, `team-hosted-external`, `customer-account` or
+  `minimised-content`; see
   [Configuration presets](configuration-guide.md#configuration-presets). `none`,
   the parameter's value in earlier 0.4.0 pre-releases, is also accepted and read
   as `standard`, so a stack deployed with it can be updated without choosing

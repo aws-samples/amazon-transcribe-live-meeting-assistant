@@ -15,10 +15,12 @@ LMA ships with a built-in **User Management** page that lets administrators crea
 - [Changing a user's role](#changing-a-users-role)
 - [Deleting users](#deleting-users)
 - [Last sign-in](#last-sign-in)
+- [Last active](#last-active)
 - [Exporting users for an access review](#exporting-users-for-an-access-review)
 - [Security model](#security-model)
 - [Guard rails](#guard-rails)
 - [Email domain restrictions](#email-domain-restrictions)
+- [Participant accounts for a meeting](#participant-accounts-for-a-meeting)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -29,7 +31,7 @@ Users are stored in LMA's Amazon Cognito User Pool (created by the `lma-cognito-
 
 The User Management page provides:
 
-- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, creation date, and [last sign-in](#last-sign-in).
+- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, creation date, [last sign-in](#last-sign-in) and [last active](#last-active) time.
 - **Create user** — creates a Cognito user with the chosen role. Cognito emails the new user a temporary password; they must set a new password on first sign-in.
 - **Change role** — moves one selected user to another role.
 - **Delete user(s)** — permanently removes one or more selected users from Cognito, with confirmation.
@@ -83,7 +85,7 @@ You cannot change your own role, and the last remaining Admin cannot be moved to
 2. Choose **Delete**.
 3. Review the confirmation modal and choose **Delete** to proceed.
 
-Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) time. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
+Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) and [last active](#last-active) times. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
 
 ## Last sign-in
 
@@ -91,7 +93,7 @@ The **Last sign-in** column shows when each user last signed in to LMA with thei
 
 **How it is recorded.** Amazon Cognito's `ListUsers` API does not return a sign-in time, and reading a user's sign-in history from Cognito requires Cognito threat protection, which LMA does not require. So the `lma-cognito-stack` nested stack adds a Cognito **PostAuthentication** Lambda trigger, `CognitoPostAuthenticationFunction`. After each successful sign-in it writes the time to a small DynamoDB table, `UserSignInTable`, one item per user keyed by the user's Cognito `sub` (an identifier that never changes). The table is encrypted with the stack's customer-managed KMS key and, like the user pool, is kept when the stack is deleted with `EnableDataRetentionOnDelete=true`. No attribute is added to the user pool. A failed write does not fail the sign-in: the trigger logs the failure in `/<stack-name>/lambda/CognitoPostAuthenticationFunction` and returns, and the user signs in as usual. As with any Cognito trigger, if Lambda cannot run the function at all (for example, it is throttled or does not answer within Cognito's five-second limit), Cognito fails that sign-in and the user can try again.
 
-**What counts as a sign-in.** PostAuthentication runs when a user authenticates with their password: in the web UI, in the browser extension, or through the MCP external app client. It does **not** run when a client silently renews its session with a refresh token, which the web UI does while a user stays signed in (for up to 30 days, the app client's refresh-token lifetime). So the column is the last *interactive sign-in*, not the last time the user used LMA: a user who keeps a browser session open can be active today and still show a sign-in from several weeks ago. For an access review, read an old or missing time as "has not entered their password since then".
+**What counts as a sign-in.** PostAuthentication runs when a user authenticates with their password: in the web UI, in the browser extension, or through the MCP external app client. It does **not** run when a client silently renews its session with a refresh token, which the web UI does while a user stays signed in (for up to 30 days, the app client's refresh-token lifetime). So the column is the last *interactive sign-in*, not the last time the user used LMA: a user who keeps a browser session open can be active today and still show a sign-in from several weeks ago. For an access review, read an old or missing time as "has not entered their password since then", and use [Last active](#last-active) for when the account was last used.
 
 **What the column can show:**
 
@@ -101,6 +103,24 @@ The **Last sign-in** column shows when each user last signed in to LMA with thei
 | **Not recorded** | No sign-in has been recorded for this user. Sign-in times are recorded from the first deployment of a version of LMA that includes this feature onwards, so right after an upgrade every user shows this until they next sign in. A new user who has not yet signed in for the first time also shows it. |
 | **Unavailable** | The sign-in times could not be read, so nothing is known about any user's last sign-in. The resolver's log (`/<stack-name>/lambda/UserManagement`) says why. |
 
+## Last active
+
+The **Last active** column shows when each user last used LMA, as far as LMA can tell without recording every request. For an access review it is usually the column to sort on: an account whose last activity is months old is a candidate for disabling, whatever its last sign-in.
+
+**What counts as activity.** Three things, each recorded in the same `UserSignInTable` item as the last sign-in, in a `LastActiveAt` attribute:
+
+- **An interactive sign-in**, in the web UI, the browser extension or through the MCP external app client.
+- **A token renewal.** Every client that stays signed in (the web UI, the browser extension, the desktop app) renews its tokens with its refresh token about once an hour while it is open, and each renewal counts. Cognito's pre token generation trigger, `CognitoPreTokenGenerationFunction`, which also sets each token's [role](#roles), runs on every sign-in and every renewal and writes the time.
+- **A request with the user's MCP API key.** API keys never reach Cognito, so the hosted MCP server's API key authorizer, `MCPApiKeyAuthorizerFunction`, writes the time when it admits a request, together with the key's own last use (shown in the MCP API Key container on the MCP Servers page; see [MCP API key authentication](mcp-api-key-auth.md#last-used)).
+
+**Resolution.** Each writer updates the time at most once every 15 minutes (a conditional DynamoDB update that does nothing when the recorded time is less than 15 minutes old), so the time can be up to 15 minutes earlier than the user's latest activity. For a signed-in client the activity itself is only seen when a token is renewed, so a user who has the web UI open is shown as active to within about an hour, and a user who closed it shows roughly when it was last renewed. An MCP API key in use is seen to within 15 minutes.
+
+**What is not counted.** Individual page loads, GraphQL calls and meeting streams between two renewals are not recorded separately, and nothing is recorded for a client that is closed, even if its refresh token is still valid. Calls made with AWS credentials rather than with an LMA user's tokens (as `lma users list` and the other CLI and SDK operations that act with your AWS credentials are) are not LMA user activity and are not recorded; a CLI or SDK operation that signs in as an LMA user counts like any other sign-in. A Virtual Participant or a meeting stream that runs on after the user's client is closed does not count either.
+
+**Failures never block a user.** Each write is one attempt that gives up after at most 1.5 seconds, and a failure is logged (in `/<stack-name>/lambda/CognitoPreTokenGenerationFunction` or the authorizer's log group) without affecting the token or the request.
+
+The column shows **Not recorded** for a user with no recorded activity (activity is recorded from the first deployment of a version of LMA that includes it onwards; a user who signs in or whose open client renews its tokens shows a time from then on) and **Unavailable** when the times could not be read, as for Last sign-in.
+
 ## Exporting users for an access review
 
 The [LMA CLI](lma-cli.md#lma-users-list--list-users-for-an-access-review) lists the same information from a terminal, for an access review export:
@@ -109,7 +129,7 @@ The [LMA CLI](lma-cli.md#lma-users-list--list-users-for-an-access-review) lists 
 # A table in the terminal
 lma users list --stack-name LMA
 
-# A CSV file for the review: email, username, role, status, enabled, created_at, last_sign_in_at
+# A CSV file for the review: email, username, role, status, enabled, created_at, last_sign_in_at, last_active_at
 lma users list --stack-name LMA --format csv --output lma-users-2026-11.csv
 
 # JSON, with the stack, Region, account, user pool and time of the export
@@ -119,12 +139,12 @@ lma users list --stack-name LMA --format json
 A CSV row looks like this (times are ISO 8601 in UTC):
 
 ```
-email,username,role,status,enabled,created_at,last_sign_in_at
-jdoe@example.com,jdoe@example.com,User,CONFIRMED,true,2026-03-02T14:05:11.000Z,2026-11-20T09:30:00.000Z
-new.user@example.com,new.user@example.com,User,FORCE_CHANGE_PASSWORD,true,2026-11-23T12:00:00.000Z,Not recorded
+email,username,role,status,enabled,created_at,last_sign_in_at,last_active_at
+jdoe@example.com,jdoe@example.com,User,CONFIRMED,true,2026-03-02T14:05:11.000Z,2026-11-20T09:30:00.000Z,2026-11-24T16:45:00.000Z
+new.user@example.com,new.user@example.com,User,FORCE_CHANGE_PASSWORD,true,2026-11-23T12:00:00.000Z,Not recorded,Not recorded
 ```
 
-In the CSV and table, a user with no recorded sign-in shows `Not recorded`, and every user shows `Unavailable` when the times could not be read (with a warning on standard error saying why, for example a stack not yet updated to a version that records them). In JSON, `last_sign_in_at` is `null` in both cases, and `last_sign_in_available` (`false` when the times could not be read) tells them apart.
+In the CSV and table, a user with no recorded sign-in (or activity) shows `Not recorded`, and every user shows `Unavailable` when the times could not be read (with a warning on standard error saying why, for example a stack not yet updated to a version that records them). In JSON, `last_sign_in_at` and `last_active_at` are `null` in both cases, and `last_sign_in_available` (`false` when the times could not be read) tells them apart.
 
 The command runs with your AWS credentials, not as an LMA user, so it needs IAM permissions on the stack's resources rather than membership of the `Admin` group. The permissions are listed under [`lma users list`](lma-cli.md#lma-users-list--list-users-for-an-access-review).
 
@@ -135,6 +155,8 @@ Authorization for user management is enforced at **three independent layers**:
 1. **AppSync schema** — `listUsers`, `createUser`, `setUserRole` and `deleteUser` are declared with `@aws_cognito_user_pools(cognito_groups: ["Admin"])`. Non-admin callers are rejected by AppSync before the Lambda resolver is even invoked. (Note: `@aws_cognito_user_pools` is the correct directive when the API uses more than one auth type — `@aws_auth` only works for single-auth APIs.)
 2. **Lambda resolver** — `UserManagementFunction` re-checks the caller's `cognito:groups` claim from the signed JWT that AppSync passes through. This is belt-and-braces protection in case a resolver is ever wired to a field without the directive.
 3. **Web UI** — the User Management navigation link and page are hidden from non-admin users. Direct navigation shows an access-denied message.
+
+The same Lambda function also answers `getMeetingParticipantAccounts` and `createParticipantAccounts`, which name `Admin` and `User` in their directives and apply the meeting-owner checks described in [Participant accounts for a meeting](#participant-accounts-for-a-meeting). Each operation's roles are listed in the function itself and checked against the [role matrix](user-based-access-control.md#roles) by its unit tests.
 
 The Lambda's IAM role grants only the specific `cognito-idp` actions required to manage users, and is scoped to the LMA user pool ARN:
 
@@ -149,7 +171,7 @@ cognito-idp:AdminRemoveUserFromGroup
 cognito-idp:AdminListGroupsForUser
 ```
 
-It may also read (`dynamodb:BatchGetItem`) and delete (`dynamodb:DeleteItem`) items in the Cognito stack's `UserSignInTable`, for the [last sign-in](#last-sign-in) times it lists and the item of a user it deletes. The PostAuthentication trigger's own role may only update items in that table.
+It may also read (`dynamodb:BatchGetItem`) and delete (`dynamodb:DeleteItem`) items in the Cognito stack's `UserSignInTable`, for the [last sign-in](#last-sign-in) and [last active](#last-active) times it lists and the item of a user it deletes. The PostAuthentication and pre token generation triggers' roles, and the MCP API key authorizer's, may only update items in that table (the authorizer also reads a key owner's `sub` with `cognito-idp:AdminGetUser` when the key does not store it).
 
 ## Guard rails
 
@@ -165,6 +187,20 @@ If a rule is violated, the API returns a clear error and the UI shows it in the 
 
 If you set the `AllowedSignUpEmailDomain` CloudFormation parameter at deployment time (for example, `example.com` or a comma-separated list such as `example.com,partner.com`), then new users created via **User Management** must have an email address in one of those domains. The restriction is enforced server-side in the Lambda in addition to Cognito's sign-up trigger. Leave the parameter empty to allow any email domain.
 
+## Participant accounts for a meeting
+
+Besides this page, there is one other way an account is created: from a meeting's [participant list](virtual-participant.md#participant-list). The meeting's owner, or an Admin, can choose **Create accounts for participants without one** on the meeting page or the Virtual Participant's page. This is its own operation (`createParticipantAccounts`), separate from **Create user**, with its own rules:
+
+- **Admins and Users may call it, for one meeting at a time.** A User may do so only for a meeting they own, not for one shared with them. An Admin may do so for any meeting. A Participant may not.
+- **Only people on that meeting's list.** Every address in the request must be on the meeting's participant list (compared ignoring case); a request naming anyone else is refused as a whole.
+- **Only the Participant role.** Each new account is added to the `Participant` group and nothing else. An address that already has an account is reported as existing and its account is not changed. Accounts with the User or Admin role, and changes of role, are made only on this page, by an Admin.
+- **Email domain restrictions apply.** When `AllowedSignUpEmailDomain` is set, an address outside those domains is reported as not allowed and no account is created for it, exactly as for **Create user** (see [Email domain restrictions](#email-domain-restrictions)).
+- **Limits.** One request creates at most 25 accounts; choose the button again for the rest. A User may create at most 25 accounts this way per day (UTC), counted across all their meetings; the answer says how many remain. A User may also look up the accounts of at most 1,000 different addresses a day (UTC); an address counts once a day however often its list is read, and the day's count keeps only a hash of each address. This is so that a list cannot be rewritten over and over to find out who has an account. Admins have neither daily limit.
+
+Cognito sends each new account the same invitation email as **Create user**. With the user pool's default email configuration (`COGNITO_DEFAULT`), Cognito sends only a small number of emails per day for the whole user pool (50 at the time of writing; see [Email settings for Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html)). Every invitation, password reset and verification email counts against it, so creating accounts for a large meeting can use it up. A deployment that needs to invite more people should configure the user pool to send email through Amazon SES.
+
+To answer the meeting page's account status (`getMeetingParticipantAccounts`), the same Lambda function reads the meeting's owner and participant list (`dynamodb:GetItem` on the meeting records and the Virtual Participant table) and looks up each address in the user pool. The two daily counts are items in the meeting table under the user's `usr#` key, which expire after two days.
+
 ## Troubleshooting
 
 **"Unauthorized" or "Not Authorized" error when opening the page**
@@ -178,6 +214,12 @@ If you set the `AllowedSignUpEmailDomain` CloudFormation parameter at deployment
 
 **A user's new role has not taken effect**
 : A role change applies at the user's next sign-in or token refresh, at most an hour later. Ask them to sign out and sign in again to apply it at once.
+
+**"Create accounts for participants without one" reports "limit reached"**
+: Either one request reached its 25 accounts (choose the button again) or you have created 25 participant accounts today (an Admin can create the rest, or try again the next day, UTC).
+
+**"You have looked up the accounts of 1000 different addresses today"**
+: The account status, and the button, look up each address on a meeting's list. Each different address counts once a day (UTC), however often the list is read again; after 1,000 different addresses in a day, a User's further lookups of new addresses are refused until the next day. An Admin is not limited.
 
 **"Email domain 'X' is not allowed"**
 : The `AllowedSignUpEmailDomain` CloudFormation parameter restricts new user emails to specific domains. Update the parameter on your stack and redeploy, or choose an email in an allowed domain.

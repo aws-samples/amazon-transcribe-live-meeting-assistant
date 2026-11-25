@@ -370,7 +370,8 @@ It is not offered as an MCP tool.
 
 Lists every user of the stack's Cognito user pool with their email, role
 (`Admin`, `User` or `Participant`), Cognito status, whether the account is enabled, when it was
-created, and when the user last signed in, for a periodic user access review.
+created, when the user last signed in and when they were last active, for a
+periodic user access review.
 
 ```bash
 # A table in the terminal
@@ -390,7 +391,9 @@ lma --stack-name LMA-team users list --format json > lma-users.json
 | `--stack-name`, `--region` | The stack and Region, as for [`lma meetings delete`](#lma-meetings-delete--delete-meetings-by-label) |
 
 The CSV columns are `email`, `username`, `role`, `status`, `enabled`
-(`true`/`false`), `created_at` and `last_sign_in_at`; times are ISO 8601 in UTC.
+(`true`/`false`), `created_at`, `last_sign_in_at` and `last_active_at`; times
+are ISO 8601 in UTC. The table has the same information, with a **Last active**
+column beside **Last sign-in**.
 
 The last sign-in is the user's last **interactive** sign-in, which the Cognito
 stack's PostAuthentication trigger records: a session the web UI renews with a
@@ -403,6 +406,15 @@ missing permission), every user shows `Unavailable` (`null` in JSON, with
 `last_sign_in_available: false` and `last_sign_in_unavailable_reason`), a warning
 saying why is printed on standard error, and the users are still listed.
 
+The last active time is the user's latest sign-in, token renewal (about hourly
+while a client such as the web UI is open) or use of their MCP API key, each
+recorded at most once every 15 minutes, so it is accurate to within about an hour
+for a signed-in client and 15 minutes for an API key. See
+[Last active](user-management.md#last-active) for what is and is not counted. It
+shows `Not recorded`, `Unavailable` or `null` in the same cases as the last
+sign-in; a user active only through an API key can have a last active time and no
+last sign-in.
+
 The command acts with your AWS credentials, not as an LMA user, so it does not
 need membership of the `Admin` group, but it needs:
 
@@ -411,7 +423,7 @@ need membership of the `Admin` group, but it needs:
 | `cloudformation:DescribeStacks` | The LMA stack | Finding the user pool in the stack's outputs |
 | `cloudformation:DescribeStackResource` | The LMA stack and its Cognito stack (`COGNITOSTACK`) | Finding the sign-in table, `UserSignInTable` |
 | `cognito-idp:ListUsers`, `cognito-idp:ListUsersInGroup` | The LMA user pool | Listing the users and the members of the `Admin` group |
-| `dynamodb:BatchGetItem` | The sign-in table | Reading the last sign-in times |
+| `dynamodb:BatchGetItem` | The sign-in table | Reading the last sign-in and last active times |
 | `kms:Decrypt` | The stack's customer-managed key, through DynamoDB | Reading the encrypted table, where the key policy leaves that to IAM |
 
 The account in the output comes from `sts:GetCallerIdentity`. If the sign-in

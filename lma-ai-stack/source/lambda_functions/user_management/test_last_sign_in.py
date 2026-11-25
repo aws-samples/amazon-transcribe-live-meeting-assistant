@@ -60,6 +60,8 @@ class FakeDynamo:
 
     def __init__(self, times: dict[str, str]) -> None:
         self.times = times
+        # Last-active times, by sub, written by the token and API key paths.
+        self.active: dict[str, str] = {}
         self.batch_requests: list[dict] = []
         self.deleted: list[dict] = []
         self.error: Exception | None = None
@@ -76,14 +78,17 @@ class FakeDynamo:
             self.unprocessed_rounds -= 1
             unprocessed = {TABLE: {**RequestItems[TABLE], "Keys": keys[-1:]}}
             keys = keys[:-1]
-        items = [
-            {
-                "UserSub": {"S": key["UserSub"]["S"]},
-                "LastSignInAt": {"S": self.times[key["UserSub"]["S"]]},
-            }
-            for key in keys
-            if key["UserSub"]["S"] in self.times
-        ]
+        items = []
+        for key in keys:
+            sub = key["UserSub"]["S"]
+            if sub not in self.times and sub not in self.active:
+                continue
+            item = {"UserSub": {"S": sub}}
+            if sub in self.times:
+                item["LastSignInAt"] = {"S": self.times[sub]}
+            if sub in self.active:
+                item["LastActiveAt"] = {"S": self.active[sub]}
+            items.append(item)
         return {"Responses": {TABLE: items}, "UnprocessedKeys": unprocessed}
 
     def delete_item(self, **kwargs):
@@ -171,6 +176,37 @@ def test_each_user_gets_the_time_recorded_under_their_own_sub(env) -> None:
     assert users["new@example.com"]["lastSignInAt"] is None
 
 
+def test_each_user_gets_their_own_last_active_time(env) -> None:
+    _cognito, dynamo = env
+    dynamo.active = {"sub-admin": "2026-11-24T16:45:00.000Z"}
+
+    users = by_name(index.handler(admin_event("listUsers"), None))
+
+    assert users["admin@example.com"]["lastActiveAt"] == "2026-11-24T16:45:00.000Z"
+    assert users["admin@example.com"]["lastSignInAt"] == "2026-11-20T09:30:00.000Z"
+    assert users["new@example.com"]["lastActiveAt"] is None
+
+
+def test_a_user_active_only_through_an_api_key_has_no_sign_in_time(env) -> None:
+    """An item holding only LastActiveAt (the authorizer wrote it) is still read."""
+    _cognito, dynamo = env
+    dynamo.active = {"sub-new": "2026-11-24T17:00:00.000Z"}
+
+    users = by_name(index.handler(admin_event("listUsers"), None))
+
+    assert users["new@example.com"]["lastActiveAt"] == "2026-11-24T17:00:00.000Z"
+    assert users["new@example.com"]["lastSignInAt"] is None
+
+
+def test_both_times_are_read_in_one_projection(env) -> None:
+    _cognito, dynamo = env
+
+    index.handler(admin_event("listUsers"), None)
+
+    (request,) = dynamo.batch_requests
+    assert request[TABLE]["ProjectionExpression"] == "UserSub, LastSignInAt, LastActiveAt"
+
+
 def test_the_table_is_asked_only_for_the_listed_users_subs(env) -> None:
     _cognito, dynamo = env
 
@@ -188,6 +224,7 @@ def test_times_are_unavailable_when_the_table_cannot_be_read(env) -> None:
 
     assert result["lastSignInAvailable"] is False
     assert [u["lastSignInAt"] for u in result["users"]] == [None, None]
+    assert [u["lastActiveAt"] for u in result["users"]] == [None, None]
     # The listing itself still succeeds.
     assert len(result["users"]) == 2
 
@@ -239,7 +276,9 @@ def test_the_table_is_read_in_chunks_of_one_hundred_keys(env) -> None:
 
 def test_a_created_user_has_no_last_sign_in(env) -> None:
     """createUser returns the same User shape, with nothing recorded yet."""
-    assert index._format_cognito_user(user("x@example.com", "sub-x"))["lastSignInAt"] is None
+    created = index._format_cognito_user(user("x@example.com", "sub-x"))
+    assert created["lastSignInAt"] is None
+    assert created["lastActiveAt"] is None
 
 
 def test_deleting_a_user_deletes_their_sign_in_item(env) -> None:

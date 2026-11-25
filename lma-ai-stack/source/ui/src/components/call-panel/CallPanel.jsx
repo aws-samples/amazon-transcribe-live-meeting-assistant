@@ -71,6 +71,7 @@ import LiveGuidancePanel from './LiveGuidancePanel';
 import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
 import MeetingContextPanel from './MeetingContextPanel';
 import MeetingLabels from './MeetingLabels';
+import MeetingParticipants from './MeetingParticipants';
 import ConsentPanel from './ConsentPanel';
 import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
@@ -2782,6 +2783,19 @@ export const CallPanel = ({
         languages={meetingLanguages(item.detectedLanguages, transcriptSegmentsForCall)}
         consentState={meetingConsent}
         onShowConsentRecord={showConsentRecordPanel ? showConsent : undefined}
+      />
+      {/* The participant list: names for everyone who can see the meeting;
+          account status, accounts and changes for its owner and Admins only
+          (not the people it is shared with). */}
+      <MeetingParticipants
+        participants={item.participants}
+        callId={item.callId}
+        canManage={!!isAdminUser || (!!user?.username && item.owner === user.username)}
+        onSave={
+          savePreparation
+            ? (participants) => savePreparation('participants', { Participants: participants })
+            : undefined
+        }
       />
       <SpeakerIdentitiesPanel
         item={item}

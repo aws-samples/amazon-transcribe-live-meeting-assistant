@@ -198,6 +198,7 @@ def new_row(
         meeting_context = preparation.normalize_context(request.get("meetingContext"))
         checklist = preparation.normalize_definitions(request.get("checklist"))
         preparation.check_checklist_size(checklist)
+        participants = preparation.normalize_participants(request.get("participants"))
     except preparation.PreparationError as error:
         raise JoinAgainRefused(str(error)) from error
     # The summary profile's name only: one the configuration no longer holds is
@@ -216,6 +217,8 @@ def new_row(
         row["meetingContext"] = meeting_context
     if checklist:
         row["checklist"] = checklist
+    if participants:
+        row["participants"] = participants
 
     mode = _text(request.get("consentMode"))
     rule = _text(request.get("consentRule"))

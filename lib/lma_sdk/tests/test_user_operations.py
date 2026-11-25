@@ -66,6 +66,7 @@ class FakeCognito:
 class FakeDynamo:
     def __init__(self) -> None:
         self.times = {"sub-admin": "2026-11-20T09:30:00.000Z", "sub-zed": "2026-10-01T08:00:00.000Z"}
+        self.active: Dict[str, str] = {}
         self.requests: List[Dict[str, Any]] = []
         self.error: Exception | None = None
         self.unprocessed_rounds = 0
@@ -80,11 +81,16 @@ class FakeDynamo:
             self.unprocessed_rounds -= 1
             unprocessed = {TABLE: {**RequestItems[TABLE], "Keys": keys[-1:]}}
             keys = keys[:-1]
-        items = [
-            {"UserSub": key["UserSub"], "LastSignInAt": {"S": self.times[key["UserSub"]["S"]]}}
-            for key in keys
-            if key["UserSub"]["S"] in self.times
-        ]
+        items = []
+        for key in keys:
+            sub = key["UserSub"]["S"]
+            item: Dict[str, Any] = {"UserSub": key["UserSub"]}
+            if sub in self.times:
+                item["LastSignInAt"] = {"S": self.times[sub]}
+            if sub in self.active:
+                item["LastActiveAt"] = {"S": self.active[sub]}
+            if len(item) > 1:
+                items.append(item)
         return {"Responses": {TABLE: items}, "UnprocessedKeys": unprocessed}
 
 
@@ -147,6 +153,36 @@ def test_a_user_who_has_not_signed_in_since_recording_began_has_no_time(client, 
     users = _by_email(client.users.list())
 
     assert users["new@example.com"].last_sign_in_at is None
+
+
+def test_each_user_has_their_own_last_active_time(client, aws):
+    aws.dynamodb.active = {"sub-admin": "2026-11-24T16:45:00.000Z", "sub-new": "2026-11-24T17:00:00.000Z"}
+
+    users = _by_email(client.users.list())
+
+    assert users["admin@example.com"].last_active_at == "2026-11-24T16:45:00.000Z"
+    # Active only through an API key: a last active time and no sign-in time.
+    assert users["new@example.com"].last_active_at == "2026-11-24T17:00:00.000Z"
+    assert users["new@example.com"].last_sign_in_at is None
+    assert users["zed@example.com"].last_active_at is None
+    assert aws.dynamodb.requests[0][TABLE]["ProjectionExpression"] == "UserSub, LastSignInAt, LastActiveAt"
+
+
+def test_last_sign_ins_still_maps_each_sub_to_its_sign_in_time(client, aws):
+    aws.dynamodb.active = {"sub-new": "2026-11-24T17:00:00.000Z"}
+
+    assert client.users.last_sign_ins(["sub-admin", "sub-new", "sub-zed"]) == {
+        "sub-admin": "2026-11-20T09:30:00.000Z",
+        "sub-zed": "2026-10-01T08:00:00.000Z",
+    }
+
+
+def test_the_json_form_has_last_active_at(client, aws):
+    aws.dynamodb.active = {"sub-admin": "2026-11-24T16:45:00.000Z"}
+
+    dumped = client.users.list().model_dump()
+
+    assert dumped["users"][0]["last_active_at"] == "2026-11-24T16:45:00.000Z"
 
 
 def test_the_result_names_where_it_was_read(client, aws):

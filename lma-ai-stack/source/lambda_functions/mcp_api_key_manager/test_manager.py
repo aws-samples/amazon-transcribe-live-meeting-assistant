@@ -262,5 +262,50 @@ class TestKeyScope(unittest.TestCase):
         self.assertEqual([key["scope"] for key in result], ["legacy", "read-write"])
 
 
+class TestLastUse(unittest.TestCase):
+    """A listed key carries its last use; a new key stores its owner's sub."""
+
+    @patch.object(index, "dynamodb")
+    def test_listed_keys_carry_their_last_use_or_null(self, mock_dynamo):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {
+                    "KeyPrefix": "lma_used0000",
+                    "Enabled": "true",
+                    "LastUsedAt": "2026-11-25T10:00:00.000Z",
+                },
+                {"KeyPrefix": "lma_unused00", "Enabled": "true"},
+            ]
+        }
+        mock_dynamo.Table.return_value = mock_table
+
+        result = index.handler(make_event("listMCPApiKeys", username="alice"), None)
+
+        self.assertEqual([key["lastUsedAt"] for key in result], ["2026-11-25T10:00:00.000Z", None])
+
+    @patch.object(index, "dynamodb")
+    def test_a_new_key_stores_its_owners_sub(self, mock_dynamo):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamo.Table.return_value = mock_table
+        event = make_event("generateMCPApiKey", username="alice")
+        event["identity"]["sub"] = "sub-alice"
+
+        index.handler(event, None)
+
+        self.assertEqual(mock_table.put_item.call_args[1]["Item"]["UserSub"], "sub-alice")
+
+    @patch.object(index, "dynamodb")
+    def test_a_new_key_without_a_sub_in_the_identity_stores_none(self, mock_dynamo):
+        mock_table = MagicMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamo.Table.return_value = mock_table
+
+        index.handler(make_event("generateMCPApiKey", username="alice"), None)
+
+        self.assertNotIn("UserSub", mock_table.put_item.call_args[1]["Item"])
+
+
 if __name__ == "__main__":
     unittest.main()

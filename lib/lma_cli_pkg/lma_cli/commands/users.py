@@ -9,9 +9,11 @@ Usage::
     lma users list --format json
 
 Each user is listed with email, role (Admin, User or Participant), Cognito status, whether the
-account is enabled, when it was created and when the user last signed in. The
-last sign-in is the last interactive sign-in the Cognito stack recorded; a user
-who has not signed in since that was deployed shows "Not recorded". When the
+account is enabled, when it was created, when the user last signed in and when
+they were last active. The last sign-in is the last interactive sign-in the
+Cognito stack recorded. The last activity is the latest sign-in, token renewal
+(about hourly while a client is open) or MCP API key use, each recorded at most
+once per 15 minutes. A user with nothing recorded shows "Not recorded". When the
 times cannot be read at all they show "Unavailable", with a warning that says why.
 """
 
@@ -40,6 +42,7 @@ CSV_COLUMNS = (
     "enabled",
     "created_at",
     "last_sign_in_at",
+    "last_active_at",
 )
 
 
@@ -48,6 +51,20 @@ def last_sign_in_text(user, available: bool) -> str:
     if not available:
         return UNAVAILABLE
     return user.last_sign_in_at or NOT_RECORDED
+
+
+def last_active_text(user, available: bool) -> str:
+    """The last activity as shown in the table and the CSV file."""
+    if not available:
+        return UNAVAILABLE
+    return user.last_active_at or NOT_RECORDED
+
+
+def _cell(iso: str | None, available: bool) -> str:
+    """A recorded time for the table, or what stands in for one."""
+    if available and iso:
+        return _shown(iso)
+    return UNAVAILABLE if not available else NOT_RECORDED
 
 
 def _shown(iso: str | None) -> str:
@@ -71,6 +88,7 @@ def to_csv(result) -> str:
                 "true" if user.enabled else "false",
                 user.created_at or "",
                 last_sign_in_text(user, result.last_sign_in_available),
+                last_active_text(user, result.last_sign_in_available),
             ]
         )
     return out.getvalue()
@@ -101,7 +119,7 @@ def users_cmd() -> None:
 @click.option("--region", default=None, envvar="AWS_DEFAULT_REGION", help="AWS region.")
 @click.pass_context
 def users_list_cmd(ctx, output_format, output, stack_name, region):
-    """List every user with email, role, status, enabled, created and last sign-in."""
+    """List every user with email, role, status, enabled, created, last sign-in and last active."""
     from lma_sdk.exceptions import LMAError
 
     if output is not None and output_format == "table":
@@ -121,7 +139,7 @@ def users_list_cmd(ctx, output_format, output, stack_name, region):
     if not result.last_sign_in_available:
         # On standard error, so a redirected json or csv file stays clean.
         err_console.print(
-            f"[warning]⚠[/warning] Last sign-in times are unavailable: "
+            f"[warning]⚠[/warning] Activity times are unavailable: "
             f"{result.last_sign_in_unavailable_reason}"
         )
 
@@ -143,27 +161,28 @@ def users_list_cmd(ctx, output_format, output, stack_name, region):
     table.add_column("Enabled")
     table.add_column("Created", style="dim")
     table.add_column("Last sign-in")
+    table.add_column("Last active")
+    available = result.last_sign_in_available
     for user in result.users:
-        if result.last_sign_in_available and user.last_sign_in_at:
-            last = _shown(user.last_sign_in_at)
-        else:
-            last = last_sign_in_text(user, result.last_sign_in_available)
         table.add_row(
             user.email,
             user.role,
             user.status,
             "Yes" if user.enabled else "No",
             _shown(user.created_at),
-            last,
+            _cell(user.last_sign_in_at, available),
+            _cell(user.last_active_at, available),
         )
     console.print(table)
     if result.last_sign_in_available:
         print_info(
             "Last sign-in is the last interactive sign-in; token refreshes are not counted. "
-            f'"{NOT_RECORDED}": no sign-in since sign-in times began to be recorded.'
+            "Last active also counts token renewals (about hourly while a client is open) "
+            "and MCP API key use, to within 15 minutes. "
+            f'"{NOT_RECORDED}": nothing recorded since recording began.'
         )
     else:
-        print_warning("Last sign-in times could not be read; see the warning above.")
+        print_warning("Last sign-in and last active times could not be read; see the warning above.")
 
 
 def _emit(text: str, output: Path | None) -> None:

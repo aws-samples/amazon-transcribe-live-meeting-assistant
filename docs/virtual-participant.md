@@ -35,6 +35,7 @@ title: "Virtual Participant"
 - [Zoom Sign-in](#zoom-sign-in)
 - [Meeting Scheduling](#meeting-scheduling)
   - [Changing a scheduled Virtual Participant](#changing-a-scheduled-virtual-participant)
+- [Participant list](#participant-list)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
   - [How a viewer is authorized](#how-a-viewer-is-authorized)
@@ -754,6 +755,35 @@ While a Virtual Participant is waiting for its scheduled launch, its owner and A
 Changes are accepted until 5 minutes before the meeting time, and a new meeting time must also be at least 5 minutes away. The check is made again when the change is saved: if the Virtual Participant has started launching in the meantime, the change is refused and it launches as it was scheduled.
 
 A saved change moves the launch schedule: the scheduler rewrites the one EventBridge Scheduler schedule created for the Virtual Participant, so it launches once, at the new time and with the new settings. If the schedule cannot be moved (for example because it no longer exists), no new schedule is created, and the Virtual Participant's status line says that it will launch as it was scheduled before; cancel it and schedule a new one to use the new settings. The meeting password, the agenda, the meeting preparation and the meeting consent choice are read by the Virtual Participant when it starts, so changes to them apply even without moving the schedule, and a change to the password alone does not move it.
+
+## Participant list
+
+A meeting can carry a **participant list**: the names and email addresses of the people expected to attend, as an organizer enters them or as a calendar invite lists them. The list is set in four places:
+
+- the **Participants** field of the Create Virtual Participant form, for a meeting started now or scheduled, and of **Join again**;
+- the scheduled Virtual Participant's **Edit** form (see [Changing a scheduled Virtual Participant](#changing-a-scheduled-virtual-participant));
+- the `participants` input of the `createVirtualParticipant`, `updateScheduledVirtualParticipant` and `joinAgainVirtualParticipant` GraphQL mutations, and the `participants` argument of the `schedule_meeting`, `start_meeting_now` and `update_scheduled_meeting` MCP tools, so an assistant that reads a calendar invite can pass its attendees (see the [MCP Tools Reference](mcp-tools-reference.md));
+- the **Participants** section of the meeting page, where the meeting's owner or an Admin can edit it at any time (`updateCallParticipants`).
+
+The Virtual Participant stores the list on its own record and puts it on the meeting record when it creates the meeting, as it does with the meeting preparation.
+
+In the form fields, enter one person per line as `Name <email>` or as an email address on its own; a list pasted from a calendar invite, separated by semicolons, also works. The list is checked the same way wherever it is set:
+
+- each entry needs a well-formed email address (the form that a user account can be created for); the name is optional, trimmed, and at most 200 characters;
+- an address listed twice, compared ignoring case, is kept once, with the first name given for it;
+- a meeting lists at most 100 people. A longer list is refused rather than cut short.
+
+Listing someone does not share the meeting with them, and does not give them access to it. Sharing is separate: use **Share** on the meeting, or the `shareWith` argument of the MCP tools.
+
+### Who has an LMA account
+
+The **Participants** section of the meeting page, and of a Virtual Participant's page, lists each person with their name and email address. The meeting's owner and Admins also see, for each person, whether they have an LMA account and with which role: **No account**, **Participant**, **User** or **Admin**. The account is matched by email address, ignoring case. The lookup is made by the server (`getMeetingParticipantAccounts`), which answers only that status and nothing else about the account. A user the meeting is shared with sees the list without the status, and cannot change it.
+
+### Creating accounts for the people on the list
+
+The meeting's owner or an Admin can choose **Create accounts for participants without one**. LMA then creates an account with the **Participant** role for each person on the list who has none, and Cognito sends each of them its invitation email with a temporary password. The [Participant](user-based-access-control.md#roles) role signs in to a home page only and gives no access to meeting data. Accounts that already exist are left exactly as they are. See [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting) for the limits that apply, including the email domain restriction and Cognito's daily email limit.
+
+On a Virtual Participant's page, the list, the status and the button all use the list stored on the Virtual Participant, so for a scheduled one the accounts can be made ahead of the meeting. Once the Virtual Participant has created its meeting, the meeting has its own copy of the list; a change to it on the meeting page is shown on the meeting page, not on the Virtual Participant's.
 
 ## Meeting Invitation Parsing
 

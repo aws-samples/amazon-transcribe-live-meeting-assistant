@@ -557,6 +557,10 @@ Resources:
   # identity pool chooses its role from lma_role. A user in no group is a User.
   # Event version 1: its group override applies to ID and access tokens, and it
   # runs on every sign-in flow and on token refresh.
+  #
+  # Because it runs on every token issue, it also records the user's last
+  # activity (LastActiveAt in UserSignInTable), at most once per 15 minutes per
+  # user, with one bounded attempt; a failed write does not affect the token.
   ##########################################################################
 
   CognitoPreTokenGenerationFunctionRole:
@@ -576,6 +580,26 @@ Resources:
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: RecordLastActive
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # One conditional write of the user's last-active time; no reads.
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt UserSignInTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   CognitoPreTokenGenerationFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -592,11 +616,16 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.12
       CodeUri: ../source/pre_token_generation
-      # Cognito waits at most 5 seconds for a trigger; this one does no I/O.
+      # Cognito waits at most 5 seconds for a trigger; its one DynamoDB write
+      # gives up after at most 1.5 seconds.
       Timeout: 5
-      MemorySize: 128
+      # More than the minimum, so a cold start (the boto3 import) stays short.
+      MemorySize: 256
       Tracing: Active
       Role: !GetAtt CognitoPreTokenGenerationFunctionRole.Arn
+      Environment:
+        Variables:
+          USER_SIGN_IN_TABLE: !Ref UserSignInTable
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CognitoPreTokenGenerationFunction
@@ -604,13 +633,13 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: Function does not require VPC access; it makes no network calls
+            reason: Function does not require VPC access; it calls only DynamoDB
           - id: W92
             reason: Function does not require reserved concurrency; it scales with sign-ins
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it scales with sign-ins"
     # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous Cognito trigger"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access; it makes no network calls"
-    # checkov:skip=CKV_AWS_173: "Function has no environment variables"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access; it calls only DynamoDB"
+    # checkov:skip=CKV_AWS_173: "Environment variables hold only a table name"
     DependsOn:
       - CognitoPreTokenGenerationFunctionLogGroup
 
@@ -895,7 +924,9 @@ Resources:
   # browser extension, the MCP external app client). It does not run when a
   # client renews its tokens with a refresh token, so the time is the last
   # time the user signed in with their password, not the last time they
-  # used LMA.
+  # used LMA. The pre token generation trigger, which runs on renewals too,
+  # records that as LastActiveAt, and the MCP API key authorizer records it
+  # for API key use.
   #
   # A failed write does not fail the sign-in: it is logged and the event
   # is returned as it came. (As for any trigger, Cognito still fails a

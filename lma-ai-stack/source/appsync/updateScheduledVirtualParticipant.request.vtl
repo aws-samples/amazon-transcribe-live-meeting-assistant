@@ -146,8 +146,9 @@ $util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead")
 #end
 
 ## The meeting preparation inputs (labels, audience, meetingContext,
-## checklist), checked by the pipeline's first function, which put them in the
-## stash: each one the request carried is stored, or removed when sent empty.
+## checklist, summaryProfile, participants), checked by the pipeline's first
+## function, which put them in the stash: each one the request carried is
+## stored, or removed when sent empty.
 #set( $preparation = $util.defaultIfNull($ctx.stash.preparation, {}) )
 #foreach( $name in $util.defaultIfNull($preparation.present, []) )
   #if( $util.isNull($preparation.get($name)) )
