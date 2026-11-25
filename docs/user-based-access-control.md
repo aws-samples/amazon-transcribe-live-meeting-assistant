@@ -172,9 +172,12 @@ A Participant reads a meeting through operations of their own
 `getParticipantMeetingTranscript`, `getParticipantMeetingRecordings` and the
 subscription `onAddParticipantTranscriptSegment`), which only the Participant
 role may call and which answer a meeting only when its sharing list names the
-caller. They return types of their own (`ParticipantMeeting`,
-`ParticipantTranscriptSegment`), built from an allowlist, rather than the
-meeting record with fields removed: a field the meeting record gains in a later
+caller. The queries return types of their own (`ParticipantMeeting`,
+`ParticipantTranscriptSegment` and the types inside them), built from an
+allowlist, rather than the meeting record with fields removed; the
+subscription returns the transcript's own type, as AppSync requires of a
+subscription to `addTranscriptSegment`, and is refused any selection beyond the
+fields `ParticipantTranscriptSegment` has: a field the meeting record gains in a later
 release reaches a Participant only when it is added to the allowlist and to the
 type. The member operations (`getCall`, `getTranscriptSegments`,
 `onAddTranscriptSegment` and every other) refuse a Participant at the field.
@@ -197,8 +200,11 @@ switch, the meeting assistant's answers (the wake phrase's and those in the
 meeting page's chat), the sharing list, the participant list's addresses, the
 recording links themselves, the consent record's attestation statement,
 evidence images, verification and status history, the per-line and overall
-sentiment, the cost estimate, the key frames of the shared screen, the chat
-attachments, the capture and transcription details, and the metadata. The
+sentiment, the cost estimate, the key frames of the shared screen and the chat
+attachments themselves (the meeting assistant panel can describe a key frame in
+words and list the chat attachments with their AI titles and summaries, as it
+does for a request made in the meeting), the capture and transcription details,
+and the metadata. The
 labels are treated as the owner's: they name engagements and internal
 references, and a Participant has nothing to filter by. The page offers no
 control that changes the meeting: no editing, deleting, sharing, regenerating,
@@ -292,7 +298,15 @@ with (`AutoSharedWith`), so that:
 Addresses are compared ignoring case and shared as the list writes them, so a
 listed person is admitted when their LMA username is that address, which it is
 for every account created in LMA. Turned off, no meeting is shared this way from
-then on; the shares already made stay until the owner removes them. The owner
+then on; the shares already made stay until the owner removes them.
+
+A share or removal is written on condition that the meeting's sharing list is
+still the one it was planned from, so a change the owner makes in the share
+dialog at the same moment is kept and the plan is made again. A record whose
+sharing still fails after three retries, or an hour, is described in the queue
+the AI stack names in its `MeetingSharingFailuresQueueName` output. A meeting
+still in progress is planned again with its next write, but an ended meeting is
+not, so an Admin applies such a change by hand with **Share** on the meeting. The owner
 can share and unshare by hand either way. The share applies to anyone signing
 in with that address, whatever their role: a User or Admin it is shared with
 sees it in their meetings list as any shared meeting, and a Participant on

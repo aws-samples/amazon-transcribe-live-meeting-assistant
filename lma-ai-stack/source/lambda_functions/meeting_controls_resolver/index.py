@@ -1117,51 +1117,158 @@ def _auto_share_plan(item: Mapping[str, Any]) -> auto_share.AutoSharePlan:
     )
 
 
-def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.AutoSharePlan) -> None:
-    """Share and unshare as the plan says, through share_meeting, then record AutoSharedWith.
+class SharingChanged(Exception):
+    """The meeting's sharing changed between the read a plan was made from and its write."""
 
-    share_meeting is what the share dialog runs: it gives the transcript, key
-    frames and chat attachments the new sharing list, writes it to the meeting
-    and its list row, and tells anyone unshared. AutoSharedWith is written after
-    it, so a failed share is planned again from the same state.
-    """
-    owner = item.get("Owner") or ""
+
+def _sharing_write(call_id: str, item: Mapping[str, Any], plan, recipients, list_key) -> list:
+    """The transaction that records a plan: SharedWith and AutoSharedWith on the meeting, and
+    SharedWith on its list row, only if the meeting's SharedWith is still what was read."""
     pk = f"c#{call_id}"
+    names = {"#auto": auto_share.AUTO_SHARED_ATTRIBUTE, "#sw": "SharedWith"}
+    values: dict = {}
+    sets, removes = [], []
+    if recipients is not None:
+        if recipients:
+            sets.append("#sw = :sw")
+            values[":sw"] = recipients
+        else:
+            removes.append("#sw")
+    if plan.auto_shared:
+        sets.append("#auto = :auto")
+        values[":auto"] = plan.auto_shared
+    else:
+        removes.append("#auto")
+    expression = " ".join(
+        part
+        for part in (
+            f"SET {', '.join(sets)}" if sets else "",
+            f"REMOVE {', '.join(removes)}" if removes else "",
+        )
+        if part
+    )
+    # The meeting must still exist, and hold the SharedWith the plan was made from:
+    # a share the owner makes meanwhile in the share dialog is not overwritten.
+    condition = "attribute_exists(PK) AND "
+    if item.get("SharedWith") is None:
+        condition += "attribute_not_exists(#sw)"
+    else:
+        condition += "#sw = :seen"
+        values[":seen"] = item["SharedWith"]
+    meeting = {
+        "Update": {
+            "TableName": LCA_CALL_EVENTS_TABLE,
+            "Key": {"PK": pk, "SK": pk},
+            "UpdateExpression": expression,
+            "ConditionExpression": condition,
+            "ExpressionAttributeNames": names,
+            **({"ExpressionAttributeValues": values} if values else {}),
+        }
+    }
+    writes = [meeting]
+    if recipients is not None and list_key is not None:
+        list_update = {
+            "TableName": LCA_CALL_EVENTS_TABLE,
+            "Key": {"PK": list_key["PK"], "SK": list_key["SK"]},
+            "ConditionExpression": "attribute_exists(PK)",
+            "ExpressionAttributeNames": {"#sw": "SharedWith"},
+        }
+        if recipients:
+            list_update["UpdateExpression"] = "SET #sw = :sw"
+            list_update["ExpressionAttributeValues"] = {":sw": recipients}
+        else:
+            list_update["UpdateExpression"] = "REMOVE #sw"
+        writes.append({"Update": list_update})
+    return writes
+
+
+def _transact(writes: list) -> None:
+    from boto3.dynamodb.types import TypeSerializer
+
+    serializer = TypeSerializer()
+
+    def typed(update: dict) -> dict:
+        out = dict(update)
+        out["Key"] = {k: serializer.serialize(v) for k, v in update["Key"].items()}
+        if "ExpressionAttributeValues" in update:
+            out["ExpressionAttributeValues"] = {
+                k: serializer.serialize(v) for k, v in update["ExpressionAttributeValues"].items()
+            }
+        return out
+
+    ddb.meta.client.transact_write_items(
+        TransactItems=[{"Update": typed(write["Update"])} for write in writes]
+    )
+
+
+def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.AutoSharePlan) -> None:
+    """Record the plan, then give the meeting's items the new sharing list.
+
+    The meeting's SharedWith and AutoSharedWith, and its list row's SharedWith,
+    are written in one transaction, on condition that the meeting's SharedWith is
+    still the value the plan was made from; if the owner changed it meanwhile
+    (the share dialog), SharingChanged is raised and the record is retried, so
+    the plan is made again from the owner's change. Then, as share_meeting does
+    for the share dialog, the transcript, key frames and chat attachments are
+    given the list, and anyone unshared is told; that is repeated once with the
+    meeting's SharedWith as it is afterwards, should another share have landed
+    while the items were being written.
+    """
+    recipients = None
+    list_key = None
     if plan.changes_sharing:
         list_key = auto_share.list_row_key(call_id, item.get("CreatedAt"))
         if list_key is None:
             raise ValueError(f"meeting {call_id} has no CreatedAt to find its list row by")
         recipients = auto_share.shared_with_after(shared_with_entries(item.get("SharedWith")), plan)
-        with appsync_client as appsync_session:
-            if not appsync_session.client.schema:
-                raise ValueError("invalid AppSync schema")
-            schema = DSLSchema(appsync_session.client.schema)
-            share_meeting(
-                appsync_session,
-                schema,
-                call_id,
-                list_key["PK"],
-                list_key["SK"],
-                ",".join(recipients),
-                owner,
-            )
-    update = {
-        "Key": {"PK": pk, "SK": pk},
-        "ExpressionAttributeNames": {"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
-        # Not on a meeting deleted meanwhile, which would be written back as a stub.
-        "ConditionExpression": "attribute_exists(PK)",
-    }
-    if plan.auto_shared:
-        update["UpdateExpression"] = "SET #auto = :auto"
-        update["ExpressionAttributeValues"] = {":auto": plan.auto_shared}
-    else:
-        update["UpdateExpression"] = "REMOVE #auto"
     try:
-        ddbTable.update_item(**update)
+        _transact(_sharing_write(call_id, item, plan, recipients, list_key))
     except ClientError as err:
-        if err.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+        if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
             raise
-        logger.info("Meeting %s was deleted before its shares were recorded", call_id)
+        reasons = [r.get("Code") for r in err.response.get("CancellationReasons") or []]
+        pk = f"c#{call_id}"
+        if not ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item"):
+            logger.info("Meeting %s was deleted before its shares were recorded", call_id)
+            return
+        raise SharingChanged(f"the sharing of {call_id} changed while it was planned ({reasons})")
+    if recipients is None:
+        return
+    with appsync_client as appsync_session:
+        if not appsync_session.client.schema:
+            raise ValueError("invalid AppSync schema")
+        schema = DSLSchema(appsync_session.client.schema)
+        _share_items(appsync_session, schema, call_id, recipients)
+        pk = f"c#{call_id}"
+        current = ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item") or {}
+        now = shared_with_entries(current.get("SharedWith"))
+        if current and sorted(now) != sorted(recipients):
+            _share_items(appsync_session, schema, call_id, now)
+        if plan.remove:
+            _tell_unshared(appsync_session, schema, call_id, list(plan.remove))
+
+
+def _tell_unshared(appsync_session, schema, call_id: str, removed: list) -> None:
+    """unshareCall, which tells the people a meeting is no longer shared with, as share_meeting does."""
+    mutation = dsl_gql(
+        DSLMutation(
+            schema.Mutation.unshareCall.args(
+                input={"CallId": call_id, "SharedWith": removed}
+            ).select(schema.UnshareCallOutput.CallId, schema.UnshareCallOutput.SharedWith)
+        )
+    )
+    appsync_session.execute(mutation)
+
+
+def _share_items(appsync_session, schema, call_id: str, recipients: list) -> None:
+    """The meeting's transcript segments, key frames and chat attachments, given ``recipients``."""
+    new_recipients = list(recipients) or None
+    for segment in get_transcript_segments(appsync_session, schema, call_id):
+        update_transcript_segment(
+            appsync_session, schema, segment["PK"], segment["SK"], new_recipients
+        )
+    share_keyframes(call_id, new_recipients)
+    share_chat_attachments(call_id, new_recipients)
 
 
 def handle_meeting_stream(event: Mapping[str, Any]) -> dict:

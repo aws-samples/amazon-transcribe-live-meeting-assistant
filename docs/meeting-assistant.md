@@ -111,8 +111,8 @@ meeting shared with them, whose answer only they see:
 | A question a Participant asks in the assistant panel of a meeting shared with them | Shown on their page only. It is not added to the meeting's transcript, so the owner and the others it is shared with do not see it. |
 
 One approval covers all four: the Participant use settings below decide what
-each is answered with and who may ask. The settings keep the keys they have
-always had (`inMeetingRequestTools`, `inMeetingWebSearch` and the other
+each is answered with and who may ask. The stored keys are unchanged by
+the rename (`inMeetingRequestTools`, `inMeetingWebSearch` and the other
 `inMeeting*` keys, and `inMeetingRequests` in Tool selection), so stored
 profiles and presets need no change.
 

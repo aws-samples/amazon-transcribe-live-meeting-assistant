@@ -1045,6 +1045,13 @@ Outputs:
       FunctionName dimension of AWS/Lambda metrics
     Value: !Ref StaleMeetingReaperFunction
 
+  MeetingSharingFailuresQueueName:
+    Description: >-
+      Generated name of the queue describing meetings-table stream records whose
+      sharing with the participant list was not applied after its retries, for
+      the QueueName dimension of AWS/SQS metrics
+    Value: !GetAtt MeetingSharingFailuresQueue.QueueName
+
   TranscriptDeletionDeadLetterQueueName:
     Description: >-
       Generated name of the queue holding transcript deletions that did not
@@ -3787,9 +3794,26 @@ Resources:
       MaximumRecordAgeInSeconds: 3600
       FunctionResponseTypes:
         - ReportBatchItemFailures
+      # A record still failing after its retries is described here (which
+      # shard, which sequence numbers), so that an ended meeting, whose record
+      # is not written again, can be shared or unshared by hand.
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt MeetingSharingFailuresQueue.Arn
       FilterCriteria:
         Filters:
           - Pattern: '{"eventName": ["INSERT", "MODIFY"], "dynamodb": {"Keys": {"PK": {"S": [{"prefix": "c#"}]}}}}'
+
+  MeetingSharingFailuresQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      # 14 days, the SQS maximum: each message names stream records whose
+      # sharing was not applied.
+      MessageRetentionPeriod: 1209600
 
   MeetingControlsResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3827,6 +3851,19 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
+              # Where MeetingSharingEventSourceMapping describes the records it gave up on.
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt MeetingSharingFailuresQueue.Arn
+              - Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
               # The meetings table's stream, read by MeetingSharingEventSourceMapping.
               - Effect: Allow
                 Action:
