@@ -96,6 +96,18 @@ def _managed_profile(stack: Stack):
     return record
 
 
+def _holds(stored, value) -> bool:
+    """Whether the stored value carries what the preset sets.
+
+    A preset sets some keys of a nested setting (``meeting_assist.guidance``, say);
+    the Managed profile is a full copy, so the stored object also holds the keys the
+    preset leaves at their defaults.
+    """
+    if isinstance(value, dict):
+        return isinstance(stored, dict) and all(_holds(stored.get(k), v) for k, v in value.items())
+    return stored == value
+
+
 # ── the Managed profile ────────────────────────────────────────────────────
 
 
@@ -108,7 +120,7 @@ def test_the_minimised_content_preset_is_a_managed_profile_with_its_values(stack
     for section, change in preset_by_id(PRESET_ID)["Sections"].items():
         stored = record.body.get(section) or {}
         for key, value in change["values"].items():
-            assert stored.get(key) == value, f"{PRESET_ID}: {section}.{key} is {stored.get(key)!r}"
+            assert _holds(stored.get(key), value), f"{PRESET_ID}: {section}.{key} is {stored.get(key)!r}"
     assert record.body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
     assert record.body["retention"]["recordingDeletionAfterSummary"] == "immediately"
     assert record.body["recording"]["recordAudio"] is False
