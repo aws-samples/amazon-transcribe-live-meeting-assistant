@@ -5,16 +5,21 @@
  */
 
 /**
- * The User Management page's Last sign-in column: a recorded time is shown, a
- * user with none shows "Not recorded" (never a blank cell), and when the server
- * could not read the times every user shows "Unavailable". Role, status, enabled
- * and created are still shown.
+ * The User Management page's Last sign-in and Last active columns: a recorded
+ * time is shown, a user with none shows "Not recorded" (never a blank cell), and
+ * when the server could not read the times every user shows "Unavailable". Role,
+ * status, enabled and created are still shown.
  */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import UserManagementPage, { NOT_RECORDED_TEXT, UNAVAILABLE_TEXT, lastSignInText } from './UserManagementPage';
+import UserManagementPage, {
+  NOT_RECORDED_TEXT,
+  UNAVAILABLE_TEXT,
+  lastActiveText,
+  lastSignInText,
+} from './UserManagementPage';
 
 const { graphqlMock, state } = vi.hoisted(() => ({ graphqlMock: vi.fn(), state: { listUsers: null } }));
 vi.mock('aws-amplify/api', () => ({
@@ -22,6 +27,7 @@ vi.mock('aws-amplify/api', () => ({
 }));
 
 const SIGNED_IN_AT = '2026-11-20T09:30:00.000Z';
+const ACTIVE_AT = '2026-11-24T16:45:00.000Z';
 
 const users = [
   {
@@ -32,6 +38,7 @@ const users = [
     enabled: true,
     createdAt: '2026-01-02T03:04:05.000Z',
     lastSignInAt: SIGNED_IN_AT,
+    lastActiveAt: ACTIVE_AT,
   },
   {
     username: 'new@example.com',
@@ -41,6 +48,7 @@ const users = [
     enabled: false,
     createdAt: '2026-11-23T12:00:00.000Z',
     lastSignInAt: null,
+    lastActiveAt: null,
   },
 ];
 
@@ -73,7 +81,8 @@ describe('UserManagementPage last sign-in', () => {
     expect(admin.queryByText(NOT_RECORDED_TEXT)).not.toBeInTheDocument();
 
     const fresh = within(await rowOf('new@example.com'));
-    expect(fresh.getByText(NOT_RECORDED_TEXT)).toBeInTheDocument();
+    // Neither a sign-in nor any activity recorded.
+    expect(fresh.getAllByText(NOT_RECORDED_TEXT)).toHaveLength(2);
   });
 
   it('keeps showing role, status, enabled and created', async () => {
@@ -86,15 +95,55 @@ describe('UserManagementPage last sign-in', () => {
   });
 
   it('shows "Unavailable" for every user when the times could not be read', async () => {
-    state.listUsers = { users: users.map((u) => ({ ...u, lastSignInAt: null })), lastSignInAvailable: false };
+    state.listUsers = {
+      users: users.map((u) => ({ ...u, lastSignInAt: null, lastActiveAt: null })),
+      lastSignInAvailable: false,
+    };
     render(<UserManagementPage />);
 
     const rows = await Promise.all(['admin@example.com', 'new@example.com'].map(rowOf));
     rows.forEach((tr) => {
       const row = within(tr);
-      expect(row.getByText(UNAVAILABLE_TEXT)).toBeInTheDocument();
+      expect(row.getAllByText(UNAVAILABLE_TEXT)).toHaveLength(2);
       expect(row.queryByText(NOT_RECORDED_TEXT)).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('UserManagementPage last active', () => {
+  it('asks for each user’s last activity', async () => {
+    render(<UserManagementPage />);
+    await screen.findByText('admin@example.com');
+    expect(graphqlMock.mock.calls[0][0].query).toContain('lastActiveAt');
+  });
+
+  it('shows the column and each user’s recorded activity', async () => {
+    render(<UserManagementPage />);
+    expect(await screen.findByText('Last active')).toBeInTheDocument();
+
+    const admin = within(await rowOf('admin@example.com'));
+    expect(admin.getByText(new Date(ACTIVE_AT).toLocaleString())).toBeInTheDocument();
+  });
+
+  it('shows a time for a user active only through an API key, and "Not recorded" for the sign-in', async () => {
+    state.listUsers = {
+      users: [{ ...users[1], lastActiveAt: ACTIVE_AT }],
+      lastSignInAvailable: true,
+    };
+    render(<UserManagementPage />);
+
+    const fresh = within(await rowOf('new@example.com'));
+    expect(fresh.getByText(new Date(ACTIVE_AT).toLocaleString())).toBeInTheDocument();
+    expect(fresh.getByText(NOT_RECORDED_TEXT)).toBeInTheDocument();
+  });
+});
+
+describe('lastActiveText', () => {
+  it('is never blank', () => {
+    expect(lastActiveText({ lastActiveAt: null }, true)).toBe(NOT_RECORDED_TEXT);
+    expect(lastActiveText({}, true)).toBe(NOT_RECORDED_TEXT);
+    expect(lastActiveText({ lastActiveAt: ACTIVE_AT }, false)).toBe(UNAVAILABLE_TEXT);
+    expect(lastActiveText({ lastActiveAt: ACTIVE_AT }, true)).toBe(new Date(ACTIVE_AT).toLocaleString());
   });
 });
 

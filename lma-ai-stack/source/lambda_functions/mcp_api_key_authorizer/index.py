@@ -14,12 +14,21 @@ lists for MCP access (appsync/role-matrix.json, the "mcp-access" capability), or
 once the owner no longer exists, and the context's isAdmin follows the owner's
 current groups. The authorizer's result is not cached (its TTL is 0), so a role
 change applies to the next request.
+
+Last use: an authorized request records when the key was last used (LastUsedAt
+on the key's item, shown in the MCP API Key container) and when its owner was last
+active (LastActiveAt on the owner's item in the Cognito stack's sign-in table,
+USER_SIGN_IN_TABLE, keyed by Cognito sub), at most once per 15 minutes per key.
+Each write is one bounded attempt, and a failure is logged without changing the
+request's policy.
 """
 
 import hashlib
 import json
 import logging
 import os
+import time
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.config import Config
@@ -43,6 +52,120 @@ MCP_ROLES = (ADMIN, USER)
 
 READ_WRITE = "read-write"
 LEGACY = "legacy"
+
+# The Cognito stack's sign-in table; empty when it has none, in which case only
+# the key's own last use is recorded.
+USER_SIGN_IN_TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
+# A key's last use, and its owner's last activity, are written at most once in
+# this many seconds per key.
+USE_INTERVAL_SECONDS = 15 * 60
+# One attempt of at most 1.5 seconds per call, for the calls that record use.
+RECORD_CONFIG = Config(
+    connect_timeout=0.5,
+    read_timeout=1,
+    retries={"mode": "standard", "total_max_attempts": 1},
+)
+# Key hashes this execution environment recorded within the interval, with when:
+# the requests that follow make no call to record.
+_recently_used = {}
+RECENT_MAX = 10000
+_record_dynamodb = None
+_record_cognito = None
+
+
+def _record_clients():
+    global _record_dynamodb, _record_cognito  # pylint: disable=global-statement
+    if _record_dynamodb is None:
+        _record_dynamodb = boto3.client("dynamodb", config=RECORD_CONFIG)
+    if _record_cognito is None:
+        _record_cognito = boto3.client("cognito-idp", config=RECORD_CONFIG)
+    return _record_dynamodb, _record_cognito
+
+
+def iso_utc(moment):
+    """A time in the form the tables hold (UTC, AppSync AWSDateTime)."""
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _is_condition_failure(error):
+    return (
+        isinstance(error, ClientError)
+        and error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+    )
+
+
+def _owner_sub(item, owner, cognito_client):
+    """The key owner's Cognito sub: stored with the key, or read from the user pool."""
+    if item.get("UserSub"):
+        return item["UserSub"]
+    user = cognito_client.admin_get_user(UserPoolId=USER_POOL_ID, Username=owner)
+    for attribute in user.get("UserAttributes") or []:
+        if attribute.get("Name") == "sub":
+            return attribute.get("Value") or ""
+    return ""
+
+
+def record_use(item, owner, now=None):
+    """Record the key's last use and its owner's last activity. Never raises."""
+    key_hash = item.get("KeyHash", "")
+    try:
+        clock = time.monotonic()
+        seen = _recently_used.get(key_hash)
+        if not key_hash or (seen is not None and clock - seen < USE_INTERVAL_SECONDS):
+            return
+        now = now or datetime.now(timezone.utc)
+        values = {
+            ":at": {"S": iso_utc(now)},
+            ":cutoff": {"S": iso_utc(now - timedelta(seconds=USE_INTERVAL_SECONDS))},
+        }
+        dynamodb_client, cognito_client = _record_clients()
+        try:
+            dynamodb_client.update_item(
+                TableName=TABLE_NAME,
+                Key={"KeyHash": {"S": key_hash}},
+                UpdateExpression="SET LastUsedAt = :at",
+                # Not on a key revoked meanwhile, and at most once per interval.
+                ConditionExpression=(
+                    "attribute_exists(KeyHash) AND "
+                    "(attribute_not_exists(LastUsedAt) OR LastUsedAt < :cutoff)"
+                ),
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if not _is_condition_failure(error):
+                raise
+            # Recorded within the interval by another execution environment.
+            _remember(key_hash, clock)
+            return
+        _remember(key_hash, clock)
+        if not USER_SIGN_IN_TABLE:
+            return
+        sub = _owner_sub(item, owner, cognito_client)
+        if not sub:
+            return
+        try:
+            dynamodb_client.update_item(
+                TableName=USER_SIGN_IN_TABLE,
+                Key={"UserSub": {"S": sub}},
+                UpdateExpression="SET LastActiveAt = :at",
+                ConditionExpression="attribute_not_exists(LastActiveAt) OR LastActiveAt < :cutoff",
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if not _is_condition_failure(error):
+                raise
+    except Exception as error:  # pylint: disable=broad-except
+        logger.warning(
+            "Could not record the use of key %s (%s)",
+            item.get("KeyPrefix", ""),
+            type(error).__name__,
+        )
+
+
+def _remember(key_hash, clock):
+    if len(_recently_used) >= RECENT_MAX:
+        _recently_used.clear()
+    _recently_used[key_hash] = clock
 
 
 def key_scope(item):
@@ -156,6 +279,7 @@ def handler(event, context):
             key_scope(item),
             json.dumps(summary),
         )
+        record_use(item, owner)
         return allow_policy(
             method_arn,
             {

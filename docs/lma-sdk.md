@@ -258,7 +258,7 @@ needs are listed under the CLI command.
 
 ### `client.users` — Users for an Access Review
 
-Lists the stack's users with their role, status and last sign-in, the operation
+Lists the stack's users with their role, status, last sign-in and last active time, the operation
 behind [`lma users list`](lma-cli.md#lma-users-list--list-users-for-an-access-review).
 
 ```python
@@ -266,15 +266,19 @@ review = client.users.list()
 if not review.last_sign_in_available:
     print("Last sign-in times unavailable:", review.last_sign_in_unavailable_reason)
 for user in review.users:
-    # last_sign_in_at is None when no sign-in is recorded
-    print(user.email, user.role, user.status, user.enabled, user.created_at, user.last_sign_in_at)
+    # last_sign_in_at / last_active_at are None when nothing is recorded
+    print(user.email, user.role, user.status, user.enabled, user.created_at,
+          user.last_sign_in_at, user.last_active_at)
 ```
 
 The role is `Admin` for a member of the `Admin` group and `User` otherwise. The
 last sign-in is the user's last interactive sign-in as the Cognito stack records
-it (see [Last sign-in](user-management.md#last-sign-in)). When the sign-in table
-cannot be found or read, the users are still returned, every `last_sign_in_at`
-is `None` and `last_sign_in_available` is `False`. The permissions it needs are
+it (see [Last sign-in](user-management.md#last-sign-in)). The last active time is
+the user's latest sign-in, token renewal or MCP API key use, recorded at most once
+every 15 minutes (see [Last active](user-management.md#last-active)). When the
+sign-in table cannot be found or read, the users are still returned, every
+`last_sign_in_at` and `last_active_at` is `None` and `last_sign_in_available` is
+`False`. The permissions it needs are
 listed under the CLI command.
 
 ### Data Models
@@ -296,7 +300,7 @@ All models are Pydantic `BaseModel` subclasses defined in `lma_sdk.models`:
 - **`VpStatus`** — Enum of VP lifecycle states (`INITIALIZING`, `JOINING`, `JOINED`, `ACTIVE`, `COMPLETED`, `ENDED`, `FAILED`, …)
 - **`MeetingRef`** — A meeting `client.meetings` found (call_id, owner, created_at, status, labels, and its list entry's keys)
 - **`MeetingDeleteResult`** — Result of `client.meetings.delete_by_labels(...)` (dry_run, user, scope, matched, skipped_in_progress, deleted, failed)
-- **`UserRecord`** — A user `client.users.list()` found (username, email, role, status, enabled, created_at, last_sign_in_at)
+- **`UserRecord`** — A user `client.users.list()` found (username, email, role, status, enabled, created_at, last_sign_in_at, last_active_at)
 - **`UserList`** — Result of `client.users.list()` (stack, region, account, user_pool_id, generated_at, last_sign_in_available, last_sign_in_unavailable_reason, users)
 
 

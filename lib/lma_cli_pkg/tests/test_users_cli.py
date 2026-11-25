@@ -4,8 +4,8 @@
 
 The SDK is a stand-in: what is asserted here is the command's contract -- the
 table, JSON and CSV forms each carry every user's email, role, status, enabled
-flag, creation time and last sign-in; a user with no recorded sign-in shows "Not
-recorded" rather than a blank; when the times could not be read every user shows
+flag, creation time, last sign-in and last activity; a user with nothing recorded
+shows "Not recorded" rather than a blank; when the times could not be read every user shows
 "Unavailable" and a warning goes to standard error, so a redirected file stays
 clean. How the users and times are read is tested in
 lib/lma_sdk/tests/test_user_operations.py.
@@ -49,6 +49,7 @@ def _result(**overrides) -> UserList:
                 enabled=True,
                 created_at="2026-01-02T03:04:05.000Z",
                 last_sign_in_at="2026-11-20T09:30:00.000Z",
+                last_active_at="2026-11-24T16:45:00.000Z",
             ),
             UserRecord(
                 username="new@example.com",
@@ -81,10 +82,11 @@ def test_the_table_shows_every_column_and_not_recorded_for_no_sign_in(runner, mo
 
     assert invoked.exit_code == 0, invoked.output
     out = invoked.stdout
-    for heading in ("Email", "Role", "Status", "Enabled", "Created", "Last sign-in"):
+    for heading in ("Email", "Role", "Status", "Enabled", "Created", "Last sign-in", "Last active"):
         assert heading in out
     assert "admin@example.com" in out and "Admin" in out
     assert "2026-11-20 09:30:00 UTC" in out
+    assert "2026-11-24 16:45:00 UTC" in out
     assert "Not recorded" in out
     assert "FORCE_CHANGE_PASSWORD" in out
     assert "Stack LMA-team (Region us-east-1, account 111122223333)" in out
@@ -100,6 +102,8 @@ def test_json_is_the_full_result(runner):
     users = {u["email"]: u for u in data["users"]}
     assert users["admin@example.com"]["last_sign_in_at"] == "2026-11-20T09:30:00.000Z"
     assert users["new@example.com"]["last_sign_in_at"] is None
+    assert users["admin@example.com"]["last_active_at"] == "2026-11-24T16:45:00.000Z"
+    assert users["new@example.com"]["last_active_at"] is None
     assert users["new@example.com"]["enabled"] is False
 
 
@@ -116,6 +120,7 @@ def test_csv_has_a_header_and_one_row_per_user(runner):
         "enabled",
         "created_at",
         "last_sign_in_at",
+        "last_active_at",
     ]
     assert rows[0] == {
         "email": "admin@example.com",
@@ -125,8 +130,10 @@ def test_csv_has_a_header_and_one_row_per_user(runner):
         "enabled": "true",
         "created_at": "2026-01-02T03:04:05.000Z",
         "last_sign_in_at": "2026-11-20T09:30:00.000Z",
+        "last_active_at": "2026-11-24T16:45:00.000Z",
     }
     assert rows[1]["last_sign_in_at"] == "Not recorded"
+    assert rows[1]["last_active_at"] == "Not recorded"
     assert rows[1]["enabled"] == "false"
 
 
@@ -137,12 +144,14 @@ def test_unavailable_times_are_marked_and_warned_about_on_stderr(runner):
     )
     for user in result.users:
         user.last_sign_in_at = None
+        user.last_active_at = None
 
     invoked, _client = _run(runner, ["--format", "csv"], result)
 
     assert invoked.exit_code == 0, invoked.output
     rows = list(csv.DictReader(io.StringIO(invoked.stdout)))
     assert [row["last_sign_in_at"] for row in rows] == ["Unavailable", "Unavailable"]
+    assert [row["last_active_at"] for row in rows] == ["Unavailable", "Unavailable"]
     assert "records no sign-in times" in invoked.stderr
     assert "records no sign-in times" not in invoked.stdout
 

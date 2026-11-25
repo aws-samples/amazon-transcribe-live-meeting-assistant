@@ -53,14 +53,20 @@ const formatError = (err) => {
 const RoleBadge = ({ role = 'User' }) => <Badge color={ROLE_BADGE_COLORS[role] || 'blue'}>{role}</Badge>;
 RoleBadge.propTypes = { role: PropTypes.string };
 
-// What the Last sign-in column shows for a user with no recorded sign-in, and for
-// every user when the sign-in times could not be read.
+// What the Last sign-in and Last active columns show for a user with nothing
+// recorded, and for every user when the times could not be read.
 export const NOT_RECORDED_TEXT = 'Not recorded';
 export const UNAVAILABLE_TEXT = 'Unavailable';
 
 export const lastSignInText = (item, lastSignInAvailable) => {
   if (!lastSignInAvailable) return UNAVAILABLE_TEXT;
   return item.lastSignInAt ? new Date(item.lastSignInAt).toLocaleString() : NOT_RECORDED_TEXT;
+};
+
+// The latest sign-in, token renewal or MCP API key use, recorded to within 15 minutes.
+export const lastActiveText = (item, lastSignInAvailable) => {
+  if (!lastSignInAvailable) return UNAVAILABLE_TEXT;
+  return item.lastActiveAt ? new Date(item.lastActiveAt).toLocaleString() : NOT_RECORDED_TEXT;
 };
 
 const columnDefinitions = (lastSignInAvailable) => [
@@ -99,6 +105,12 @@ const columnDefinitions = (lastSignInAvailable) => [
     header: 'Last sign-in',
     cell: (item) => lastSignInText(item, lastSignInAvailable),
     sortingField: 'lastSignInAt',
+  },
+  {
+    id: 'lastActiveAt',
+    header: 'Last active',
+    cell: (item) => lastActiveText(item, lastSignInAvailable),
+    sortingField: 'lastActiveAt',
   },
 ];
 

@@ -57,6 +57,37 @@ class FakeCognito:
 COGNITO = FakeCognito()
 index.cognito = COGNITO
 
+
+class FakeRecorder:
+    """The clients that record a key's use: DynamoDB update_item and AdminGetUser."""
+
+    def __init__(self):
+        self.updates = []
+        self.lookups = []
+        self.errors = {}
+        self.sub = "sub-owner"
+
+    def update_item(self, **kwargs):
+        self.updates.append(kwargs)
+        error = self.errors.get(kwargs["TableName"])
+        if error is not None:
+            raise error
+        return {}
+
+    def admin_get_user(self, **kwargs):
+        self.lookups.append(kwargs)
+        if "cognito" in self.errors:
+            raise self.errors["cognito"]
+        return {
+            "UserAttributes": [{"Name": "email", "Value": "x"}, {"Name": "sub", "Value": self.sub}]
+        }
+
+
+# Every test records use through this double, so none reaches AWS.
+RECORDER = FakeRecorder()
+index._record_dynamodb = RECORDER
+index._record_cognito = RECORDER
+
 METHOD_ARN = "arn:aws:execute-api:us-east-1:123456789012:abc123def/prod/POST/mcp"
 
 
@@ -490,6 +521,157 @@ class TestOwnerRole(unittest.TestCase):
             self.assertEqual(self.effect(self.authorize()), "Deny")
         finally:
             index.USER_POOL_ID = original
+
+
+def _condition_failed():
+    return ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException", "Message": "recent"}}, "UpdateItem"
+    )
+
+
+class TestLastUse(unittest.TestCase):
+    """An authorized request records the key's last use and its owner's last activity."""
+
+    SIGN_IN_TABLE = "LMA-COGNITOSTACK-UserSignInTable"
+
+    def setUp(self):
+        RECORDER.__init__()
+        COGNITO.__init__()
+        index._recently_used.clear()
+        patcher = patch.object(index, "USER_SIGN_IN_TABLE", self.SIGN_IN_TABLE)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def authorize(self, item=None, token="lma_use-test-key"):
+        item = item or make_valid_item(token)
+        with patch.object(index, "dynamodb") as mock_dynamo:
+            mock_table = MagicMock()
+            mock_table.get_item.return_value = {"Item": item}
+            mock_dynamo.Table.return_value = mock_table
+            return index.handler({"methodArn": METHOD_ARN, "authorizationToken": token}, None)
+
+    @staticmethod
+    def effect(result):
+        return result["policyDocument"]["Statement"][0]["Effect"]
+
+    def test_a_use_records_the_key_and_the_owner_with_a_15_minute_condition(self):
+        token = "lma_use-test-key"
+        now = index.datetime(2026, 11, 25, 10, 0, tzinfo=index.timezone.utc)
+        index.record_use(make_valid_item(token), "testuser@example.com", now=now)
+
+        key_update, owner_update = RECORDER.updates
+        values = {
+            ":at": {"S": "2026-11-25T10:00:00.000Z"},
+            ":cutoff": {"S": "2026-11-25T09:45:00.000Z"},
+        }
+        self.assertEqual(key_update["TableName"], "test-mcp-api-keys")
+        self.assertEqual(
+            key_update["Key"], {"KeyHash": {"S": hashlib.sha256(token.encode()).hexdigest()}}
+        )
+        self.assertEqual(key_update["UpdateExpression"], "SET LastUsedAt = :at")
+        self.assertIn("attribute_exists(KeyHash)", key_update["ConditionExpression"])
+        self.assertIn("LastUsedAt < :cutoff", key_update["ConditionExpression"])
+        self.assertEqual(key_update["ExpressionAttributeValues"], values)
+        self.assertEqual(owner_update["TableName"], self.SIGN_IN_TABLE)
+        self.assertEqual(owner_update["Key"], {"UserSub": {"S": "sub-owner"}})
+        self.assertEqual(owner_update["UpdateExpression"], "SET LastActiveAt = :at")
+        self.assertEqual(
+            owner_update["ConditionExpression"],
+            "attribute_not_exists(LastActiveAt) OR LastActiveAt < :cutoff",
+        )
+        self.assertEqual(owner_update["ExpressionAttributeValues"], values)
+        self.assertEqual(
+            RECORDER.lookups,
+            [{"UserPoolId": "us-east-1_testpool", "Username": "testuser@example.com"}],
+        )
+
+    def test_a_sub_stored_with_the_key_needs_no_user_pool_read(self):
+        item = make_valid_item("lma_use-test-key")
+        item["UserSub"] = "sub-stored"
+
+        self.assertEqual(self.effect(self.authorize(item)), "Allow")
+
+        self.assertEqual(RECORDER.lookups, [])
+        self.assertEqual(RECORDER.updates[1]["Key"], {"UserSub": {"S": "sub-stored"}})
+
+    def test_requests_within_15_minutes_record_once(self):
+        clock = iter([1000.0, 1000.0 + 60, 1000.0 + 14 * 60, 1000.0 + 16 * 60])
+        with patch.object(index.time, "monotonic", lambda: next(clock)):
+            for _ in range(4):
+                self.assertEqual(self.effect(self.authorize()), "Allow")
+
+        # Two writes (key and owner) for the first request and for the fourth.
+        self.assertEqual(len(RECORDER.updates), 4)
+
+    def test_a_use_recorded_elsewhere_leaves_the_owner_alone(self):
+        RECORDER.errors["test-mcp-api-keys"] = _condition_failed()
+
+        self.assertEqual(self.effect(self.authorize()), "Allow")
+        self.assertEqual(self.effect(self.authorize()), "Allow")
+
+        self.assertEqual(len(RECORDER.updates), 1)
+        self.assertEqual(RECORDER.lookups, [])
+
+    def test_an_owner_active_within_15_minutes_is_left_alone(self):
+        RECORDER.errors[self.SIGN_IN_TABLE] = _condition_failed()
+
+        self.assertEqual(self.effect(self.authorize()), "Allow")
+
+    def test_a_failed_write_does_not_change_the_policy(self):
+        failures = [
+            {"test-mcp-api-keys": RuntimeError("read timeout")},
+            {
+                "test-mcp-api-keys": ClientError(
+                    {"Error": {"Code": "AccessDeniedException"}}, "UpdateItem"
+                )
+            },
+            {
+                self.SIGN_IN_TABLE: ClientError(
+                    {"Error": {"Code": "ResourceNotFoundException"}}, "UpdateItem"
+                )
+            },
+            {"cognito": ClientError({"Error": {"Code": "UserNotFoundException"}}, "AdminGetUser")},
+        ]
+        RECORDER.__init__()
+        index._recently_used.clear()
+        expected = self.authorize()
+        for errors in failures:
+            RECORDER.__init__()
+            RECORDER.errors = errors
+            index._recently_used.clear()
+
+            self.assertEqual(self.authorize(), expected)
+
+    def test_a_key_write_that_fails_is_tried_again_on_the_next_request(self):
+        RECORDER.errors["test-mcp-api-keys"] = RuntimeError("connect timeout")
+
+        self.authorize()
+        self.authorize()
+
+        self.assertEqual(len(RECORDER.updates), 2)
+
+    def test_a_refused_request_records_nothing(self):
+        COGNITO.groups["testuser@example.com"] = ["Participant"]
+        item = make_valid_item("lma_use-test-key")
+
+        self.assertEqual(self.effect(self.authorize(item)), "Deny")
+        item["Enabled"] = "false"
+        COGNITO.groups.clear()
+        self.assertEqual(self.effect(self.authorize(item)), "Deny")
+
+        self.assertEqual(RECORDER.updates, [])
+
+    def test_without_a_sign_in_table_only_the_key_is_recorded(self):
+        with patch.object(index, "USER_SIGN_IN_TABLE", ""):
+            self.assertEqual(self.effect(self.authorize()), "Allow")
+
+        self.assertEqual([u["TableName"] for u in RECORDER.updates], ["test-mcp-api-keys"])
+
+    def test_each_record_call_is_a_single_bounded_attempt(self):
+        config = index.RECORD_CONFIG
+
+        self.assertEqual(config.retries["total_max_attempts"], 1)
+        self.assertLessEqual(config.connect_timeout + config.read_timeout, 1.5)
 
 
 if __name__ == "__main__":

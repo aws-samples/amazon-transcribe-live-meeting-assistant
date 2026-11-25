@@ -29,6 +29,11 @@ the Cognito stack's PostAuthentication trigger writes to its sign-in table
 signed in since the trigger was deployed. When the table cannot be read the
 times are left null and `lastSignInAvailable` is false, so the page does not
 report "not recorded" for a time it could not read.
+
+Last active: `listUsers` also adds each user's last activity, LastActiveAt in
+the same table, which the Cognito stack's pre token generation trigger writes on
+sign-in and token renewal and the MCP API key authorizer writes on API key use,
+each at most once per 15 minutes. It is read and reported as the last sign-in is.
 """
 
 import logging
@@ -203,11 +208,15 @@ def _format_cognito_user(user):
         "enabled": user.get("Enabled", True),
         "createdAt": created_iso,
         "lastSignInAt": None,
+        "lastActiveAt": None,
     }
 
 
 def _last_sign_ins(subs):
-    """Map each Cognito sub in ``subs`` to its recorded last sign-in time.
+    """Map each Cognito sub in ``subs`` to its recorded times.
+
+    Each value is a dict with "lastSignInAt" and "lastActiveAt" (either may be
+    None); a sub with neither recorded is left out.
 
     Returns None when the times cannot be read (no table configured, or
     DynamoDB refused), so a caller can tell "not recorded" from "unknown".
@@ -223,16 +232,19 @@ def _last_sign_ins(subs):
             request = {
                 USER_SIGN_IN_TABLE: {
                     "Keys": [{"UserSub": {"S": sub}} for sub in chunk],
-                    "ProjectionExpression": "UserSub, LastSignInAt",
+                    "ProjectionExpression": "UserSub, LastSignInAt, LastActiveAt",
                 }
             }
             attempt = 0
             while request:
                 response = dynamodb.batch_get_item(RequestItems=request)
                 for item in response.get("Responses", {}).get(USER_SIGN_IN_TABLE, []):
-                    at = (item.get("LastSignInAt") or {}).get("S")
-                    if at:
-                        found[item["UserSub"]["S"]] = at
+                    times = {
+                        "lastSignInAt": (item.get("LastSignInAt") or {}).get("S") or None,
+                        "lastActiveAt": (item.get("LastActiveAt") or {}).get("S") or None,
+                    }
+                    if times["lastSignInAt"] or times["lastActiveAt"]:
+                        found[item["UserSub"]["S"]] = times
                 request = response.get("UnprocessedKeys") or {}
                 if request:
                     attempt += 1
@@ -260,7 +272,7 @@ def _count_admins():
 
 
 def list_users(_event, _args):
-    """Return all users in the Cognito user pool with their role and last sign-in."""
+    """Return all users in the Cognito user pool with their role, last sign-in and last activity."""
     users = []
     subs = []
     paginator = cognito.get_paginator("list_users")
@@ -271,7 +283,7 @@ def list_users(_event, _args):
     sign_ins = _last_sign_ins(subs)
     if sign_ins is not None:
         for user, sub in zip(users, subs):
-            user["lastSignInAt"] = sign_ins.get(sub)
+            user.update(sign_ins.get(sub) or {})
     # Sort newest first
     users.sort(key=lambda u: u.get("createdAt") or "", reverse=True)
     logger.info("Listed %d users", len(users))

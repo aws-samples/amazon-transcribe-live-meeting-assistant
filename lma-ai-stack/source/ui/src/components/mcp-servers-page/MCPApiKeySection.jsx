@@ -60,6 +60,11 @@ export const scopeLabel = (scope) => {
   return 'Legacy (original tools)';
 };
 
+// When the key last authorized a request; the authorizer records it at most once
+// every 15 minutes, and a key not used since then shows "Not recorded".
+export const lastUsedText = (lastUsedAt) =>
+  lastUsedAt ? `Last used ${new Date(lastUsedAt).toLocaleString()}` : 'Last used: Not recorded';
+
 const ScopeBadge = ({ scope = null }) => (
   <Badge color={scope === 'read-write' ? 'blue' : 'grey'}>{scopeLabel(scope)}</Badge>
 );
@@ -145,6 +150,9 @@ const MCPApiKeySection = () => {
           <ScopeBadge scope={key.scope} />
           <Box color="text-body-secondary" fontSize="body-s">
             Created {new Date(key.createdAt).toLocaleDateString()}
+          </Box>
+          <Box color="text-body-secondary" fontSize="body-s">
+            {lastUsedText(key.lastUsedAt)}
           </Box>
           <Button variant="link" onClick={() => setShowRevokeConfirm(true)}>
             Revoke

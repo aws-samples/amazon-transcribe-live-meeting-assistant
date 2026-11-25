@@ -15,6 +15,7 @@ LMA ships with a built-in **User Management** page that lets administrators crea
 - [Changing a user's role](#changing-a-users-role)
 - [Deleting users](#deleting-users)
 - [Last sign-in](#last-sign-in)
+- [Last active](#last-active)
 - [Exporting users for an access review](#exporting-users-for-an-access-review)
 - [Security model](#security-model)
 - [Guard rails](#guard-rails)
@@ -29,7 +30,7 @@ Users are stored in LMA's Amazon Cognito User Pool (created by the `lma-cognito-
 
 The User Management page provides:
 
-- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, creation date, and [last sign-in](#last-sign-in).
+- A searchable table of every user in the user pool, showing email, role, Cognito status (e.g. `CONFIRMED`, `FORCE_CHANGE_PASSWORD`), enabled flag, creation date, [last sign-in](#last-sign-in) and [last active](#last-active) time.
 - **Create user** — creates a Cognito user with the chosen role. Cognito emails the new user a temporary password; they must set a new password on first sign-in.
 - **Change role** — moves one selected user to another role.
 - **Delete user(s)** — permanently removes one or more selected users from Cognito, with confirmation.
@@ -83,7 +84,7 @@ You cannot change your own role, and the last remaining Admin cannot be moved to
 2. Choose **Delete**.
 3. Review the confirmation modal and choose **Delete** to proceed.
 
-Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) time. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
+Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) and [last active](#last-active) times. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
 
 ## Last sign-in
 
@@ -91,7 +92,7 @@ The **Last sign-in** column shows when each user last signed in to LMA with thei
 
 **How it is recorded.** Amazon Cognito's `ListUsers` API does not return a sign-in time, and reading a user's sign-in history from Cognito requires Cognito threat protection, which LMA does not require. So the `lma-cognito-stack` nested stack adds a Cognito **PostAuthentication** Lambda trigger, `CognitoPostAuthenticationFunction`. After each successful sign-in it writes the time to a small DynamoDB table, `UserSignInTable`, one item per user keyed by the user's Cognito `sub` (an identifier that never changes). The table is encrypted with the stack's customer-managed KMS key and, like the user pool, is kept when the stack is deleted with `EnableDataRetentionOnDelete=true`. No attribute is added to the user pool. A failed write does not fail the sign-in: the trigger logs the failure in `/<stack-name>/lambda/CognitoPostAuthenticationFunction` and returns, and the user signs in as usual. As with any Cognito trigger, if Lambda cannot run the function at all (for example, it is throttled or does not answer within Cognito's five-second limit), Cognito fails that sign-in and the user can try again.
 
-**What counts as a sign-in.** PostAuthentication runs when a user authenticates with their password: in the web UI, in the browser extension, or through the MCP external app client. It does **not** run when a client silently renews its session with a refresh token, which the web UI does while a user stays signed in (for up to 30 days, the app client's refresh-token lifetime). So the column is the last *interactive sign-in*, not the last time the user used LMA: a user who keeps a browser session open can be active today and still show a sign-in from several weeks ago. For an access review, read an old or missing time as "has not entered their password since then".
+**What counts as a sign-in.** PostAuthentication runs when a user authenticates with their password: in the web UI, in the browser extension, or through the MCP external app client. It does **not** run when a client silently renews its session with a refresh token, which the web UI does while a user stays signed in (for up to 30 days, the app client's refresh-token lifetime). So the column is the last *interactive sign-in*, not the last time the user used LMA: a user who keeps a browser session open can be active today and still show a sign-in from several weeks ago. For an access review, read an old or missing time as "has not entered their password since then", and use [Last active](#last-active) for when the account was last used.
 
 **What the column can show:**
 
@@ -101,6 +102,24 @@ The **Last sign-in** column shows when each user last signed in to LMA with thei
 | **Not recorded** | No sign-in has been recorded for this user. Sign-in times are recorded from the first deployment of a version of LMA that includes this feature onwards, so right after an upgrade every user shows this until they next sign in. A new user who has not yet signed in for the first time also shows it. |
 | **Unavailable** | The sign-in times could not be read, so nothing is known about any user's last sign-in. The resolver's log (`/<stack-name>/lambda/UserManagement`) says why. |
 
+## Last active
+
+The **Last active** column shows when each user last used LMA, as far as LMA can tell without recording every request. For an access review it is usually the column to sort on: an account whose last activity is months old is a candidate for disabling, whatever its last sign-in.
+
+**What counts as activity.** Three things, each recorded in the same `UserSignInTable` item as the last sign-in, in a `LastActiveAt` attribute:
+
+- **An interactive sign-in**, in the web UI, the browser extension or through the MCP external app client.
+- **A token renewal.** Every client that stays signed in (the web UI, the browser extension, the desktop app) renews its tokens with its refresh token about once an hour while it is open, and each renewal counts. Cognito's pre token generation trigger, `CognitoPreTokenGenerationFunction`, which also sets each token's [role](#roles), runs on every sign-in and every renewal and writes the time.
+- **A request with the user's MCP API key.** API keys never reach Cognito, so the hosted MCP server's API key authorizer, `MCPApiKeyAuthorizerFunction`, writes the time when it admits a request, together with the key's own last use (shown in the MCP API Key container on the MCP Servers page; see [MCP API key authentication](mcp-api-key-auth.md#last-used)).
+
+**Resolution.** Each writer updates the time at most once every 15 minutes (a conditional DynamoDB update that does nothing when the recorded time is less than 15 minutes old), so the time can be up to 15 minutes earlier than the user's latest activity. For a signed-in client the activity itself is only seen when a token is renewed, so a user who has the web UI open is shown as active to within about an hour, and a user who closed it shows roughly when it was last renewed. An MCP API key in use is seen to within 15 minutes.
+
+**What is not counted.** Individual page loads, GraphQL calls and meeting streams between two renewals are not recorded separately, and nothing is recorded for a client that is closed, even if its refresh token is still valid. Calls made with AWS credentials rather than with an LMA user's tokens (as `lma users list` and the other CLI and SDK operations that act with your AWS credentials are) are not LMA user activity and are not recorded; a CLI or SDK operation that signs in as an LMA user counts like any other sign-in. A Virtual Participant or a meeting stream that runs on after the user's client is closed does not count either.
+
+**Failures never block a user.** Each write is one attempt that gives up after at most 1.5 seconds, and a failure is logged (in `/<stack-name>/lambda/CognitoPreTokenGenerationFunction` or the authorizer's log group) without affecting the token or the request.
+
+The column shows **Not recorded** for a user with no recorded activity (activity is recorded from the first deployment of a version of LMA that includes it onwards; a user who signs in or whose open client renews its tokens shows a time from then on) and **Unavailable** when the times could not be read, as for Last sign-in.
+
 ## Exporting users for an access review
 
 The [LMA CLI](lma-cli.md#lma-users-list--list-users-for-an-access-review) lists the same information from a terminal, for an access review export:
@@ -109,7 +128,7 @@ The [LMA CLI](lma-cli.md#lma-users-list--list-users-for-an-access-review) lists 
 # A table in the terminal
 lma users list --stack-name LMA
 
-# A CSV file for the review: email, username, role, status, enabled, created_at, last_sign_in_at
+# A CSV file for the review: email, username, role, status, enabled, created_at, last_sign_in_at, last_active_at
 lma users list --stack-name LMA --format csv --output lma-users-2026-11.csv
 
 # JSON, with the stack, Region, account, user pool and time of the export
@@ -119,12 +138,12 @@ lma users list --stack-name LMA --format json
 A CSV row looks like this (times are ISO 8601 in UTC):
 
 ```
-email,username,role,status,enabled,created_at,last_sign_in_at
-jdoe@example.com,jdoe@example.com,User,CONFIRMED,true,2026-03-02T14:05:11.000Z,2026-11-20T09:30:00.000Z
-new.user@example.com,new.user@example.com,User,FORCE_CHANGE_PASSWORD,true,2026-11-23T12:00:00.000Z,Not recorded
+email,username,role,status,enabled,created_at,last_sign_in_at,last_active_at
+jdoe@example.com,jdoe@example.com,User,CONFIRMED,true,2026-03-02T14:05:11.000Z,2026-11-20T09:30:00.000Z,2026-11-24T16:45:00.000Z
+new.user@example.com,new.user@example.com,User,FORCE_CHANGE_PASSWORD,true,2026-11-23T12:00:00.000Z,Not recorded,Not recorded
 ```
 
-In the CSV and table, a user with no recorded sign-in shows `Not recorded`, and every user shows `Unavailable` when the times could not be read (with a warning on standard error saying why, for example a stack not yet updated to a version that records them). In JSON, `last_sign_in_at` is `null` in both cases, and `last_sign_in_available` (`false` when the times could not be read) tells them apart.
+In the CSV and table, a user with no recorded sign-in (or activity) shows `Not recorded`, and every user shows `Unavailable` when the times could not be read (with a warning on standard error saying why, for example a stack not yet updated to a version that records them). In JSON, `last_sign_in_at` and `last_active_at` are `null` in both cases, and `last_sign_in_available` (`false` when the times could not be read) tells them apart.
 
 The command runs with your AWS credentials, not as an LMA user, so it needs IAM permissions on the stack's resources rather than membership of the `Admin` group. The permissions are listed under [`lma users list`](lma-cli.md#lma-users-list--list-users-for-an-access-review).
 
@@ -149,7 +168,7 @@ cognito-idp:AdminRemoveUserFromGroup
 cognito-idp:AdminListGroupsForUser
 ```
 
-It may also read (`dynamodb:BatchGetItem`) and delete (`dynamodb:DeleteItem`) items in the Cognito stack's `UserSignInTable`, for the [last sign-in](#last-sign-in) times it lists and the item of a user it deletes. The PostAuthentication trigger's own role may only update items in that table.
+It may also read (`dynamodb:BatchGetItem`) and delete (`dynamodb:DeleteItem`) items in the Cognito stack's `UserSignInTable`, for the [last sign-in](#last-sign-in) and [last active](#last-active) times it lists and the item of a user it deletes. The PostAuthentication and pre token generation triggers' roles, and the MCP API key authorizer's, may only update items in that table (the authorizer also reads a key owner's `sub` with `cognito-idp:AdminGetUser` when the key does not store it).
 
 ## Guard rails
 

@@ -7,6 +7,11 @@ for the MCP tools that change nothing, or "read-write", for every tool. A key
 stored before keys had scopes has no Scope attribute and is listed, and
 authorized, as "legacy": the tools the server offered such keys, and the read
 tools added since.
+
+A listed key carries lastUsedAt, which the authorizer records on the key's item
+at most once per 15 minutes (null until the key is first used after that began).
+A new key stores its owner's Cognito sub, which the authorizer uses to record the
+owner's last activity without reading the user pool.
 """
 
 import hashlib
@@ -57,7 +62,7 @@ def handler(event, context):
             scope = READ
         if scope not in SCOPES:
             return error(f"scope must be one of: {', '.join(SCOPES)}")
-        return generate_key(username, is_admin, scope)
+        return generate_key(username, is_admin, scope, identity.get("sub") or "")
     elif field == "revokeMCPApiKey":
         prefix = event.get("arguments", {}).get("keyPrefix", "")
         return revoke_key(username, prefix)
@@ -67,7 +72,7 @@ def handler(event, context):
         return error(f"Unknown operation: {field}")
 
 
-def generate_key(username, is_admin, scope=READ):
+def generate_key(username, is_admin, scope=READ, sub=""):
     table = dynamodb.Table(TABLE_NAME)
 
     # Check if user already has a key
@@ -85,18 +90,19 @@ def generate_key(username, is_admin, scope=READ):
     prefix = raw_key[:12]
     now = datetime.now(timezone.utc).isoformat()
 
-    table.put_item(
-        Item={
-            "KeyHash": key_hash,
-            "UserId": username,
-            "Username": username,
-            "IsAdmin": "true" if is_admin else "false",
-            "KeyPrefix": prefix,
-            "CreatedAt": now,
-            "Enabled": "true",
-            "Scope": scope,
-        }
-    )
+    item = {
+        "KeyHash": key_hash,
+        "UserId": username,
+        "Username": username,
+        "IsAdmin": "true" if is_admin else "false",
+        "KeyPrefix": prefix,
+        "CreatedAt": now,
+        "Enabled": "true",
+        "Scope": scope,
+    }
+    if sub:
+        item["UserSub"] = sub
+    table.put_item(Item=item)
 
     logger.info(f"Generated API key for {username}, prefix={prefix}, scope={scope}")
 
@@ -139,6 +145,7 @@ def list_keys(username):
             "createdAt": i.get("CreatedAt", ""),
             "enabled": i.get("Enabled") == "true",
             "scope": stored_scope(i),
+            "lastUsedAt": i.get("LastUsedAt") or None,
         }
         for i in items
     ]

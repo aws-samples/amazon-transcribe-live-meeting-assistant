@@ -16,6 +16,7 @@ export const listUsers = /* GraphQL */ `
         enabled
         createdAt
         lastSignInAt
+        lastActiveAt
       }
       lastSignInAvailable
     }
