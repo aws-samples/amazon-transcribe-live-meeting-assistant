@@ -3763,7 +3763,10 @@ Meeting Context:
 User Request: {user_input}
 
 Please provide a helpful response based on the meeting context. Keep it concise and professional."""
-        prompt += configured_sensitive_information_rule()
+        rule = configured_sensitive_information_rule()
+        if rule:
+            # The rule is written as bullets of the fixed part; give it a lead-in here.
+            prompt += "\n\nAlso follow these rules:" + rule
 
         # Prepare the message for Bedrock
         message = {
