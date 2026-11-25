@@ -64,8 +64,22 @@ const callsWithKeys = (props) => {
   return callsKeys;
 };
 
-const invokeShareMeetings = async (props, currentRecipients) => {
-  const callsKeys = callsWithKeys(props);
+// The errorType shareMeetings fails with when a meeting's sharing list is no
+// longer the one the dialog read: nothing was changed.
+export const SHARING_LIST_CHANGED = 'SharingListChanged';
+export const SHARING_LIST_CHANGED_MESSAGE =
+  'The sharing list changed while this dialog was open, so nothing was saved. ' +
+  'The current list is shown: make your change again and submit.';
+
+export const isSharingListChanged = (err) =>
+  Array.isArray(err?.errors) && err.errors.some((e) => e?.errorType === SHARING_LIST_CHANGED);
+
+// readSharedWith: each meeting's sharing list as the dialog read it, by CallId. A
+// meeting with one is shared only if its list is still that one.
+const invokeShareMeetings = async (props, currentRecipients, readSharedWith = {}) => {
+  const callsKeys = callsWithKeys(props).map((call) =>
+    readSharedWith[call.CallId] ? { ...call, ExpectedSharedWith: readSharedWith[call.CallId] } : call,
+  );
   const response = await client.graphql({
     query: shareMeetings,
     variables: {
@@ -99,6 +113,8 @@ export const shareModal = (props) => {
   const [originalCount, setOriginalCount] = useState(0);
   const [submit, setSubmit] = useState(false);
   const [shareResult, setShareResult] = useState(null);
+  const [shareError, setShareError] = useState(null);
+  const [readSharedWith, setReadSharedWith] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const modalContent =
     props.selectedItems.length === 1 ? `"${props.selectedItems[0].callId}"` : `${props.selectedItems.length} meetings`;
@@ -116,10 +132,14 @@ export const shareModal = (props) => {
     const callDetails = await getCallDetailsFromCallIds(props.selectedItems.map((c) => c.callId));
 
     const recipients = new Set();
+    const read = {};
     callDetails.forEach((call) => {
+      if (!call) return;
       const sharedWithArray = sharedWithEntries(call.SharedWith);
       sharedWithArray.forEach((email) => recipients.add(email));
+      if (call.CallId) read[call.CallId] = sharedWithArray;
     });
+    setReadSharedWith(read);
 
     const recipientList = Array.from(recipients).map((email) => email);
     setCurrentRecipients(recipientList);
@@ -133,6 +153,7 @@ export const shareModal = (props) => {
     setCurrentRecipients([]);
     setAddRecipients('');
     setShareResult(null);
+    setShareError(null);
   };
 
   const handleAddRecipients = () => {
@@ -151,15 +172,30 @@ export const shareModal = (props) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setShareResult(null);
+    setShareError(null);
     setSubmit(true);
     // merge current and new recipients
     const allRecipients = [...new Set([...currentRecipients, ...newRecipients])];
-    const result = await invokeShareMeetings(props, allRecipients.join(','));
-    setCurrentRecipients([]);
-    setNewRecipients([]);
-    setSubmit(false);
-    setShareResult(result);
-    await openShareSettings();
+    try {
+      const result = await invokeShareMeetings(props, allRecipients.join(','), readSharedWith);
+      setCurrentRecipients([]);
+      setNewRecipients([]);
+      setSubmit(false);
+      setShareResult(result);
+      await openShareSettings();
+    } catch (err) {
+      setSubmit(false);
+      if (isSharingListChanged(err)) {
+        // Saved by someone else, or by Meeting Sharing, since the dialog opened:
+        // show the list as it is now. The users being added are kept.
+        setShareError(SHARING_LIST_CHANGED_MESSAGE);
+        await openShareSettings();
+        setChanged(newRecipients.length > 0);
+      } else {
+        console.error('Share meeting failed', err);
+        setShareError(err?.errors?.[0]?.message || err?.message || 'The meeting could not be shared.');
+      }
+    }
   };
 
   const showCurrentRecipients = () => {
@@ -181,6 +217,7 @@ export const shareModal = (props) => {
             setCurrentRecipients(updatedRecipients);
             setChanged(currentRecipients.length !== 0);
             setShareResult(null);
+            setShareError(null);
           }}
           alignment="horizontal"
         />
@@ -243,6 +280,9 @@ export const shareModal = (props) => {
             <Alert type="success" visible={shareResult}>
               {shareResult}
             </Alert>
+            <Alert type="error" visible={!!shareError}>
+              {shareError}
+            </Alert>
           </Form>
         }
         header={<h3>Share {modalContent}</h3>}
@@ -265,6 +305,7 @@ export const shareModal = (props) => {
                       setChanged(true);
                       setAddRecipients(event.detail.value);
                       setShareResult(null);
+                      setShareError(null);
                     }}
                     placeholder="Enter email addresses"
                   />

@@ -14,6 +14,7 @@ import pytest
 from auto_share import list_row_key, listed_addresses, plan_auto_share, shared_with_after
 from boto3.dynamodb.types import TypeSerializer
 from test_delete_metering_records import index
+from test_sharing_fanout import MeetingsTable
 
 OWNER = "owner@example.com"
 ANA = "ana@example.com"
@@ -152,18 +153,17 @@ def _meeting(call_id="m1", **attributes):
     }
 
 
-class StreamTable:
-    """The meetings table: consistent reads, and the transaction the handler writes."""
+class StreamTable(MeetingsTable):
+    """The meetings table, with one transcript segment for each meeting given."""
 
     def __init__(self, items):
-        self.items = {item["PK"]: dict(item) for item in items}
-        self.reads = 0
-
-    def get_item(self, Key, ConsistentRead=False):  # noqa: N803
-        assert ConsistentRead
-        self.reads += 1
-        item = self.items.get(Key["PK"])
-        return {"Item": dict(item)} if item else {}
+        meetings = [dict(item) for item in items]
+        segments = [
+            {"PK": f"trs#{item['PK'][2:]}", "SK": "s#00000"}
+            for item in meetings
+            if item["PK"] == item["SK"]
+        ]
+        super().__init__(meetings + segments)
 
 
 def _cancelled():
@@ -180,55 +180,36 @@ def _cancelled():
 
 @pytest.fixture
 def stream(monkeypatch):
-    """The handler's writes: the transactions, the items given each list, and who is told."""
+    """The handler's writes: the transactions, the list each fan-out pass gives, and who is told."""
     seen = {"transactions": [], "items": [], "unshared": [], "fail": set(), "cancel": set()}
-    table_ref = {}
 
-    def fake_transact(writes):
-        meeting = writes[0]["Update"]
-        call_id = meeting["Key"]["PK"][2:]
-        if call_id in seen["fail"]:
-            raise RuntimeError("DynamoDB unavailable")
-        if call_id in seen["cancel"]:
-            raise _cancelled()
-        seen["transactions"].append(writes)
-        # Apply it to the fake table, so the read after the items sees it.
-        table = table_ref.get("table")
-        if table is not None:
-            row = table.items[meeting["Key"]["PK"]]
-            values = meeting.get("ExpressionAttributeValues", {})
-            if ":sw" in values:
-                row["SharedWith"] = values[":sw"]
-            elif "#sw" in meeting["UpdateExpression"].split("REMOVE")[-1]:
-                row.pop("SharedWith", None)
+    def give_items(_pool, keys, recipients):
+        call_id = keys[0]["PK"].split("#", 1)[1]
+        if keys[0]["PK"].startswith("trs#"):
+            seen["items"].append((call_id, list(recipients)))
+        for key in keys:
+            index._give_item(key, recipients)
 
-    def fake_share_items(_session, _schema, call_id, recipients):
-        seen["items"].append((call_id, list(recipients)))
-
-    class Session:
-        client = type("Client", (), {"schema": object()})()
-
-    class Client:
-        def __enter__(self):
-            return Session()
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(index, "_transact", fake_transact)
-    monkeypatch.setattr(index, "_share_items", fake_share_items)
+    monkeypatch.setattr(index, "_give_items", give_items)
     monkeypatch.setattr(
         index,
-        "_tell_unshared",
-        lambda _s, _sc, call_id, removed: seen["unshared"].append((call_id, removed)),
+        "_notify_unshared",
+        lambda call_id, removed: seen["unshared"].append((call_id, list(removed))),
     )
-    monkeypatch.setattr(index, "appsync_client", Client())
-    monkeypatch.setattr(index, "DSLSchema", lambda schema: schema)
     monkeypatch.setattr(index, "_auto_share_enabled", lambda: True)
     monkeypatch.setattr(index, "account_username", lambda address: address)
 
     def use(table):
-        table_ref["table"] = table
+        def transact(writes):
+            call_id = writes[0]["Update"]["Key"]["PK"][2:]
+            if call_id in seen["fail"]:
+                raise RuntimeError("DynamoDB unavailable")
+            if call_id in seen["cancel"]:
+                raise _cancelled()
+            table.transact(writes)
+            seen["transactions"].append(writes)
+
+        monkeypatch.setattr(index, "_transact", transact)
         monkeypatch.setattr(index, "ddbTable", table)
         return table
 
@@ -247,7 +228,12 @@ def test_the_handler_shares_a_meeting_from_its_record_in_one_conditional_write(s
     assert meeting["ExpressionAttributeValues"][":sw"] == [CARL, ANA, BEN]
     assert meeting["ExpressionAttributeValues"][":auto"] == [ANA, BEN]
     # Only if the meeting's SharedWith is still the one the plan was made from.
-    assert meeting["ConditionExpression"] == "attribute_exists(PK) AND #sw = :seen"
+    assert meeting["ConditionExpression"] == (
+        "attribute_exists(PK) AND #sw = :seen AND attribute_not_exists(#fan)"
+    )
+    # The marker that the items have still to be given the list, cleared once they are.
+    assert set(meeting["ExpressionAttributeValues"][":fan"]) == {"Token"}
+    assert index.FANOUT_ATTRIBUTE not in index.ddbTable.meeting()
     assert meeting["ExpressionAttributeValues"][":seen"] == [CARL]
     assert list_row["Key"] == {
         "PK": "cls#2026-11-24#s#04",
@@ -264,7 +250,9 @@ def test_a_meeting_shared_with_nobody_is_written_on_condition_that_it_still_is(s
     stream["use"](StreamTable([item]))
     index.lambda_handler({"Records": [_record(item)]}, None)
     meeting = stream["transactions"][0][0]["Update"]
-    assert meeting["ConditionExpression"] == "attribute_exists(PK) AND attribute_not_exists(#sw)"
+    assert meeting["ConditionExpression"] == (
+        "attribute_exists(PK) AND attribute_not_exists(#sw) AND attribute_not_exists(#fan)"
+    )
 
 
 def test_a_share_made_meanwhile_is_not_overwritten_and_the_record_is_retried(stream) -> None:
@@ -294,19 +282,17 @@ def test_a_meeting_deleted_before_its_shares_are_recorded_is_not_retried(stream)
 def test_the_items_follow_a_share_that_lands_while_they_are_written(stream) -> None:
     item = _meeting(Participants=_people(ANA))
     table = stream["use"](StreamTable([item]))
-    original = index._share_items
 
-    def share_then_owner_shares(session, schema, call_id, recipients):
-        original(session, schema, call_id, recipients)
-        if len(stream["items"]) == 1:
-            table.items["c#m1"]["SharedWith"] = [ANA, CARL]
+    def owner_shares(t):
+        t.on_chunk_check = None
+        row = t.meeting()
+        row["SharedWith"] = [ANA, CARL]
+        row[index.FANOUT_ATTRIBUTE] = {"Token": "from-the-dialog"}
 
-    index._share_items = share_then_owner_shares
-    try:
-        index.lambda_handler({"Records": [_record(item)]}, None)
-    finally:
-        index._share_items = original
+    table.on_chunk_check = owner_shares
+    index.lambda_handler({"Records": [_record(item)]}, None)
     assert stream["items"] == [("m1", [ANA]), ("m1", [ANA, CARL])]
+    assert table.items[("trs#m1", "s#00000")]["SharedWith"] == [ANA, CARL]
 
 
 def test_a_record_with_nothing_to_change_is_not_read_again(stream, monkeypatch) -> None:
@@ -395,6 +381,11 @@ def test_the_transaction_is_sent_in_the_low_level_form(monkeypatch) -> None:
     meeting = sent[0][0]["Update"]
     assert meeting["Key"] == {"PK": {"S": "c#m1"}, "SK": {"S": "c#m1"}}
     assert meeting["ExpressionAttributeValues"][":sw"] == {"L": [{"S": ANA}]}
+    fanout = index._new_fanout(item, [ANA], [BEN])
+    writes = index._sharing_write("m1", item, plan, [ANA], {"PK": "cls#x", "SK": "ts#y"}, fanout)
+    index._transact(writes)
+    marker = sent[1][0]["Update"]["ExpressionAttributeValues"][":fan"]
+    assert marker["M"]["Unshared"] == {"L": [{"S": BEN}]}
 
 
 # ── the account a listed address belongs to ─────────────────────────────────

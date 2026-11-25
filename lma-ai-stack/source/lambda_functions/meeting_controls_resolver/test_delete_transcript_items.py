@@ -82,12 +82,8 @@ def test_a_failed_delete_fails_the_meeting_deletion(monkeypatch) -> None:
 def test_deleting_a_meeting_empties_its_transcript_partition(monkeypatch) -> None:
     """delete_meeting deletes the partition directly, not via getTranscriptSegments."""
 
-    def no_appsync_read(*_args):
-        raise AssertionError("getTranscriptSegments is not part of deleting a meeting")
-
     table = FakeTable(ROWS)
     monkeypatch.setattr(index, "ddbTable", table)
-    monkeypatch.setattr(index, "get_transcript_segments", no_appsync_read)
     monkeypatch.setattr(index, "cleanup_virtual_participants", lambda callid: None)
     monkeypatch.setattr(index, "get_call_details", lambda *a: {"getCall": {"SharedWith": None}})
     monkeypatch.setattr(index, "delete_recordings_transcripts", lambda callid: None)

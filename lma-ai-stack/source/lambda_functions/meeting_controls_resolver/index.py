@@ -7,6 +7,8 @@ import dataclasses
 import json
 import logging
 import re
+import time
+import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -321,42 +323,6 @@ def get_call_details(appsync_session, schema, callid):
         return result
 
 
-def get_transcript_segments(appsync_session, schema, callid):
-    """Every final segment of the meeting, read a page at a time.
-
-    A long meeting's segments span several pages of the table, and a page can
-    come back empty with a nextToken, so pages are read until there is none.
-    """
-    segments = []
-    next_token = None
-    while True:
-        query = dsl_gql(
-            DSLQuery(
-                schema.Query.getTranscriptSegments.args(callId=callid, nextToken=next_token).select(
-                    schema.TranscriptSegmentList.TranscriptSegments.select(
-                        schema.TranscriptSegment.PK,
-                        schema.TranscriptSegment.SK,
-                    ),
-                    schema.TranscriptSegmentList.nextToken,
-                )
-            )
-        )
-        try:
-            result = appsync_session.execute(query)
-        except ClientError as err:
-            logger.error(
-                "Error reading transcript segments %s: %s",
-                err.response["Error"]["Code"],
-                err.response["Error"]["Message"],
-            )
-            raise
-        page = result.get("getTranscriptSegments") or {}
-        segments.extend(segment for segment in page.get("TranscriptSegments") or [] if segment)
-        next_token = page.get("nextToken")
-        if not next_token:
-            return segments
-
-
 def get_call_metadata(callid):
     pk = "c#" + callid
     try:
@@ -428,104 +394,152 @@ def shared_with_entries(value: object) -> list:
 # END shared_with_entries
 
 
-def share_meetings(calls, owner, recipients):
+#: The error shareMeetings answers when a meeting's sharing list is no longer the one
+#: the caller read (ExpectedSharedWith); the share dialog shows it and reads the list again.
+SHARING_LIST_CHANGED = "SharingListChanged"
+SHARING_LIST_CHANGED_MESSAGE = "The sharing list changed; reopen to see the current list"
+
+#: How long the share dialog's request gives the meetings' items, of AppSync's
+#: 30 seconds for the whole request; what is left is completed from the meetings
+#: table's stream (complete_sharing).
+DIALOG_FANOUT_SECONDS = float(environ.get("SHARE_DIALOG_FANOUT_SECONDS", "20"))
+
+
+class SharingListChanged(Exception):
+    """A meeting's sharing list is not the one the share dialog read."""
+
+
+def _recipient_list(recipients: str) -> list:
+    """The recipients of a share, trimmed, each once, in the order given."""
+    out: list = []
+    for email in (recipients or "").split(","):
+        email = email.strip()
+        if email and email not in out:
+            out.append(email)
+    return out
+
+
+def _is_list_row_of(call_id: str, list_pk: Any, list_sk: Any) -> bool:
+    """Whether ListPK/ListSK name a row of the meetings list for this meeting."""
+    return (
+        isinstance(list_pk, str)
+        and isinstance(list_sk, str)
+        and list_pk.startswith("cls#")
+        and list_sk.startswith("ts#")
+        and list_sk.endswith(f"#id#{call_id}")
+    )
+
+
+def _expected_entries(call: Mapping[str, Any]):
+    """The sharing list the caller read for this meeting, or None when it sent none."""
+    expected = call.get("ExpectedSharedWith")
+    if expected is None:
+        return None
+    return sorted(set(shared_with_entries(list(expected))))
+
+
+def _read_meeting(call_id: str):
+    pk = f"c#{call_id}"
+    return ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item")
+
+
+def share_meetings(calls, owner, recipients, context=None):
+    """The share dialog's save: give each meeting the recipients as its sharing list.
+
+    Each meeting's SharedWith, its list row's SharedWith and the SharingFanout
+    marker are written in one transaction (record_share); then, within
+    DIALOG_FANOUT_SECONDS, complete_sharing gives the meetings' transcripts, key
+    frames and chat attachments the list and tells anyone unshared. What that
+    time does not cover is completed from the meetings table's stream.
+
+    A call that sends ExpectedSharedWith (the share dialog does) is saved only if
+    the meeting's sharing list is still that one: otherwise nothing is written,
+    for any of the meetings, and the answer carries ErrorType SharingListChanged.
+    """
     if recipients and not all(
         RECIPIENT_PATTERN.fullmatch(email.strip()) for email in recipients.split(",")
     ):
         return {"Result": "Invalid email address provided"}
+    for call in calls:
+        if not _is_list_row_of(call["CallId"], call.get("ListPK"), call.get("ListSK")):
+            return {"Result": "Invalid meeting list key provided"}
+    new_recipients = _recipient_list(recipients)
+    started = time.monotonic()
+    budget = DIALOG_FANOUT_SECONDS
+    if context is not None and hasattr(context, "get_remaining_time_in_millis"):
+        budget = min(budget, context.get_remaining_time_in_millis() / 1000 - 10)
+    deadline = started + max(0.0, budget)
 
-    with appsync_client as appsync_session:
-        if not appsync_session.client.schema:
-            raise ValueError("invalid AppSync schema")
-        schema = DSLSchema(appsync_session.client.schema)
-
+    try:
+        # Every meeting is checked before any is written, so a conflict changes nothing.
         for call in calls:
-            callid = call["CallId"]
-            listPK = call["ListPK"]
-            listSK = call["ListSK"]
-            share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, owner)
+            expected = _expected_entries(call)
+            if expected is None:
+                continue
+            item = _read_meeting(call["CallId"]) or {}
+            if sorted(set(shared_with_entries(item.get("SharedWith")))) != expected:
+                raise SharingListChanged(call["CallId"])
+        for call in calls:
+            record_share(
+                call["CallId"],
+                {"PK": call["ListPK"], "SK": call["ListSK"]},
+                new_recipients,
+                _expected_entries(call),
+            )
+    except SharingListChanged as changed:
+        logger.info("The sharing list of %s changed since it was read", changed)
+        return {
+            "Calls": [],
+            "Result": SHARING_LIST_CHANGED_MESSAGE,
+            "ErrorType": SHARING_LIST_CHANGED,
+            "Owner": owner,
+        }
 
-    callIds = [call["CallId"] for call in calls]
+    runner = f"dialog-{uuid.uuid4().hex}"
+    for call in calls:
+        if time.monotonic() >= deadline:
+            break
+        try:
+            complete_sharing(call["CallId"], deadline, runner=runner)
+        except Exception:  # noqa: BLE001 - the marker stays, and the stream completes it
+            logger.exception("Sharing the items of %s is left to the stream", call["CallId"])
+
     return {
-        "Calls": callIds,
+        "Calls": [call["CallId"] for call in calls],
         "Result": "Meetings shared successfully",
         "Owner": owner,
         "SharedWith": recipients,
     }
 
 
-def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, owner):
-    new_recipients = list(set(email.strip() for email in recipients.split(",") if email.strip()))
+def record_share(call_id: str, list_key: Mapping[str, str], recipients: list, expected) -> None:
+    """Write the share dialog's sharing list on the meeting and its list row, with the marker.
 
-    if not recipients:
-        new_recipients = None
-
-    try:
-        for transcript_segment in get_transcript_segments(appsync_session, schema, callid):
-            update_transcript_segment(
-                appsync_session,
-                schema,
-                transcript_segment["PK"],
-                transcript_segment["SK"],
-                new_recipients,
-            )
-        share_keyframes(callid, new_recipients)
-        share_chat_attachments(callid, new_recipients)
-
-        input = {
-            "CallId": callid,
-            "ListPK": listPK,
-            "ListSK": listSK,
-            "Owner": owner,
-            "SharedWith": new_recipients,
-        }
-
-        result = get_call_details(appsync_session, schema, callid)
-        shared_with = result.get("getCall").get("SharedWith")
-
-        shared_with = shared_with_entries(shared_with)
-
-        if shared_with and new_recipients:
-            unshare_list = list(set(shared_with) - set(new_recipients))
-        elif shared_with:
-            unshare_list = shared_with
-        else:
-            unshare_list = []
-        # Now share the call records (PK that begins with c# and cls#)
-        mutation = dsl_gql(
-            DSLMutation(
-                schema.Mutation.shareCall.args(input=input).select(
-                    schema.ShareCallOutput.CallId,
-                    schema.ShareCallOutput.Owner,
-                    schema.ShareCallOutput.SharedWith,
-                )
-            )
+    On condition that the meeting's SharedWith, and its marker, are still as read;
+    a marker changed meanwhile by a fan-out's progress is read again and the write
+    retried, while a SharedWith that is no longer ``expected`` (when given) raises
+    SharingListChanged.
+    """
+    for _attempt in range(3):
+        item = _read_meeting(call_id)
+        if not item:
+            raise ValueError(f"meeting {call_id} not found")
+        current = shared_with_entries(item.get("SharedWith"))
+        if expected is not None and sorted(set(current)) != expected:
+            raise SharingListChanged(call_id)
+        removed = [entry for entry in current if entry not in recipients]
+        fanout = _new_fanout(item, recipients, removed)
+        writes = _sharing_write(
+            call_id, item, None, list(recipients), list_key, fanout, list_row_must_exist=False
         )
-
-        result = appsync_session.execute(mutation)
-
-        # Send notification to recipients who no longer have access to the meeting
-        if unshare_list:
-            input = {"CallId": callid, "SharedWith": unshare_list}
-            mutation = dsl_gql(
-                DSLMutation(
-                    schema.Mutation.unshareCall.args(input=input).select(
-                        schema.UnshareCallOutput.CallId, schema.UnshareCallOutput.SharedWith
-                    )
-                )
-            )
-
-            appsync_session.execute(mutation)
-
-    except ClientError as err:
-        logger.error(
-            "Error updating people can access %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return
+        try:
+            _transact(writes)
+            return
+        except ClientError as err:
+            if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
+                raise
+            logger.info("The record of %s changed while it was shared; reading it again", call_id)
+    raise SharingListChanged(call_id)
 
 
 def _keyframe_keys(callid):
@@ -542,28 +556,6 @@ def _keyframe_keys(callid):
         if not last:
             return
         kwargs["ExclusiveStartKey"] = last
-
-
-def share_keyframes(callid, new_recipients):
-    """Give the meeting's key frames the meeting's new SharedWith.
-
-    Key frames follow the transcript's access rule, so they are shared and
-    unshared with it. Written directly rather than through AppSync: there is no
-    mutation for it, and the function's role already allows UpdateItem on the
-    table.
-    """
-    updated = 0
-    for key in _keyframe_keys(callid):
-        if new_recipients:
-            ddbTable.update_item(
-                Key=key,
-                UpdateExpression="SET SharedWith = :val",
-                ExpressionAttributeValues={":val": new_recipients},
-            )
-        else:
-            ddbTable.update_item(Key=key, UpdateExpression="REMOVE SharedWith")
-        updated += 1
-    return updated
 
 
 def delete_keyframes(callid):
@@ -601,22 +593,6 @@ def _chat_attachment_keys(callid):
         kwargs["ExclusiveStartKey"] = last
 
 
-def share_chat_attachments(callid, new_recipients):
-    """Give the meeting's chat attachments the meeting's new SharedWith, as its key frames."""
-    updated = 0
-    for key in _chat_attachment_keys(callid):
-        if new_recipients:
-            ddbTable.update_item(
-                Key=key,
-                UpdateExpression="SET SharedWith = :val",
-                ExpressionAttributeValues={":val": new_recipients},
-            )
-        else:
-            ddbTable.update_item(Key=key, UpdateExpression="REMOVE SharedWith")
-        updated += 1
-    return updated
-
-
 def delete_chat_attachments(callid):
     """Delete the meeting's chat attachments: their items and every version of their files.
 
@@ -649,30 +625,6 @@ def delete_consent_evidence(callid):
     if images:
         logger.info("Deleted %d consent evidence image(s) for %s", images, callid)
     return images
-
-
-def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
-    input = {"PK": PK, "SK": SK, "SharedWith": new_recipients}
-
-    try:
-        mutation = dsl_gql(
-            DSLMutation(
-                schema.Mutation.shareTranscriptSegment.args(input=input).select(
-                    schema.ShareTranscriptSegmentOutput.PK,
-                )
-            )
-        )
-        appsync_session.execute(mutation)
-
-    except ClientError as err:
-        logger.error(
-            "Error updating transcript segment %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return
 
 
 # Delete Meetings
@@ -1165,11 +1117,108 @@ class SharingChanged(Exception):
     """The meeting's sharing changed between the read a plan was made from and its write."""
 
 
-def _sharing_write(call_id: str, item: Mapping[str, Any], plan, recipients, list_key) -> list:
-    """The transaction that records a plan: SharedWith and AutoSharedWith on the meeting, and
-    SharedWith on its list row, only if the meeting's SharedWith is still what was read."""
+# ── Giving a meeting's items its sharing list ───────────────────────────────
+#
+# Sharing a meeting is two steps. The first writes, in one transaction, the
+# meeting's SharedWith (with AutoSharedWith, for Meeting Sharing), its list
+# row's SharedWith, and SharingFanout, a marker saying that the meeting's items
+# have still to be given that list:
+#
+#   {"Token": <new for every share>,
+#    "Unshared": [<addresses to tell they no longer have access>],
+#    "Cursor": {"Stage": "trs" | "kf" | "att", "After": <SK of the last item done>}}
+#
+# The second, complete_sharing, gives every item of the meeting's transcript
+# (PK trs#), key frames (kf#) and chat attachments (att#) the meeting's
+# SharedWith as it is then, tells the Unshared addresses, and removes the
+# marker. While the marker is there the share is unfinished, whatever else the
+# record says, and every write of the meeting record reaches the meetings
+# table's stream, whose handler runs complete_sharing for any record that has
+# the marker. So a fan-out that fails, or a function that times out, is taken
+# up again: the next attempt starts from the Cursor, which a fan-out writes
+# when its time is nearly up (that write is itself a record in the stream),
+# and writing an item's SharedWith again is harmless.
+#
+# One fan-out at a time works on a meeting: SharingFanoutLease ({"By", "Until"},
+# Until in epoch seconds) names it. The stream's handler is the runner "stream":
+# the stream gives one invocation at a time each meeting (one batch per shard,
+# a meeting's records on one shard), so it may always take over a lease of its
+# own, left by an invocation that ended. The share dialog's request runs a
+# fan-out of its own for its time (DIALOG_FANOUT_SECONDS), under a lease that
+# ends soon after, and the stream waits for that lease to be released or to end.
+#
+# A share made while a fan-out is running writes a new Token; the fan-out sees
+# it after the chunk it is writing and starts again from the first item with
+# the new list, so the last list written to every item is the meeting's.
+
+#: The meeting record's marker of a share whose items are not all given its list.
+FANOUT_ATTRIBUTE = "SharingFanout"
+#: The meeting record's attribute naming the fan-out working on it.
+LEASE_ATTRIBUTE = "SharingFanoutLease"
+#: The meeting's item partitions, in the order they are given the list:
+#: transcript items, key frames, chat attachments.
+FANOUT_STAGES = ("trs", "kf", "att")
+#: Items given the list between two checks of the time and of the Token.
+FANOUT_CHUNK = int(environ.get("SHARING_FANOUT_CHUNK", "100"))
+#: The stream handler's runner name (see above).
+STREAM_RUNNER = "stream"
+#: A lease lasts this much past its holder's deadline.
+LEASE_MARGIN_SECONDS = 30
+#: How often a runner waiting for another's lease reads the record again.
+LEASE_POLL_SECONDS = 2.0
+#: The stream handler stops starting work this long before its function times out.
+STREAM_MARGIN_SECONDS = 30
+
+_FANOUT_NAMES = {"#fan": FANOUT_ATTRIBUTE, "#tok": "Token"}
+_LEASE_NAMES = {"#lease": LEASE_ATTRIBUTE, "#by": "By", "#until": "Until"}
+
+
+def _key(address: str) -> str:
+    return address.strip().casefold()
+
+
+def _new_fanout(item: Mapping[str, Any], recipients, removed) -> dict:
+    """The marker a share writes: a new Token, and whom to tell they were unshared.
+
+    Those an unfinished earlier share was still to tell are kept, unless this
+    share gives them the meeting again.
+    """
+    keep = {_key(a) for a in recipients or []}
+    earlier = (item.get(FANOUT_ATTRIBUTE) or {}).get("Unshared") or []
+    unshared: list = []
+    seen: set = set()
+    for address in list(earlier) + list(removed or []):
+        if not isinstance(address, str) or not address.strip():
+            continue
+        key = _key(address)
+        if key in keep or key in seen:
+            continue
+        seen.add(key)
+        unshared.append(address.strip())
+    fanout: dict = {"Token": uuid.uuid4().hex}
+    if unshared:
+        fanout["Unshared"] = unshared
+    return fanout
+
+
+def _sharing_write(
+    call_id: str,
+    item: Mapping[str, Any],
+    plan,
+    recipients,
+    list_key,
+    fanout=None,
+    list_row_must_exist=True,
+) -> list:
+    """The transaction that records a share.
+
+    SharedWith (``recipients``; None leaves it, [] removes it) and, with a
+    ``plan``, AutoSharedWith on the meeting; SharedWith on its list row; and the
+    ``fanout`` marker. Only if the meeting's SharedWith, and its marker, are still
+    what was read.
+    """
     pk = f"c#{call_id}"
-    names = {"#auto": auto_share.AUTO_SHARED_ATTRIBUTE, "#sw": "SharedWith"}
+    names = {"#sw": "SharedWith"}
     values: dict = {}
     sets, removes = [], []
     if recipients is not None:
@@ -1178,11 +1227,17 @@ def _sharing_write(call_id: str, item: Mapping[str, Any], plan, recipients, list
             values[":sw"] = recipients
         else:
             removes.append("#sw")
-    if plan.auto_shared:
-        sets.append("#auto = :auto")
-        values[":auto"] = plan.auto_shared
-    else:
-        removes.append("#auto")
+    if plan is not None:
+        names["#auto"] = auto_share.AUTO_SHARED_ATTRIBUTE
+        if plan.auto_shared:
+            sets.append("#auto = :auto")
+            values[":auto"] = plan.auto_shared
+        else:
+            removes.append("#auto")
+    if fanout is not None:
+        names["#fan"] = FANOUT_ATTRIBUTE
+        sets.append("#fan = :fan")
+        values[":fan"] = fanout
     expression = " ".join(
         part
         for part in (
@@ -1191,14 +1246,23 @@ def _sharing_write(call_id: str, item: Mapping[str, Any], plan, recipients, list
         )
         if part
     )
-    # The meeting must still exist, and hold the SharedWith the plan was made from:
-    # a share the owner makes meanwhile in the share dialog is not overwritten.
+    # The meeting must still exist, and hold the SharedWith the share was made from:
+    # a share made meanwhile (the share dialog, or Meeting Sharing) is not overwritten.
     condition = "attribute_exists(PK) AND "
     if item.get("SharedWith") is None:
         condition += "attribute_not_exists(#sw)"
     else:
         condition += "#sw = :seen"
         values[":seen"] = item["SharedWith"]
+    if fanout is not None:
+        # Nor a marker another share wrote meanwhile, whose Unshared this one carries on.
+        earlier = (item.get(FANOUT_ATTRIBUTE) or {}).get("Token")
+        if earlier:
+            names["#tok"] = "Token"
+            condition += " AND #fan.#tok = :seentok"
+            values[":seentok"] = earlier
+        else:
+            condition += " AND attribute_not_exists(#fan)"
     meeting = {
         "Update": {
             "TableName": LCA_CALL_EVENTS_TABLE,
@@ -1214,9 +1278,10 @@ def _sharing_write(call_id: str, item: Mapping[str, Any], plan, recipients, list
         list_update = {
             "TableName": LCA_CALL_EVENTS_TABLE,
             "Key": {"PK": list_key["PK"], "SK": list_key["SK"]},
-            "ConditionExpression": "attribute_exists(PK)",
             "ExpressionAttributeNames": {"#sw": "SharedWith"},
         }
+        if list_row_must_exist:
+            list_update["ConditionExpression"] = "attribute_exists(PK)"
         if recipients:
             list_update["UpdateExpression"] = "SET #sw = :sw"
             list_update["ExpressionAttributeValues"] = {":sw": recipients}
@@ -1245,18 +1310,14 @@ def _transact(writes: list) -> None:
     )
 
 
-def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.AutoSharePlan) -> None:
-    """Record the plan, then give the meeting's items the new sharing list.
+def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.AutoSharePlan) -> bool:
+    """Record a Meeting Sharing plan; True when it left the meeting's items to be given the list.
 
-    The meeting's SharedWith and AutoSharedWith, and its list row's SharedWith,
-    are written in one transaction, on condition that the meeting's SharedWith is
-    still the value the plan was made from; if the owner changed it meanwhile
-    (the share dialog), SharingChanged is raised and the record is retried, so
-    the plan is made again from the owner's change. Then, as share_meeting does
-    for the share dialog, the transcript, key frames and chat attachments are
-    given the list, and anyone unshared is told; that is repeated once with the
-    meeting's SharedWith as it is afterwards, should another share have landed
-    while the items were being written.
+    The meeting's SharedWith, AutoSharedWith and marker, and its list row's
+    SharedWith, are written in one transaction, on condition that the meeting's
+    SharedWith and marker are still the ones the plan was made from; if either
+    changed meanwhile (the share dialog), SharingChanged is raised and the record
+    is retried, so the plan is made again from that change.
     """
     if plan.add:
         # Each new address under its account's own username, where it has one.
@@ -1265,40 +1326,28 @@ def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.Aut
         plan = dataclasses.replace(plan, add=added, auto_shared=kept + added)
     recipients = None
     list_key = None
+    fanout = None
     if plan.changes_sharing:
         list_key = auto_share.list_row_key(call_id, item.get("CreatedAt"))
         if list_key is None:
             raise ValueError(f"meeting {call_id} has no CreatedAt to find its list row by")
         recipients = auto_share.shared_with_after(shared_with_entries(item.get("SharedWith")), plan)
+        fanout = _new_fanout(item, recipients, plan.remove)
     try:
-        _transact(_sharing_write(call_id, item, plan, recipients, list_key))
+        _transact(_sharing_write(call_id, item, plan, recipients, list_key, fanout))
     except ClientError as err:
         if err.response.get("Error", {}).get("Code") != "TransactionCanceledException":
             raise
         reasons = [r.get("Code") for r in err.response.get("CancellationReasons") or []]
-        pk = f"c#{call_id}"
-        if not ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item"):
+        if not _read_meeting(call_id):
             logger.info("Meeting %s was deleted before its shares were recorded", call_id)
-            return
+            return False
         raise SharingChanged(f"the sharing of {call_id} changed while it was planned ({reasons})")
-    if recipients is None:
-        return
-    with appsync_client as appsync_session:
-        if not appsync_session.client.schema:
-            raise ValueError("invalid AppSync schema")
-        schema = DSLSchema(appsync_session.client.schema)
-        _share_items(appsync_session, schema, call_id, recipients)
-        pk = f"c#{call_id}"
-        current = ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item") or {}
-        now = shared_with_entries(current.get("SharedWith"))
-        if current and sorted(now) != sorted(recipients):
-            _share_items(appsync_session, schema, call_id, now)
-        if plan.remove:
-            _tell_unshared(appsync_session, schema, call_id, list(plan.remove))
+    return fanout is not None
 
 
 def _tell_unshared(appsync_session, schema, call_id: str, removed: list) -> None:
-    """unshareCall, which tells the people a meeting is no longer shared with, as share_meeting does."""
+    """unshareCall, which tells the people a meeting is no longer shared with."""
     mutation = dsl_gql(
         DSLMutation(
             schema.Mutation.unshareCall.args(
@@ -1309,27 +1358,249 @@ def _tell_unshared(appsync_session, schema, call_id: str, removed: list) -> None
     appsync_session.execute(mutation)
 
 
-def _share_items(appsync_session, schema, call_id: str, recipients: list) -> None:
-    """The meeting's transcript segments, key frames and chat attachments, given ``recipients``."""
-    new_recipients = list(recipients) or None
-    for segment in get_transcript_segments(appsync_session, schema, call_id):
-        update_transcript_segment(
-            appsync_session, schema, segment["PK"], segment["SK"], new_recipients
-        )
-    share_keyframes(call_id, new_recipients)
-    share_chat_attachments(call_id, new_recipients)
+def _notify_unshared(call_id: str, removed: list) -> None:
+    with appsync_client as appsync_session:
+        if not appsync_session.client.schema:
+            raise ValueError("invalid AppSync schema")
+        schema = DSLSchema(appsync_session.client.schema)
+        _tell_unshared(appsync_session, schema, call_id, removed)
 
 
-def handle_meeting_stream(event: Mapping[str, Any]) -> dict:
-    """The meetings table's stream: share each changed meeting with its listed participants.
+def _partition_keys(pk: str, after=None):
+    """The keys of the items under ``pk`` in SK order, from the one after SK ``after``."""
+    kwargs: dict = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": pk},
+        "ProjectionExpression": "PK, SK",
+        "ConsistentRead": True,
+    }
+    if after:
+        kwargs["ExclusiveStartKey"] = {"PK": pk, "SK": after}
+    while True:
+        response = ddbTable.query(**kwargs)
+        for item in response.get("Items", []):
+            yield {"PK": item["PK"], "SK": item["SK"]}
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
+def _chunks(keys, size: int):
+    chunk: list = []
+    for key in keys:
+        chunk.append(key)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def _give_item(key: Mapping[str, str], recipients: list) -> None:
+    """One item given the sharing list; an item deleted meanwhile is left deleted."""
+    kwargs: dict = {"Key": dict(key), "ConditionExpression": "attribute_exists(PK)"}
+    if recipients:
+        kwargs["UpdateExpression"] = "SET SharedWith = :val"
+        kwargs["ExpressionAttributeValues"] = {":val": list(recipients)}
+    else:
+        kwargs["UpdateExpression"] = "REMOVE SharedWith"
+    try:
+        ddbTable.update_item(**kwargs)
+    except ClientError as err:
+        if err.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+
+
+def _give_items(pool, keys: list, recipients: list) -> None:
+    for future in [pool.submit(_give_item, key, recipients) for key in keys]:
+        future.result()
+
+
+def _conditional_update(**kwargs) -> bool:
+    """An UpdateItem on the meeting record; False when its condition did not hold."""
+    try:
+        ddbTable.update_item(**kwargs)
+        return True
+    except ClientError as err:
+        if err.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _meeting_key(call_id: str) -> dict:
+    return {"PK": f"c#{call_id}", "SK": f"c#{call_id}"}
+
+
+def _claim_lease(call_id: str, runner: str, deadline: float) -> bool:
+    until = int(time.time() + max(0.0, deadline - time.monotonic()) + LEASE_MARGIN_SECONDS)
+    return _conditional_update(
+        Key=_meeting_key(call_id),
+        UpdateExpression="SET #lease = :lease",
+        ConditionExpression=(
+            "attribute_exists(#fan) AND (attribute_not_exists(#lease) OR #lease.#by = :me "
+            "OR #lease.#until <= :now)"
+        ),
+        ExpressionAttributeNames={**_LEASE_NAMES, "#fan": FANOUT_ATTRIBUTE},
+        ExpressionAttributeValues={
+            ":lease": {"By": runner, "Until": until},
+            ":me": runner,
+            ":now": int(time.time()),
+        },
+    )
+
+
+def _release_lease(call_id: str, runner: str) -> None:
+    _conditional_update(
+        Key=_meeting_key(call_id),
+        UpdateExpression="REMOVE #lease",
+        ConditionExpression="#lease.#by = :me",
+        ExpressionAttributeNames={"#lease": LEASE_ATTRIBUTE, "#by": "By"},
+        ExpressionAttributeValues={":me": runner},
+    )
+
+
+def _checkpoint(call_id: str, runner: str, token: str, position: Mapping[str, str]) -> None:
+    """Record how far the fan-out got and release the lease; a record in the stream either way."""
+    saved = _conditional_update(
+        Key=_meeting_key(call_id),
+        UpdateExpression="SET #fan.#cur = :cur REMOVE #lease",
+        ConditionExpression="#fan.#tok = :tok AND #lease.#by = :me",
+        ExpressionAttributeNames={
+            **_FANOUT_NAMES,
+            "#cur": "Cursor",
+            "#lease": LEASE_ATTRIBUTE,
+            "#by": "By",
+        },
+        ExpressionAttributeValues={":cur": dict(position), ":tok": token, ":me": runner},
+    )
+    if not saved:
+        # A newer share's marker, which starts from the first item.
+        _release_lease(call_id, runner)
+
+
+def _finish(call_id: str, token: str) -> bool:
+    """Remove the marker and the lease, if no share was made since the fan-out read it."""
+    return _conditional_update(
+        Key=_meeting_key(call_id),
+        UpdateExpression="REMOVE #fan, #lease",
+        ConditionExpression="#fan.#tok = :tok",
+        ExpressionAttributeNames={**_FANOUT_NAMES, "#lease": LEASE_ATTRIBUTE},
+        ExpressionAttributeValues={":tok": token},
+    )
+
+
+def _current_token(call_id: str):
+    item = (
+        ddbTable.get_item(
+            Key=_meeting_key(call_id),
+            ConsistentRead=True,
+            ProjectionExpression="#fan.#tok",
+            ExpressionAttributeNames=_FANOUT_NAMES,
+        ).get("Item")
+        or {}
+    )
+    return (item.get(FANOUT_ATTRIBUTE) or {}).get("Token")
+
+
+def _lease_until(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def complete_sharing(call_id: str, deadline: float, runner: str = STREAM_RUNNER, wait=False) -> str:
+    """Give the meeting's items its sharing list, if a share left them to be given it.
+
+    ``deadline`` is a time.monotonic() value. Answers "done" (nothing left to do),
+    "paused" (the time ran out, and the progress, or the lease's release, was
+    written, which the stream takes up), or "busy" (another fan-out holds the
+    lease; with ``wait`` that is answered only once the deadline comes).
+    """
+    while True:
+        item = _read_meeting(call_id)
+        if not item or not item.get(FANOUT_ATTRIBUTE):
+            return "done"
+        lease = item.get(LEASE_ATTRIBUTE) or {}
+        holder = lease.get("By")
+        held = holder and holder != runner and _lease_until(lease.get("Until")) > time.time()
+        if not held and _claim_lease(call_id, runner, deadline):
+            break
+        # Another fan-out holds the meeting, or took it between the read and the claim.
+        if not wait or time.monotonic() + LEASE_POLL_SECONDS >= deadline:
+            return "busy"
+        time.sleep(LEASE_POLL_SECONDS)
+    try:
+        return _fan_out(call_id, runner, deadline)
+    except Exception:
+        try:
+            _release_lease(call_id, runner)
+        except Exception:  # noqa: BLE001 - the lease ends by itself
+            logger.warning("Could not release the sharing lease of %s", call_id)
+        raise
+
+
+def _fan_out(call_id: str, runner: str, deadline: float) -> str:
+    workers = max(1, SEGMENT_CONCURRENCY)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        while True:
+            item = _read_meeting(call_id) or {}
+            marker = item.get(FANOUT_ATTRIBUTE)
+            if not marker:
+                _release_lease(call_id, runner)
+                return "done"
+            token = marker.get("Token")
+            target = shared_with_entries(item.get("SharedWith"))
+            cursor = marker.get("Cursor") or {}
+            stage = cursor.get("Stage")
+            start = FANOUT_STAGES.index(stage) if stage in FANOUT_STAGES else 0
+            after = cursor.get("After") if stage in FANOUT_STAGES else None
+            superseded = False
+            for name in FANOUT_STAGES[start:]:
+                for chunk in _chunks(_partition_keys(f"{name}#{call_id}", after), FANOUT_CHUNK):
+                    _give_items(pool, chunk, target)
+                    if time.monotonic() >= deadline:
+                        _checkpoint(
+                            call_id, runner, token, {"Stage": name, "After": chunk[-1]["SK"]}
+                        )
+                        return "paused"
+                    if _current_token(call_id) != token:
+                        superseded = True
+                        break
+                if superseded:
+                    break
+                after = None
+            if superseded:
+                continue
+            keep = {_key(a) for a in target}
+            unshared = [a for a in marker.get("Unshared") or [] if _key(a) not in keep]
+            if unshared:
+                _notify_unshared(call_id, unshared)
+            if _finish(call_id, token):
+                return "done"
+
+
+def _stream_deadline(context) -> float:
+    remaining = 300.0
+    if context is not None and hasattr(context, "get_remaining_time_in_millis"):
+        remaining = context.get_remaining_time_in_millis() / 1000
+    return time.monotonic() + max(0.0, remaining - STREAM_MARGIN_SECONDS)
+
+
+def handle_meeting_stream(event: Mapping[str, Any], context=None) -> dict:
+    """The meetings table's stream: Meeting Sharing, and the items of unfinished shares.
 
     The event source mapping passes only writes of items whose PK starts c#;
     of those, only meeting records (PK equal to SK) are read, and each meeting
     once per batch, from its latest record. The record in the stream decides
-    whether anything is to be done, without a read; when something is, the
-    meeting is read again, consistently, and planned from what it holds now,
-    since later writes of the same meeting can follow in the stream. A
-    meeting whose plan fails is reported, so the batch is retried from it.
+    whether anything is to be done, without a read: a participant list to share
+    with, or a SharingFanout marker. When something is, the meeting is read
+    again, consistently, and planned from what it holds now, since later writes
+    of the same meeting can follow in the stream; then any share left unfinished
+    is completed (complete_sharing). A meeting that fails, or that another
+    fan-out still holds when time runs out, is reported, so the batch is retried
+    from it.
     """
     latest: dict = {}
     for record in event.get("Records") or []:
@@ -1341,33 +1612,44 @@ def handle_meeting_stream(event: Mapping[str, Any]) -> dict:
         if not pk.startswith("c#") or pk != sk:
             continue
         latest[pk[2:]] = record
+    deadline = _stream_deadline(context)
     failures = []
     enabled = None
-    changed = 0
     for call_id, record in latest.items():
         try:
-            if not _auto_share_plan(_stream_image(record)).changes_anything:
+            image = _stream_image(record)
+            pending = bool(image.get(FANOUT_ATTRIBUTE))
+            planned = _auto_share_plan(image).changes_anything
+            if planned:
+                if enabled is None:
+                    enabled = _auto_share_enabled()
+                planned = enabled
+            if not pending and not planned:
                 continue
-            if enabled is None:
-                enabled = _auto_share_enabled()
-            if not enabled:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("no time left in this invocation")
+            if planned:
+                item = _read_meeting(call_id)
+                if not item:
+                    continue
+                plan = _auto_share_plan(item)
+                if plan.changes_anything:
+                    pending = apply_auto_share(call_id, item, plan) or pending
+                    # Counts only: the addresses are personal data.
+                    logger.info(
+                        "Meeting sharing for %s: %d added, %d removed",
+                        call_id,
+                        len(plan.add),
+                        len(plan.remove),
+                    )
+                pending = pending or bool(item.get(FANOUT_ATTRIBUTE))
+            if not pending:
                 continue
-            pk = f"c#{call_id}"
-            item = ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item")
-            if not item:
-                continue
-            plan = _auto_share_plan(item)
-            if not plan.changes_anything:
-                continue
-            apply_auto_share(call_id, item, plan)
-            changed += 1
-            # Counts only: the addresses are personal data.
-            logger.info(
-                "Meeting sharing for %s: %d added, %d removed",
-                call_id,
-                len(plan.add),
-                len(plan.remove),
-            )
+            outcome = complete_sharing(call_id, deadline, wait=True)
+            if outcome == "busy":
+                raise TimeoutError("another fan-out still holds the meeting")
+            if outcome == "paused":
+                logger.info("Sharing the items of %s continues from its next record", call_id)
         except Exception:  # noqa: BLE001 - reported for retry, the batch goes on
             logger.exception("Meeting sharing failed for %s", call_id)
             failures.append(
@@ -1379,7 +1661,7 @@ def handle_meeting_stream(event: Mapping[str, Any]) -> dict:
 def lambda_handler(event, context):
     # The meetings table's stream (Meeting Sharing), rather than an AppSync request.
     if "Records" in event:
-        return handle_meeting_stream(event)
+        return handle_meeting_stream(event, context)
     owner = event["identity"]["username"]
     if not verify_permissions(event):
         return {
@@ -1392,7 +1674,7 @@ def lambda_handler(event, context):
 
     if action == "shareMeetings":
         recipients = event["arguments"]["input"]["MeetingRecipients"]
-        return share_meetings(calls, owner, recipients)
+        return share_meetings(calls, owner, recipients, context)
     elif action == "deleteMeetings":
         return delete_meetings(calls, owner)
     else:

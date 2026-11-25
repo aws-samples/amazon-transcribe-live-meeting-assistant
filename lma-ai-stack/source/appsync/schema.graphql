@@ -355,6 +355,10 @@ input ShareMeetingsItem {
 	CallId: ID!
 	ListPK: ID!
 	ListSK: ID!
+	# The meeting's sharing list as the caller read it. When given, the meeting
+	# is shared only if its list is still this one; otherwise no meeting of the
+	# request is changed and the request fails with errorType SharingListChanged.
+	ExpectedSharedWith: [String]
 }
 
 input ShareMeetingsInput {
