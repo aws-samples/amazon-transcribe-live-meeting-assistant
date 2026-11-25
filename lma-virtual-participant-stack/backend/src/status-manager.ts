@@ -19,7 +19,12 @@ import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
 import { CallSessionReadError, callSessionFromVpRow, type VpCallSession } from './call-session.js';
-import { preparationFromVpRow, type VpPreparation } from './meeting-preparation.js';
+import {
+  participantsFromVpRow,
+  preparationFromVpRow,
+  type MeetingParticipant,
+  type VpPreparation,
+} from './meeting-preparation.js';
 import { createLogger, registerSecretValue } from './logger.js';
 
 const log = createLogger('status-manager');
@@ -579,6 +584,69 @@ export class VirtualParticipantStatusManager {
     } catch (error) {
       log.error('Error storing task ARN in registry:', error);
       // This is non-critical - don't fail the container startup
+    }
+  }
+
+  /**
+   * The participant list on this VP's row as it is now, read again just
+   * before the meeting is created: the owner can change it from the VP's page
+   * while the VP is joining (docs/virtual-participant.md#participant-list).
+   * Null when it cannot be read, so the list read at startup is kept.
+   */
+  async getParticipantList(): Promise<MeetingParticipant[] | null> {
+    if (!this.graphqlEndpoint) return null;
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            participants { name email }
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      const row = result?.getVirtualParticipant;
+      return row ? participantsFromVpRow(row.participants) : null;
+    } catch (error) {
+      log.warn(`Could not read the participant list again; keeping the one read at startup: ${error}`);
+      return null;
+    }
+  }
+
+  /** The meeting record's participant list; null while there is no record, or when it cannot be read. */
+  async getMeetingParticipants(callId: string): Promise<MeetingParticipant[] | null> {
+    if (!this.graphqlEndpoint) return null;
+    try {
+      const query = `
+        query GetCall($CallId: ID!) {
+          getCall(CallId: $CallId) { CallId Participants { name email } }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { CallId: callId });
+      const meeting = result?.getCall;
+      return meeting?.CallId ? participantsFromVpRow(meeting.Participants) : null;
+    } catch (error) {
+      log.warn(`Could not read the meeting record's participant list: ${error}`);
+      return null;
+    }
+  }
+
+  /** Put a participant list on the meeting record (updateCallParticipants, as a backend role). */
+  async setMeetingParticipants(callId: string, participants: MeetingParticipant[]): Promise<boolean> {
+    if (!this.graphqlEndpoint) return false;
+    try {
+      const mutation = `
+        mutation UpdateCallParticipants($input: UpdateCallParticipantsInput!) {
+          updateCallParticipants(input: $input) { CallId }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(mutation, {
+        input: { CallId: callId, Participants: participants.map(({ name, email }) => ({ name, email })) },
+      });
+      return Boolean(result?.updateCallParticipants?.CallId);
+    } catch (error) {
+      log.warn(`Could not put the participant list on the meeting: ${error}`);
+      return false;
     }
   }
 

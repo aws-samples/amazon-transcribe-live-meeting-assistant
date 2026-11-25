@@ -301,16 +301,55 @@ def list_users(_event, _args):
     return {"users": users, "lastSignInAvailable": sign_ins is not None}
 
 
-def create_user(_event, args):
-    """Create a new user in Cognito and add them to their role's group, if it has one."""
+def _meeting_to_invite_to(value):
+    """((kind, id), meeting) for createUser's inviteToMeeting, or (None, None) when it is empty.
+
+    The value is a Virtual Participant's id or a meeting's CallId, tried in that
+    order. The caller is an Admin, who may name any meeting.
+    """
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        raise ValidationError("inviteToMeeting must be a meeting or Virtual Participant id")
+    ref_id = value.strip()
+    if not ref_id:
+        return None, None
+    if len(ref_id) > MAX_MEETING_REF_CHARS:
+        raise ValidationError(f"inviteToMeeting must be at most {MAX_MEETING_REF_CHARS} characters")
+    for kind in ("vp", "call"):
+        meeting = _read_meeting_for_participants(kind, ref_id)
+        if meeting is not None:
+            return (kind, ref_id), meeting
+    raise ValidationError(f"There is no meeting or Virtual Participant {ref_id!r}")
+
+
+def create_user(event, args):
+    """Create a new user in Cognito and add them to their role's group, if it has one.
+
+    With ``inviteToMeeting``, the invitation names that meeting and links to its
+    consent page, and the address is added to the meeting's participant list
+    first, if it is not on it.
+    """
     payload = args.get("input") or {}
     email = (payload.get("email") or "").strip()
     role = (payload.get("role") or "").strip()
 
     _validate_email(email)
     _validate_role(role)
+    meeting_ref, meeting = _meeting_to_invite_to(payload.get("inviteToMeeting"))
 
-    logger.info("Creating user email=%s role=%s", email, role)
+    logger.info(
+        "Creating user email=%s role=%s%s", email, role, " for a meeting" if meeting_ref else ""
+    )
+
+    if meeting_ref:
+        # Checked before the list is changed, so an existing account's address
+        # is not added; createUser would refuse it below in any case.
+        if _find_account(email) is not None:
+            raise ValidationError(f"User with email {email} already exists")
+        caller = _get_caller_identity(event)
+        if _add_to_participant_list(meeting, email, caller["username"] or "LMA"):
+            logger.info("Added the new user's address to the meeting's participant list")
 
     try:
         cognito.admin_create_user(
@@ -321,6 +360,8 @@ def create_user(_event, args):
                 {"Name": "email_verified", "Value": "true"},
             ],
             DesiredDeliveryMediums=["EMAIL"],
+            # Read by the CustomMessage trigger: the role, and the meeting.
+            ClientMetadata=_invitation_metadata(role, meeting_ref, meeting),
         )
     except cognito.exceptions.UsernameExistsException as exc:
         raise ValidationError(f"User with email {email} already exists") from exc
@@ -545,6 +586,11 @@ def _delete_notification_preferences(username):
 # condition and the web UI compare it.
 
 NO_ACCOUNT = "none"
+#: A meeting lists at most this many people (normalize_participants in the
+#: configuration layer's lma_meeting_preparation/rules.py).
+MAX_PARTICIPANTS = 100
+#: The longest meeting or Virtual Participant id createUser's inviteToMeeting takes.
+MAX_MEETING_REF_CHARS = 256
 PARTICIPANT_ACCOUNTS_PER_DAY = int(os.environ.get("PARTICIPANT_ACCOUNTS_PER_DAY", "25"))
 PARTICIPANT_ACCOUNTS_PER_REQUEST = 25
 PARTICIPANT_LOOKUPS_PER_DAY = int(os.environ.get("PARTICIPANT_LOOKUPS_PER_DAY", "1000"))
@@ -583,32 +629,52 @@ def _read_meeting_for_participants(kind, ref_id):
     """The owner and participant list of the meeting, or None when there is none."""
     dynamodb = boto3.client("dynamodb")
     if kind == "call":
-        if not EVENT_SOURCING_TABLE:
-            raise ValidationError("Meeting records are not available")
-        item = dynamodb.get_item(
-            TableName=EVENT_SOURCING_TABLE,
-            Key={"PK": {"S": f"c#{ref_id}"}, "SK": {"S": f"c#{ref_id}"}},
-            ProjectionExpression="#o, Participants",
-            ExpressionAttributeNames={"#o": "Owner"},
-        ).get("Item")
-        participants_attr = "Participants"
-    else:
-        if not VIRTUAL_PARTICIPANT_TABLE:
-            raise ValidationError("Virtual Participant records are not available")
-        item = dynamodb.get_item(
-            TableName=VIRTUAL_PARTICIPANT_TABLE,
-            Key={"id": {"S": ref_id}},
-            ProjectionExpression="#o, participants, meetingName",
-            ExpressionAttributeNames={"#o": "Owner"},
-        ).get("Item")
-        participants_attr = "participants"
+        item = _meeting_item(dynamodb, ref_id)
+        if not item:
+            return None
+        return {
+            "owner": (item.get("Owner") or {}).get("S") or "",
+            "participants": _plain_participants(item.get("Participants")),
+            "name": ref_id,
+            "listed_on": ("call", ref_id),
+        }
+    if not VIRTUAL_PARTICIPANT_TABLE:
+        raise ValidationError("Virtual Participant records are not available")
+    item = dynamodb.get_item(
+        TableName=VIRTUAL_PARTICIPANT_TABLE,
+        Key={"id": {"S": ref_id}},
+        ProjectionExpression="#o, participants, meetingName, CallId",
+        ExpressionAttributeNames={"#o": "Owner"},
+    ).get("Item")
     if not item:
         return None
-    return {
+    meeting = {
         "owner": (item.get("Owner") or {}).get("S") or "",
-        "participants": _plain_participants(item.get(participants_attr)),
-        "name": (item.get("meetingName") or {}).get("S") or (ref_id if kind == "call" else ""),
+        "participants": _plain_participants(item.get("participants")),
+        "name": (item.get("meetingName") or {}).get("S") or "",
+        "listed_on": ("vp", ref_id),
     }
+    # Once the Virtual Participant has created its meeting, the meeting's list
+    # is the one its owner edits (updateCallParticipants), so it is the one
+    # read, as the consent page reads it (advance_consent_resolver.meeting_of).
+    linked = (item.get("CallId") or {}).get("S") or ""
+    row = _meeting_item(dynamodb, linked) if linked else None
+    if row and ((row.get("Owner") or {}).get("S") or "") == meeting["owner"]:
+        meeting["participants"] = _plain_participants(row.get("Participants"))
+        meeting["listed_on"] = ("call", linked)
+    return meeting
+
+
+def _meeting_item(dynamodb, call_id):
+    """The meeting row's Owner and Participants, or None."""
+    if not EVENT_SOURCING_TABLE:
+        raise ValidationError("Meeting records are not available")
+    return dynamodb.get_item(
+        TableName=EVENT_SOURCING_TABLE,
+        Key={"PK": {"S": f"c#{call_id}"}, "SK": {"S": f"c#{call_id}"}},
+        ProjectionExpression="#o, Participants",
+        ExpressionAttributeNames={"#o": "Owner"},
+    ).get("Item")
 
 
 def _meeting_for_caller(caller, args):
@@ -797,19 +863,121 @@ def _remaining_today(username, now):
     return max(PARTICIPANT_ACCOUNTS_PER_DAY - used, 0)
 
 
-def _invitation_metadata(kind, ref_id, meeting):
-    """The client metadata that has the invitation name the meeting and link its consent page.
+def _advance_consent_enabled():
+    """Whether Meeting Consent › Allow consent given in advance is on, read now.
+
+    Read as advance_consent_resolver reads it (the configuration layer's
+    Meeting Consent section, with the shipped defaults where nothing is set).
+    False when the read fails (the invitation then says nothing about it); the shipped
+    default when no configuration table is named.
+    """
+    try:
+        # pylint: disable=import-outside-toplevel,import-error
+        from lma_config import (  # configuration layer
+            MEETING_CONSENT,
+            ConfigurationStore,
+            ConfigurationTableNotConfigured,
+            offered_settings,
+        )
+        from lma_consent import rules as consent_rules  # configuration layer
+
+        # pylint: enable=import-outside-toplevel,import-error
+    except ImportError:
+        logger.warning("The configuration layer is not available; the invitation omits consent")
+        return False
+    try:
+        try:
+            values = ConfigurationStore().get_section(MEETING_CONSENT.name).values
+        except ConfigurationTableNotConfigured:
+            values = {}
+        settings = consent_rules.effective_settings(offered_settings(MEETING_CONSENT.name, values))
+        return bool(settings.get("advanceConsentEnabled"))
+    except Exception:  # pylint: disable=broad-except
+        logger.warning("Could not read the meeting consent settings", exc_info=True)
+        return False
+
+
+def _invitation_metadata(role, meeting_ref=None, meeting=None):
+    """The client metadata the invitation is sent with.
 
     Read by the user pool's CustomMessage trigger
-    (lma-cognito-stack/source/custom_message), which builds the link from the
-    web UI's address and this query. Cognito passes client metadata to the
-    trigger only; it is not stored.
+    (lma-cognito-stack/source/custom_message): the account's role, whether
+    consent given in advance is on (which decides what the invitation says about
+    the My consents page), and for an account invited to a meeting, the meeting
+    and the query of its consent page, from which the trigger builds the link
+    with the web UI's address. Cognito passes client metadata to the trigger
+    only; it is not stored.
     """
-    return {
-        "lmaInvitation": "meeting_participant",
-        "meetingName": (meeting.get("name") or "")[:200],
-        "consentQuery": f"{'meeting' if kind == 'call' else 'vp'}={quote(ref_id, safe='')}",
-    }
+    metadata = {"lmaRole": role}
+    if _advance_consent_enabled():
+        metadata["lmaAdvanceConsent"] = "on"
+    if meeting_ref:
+        kind, ref_id = meeting_ref
+        metadata.update(
+            {
+                "lmaInvitation": "meeting_participant",
+                "meetingName": ((meeting or {}).get("name") or "")[:200],
+                "consentQuery": f"{'meeting' if kind == 'call' else 'vp'}={quote(ref_id, safe='')}",
+            }
+        )
+    return metadata
+
+
+def _add_to_participant_list(meeting, email, added_by):
+    """Put ``email`` at the end of the meeting's participant list, if it is not on it.
+
+    The list written is the meeting's once the meeting record exists, otherwise
+    the Virtual Participant's (``meeting["listed_on"]``), as updateCallParticipants
+    writes it. An append, so a change made meanwhile by someone else is kept; on
+    condition that the list still has room. Returns True when the address was added.
+    """
+    listed = {p["email"].casefold() for p in meeting["participants"]}
+    if email.casefold() in listed:
+        return False
+    if len(meeting["participants"]) >= MAX_PARTICIPANTS:
+        raise ValidationError(
+            f"The meeting's participant list already has {MAX_PARTICIPANTS} people"
+        )
+    kind, ref_id = meeting["listed_on"]
+    entry = {"L": [{"M": {"name": {"S": ""}, "email": {"S": email}}}]}
+    names = {"#p": "Participants" if kind == "call" else "participants"}
+    values = {":entry": entry, ":empty": {"L": []}, ":max": {"N": str(MAX_PARTICIPANTS)}}
+    sets = "#p = list_append(if_not_exists(#p, :empty), :entry)"
+    if kind == "call":
+        key = {"PK": {"S": f"c#{ref_id}"}, "SK": {"S": f"c#{ref_id}"}}
+        table = EVENT_SOURCING_TABLE
+        names.update({"#by": "ParticipantsUpdatedBy", "#at": "ParticipantsUpdatedAt", "#pk": "PK"})
+        values.update(
+            {
+                ":by": {"S": added_by},
+                ":at": {
+                    "S": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+                },
+            }
+        )
+        sets += ", #by = :by, #at = :at"
+        exists = "attribute_exists(#pk)"
+    else:
+        key = {"id": {"S": ref_id}}
+        table = VIRTUAL_PARTICIPANT_TABLE
+        names["#id"] = "id"
+        exists = "attribute_exists(#id)"
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=table,
+            Key=key,
+            UpdateExpression=f"SET {sets}",
+            ConditionExpression=f"{exists} AND (attribute_not_exists(#p) OR size(#p) < :max)",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise ValidationError(
+                "The meeting's participant list is full or the meeting no longer exists"
+            ) from exc
+        raise
+    return True
 
 
 def _create_participant_account(email, client_metadata=None):
@@ -861,7 +1029,7 @@ def create_participant_accounts(event, args):
     caller = _get_caller_identity(event)
     payload = args.get("input") or {}
     meeting = _meeting_for_caller(caller, payload)
-    invitation = _invitation_metadata(*_meeting_ref(payload), meeting)
+    invitation = _invitation_metadata(PARTICIPANT_ROLE, _meeting_ref(payload), meeting)
     listed = {p["email"].casefold(): p["email"] for p in meeting["participants"]}
 
     requested = payload.get("emails")

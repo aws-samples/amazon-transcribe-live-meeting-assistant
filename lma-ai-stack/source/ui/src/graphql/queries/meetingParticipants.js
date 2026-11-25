@@ -20,6 +20,41 @@ export const getMeetingParticipantAccounts = /* GraphQL */ `
   }
 `;
 
+/**
+ * The participant list of the meeting a Virtual Participant created, for its
+ * page, which shows and changes that list once the meeting exists.
+ */
+export const getCallParticipants = /* GraphQL */ `
+  query GetCallParticipants($CallId: ID!) {
+    getCall(CallId: $CallId) {
+      CallId
+      Owner
+      Participants {
+        name
+        email
+      }
+    }
+  }
+`;
+
+/**
+ * Replace the participant list from a Virtual Participant's page, named by its
+ * id: the answer is the meeting once the meeting exists (its list was changed),
+ * and null before (the Virtual Participant's own list was changed).
+ */
+export const updateVirtualParticipantMeetingParticipants = /* GraphQL */ `
+  mutation UpdateCallParticipants($input: UpdateCallParticipantsInput!) {
+    updateCallParticipants(input: $input) {
+      CallId
+      Owner
+      Participants {
+        name
+        email
+      }
+    }
+  }
+`;
+
 export const createParticipantAccounts = /* GraphQL */ `
   mutation CreateParticipantAccounts($input: CreateParticipantAccountsInput!) {
     createParticipantAccounts(input: $input) {
