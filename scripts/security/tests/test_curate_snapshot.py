@@ -403,8 +403,8 @@ def committed_snapshots() -> list[Path]:
     return sorted(p for p in (REPO_ROOT / "security" / "test-results").glob("*") if p.is_dir())
 
 
-@pytest.mark.parametrize("folder", committed_snapshots(), ids=lambda p: p.name)
-def test_every_committed_snapshot_is_public_safe_and_counts_only(folder: Path) -> None:
+def check_snapshot_folder(folder: Path) -> None:
+    """What every committed snapshot must satisfy."""
     assert sorted(p.name for p in folder.iterdir()) == ["summary.json", "summary.md"]
     for name in ("summary.md", "summary.json"):
         cs.assert_public_safe((folder / name).read_text(encoding="utf-8"))
@@ -414,6 +414,27 @@ def test_every_committed_snapshot_is_public_safe_and_counts_only(folder: Path) -
     for target in snapshot["parts"]["zap"].get("targets") or []:
         assert set(target) <= {"target", "mode", "ran", "rules", "alerts", "reason"}
     assert (folder / "summary.md").read_text(encoding="utf-8") == cs.to_markdown(snapshot)
+
+
+@pytest.mark.parametrize("folder", committed_snapshots(), ids=lambda p: p.name)
+def test_every_committed_snapshot_is_public_safe_and_counts_only(folder: Path) -> None:
+    check_snapshot_folder(folder)
+
+
+def test_a_snapshot_the_curator_writes_passes_the_committed_snapshot_check(
+    tmp_path: Path,
+) -> None:
+    # Runs even before any snapshot is committed, so the check itself is exercised.
+    snapshot, forbidden = build(tmp_path)
+    check_snapshot_folder(cs.write(snapshot, forbidden, tmp_path / "out", allow_failures=True))
+
+
+def test_a_static_run_with_no_tests_counts_as_a_failure(tmp_path: Path) -> None:
+    junit = tmp_path / "static.xml"
+    junit.write_text("<testsuite tests='0'/>")
+    snapshot, _ = cs.build({"static-roles": junit}, version="9.9.9", date="2026-11-25")
+    assert snapshot["parts"]["static-roles"]["outcome"] == "failed"
+    assert cs.failures(snapshot) == ["static role checks"]
 
 
 # ── security_results.py hands only this run's reports to the curator ───────
@@ -438,6 +459,23 @@ def test_a_snapshot_from_a_run_reads_only_the_reports_this_run_wrote(tmp_path: P
     sources, _, not_run = security_results.snapshot_inputs([srt, stale], "", out_dir, tmp_path)
     assert sources["static-roles"] is None
     assert not_run["static-roles"] == "the step wrote no report in this run"
+
+
+def test_a_seeded_srt_file_the_scan_never_assessed_is_not_run(tmp_path: Path) -> None:
+    # srt-seed copies the decisions in with a fresh mtime; a scan that stopped
+    # before assessing leaves that copy as it was.
+    (tmp_path / ".srt").mkdir()
+    decisions = '[{"status": "suppressed"}]'
+    (tmp_path / ".srt" / "suppressions.json").write_text(decisions)
+    (tmp_path / ".srt" / "issues.json").write_text(decisions)
+    for status in (0, 1):
+        srt = security_results.Step("srt", [], status=status, started=0.0)
+        sources, _, not_run = security_results.snapshot_inputs([srt], "", tmp_path, tmp_path)
+        assert sources["srt"] is None
+        assert not_run["srt"] == "the scan did not complete its assessment"
+    (tmp_path / ".srt" / "issues.json").write_text('[{"status": "Open"}]')
+    sources, _, _ = security_results.snapshot_inputs([srt], "", tmp_path, tmp_path)
+    assert sources["srt"] == tmp_path / ".srt" / "issues.json"
 
 
 def test_the_live_junit_file_is_used_only_when_this_run_wrote_it(tmp_path: Path) -> None:

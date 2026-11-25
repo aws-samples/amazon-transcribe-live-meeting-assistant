@@ -33,7 +33,8 @@ With ``--snapshot`` (``SNAPSHOT=1``) it then writes the public-safe snapshot of
 this run to ``security/test-results/<VERSION>/`` with curate_snapshot.py, from
 this run's reports only: a step that was not run is recorded as not run, never
 read from an earlier run's report. ``--replace`` overwrites an existing snapshot
-of the same version.
+of the same version, and ``--allow-failures`` writes one that records failures,
+once they have been handled.
 """
 
 from __future__ import annotations
@@ -167,6 +168,13 @@ def version_of(description: str) -> str:
     return match.group(1) if match else ""
 
 
+def _only_seeded(issues: Path, suppressions: Path) -> bool:
+    """True when SRT's working file is still the copy of the tracked decisions."""
+    if not issues.is_file() or not suppressions.is_file():
+        return False
+    return issues.read_bytes() == suppressions.read_bytes()
+
+
 def snapshot_inputs(
     steps: list[Step], commit: str, out_dir: Path = OUT_DIR, root: Path = REPO_ROOT
 ) -> tuple[dict, dict, dict]:
@@ -185,6 +193,11 @@ def snapshot_inputs(
         if part not in ran:
             sources[part] = None
             not_run[part] = "no stack was given" if part in ("live-rbac", "zap") else "not run"
+        elif part == "srt" and _only_seeded(report, root / ".srt" / "suppressions.json"):
+            # srt-seed copies the decisions in before the scan; a copy left as it was
+            # means the assessment never ran.
+            sources[part] = None
+            not_run[part] = "the scan did not complete its assessment"
         elif report.is_file() and report.stat().st_mtime >= ran[part].started:
             sources[part] = report
         else:

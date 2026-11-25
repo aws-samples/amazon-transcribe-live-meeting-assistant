@@ -607,7 +607,7 @@ def failures(snapshot: dict) -> list[str]:
     p = snapshot["parts"]
     found = []
     static = p["static-roles"]
-    if static["ran"] and static["failed"] + static["errors"]:
+    if static["ran"] and static["outcome"] != "passed":  # a failure, or no tests at all
         found.append("static role checks")
     live = p["live-rbac"]
     if live["ran"] and (live["totals"]["fail"] or (live.get("tests") or {}).get("failed")):

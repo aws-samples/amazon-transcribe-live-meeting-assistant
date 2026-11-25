@@ -225,7 +225,7 @@ to `<step>.log` beside them.
 
 ## Release snapshots
 
-Each release can carry a published record of its security test results, in
+Each release commits a published record of its security test results, in
 [`security/test-results/<version>/`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/tree/develop/security/test-results):
 `summary.md` to read and `summary.json` with the same content for tools. A
 snapshot holds **counts only**:
