@@ -80,3 +80,56 @@ describe('the participant list START carries', () => {
         assert.deepEqual(start().Participants, [ANA]);
     });
 });
+
+describe('the participant list after START', () => {
+    const Manager = kinesisStreamManager.constructor as unknown as {
+        PARTICIPANT_SYNC_WAIT_MS: number;
+        PARTICIPANT_SYNC_POLL_MS: number;
+    };
+
+    beforeEach(() => {
+        Manager.PARTICIPANT_SYNC_WAIT_MS = 50;
+        Manager.PARTICIPANT_SYNC_POLL_MS = 5;
+        kinesisStreamManager.setParticipantSync(null);
+    });
+
+    const syncWith = (appearsAfter: number) => {
+        let checks = 0;
+        const written: MeetingParticipant[][] = [];
+        kinesisStreamManager.setParticipantSync({
+            meetingExists: async () => {
+                checks += 1;
+                return checks > appearsAfter;
+            },
+            writeMeetingList: async (_callId, participants) => {
+                written.push(participants);
+                return true;
+            },
+        });
+        return written;
+    };
+
+    it('puts a change saved on the VP while the meeting was being created on the meeting, once it exists', async () => {
+        const written = syncWith(2);
+        kinesisStreamManager.setParticipantReader(async () => [ANA, BO]);
+        await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
+        assert.deepEqual(written, [[ANA, BO]]);
+    });
+
+    it('writes nothing when the list did not change', async () => {
+        const written = syncWith(0);
+        kinesisStreamManager.setParticipantReader(async () => [ANA]);
+        await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
+        assert.deepEqual(written, []);
+    });
+
+    it('writes nothing when the meeting record does not appear, or the list cannot be read', async () => {
+        const written = syncWith(1000);
+        kinesisStreamManager.setParticipantReader(async () => [BO]);
+        await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
+        syncWith(0);
+        kinesisStreamManager.setParticipantReader(async () => null);
+        await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
+        assert.deepEqual(written, []);
+    });
+});

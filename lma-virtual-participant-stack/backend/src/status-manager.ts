@@ -613,6 +613,42 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /** Whether the meeting record exists yet (getCall answers it). False when it cannot be read. */
+  async meetingExists(callId: string): Promise<boolean> {
+    if (!this.graphqlEndpoint) return false;
+    try {
+      const query = `
+        query GetCall($CallId: ID!) {
+          getCall(CallId: $CallId) { CallId }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { CallId: callId });
+      return Boolean(result?.getCall?.CallId);
+    } catch (error) {
+      log.warn(`Could not read whether the meeting record exists: ${error}`);
+      return false;
+    }
+  }
+
+  /** Put a participant list on the meeting record (updateCallParticipants, as a backend role). */
+  async setMeetingParticipants(callId: string, participants: MeetingParticipant[]): Promise<boolean> {
+    if (!this.graphqlEndpoint) return false;
+    try {
+      const mutation = `
+        mutation UpdateCallParticipants($input: UpdateCallParticipantsInput!) {
+          updateCallParticipants(input: $input) { CallId }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(mutation, {
+        input: { CallId: callId, Participants: participants.map(({ name, email }) => ({ name, email })) },
+      });
+      return Boolean(result?.updateCallParticipants?.CallId);
+    } catch (error) {
+      log.warn(`Could not put the participant list on the meeting: ${error}`);
+      return false;
+    }
+  }
+
   // Read just the current status of this VP.
   async getCurrentStatus(): Promise<string | null> {
     try {

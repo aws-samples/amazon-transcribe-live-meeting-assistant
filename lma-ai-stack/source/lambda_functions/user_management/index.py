@@ -868,7 +868,8 @@ def _advance_consent_enabled():
 
     Read as advance_consent_resolver reads it (the configuration layer's
     Meeting Consent section, with the shipped defaults where nothing is set).
-    False when it cannot be read: the invitation then says nothing about it.
+    False when the read fails (the invitation then says nothing about it); the shipped
+    default when no configuration table is named.
     """
     try:
         # pylint: disable=import-outside-toplevel,import-error

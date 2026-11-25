@@ -29,7 +29,6 @@ export const getCallParticipants = /* GraphQL */ `
     getCall(CallId: $CallId) {
       CallId
       Owner
-      SharedWith
       Participants {
         name
         email
@@ -48,7 +47,6 @@ export const updateVirtualParticipantMeetingParticipants = /* GraphQL */ `
     updateCallParticipants(input: $input) {
       CallId
       Owner
-      SharedWith
       Participants {
         name
         email

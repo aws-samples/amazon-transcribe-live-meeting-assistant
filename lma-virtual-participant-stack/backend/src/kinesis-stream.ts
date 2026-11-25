@@ -184,6 +184,57 @@ class KinesisStreamManager {
   }
 
   /**
+   * After START: the meeting record is created a few seconds later, and until
+   * it exists a change saved from the VP's page goes to the VP's row. So once
+   * the record exists, the row's list is read once more and, if it changed
+   * since the read before START, put on the meeting (updateCallParticipants).
+   * From then on the page changes the meeting's list itself (its resolver
+   * also writes the meeting when the record appears during its own write), so
+   * no change is left on the row. Unset (local runs), nothing is done.
+   */
+  private participantSync: {
+    meetingExists: (callId: string) => Promise<boolean>;
+    writeMeetingList: (callId: string, participants: MeetingParticipant[]) => Promise<boolean>;
+  } | null = null;
+
+  setParticipantSync(sync: KinesisStreamManager['participantSync']): void {
+    this.participantSync = sync;
+  }
+
+  /** How long, and how often, the record is looked for before the list is read once more. */
+  static PARTICIPANT_SYNC_WAIT_MS = 60000;
+  static PARTICIPANT_SYNC_POLL_MS = 3000;
+
+  async syncParticipantsAfterStart(sent: MeetingParticipant[]): Promise<void> {
+    const sync = this.participantSync;
+    const reader = this.participantReader;
+    if (!sync || !reader) return;
+    const callId = this.callId;
+    try {
+      const deadline = Date.now() + KinesisStreamManager.PARTICIPANT_SYNC_WAIT_MS;
+      let exists = await sync.meetingExists(callId);
+      while (!exists && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, KinesisStreamManager.PARTICIPANT_SYNC_POLL_MS));
+        exists = await sync.meetingExists(callId);
+      }
+      if (!exists) {
+        log.warn('The meeting record did not appear; the participant list is not read again');
+        return;
+      }
+      const latest = await reader();
+      if (latest === null || JSON.stringify(latest) === JSON.stringify(sent)) return;
+      const written = await sync.writeMeetingList(callId, latest);
+      log.info(
+        written
+          ? `Participant list changed while the meeting was created; put on the meeting (${latest.length} people)`
+          : 'Participant list changed while the meeting was created, and could not be put on the meeting',
+      );
+    } catch (error) {
+      log.warn(`Could not bring the participant list over to the meeting: ${error}`);
+    }
+  }
+
+  /**
    * The engine, language and speaker separation the meeting is expected to be
    * transcribed with, stored on its record by the START event. Null leaves them
    * off the record.
@@ -348,6 +399,9 @@ class KinesisStreamManager {
         } catch (error) {
             log.warn(`Failed to link CallId to VP: ${error}`);
         }
+        // Not awaited: it waits for the meeting record, which the call event
+        // processor creates from this START.
+        void this.syncParticipantsAfterStart(this.preparation?.participants ?? []);
     }
   }
 

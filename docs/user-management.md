@@ -72,7 +72,7 @@ The new user receives a **Welcome to Live Meeting Assistant!** email from Amazon
 
 ### Inviting a new user to a meeting
 
-The **Meeting to invite them to** field is optional, for any role. It offers the Virtual Participants that are scheduled or running and the meetings of the last 14 days, and also takes a pasted meeting identifier (`CallId`), Virtual Participant id, or a link to a meeting page, a Virtual Participant page or a meeting's consent page. Without a meeting, the account and its email are exactly as described above.
+The **Meeting to invite them to** field is optional, for any role. It offers the Virtual Participants that are scheduled or running and up to 50 of the most recent meetings of the last 14 days, and also takes a pasted meeting identifier (`CallId`), Virtual Participant id, or a link to a meeting page, a Virtual Participant page or a meeting's consent page. Without a meeting, the account and its email are exactly as described above.
 
 With a meeting:
 
