@@ -53,6 +53,8 @@ export const getAdvanceConsentInvitation = /* GraphQL */ `
     $Scope: String
     $ValidUntil: String
     $LabelKey: String
+    $Organizer: String
+    $LabelValue: String
   ) {
     getAdvanceConsentInvitation(
       CallId: $CallId
@@ -60,6 +62,8 @@ export const getAdvanceConsentInvitation = /* GraphQL */ `
       Scope: $Scope
       ValidUntil: $ValidUntil
       LabelKey: $LabelKey
+      Organizer: $Organizer
+      LabelValue: $LabelValue
     ) {
       Listed
       Requested

@@ -97,10 +97,10 @@ def _meeting_paragraph(metadata, url):
 #: never asks for consent, which has to be freely given.
 PARTICIPANT_CONSENT_TEXT = (
     "Meetings recorded with Live Meeting Assistant ask everyone for consent. To avoid being "
-    "asked in every meeting, you can record your choice after you sign in, from a meeting's "
-    "consent link: for that meeting, or for the meetings its organizer holds, for a period "
-    "you choose. Your choices are on the {link} page, where you can change or withdraw them "
-    "at any time, and you can still object in any meeting."
+    "asked in every meeting, you can record your choice on the {link} page after you sign "
+    "in — for one meeting, for meetings with a particular organizer, or for all meetings "
+    "on this deployment, for a period you choose. You can change or withdraw it at any time, "
+    "and you can still object in any meeting."
 )
 #: What a User's or Admin's invitation says about it: one line.
 USER_CONSENT_TEXT = "You can manage your meeting consents on the {link} page."

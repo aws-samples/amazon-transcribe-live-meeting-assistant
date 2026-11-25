@@ -22,6 +22,7 @@ import {
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   TROUBLESHOOTING_PATH,
+  MY_CONSENTS_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -51,6 +52,7 @@ export const NAV_PATHS = [
   BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
   TROUBLESHOOTING_PATH,
+  MY_CONSENTS_PATH,
 ];
 
 /* eslint-disable react/prop-types */
@@ -75,6 +77,8 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${SKILLS_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
+  } else if (path.includes(MY_CONSENTS_PATH)) {
+    activeHref = `#${MY_CONSENTS_PATH}`;
   } else if (path.includes(TROUBLESHOOTING_PATH)) {
     activeHref = `#${TROUBLESHOOTING_PATH}`;
   } else if (path.includes(CONFIGURATION_PATH)) {

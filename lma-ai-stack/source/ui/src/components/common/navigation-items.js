@@ -89,9 +89,9 @@ export const generateNavigationItems = (settings, isAdmin) => {
     });
   }
 
-  // Each person's own consents given in advance, whatever their role; a
-  // standalone page, like voice enrollment.
-  navigationItems.push({ type: 'link', text: 'My consents', href: `#${MY_CONSENTS_PATH}`, external: true });
+  // Each person's own consents given in advance, whatever their role: an
+  // in-app page in the standard layout, opened in the same tab.
+  navigationItems.push({ type: 'link', text: 'My consents', href: `#${MY_CONSENTS_PATH}` });
 
   // Add Configuration section (admin only)
   if (isAdmin) {

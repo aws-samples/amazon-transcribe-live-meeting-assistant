@@ -535,9 +535,11 @@ type Mutation @aws_iam {
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	# Consent given in advance, by the signed-in person for themselves
-	# (advance_consent_resolver). Giving needs the caller on the meeting's
-	# participant list and the NoticeHash getAdvanceConsentInvitation returned
-	# for the same choice; asking to be added is for someone not on it, and is
+	# (advance_consent_resolver). Giving needs the NoticeHash
+	# getAdvanceConsentInvitation returned for the same choice and, when a
+	# meeting is named, the caller on its participant list; with no meeting
+	# named it is a standing consent ("organizer" or "deployment"). Asking to
+	# be added is for someone not on the meeting's participant list, and is
 	# shown in LMA to the people who see the meeting's participant list. See
 	# docs/meeting-consent.md#consent-given-in-advance.
 	giveAdvanceConsent(input: GiveAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
@@ -813,7 +815,10 @@ type Query @aws_iam {
 	# Participant that may not have created it yet (exactly one). Scope,
 	# ValidUntil (YYYY-MM-DD) and LabelKey choose the consent whose text is
 	# returned. Someone not on the meeting's participant list is told only that.
-	getAdvanceConsentInvitation(CallId: ID, VirtualParticipantId: ID, Scope: String, ValidUntil: String, LabelKey: String): AdvanceConsentInvitation @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# With no meeting named and Scope "organizer" (Organizer, the address typed,
+	# and optionally LabelKey and LabelValue) or "deployment", the text of that
+	# standing consent is returned, and nothing about any meeting.
+	getAdvanceConsentInvitation(CallId: ID, VirtualParticipantId: ID, Scope: String, ValidUntil: String, LabelKey: String, Organizer: String, LabelValue: String): AdvanceConsentInvitation @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
@@ -2208,7 +2213,7 @@ type MeetingConsentEvent @aws_cognito_user_pools
 type MeetingConsentPreMeeting @aws_cognito_user_pools
 @aws_iam {
 	ConsentId: String
-	# "meeting" or "organizer".
+	# "meeting", "organizer" or "deployment".
 	Scope: String
 	GrantedAt: AWSDateTime
 	ValidUntil: AWSDateTime
@@ -3655,15 +3660,17 @@ type ParticipantMeetingRecording @aws_cognito_user_pools {
 
 type AdvanceConsent @aws_cognito_user_pools {
 	ConsentId: ID!
-	# "meeting" or "organizer".
+	# "meeting", "organizer" or "deployment" (every meeting on the deployment).
 	Scope: String!
 	# The meeting of a "meeting" consent: its CallId, and the Virtual
 	# Participant it was given through, either or both.
 	CallId: String
 	VirtualParticipantId: String
-	# The meeting the consent page was opened for, as it was named then.
+	# The meeting the consent page was opened for, as it was named then; none
+	# for a standing consent given with no meeting named.
 	MeetingName: String
-	# The meeting's owner in LMA; an "organizer" consent covers their meetings.
+	# The meeting's owner in LMA, or the address typed for a standing consent
+	# given with no meeting named; an "organizer" consent covers their meetings.
 	Organizer: String
 	# An "organizer" consent limited to the meetings with this label.
 	LabelKey: String
@@ -3700,7 +3707,9 @@ type AdvanceConsentList @aws_cognito_user_pools {
 
 type AdvanceConsentInvitation @aws_cognito_user_pools {
 	# Whether the caller's email address is on the meeting's participant list.
-	# When it is not, only Listed, Requested, Enabled and Email are returned.
+	# When it is not and a meeting is named, only Listed, Requested, Enabled
+	# and Email are returned. With no meeting named (a standing consent),
+	# Listed is false and the consent's fields and ActiveConsents are returned.
 	Listed: Boolean!
 	# Whether the caller has asked to be added to the list (in the last 30 days).
 	Requested: Boolean
@@ -3724,19 +3733,26 @@ type AdvanceConsentInvitation @aws_cognito_user_pools {
 	NoticeText: String
 	NoticeHash: String
 	MaxDays: Int
-	# The caller's consents in force that cover this meeting.
+	# The caller's consents in force that cover this meeting, or, with no
+	# meeting named, those in force for the same scope.
 	ActiveConsents: [AdvanceConsent]
 }
 
 input GiveAdvanceConsentInput {
+	# The meeting, by one of these; with neither, a standing consent.
 	CallId: ID
 	VirtualParticipantId: ID
-	# "meeting" (the default) or "organizer".
+	# "meeting" (the default) or "organizer" with a meeting named;
+	# "organizer" or "deployment" with none.
 	Scope: String
-	# YYYY-MM-DD, required for "organizer": at most the Meeting Consent
-	# setting's number of days ahead (365 at most).
+	# YYYY-MM-DD, required for "organizer" and "deployment": at most the
+	# Meeting Consent setting's number of days ahead (365 at most).
 	ValidUntil: String
 	LabelKey: String
+	# With no meeting named: the organizer's email address, for "organizer",
+	# and the label's value, with LabelKey.
+	Organizer: String
+	LabelValue: String
 	NoticeHash: String!
 }
 
