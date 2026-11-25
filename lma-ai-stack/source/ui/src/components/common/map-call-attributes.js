@@ -7,6 +7,27 @@ import { canonicalSentiment } from './channels';
 import getRecordingStatus from './get-recording-status';
 import { getSentimentTrendLabel, getWeightedSentimentLabel } from './sentiment';
 
+/**
+ * The meeting with no recording links once its recordings have been deleted
+ * under the Retention settings (recordingsDeletedAt), and as it is otherwise.
+ * The deletion removes the links from the meeting record with the files, and a
+ * recording stored afterwards is deleted when it arrives; this keeps a copy
+ * read before the deletion, or one that has not caught up yet, from offering a
+ * file that is gone. See docs/transcript-deletion.md.
+ */
+export const withoutDeletedRecordings = (meeting) =>
+  meeting?.recordingsDeletedAt
+    ? {
+        ...meeting,
+        recordingUrl: null,
+        videoRecordingUrl: null,
+        recordingUrls: [],
+        recordingUrlSessions: [],
+        videoRecordingUrls: [],
+        videoRecordingUrlSessions: [],
+      }
+    : meeting;
+
 /* Maps call attributes from API to a format that can be used in tables and panel */
 // eslint-disable-next-line arrow-body-style
 const mapCallsAttributes = (calls) => {
@@ -42,6 +63,10 @@ const mapCallsAttributes = (calls) => {
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
       TranscriptFilesDeleted: transcriptFilesDeleted,
+      // The same for the recordings, under their own Retention setting.
+      RecordingDeletionScheduledFor: recordingDeletionScheduledFor,
+      RecordingsDeletedAt: recordingsDeletedAt,
+      RecordingFilesDeleted: recordingFilesDeleted,
       // When the meeting record expires (epoch seconds), by the deployment's
       // days to keep meeting records.
       ExpiresAfter: expiresAfter,
@@ -100,7 +125,7 @@ const mapCallsAttributes = (calls) => {
     const agentSentimentByQuarter = sentiment?.SentimentByPeriod?.QUARTER?.LOCAL || [];
     const agentSentimentTrendLabel = getSentimentTrendLabel(agentSentimentByQuarter);
 
-    return {
+    return withoutDeletedRecordings({
       callId,
       agentId,
       callSummaryText,
@@ -133,6 +158,9 @@ const mapCallsAttributes = (calls) => {
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
       transcriptFilesDeleted,
+      recordingDeletionScheduledFor,
+      recordingsDeletedAt,
+      recordingFilesDeleted,
       expiresAfter,
       remoteParticipantName,
       systemLabel,
@@ -170,7 +198,7 @@ const mapCallsAttributes = (calls) => {
       sharedWith,
       listPK,
       listSK,
-    };
+    });
   });
 };
 
@@ -195,7 +223,7 @@ export const adoptMeetingCopy = (current, incoming) => {
   if (!current || !incoming) return incoming;
   const keep = (field) =>
     incoming[field] === undefined || incoming[field] === null ? current[field] : incoming[field];
-  return {
+  return withoutDeletedRecordings({
     ...incoming,
     ...(incoming.agendaUpdatedAt
       ? {}
@@ -230,6 +258,9 @@ export const adoptMeetingCopy = (current, incoming) => {
     transcriptDeletedAt: keep('transcriptDeletedAt'),
     transcriptSegmentsDeleted: keep('transcriptSegmentsDeleted'),
     transcriptFilesDeleted: keep('transcriptFilesDeleted'),
+    recordingDeletionScheduledFor: keep('recordingDeletionScheduledFor'),
+    recordingsDeletedAt: keep('recordingsDeletedAt'),
+    recordingFilesDeleted: keep('recordingFilesDeleted'),
     expiresAfter: keep('expiresAfter'),
     transcriptionPause: keep('transcriptionPause'),
     // The session playback fields: every write published to onUpdateCall
@@ -254,7 +285,7 @@ export const adoptMeetingCopy = (current, incoming) => {
     // Selected by getCall, onUpdateCall and updateCallWhiteboards only; a write
     // that does not select it arrives with it null, which keeps the copy held.
     whiteboardsEnabled: keep('whiteboardsEnabled'),
-  };
+  });
 };
 
 /** Whether a newer copy of a meeting carries a different agenda from the copy on screen. */

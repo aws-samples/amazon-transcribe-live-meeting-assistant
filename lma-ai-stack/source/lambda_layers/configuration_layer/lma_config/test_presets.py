@@ -59,7 +59,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "accept_with_warning",
             "leaveOnObjection": False,
         },
-        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "off",
+            "recordingDeletionAfterSummary": "off",
+        },
         "recording": {"recordAudio": True, "recordScreenVideo": True, "recordVpMeetingVideo": True},
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
@@ -76,7 +79,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "accept_with_warning",
             "leaveOnObjection": False,
         },
-        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "off",
+            "recordingDeletionAfterSummary": "off",
+        },
         "recording": {"recordAudio": True, "recordScreenVideo": True, "recordVpMeetingVideo": True},
         "virtual_participant": {"captureMeetingChat": True},
         "transcription": {"contentRedactionEnabled": False},
@@ -93,7 +99,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
         },
-        "retention": {"transcriptDeletionAfterSummary": "after_15_minutes"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "after_15_minutes",
+            "recordingDeletionAfterSummary": "immediately",
+        },
         "recording": {
             "recordAudio": False,
             "recordScreenVideo": False,
@@ -114,7 +123,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
         },
-        "retention": {"transcriptDeletionAfterSummary": "after_15_minutes"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "after_15_minutes",
+            "recordingDeletionAfterSummary": "immediately",
+        },
         "recording": {
             "recordAudio": False,
             "recordScreenVideo": False,
@@ -135,7 +147,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
         },
-        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "off",
+            "recordingDeletionAfterSummary": "off",
+        },
         "recording": {
             "recordAudio": False,
             "recordScreenVideo": False,
@@ -165,7 +180,10 @@ PRESET_VALUES = {
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": False,
         },
-        "retention": {"transcriptDeletionAfterSummary": "off"},
+        "retention": {
+            "transcriptDeletionAfterSummary": "off",
+            "recordingDeletionAfterSummary": "off",
+        },
         "recording": {
             "recordAudio": False,
             "recordScreenVideo": True,

@@ -1545,6 +1545,15 @@ def test_the_transcript_deletion_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_recording_deletion_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_RECORDING_DELETION=1, and change a deployment-wide setting."""
+    import test_recording_deletion
+
+    names = [m.name for m in test_recording_deletion.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 def test_the_assistant_profile_tests_are_opt_in_optional_features() -> None:
     """They need LMA_TEST_ASSISTANT_PROFILE=1, and change a deployment-wide setting."""
     import test_assistant_profile

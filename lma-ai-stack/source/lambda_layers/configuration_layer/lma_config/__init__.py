@@ -75,6 +75,7 @@ from .presets import (
     preset_offered,
     shipped_presets,
 )
+from .recording_deletion import recording_deletion_delay_minutes
 from .revisions import (
     DEFAULT_RETAINED_REVISIONS,
     MAX_COMMENT_LENGTH,
@@ -213,6 +214,7 @@ __all__ = [
     "resolve_model_id",
     "deep_merge",
     "deletion_delay_minutes",
+    "recording_deletion_delay_minutes",
     "diff_bodies",
     "is_profile_key",
     "knowledge_base_prompt_templates",

@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { describe, it, expect } from 'vitest';
-import mapCallsAttributes, { adoptMeetingCopy, agendaChanged } from './map-call-attributes';
+import mapCallsAttributes, { adoptMeetingCopy, agendaChanged, withoutDeletedRecordings } from './map-call-attributes';
 
 const call = (sentiment) => ({ CallId: 'c1', CreatedAt: '2026-01-01T00:00:00Z', Sentiment: sentiment });
 const quarters = (score) => [1, 2, 3, 4].map((i) => ({ BeginOffsetMillis: i, EndOffsetMillis: i + 1, Score: score }));
@@ -40,6 +40,52 @@ describe('mapCallsAttributes sentiment', () => {
     const [item] = mapCallsAttributes([call(undefined)]);
     expect(item.callerAverageSentiment).toBe(0);
     expect(item.agentAverageSentiment).toBe(0);
+  });
+});
+
+describe('recordings deleted under the Retention settings', () => {
+  const LINKS = {
+    RecordingUrl: 'https://b.s3.us-east-1.amazonaws.com/lma-audio-recordings/m_s2.wav',
+    RecordingUrls: ['https://b.s3.us-east-1.amazonaws.com/lma-audio-recordings/m.wav'],
+    RecordingUrlSessions: [1],
+    VideoRecordingUrl: 'https://b.s3.us-east-1.amazonaws.com/lma-video-recordings/m.mp4',
+    VideoRecordingUrls: ['https://b.s3.us-east-1.amazonaws.com/lma-video-recordings/m.mp4'],
+    VideoRecordingUrlSessions: [1],
+  };
+  const NO_LINKS = {
+    recordingUrl: null,
+    videoRecordingUrl: null,
+    recordingUrls: [],
+    recordingUrlSessions: [],
+    videoRecordingUrls: [],
+    videoRecordingUrlSessions: [],
+  };
+
+  it('maps the deletion fields and offers no recording once they are deleted', () => {
+    const [item] = mapCallsAttributes([
+      { ...call(), ...LINKS, RecordingsDeletedAt: '2026-11-05T11:00:00Z', RecordingFilesDeleted: 4 },
+    ]);
+    expect(item).toMatchObject({ recordingsDeletedAt: '2026-11-05T11:00:00Z', recordingFilesDeleted: 4, ...NO_LINKS });
+  });
+
+  it('keeps the links of a meeting whose deletion is only scheduled', () => {
+    const [item] = mapCallsAttributes([{ ...call(), ...LINKS, RecordingDeletionScheduledFor: '2026-11-05T11:15:00Z' }]);
+    expect(item.recordingDeletionScheduledFor).toBe('2026-11-05T11:15:00Z');
+    expect(item.recordingUrl).toBe(LINKS.RecordingUrl);
+    expect(item.videoRecordingUrls).toEqual(LINKS.VideoRecordingUrls);
+  });
+
+  it('keeps the deletion, and no links, through a copy that read neither', () => {
+    const [shown] = mapCallsAttributes([{ ...call(), RecordingsDeletedAt: '2026-11-05T11:00:00Z' }]);
+    // The meeting list's copy, read before the deletion: links, no deletion time.
+    const [fromList] = mapCallsAttributes([{ ...call(), ...LINKS }]);
+    const next = adoptMeetingCopy(shown, fromList);
+    expect(next).toMatchObject({ recordingsDeletedAt: '2026-11-05T11:00:00Z', ...NO_LINKS });
+  });
+
+  it('leaves a meeting with nothing deleted as it is', () => {
+    const meeting = { callId: 'c1', recordingUrl: 'https://b/a.wav' };
+    expect(withoutDeletedRecordings(meeting)).toBe(meeting);
   });
 });
 

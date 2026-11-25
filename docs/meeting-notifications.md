@@ -337,5 +337,5 @@ function.
 - [MCP API Key Authentication](mcp-api-key-auth.md): `push_meeting_guidance`,
   `list_meeting_guidance` and `list_meeting_notifications`
 - [User-Based Access Control](user-based-access-control.md)
-- [Transcript Deletion After the Summary](transcript-deletion.md)
+- [Transcript and Recording Deletion After the Summary](transcript-deletion.md)
 - [Privacy and Data Handling](privacy-and-data-handling.md)
