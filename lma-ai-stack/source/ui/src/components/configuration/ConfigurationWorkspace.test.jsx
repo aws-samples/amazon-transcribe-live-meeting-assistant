@@ -75,6 +75,7 @@ const TIERS = {
   virtual_participant: 'immediate',
   retention: 'standard',
   meeting_agenda: 'standard',
+  meeting_sharing: 'immediate',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -153,6 +154,7 @@ const DEFAULTS = {
   // The shipped defaults, read from the file the seeder ships them in.
   meeting_consent: CONSENT_DEFAULTS,
   meeting_agenda: { autoDeriveAfterSeconds: 300 },
+  meeting_sharing: { shareWithListedParticipants: true },
   virtual_participant: {
     voiceAssistantProvider: 'none',
     voiceAssistantActivationMode: 'wake_phrase',

@@ -36,8 +36,11 @@ export const MOVED_CONFIGURATION_PAGES = {
 // The troubleshooting agent's page, for the Admin group.
 export const TROUBLESHOOTING_PATH = '/troubleshooting';
 export const DEFAULT_PATH = CALLS_PATH;
-// The Participant role's home page, and the only page it opens.
+// The Participant role's home page.
 export const HOME_PATH = '/home';
+// A Participant's read-only list of the meetings shared with them, and each
+// meeting's page under it (/shared-meetings/<CallId>).
+export const SHARED_MEETINGS_PATH = '/shared-meetings';
 export const EMBED_PATH = '/embed';
 // The enrollment portal. Top-level rather than under /configuration, because
 // enrolling your own voice is something every user does for themselves, not an

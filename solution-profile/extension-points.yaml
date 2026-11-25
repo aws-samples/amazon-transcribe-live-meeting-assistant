@@ -95,7 +95,7 @@ extension_points:
     evidence:
       - docs/meeting-assistant.md#chat-shortcut-button-configuration
       - docs/meeting-assistant.md#assistant-instructions
-      - docs/meeting-assistant.md#in-meeting-requests
+      - docs/meeting-assistant.md#participant-use
     when_to_use: Shape the assistant for the customer's meetings and audience.
     constraints:
       - The fixed part of the instructions, which treats tool results as data, cannot be changed by configuration.

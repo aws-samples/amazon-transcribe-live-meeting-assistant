@@ -166,18 +166,18 @@ A library of up to 40 skills is read. The pages and the SDK send a large library
 
 | Setting | Stored as | Effect |
 |---|---|---|
-| **Enabled** | `enabled` | Off: the assistant does not use the skill at all, for the owner's requests or for in-meeting ones. On, or not set, is the default. |
-| **In-meeting requests** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for in-meeting requests. Not set: the In-meeting requests setting decides, as for every skill: under **Selected tools**, the **In-meeting requests: skills** switch (`inMeetingSkills`); under **Unrestricted**, allowed. |
+| **Owner use** | `enabled` | Off: the assistant does not use the skill at all, for Owner use or for Participant use. On, or not set, is the default. |
+| **Participant use** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for [Participant use](meeting-assistant.md#participant-use). Not set: the Participant use setting decides, as for every skill: under **Selected tools**, the **Participant use: skills** switch (`inMeetingSkills`); under **Unrestricted**, allowed. |
 | **Always on** | `alwaysOn` | Reserved for a later always-on mode. It is stored and validated, and nothing reads it yet. |
 
 How a request is offered skills, as for [MCP servers](meeting-assistant.md#choosing-mcp-servers-one-by-one):
 
 - **The meeting page's chat** (the owner's own requests) is offered every skill that is not turned off.
 - **Current meeting only** offers no skill, whatever a skill's own setting.
-- **Selected tools** offers a skill when its own **In-meeting requests** is Allowed, or when it is not set and the **In-meeting requests: skills** switch is on.
+- **Selected tools** offers a skill when its own **Participant use** is Allowed, or when it is not set and the **Participant use: skills** switch is on.
 - **Unrestricted** offers every skill not turned off, except one set to Not allowed.
 
-A skill the profile does not name is offered as the defaults say, so a profile with no skill entries offers every skill to the owner's requests and none to in-meeting requests under the shipped In-meeting requests setting. The assistant is told, by name, which skills are not available for a request (those turned off or not allowed), so that it says so when a request needs one. A profile entry for a skill that is not stored has no effect.
+A skill the profile does not name is offered as the defaults say, so a profile with no skill entries offers every skill for Owner use and none for Participant use under the shipped Participant use setting. The assistant is told, by name, which skills are not available for a request (those turned off or not allowed), so that it says so when a request needs one. A profile entry for a skill that is not stored has no effect.
 
 The selection is in the profile, and so is versioned, compared, exported and imported with the rest of it; the skills themselves move with the skill library.
 

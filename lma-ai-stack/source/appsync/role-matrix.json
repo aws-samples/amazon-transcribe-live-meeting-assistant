@@ -3,7 +3,7 @@
   "roles": {
     "Admin": "Member of the Admin Cognito group. Every meeting, the configuration and user management.",
     "User": "A user in neither the Admin nor the Participant group. Their own meetings and those shared with them, and every meeting source.",
-    "Participant": "Member of the Participant Cognito group. Signs in to a minimal home page; no meeting data, meeting sources or configuration."
+    "Participant": "Member of the Participant Cognito group. Reads the meetings shared with them, read-only and without the owner's own material, asks the meeting assistant about them, and enrolls their own voice; no meeting sources, configuration or other meetings."
   },
   "effectiveRole": {
     "description": "A caller's role from their Cognito groups: Admin when the groups include Admin, otherwise Participant when they include Participant, otherwise User. The pre token generation trigger replaces the role groups in each token's cognito:groups claim with this one role, keeps any other group, and adds the role to the ID token as the lma_role claim. Implemented by lma-cognito-stack/source/pre_token_generation/index.py, lma-ai-stack/source/ui/src/components/common/roles.js, lma-websocket-transcriber-stack/source/app/src/utils/roles.ts, mcp_api_key_authorizer, mcp_analytics/index.py and user_management; each one's tests check it against these vectors.",
@@ -32,6 +32,21 @@
       "appsync": [],
       "surfaces": [],
       "uiRoutes": ["/home"]
+    },
+    {
+      "id": "participant-meetings",
+      "title": "A Participant's read-only view of the meetings shared with them: the list, and each meeting's transcript (live while it is in progress), summary, meeting chat, recordings and consent record",
+      "roles": ["Participant"],
+      "notes": "Only meetings whose sharing list names them. Not the owner's own material: the meeting context, checklist, labels, guidance, whiteboards, the assistant's answers, the sharing list and the participant addresses. Recordings play through links the server signs for the meeting; the identity pool gives a Participant no permissions.",
+      "appsync": [
+        "Query.listParticipantMeetings",
+        "Query.getParticipantMeeting",
+        "Query.getParticipantMeetingTranscript",
+        "Query.getParticipantMeetingRecordings",
+        "Subscription.onAddParticipantTranscriptSegment"
+      ],
+      "surfaces": [],
+      "uiRoutes": ["/shared-meetings"]
     },
     {
       "id": "meetings",
@@ -124,14 +139,21 @@
       "uiRoutes": []
     },
     {
+      "id": "meeting-detail-agent",
+      "title": "The meeting assistant chat on a meeting's page",
+      "roles": ["Admin", "User", "Participant"],
+      "notes": "Admin: every meeting. User: their own meetings and those shared with them. Participant: the meetings shared with them, answered with the tools approved for Participant use and from that meeting only, and not added to its transcript.",
+      "appsync": ["Mutation.sendChatMessage", "Subscription.onAddChatToken"],
+      "surfaces": [],
+      "uiRoutes": []
+    },
+    {
       "id": "meeting-assistant",
-      "title": "Meeting assistant chat, the Meetings Query Tool, the knowledge base, and reading the installed MCP servers and skills",
+      "title": "The Meetings Query Tool, the knowledge base, the chat buttons, the meeting page's chat notifications, and reading the installed MCP servers and skills",
       "roles": ["Admin", "User"],
       "notes": "",
       "appsync": [
-        "Mutation.sendChatMessage",
         "Subscription.onSendChatMessage",
-        "Subscription.onAddChatToken",
         "Query.queryKnowledgeBase",
         "Query.getChatButtonConfig",
         "Query.listInstalledMCPServers",
@@ -208,8 +230,8 @@
     {
       "id": "voice-enrollment",
       "title": "Enrolling your own voice",
-      "roles": ["Admin", "User"],
-      "notes": "",
+      "roles": ["Admin", "User", "Participant"],
+      "notes": "Each person their own voice only: enrolling it, and deleting it.",
       "appsync": [
         "Query.voiceEnrollmentTerms",
         "Mutation.grantVoiceConsent",

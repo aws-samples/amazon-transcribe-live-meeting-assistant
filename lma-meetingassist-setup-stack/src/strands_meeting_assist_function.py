@@ -1056,8 +1056,14 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
     return meeting_history
 
 
-def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
-    """Factory function to create current meeting transcript tool with closure"""
+def create_current_meeting_transcript_tool(
+    call_id: str, dynamodb_table_name: str, message_id: str = None, include_assistant: bool = True
+):
+    """Factory function to create current meeting transcript tool with closure.
+
+    Without ``include_assistant`` the transcript leaves out the meeting
+    assistant's answers (see query_transcript_items).
+    """
     from strands import tool
     
     @tool
@@ -1115,7 +1121,10 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             
             # Fetch full transcript
             full_transcript = fetch_meeting_transcript(
-                call_id, dynamodb_table_name, with_timestamps=with_timestamps
+                call_id,
+                dynamodb_table_name,
+                with_timestamps=with_timestamps,
+                include_assistant=include_assistant,
             )
 
             if not full_transcript:
@@ -1943,7 +1952,8 @@ def create_chat_attachments_tool(call_id: str, message_id: str = None):
 
 
 def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id: str,
-                               show_inline: bool, message_id: str = None):
+                               show_inline: bool, message_id: str = None,
+                               include_assistant: bool = True):
     """Factory for the tool that shows the agent the meeting's shared screen.
 
     Offered in every tool scope, the meeting chat's included: the frames are
@@ -2019,7 +2029,9 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                 # A transcript that cannot be read costs the frames their
                 # transcript, not the frames themselves.
                 try:
-                    segments = query_transcript_items(call_id, dynamodb_table_name)
+                    segments = query_transcript_items(
+                        call_id, dynamodb_table_name, include_assistant=include_assistant
+                    )
                 except Exception as e:
                     logger.warning(f"Meeting frames tool: transcript unreadable, frames go without it: {str(e)}")
             result = meeting_frames.build_tool_result(
@@ -2060,12 +2072,17 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
 
 
 def query_transcript_items(
-    call_id: str, dynamodb_table_name: str, include_chat: bool = False
+    call_id: str,
+    dynamodb_table_name: str,
+    include_chat: bool = False,
+    include_assistant: bool = True,
 ) -> List[Dict[str, Any]]:
     """The meeting's final transcript segments (speaker, assistant and caller lines), unsorted.
 
     With ``include_chat``, the messages typed in the meeting chat
-    (MEETING_CHAT_CHANNEL) too. Raises on a read failure;
+    (MEETING_CHAT_CHANNEL) too. Without ``include_assistant``, not the meeting
+    assistant's own answers to the wake phrase (AGENT_ASSISTANT), which a
+    Participant's question is not given. Raises on a read failure;
     fetch_meeting_transcript turns that into an empty transcript.
     """
     table = dynamodb.Table(dynamodb_table_name)
@@ -2084,7 +2101,7 @@ def query_transcript_items(
         'FilterExpression': (
             Attr('Channel').is_in([
                 *STORED_SPEECH_CHANNELS,
-                'AGENT_ASSISTANT',
+                *(['AGENT_ASSISTANT'] if include_assistant else []),
                 *([MEETING_CHAT_CHANNEL] if include_chat else []),
             ])
             & Attr('IsPartial').eq(False)
@@ -2154,7 +2171,12 @@ def chat_line_text(text: Any) -> str:
     return one_line
 
 
-def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
+def fetch_meeting_transcript(
+    call_id: str,
+    dynamodb_table_name: str,
+    with_timestamps: bool = False,
+    include_assistant: bool = True,
+) -> str:
     """
     Fetch the meeting transcript from DynamoDB.
 
@@ -2168,7 +2190,9 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
     what was typed from what was said.
     """
     try:
-        items = query_transcript_items(call_id, dynamodb_table_name, include_chat=True)
+        items = query_transcript_items(
+            call_id, dynamodb_table_name, include_chat=True, include_assistant=include_assistant
+        )
 
         # Sort by EndTime and format transcript
         # By end time as before; by start time when lines carry their start
@@ -2270,12 +2294,23 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         return ""
 
 
-# In-meeting requests: a request made in the meeting by whoever is in it rather
-# than by the signed-in LMA user on the meeting page. Each caller names its own
-# toolScope: the Virtual Participant's meeting chat (`LMA ask`) and voice
-# assistant lookups, and the wake phrase spoken in the transcript
-# (async_agent_assist_orchestrator). The meeting page's own chat sends none.
-IN_MEETING_TOOL_SCOPES = ('meeting_chat', 'voice_assistant', 'wake_phrase')
+# Participant use (the settings keep their older inMeeting* keys): a request
+# made by someone other than the meeting's owner and the users it is shared
+# with. Each caller names its own toolScope: the Virtual Participant's meeting
+# chat (`LMA ask`) and voice assistant lookups, and the wake phrase spoken in
+# the transcript (async_agent_assist_orchestrator), which are made in the
+# meeting by whoever is in it; and a question a Participant asks on the page of
+# a meeting shared with them (PARTICIPANT_PAGE_SCOPE, passed by the
+# orchestrator for strands_chat_interface). The owner's own chat on the meeting
+# page sends none. One approval covers them all: the same settings decide what
+# each is answered with, and who may ask.
+PARTICIPANT_PAGE_SCOPE = 'participant_page'
+IN_MEETING_TOOL_SCOPES = ('meeting_chat', 'voice_assistant', 'wake_phrase', PARTICIPANT_PAGE_SCOPE)
+
+# What a Participant's question on a shared meeting's page is never offered,
+# whatever the Participant use settings say: the tool groups that act on the
+# owner's live session (the Virtual Participant's browser and preview).
+PARTICIPANT_PAGE_EXCLUDED_GROUPS = frozenset({'vp_controls'})
 
 # What an in-meeting request may be answered with: the Meeting Assistant
 # section's inMeetingRequestTools setting. The values, and the one used when
@@ -2630,6 +2665,16 @@ class InMeetingScope(NamedTuple):
         """The question was typed in the meeting chat, where everyone reads the answer."""
         return self.tool_scope == 'meeting_chat'
 
+    @property
+    def from_participant_page(self) -> bool:
+        """A Participant asked on the page of a meeting shared with them.
+
+        Answered from what that page shows: not the meeting context or
+        checklist, whatever inMeetingContextAccess says, and not the meeting
+        assistant's earlier answers in the transcript, which are the owner's.
+        """
+        return self.tool_scope == PARTICIPANT_PAGE_SCOPE
+
 
 def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
     """Which tools a request is offered, and the user email to use.
@@ -2661,6 +2706,8 @@ def in_meeting_scope(event: Dict[str, Any]) -> InMeetingScope:
     (webSearchEnabled, mcpServersEnabled) is taken out of what it is offered.
     """
     scope = _in_meeting_scope_before_turned_off(event)
+    if scope.tool_scope == PARTICIPANT_PAGE_SCOPE:
+        scope = scope._replace(tool_groups=scope.tool_groups - PARTICIPANT_PAGE_EXCLUDED_GROUPS)
     turned_off = configured_turned_off_tool_groups() & scope.tool_groups
     if not turned_off:
         return scope
@@ -2864,7 +2911,14 @@ def handler(event, context):
         web_search_configured = tavily_secret.is_configured()
         
         # Fetch meeting transcript from DynamoDB
-        transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
+        # A Participant's question is given what their page shows: not the
+        # meeting assistant's earlier answers.
+        include_assistant = not request_scope.from_participant_page
+        transcript = (
+            fetch_meeting_transcript(call_id, dynamodb_table_name, include_assistant=include_assistant)
+            if dynamodb_table_name
+            else event.get('transcript', '')
+        )
         
         # Get message ID early for tool wrappers and status updates. A caller that
         # supplies no id of its own has no subscriber either; see
@@ -3116,7 +3170,8 @@ def handler(event, context):
             tools.append(create_current_meeting_transcript_tool(
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
-                message_id=message_id
+                message_id=message_id,
+                include_assistant=include_assistant,
             ))
             logger.info("Current meeting transcript tool enabled")
 
@@ -3135,8 +3190,10 @@ def handler(event, context):
         # a request made in the meeting only when an Admin allows it, whatever
         # In-meeting requests is set to. The context can hold the owner's
         # preparation notes, and an in-meeting answer reaches everyone there.
+        # Never to a Participant: the context and checklist are the owner's,
+        # and their page does not show them.
         context_tools_offered = False
-        if dynamodb_table_name and meeting_preparation.context_tools_allowed(
+        if dynamodb_table_name and not request_scope.from_participant_page and meeting_preparation.context_tools_allowed(
             request_scope.tool_scope,
             configured_in_meeting_context_access() if request_scope.tool_scope else '',
         ):
@@ -3159,8 +3216,15 @@ def handler(event, context):
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
                 model_id=model_id,
-                show_inline=bool(transcript_segment_args.get('MessageId')) and not request_scope.from_meeting_chat,
-                message_id=message_id
+                # Not on a Participant's page either: an inline frame is shown
+                # through the identity pool credentials, which a Participant has none of.
+                show_inline=(
+                    bool(transcript_segment_args.get('MessageId'))
+                    and not request_scope.from_meeting_chat
+                    and not request_scope.from_participant_page
+                ),
+                message_id=message_id,
+                include_assistant=include_assistant,
             ))
             logger.info("Meeting frames tool enabled")
 

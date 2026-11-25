@@ -228,3 +228,34 @@ def test_a_wake_phrase_request_carries_its_channel_and_the_capture_source(writte
 def test_a_capture_source_that_cannot_be_read_is_sent_as_unknown(written, table):
     written({"Channel": "LOCAL", "StartTime": 12.0, "EndTime": 14.0}, table)
     assert REQUESTS[0]["requestCaptureSource"] == ""
+
+
+PARTICIPANT_QUESTION = {
+    **CHAT_QUESTION,
+    "Owner": "pat@example.com",
+    "RequesterRole": "Participant",
+    "MeetingOwner": "owner@example.com",
+}
+
+
+def test_a_participants_question_is_answered_under_participant_use_for_the_owner(written):
+    written(PARTICIPANT_QUESTION, _meeting(1_000))
+    (request,) = REQUESTS
+    assert request["toolScope"] == "participant_page"
+    assert request["userEmail"] == "owner@example.com"
+    assert "requestChannel" not in request
+
+
+def test_a_participants_question_and_answer_are_not_added_to_the_transcript(written):
+    assert written(PARTICIPANT_QUESTION, _meeting(1_000)) == []
+    # Only a Participant's: another user's question on the meeting page is kept.
+    assert len(written({**CHAT_QUESTION, "RequesterRole": "User"}, _meeting(1_000))) == 2
+    # And the role counts only with the meeting page's chat channel.
+    spoken = {
+        "Channel": "AGENT_ASSISTANT",
+        "StartTime": 1.0,
+        "EndTime": 2.0,
+        "RequesterRole": "Participant",
+    }
+    assert len(written(spoken, _meeting(1_000))) == 2
+    assert REQUESTS[-1]["toolScope"] == "wake_phrase"

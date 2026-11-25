@@ -522,9 +522,9 @@ type Mutation @aws_iam {
 	# answer is read with getTroubleshootingJob. For the Admin group, and
 	# re-checked in the resolver Lambda. See docs/troubleshooting-agent.md.
 	startTroubleshooting(input: StartTroubleshootingInput!): TroubleshootingJob @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
-	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
-	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call @aws_iam
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment @aws_iam
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
@@ -587,7 +587,11 @@ type Mutation @aws_iam {
 	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
-	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	# The meeting assistant chat of a meeting's page. Answered for a caller who
+	# may read the meeting: an Admin, its owner or someone it is shared with. A
+	# Participant's question is answered with the tools approved for Participant
+	# use, from the shared meeting only, and is not added to its transcript.
+	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	# The four configuration records below are account-wide: one stored item drives
 	# every meeting in the deployment. Writing them is an administrator operation,
@@ -671,7 +675,7 @@ type Query @aws_iam {
 	listSummaryProfiles: [SummaryProfileOption] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# What the enrollment portal shows its visitor about their own enrollment,
 	# including the terms text whose hash is stored with a consent.
-	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	# A meeting's segments a page at a time: pass each page's nextToken back
 	# until it is null. A page can hold no segments and still carry a nextToken.
 	getTranscriptSegments(callId: ID!, isPartial: Boolean, nextToken: String): TranscriptSegmentList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
@@ -774,6 +778,14 @@ type Query @aws_iam {
 	getMeetingParticipantAccounts(CallId: ID, VirtualParticipantId: ID): [MeetingParticipantAccount] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	# A Participant's read-only view of the meetings shared with them
+	# (participant_meeting_resolver): the list, one meeting, its transcript a
+	# page at a time, and signed links to its recordings. Each answers only a
+	# meeting whose SharedWith names the caller.
+	listParticipantMeetings(startDateTime: AWSDateTime, endDateTime: AWSDateTime, limit: Int, nextToken: String): ParticipantMeetingList @aws_cognito_user_pools(cognito_groups: ["Participant"])
+	getParticipantMeeting(CallId: ID!): ParticipantMeeting @aws_cognito_user_pools(cognito_groups: ["Participant"])
+	getParticipantMeetingTranscript(CallId: ID!, nextToken: String): ParticipantTranscriptPage @aws_cognito_user_pools(cognito_groups: ["Participant"])
+	getParticipantMeetingRecordings(CallId: ID!): [ParticipantMeetingRecording] @aws_cognito_user_pools(cognito_groups: ["Participant"])
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
@@ -1256,7 +1268,7 @@ type Subscription @aws_iam {
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
-		@aws_subscribe(mutations: ["addChatToken"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+		@aws_subscribe(mutations: ["addChatToken"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	onShareMeetings: ShareMeetingsOutput
 		@aws_subscribe(mutations: ["shareMeetings"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onDeleteCall: DeleteCallOutput
@@ -1269,6 +1281,14 @@ type Subscription @aws_iam {
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant", "rejoinVirtualParticipant"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl
 		@aws_subscribe(mutations: ["toggleVNCPreview"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	# The live transcript of a meeting shared with a Participant
+	# (participantTranscriptSubscription.js): what is said and typed in the
+	# meeting chat, not the meeting assistant's answers. Admitted only while the
+	# meeting is shared with the caller, each message checked against the
+	# sharing list it is published with, and only for a selection of the fields
+	# ParticipantTranscriptSegment has.
+	onAddParticipantTranscriptSegment(CallId: ID!): TranscriptSegment
+		@aws_subscribe(mutations: ["addTranscriptSegment"]) @aws_cognito_user_pools(cognito_groups: ["Participant"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -3461,4 +3481,97 @@ schema {
 	query: Query
 	mutation: Mutation
 	subscription: Subscription
+}
+
+# ----------------------------------------------------------------------------
+# A Participant's read-only view of a meeting shared with them
+# (participant_meeting_resolver). Types of their own rather than Call and
+# TranscriptSegment, so that a field those gain later reaches a Participant
+# only when it is added here as well. What is shown and what is not is listed
+# in docs/user-based-access-control.md#participant.
+# ----------------------------------------------------------------------------
+
+type ParticipantMeeting @aws_cognito_user_pools {
+	CallId: ID!
+	CreatedAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+	Status: CallStatus
+	TotalConversationDurationMillis: Float
+	# The meeting's owner, who shared it.
+	Owner: String
+	MeetingPlatform: String
+	Agenda: String
+	CallSummaryText: String
+	# CallSummaryState's status: "running", "failed", "idle" or absent.
+	SummaryStatus: String
+	ActionItems: [ActionItem]
+	# The speaker name map the transcript's speakers are resolved with, as the
+	# meeting record's SpeakerIdentities holds it, without the attendee
+	# candidates, the rejected names or the naming pass's bookkeeping.
+	SpeakerIdentities: String
+	# The name given for the other participants (Call.CustomerPhoneNumber).
+	OtherParticipantsName: String
+	# The names on the meeting's participant list; never their addresses.
+	ParticipantNames: [String]
+	Consent: ParticipantMeetingConsent
+	HasAudioRecording: Boolean
+	HasVideoRecording: Boolean
+	Sessions: [CallSession]
+	TranscriptDeletedAt: AWSDateTime
+	RecordingsDeletedAt: AWSDateTime
+}
+
+type ParticipantMeetingList @aws_cognito_user_pools {
+	Meetings: [ParticipantMeeting]
+	nextToken: String
+}
+
+# The meeting's consent record: its mode, status, notice and replies. Not its
+# attestation statement, evidence or status history.
+type ParticipantMeetingConsent @aws_cognito_user_pools {
+	Mode: String
+	Rule: String
+	Status: String
+	CaptureAllowed: Boolean
+	NoticeText: String
+	NoticePostedAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+	Replies: [ParticipantConsentReply]
+}
+
+type ParticipantConsentReply @aws_cognito_user_pools {
+	ParticipantName: String
+	# "consent" or "objection".
+	Decision: String
+	# "chat", "voice", "ui" or "attestation".
+	Source: String
+	OccurredAt: AWSDateTime
+}
+
+type ParticipantTranscriptSegment @aws_cognito_user_pools {
+	CallId: ID!
+	SegmentId: ID!
+	StartTime: Float
+	EndTime: Float
+	Transcript: String
+	IsPartial: Boolean
+	Channel: Channel
+	Speaker: String
+	LanguageCode: String
+	CreatedAt: AWSDateTime
+}
+
+type ParticipantTranscriptPage @aws_cognito_user_pools {
+	Segments: [ParticipantTranscriptSegment]
+	nextToken: String
+}
+
+# A link to one recording of the meeting, signed for an hour.
+type ParticipantMeetingRecording @aws_cognito_user_pools {
+	# "AUDIO" or "VIDEO".
+	Kind: String!
+	# The capture session it was recorded in, when the meeting record says.
+	SessionNumber: Int
+	Url: String!
+	ExpiresInSeconds: Int
 }

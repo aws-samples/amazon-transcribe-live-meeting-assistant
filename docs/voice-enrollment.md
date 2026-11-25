@@ -172,17 +172,29 @@ which destroys the voiceprints and leaves only the log.
 
 Anyone with an account in the deployment can enroll their own voice, and nobody
 can enroll anybody else's. **Enroll My Voice** appears in the navigation for every
-user when `EnableVoiceEnrollment` is `true`.
+Admin and User when `EnableVoiceEnrollment` is `true`.
+
+A [Participant](user-based-access-control.md#participant) can enroll their own
+voice too, and delete it: **Voice enrollment** is in the navigation of every
+Participant, and its page says when enrollment is not available in the
+deployment. That is all a Participant can do here, as for every role: read the
+terms, give consent, record the enrollment script, and withdraw consent, which
+deletes the voiceprint. They cannot revoke anybody else's, which only an Admin
+can do. The operations (`voiceEnrollmentTerms`, `grantVoiceConsent`,
+`enrolMyVoice`, `revokeVoiceConsent`) name all three roles, and each acts only on
+the caller's own enrollment.
 
 There is no administrative enrollment action, and that is a property of the
 design rather than a gap in the UI: a consent somebody else gives on your behalf
 is not consent. An admin can revoke on somebody's behalf — for a person who has
 left — which is recorded with the admin as the actor.
 
-**People without an account in the deployment cannot currently enroll.** The
-obvious use for this feature is the participant from another company or the
-contractor in a meeting room, and they are exactly who it does not yet serve,
-because enrolling would mean issuing them an account here. See
+**People without an account in the deployment cannot enroll.** The participant
+from another company or the contractor in a meeting room can enroll once they
+hold a Participant account, which a meeting's owner can create for the people
+on its participant list (see
+[Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting)),
+and which gives them no access to meetings that are not shared with them. See
 [limits we hold deliberately](#limits-we-hold-deliberately).
 
 ## Enrolling a voice
@@ -343,13 +355,13 @@ organisation that wants a shorter cycle can set one.
   voiceprint.
 - **No cross-deployment sharing.** A centroid stays in the account and table it
   was created in.
-- **People outside the deployment cannot enroll yet.** Enrolling requires an
-  account here, so the external participant and the contractor in a meeting
-  room — the people this feature is most useful for — are not served by it
-  today. Inviting them would mean issuing them credentials to this deployment,
-  which is a larger decision than enrollment, and it is deliberately not part
-  of this feature. Their voices are named the way they were before: by hand on
-  the Speakers panel, or from
+- **People outside the deployment enroll only with a Participant account.**
+  Enrolling requires an account here. The external participant and the
+  contractor in a meeting room can be given a
+  [Participant](user-based-access-control.md#participant) account, which reads
+  only the meetings shared with it; issuing one is a decision for the meeting's
+  owner or an Admin, not something enrollment does. Without one, their voices
+  are named the way they were before: by hand on the Speakers panel, or from
   [what they say in the meeting](transcription-and-translation.md#finding-the-names-automatically).
 - **A match is not yet distinguishable from a typed name.** See
   [how a match is used](#how-a-match-is-used).

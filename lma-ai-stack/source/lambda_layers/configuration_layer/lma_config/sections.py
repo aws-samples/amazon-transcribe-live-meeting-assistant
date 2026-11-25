@@ -387,6 +387,22 @@ MEETING_AGENDA = register(
     )
 )
 
+#: Whether a meeting is shared with the people on its participant list, as
+#: soon as the meeting record exists and whenever the list changes. Read by
+#: the meeting controls function when the meetings table's stream shows a
+#: meeting record whose list and LMA's shares of it disagree. See
+#: docs/user-based-access-control.md#meeting-sharing.
+#:
+#: Immediate tier, because it is privacy-bearing: an administrator who turns it
+#: off is promised that no meeting is shared this way after the save.
+MEETING_SHARING = register(
+    SectionSpec(
+        name="meeting_sharing",
+        cache_tier=CacheTier.IMMEDIATE,
+        description="Whether a meeting is shared with the people on its participant list.",
+    )
+)
+
 #: How long meeting records and transcript segments are kept: the time each one
 #: is given to live when it is written. The stack parameter of each setting is
 #: both its default and its upper limit (``maximumIsDefault`` in the schema), so

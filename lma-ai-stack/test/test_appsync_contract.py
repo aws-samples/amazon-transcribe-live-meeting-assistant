@@ -314,6 +314,12 @@ OTHER_FIELDS = [
     # meeting (or is an Admin) and that each address is on its list.
     ("Query", "getMeetingParticipantAccounts"),
     ("Mutation", "createParticipantAccounts"),
+    # A Participant's read-only view: the Participant group only, and each
+    # meeting only when its SharedWith names the caller (participant_meeting_resolver).
+    ("Query", "listParticipantMeetings"),
+    ("Query", "getParticipantMeeting"),
+    ("Query", "getParticipantMeetingTranscript"),
+    ("Query", "getParticipantMeetingRecordings"),
     # A digest of one meeting: a Lambda resolver applying the same rule in
     # `caller_may_edit`.
     ("Mutation", "requestMeetingDigest"),

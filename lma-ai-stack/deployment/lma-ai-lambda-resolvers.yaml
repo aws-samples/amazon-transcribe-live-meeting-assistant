@@ -73,6 +73,11 @@ Parameters:
     Type: Number
   PermissionsBoundaryArn:
     Type: String
+  RecordingsBucketName:
+    Type: String
+    Description: >-
+      The recordings bucket. The Participant view signs links to the audio
+      and video recordings in it.
   TranscriptionExpirationInDays:
     Type: Number
     Description: >-
@@ -116,6 +121,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !Ref AsyncAgentAssistOrchestratorArn
+          EVENT_SOURCING_TABLE_NAME: !Ref EventSourcingTable
       Timeout: 30
       MemorySize: 128
       Handler: lambda_function.lambda_handler
@@ -171,6 +177,24 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !Ref AsyncAgentAssistOrchestratorArn
+              # Read-only, and only the meeting records (c#): whether the caller
+              # may ask about the meeting, and its owner.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   QueryKnowledgeBaseResolverFunction:
     Type: AWS::Serverless::Function
@@ -382,6 +406,7 @@ Resources:
                 Resource: 
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
                   - !GetAtt MeetingInvitationParserFunction.Arn
+                  - !GetAtt ParticipantMeetingResolverFunction.Arn
 
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
@@ -2492,6 +2517,139 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt VncEdgeTokenFunction.Arn
 
+  ##########################################################################
+  # A Participant's read-only view of the meetings shared with them
+  # (listParticipantMeetings, getParticipantMeeting,
+  # getParticipantMeetingTranscript, getParticipantMeetingRecordings). Reads
+  # the meetings table and signs links to the recordings; it writes nothing.
+  ##########################################################################
+  ParticipantMeetingResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ParticipantMeetingResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/participant_meeting_resolver
+      Description: A Participant's read-only view of the meetings shared with them
+      MemorySize: 256
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          EVENT_SOURCING_TABLE_NAME: !Ref EventSourcingTable
+          RECORDINGS_BUCKET_NAME: !Ref RecordingsBucketName
+          AUDIO_RECORDINGS_PREFIX: lma-audio-recordings/
+          VIDEO_RECORDINGS_PREFIX: lma-video-recordings/
+      Layers:
+        # lma_channels and lma_speakers.
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AIStackName}/resolvers/lambda/ParticipantMeetingResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required: AppSync returns the error to the caller"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table, bucket and prefix names"
+    DependsOn:
+      - ParticipantMeetingResolverFunctionLogGroup
+
+  ParticipantMeetingResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AIStackName}/resolvers/lambda/ParticipantMeetingResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ParticipantMeetingResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Participant meeting view Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-ParticipantMeetingView
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read-only: the meeting records (c#), their transcript (trs#) and
+              # the meetings list index.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+                      - "trs#*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Sub "${EventSourcingTableArn}/index/TypeDateIndex"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+              # The links it signs are to the two recording prefixes only, as the
+              # web UI's identity pool role reads them for Admins and Users.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${RecordingsBucketName}/lma-audio-recordings/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${RecordingsBucketName}/lma-video-recordings/*"
+              # The recordings are encrypted with the stack's key; a signed GET
+              # needs Decrypt, through Amazon S3, for this bucket's objects only.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
+                  StringLike:
+                    "kms:EncryptionContext:aws:s3:arn":
+                      - !Sub "arn:${AWS::Partition}:s3:::${RecordingsBucketName}"
+                      - !Sub "arn:${AWS::Partition}:s3:::${RecordingsBucketName}/*"
+
+  ParticipantMeetingLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      Name: ParticipantMeetingFunction
+      Description: A Participant's read-only view of the meetings shared with them
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ParticipantMeetingResolverFunction.Arn
+
 Outputs:
   UpdateChatButtonConfigLambdaDataSourceName:
     Value: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
@@ -2521,6 +2679,8 @@ Outputs:
     Value: !GetAtt KnowledgeBaseDataSource.Name
   StrandsChatDataSourceName:
     Value: !GetAtt StrandsChatDataSource.Name
+  ParticipantMeetingLambdaDataSourceName:
+    Value: !GetAtt ParticipantMeetingLambdaDataSource.Name
   MeetingInvitationParserDataSourceName:
     Value: !GetAtt MeetingInvitationParserDataSource.Name
   MicrovmVncTokenDataSourceName:

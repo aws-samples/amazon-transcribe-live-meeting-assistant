@@ -410,6 +410,10 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
         ("ui", "transcriber", "lambdas", "integ_plumbing"),
     ),
     ("lma-ai-stack/source/appsync/schema.graphql", "integ_plumbing"),
+    # The Participant view resolver's tests hold its allowlist to the schema's
+    # Participant types and to the list of what a Participant is shown.
+    ("lma-ai-stack/source/appsync/schema.graphql", "lambdas"),
+    ("docs/user-based-access-control.md", "lambdas"),
     ("README.md", "vp_template"),
     # ...and read the AI stack through the AI stack tests' helper, which inlines its
     # nested templates.

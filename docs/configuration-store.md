@@ -244,6 +244,7 @@ Today's sections and their tiers:
 | `virtual_participant` | `immediate` | Read once by each Virtual Participant as it starts, with the `transcription` and `recording` sections, as for the Nova Sonic settings it reads at the same moment; the page says a change applies to the next one to start |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 | `meeting_consent` | `immediate` | Read by the meeting consent resolver when a meeting's consent starts and whenever a meeting's consent is read, and by the WebSocket transcriber when a streamed meeting starts and when a client asks for the consent step's settings. Consent-bearing: an administrator who turns opt-in on is promised that the next meeting asks first. If it cannot be read, starting a meeting's consent, and reading a meeting with no consent record, fail rather than fall back to off; a restart, and a read of a meeting with a record, do not need it. See [Meeting Consent](meeting-consent.md#the-meeting-consent-settings) |
+| `meeting_sharing` | `immediate` | Read by the meeting controls function, once per batch of the meetings table's stream, when a meeting record's participant list and its shares disagree. Privacy-bearing: an administrator who turns it off is promised that no meeting is shared this way after the save. See [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list) |
 
 ### Resolving a read
 
@@ -383,6 +384,7 @@ so a release cannot ship a default its own save would refuse.
 | `meeting_assist` | `wakePhraseRegex`, text of 1 to 256 characters; `promptCachingEnabled`, `true` or `false`; `assistantReasoningEffort`, `low`, `medium` or `high`; `inMeetingRequestTools`, `current_meeting_only`, `unrestricted` or `selected`; `inMeetingWebSearch`, `inMeetingDocumentSearch`, `inMeetingMeetingHistory`, `inMeetingMcpServers`, `inMeetingVpControls` and `inMeetingSkills`, each `true` or `false`; `systemPrompt`, the editable part of the assistant's instructions, text of 1 to 20,000 characters; `toolSelection`, an object of `mcpServers` and `skills`, each up to 200 entries keyed by a server or skill id (1 to 256 characters, no control characters), each entry holding only `enabled`, `inMeetingRequests` and `alwaysOn`, each `true` or `false`; `whiteboards`, the [whiteboards](meeting-whiteboards.md#settings) settings: `defaultEnabled`, `true` or `false`; `intervalSeconds`, 60 to 3600; `minNewSegments`, 1 to 500; `maxRunsPerMeeting`, 0 to 1000; `maxWhiteboardsPerMeeting`, 1 to 10; `modelId`; `prompt`, 1 to 10000 characters; `guidance`, the [live guidance](live-guidance.md#settings) settings: `defaultEnabled`, `true` or `false`; `intervalSeconds`, 60 to 3600; `minNewSegments`, 1 to 500; `maxItemsPer10Min`, 0 to 50; `confidenceThreshold`, 0 to 1; `modelId`, a model id or `""` for the Meeting assistant model; `maxRunsPerMeeting`, 0 to 1000; `prompt`, text of 1 to 10,000 characters |
 | `meeting_processing` | `transcriptHookNonPartialOnly`, `true` or `false`; `inactiveMeetingLookbackDays`, a whole number from 1 to 90, and `inactiveMeetingTimeoutMinutes`, a whole number from 0 to 10080, their parameters' ranges |
 | `meeting_agenda` | `autoDeriveAfterSeconds`, a whole number from 0 to 3600, the parameter's range |
+| `meeting_sharing` | `shareWithListedParticipants`, `true` or `false`; nothing else |
 | `retention` | `meetingRecordExpirationInDays` and `transcriptionExpirationInDays`, numbers of days of at least 0.1, each at most the baseline's value (`maximumIsDefault`, below); `transcriptDeletionAfterSummary` and `recordingDeletionAfterSummary`, each one of `off`, `immediately`, `after_15_minutes`, `after_30_minutes` and `after_60_minutes` (see [Transcript and Recording Deletion After the Summary](transcript-deletion.md)) |
 | `meeting_consent` | `mode` and `consentRule` from their fixed lists; the two notice texts of 1 to 2,000 characters; the two phrase lists of 1 to 1,000 characters; `allowPerMeetingOverride`, `keepEvidenceScreenshots`, `leaveOnObjection` and `readSpokenReplies`, `true` or `false`; `verifierModelId`, one of the image-capable models the Key frame text setting offers; `clientsWithoutConsent`, `accept_with_warning` or `reject`; nothing else |
 | `virtual_participant` | The display name as text of 1 to 128 characters, not blank; the provider from its parameter's list; wake phrases as text; the activation duration, poll interval and poll counts as whole numbers in their parameters' ranges; the ElevenLabs agent and Simli face ids in the characters their services use, empty for none |
@@ -1262,7 +1264,7 @@ by the Configuration page's export and import with the rest of the section.
 
   `mcpServers` is keyed by the `ServerId` of an installed MCP server. Each flag is
   optional: `enabled` (absent means true), `inMeetingRequests` (absent means the
-  In-meeting requests setting decides) and `alwaysOn` (reserved for a later
+  Participant use setting decides) and `alwaysOn` (reserved for a later
   always-on mode; stored and not read). `skills` has the same shape, keyed by the
   `SkillId` of a skill in the skills table, with `inMeetingSkills` as its Selected
   tools default (see
@@ -1270,7 +1272,7 @@ by the Configuration page's export and import with the rest of the section.
   The shipped value names
   nothing. An MCP server the profile does not name behaves as it did before the
   setting existed; a skill it does not name is enabled for the owner's own
-  requests, and for in-meeting requests it follows the In-meeting requests setting
+  requests, and for in-meeting requests it follows the Participant use setting
   (under Selected tools, `inMeetingSkills` decides).
   See
   [Choosing MCP servers one by one](meeting-assistant.md#choosing-mcp-servers-one-by-one).

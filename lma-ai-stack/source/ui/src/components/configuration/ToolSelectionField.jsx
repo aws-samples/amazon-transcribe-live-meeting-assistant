@@ -5,15 +5,18 @@
  */
 
 // Meeting Assistant › Tool selection: per installed MCP server and per skill,
-// whether the meeting assistant may use it at all, whether requests made in the
-// meeting may, and the reserved always-on flag. The servers, with their
+// whether the meeting assistant may use it at all (Owner use: the meeting page's
+// chat for the owner, the users the meeting is shared with and Admins), whether
+// it may for Participant use (requests made in the meeting, and a Participant's
+// questions on a shared meeting's page; stored as inMeetingRequests), and the
+// reserved always-on flag. The servers, with their
 // credentials, are installed on the MCP Servers page, and the skills are written
 // on the Skills page; each stays in its own table. This edits only the active
 // profile's flags, keyed by server id (meeting_assist.toolSelection.mcpServers)
 // and by skill id (meeting_assist.toolSelection.skills). An item with no entry
 // takes its default (an MCP server as it did before the profile could name it; a
-// skill as enabled for the owner's own requests, and for in-meeting requests as
-// the In-meeting requests setting decides, inMeetingSkills under Selected tools),
+// skill as enabled for Owner use, and for Participant use as the Participant use
+// setting decides, inMeetingSkills under Selected tools),
 // so the profile stores only what an administrator changed.
 
 import React, { useContext, useEffect, useState } from 'react';
@@ -98,7 +101,7 @@ const KINDS = {
 };
 
 const inMeetingOptions = (noun) => [
-  { value: 'default', label: `As In-meeting requests sets for every ${noun}` },
+  { value: 'default', label: `As Participant use sets for every ${noun}` },
   { value: 'true', label: 'Allowed' },
   { value: 'false', label: 'Not allowed' },
 ];
@@ -176,7 +179,8 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
             },
             {
               id: 'enabled',
-              header: 'Enabled',
+              // Off turns the item off for Participant use as well.
+              header: 'Owner use',
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => {
                 const on = entries[row.id]?.enabled !== false;
@@ -184,7 +188,7 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
                   <Toggle
                     checked={on}
                     disabled={readOnly}
-                    ariaLabel={`Enabled: ${row.name}`}
+                    ariaLabel={`Owner use: ${row.name}`}
                     // On is the default, so it is stored by leaving the flag out.
                     onChange={({ detail }) => setFlag(row.id, 'enabled', detail.checked ? undefined : false)}
                   >
@@ -195,7 +199,7 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
             },
             {
               id: 'inMeetingRequests',
-              header: 'In-meeting requests',
+              header: 'Participant use',
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => {
                 const flag = entries[row.id]?.inMeetingRequests;
@@ -205,7 +209,7 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
                     selectedOption={selected}
                     options={options}
                     disabled={readOnly}
-                    ariaLabel={`In-meeting requests: ${row.name}`}
+                    ariaLabel={`Participant use: ${row.name}`}
                     onChange={({ detail }) => {
                       const chosen = detail.selectedOption.value;
                       setFlag(row.id, 'inMeetingRequests', chosen === 'default' ? undefined : chosen === 'true');

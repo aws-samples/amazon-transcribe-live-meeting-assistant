@@ -411,15 +411,18 @@ capabilities:
     related: [capability:meeting-assistant, capability:web-search]
 
   - id: in-meeting-requests
-    title: Requests made in the meeting (chat, voice and wake phrase), with controls on what they may use
+    title: Participant use of the assistant, with controls on what it may use
     description: >-
       Anyone in a meeting can ask the assistant through the meeting chat, the voice
-      assistant or a wake phrase. Because none of these can verify who asked, an
-      administrator chooses what such requests may use (the current meeting only by
-      default, selected tool groups, or everything the owner could use) and who may
-      ask (anyone, the owner's own microphone only, or nobody).
+      assistant or a wake phrase, and a Participant can ask about a meeting shared
+      with them from its page. Because none of the requests made in the meeting can
+      verify who asked, one approval, Participant use, decides what all of these may
+      use (the current meeting only by default, selected tool groups, or everything
+      the owner could use) and who may ask (anyone, the owner's own microphone only,
+      or nobody). A Participant's question is never offered the meeting context,
+      checklist or Virtual Participant controls, and is not added to the transcript.
     evidence:
-      - docs/meeting-assistant.md#in-meeting-requests
+      - docs/meeting-assistant.md#participant-use
       - docs/meeting-assistant.md#who-may-ask
     configuration: [meeting_assist.inMeetingRequestTools, meeting_assist.inMeetingRequesters]
     tags: [assistant, governance]
@@ -889,10 +892,16 @@ capabilities:
       Each non-admin user sees only their own meetings and the meetings shared with
       them; Admins see every meeting. Owners share meetings read-only by email address
       and delete their own meetings; access rules are the same on the web app, the
-      search tools and the MCP server.
+      search tools and the MCP server. A meeting can be shared automatically with the
+      people on its participant list (on by default), and a Participant account reads
+      only the meetings shared with it, through a read-only view without the owner's
+      own material, with recordings played through links the server signs.
     evidence:
       - docs/user-based-access-control.md
       - docs/user-based-access-control.md#meeting-sharing
+      - docs/user-based-access-control.md#sharing-with-the-participant-list
+      - docs/user-based-access-control.md#what-a-participant-sees-of-a-shared-meeting
+      - lma-ai-stack/source/lambda_functions/participant_meeting_resolver/participant_view.py
       - lma-ai-stack/source/lambda_functions/mcp_analytics/tools/access.py
     tags: [access, mcp-tool:share_meeting, mcp-tool:delete_meeting, mcp-tool:end_meeting]
     related: [question:transcript-visibility]

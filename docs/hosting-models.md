@@ -62,9 +62,9 @@ the full table.
 | | Meeting Recording › Record Virtual Participant meeting video | Off | No Virtual Participant records the meeting's video or keeps its key frames, whatever its Record meeting video toggle says; the toggle is shown off and disabled. |
 | | Retention › Delete the transcript after the summary | Off | The transcript is kept for the retention period, 90 days by default. |
 | | Virtual Participant › Add the meeting chat to the transcript | On | The chat is part of the meeting's record and is deleted with it. |
-| In-meeting requests | Meeting Assistant › In-meeting requests: who may ask | Off | No request made in the meeting is answered, and a Virtual Participant does not start its voice assistant. See [Who may ask](#who-may-ask). |
-| | Meeting Assistant › In-meeting requests | Current meeting only | Held to the current meeting in case a copied profile allows requests again. |
-| | Meeting Assistant › In-meeting requests: meeting context and checklist | None | The owner's preparation notes are never read out to guests. |
+| Participant use | Meeting Assistant › Participant use: who may ask | Off | No request made in the meeting is answered, and a Virtual Participant does not start its voice assistant. See [Who may ask](#who-may-ask). |
+| | Meeting Assistant › Participant use | Current meeting only | Held to the current meeting in case a copied profile allows requests again. |
+| | Meeting Assistant › Participant use: meeting context and checklist | None | The owner's preparation notes are never read out to guests. |
 | Knowledge | Meeting Assistant › Web search | Off | Nothing from a meeting is sent to a web search provider, from the meeting page's chat either. |
 | | Meeting Assistant › MCP servers | Off | None of the MCP servers installed on the MCP Servers page is connected to or offered. LMA's own MCP server is not affected. |
 | | Meeting Assistant › Live guidance › On for new meetings | On | The people running a meeting are offered [live guidance](live-guidance.md) in its Notifications drawer, never in the meeting chat and never to its guests. Each run is a model call billed to the meeting; a meeting can still turn it off. |
@@ -89,7 +89,7 @@ A Virtual Participant cannot tell the meeting's owner from a guest. It knows a
 chat sender only by the display name the meeting shows, which a guest who joins
 without signing in types themselves, and on the Teams browser join off the
 light-meetings client it sees no sender at all. It knows a speaker only by a
-diarization label. So **In-meeting requests: who may ask** has no value that lets
+diarization label. So **Participant use: who may ask** has no value that lets
 only the owner ask through a Virtual Participant: **Owner only** answers only a
 wake phrase spoken into the owner's own microphone from Stream Audio/Video, the Desktop
 Capture App or the browser extension, and nothing in a meeting a Virtual
@@ -109,7 +109,7 @@ not need to keep transcripts out of the knowledge base.
 The owner's own past meetings are a different matter: a team member who hosts
 meetings with several organizations owns all of them, and a request made in a
 meeting that is allowed past meetings would search them all. That is why
-**In-meeting requests** stays at **Current meeting only**, and requests made in
+**Participant use** stays at **Current meeting only**, and requests made in
 the meeting are off. Keep the Admin group to the people who run the deployment,
 since an Admin's search reaches every meeting, as an Admin's meeting list does.
 To keep transcripts out of the knowledge base entirely, deploy with
@@ -139,7 +139,7 @@ is one to **decide with the customer**.
 | Knowledge base | Allowed | The document knowledge base holds the customer's own documents; it is chosen with the `MeetingAssistService` stack parameter and its data sources. |
 | Meeting Assistant › Web search | Off | Whether meeting content may be sent to a web search provider. |
 | Meeting Assistant › MCP servers | On | Which of their systems the assistant may reach; each server is installed by an Admin. |
-| Meeting Assistant › In-meeting requests: who may ask | Anyone | Whether participants may ask the assistant in the meeting, answered from the current meeting only. |
+| Meeting Assistant › Participant use: who may ask | Anyone | Whether participants may ask the assistant in the meeting, answered from the current meeting only. |
 | Meeting Processing › Default summary profile for new meetings | `default` | The `discovery-session` profile is available for each meeting; make it the default if most meetings are discovery sessions. |
 
 Stream Audio/Video and the Desktop Capture App have no participant list, so they

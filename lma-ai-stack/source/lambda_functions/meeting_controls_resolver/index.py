@@ -13,6 +13,7 @@ from os import environ
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+import auto_share
 import boto3
 from appsync_utils import AppsyncRequestsGqlClient
 from boto3.dynamodb.conditions import Attr
@@ -1084,7 +1085,143 @@ def delete_vp_registry_entry(vp_id):
         logger.error(f"Error deleting registry entry for VP {vp_id}: {e}")
 
 
+# Sharing with the participant list (Meeting Sharing; see auto_share.py)
+
+
+def _auto_share_enabled() -> bool:
+    """Meeting Sharing › Share meetings with their listed participants; on unless saved off."""
+    try:
+        from lma_config import read_setting  # configuration layer
+    except ImportError:  # pragma: no cover - the layer is attached in every deployment
+        logger.warning(
+            "Configuration layer not available; using the shipped Meeting Sharing default"
+        )
+        return True
+    return read_setting("meeting_sharing", "shareWithListedParticipants", default=True) is not False
+
+
+def _stream_image(record: Mapping[str, Any]) -> dict:
+    from boto3.dynamodb.types import TypeDeserializer
+
+    image = (record.get("dynamodb") or {}).get("NewImage") or {}
+    deserializer = TypeDeserializer()
+    return {name: deserializer.deserialize(value) for name, value in image.items()}
+
+
+def _auto_share_plan(item: Mapping[str, Any]) -> auto_share.AutoSharePlan:
+    return auto_share.plan_auto_share(
+        item.get("Owner"),
+        shared_with_entries(item.get("SharedWith")),
+        item.get("Participants"),
+        item.get(auto_share.AUTO_SHARED_ATTRIBUTE),
+    )
+
+
+def apply_auto_share(call_id: str, item: Mapping[str, Any], plan: auto_share.AutoSharePlan) -> None:
+    """Share and unshare as the plan says, through share_meeting, then record AutoSharedWith.
+
+    share_meeting is what the share dialog runs: it gives the transcript, key
+    frames and chat attachments the new sharing list, writes it to the meeting
+    and its list row, and tells anyone unshared. AutoSharedWith is written after
+    it, so a failed share is planned again from the same state.
+    """
+    owner = item.get("Owner") or ""
+    pk = f"c#{call_id}"
+    if plan.changes_sharing:
+        list_key = auto_share.list_row_key(call_id, item.get("CreatedAt"))
+        if list_key is None:
+            raise ValueError(f"meeting {call_id} has no CreatedAt to find its list row by")
+        recipients = auto_share.shared_with_after(shared_with_entries(item.get("SharedWith")), plan)
+        with appsync_client as appsync_session:
+            if not appsync_session.client.schema:
+                raise ValueError("invalid AppSync schema")
+            schema = DSLSchema(appsync_session.client.schema)
+            share_meeting(
+                appsync_session,
+                schema,
+                call_id,
+                list_key["PK"],
+                list_key["SK"],
+                ",".join(recipients),
+                owner,
+            )
+    if plan.auto_shared:
+        ddbTable.update_item(
+            Key={"PK": pk, "SK": pk},
+            UpdateExpression="SET #auto = :auto",
+            ExpressionAttributeNames={"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
+            ExpressionAttributeValues={":auto": plan.auto_shared},
+            ConditionExpression="attribute_exists(PK)",
+        )
+    else:
+        ddbTable.update_item(
+            Key={"PK": pk, "SK": pk},
+            UpdateExpression="REMOVE #auto",
+            ExpressionAttributeNames={"#auto": auto_share.AUTO_SHARED_ATTRIBUTE},
+            ConditionExpression="attribute_exists(PK)",
+        )
+
+
+def handle_meeting_stream(event: Mapping[str, Any]) -> dict:
+    """The meetings table's stream: share each changed meeting with its listed participants.
+
+    The event source mapping passes only writes of items whose PK starts c#;
+    of those, only meeting records (PK equal to SK) are read, and each meeting
+    once per batch, from its latest record. The record in the stream decides
+    whether anything is to be done, without a read; when something is, the
+    meeting is read again, consistently, and planned from what it holds now,
+    since later writes of the same meeting can follow in the stream. A
+    meeting whose plan fails is reported, so the batch is retried from it.
+    """
+    latest: dict = {}
+    for record in event.get("Records") or []:
+        if record.get("eventName") not in ("INSERT", "MODIFY"):
+            continue
+        keys = (record.get("dynamodb") or {}).get("Keys") or {}
+        pk = (keys.get("PK") or {}).get("S", "")
+        sk = (keys.get("SK") or {}).get("S", "")
+        if not pk.startswith("c#") or pk != sk:
+            continue
+        latest[pk[2:]] = record
+    failures = []
+    enabled = None
+    changed = 0
+    for call_id, record in latest.items():
+        try:
+            if not _auto_share_plan(_stream_image(record)).changes_anything:
+                continue
+            if enabled is None:
+                enabled = _auto_share_enabled()
+            if not enabled:
+                continue
+            pk = f"c#{call_id}"
+            item = ddbTable.get_item(Key={"PK": pk, "SK": pk}, ConsistentRead=True).get("Item")
+            if not item:
+                continue
+            plan = _auto_share_plan(item)
+            if not plan.changes_anything:
+                continue
+            apply_auto_share(call_id, item, plan)
+            changed += 1
+            # Counts only: the addresses are personal data.
+            logger.info(
+                "Meeting sharing for %s: %d added, %d removed",
+                call_id,
+                len(plan.add),
+                len(plan.remove),
+            )
+        except Exception:  # noqa: BLE001 - reported for retry, the batch goes on
+            logger.exception("Meeting sharing failed for %s", call_id)
+            failures.append(
+                {"itemIdentifier": (record.get("dynamodb") or {}).get("SequenceNumber", "")}
+            )
+    return {"batchItemFailures": failures}
+
+
 def lambda_handler(event, context):
+    # The meetings table's stream (Meeting Sharing), rather than an AppSync request.
+    if "Records" in event:
+        return handle_meeting_stream(event)
     owner = event["identity"]["username"]
     if not verify_permissions(event):
         return {

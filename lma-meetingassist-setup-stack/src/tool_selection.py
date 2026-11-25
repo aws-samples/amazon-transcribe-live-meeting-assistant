@@ -21,10 +21,13 @@ individual tools by kind and id, each with three flags::
 
 The flags, each optional:
 
-- ``enabled``: the assistant may use the item at all. Absent means true.
-- ``inMeetingRequests``: the item may be used for a request made in the meeting
-  (the meeting chat, the voice assistant, the wake phrase). Absent means the
-  request's own default: the In-meeting requests setting's default for the kind
+- ``enabled`` (Owner use in the UI): the assistant may use the item at all.
+  Absent means true.
+- ``inMeetingRequests`` (Participant use in the UI): the item may be used for
+  a request from anyone but the meeting's owner and the users it is shared
+  with (the meeting chat, the voice assistant, the wake phrase, and a
+  Participant on a shared meeting's page). Absent means the request's own
+  default: the Participant use setting's default for the kind
   (Unrestricted, or under Selected tools the kind's switch: ``inMeetingMcpServers``
   for MCP servers, ``inMeetingSkills`` for skills). Never used under Current meeting only, which offers nothing
   beyond the current meeting.

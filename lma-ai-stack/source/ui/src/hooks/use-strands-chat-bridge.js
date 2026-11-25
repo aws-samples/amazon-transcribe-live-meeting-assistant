@@ -22,6 +22,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
 import useUserGroups from './use-user-groups';
+import { PARTICIPANT } from '../components/common/roles';
 
 const logger = new ConsoleLogger('useStrandsChatBridge');
 
@@ -109,12 +110,12 @@ const userContextMessage = ({ user, userGroups, isAdmin }) => ({
  */
 const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
   const { user } = useAppContext();
-  const { userGroups, isAdmin } = useUserGroups();
+  const { userGroups, isAdmin, role } = useUserGroups();
 
   // Read when a request arrives, so an answer carries the groups as they are
   // now rather than as they were when the listener was added.
-  const contextRef = useRef({ user, userGroups, isAdmin });
-  contextRef.current = { user, userGroups, isAdmin };
+  const contextRef = useRef({ user, userGroups, isAdmin, role });
+  contextRef.current = { user, userGroups, isAdmin, role };
   const clientRef = useRef(client);
   if (!clientRef.current) clientRef.current = generateClient();
   const onAnswerCompleteRef = useRef(onAnswerComplete);
@@ -143,6 +144,10 @@ const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
 
       if (data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
         reply(userContextMessage(contextRef.current));
+      } else if (data.type === 'STRANDS_BUTTON_CONFIG_REQUEST' && contextRef.current.role === PARTICIPANT) {
+        // The chat buttons are read by Admins and Users only; a Participant's
+        // frame shows none, without a request the API would refuse.
+        reply({ type: 'STRANDS_BUTTON_CONFIG_RESPONSE', requestId: data.requestId, success: true, config: {} });
       } else if (data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
         try {
           const result = await gql.graphql({

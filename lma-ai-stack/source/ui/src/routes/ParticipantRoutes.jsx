@@ -11,25 +11,49 @@ import {
   ParticipantHome,
   ParticipantLayout,
 } from '../components/participant-home/ParticipantHome';
+import ParticipantMeetingList from '../components/participant-meetings/ParticipantMeetingList';
+import ParticipantMeetingPage from '../components/participant-meetings/ParticipantMeetingPage';
+import VoiceEnrollmentPage from '../components/voice-enrollment/VoiceEnrollmentPage';
 import { PARTICIPANT, roleMayOpen } from '../components/common/roles';
 import SignOutRedirect from './SignOutRedirect';
-import { HOME_PATH, LOGIN_PATH, LOGOUT_PATH } from './constants';
+import { HOME_PATH, LOGIN_PATH, LOGOUT_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from './constants';
 
-// A page by the role's route table: the home page where the Participant role
-// may open the path, Access denied everywhere else.
+// A meeting id as the path holds it: encoded by the list's link, and decoded
+// once; a path that is not valid encoding is taken as it stands.
+const pathCallId = (rest) => {
+  try {
+    return decodeURIComponent(rest);
+  } catch (e) {
+    return rest;
+  }
+};
+
+// The page each path the Participant role may open shows; Access denied for
+// every other path, as the role's route table says.
+const pageFor = (pathname) => {
+  if (!roleMayOpen(PARTICIPANT, pathname)) return <ParticipantAccessDenied />;
+  if (pathname === SHARED_MEETINGS_PATH) return <ParticipantMeetingList />;
+  if (pathname.startsWith(`${SHARED_MEETINGS_PATH}/`)) {
+    const callId = pathCallId(pathname.slice(SHARED_MEETINGS_PATH.length + 1));
+    return <ParticipantMeetingPage callId={callId} />;
+  }
+  if (pathname === VOICE_ENROLLMENT_PATH || pathname.startsWith(`${VOICE_ENROLLMENT_PATH}/`)) {
+    return <VoiceEnrollmentPage />;
+  }
+  return <ParticipantHome />;
+};
+
 const ParticipantPage = () => {
   const { pathname } = useLocation();
-  return (
-    <ParticipantLayout>
-      {roleMayOpen(PARTICIPANT, pathname) ? <ParticipantHome /> : <ParticipantAccessDenied />}
-    </ParticipantLayout>
-  );
+  return <ParticipantLayout>{pageFor(pathname)}</ParticipantLayout>;
 };
 
 /**
- * The routes of a signed-in Participant. Nothing here reads a meeting, the
- * deployment settings or any GraphQL operation; the page itself is the
- * Participant's home page, and every other path says Access denied.
+ * The routes of a signed-in Participant: their home page, the meetings shared
+ * with them (read-only, through the Participant view operations only) and
+ * their own voice enrollment. Nothing here reads the deployment settings, the
+ * member meeting operations or any configuration; every other path says
+ * Access denied.
  */
 const ParticipantRoutes = () => (
   <Routes>

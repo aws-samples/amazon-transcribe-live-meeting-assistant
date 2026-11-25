@@ -61,6 +61,7 @@ describe('schema-validation', () => {
       'meeting_assist',
       'meeting_consent',
       'meeting_processing',
+      'meeting_sharing',
       'nova_sonic_config',
       'recording',
       'retention',
