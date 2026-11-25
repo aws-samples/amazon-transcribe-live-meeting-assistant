@@ -131,6 +131,37 @@ describe('runSummaryAction', () => {
   });
 });
 
+describe('the Email summary entry', () => {
+  const openedLink = async (item) => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    try {
+      expect(await runSummaryAction('email', item, CONSENT)).toBe(true);
+      return open.mock.calls[0][0];
+    } finally {
+      open.mockRestore();
+    }
+  };
+
+  it("addresses the email to the meeting's participants", async () => {
+    const link = await openedLink({
+      ...ITEM,
+      participants: [
+        { name: 'Ana Lima', email: 'ana@example.com' },
+        { name: '', email: 'bob+lma@example.com' },
+        { name: 'Ana again', email: 'ANA@example.com' },
+        { name: 'No address', email: '' },
+      ],
+    });
+    expect(link.startsWith('mailto:ana%40example.com,bob%2Blma%40example.com?subject=')).toBe(true);
+    expect(link).toContain(`subject=${encodeURIComponent(ITEM.callId)}&body=`);
+  });
+
+  it('leaves the recipients empty for a meeting with no participant list', async () => {
+    expect((await openedLink(ITEM)).startsWith(`mailto:?subject=${encodeURIComponent(ITEM.callId)}&body=`)).toBe(true);
+    expect((await openedLink({ ...ITEM, participants: null })).startsWith('mailto:?subject=')).toBe(true);
+  });
+});
+
 describe('runTranscriptDownload', () => {
   it('builds the PDF with the consent record', async () => {
     expect(await runTranscriptDownload('pdf', TRANSCRIPT, ITEM, CONSENT)).toBe(true);

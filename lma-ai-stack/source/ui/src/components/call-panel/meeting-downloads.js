@@ -27,6 +27,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 
+import { participantsInput } from '../common/participant-list';
 import { getEmailFormattedSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import {
   downloadSummaryAsDocx,
@@ -90,12 +91,22 @@ export const copyText = async (text) => {
   }
 };
 
+const summaryEmailRecipients = (item) => {
+  const seen = new Set();
+  return participantsInput(item.participants)
+    .map((p) => p.email.trim())
+    .filter((email) => email && !seen.has(email.toLowerCase()) && seen.add(email.toLowerCase()))
+    .map(encodeURIComponent)
+    .join(',');
+};
+
 /**
  * Runs one of SUMMARY_ACTION_ITEMS for a meeting; `consent` is its consent
  * record, when it has one, and `participants` the names the page's header
  * lists, which the downloads write with the meeting's date and duration.
- * Resolves to whether a copy reached the clipboard, for 'copy', and to true
- * otherwise.
+ * The email is addressed to the meeting's participant list
+ * (`item.participants`). Resolves to whether a copy reached the clipboard, for
+ * 'copy', and to true otherwise.
  */
 export const runSummaryAction = async (id, item, consent = null, { participants = [] } = {}) => {
   const name = `Summary-${item.callId}`;
@@ -116,7 +127,9 @@ export const runSummaryAction = async (id, item, consent = null, { participants 
     // Both halves are encoded: a meeting name is free text, and
     // getEmailFormattedSummary returns an encoded body.
     const subject = encodeURIComponent(item.callId ?? '');
-    window.open(`mailto:?subject=${subject}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
+    const to = summaryEmailRecipients(item);
+    const body = getEmailFormattedSummary(item.callSummaryText);
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`);
   }
   return true;
 };
