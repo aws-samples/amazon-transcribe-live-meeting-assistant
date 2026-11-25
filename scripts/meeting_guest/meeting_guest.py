@@ -466,6 +466,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     p = sub.add_parser("chat", help="send a chat message")
     p.add_argument("text")
     sub.add_parser("present", help="present a tab of slides")
+    sub.add_parser(
+        "probe", help="log the controls that could carry the participant count (task log)"
+    )
     p = sub.add_parser("shot", help="save a screenshot of the guest's window")
     p.add_argument("out", type=Path)
     sub.add_parser("leave", help="leave, stop the task and delete its S3 objects")
@@ -486,8 +489,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         outcome = wait_until_joined(session, state, args.timeout)
         print(outcome)
         return 0 if outcome == "in_call" else 1
-    if args.cmd in ("chat", "present"):
-        line = f"chat {args.text}" if args.cmd == "chat" else "present"
+    if args.cmd in ("chat", "present", "probe"):
+        line = f"chat {args.text}" if args.cmd == "chat" else args.cmd
         _save(args.state, send_command(session, state, line))
         return 0
     if args.cmd == "shot":

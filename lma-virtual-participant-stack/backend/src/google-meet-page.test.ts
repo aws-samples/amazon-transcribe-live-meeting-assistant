@@ -32,6 +32,8 @@ import {
     normalizeMeetText,
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
+    isMeetPeopleCountText,
+    MEET_PEOPLE_COUNT_TEXT,
     pickMeetActiveSpeaker,
     senderFromMeetGroupHeader,
     timeFromMeetGroupHeader,
@@ -167,6 +169,25 @@ test('the participant count is read from the People button', () => {
     assert.equal(parseMeetParticipantCount('people 3'), 3);
     assert.equal(parseMeetParticipantCount('people', 'People - 12 participants'), 12);
     assert.equal(parseMeetParticipantCount(' 1 '), 1);
+});
+
+test("the count is read from the current page's unlabelled People control", () => {
+    // Measured in a live meeting (2026-11-25): a role="button" div, no aria-label,
+    // whose text is "People" and the count, VP included.
+    assert.equal(isMeetPeopleCountText('People5'), true);
+    assert.equal(isMeetPeopleCountText(' People  12 '), true);
+    assert.equal(parseMeetParticipantCount('People5', ''), 5);
+    for (const text of ['People', 'Chat with everyone', 'More options for People 5', 'People 5 6', '', null]) {
+        assert.equal(isMeetPeopleCountText(text), false, String(text));
+    }
+});
+
+test('the People panel opener also matches the unlabelled People control', () => {
+    assert.ok(
+        MEET_SELECTORS.peopleButton.some((sel) => sel.startsWith('[role="button"]:text-matches(')),
+        'a Playwright text match for the role="button" control',
+    );
+    assert.equal(new RegExp(MEET_PEOPLE_COUNT_TEXT, 'i').source, MEET_PEOPLE_COUNT_TEXT);
 });
 
 test('an unreadable or ambiguous count is null, never a guess', () => {

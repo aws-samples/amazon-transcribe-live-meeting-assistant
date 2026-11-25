@@ -59,6 +59,7 @@ import {
 import {
     MEET_HOST,
     MEET_IN_PAGE_SELECTORS,
+    MEET_PEOPLE_COUNT_TEXT,
     MEET_SELECTORS,
     MeetScreen,
     MeetTileReading,
@@ -856,7 +857,7 @@ export default class GoogleMeet {
     private async readAttendees(page: Page): Promise<AttendeeReading> {
         try {
             const raw = await page.evaluate(
-                (sels: { people: readonly string[]; leaveCall: readonly string[] }) => {
+                (sels: { people: readonly string[]; leaveCall: readonly string[]; countText: string }) => {
                     const visible = (el: Element | null): boolean => {
                         if (!el) return false;
                         const r = (el as HTMLElement).getBoundingClientRect();
@@ -867,9 +868,20 @@ export default class GoogleMeet {
                         const el = document.querySelector(sel);
                         if (el) return { text: el.textContent || '', label: el.getAttribute('aria-label') || '', inMeeting };
                     }
+                    // The current page: an unlabelled role="button" whose text is
+                    // "People" and the count (MEET_PEOPLE_COUNT_TEXT).
+                    const countText = new RegExp(sels.countText, 'i');
+                    for (const el of Array.from(document.querySelectorAll('[role="button"]'))) {
+                        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (countText.test(text) && visible(el)) return { text, label: el.getAttribute('aria-label') || '', inMeeting };
+                    }
                     return { text: null, label: null, inMeeting };
                 },
-                { people: MEET_IN_PAGE_SELECTORS.peopleButton, leaveCall: MEET_IN_PAGE_SELECTORS.leaveCall },
+                {
+                    people: MEET_IN_PAGE_SELECTORS.peopleButton,
+                    leaveCall: MEET_IN_PAGE_SELECTORS.leaveCall,
+                    countText: MEET_PEOPLE_COUNT_TEXT,
+                },
             );
             const count = parseMeetParticipantCount(raw.text, raw.label);
             if (count !== null) return { state: 'OK', count };
