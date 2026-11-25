@@ -306,3 +306,11 @@ def test_the_meeting_is_deleted_only_after_every_test_that_reads_it() -> None:
     tests = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
     users = [t.name for t in tests if "meeting" in {a.arg for a in t.args.args}]
     assert users[-1] == "test_a_meeting_is_changed_shared_and_deleted_only_as_each_rule_allows"
+
+
+def test_the_client_settings_are_kept_beside_the_report_while_changed(monkeypatch, tmp_path: Path) -> None:
+    probe = _probe()
+    monkeypatch.setenv("LMA_SECURITY_REPORT_DIR", str(tmp_path))
+    assert probe.settings_record_path() == tmp_path / "web-client-settings-before-change.json"
+    monkeypatch.delenv("LMA_SECURITY_REPORT_DIR")
+    assert probe.settings_record_path().parent == security_report.DEFAULT_DIR

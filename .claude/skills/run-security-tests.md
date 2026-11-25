@@ -27,7 +27,8 @@ looks like production; the nightly stack `lma-integtest1` is in **us-west-2**.
   web UI app client's ID token lifetime for one sign-in and restores it. If the
   restore check fails, the report's detail holds the settings to put back with
   `aws cognito-idp update-user-pool-client`: do that before anything else, and
-  tell the user.
+  tell the user. A run killed during that sign-in leaves them in
+  `scratch/api-test-results/web-client-settings-before-change.json`.
 - It takes about ten minutes; run it in the background with its output in a
   file, and read the report when it ends.
 - An active ZAP scan sends attack payloads and mutations as an Admin and can
@@ -73,7 +74,7 @@ CLAUDE.md, *Security Disclosure Hygiene*, applies to every result:
   is deleted in a `finally`, and any stack setting it changes is restored there
   and the restore checked.
 - A new GraphQL operation needs nothing here: `test_role_access.py` and the
-  unauthenticated sweep read the role matrix and the schema. A new mutation that
+  no-credential sweep read the role matrix and the schema. A new mutation that
   starts paid work goes into `NEVER_SCANNED` in `scripts/security/zap_scan.py`
   (a test fails if a name there leaves the schema).
 - A new entry point (an API, a function URL, a CloudFront path) gets a check in

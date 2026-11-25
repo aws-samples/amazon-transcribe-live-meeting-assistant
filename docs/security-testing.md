@@ -60,7 +60,7 @@ Virtual Participant viewer path under the MicroVM launch type).
 | AppSync authentication | `test_security_access.py` | Every query and mutation is refused with no `Authorization` header. A User's ID token is refused when its claims were changed (a role group added, the expiry moved), its signature altered, its header set to `alg: none`, or its claims signed by another key, with this pool's issuer or another one's. A genuine ID token issued to another app client of the user pool is refused. A genuine ID token is answered while fresh and refused after it expires. |
 | AppSync backend-only operations | `test_security_access.py` | Every operation only backend roles may call (the matrix's `backendOnly`), and every query that also accepts backend roles (`alsoIam`), is refused to a request signed with SigV4 by the web UI's identity-pool credentials, for an Admin, a User and a Participant. |
 | Meeting access | `test_security_access.py` | One meeting, owned by one User and shared with a second, is read (`getCall`, the transcript, the transcript with sentiment, the key frames with their signed links, the meeting list) by its owner, the shared user and an Admin, and by no other User. The operations that name the meeting (chat attachments, consent, cost, whiteboards, notifications, the archive) answer its owner and refuse the other User. Labels are changed by the owner and the shared user and not by the other User; sharing and deleting are done by the owner only; a deleted meeting is no longer returned. The web UI's identity-pool credentials read the audio and video recording prefixes of the recordings bucket and no other prefix, and a Participant's read none. |
-| Other entry points | `test_security_access.py` | The WebSocket transcriber admits a genuine access token only (no parameter, a non-bearer value, an ID token, an altered or self-signed token: `401`), and refuses a `START` naming a meeting the caller does not own. The MCP API key endpoint refuses no key, a key never issued and a revoked key, and answers a meeting's transcript to its owner and shared user only. The MCP OAuth gateway refuses no token, a non-token, web UI ID and access tokens, and a self-signed token. The Virtual Participant viewer path (`/vnc/*`) answers `401` with no token and `403` with one it did not sign. The identity pool gives no credentials without a login; the user pool refuses a self sign-up from outside the allowed domains. The stack has no Lambda function URL and no REST API method without an authorizer. |
+| Other entry points | `test_security_access.py` | The WebSocket transcriber admits a genuine access token only (no parameter, a non-bearer value, an ID token, an altered or self-signed token: `401`), and refuses a `START` naming a meeting the caller does not own. The MCP API key endpoint refuses no key, a key never issued and a revoked key, and answers a meeting's transcript to its owner and shared user only. The MCP OAuth gateway refuses no token, a non-token, web UI ID and access tokens, and a self-signed token. The Virtual Participant viewer path (`/vnc/*`) answers `401` with no token and `403` with one it did not sign. The identity pool gives no credentials without a login; the user pool refuses a self sign-up from outside the allowed domains. Every REST API method of the stack names an authorizer, and the stack declares no Lambda function URL. |
 
 The role matrix and the schema are also held to each other offline, by
 `lma-ai-stack/test/test_role_matrix.py` and `test_appsync_contract.py`, and the
@@ -134,8 +134,8 @@ make setup-cli-dev
 AWS_PROFILE=default make stacktest-zap STACK=<stack name> REGION=<region>
 ```
 
-Needs Docker (the official `ghcr.io/zaproxy/zaproxy:stable` image; set
-`ZAP_DOCKER_IMAGE` to use another). `scripts/security/zap_scan.py` runs three
+Needs Docker (the official ZAP image, pinned to a release in
+`scripts/security/zap_scan.py`; set `ZAP_DOCKER_IMAGE` to use another). `scripts/security/zap_scan.py` runs three
 ZAP scans, about ten to thirty minutes in all:
 
 | Target | ZAP script | Seeded with | Signed in as |
@@ -228,7 +228,7 @@ To set up the ZAP schedule in GitLab, add a pipeline schedule on `develop` with
 the variable `ZAP_DAST` = `true`, weekly, and without `NIGHTLY_INTEG`, so the
 nightly deploy does not run with it. It uses the same `AWS_CREDS_TARGET_ROLE`
 as the nightly jobs ([Scheduled Integration Tests](scheduled-integration-tests.md)).
-To run it by hand, start a pipeline on `develop` from **Build › Pipelines › Run
+To run it by hand (on `develop` only), start a pipeline on `develop` from **Build › Pipelines › Run
 pipeline** and play the `zap_dast` job. It runs the ZAP image as the job image
 (these runners have no Docker daemon), scans passively, prints counts only, and
 keeps the reports as the job's artifacts for a month. It never runs an active

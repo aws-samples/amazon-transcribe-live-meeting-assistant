@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 import urllib.error
@@ -40,6 +41,7 @@ import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import role_access_probe as rbac
@@ -229,6 +231,14 @@ CLIENT_SETTINGS = (
 DEFAULT_TOKEN_UNITS = {"AccessToken": "hours", "IdToken": "hours", "RefreshToken": "days"}
 
 
+def settings_record_path():
+    """Where the web UI app client's settings are kept while the expiry check has them changed."""
+    import security_report  # pylint: disable=import-outside-toplevel
+
+    base = os.environ.get("LMA_SECURITY_REPORT_DIR") or str(security_report.DEFAULT_DIR)
+    return Path(base) / "web-client-settings-before-change.json"
+
+
 def client_settings(described: dict) -> dict:
     return {name: described[name] for name in CLIENT_SETTINGS if name in described}
 
@@ -260,6 +270,11 @@ def sign_in_with_short_id_token(deployment: rbac.Deployment, user: rbac.RoleUser
     cognito = deployment.session.client("cognito-idp")
     described = cognito.describe_user_pool_client(UserPoolId=deployment.pool_id, ClientId=deployment.client_id)
     original = effective_settings(client_settings(described["UserPoolClient"]))
+    # Written before the change and removed once the restore is confirmed, so a run
+    # killed in between (a job timeout) leaves the settings to restore on disk.
+    record = settings_record_path()
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"clientId": deployment.client_id, "settings": original}, default=str, indent=2))
     tokens: dict = {}
     try:
         cognito.update_user_pool_client(
@@ -283,8 +298,10 @@ def sign_in_with_short_id_token(deployment: rbac.Deployment, user: rbac.RoleUser
             except Exception as error:  # noqa: BLE001 - retried, then reported by the caller
                 last_error = f"{type(error).__name__}: {error}"
             time.sleep(2 * (attempt + 1))
-    if not restored:
-        last_error += f"; restore these settings by hand: {json.dumps(original, default=str)}"
+    if restored:
+        record.unlink(missing_ok=True)
+    else:
+        last_error += f"; restore these settings by hand (also in {record}): {json.dumps(original, default=str)}"
     return tokens, restored, last_error
 
 
@@ -637,7 +654,9 @@ def transcriber_start_on(deployment: rbac.Deployment, user: rbac.RoleUser, call_
                 frame = json.loads(message)
                 if frame.get("event") == "CONSENT_STATE" and frame.get("captureAllowed") is False:
                     return "refused", str(frame.get("code"))
-            # No refusal: end what was started so nothing keeps streaming.
+            # No refusal, so the check has failed: end what was started so nothing keeps
+            # streaming. The meeting's END may still start post-meeting processing,
+            # which the fixture's cleanup by CallId then races; that happens only here.
             await ws.send(json.dumps({"callEvent": "END", "callId": call_id}))
             return "accepted", "no refusal within 20 seconds"
 

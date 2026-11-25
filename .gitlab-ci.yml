@@ -994,7 +994,8 @@ nightly_integ_tests:
 # Credentials come from the runner's credential vendor, as for the nightly jobs.
 zap_dast:
   stage: scheduled_integration
-  image: ghcr.io/zaproxy/zaproxy:stable
+  # Pinned with zap_scan.py's ZAP_IMAGE; change both together.
+  image: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
   needs: []
   timeout: 50m
   # The scan creates a user in the stack's pool and deletes it in a `finally`.
@@ -1004,14 +1005,16 @@ zap_dast:
   allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $ZAP_DAST == "true"
-    - if: $CI_PIPELINE_SOURCE == "web"
+    # By hand only on develop, so the job runs no other branch's code with the
+    # integration stack's credentials.
+    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == "develop"
       when: manual
     - when: never
   variables:
     LMA_INTEG_STACK: lma-integtest1
     AWS_DEFAULT_REGION: us-west-2
   before_script:
-    - python3 -m pip install --user --quiet --break-system-packages boto3 pycognito graphql-core websockets
+    - python3 -m pip install --user --quiet --break-system-packages -r scripts/security/requirements-zap-job.txt
     - |
       if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
         echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2

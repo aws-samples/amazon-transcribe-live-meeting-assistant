@@ -67,7 +67,11 @@ SCHEMA_PATH = REPO_ROOT / "lma-ai-stack" / "source" / "appsync" / "schema.graphq
 MATRIX_PATH = REPO_ROOT / "lma-ai-stack" / "source" / "appsync" / "role-matrix.json"
 RULES_PATH = Path(__file__).resolve().parent / "zap-rules.conf"
 DEFAULT_REPORT_DIR = REPO_ROOT / "scratch" / "zap-reports"
-ZAP_IMAGE = os.environ.get("ZAP_DOCKER_IMAGE", "ghcr.io/zaproxy/zaproxy:stable")
+# A release, by tag and digest; the zap_dast job in .gitlab-ci.yml uses the same.
+ZAP_IMAGE = os.environ.get(
+    "ZAP_DOCKER_IMAGE",
+    "ghcr.io/zaproxy/zaproxy:2.17.0@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af",
+)
 TARGETS = ("graphql", "web", "mcp")
 SCAN_MINUTES = 30
 

@@ -260,6 +260,34 @@ def test_a_passive_scan_passes_zaps_safe_mode_flag_and_an_active_one_does_not() 
     assert "-S" not in zap_scan.common_args("web", active=False, safe_flag=False)
 
 
+def test_the_ci_job_and_the_script_use_the_same_pinned_zap_release() -> None:
+    import yaml
+
+    job = yaml.safe_load((zap_scan.REPO_ROOT / ".gitlab-ci.yml").read_text())["zap_dast"]
+    if "ZAP_DOCKER_IMAGE" not in __import__("os").environ:
+        assert job["image"] == zap_scan.ZAP_IMAGE
+    assert "@sha256:" in job["image"] and ":stable" not in job["image"]
+
+
+def test_the_ci_job_runs_by_hand_on_develop_only() -> None:
+    import yaml
+
+    job = yaml.safe_load((zap_scan.REPO_ROOT / ".gitlab-ci.yml").read_text())["zap_dast"]
+    manual = [r for r in job["rules"] if r.get("when") == "manual"]
+    assert manual and all('$CI_COMMIT_BRANCH == "develop"' in r["if"] for r in manual)
+
+
+def test_the_ci_job_installs_pinned_packages() -> None:
+    import yaml
+
+    job = yaml.safe_load((zap_scan.REPO_ROOT / ".gitlab-ci.yml").read_text())["zap_dast"]
+    assert "-r scripts/security/requirements-zap-job.txt" in " ".join(job["before_script"])
+    path = zap_scan.REPO_ROOT / "scripts/security/requirements-zap-job.txt"
+    lines = [line.strip() for line in path.read_text().splitlines()]
+    packages = [line for line in lines if line and not line.startswith("#")]
+    assert packages and all("==" in line for line in packages)
+
+
 def test_unknown_targets_are_refused(capsys) -> None:
     with pytest.raises(SystemExit):
         zap_scan.main(["--stack-name", "x", "--targets", "graphql,nope"])
