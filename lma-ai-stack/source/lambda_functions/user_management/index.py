@@ -463,10 +463,16 @@ def _delete_notification_preferences(username):
 #      (counted in the event-sourcing table under usr#<username>); every caller
 #      at most PARTICIPANT_ACCOUNTS_PER_REQUEST in one request.
 #   6. AllowedSignUpEmailDomain applies as it does to createUser.
+#   7. A User looks up at most PARTICIPANT_LOOKUPS_PER_DAY addresses a UTC day,
+#      across both operations (counted the same way), so a list cannot be
+#      rewritten again and again to look up any address in the user pool.
+# The owner is compared exactly, as the meeting preparation resolver's write
+# condition and the web UI compare it.
 
 NO_ACCOUNT = "none"
 PARTICIPANT_ACCOUNTS_PER_DAY = int(os.environ.get("PARTICIPANT_ACCOUNTS_PER_DAY", "25"))
 PARTICIPANT_ACCOUNTS_PER_REQUEST = 25
+PARTICIPANT_LOOKUPS_PER_DAY = int(os.environ.get("PARTICIPANT_LOOKUPS_PER_DAY", "1000"))
 LOOKUP_WORKERS = 8
 # The daily counts are kept for two days, then the table's time to live removes them.
 DAILY_COUNT_TTL_SECONDS = 2 * 86400
@@ -537,8 +543,8 @@ def _meeting_for_caller(caller, args):
         if meeting is None:
             raise ValidationError("There is no such meeting")
         return meeting
-    username = (caller["username"] or "").casefold()
-    if meeting is None or not username or meeting["owner"].casefold() != username:
+    username = caller["username"] or ""
+    if meeting is None or not username or meeting["owner"] != username:
         raise ForbiddenError("only the meeting's owner or an Admin may do this")
     return meeting
 
@@ -580,10 +586,42 @@ def _accounts_of(emails):
         return dict(zip(emails, pool.map(_account_of, emails)))
 
 
+def _reserve_lookups(caller, count, now):
+    """Count ``count`` address lookups against a User's day; refuse when they do not fit."""
+    if caller["is_admin"] or count == 0:
+        return
+    room = PARTICIPANT_LOOKUPS_PER_DAY - count
+    if room < 0:
+        raise ValidationError(
+            f"At most {PARTICIPANT_LOOKUPS_PER_DAY} addresses can be looked up a day"
+        )
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_daily_count_key(caller["username"], now, "participant-lookups"),
+            UpdateExpression="ADD LookupCount :count SET ExpiresAfter = :ttl",
+            ConditionExpression="attribute_not_exists(LookupCount) OR LookupCount <= :room",
+            ExpressionAttributeValues={
+                ":count": {"N": str(count)},
+                ":room": {"N": str(room)},
+                ":ttl": {"N": str(int(now) + DAILY_COUNT_TTL_SECONDS)},
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise ValidationError(
+                f"You have looked up the accounts of {PARTICIPANT_LOOKUPS_PER_DAY} addresses "
+                "today, the most a day; an Admin can look up the rest, or try again tomorrow (UTC)"
+            ) from exc
+        raise
+
+
 def get_meeting_participant_accounts(event, args):
     """Each person on the meeting's list, as the list names them, with their account answer."""
-    meeting = _meeting_for_caller(_get_caller_identity(event), args)
+    caller = _get_caller_identity(event)
+    meeting = _meeting_for_caller(caller, args)
     participants = meeting["participants"]
+    _reserve_lookups(caller, len(participants), time.time())
     accounts = _accounts_of([p["email"] for p in participants])
     return [
         {"name": p["name"], "email": p["email"], "account": accounts[p["email"]]}
@@ -599,10 +637,10 @@ def _domain_allowed(email):
     return True
 
 
-def _daily_count_key(username, now):
+def _daily_count_key(username, now, kind="participant-accounts"):
     return {
         "PK": {"S": f"usr#{username}"},
-        "SK": {"S": f"participant-accounts#{time.strftime('%Y-%m-%d', time.gmtime(now))}"},
+        "SK": {"S": f"{kind}#{time.strftime('%Y-%m-%d', time.gmtime(now))}"},
     }
 
 
@@ -722,9 +760,10 @@ def create_participant_accounts(event, args):
             )
         wanted = list(dict.fromkeys(listed[e.strip().casefold()] for e in requested))
 
+    now = time.time()
+    _reserve_lookups(caller, len(wanted), now)
     accounts = _accounts_of(wanted)
     limited = not caller["is_admin"]
-    now = time.time()
     results = []
     attempts = 0
     for email in wanted:

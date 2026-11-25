@@ -144,6 +144,16 @@ def _participants_attr(people):
 
 
 class FakeDynamo:
+    def accounts_counted(self) -> int:
+        return sum(
+            n for (_pk, sk), n in self.counts.items() if sk.startswith("participant-accounts#")
+        )
+
+    def lookups_counted(self) -> int:
+        return sum(
+            n for (_pk, sk), n in self.counts.items() if sk.startswith("participant-lookups#")
+        )
+
     def __init__(self) -> None:
         self.meetings: dict[str, dict] = {}
         self.vps: dict[str, dict] = {}
@@ -166,7 +176,13 @@ class FakeDynamo:
         key = (kwargs["Key"]["PK"]["S"], kwargs["Key"]["SK"]["S"])
         values = kwargs["ExpressionAttributeValues"]
         current = self.counts.get(key)
-        if "ConditionExpression" in kwargs:
+        if ":room" in values:  # a block of lookups: fits when the count is at most room
+            if current is not None and current > int(values[":room"]["N"]):
+                raise ClientError(
+                    {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+                )
+            self.counts[key] = (current or 0) + int(values[":count"]["N"])
+        elif "ConditionExpression" in kwargs:
             limit = int(values[":limit"]["N"])
             if current is not None and current >= limit:
                 raise ClientError(
@@ -344,7 +360,7 @@ def test_an_account_made_between_the_lookup_and_the_create_is_reported_as_existi
     result = create({"CallId": CALL_ID, "emails": ["ana@example.com"]})
     assert result["results"][0]["outcome"] == "exists"
     assert pool.users["ana@example.com"]["groups"] == ["Admin"]
-    assert sum(ddb.counts.values()) == 0, "the slot reserved for it is given back"
+    assert ddb.accounts_counted() == 0, "the slot reserved for it is given back"
 
 
 @pytest.mark.parametrize("failing", ["add_to_group_error", "resend_error"])
@@ -355,7 +371,7 @@ def test_a_failure_after_the_create_leaves_no_account_and_sends_no_invitation(po
     assert "di@example.com" not in pool.users
     assert pool.invited == []
     assert result["created"] == 0
-    assert sum(ddb.counts.values()) == 0, "the daily slot is given back"
+    assert ddb.accounts_counted() == 0, "the daily slot is given back"
 
 
 def test_addresses_outside_the_allowed_domains_are_not_created(pool, ddb, monkeypatch):
@@ -383,7 +399,7 @@ def test_a_user_s_daily_limit_stops_creation_and_is_reported(pool, ddb, monkeypa
     assert result["remainingToday"] == 0
     assert len(pool.users) == 2
     # The count is the caller's, for today, and expires.
-    (update, *_rest) = ddb.updates
+    update = next(u for u in ddb.updates if u["Key"]["SK"]["S"].startswith("participant-accounts#"))
     assert update["Key"]["PK"]["S"] == f"usr#{OWNER}"
     assert update["Key"]["SK"]["S"].startswith("participant-accounts#")
     assert ":ttl" in update["ExpressionAttributeValues"]
@@ -403,3 +419,29 @@ def test_one_request_creates_at_most_the_per_request_limit(pool, ddb, monkeypatc
 def test_the_remaining_daily_count_is_returned_to_a_user(pool, ddb):
     result = create({"CallId": CALL_ID, "emails": ["di@example.com"]})
     assert result["remainingToday"] == index.PARTICIPANT_ACCOUNTS_PER_DAY - 1
+
+
+def test_a_user_s_lookups_are_counted_and_bounded_a_day(pool, ddb, monkeypatch):
+    accounts({"CallId": CALL_ID})
+    create({"CallId": CALL_ID, "emails": ["di@example.com"]})
+    assert ddb.lookups_counted() == len(LISTED) + 1
+    monkeypatch.setattr(index, "PARTICIPANT_LOOKUPS_PER_DAY", len(LISTED) + 2)
+    with pytest.raises(Exception, match="looked up"):
+        accounts({"CallId": CALL_ID})
+    with pytest.raises(Exception, match="looked up"):
+        create({"CallId": CALL_ID})
+    assert [n for n, _ in pool.calls].count("admin_get_user") == len(LISTED) + 1
+    monkeypatch.setattr(index, "PARTICIPANT_LOOKUPS_PER_DAY", 2)
+    with pytest.raises(Exception, match="At most 2 addresses"):
+        accounts({"CallId": CALL_ID})
+
+
+def test_an_admin_s_lookups_are_not_counted(pool, ddb, monkeypatch):
+    monkeypatch.setattr(index, "PARTICIPANT_LOOKUPS_PER_DAY", 1)
+    accounts({"CallId": CALL_ID}, username="admin@example.com", groups=["Admin"])
+    assert ddb.lookups_counted() == 0
+
+
+def test_the_owner_is_compared_exactly(pool, ddb):
+    with pytest.raises(Exception, match="Unauthorized"):
+        accounts({"CallId": CALL_ID}, username=OWNER.upper())

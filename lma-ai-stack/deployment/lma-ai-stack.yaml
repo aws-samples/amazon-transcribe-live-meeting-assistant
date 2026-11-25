@@ -11300,12 +11300,14 @@ Resources:
                   - cognito-idp:AdminListGroupsForUser
                 Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
               # A deleted user's meeting notification preferences, and the
-              # daily count of Participant accounts a user has created for
-              # their meetings: only under the usr# partitions.
+              # daily counts of the participant accounts a user has created
+              # and looked up for their meetings (written and read): only
+              # under the usr# partitions.
               - Effect: Allow
                 Action:
                   - "dynamodb:DeleteItem"
                   - "dynamodb:UpdateItem"
+                  - "dynamodb:GetItem"
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
                   ForAllValues:StringLike:

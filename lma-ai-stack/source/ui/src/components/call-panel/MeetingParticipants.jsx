@@ -102,6 +102,9 @@ const MeetingParticipants = ({
 
   const accountOf = (email) => accounts?.get(email.toLowerCase());
   const withoutAccount = accounts ? people.filter((p) => accountOf(p.email) === 'none') : [];
+  let createDisabledReason = 'Checking the accounts';
+  if (accounts) createDisabledReason = 'Everyone on the list has an LMA account';
+  else if (accountsError) createDisabledReason = 'The accounts could not be checked';
 
   const createAccounts = async () => {
     setConfirming(false);
@@ -164,7 +167,7 @@ const MeetingParticipants = ({
           onClick={() => setConfirming(true)}
           loading={creating}
           disabled={!withoutAccount.length}
-          disabledReason={accounts ? 'Everyone on the list has an LMA account' : 'Checking the accounts'}
+          disabledReason={createDisabledReason}
         >
           Create accounts for participants without one
         </Button>

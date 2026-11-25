@@ -213,7 +213,7 @@ def _delete_daily_counts(ddb, table: str, username: str) -> None:
     for item in ddb.query(
         TableName=table,
         KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
-        ExpressionAttributeValues={":pk": {"S": f"usr#{username}"}, ":sk": {"S": "participant-accounts#"}},
+        ExpressionAttributeValues={":pk": {"S": f"usr#{username}"}, ":sk": {"S": "participant-"}},
     ).get("Items", []):
         ddb.delete_item(TableName=table, Key={"PK": item["PK"], "SK": item["SK"]})
 
