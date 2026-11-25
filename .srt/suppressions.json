@@ -201316,7 +201316,7 @@
   {
     "source": "Semgrep",
     "path": "lma-virtual-participant-stack/backend/src/webex.ts",
-    "line": 159,
+    "line": 160,
     "issue": "RegExp() called with a `base` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
     "check_id": "javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
     "priority": "MEDIUM",
@@ -201329,7 +201329,7 @@
   {
     "source": "Semgrep",
     "path": "lma-virtual-participant-stack/backend/src/zoom-sdk-server.ts",
-    "line": 315,
+    "line": 324,
     "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
@@ -201389,31 +201389,5 @@
     "firstDetectedAt": "2026-11-17T18:49:15.833Z",
     "assessmentCount": 1,
     "suppressionReason": "Reviewed 2026-10-23 against the code (develop). Accepted, consistent with the existing decisions for this check: the function's only environment variable is LOG_LEVEL, configuration rather than a secret."
-  },
-  {
-    "source": "Semgrep",
-    "path": "lma-virtual-participant-stack/backend/src/webex.ts",
-    "line": 160,
-    "issue": "RegExp() called with a `base` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
-    "check_id": "javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
-    "priority": "MEDIUM",
-    "references": "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
-    "status": "suppressed",
-    "firstDetectedAt": "2026-11-25T00:00:00.000Z",
-    "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-11-16 against the code. Same decision as at the previous lines: the base name is escaped for every RegExp metacharacter before it is embedded in a fixed, anchored pattern."
-  },
-  {
-    "source": "Semgrep",
-    "path": "lma-virtual-participant-stack/backend/src/zoom-sdk-server.ts",
-    "line": 324,
-    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
-    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
-    "priority": "MEDIUM",
-    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "suppressed",
-    "firstDetectedAt": "2026-11-25T00:00:00.000Z",
-    "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-11-16 against the code. Same decision as at the previous lines: the joined path is normalized and must equal distDir or start with distDir + path.sep before anything is read (the check is the line after the flagged one)."
   }
 ]
