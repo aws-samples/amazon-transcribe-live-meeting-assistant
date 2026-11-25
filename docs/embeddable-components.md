@@ -112,6 +112,8 @@ To try the hosted [demo pages](#interactive-demo-page) against your stack, add t
    So a page on another origin that sends the embed messages, uses `authMode=token`, or listens for
    its events must pass its own origin there. Use the exact origin of the embedding page, for example
    `allowedOrigins=https://crm.example.com` (URL-encode it if you build the URL by hand).
+   `allowedOrigins` is compared exactly and takes no wildcards, even where `AllowedEmbedOrigins`
+   uses a `*.` entry: list each embedding page's origin.
 
 3. **Address messages to LMA's origin and check `event.origin`**, as in
    [Security Best Practices](#security-best-practices).
@@ -645,7 +647,7 @@ A compact widget that lets users start a meeting recording with one click:
   <div class="recorder-widget">
     <iframe
       id="recorder"
-      src="https://YOUR_LMA_URL/#/embed?component=stream-audio&meetingTopic=Quick+Recording&autoStart=false"
+      src="https://YOUR_LMA_URL/#/embed?component=stream-audio&meetingTopic=Quick+Recording&autoStart=false&allowedOrigins=https://YOUR_APP_ORIGIN"
       width="100%"
       height="100%"
       style="border: none;"
@@ -714,7 +716,7 @@ Start and stop meetings entirely from your parent application:
 ```html
 <iframe
   id="meeting"
-  src="https://YOUR_LMA_URL/#/embed?component=meeting-loader&authMode=cognito"
+  src="https://YOUR_LMA_URL/#/embed?component=meeting-loader&authMode=cognito&allowedOrigins=https://YOUR_APP_ORIGIN"
   width="100%"
   height="300px"
   style="border: none;"
@@ -733,13 +735,13 @@ function startMeeting() {
     meetingTopic: 'Automated Meeting',
     participants: 'Team',
     owner: 'admin@company.com'
-  }, '*');
+  }, 'https://YOUR_LMA_URL');
 }
 
 function stopMeeting() {
   iframe.contentWindow.postMessage({
     type: 'LMA_STOP_MEETING'
-  }, '*');
+  }, 'https://YOUR_LMA_URL');
 }
 
 window.addEventListener('message', (event) => {
@@ -857,15 +859,20 @@ see [What the embedding page must do](#what-the-embedding-page-must-do).
 
 ### Issue: postMessage not received by iframe
 
-**Cause**: Origin mismatch or timing issue.
+**Cause**: The parent page's origin is not in the iframe's `allowedOrigins` query parameter, or an
+origin mismatch or timing issue.
 
 **Solutions**:
-1. Wait for the `LMA_AUTH_READY` or `LMA_EMBED_LOADED` message before sending
-2. Verify the target origin matches the iframe's origin:
+1. Add your page's exact origin to the iframe URL, for example
+   `&allowedOrigins=https://YOUR_APP_ORIGIN`. The embed accepts messages only from the origins in
+   `allowedOrigins` (LMA's own origin when it is absent) and sends its events to the first of them;
+   see [What the embedding page must do](#what-the-embedding-page-must-do).
+2. Wait for the `LMA_AUTH_READY` or `LMA_EMBED_LOADED` message before sending
+3. Verify the target origin matches the iframe's origin:
    ```javascript
    iframe.contentWindow.postMessage(data, 'https://YOUR_LMA_CLOUDFRONT_URL');
    ```
-3. Check browser console for cross-origin errors
+4. Check browser console for cross-origin errors
 
 ### Issue: "Meeting not found" when using callId
 
