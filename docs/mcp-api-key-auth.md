@@ -258,14 +258,14 @@ When the authorizer admits a request it records two times, for access reviews:
 - the key's **last use**, as `LastUsedAt` on the key's item, which the MCP API Key container shows as **Last used** (or **Last used: Not recorded** for a key not used since this was deployed); and
 - the owner's **last activity**, as `LastActiveAt` on their item in the Cognito stack's `UserSignInTable`, which the User Management page shows as **Last active** (see [User Management › Last active](user-management.md#last-active)).
 
-Both are conditional DynamoDB updates that write only when the recorded time is more than 15 minutes old, so a busy key costs at most one pair of writes every 15 minutes, and the times are accurate to within 15 minutes. An execution environment also remembers the keys it recorded in the last 15 minutes and makes no call for them. Each call is one attempt that gives up after at most 1.5 seconds; a failed write is logged (by key prefix and error type only) and never changes the policy. A refused request records nothing.
+Both are conditional DynamoDB updates that write only when the recorded time is more than 15 minutes old, so a busy key costs at most one pair of writes every 15 minutes (plus, for a key generated before keys stored their owner's `sub`, one `AdminGetUser` read, which counts against the same Cognito user-read quota as the role lookup), and the times are accurate to within 15 minutes. An execution environment also remembers the keys it recorded in the last 15 minutes and makes no call for them. Each call is one attempt that gives up after at most 1.5 seconds, so the first request of a window can take up to about 4.5 seconds longer when DynamoDB or Cognito are slow (the authorizer's timeout is 10 seconds). If the key's write succeeds and the owner's then fails, the owner's write is not tried again for that key until the next window. A failed write is logged (by key prefix and error type only) and never changes the policy. A refused request records nothing.
 
 ## UI
 
 Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`):
 
 - **MCP API Key** container at the top of the page
-- Shows key prefix with masked suffix, its scope (**Read only**, **Read and write**, or **Legacy (original tools)** with a note that a new key gives the new scopes) creation date and when the key was last used if a key exists
+- Shows key prefix with masked suffix, its scope (**Read only**, **Read and write**, or **Legacy (original tools)** with a note that a new key gives the new scopes), creation date and when the key was last used if a key exists
 - Before a key exists, a **Scope** choice (**Read only** by default, or **Read and write**) and the "Generate API Key" button (disabled when a key already exists)
 - Generated key shown in a modal with its scope, CopyToClipboard and a warning it won't be shown again
 - "Revoke" button with confirmation modal
