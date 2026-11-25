@@ -3735,10 +3735,13 @@ Resources:
         - !Ref ConfigurationPythonLayer
       Description: Lambda function for meeting controls
       MemorySize: 512
-      # Sharing a meeting gives each of its transcript segments the new sharing
-      # list one at a time; the meetings-table stream (MeetingSharingEventSourceMapping)
-      # is not bound by AppSync's 30-second resolver limit, so a long meeting's
-      # share there is given time to finish rather than retried from the start.
+      # Sharing a meeting gives each of its transcript items, key frames and chat
+      # attachments the new sharing list. The share dialog's request does what
+      # it can in 20 seconds, within AppSync's 30-second resolver limit; the
+      # meetings-table stream (MeetingSharingEventSourceMapping) completes the
+      # rest, continuing from where the last attempt stopped (index.py,
+      # complete_sharing), so a long meeting's share finishes over as many
+      # invocations as it needs.
       Timeout: 300
       FunctionName: !Sub '${LMAStackName}-MeetingControlsLambda'
       Environment:
@@ -3777,8 +3780,12 @@ Resources:
   # Meeting Sharing: each write of a meeting record reaches the meeting controls
   # function, which shares the meeting with the people on its participant list
   # as soon as the record exists and whenever the list changes
-  # (auto_share.py). The stream's only reader. Only items whose PK starts c#
-  # are passed; the function reads the meeting records among them.
+  # (auto_share.py), and completes any share, from either path, whose items
+  # have still to be given the meeting's sharing list (the SharingFanout
+  # marker). The stream's only reader. Only items whose PK starts c# are
+  # passed; the function reads the meeting records among them. It relies on
+  # one batch at a time per shard (no ParallelizationFactor), so a meeting is
+  # worked on by one invocation at a time.
   MeetingSharingEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
     Properties:

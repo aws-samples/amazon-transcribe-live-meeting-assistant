@@ -336,6 +336,24 @@ def test_shared_meetings_are_published_with_a_bracketed_list(client) -> None:
     assert output["Calls"] == ["c1"]
 
 
+def test_a_share_refused_on_a_changed_sharing_list_is_an_error_of_its_own_type(client) -> None:
+    # The meeting controls Lambda answers ErrorType when ExpectedSharedWith no longer holds.
+    result = {
+        "Calls": [],
+        "Result": "The sharing list changed; reopen to see the current list",
+        "ErrorType": "SharingListChanged",
+    }
+    response = client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "shareMeetings.js").read_text(encoding="utf-8"),
+        context=json.dumps({"result": result, "arguments": {}}),
+        function="response",
+    )
+    error = response.get("error") or {}
+    assert "The sharing list changed" in error.get("message", ""), response
+    assert "evaluationResult" not in response or not response["evaluationResult"], response
+
+
 def test_an_ended_virtual_participant_is_published_with_a_bracketed_list(client) -> None:
     body = {"id": "vp1", "Owner": OWNER, "SharedWith": SHAPES["comma-separated"], "status": "ENDED"}
     output = _evaluate_js(

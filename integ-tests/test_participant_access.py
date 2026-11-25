@@ -29,6 +29,17 @@ preparation are written to the meeting directly. Then:
 ``test_a_participant_is_refused_a_meeting_not_shared_with_them``
     The unlisted Participant is refused every view operation for the meeting,
     and both Participants are refused the member operations at the field.
+``test_a_share_gives_every_transcript_line_the_new_sharing_list``
+    Forty more transcript lines are written with the meeting's sharing list,
+    then the owner shares the meeting with one more address through
+    shareMeetings, on condition of the list read (ExpectedSharedWith): every
+    line of the transcript ends with the new list, and the meeting record's
+    SharingFanout marker is removed once they do. Forty lines fit in the
+    share dialog's own time, so the stream continuing from a saved cursor is
+    covered by the unit tests (test_sharing_fanout.py), not here.
+``test_a_share_saved_on_a_list_that_has_since_changed_is_refused``
+    A shareMeetings save whose ExpectedSharedWith is not the meeting's list is
+    refused with errorType SharingListChanged, and the sharing is unchanged.
 ``test_taking_someone_off_the_list_removes_only_the_share_meeting_sharing_made``
     A share the owner makes by hand stays when the list changes; the listed
     Participant's share goes when they are taken off it.
@@ -602,6 +613,134 @@ def test_a_participant_is_refused_a_meeting_not_shared_with_them(
     # And the owner is refused the Participant view at the field.
     owner_call = probe.call(deployment, users["owner"], GET_MEETING, {"CallId": call_id})
     assert probe.refused_at_field(owner_call, "Query.getParticipantMeeting"), owner_call
+
+
+FANOUT_SEGMENTS = 40
+
+
+def _entries(value: Any) -> list:
+    if isinstance(value, str):
+        return [s.strip() for s in value.strip("[]").split(",") if s.strip()]
+    return [s for s in (value or []) if isinstance(s, str)]
+
+
+def _share_call(call_id: str, created_at: str, expected: Any = None) -> dict:
+    shard = f"{int(created_at[11:13]) // 4:02d}"
+    call = {
+        "CallId": call_id,
+        "ListPK": f"cls#{created_at[:10]}#s#{shard}",
+        "ListSK": f"ts#{created_at}#id#{call_id}",
+    }
+    if expected is not None:
+        call["ExpectedSharedWith"] = expected
+    return call
+
+
+def _transcript_lists(deployment, call_id: str) -> dict:
+    """The sharing list of every item under the meeting's transcript partition, by SK."""
+    from boto3.dynamodb.types import TypeDeserializer
+
+    ddb = deployment.session.client("dynamodb")
+    deserializer = TypeDeserializer()
+    out: dict = {}
+    kwargs = {
+        "TableName": deployment.ai_resources["EventSourcingTable"],
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": {"S": f"trs#{call_id}"}},
+        "ProjectionExpression": "SK, SharedWith",
+        "ConsistentRead": True,
+    }
+    while True:
+        page = ddb.query(**kwargs)
+        for item in page.get("Items", []):
+            shared = item.get("SharedWith")
+            out[item["SK"]["S"]] = _entries(deserializer.deserialize(shared) if shared else None)
+        if not page.get("LastEvaluatedKey"):
+            return out
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def test_a_share_gives_every_transcript_line_the_new_sharing_list(
+    deployment, users, meeting, shared
+) -> None:
+    """The share dialog's save reaches every transcript line, and finishes (no SharingFanout left)."""
+    call_id, created_at, _seeded = meeting
+    ddb = deployment.session.client("dynamodb")
+    table = deployment.ai_resources["EventSourcingTable"]
+    current, _auto = _shared_with(deployment, call_id)
+    # Lines written before the share, with the sharing list they were written with.
+    for i in range(FANOUT_SEGMENTS):
+        ddb.put_item(
+            TableName=table,
+            Item={
+                "PK": {"S": f"trs#{call_id}"},
+                "SK": {"S": f"ts#{created_at}#id#integ-fanout-{i:03d}"},
+                "CallId": {"S": call_id},
+                "SegmentId": {"S": f"integ-fanout-{i:03d}"},
+                "Channel": {"S": "REMOTE"},
+                "Transcript": {"S": f"integ fan-out line {i}"},
+                "Speaker": {"S": "Integ Speaker"},
+                "IsPartial": {"BOOL": False},
+                "StartTime": {"N": str(10 + i)},
+                "EndTime": {"N": str(11 + i)},
+                "Owner": {"S": users["owner"].username},
+                "SharedWith": {"L": [{"S": a} for a in current]},
+                "ExpiresAfter": {"N": str(int(time.time()) + 3600)},
+            },
+        )
+    added = f"integ-participant-fanout-{uuid.uuid4().hex[:8]}@example.invalid"
+    wanted = current + [added]
+    share = probe.call(
+        deployment,
+        users["owner"],
+        SHARE_MEETINGS,
+        {
+            "input": {
+                "Calls": [_share_call(call_id, created_at, expected=current)],
+                "MeetingRecipients": ",".join(wanted),
+            }
+        },
+    )
+    assert _data(share, "shareMeetings")["Result"] == "Meetings shared successfully", share
+
+    def finished():
+        record = read_meeting(ddb, table, call_id) or {}
+        lists = _transcript_lists(deployment, call_id)
+        done = "SharingFanout" not in record and all(added in v for v in lists.values())
+        return done and lists
+
+    lists = wait_for(finished, timeout=SHARE_TIMEOUT_S, interval=3.0)
+    assert lists, (
+        f"not every transcript line had the new sharing list within {SHARE_TIMEOUT_S:.0f}s: "
+        f"{_transcript_lists(deployment, call_id)}"
+    )
+    assert len(lists) >= FANOUT_SEGMENTS
+    assert all(sorted(v) == sorted(wanted) for v in lists.values()), lists
+    assert sorted(_shared_with(deployment, call_id)[0]) == sorted(wanted)
+
+
+def test_a_share_saved_on_a_list_that_has_since_changed_is_refused(
+    deployment, users, meeting, shared
+) -> None:
+    """A save with ExpectedSharedWith that no longer holds changes nothing, and says so."""
+    call_id, created_at, _seeded = meeting
+    before, auto_before = _shared_with(deployment, call_id)
+    stale = [a for a in before if a != users["listed"].username]
+    response = probe.call(
+        deployment,
+        users["owner"],
+        SHARE_MEETINGS,
+        {
+            "input": {
+                "Calls": [_share_call(call_id, created_at, expected=stale)],
+                "MeetingRecipients": ",".join(stale),
+            }
+        },
+    )
+    errors = response.get("errors") or []
+    assert [e.get("errorType") for e in errors] == ["SharingListChanged"], response
+    assert "sharing list changed" in _errors(response), response
+    assert _shared_with(deployment, call_id) == (before, auto_before)
 
 
 def test_taking_someone_off_the_list_removes_only_the_share_meeting_sharing_made(

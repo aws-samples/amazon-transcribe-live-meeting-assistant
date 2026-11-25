@@ -355,6 +355,11 @@ input ShareMeetingsItem {
 	CallId: ID!
 	ListPK: ID!
 	ListSK: ID!
+	# The meeting's sharing list as the caller read it. When given, the meeting
+	# is shared only if its list is still this one; otherwise the request fails
+	# with errorType SharingListChanged and no meeting is changed (meetings are
+	# saved 50 at a time; the groups saved before the refused one are kept).
+	ExpectedSharedWith: [String]
 }
 
 input ShareMeetingsInput {
