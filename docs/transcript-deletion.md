@@ -74,6 +74,7 @@ The configuration presets set both:
 | **Standard**, **Internal meetings – notify participants** | Off | Off |
 | **Regulated – consent required, transcript not retained**, **Regulated – notify with opt-out, transcript not retained** | 15 minutes after the summary | Immediately |
 | **Team-hosted (external meetings)**, **Customer account** | Off | Off |
+| **Minimised content – summary only** | Immediately | Immediately |
 
 The two Regulated presets also turn **Record meeting audio**, **Record screen
 video from streaming clients** and **Record Virtual Participant meeting video**

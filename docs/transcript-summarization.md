@@ -153,6 +153,7 @@ the summary's state records the profile it asked for.
 |---|---|
 | `discovery-session` | SUMMARY (as the default); DECISIONS, each with who decided, when it applies and the time; ACTION ITEMS, each with its owner and due date, saying "no owner" or "no due date" plainly when missing, and the time; OPEN QUESTIONS, each with who should answer and when it was asked; RISKS AND CONSTRAINTS; REQUIREMENTS HEARD, each a short statement with the speaker, a word-for-word quote of up to 200 characters and the time, and only what was said; CHECKLIST COVERAGE, from the meeting's checklist, each item covered, partial or open with the times of its evidence; AGENDA COVERAGE (as the default). Lists [structured action items](#structured-action-items). |
 | `healthcare` | The healthcare sections: SUMMARY, DETAILS, SOAP and BIRP. |
+| `minimised-content` | SUMMARY, ACTIONS and AGENDA COVERAGE, each the default section with an added instruction to leave out health information and the other categories of sensitive personal information, and to say only that a personal matter was raised where one bears on a decision or an action item. The default for new meetings under the Minimised content preset. The model is asked to leave such information out; nothing checks that it did. See [Minimised content](privacy-and-data-handling.md#minimised-content). |
 
 A deployment with the stack parameter `Domain` set to `Healthcare` also keeps the
 healthcare sections as its default, as before.

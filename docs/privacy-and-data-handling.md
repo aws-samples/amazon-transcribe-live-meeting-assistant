@@ -47,6 +47,7 @@ with whoever advises your organisation on those rules.
 - [Deleting data](#deleting-data)
 - [Where content is processed](#where-content-is-processed)
 - [Configuration presets and deploy-time controls](#configuration-presets-and-deploy-time-controls)
+- [Minimised content](#minimised-content)
 - [Related](#related)
 
 ## Consent options
@@ -651,35 +652,37 @@ A **configuration preset** sets the consent, retention and privacy settings
 together. An Admin applies one from **Configuration ▸ Configuration ▸ Actions ▸
 Apply a preset…**, or chooses one at deploy time with the `ConfigurationPreset`
 stack parameter; each preset is also available as a read-only **Managed**
-profile. All six set the same settings, so applying one replaces whatever another
+profile. All seven set the same settings, so applying one replaces whatever another
 preset set, and leaves every other setting as it is. See
 [Configuration presets](configuration-guide.md#configuration-presets). The two
 hosting presets, Team-hosted and Customer account, are explained in
-[Hosting Models](hosting-models.md).
+[Hosting Models](hosting-models.md), and Minimised content in
+[Minimised content](#minimised-content).
 
-| Setting | Standard | Internal meetings – notify participants | Regulated – consent required, transcript not retained | Regulated – notify with opt-out, transcript not retained | Team-hosted (external meetings) | Customer account |
-|---|---|---|---|---|---|---|
-| Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in |
-| Consent rule (opt-in) | Each participant | Each participant | Each participant | Each participant | Each participant | Each participant |
-| Allow a different choice per meeting | On | On | Off (stricter only) | Off (stricter only) | Off (stricter only) | On |
-| Keep evidence screenshots | On | On | On | On | On | On |
-| Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
-| Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse | Refuse | Refuse |
-| Virtual Participant leaves after an objection | Off | Off | On | On | On | Off |
-| Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off |
-| Delete the recordings after the summary | Off | Off | Immediately | Immediately | Off | Off |
-| Record meeting audio | On | On | Off | Off | Off | Off |
-| Record screen video from streaming clients | On | On | Off | Off | Off | On |
-| Record Virtual Participant meeting video | On | On | Off | Off | Off | On |
-| Add the meeting chat to the transcript | On | On | Off | Off | On | On |
-| Redact personal information | Off | Off | On | On | Off | Off |
-| Model inference geography | Global | Global | Same geography | Same geography | Global | Global |
-| Meeting assistant: web search | On | On | On | On | Off | Off |
-| Meeting assistant: MCP servers | On | On | On | On | Off | On |
-| In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
-| In-meeting requests: meeting context and checklist | None | None | None | None | None | None |
-| In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone |
-| Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` |
+| Setting | Standard | Internal meetings – notify participants | Regulated – consent required, transcript not retained | Regulated – notify with opt-out, transcript not retained | Team-hosted (external meetings) | Customer account | Minimised content – summary only |
+|---|---|---|---|---|---|---|---|
+| Consent mode | Off | Notify | Opt-in | Notify | Opt-in | Opt-in | Opt-in |
+| Consent rule (opt-in) | Each participant | Each participant | Each participant | Each participant | Each participant | Each participant | Each participant |
+| Allow a different choice per meeting | On | On | Off (stricter only) | Off (stricter only) | Off (stricter only) | On | Off (stricter only) |
+| Keep evidence screenshots | On | On | On | On | On | On | On |
+| Video sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence | Shipped sentence |
+| Streaming clients without a consent step | Accept with a warning | Accept with a warning | Refuse | Refuse | Refuse | Refuse | Refuse |
+| Virtual Participant leaves after an objection | Off | Off | On | On | On | Off | On |
+| Delete the transcript after the summary | Off | Off | 15 minutes after | 15 minutes after | Off | Off | Immediately |
+| Delete the recordings after the summary | Off | Off | Immediately | Immediately | Off | Off | Immediately |
+| Record meeting audio | On | On | Off | Off | Off | Off | Off |
+| Record screen video from streaming clients | On | On | Off | Off | Off | On | Off |
+| Record Virtual Participant meeting video | On | On | Off | Off | Off | On | Off |
+| Add the meeting chat to the transcript | On | On | Off | Off | On | On | Off |
+| Redact personal information | Off | Off | On | On | Off | Off | On |
+| Model inference geography | Global | Global | Same geography | Same geography | Global | Global | Same geography |
+| Meeting assistant: web search | On | On | On | On | Off | Off | On |
+| Meeting assistant: MCP servers | On | On | On | On | Off | On | On |
+| In-meeting requests | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only | Current meeting only |
+| In-meeting requests: meeting context and checklist | None | None | None | None | None | None | None |
+| In-meeting requests: who may ask | Anyone | Anyone | Anyone | Anyone | Off | Anyone | Anyone |
+| Meeting assistant: leave out sensitive personal information | Off | Off | Off | Off | Off | Off | On |
+| Default summary profile for new meetings | `default` | `default` | `default` | `default` | `discovery-session` | `default` | `minimised-content` |
 
 No preset sets **Read spoken replies** or **Capture chat attachments**, which
 is off by default. Under the consent-required preset, Stream
@@ -743,6 +746,135 @@ they expire.
    [Point-in-time recovery of the DynamoDB tables](#point-in-time-recovery-of-the-dynamodb-tables)).
 10. Set `EnableDataRetentionOnDelete` to match what must happen to the data when
     the deployment is removed.
+
+## Minimised content
+
+The **Minimised content – summary only** preset (`minimised-content`) is for a
+deployment that must keep as little personal content as possible. Under it the
+summary is the only record of what was said that LMA keeps once the meeting is
+summarized, and the model that writes the summary, and the meeting assistant,
+are told to leave sensitive personal information out of what they write. Some
+other content is still kept; see
+[What can still hold sensitive personal information](#what-can-still-hold-sensitive-personal-information).
+
+### What the preset sets
+
+- **Consent first.** Opt-in with the each-participant rule; a meeting may only
+  use this mode or a stricter one; streaming clients without a consent step are
+  refused; the Virtual Participant leaves after an objection; evidence screenshots
+  are kept. These are the settings of the Regulated – consent required preset,
+  with the same consequences: Stream Audio/Video and the Desktop Capture App
+  cannot start a meeting, and the Webex join is never granted.
+- **No transcript kept.** **Delete the transcript after the summary** is
+  Immediately, so the transcript, the meeting assistant's answers stored with it,
+  and the transcript file in the recordings bucket are deleted as soon as the
+  summary is written (see
+  [Transcript Deletion After the Summary](transcript-deletion.md)). The meeting
+  chat is not added to the transcript, and personal information is redacted from
+  it while it exists (in en-US, en-AU, en-GB and es-US).
+- **No recordings.** **Record meeting audio**, **Record screen video from
+  streaming clients** and **Record Virtual Participant meeting video** are off,
+  so no client records the meeting's audio or video and no key frames are kept,
+  whatever a Virtual Participant's **Record meeting video** toggle says. **Delete
+  the recordings after the summary** is Immediately, so a recording that is
+  still stored, such as an uploaded meeting's audio, is deleted as soon as the
+  summary is written. The
+  `EnableVideoRecording` stack parameter is the deployment-wide limit: set to
+  `false`, no setting, profile or launch records video, so a profile copied from
+  this one that turns video back on still records none.
+- **Same geography.** Amazon Bedrock models run within this deployment's
+  geography.
+- **Summary and assistant rule.** New meetings are summarized with the
+  shipped `minimised-content` summary profile, and **Meeting Assistant › Leave
+  out sensitive personal information** is on, which appends a rule to the
+  assistant's system prompt after its fixed part, so whatever **Assistant
+  instructions** say, the rule follows them. Both tell the model to leave out sensitive personal information about
+  anyone: health and medical information (conditions, symptoms, diagnoses,
+  treatments, medication, disabilities, pregnancy and mental health), racial or
+  ethnic origin, religious or philosophical beliefs, political opinions, trade
+  union membership, sex life and sexual orientation, gender identity, genetic and
+  biometric data, and criminal convictions or allegations. The summary profile's
+  sections (a summary, the action items and, for a meeting with an agenda, its
+  coverage) are the default Transcript Summary sections of the same names with
+  the rule added to each, and where such information bears on a decision or an
+  action item the summary says only that a personal matter was raised. Asked for
+  such information, the assistant says that it leaves it out and answers the
+  rest of the request.
+
+The other meeting assistant settings keep their shipped defaults. The summary
+profile is shipped in every deployment's Summary Profiles section, whichever
+preset is active, so it can also be chosen for a single meeting.
+
+### The omission is an instruction to the model
+
+The rule is part of the prompt. It is not a filter applied to what the model
+writes, and nothing checks the output against it. A model usually follows it, but
+it can miss something, particularly information that is implied rather than
+named, so review summaries where that matters. Measured by calling the default
+summary and meeting assistant models directly, outside LMA and without the
+assistant's tools, on one short scripted meeting in which a participant names a
+health condition and its treatment as the reason for an action item: with the
+shipped default prompts, 4 of 6 summary sections named a medical need, and with
+the `minimised-content` sections 0 of 10 did; asked about it, the meeting
+assistant named the condition in 5 of 5 answers with the shipped instructions and
+in 0 of 5 with the same rule added after them. That is a small sample of one conversation, not a
+measured rate, and a different model or meeting can behave differently.
+
+The rule applies only where its prompts are used:
+
+- a meeting whose owner chooses another summary profile when it starts or on the
+  meeting page, or whose summary is regenerated with another profile, is
+  summarized without it;
+- an Admin who edits the summary profile, or turns **Leave out sensitive
+  personal information** off, in a Custom profile copied from this one removes
+  it; editing **Assistant instructions** does not;
+- a Virtual Participant's voice assistant (Amazon Nova Sonic, or an ElevenLabs
+  agent) has its own instructions, which the preset does not change; a question
+  it passes to the meeting assistant is answered with the rule, but what the
+  voice assistant says in its own words is not covered.
+
+### What can still hold sensitive personal information
+
+With the preset active, these can still hold such information:
+
+- **The summary itself**, if the model fails to leave something out. It is kept
+  with the meeting for `MeetingRecordExpirationInDays`, and indexed in the
+  transcript knowledge base unless `TranscriptKnowledgeBase` is `DISABLED`.
+- **Answers the meeting assistant gives during the meeting.** They are shown to
+  whoever asked, and a Virtual Participant posts the answer to a question asked in
+  the meeting chat into that chat, where the meeting platform keeps it under its
+  own rules. LMA's copy is deleted with the transcript.
+- **Text read from shared-screen key frames**, if a profile copied from this one
+  turns video back on where `EnableVideoRecording` is `true`: the key frames and the text read from them
+  are kept for **Days to keep transcript segments**, not deleted with the
+  transcript.
+- **Chat attachments, if captured.** The preset does not add the meeting chat to
+  the transcript, and redaction is on, so no attachment is captured under it. A
+  profile copied from it that turns the chat, and **Capture chat attachments**,
+  back on stores the images and files shared in the chat, and their AI titles
+  and summaries, which the instruction does not cover, until the transcript
+  deletion removes them with the transcript.
+- **Consent evidence images.** **Keep evidence screenshots** is on, so a
+  screenshot taken as consent evidence stays with the meeting; it can show
+  participants' names, faces and anything else on screen. Turn the setting off to
+  keep only each check's result.
+- **The meeting record**: its title, participants, speaker names, agenda, meeting
+  context and checklist, which are kept with the meeting.
+- **Copies outside the meeting**: logs at `LogLevel` `DEBUG` or
+  `AppSyncFieldLogLevel` `DEBUG`/`ALL`, Amazon Bedrock model invocation logging
+  if the account has it on, the meetings table's point-in-time recovery window,
+  and the recordings bucket's noncurrent object versions (see
+  [Copies that follow their own lifetime](#copies-that-follow-their-own-lifetime)).
+
+### Deploy-time steps
+
+As for a regulated deployment, also set: `EnableVideoRecording` to `false`;
+`TranscriptKnowledgeBase` to `DISABLED` if summaries must not be indexed for
+search across meetings; `LogLevel` to `INFO` or `WARN`; and
+`MeetingRecordExpirationInDays`, `TranscriptionExpirationInDays`,
+`AudioRecordingExpirationInDays` and `CloudWatchLogsExpirationInDays` to the
+periods your policy allows. See
+[Checklist for a regulated deployment](#checklist-for-a-regulated-deployment).
 
 ## Related
 

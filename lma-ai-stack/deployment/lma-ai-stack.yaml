@@ -361,6 +361,7 @@ Parameters:
       - regulated-notify
       - team-hosted-external
       - customer-account
+      - minimised-content
       - none
     Description: >-
       The configuration preset the deployment's default configuration is built

@@ -245,7 +245,7 @@ def test_the_baseline_ships_the_discovery_session_and_healthcare_profiles(seeder
     """Both profiles reach every deployment, whatever its Domain."""
     for domain in ("default", "healthcare"):
         profiles = seeder.shipped_default_body(domain)["summary_profiles"]
-        assert set(profiles) == {"discovery-session", "healthcare"}
+        assert set(profiles) == {"discovery-session", "healthcare", "minimised-content"}
         discovery = profiles["discovery-session"]
         assert discovery["structuredActionItems"] is True
         assert list(discovery["prompts"]) == [
@@ -1777,6 +1777,7 @@ PRESETS = (
     "regulated-notify",
     "team-hosted-external",
     "customer-account",
+    "minimised-content",
 )
 
 #: A preset needing the on-demand ASR engine, for the paths no shipped preset takes.
@@ -1810,6 +1811,30 @@ def test_each_preset_is_written_as_a_managed_profile(seeder) -> None:
     assert _managed(dynamo)["regulated-notify"]["Description"] == (
         "Regulated – notify with opt-out, transcript not retained"
     )
+
+
+def test_the_minimised_content_profile_holds_the_summary_profile_it_selects(seeder) -> None:
+    """The Managed profile names a summary profile it also holds, and turns the assistant rule on."""
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    seeder.write_managed_profiles(store, store.read_profile("default").body, {})
+    body = dynamo.body("Config#minimised-content")
+    assert body["meeting_processing"]["defaultSummaryProfile"] == "minimised-content"
+    sections = body["summary_profiles"]["minimised-content"]["prompts"]
+    assert list(sections) == ["1#SUMMARY", "2#ACTIONS", "3#AGENDA COVERAGE"]
+    for prompt in sections.values():
+        assert "Leave out sensitive personal information about anyone" in prompt
+    assert body["meeting_assist"]["omitSensitivePersonalInformation"] is True
+    # The Assistant instructions are the baseline's: the preset does not set them.
+    default = dynamo.body("Config#default")
+    assert body["meeting_assist"]["systemPrompt"] == default["meeting_assist"]["systemPrompt"]
+    assert body["retention"]["transcriptDeletionAfterSummary"] == "immediately"
+    assert body["retention"]["recordingDeletionAfterSummary"] == "immediately"
+    assert _managed(dynamo)["minimised-content"]["Description"] == (
+        "Minimised content – summary only"
+    )
+    # Every other profile holds the summary profile too, unselected.
+    assert "minimised-content" in dynamo.body("Config#default")["summary_profiles"]
 
 
 def test_a_preset_the_deployment_cannot_run_is_not_written(seeder, monkeypatch) -> None:

@@ -829,11 +829,12 @@ capabilities:
   - id: configuration-presets
     title: Configuration presets for consent, retention, privacy and the assistant
     description: >-
-      Six shipped presets set the consent, retention, privacy, assistant and summary
+      Seven shipped presets set the consent, retention, privacy, assistant and summary
       settings together: Standard, Internal meetings with notice, two regulated
-      presets that do not retain the transcript, Team-hosted (external meetings) and
-      Customer account. One is chosen at deploy time or applied later, and each is
-      available as a read-only Managed profile.
+      presets that do not retain the transcript, Team-hosted (external meetings),
+      Customer account, and Minimised content, which keeps only a summary written to
+      leave out sensitive personal information. One is chosen at deploy time or
+      applied later, and each is available as a read-only Managed profile.
     evidence:
       - docs/privacy-and-data-handling.md#what-each-preset-sets
       - docs/configuration-guide.md#configuration-presets
@@ -847,6 +848,7 @@ capabilities:
       - preset:regulated-notify
       - preset:team-hosted-external
       - preset:customer-account
+      - preset:minimised-content
     related: [capability:hosting-models, extension:configuration-preset]
 
   - id: hosting-models
