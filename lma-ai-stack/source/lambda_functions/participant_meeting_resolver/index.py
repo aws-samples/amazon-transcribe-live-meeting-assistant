@@ -44,10 +44,16 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 DYNAMODB = boto3.resource("dynamodb", config=CLIENT_CONFIG)
+# Links name the bucket on the Region's own endpoint
+# (<bucket>.s3.<region>.<suffix>), the one host form the web UI's
+# Content-Security-Policy admits for media; in us-east-1 the default would be
+# the global endpoint instead.
 S3_CLIENT = boto3.client(
     "s3",
     config=BotoCoreConfig(
-        retries={"mode": "adaptive", "max_attempts": 3}, signature_version="s3v4"
+        retries={"mode": "adaptive", "max_attempts": 3},
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual", "us_east_1_regional_endpoint": "regional"},
     ),
 )
 

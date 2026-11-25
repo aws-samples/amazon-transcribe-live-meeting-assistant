@@ -1,0 +1,8 @@
+# What scripts/security/zap_scan.py needs inside the ZAP image, for the zap_dast
+# GitLab job (.gitlab-ci.yml), pinned so the job, which runs with AWS
+# credentials, changes only with a commit. Locally `make setup-cli-dev` and
+# integ-tests/requirements.txt provide the same packages.
+boto3==1.44.11
+pycognito==2024.5.1
+graphql-core==3.2.6
+websockets==17.4

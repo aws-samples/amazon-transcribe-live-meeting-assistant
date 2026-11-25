@@ -1,8 +1,10 @@
 # Extra Python deps for the LMA integration tests (beyond the LMA SDK, which
 # `make setup-cli-dev` installs). pytest + boto3 come with the SDK's [dev] extra.
 #
-# Only the opt-in WebSocket streaming test (test_ws_stream_connects) needs these;
-# it skips cleanly if they're absent. Install with:
+# The opt-in WebSocket streaming test (test_ws_stream_connects) and the access
+# tests (test_role_access.py, test_security_access.py) need these; they skip
+# cleanly if they're absent, which --no-skips turns into a failure. Install with:
 #   .venv/bin/pip install -r integ-tests/requirements.txt
 pycognito>=2024.5.1   # Cognito SRP auth to mint a real user token
 websockets>=13.0      # WebSocket client for the live stream probe
+cryptography>=42.0   # signs the self-made tokens test_security_access.py presents (jwt_tampering.py)

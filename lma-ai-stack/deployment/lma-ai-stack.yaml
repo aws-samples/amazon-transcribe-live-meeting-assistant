@@ -9301,12 +9301,43 @@ Resources:
         IntegrationHttpMethod: POST
         Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MCPServerAnalyticsFunction.Arn}/invocations"
 
-  MCPApiKeyDeployment:
+  # Responses API Gateway writes itself (a refused key, throttling, an
+  # integration error) carry the same security headers as the function's own
+  # responses (RESPONSE_HEADERS in mcp_analytics/index.py). Response types
+  # without their own gateway response inherit these two.
+  MCPApiKeyGatewayResponseDefault4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+        gatewayresponse.header.X-Content-Type-Options: "'nosniff'"
+        gatewayresponse.header.Cross-Origin-Resource-Policy: "'same-origin'"
+
+  MCPApiKeyGatewayResponseDefault5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+        gatewayresponse.header.X-Content-Type-Options: "'nosniff'"
+        gatewayresponse.header.Cross-Origin-Resource-Policy: "'same-origin'"
+
+  # A change to the API's methods or gateway responses reaches the stage only
+  # in a new deployment, and CloudFormation creates one only for a new logical
+  # id. Rename this resource whenever those change.
+  MCPApiKeyDeploymentV2:
     Type: AWS::ApiGateway::Deployment
     Condition: ShouldEnableMCPServer
     DependsOn:
       - MCPApiKeyMethod
       - MCPApiKeyRootMethod
+      - MCPApiKeyGatewayResponseDefault4XX
+      - MCPApiKeyGatewayResponseDefault5XX
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
 
@@ -9320,7 +9351,7 @@ Resources:
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
-      DeploymentId: !Ref MCPApiKeyDeployment
+      DeploymentId: !Ref MCPApiKeyDeploymentV2
       StageName: mcp
       # NOTE: AccessLogSetting and MethodSettings.LoggingLevel are intentionally
       # omitted — see the CKV2_AWS_4 skip comment above for the full rationale.
@@ -13358,59 +13389,64 @@ Resources:
         SecurityHeadersConfig:
           ContentSecurityPolicy:
             Override: true
-            # Tightened CSP for LMA SPA:
-            #   - connect-src: restricted to AWS service hostnames (*.amazonaws.com
-            #     covers AppSync, Cognito, S3, API Gateway, etc.) and the
-            #     CloudFront-fronted WebSocket transcriber/VNC endpoints
-            #     (*.cloudfront.net), plus wss for realtime subscriptions and
-            #     ws://localhost for dev mode. NOTE: CSP host-sources only allow '*'
-            #     as the leftmost label, so mid-domain wildcards like
-            #     cognito-idp.*.amazonaws.com are invalid (browser ignores them) and
-            #     are intentionally omitted -- they are already covered by *.amazonaws.com.
-            #     registry.modelcontextprotocol.io is allowed so the MCP Servers UI can
-            #     browse/install servers from the official MCP registry.
-            #     wss://*.lambda-microvm.<region>.on.aws is the per-MicroVM noVNC
-            #     endpoint used when VPLaunchType=MICROVM (there is no ALB/CloudFront
-            #     in that path). Region-scoped rather than *.on.aws to keep the
-            #     allowlist tight. A missing entry here fails SILENTLY with no
-            #     backend logs, which is painful to diagnose.
-            #   - default-src: 'self'. This is the fallback for every fetch
-            #     directive not named below. Because adding it changes the
-            #     effective policy for directives that were previously absent,
-            #     the ones the app actually needs are now named explicitly
-            #     (frame-src, media-src, font-src, worker-src) so their behaviour
-            #     is unchanged. The same silent-failure caveat as connect-src
-            #     applies: a resource type that is neither 'self' nor listed just
-            #     stops loading, with nothing in the backend logs.
-            #   - script-src: 'self' only for host-sources. Every script the SPA
-            #     loads is served from this distribution -- the Vite bundles under
-            #     /assets, the vendored libraries under /js used by
-            #     strands-chat.html, and the audio worklet under /worklets -- so
-            #     no external script origin is required. 'unsafe-inline' is kept
-            #     for the inline handlers on strands-chat.html and 'unsafe-eval'
-            #     for React SPA compatibility.
-            #   - frame-src: 'self'. Both <iframe> elements in the UI (CallPanel
-            #     and the embed view) point at /strands-chat.html on this same
-            #     distribution.
-            #   - media-src: meeting audio and video are played from S3 presigned
-            #     URLs of the form https://<bucket>.s3.<region>.<urlsuffix>, which
-            #     is why the URL suffix is allowed here; blob: covers locally
-            #     generated object URLs. AWS::URLSuffix is used rather than a
-            #     literal amazonaws.com so this directive does not have to change
-            #     later, but note it delivers no GovCloud or China benefit today:
-            #     the UI builds those URLs in
-            #     src/components/common/generate-s3-presigned-url.js, which still
-            #     hardcodes amazonaws.com. Playback in a non-standard partition
-            #     needs that fixed too.
-            #   - font-src: 'self' and data:. The built stylesheets contain no
-            #     external font references; Cloudscape uses system font stacks.
-            #   - worker-src: 'self' and blob:. The audio worklet is served from
-            #     this origin; blob: covers workers the AWS SDK may create.
-            #   - style-src: 'unsafe-inline' retained for React SPA compatibility.
-            #   - object-src: 'none' (no plugins needed).
-            #   - base-uri: 'none' (prevent base tag injection).
-            #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; frame-src 'self'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https://*.${AWS::URLSuffix} https://*.cloudfront.net; font-src 'self' data:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws ws://localhost:*;"
+            # Content-Security-Policy for the LMA SPA. Every source is one the
+            # app uses. A resource that is not allowed here stops loading in
+            # the browser with nothing in any backend log, so a change to what
+            # the UI loads or calls needs a matching change here.
+            # test_web_ui_response_headers.py pins the exact directives.
+            #   - default-src 'self': the fallback for every fetch directive
+            #     not named below.
+            #   - script-src 'self': every script is served from this
+            #     distribution (the Vite bundles under /assets, the chat
+            #     frame's js/strands-chat.js and vendored libraries under /js,
+            #     the audio worklet under /worklets), none is inline, and none
+            #     needs eval.
+            #   - style-src 'self' 'unsafe-inline': the stylesheets are served
+            #     from this distribution; 'unsafe-inline' is for the style
+            #     elements and attributes that libraries add at run time
+            #     (mermaid, KaTeX, jsPDF, html2canvas, cytoscape, React).
+            #   - img-src / media-src: pictures, recordings and video are read
+            #     from S3 presigned URLs on the deployment's regional endpoint,
+            #     virtual-hosted (<bucket>.s3.<region>.<suffix>) or path-style
+            #     (s3.<region>.<suffix>); data: and blob: cover locally built
+            #     images and object URLs. The UI builds playback URLs in
+            #     src/components/common/generate-s3-presigned-url.js with a
+            #     literal amazonaws.com, so playback in another partition needs
+            #     that file changed too.
+            #   - font-src 'self' data:: no external fonts; Cloudscape uses
+            #     system font stacks.
+            #   - worker-src 'self' blob:: the audio worklet and the workers
+            #     some libraries create from object URLs.
+            #   - frame-src 'self': the <iframe> elements in the UI (CallPanel,
+            #     the embed view and a Participant's shared meeting page) load
+            #     /strands-chat.html from here. A Participant's recordings are
+            #     links participant_meeting_resolver signs on the regional
+            #     endpoint, which media-src admits as above.
+            #   - connect-src: the services the browser calls, by name.
+            #       AppSync: its own GraphQL and real-time hosts.
+            #       cognito-idp / cognito-identity: Amplify sign-in and the
+            #         identity pool's credentials.
+            #       ssm (settings), sync-states (Virtual Participant launches)
+            #         and translate (transcript translation): the SDK clients
+            #         the UI constructs. The UI sends Step Functions only
+            #         StartSyncExecution, whose endpoint carries the "sync-"
+            #         host prefix; another Step Functions operation would call
+            #         states.<region>. test_web_ui_response_headers.py fails
+            #         when the UI constructs a client, or sends a Step
+            #         Functions command, this list does not name.
+            #       S3 (both URL forms above): uploads, keyframe fetches and
+            #         downloads through presigned URLs.
+            #       registry.modelcontextprotocol.io: the MCP Servers page
+            #         browses the public MCP registry.
+            #       wss://*.cloudfront.net: the WebSocket transcriber (Stream
+            #         Audio/Video, embeds) is on its own CloudFront
+            #         distribution, created after this stack, so it is named by
+            #         suffix; the ECS noVNC view is under /vnc on this one.
+            #       wss://*.lambda-microvm.<region>.on.aws: the per-MicroVM
+            #         noVNC endpoint used when VPLaunchType=MICROVM.
+            #   - object-src 'none', base-uri 'none', form-action 'self'.
+            #   - frame-ancestors 'self': only this origin may frame the app.
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; media-src 'self' blob: https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix}; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self'; connect-src 'self' https://${AppSyncApiEncrypted.GraphQLDns} wss://${AppSyncApiEncrypted.RealtimeDns} https://cognito-idp.${AWS::Region}.${AWS::URLSuffix} https://cognito-identity.${AWS::Region}.${AWS::URLSuffix} https://ssm.${AWS::Region}.${AWS::URLSuffix} https://sync-states.${AWS::Region}.${AWS::URLSuffix} https://translate.${AWS::Region}.${AWS::URLSuffix} https://*.s3.${AWS::Region}.${AWS::URLSuffix} https://s3.${AWS::Region}.${AWS::URLSuffix} https://registry.modelcontextprotocol.io wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
@@ -13424,6 +13460,30 @@ Resources:
           ReferrerPolicy:
             Override: true
             ReferrerPolicy: strict-origin-when-cross-origin
+        CustomHeadersConfig:
+          Items:
+            # Microphone, camera and screen capture for this origin only
+            # (Stream Audio/Video and the stream-audio embeds); the other
+            # listed features are off for every origin.
+            - Header: Permissions-Policy
+              Value: "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=()"
+              Override: true
+            # Other origins cannot load this distribution's responses as
+            # subresources. Navigations, including the app in a frame, are
+            # not subject to it.
+            - Header: Cross-Origin-Resource-Policy
+              Value: same-origin
+              Override: true
+            # Cross-Origin-Opener-Policy is not sent. The MCP server OAuth
+            # sign-in and an embed opened as a popup both post their result to
+            # window.opener, and a browser drops the opener when the popup
+            # loads a document that sends Cross-Origin-Opener-Policy. Every
+            # route is the same hash-routed index.html, so the header cannot be
+            # limited to the other pages.
+        RemoveHeadersConfig:
+          Items:
+            # CloudFront then sends its own "Server: CloudFront".
+            - Header: Server
 
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity

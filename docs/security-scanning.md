@@ -27,6 +27,8 @@ git commit -m "chore(security): update SRT review decisions"
 
 SRT is not part of `make lint` or `make test` — it runs automatically in GitLab CI on merge requests targeting `develop`.
 
+SRT reads the repository. The tests that call a deployed stack, the live access tests and the OWASP ZAP scan, and `make security-results`, which runs SRT with them as a set, are described in [Security Testing](security-testing.md).
+
 ## How It Works
 
 `make srt-setup` downloads the latest SRT binary from [GitHub Releases](https://github.com/aws-samples/sample-security-review-tool/releases) into `.srt/`. `make srt-scan` runs `srt assess`, which:

@@ -308,7 +308,8 @@ def test_recordings_are_signed_links_to_the_two_recording_prefixes_only(table) -
         ("VIDEO", None),
     ]
     audio = urlparse(links[0]["Url"])
-    assert audio.hostname.startswith("lma-recordings.s3")
+    # The Region's own endpoint, which the web UI's Content-Security-Policy admits for media.
+    assert audio.hostname == f"lma-recordings.s3.{index.S3_CLIENT.meta.region_name}.amazonaws.com"
     assert audio.path == "/lma-audio-recordings/m1.wav"
     query = parse_qs(audio.query)
     assert query["X-Amz-Expires"] == ["3600"]
